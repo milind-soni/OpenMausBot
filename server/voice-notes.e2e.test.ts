@@ -1,11 +1,15 @@
 // The TTS provider is a loopback Chatterbox stub, so no external service is reached.
+import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { listSystemVoices } from "./tts/system-voices.ts";
+
+const execFileAsync = promisify(execFile);
 
 const MP3 = Buffer.from("ID3 fake mp3 for the voice note fixture");
 
@@ -112,9 +116,11 @@ it("advertises send_voice_note to a ready bot and attaches the clip to the settl
   const withAudio = messages.filter((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"));
   expect(withAudio).toHaveLength(1);
   expect(withAudio[0].role).toBe("bot");
-  expect(withAudio[0].text).toBe("The summary you can also listen to.\n\n" + note);
+  // The words move onto the attachment: the reply never reads twice.
+  expect(withAudio[0].text).toBe("The summary you can also listen to.");
   const audio = withAudio[0].attachments.find((a: any) => a.kind === "audio");
   expect(audio.mime).toBe("audio/mpeg");
+  expect(audio.text).toBe(note);
 
   const files = f.mp3Files();
   expect(files).toHaveLength(1);
@@ -152,15 +158,19 @@ it("delivers a WAV voice note from a provider that answers in WAV", async () => 
   expect((await sendWavNote(f)).equals(wav)).toBe(true);
 }), 60_000);
 
-it.runIf(process.platform === "darwin")("delivers a voice note spoken by the built-in Mac voices", async () => withVoiceFixture(async (f) => {
-  const [voice] = await listSystemVoices();
-  await f.api("/api/config", { tts: { provider: "system", voice: voice!.id } }, "PUT");
-  const served = await sendWavNote(f);
-  expect(served.subarray(0, 4).toString("latin1")).toBe("RIFF");
-  expect(served.subarray(8, 12).toString("latin1")).toBe("WAVE");
-}), 60_000);
+it.runIf(process.platform === "darwin")("delivers a voice note spoken by the built-in Mac voices", async ({ skip }) => {
+  // A cold CI Mac can take longer than the app's 5 s to list its voices, and some runner images have none.
+  const [voice] = await listSystemVoices((file, args) => execFileAsync(file, args, { timeout: 30_000 }));
+  if (!voice) return skip("this Mac lists no system voices");
+  await withVoiceFixture(async (f) => {
+    await f.api("/api/config", { tts: { provider: "system", voice: voice.id } }, "PUT");
+    const served = await sendWavNote(f);
+    expect(served.subarray(0, 4).toString("latin1")).toBe("RIFF");
+    expect(served.subarray(8, 12).toString("latin1")).toBe("WAVE");
+  });
+}, 60_000);
 
-it("makes the note text the visible transcript when the turn writes no reply", async () => withVoiceFixture(async (f) => {
+it("keeps a voice-only reply's words on the attachment as its transcript when the turn writes no reply", async () => withVoiceFixture(async (f) => {
   const baseUrl = await f.serveTts();
   await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a" } }, "PUT");
   const bot = (await f.cli("new-bot", "--name", "Voice only bot")).bot;
@@ -172,7 +182,8 @@ it("makes the note text the visible transcript when the turn writes no reply", a
   const messages = await f.messages(bot.activeTaskId);
   const withAudio = messages.filter((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"));
   expect(withAudio).toHaveLength(1);
-  expect(withAudio[0].text).toBe(note);
+  expect(withAudio[0].text).toBe("");
+  expect(withAudio[0].attachments.find((a: any) => a.kind === "audio").text).toBe(note);
   expect(f.mp3Files()).toHaveLength(1);
 }), 60_000);
 
@@ -254,6 +265,7 @@ it("attaches a parked voice note to a room post and delivers it exactly once", a
   expect(posted).toBeTruthy();
   const audio = (posted.attachments ?? []).find((a: any) => a.kind === "audio");
   expect(audio?.mime).toBe("audio/mpeg");
+  expect(audio.text).toBe(note);
 
   const own = await f.messages(bot.activeTaskId);
   expect(own.some((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"))).toBe(false);

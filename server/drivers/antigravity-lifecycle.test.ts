@@ -9,7 +9,7 @@ import { DATA_DIR } from "../config.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { AntigravityAcpClient, validateAntigravityRuntime } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
-import { VERIFICATION_TEMP_KEY, antigravityTempDir } from "./antigravity-temp.ts";
+import { VERIFICATION_TEMP_KEY, antigravityTempDir, folderBytes } from "./antigravity-temp.ts";
 
 const scratch = vi.hoisted(() => [] as string[]);
 vi.mock("../procs.ts", () => ({ spawnCli: vi.fn(), killCliTree: vi.fn() }));
@@ -25,6 +25,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     },
   };
 });
+vi.mock("./antigravity-temp.ts", async (importOriginal) => {
+  const temp = await importOriginal<typeof import("./antigravity-temp.ts")>();
+  return { ...temp, folderBytes: vi.fn(temp.folderBytes) };
+});
+const realFolderBytes = (await vi.importActual<typeof import("./antigravity-temp.ts")>("./antigravity-temp.ts")).folderBytes;
 const realRm = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).rm;
 
 const runtime: AntigravityRuntime = {
@@ -63,8 +68,17 @@ async function afterExitGrace(child: ReturnType<typeof fakeChild>) {
   await vi.advanceTimersByTimeAsync(5_000);
 }
 
-function client() {
-  return new AntigravityAcpClient(runtime, { directory: "/fixture", tokenPath: "/fixture/token", environment: {} }, "/fixture");
+function client(tempDirectory?: string) {
+  return new AntigravityAcpClient(
+    runtime,
+    { directory: "/fixture", tokenPath: "/fixture/token", environment: {}, ...(tempDirectory ? { tempDirectory } : {}) },
+    "/fixture",
+  );
+}
+
+/** Each count reports the next size; the last one repeats. */
+function unpackSizes(...sizes: number[]) {
+  vi.mocked(folderBytes).mockImplementation(async () => ({ bytes: sizes.length > 1 ? sizes.shift()! : sizes[0], complete: true }));
 }
 
 beforeEach(() => {
@@ -76,6 +90,7 @@ beforeEach(() => {
     ? Promise.resolve(true)
     : new Promise((resolve) => { child.once("close", () => resolve(true)); }));
   vi.mocked(rm).mockReset().mockImplementation(realRm);
+  vi.mocked(folderBytes).mockReset().mockImplementation(realFolderBytes);
 });
 
 afterEach(() => {
@@ -116,6 +131,66 @@ describe("Antigravity initialization diagnostics", () => {
     expect(settled).toBe(false);
     child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}\n`);
     await expect(result).resolves.toEqual(initialized);
+    acp.close();
+  });
+
+  it("waits another window while the Windows runtime is still unpacking", async () => {
+    unpackSizes(0, 600_000_000, 950_000_000);
+    const child = fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize();
+    let settled = false;
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(settled).toBe(false);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}
+`);
+    await expect(result).resolves.toEqual(initialized);
+    acp.close();
+  });
+
+  it("keeps waiting when a count runs out of time, since it proves no lack of progress", async () => {
+    vi.mocked(folderBytes)
+      .mockResolvedValueOnce({ bytes: 500_000_000, complete: true })
+      .mockResolvedValue({ bytes: 100_000_000, complete: false });
+    const child = fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize();
+    let settled = false;
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(settled).toBe(false);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}\n`);
+    await expect(result).resolves.toEqual(initialized);
+    acp.close();
+  });
+
+  it("fails after one window when nothing was unpacked, and says so", async () => {
+    unpackSizes(0);
+    fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize().catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(90_000);
+    const error = await result;
+    expect(error.message).toContain("timed out after 90 seconds");
+    expect(error.message).toContain("Unpacked into temp: 0 MB");
+    acp.close();
+  });
+
+  it("gives up at the startup cap even while the folder keeps growing", async () => {
+    let size = 0;
+    vi.mocked(folderBytes).mockImplementation(async () => ({ bytes: size += 100_000_000, complete: true }));
+    fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize().catch((error: Error) => error);
+    let settled = false;
+    void result.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const error = await result;
+    expect(error.message).toContain("timed out after 300 seconds");
+    expect(error.message).toMatch(/Unpacked into temp: [1-9]\d* MB/u);
     acp.close();
   });
 

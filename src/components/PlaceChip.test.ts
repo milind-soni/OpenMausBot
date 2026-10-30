@@ -101,8 +101,8 @@ describe("the menu's first row", () => {
   it("stays Auto, unchecked, when the conversation is pinned elsewhere", () => {
     const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined }, task: { surface: "vm" } });
     expect(menu[0]).toEqual({ checked: false, text: "Auto Picks the right place for each task" });
-    expect(menu.find((row) => row.checked)?.text).toBe("Local VM Isolated local desktop");
-    expect(html).toContain('aria-label="Where this conversation works: Local VM"');
+    expect(menu.find((row) => row.checked)?.text).toBe("Private desktop Isolated local desktop");
+    expect(html).toContain('aria-label="Where this conversation works: Private desktop"');
   });
 
   it("keeps following the bot's setting when the bot works on a specific place", () => {
@@ -134,13 +134,13 @@ describe("the places a conversation can be pinned to", () => {
 describe("J11: the chip names a place's problem in the panel's words", () => {
   afterEach(() => { fixture.menuOpen = false; fixture.computerMcp = true; });
 
-  it("greys out the cloud computer for a model that can't use one, with the same few words and line", () => {
+  it("greys out the cloud desktop for a model that can't use one, with the same few words and line", () => {
     fixture.computerMcp = false;
     fixture.menuOpen = true;
     const html = renderToStaticMarkup(createElement(PlaceChip, { bot, live: false, onPin: () => {} }));
-    const row = html.split('role="menuitemradio"').slice(1).find((entry) => entry.includes("Cloud computer"))!;
+    const row = html.split('role="menuitemradio"').slice(1).find((entry) => entry.includes("Cloud desktop"))!;
     expect(row).toContain('disabled=""');
     expect(row).toContain("Not with this model");
-    expect(row).toContain("title=\"grok-4.6 can&#x27;t use a computer. Choose a model that can, such as Claude or ChatGPT.\"");
+    expect(row).toContain("title=\"grok-4.6 can&#x27;t use a desktop. Choose a model that can, such as Claude or ChatGPT.\"");
   });
 });

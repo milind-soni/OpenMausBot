@@ -7,6 +7,8 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
+import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
+import { openKeySettings } from "./keys/key-focus";
 
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
 /** The room decision budget in server/decider/room-routing.ts; slower falls back to the lead. */
@@ -43,8 +45,38 @@ const OPENROUTER_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.openrouter.error.malformed",
 };
 
+const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
+  ...FAILURES,
+  rejected: "decider.workersAi.error.rejected",
+  unreachable: "decider.workersAi.error.unreachable",
+  timeout: "decider.workersAi.error.timeout",
+  rate_limited: "decider.workersAi.error.rateLimited",
+  overloaded: "decider.workersAi.error.overloaded",
+  malformed: "decider.workersAi.error.malformed",
+};
+
+const BY: Record<"jev" | "workersai" | "openrouter", LocaleKey> = {
+  jev: "decider.status.byJev", workersai: "decider.status.byWorkersAi", openrouter: "decider.status.byOpenRouter",
+};
+
+/** Who decides and who reads, in a word each: the person's own key, the Cloud plan's, or nothing yet. */
+export function helpersStatusLine(config: ConfigStatus | null): string {
+  const decider = config?.decider;
+  const extraction = config?.helpers?.extraction;
+  const decisions = !decider?.configured ? t("decider.status.notSetUp")
+    : decider.included ? t("decider.status.byCloud") : t(BY[decider.provider] ?? BY.jev);
+  const reading = !extraction?.provider ? t("decider.status.notSetUp")
+    : extraction.included ? t("decider.status.byCloud") : t(BY[extraction.provider]);
+  return t("decider.status.line", { decisions, extraction: reading });
+}
+
 /** A fixed sentence per failure: the vendor's own body never reaches the UI. */
-export function deciderFailureText(result: { reason: string; status?: number }, included = false, provider: Provider = "jev"): string {
+export function deciderFailureText(result: { reason: string; status?: number }, included = false, provider: Provider | "workersai" = "jev"): string {
+  if (provider === "workersai") {
+    if (result.reason === "http_error") return t("decider.workersAi.error.http", { status: String(result.status ?? "?") });
+    const key = WORKERS_AI_FAILURES[result.reason];
+    return key ? t(key) : t("decider.error.other");
+  }
   if (provider === "openrouter") {
     // 402 is OpenRouter's answer for an account with no credits left.
     if (result.reason === "http_error" && result.status === 402) return t("decider.openrouter.error.credits");
@@ -68,7 +100,9 @@ export function DecisionModelSettings() {
   const openrouter = provider === "openrouter";
   const configured = decider?.configured ?? false;
   const included = configured && decider?.included === true;
-  const ownKey = configured && !included;
+  const usingShared = openrouter && configured && decider?.keySource === "shared";
+  const sharedKey = openrouter && decider?.sharedKey === true;
+  const ownKey = configured && !included && !usingShared;
   const enabled = decider?.enabled ?? false;
   const roomRouting = decider?.jobs.roomRouting ?? true;
   const [value, setValue] = useState("");
@@ -80,6 +114,15 @@ export function DecisionModelSettings() {
   const [models, setModels] = useState<ModelList | null>(null);
   const draft = value.trim();
   const clearing = !draft && ownKey;
+  const keyHint: LocaleKey | null = !openrouter || included
+    ? null
+    : usingShared
+      ? "decider.openrouter.status.sharedHint"
+      : !configured
+        ? "decider.openrouter.status.notConnectedHint"
+        : sharedKey
+          ? "decider.openrouter.status.ownFallbackHint"
+          : null;
 
   const applied = (config: ConfigStatus) => dispatch({ type: "configStatus", config });
 
@@ -136,6 +179,7 @@ export function DecisionModelSettings() {
     setVerdict(null);
     setError(null);
     const testingIncluded = !draft && included;
+    const testingShared = !draft && usingShared;
     try {
       const result = await api<TestResult>("/api/decider/test", { method: "POST", body: JSON.stringify(draft ? { key: draft } : {}) });
       setVerdict(result.ok
@@ -143,7 +187,7 @@ export function DecisionModelSettings() {
           ok: true,
           text: openrouter
             ? [
-              t("decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
+              t(testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
               ...(result.latencyMs > ROOM_BUDGET_MS ? [t("decider.test.slow")] : []),
             ].join(" ")
             : t("decider.test.ok", { ms: String(result.latencyMs) }),
@@ -160,7 +204,9 @@ export function DecisionModelSettings() {
     <>
       <section className="space-y-2 px-4">
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("decider.intro")}</p>
+        <p role="status" data-testid="helpers-status" className="text-[13px] font-medium text-ink">{helpersStatusLine(state.config)}</p>
       </section>
+      <WorkersAiKeyCard failureText={(result) => deciderFailureText(result, false, "workersai")} />
       <SettingRow title={t("decider.provider.label")}>
         <Select className="w-48"
           data-testid="decider-provider"
@@ -201,7 +247,7 @@ export function DecisionModelSettings() {
       )}
       <SettingRow
         title={t(openrouter ? "decider.openrouter.master" : "decider.master")}
-        subtitle={configured ? undefined : t("decider.masterNeedsKey")}
+        subtitle={configured ? undefined : t(openrouter ? "decider.masterNeedsKey.openrouter" : "decider.masterNeedsKey")}
       >
         <Switch
           data-testid="decider-master"
@@ -217,9 +263,33 @@ export function DecisionModelSettings() {
         <div role="status" className="mb-2 flex items-center gap-2 text-[13px] text-ink-secondary">
           <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
           <span className={configured ? "text-success" : undefined}>
-            {included ? t("keys.includedWithCloudPro") : configured ? t("decider.status.connected") : t("decider.status.notConnected")}
+            {included
+              ? t("keys.includedWithCloudPro")
+              : usingShared
+                ? t("decider.openrouter.status.shared")
+                : configured
+                  ? t(sharedKey ? "decider.openrouter.status.own" : "decider.status.connected")
+                  : t("decider.status.notConnected")}
           </span>
         </div>
+        {keyHint && (
+          <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
+            {t(keyHint)}
+            {!ownKey && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  data-testid="decider-manage-keys"
+                  onClick={() => dispatch(openKeySettings("openrouter"))}
+                  className="cursor-pointer text-accent hover:underline"
+                >
+                  {t("decider.openrouter.key.manageLink")}
+                </button>
+              </>
+            )}
+          </p>
+        )}
         <div className="flex gap-2">
           <input
             type="password"
@@ -227,7 +297,7 @@ export function DecisionModelSettings() {
             onChange={(event) => { setVerdict(null); setError(null); setValue(event.target.value); }}
             onKeyDown={(event) => event.key === "Enter" && void save()}
             disabled={saving}
-            placeholder={ownKey ? t("keys.replace") : t(openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
+            placeholder={ownKey ? t("keys.replace") : t(usingShared ? "decider.openrouter.key.overridePlaceholder" : openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
             aria-label={t(openrouter ? "decider.openrouter.key.label" : "decider.key.label")}
             autoComplete="off"
             spellCheck={false}
@@ -258,15 +328,17 @@ export function DecisionModelSettings() {
         </div>
         {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
         {verdict && <p role="status" className={cn("mt-1 text-[12px]", verdict.ok ? "text-success" : "text-danger")}>{verdict.text}</p>}
-        <a
-          href={KEY_URL[provider]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-flex cursor-pointer items-center gap-1 text-[12px] text-accent hover:underline"
-        >
-          {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
-          <ExternalLink size={11} aria-hidden="true" />
-        </a>
+        {!usingShared && (
+          <a
+            href={KEY_URL[provider]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex cursor-pointer items-center gap-1 text-[12px] text-accent hover:underline"
+          >
+            {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
+            <ExternalLink size={11} aria-hidden="true" />
+          </a>
+        )}
       </Card>
 
       <Card title={t("decider.jobs.title")}>

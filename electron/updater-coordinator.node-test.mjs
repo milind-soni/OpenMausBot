@@ -584,29 +584,37 @@ test("without a hand-off the install still quits and installs", async () => {
   assert.equal(h.getState().status, "installing");
 });
 
-test("a staged update survives hourly checks until the user explicitly checks again", async () => {
+test("a staged update survives hourly checks that find nothing newer, and a manual check still replaces it", async () => {
   const h = harness();
   await downloadInto(h);
   let checks = 0;
   h.updater.checkForUpdates = async () => {
     checks += 1;
     h.updater.emit("checking-for-update");
-    h.updater.emit("update-available", { version: "2.1.0" });
+    h.updater.emit("update-available", { version: "2.0.0" });
   };
   const staged = h.getState();
 
   await h.coordinator.check();
-  assert.equal(checks, 0);
+  assert.equal(checks, 1);
   assert.deepEqual(h.getState(), staged);
-
+  h.updater.checkForUpdates = async () => {
+    checks += 1;
+    h.updater.emit("checking-for-update");
+    h.updater.emit("update-not-available", {});
+  };
+  await h.coordinator.check();
+  assert.deepEqual(h.getState(), staged);
+  h.updater.checkForUpdates = async () => {
+    checks += 1;
+    h.updater.emit("update-available", { version: "2.1.0" });
+  };
   h.updater.downloadUpdate = async () => {
     h.updater.emit("update-downloaded", { version: "2.1.0" });
     return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
   };
   await h.coordinator.check(true);
   await settle();
-  assert.equal(checks, 1);
-  assert.equal(h.getState().status, "downloaded");
   assert.equal(h.getState().version, "2.1.0");
 });
 
@@ -706,4 +714,214 @@ test("carries the release notes with the version, as one capped string", async (
   assert.equal(h.getState().status, "downloading");
   assert.equal(h.getState().version, "2.0.0");
   assert.equal(h.getState().releaseNotes, "- **Faster start.** Opens at once.");
+});
+
+// ---- Ubuntu .deb: install behind a password prompt, then reopen ----------
+
+const SUM = "c2hhNTEy";
+function elevatedHarness(elevatedInstall, extra = {}) {
+  const calls = { elevated: [], handOff: [], relaunch: 0 };
+  const h = harness({
+    elevatedInstall: (files, info) => {
+      calls.elevated.push({ files, info });
+      return elevatedInstall(files, info);
+    },
+    relaunch: () => {
+      calls.relaunch += 1;
+    },
+    handOffInstall: (files) => {
+      calls.handOff.push(files);
+      return Promise.resolve({ command: "sudo apt-get install -y '/tmp/x.deb'", terminalOpened: true });
+    },
+    ...extra,
+  });
+  h.updater.quitAndInstall = () => assert.fail("a system package must not be installed by quitAndInstall");
+  h.updater.downloadedUpdateHelper = { downloadedFileInfo: { sha512: SUM } };
+  return { h, calls };
+}
+
+test("elevated install: one click installs the staged package and reopens", async () => {
+  const { h, calls } = elevatedHarness(() => Promise.resolve({ ok: true }));
+  await downloadInto(h);
+
+  h.coordinator.install();
+  // the person sees the prompt coming before it appears
+  assert.equal(h.getState().status, "installing");
+  assert.match(h.getState().message, /password/i);
+  await settle();
+
+  assert.deepEqual(calls.elevated, [{ files: ["/tmp/OpenMausBot-2.0.0-amd64.deb"], info: { sha512: SUM } }]);
+  assert.equal(calls.relaunch, 1);
+  assert.deepEqual(calls.handOff, [], "no terminal when the install worked");
+  // the card stays busy while the app reopens: no second click, no stray state
+  assert.equal(h.getState().status, "installing");
+  assert.equal(h.getState().message, undefined);
+  h.coordinator.install();
+  await settle();
+  assert.equal(calls.elevated.length, 1);
+  assert.equal(calls.relaunch, 1);
+});
+
+test("elevated install: closing the password prompt leaves the update ready to retry", async () => {
+  let answer = { ok: false, reason: "declined", detail: "The password prompt was closed." };
+  const { h, calls } = elevatedHarness(() => Promise.resolve(answer));
+  await downloadInto(h);
+
+  h.coordinator.install();
+  await settle();
+
+  assert.equal(h.getState().status, "downloaded");
+  assert.equal(h.getState().version, "2.0.0");
+  assert.equal(calls.relaunch, 0);
+  assert.deepEqual(calls.handOff, []);
+
+  // asking again works, and succeeds this time
+  answer = { ok: true };
+  h.coordinator.install();
+  await settle();
+  assert.equal(calls.elevated.length, 2);
+  assert.equal(calls.relaunch, 1);
+});
+
+test("elevated install: a package that fails its checksum is never handed to a terminal", async () => {
+  const { h, calls } = elevatedHarness(() =>
+    Promise.resolve({ ok: false, reason: "checksum", detail: "The downloaded update did not match its checksum." }),
+  );
+  await downloadInto(h);
+
+  h.coordinator.install();
+  await settle();
+
+  assert.equal(h.getState().status, "error");
+  // the repo's one integrity message (update-errors.mjs), not a new wording
+  assert.match(h.getState().message, /failed verification/);
+  assert.deepEqual(calls.handOff, [], "the command would install the same bad file");
+  assert.equal(calls.relaunch, 0);
+});
+
+for (const reason of ["refused", "unavailable", "failed", "unverifiable"]) {
+  test(`elevated install: ${reason} falls back to the terminal hand-off and says why`, async () => {
+    const { h, calls } = elevatedHarness(() => Promise.resolve({ ok: false, reason, detail: `because ${reason}.` }));
+    await downloadInto(h);
+
+    h.coordinator.install();
+    await settle();
+
+    assert.equal(h.getState().status, "handed-off");
+    assert.equal(h.getState().command, "sudo apt-get install -y '/tmp/x.deb'");
+    assert.equal(h.getState().message, `because ${reason}.`);
+    assert.deepEqual(calls.handOff, [["/tmp/OpenMausBot-2.0.0-amd64.deb"]]);
+    assert.equal(calls.relaunch, 0);
+  });
+}
+
+test("elevated install: with no hand-off to fall back to, a failure is an error", async () => {
+  const { h } = elevatedHarness(() => Promise.resolve({ ok: false, reason: "failed", detail: "The install did not finish: E: lock." }), {
+    handOffInstall: null,
+  });
+  await downloadInto(h);
+
+  h.coordinator.install();
+  await settle();
+
+  assert.equal(h.getState().status, "error");
+  assert.equal(h.getState().message, "The install did not finish: E: lock.");
+});
+
+test("elevated install: a thrown error or a failed relaunch is reported, not left spinning", async () => {
+  const thrown = elevatedHarness(() => Promise.reject(new Error("polkit exploded")));
+  await downloadInto(thrown.h);
+  thrown.h.coordinator.install();
+  await settle();
+  assert.equal(thrown.h.getState().status, "error");
+  assert.equal(thrown.h.getState().message, "polkit exploded");
+
+  const relaunch = elevatedHarness(() => Promise.resolve({ ok: true }), {
+    relaunch: () => {
+      throw new Error("cannot relaunch");
+    },
+  });
+  await downloadInto(relaunch.h);
+  relaunch.h.coordinator.install();
+  await settle();
+  assert.equal(relaunch.h.getState().status, "error");
+  assert.equal(relaunch.h.getState().message, "cannot relaunch");
+});
+
+test("repeated silent check failures surface a retryable notice instead of staying idle forever", async () => {
+  const { updater, coordinator, getState } = harness();
+  updater.checkForUpdates = () => Promise.reject(new Error("getaddrinfo ENOTFOUND github.com"));
+
+  await coordinator.check();
+  await coordinator.check();
+  assert.equal(getState().status, "idle");
+  await coordinator.check();
+
+  assert.equal(getState().status, "error");
+  assert.match(getState().message, /Couldn't check for updates/);
+  assert.notEqual(getState().retryable, false);
+});
+
+test("a successful check resets the silent failure count", async () => {
+  const { updater, coordinator, getState } = harness();
+  updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  await coordinator.check();
+  await coordinator.check();
+  updater.checkForUpdates = async () => updater.emit("update-not-available");
+  await coordinator.check();
+  updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  await coordinator.check();
+  await coordinator.check();
+
+  assert.equal(getState().status, "idle");
+});
+
+test("a manual retry after the notice clears it and checks again", async () => {
+  const { updater, coordinator, getState } = harness();
+  updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await coordinator.check();
+  assert.equal(getState().status, "error");
+
+  updater.checkForUpdates = async () => updater.emit("update-not-available");
+  await coordinator.check(true);
+
+  assert.equal(getState().status, "idle");
+});
+
+test("after the notice, the hourly check keeps going: reaching the feed clears it, and a release found is downloaded", async () => {
+  const h = harness();
+  h.updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await h.coordinator.check();
+  assert.equal(h.getState().status, "error");
+
+  // a quiet hourly check that reaches the feed clears the notice by itself
+  let checks = 0;
+  h.updater.checkForUpdates = async () => {
+    checks += 1;
+    h.updater.emit("checking-for-update");
+    h.updater.emit("update-not-available");
+  };
+  await h.coordinator.check();
+  assert.equal(checks, 1);
+  assert.equal(h.getState().status, "idle");
+
+  // and once the notice is back, a release found by an hourly check still downloads
+  h.updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await h.coordinator.check();
+  assert.equal(h.getState().status, "error");
+  await downloadInto(h);
+  assert.equal(h.getState().status, "downloaded");
+  assert.equal(h.getState().version, "2.0.0");
+});
+
+test("the check-failure notice never covers a staged update: hourly re-checks that fail stay silent", async () => {
+  const h = harness();
+  await downloadInto(h);
+  const staged = h.getState();
+  h.updater.checkForUpdates = () => {
+    h.updater.emit("error", new Error("offline"));
+    return Promise.reject(new Error("offline"));
+  };
+  for (let i = 0; i < 4; i++) await h.coordinator.check();
+  assert.deepEqual(h.getState(), staged);
 });

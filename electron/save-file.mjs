@@ -131,6 +131,15 @@ export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathA
   return "shown";
 }
 
+/** This app's own logs folder in Explorer or Finder, made first if nothing has been logged yet. The folder is main's
+ * own (app.getPath("logs")), never one a page names; `open` is shell.openPath, which answers "" or why it failed. */
+export async function openLogsFolder(folder, { open, fsp = fs.promises }) {
+  try { await fsp.mkdir(folder, { recursive: true }); } catch {}
+  let error = "";
+  try { error = await open(folder); } catch (failure) { error = failure?.message ?? String(failure); }
+  return { folder, opened: !error, ...(error ? { error: String(error).slice(0, 300) } : {}) };
+}
+
 export async function defaultSaveName(dir, sourcePath, { fsp = fs.promises } = {}) {
   const ext = path.extname(sourcePath);
   const stem = path.basename(sourcePath, ext);

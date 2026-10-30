@@ -102,6 +102,7 @@ function schedulePhrase(schedule: OverviewFacts["routines"][number]["schedule"],
     const date = new Date(schedule.at).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone });
     return `Once on ${date} at ${time(schedule.at, timeZone)}`;
   }
+  if (schedule.type === "limit_reset") return schedule.repeat === "every_reset" ? "Each time the AI usage limit resets" : "When the AI usage limit resets";
   if (schedule.type === "interval") {
     const minutes = schedule.everyMinutes;
     if (minutes < 60) return `Every ${minutes} minute${minutes === 1 ? "" : "s"}`;
@@ -220,13 +221,15 @@ function reachesLines(facts: OverviewFacts): string[] {
     lines.push("Connected apps could not be checked.");
   }
   if (facts.browserEnabled && facts.engine?.browserMcp && facts.bot.browser !== false && facts.bot.computer !== "off") lines.push("Has the built-in browser.");
-  if (facts.engine?.agentsMcp && facts.sectionPeers > 0 && facts.bot.peers?.length !== 0) {
-    const scope = facts.bot.chiefOfStaff && facts.bot.managedSections?.length ? "its allowed teams" : "its section";
-    lines.push(`Can talk to ${facts.sectionPeers} other bot${facts.sectionPeers === 1 ? "" : "s"} in ${scope}.`);
+  const peers = facts.sectionPeers;
+  if (facts.engine?.agentsMcp && peers > 0 && facts.bot.peers?.length !== 0) {
+    lines.push(Array.isArray(facts.bot.peers)
+      ? "Talks only to the bots chosen for it."
+      : peers === 1 ? "Can talk to the other bot." : `Can talk to all ${peers} other bots, in any department.`);
   }
-  if (facts.bot.chiefOfStaff) lines.push("Coordinates its section as Chief of Staff.");
+  if (facts.bot.chiefOfStaff) lines.push("Coordinates its department as Chief of Staff.");
   if (facts.bot.chiefOfStaff && facts.bot.managedSections?.length) {
-    lines.push(`May also coordinate these teams: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
+    lines.push(`Also in charge of these departments: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
   }
   return lines;
 }

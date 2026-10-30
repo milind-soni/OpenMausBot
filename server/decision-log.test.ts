@@ -151,6 +151,18 @@ describe("appendDecision / readDecisions", () => {
     expect(csv.split("\n").filter((line) => line.includes("(by voice)"))).toHaveLength(1);
   });
 
+  it("marks a person's decision made with a 👍 or 👎 on the card", async () => {
+    await withDecisionActor({ kind: "loopback" }, async () => {
+      appendDecision(dir, row({ requestId: "reacted", decision: "user-denied", source: "user" }));
+    }, "reaction");
+    await flushDecisionLog(dir);
+    const rows = readDecisions(dir, 10);
+    expect(rows.find((r) => r.requestId === "reacted")).toMatchObject({ actor: { kind: "loopback" }, via: "reaction" });
+    const csv = decisionsCsv(rows);
+    expect(csv).toContain("This computer (by reaction)");
+    expect(csv).not.toContain("(by voice)");
+  });
+
   it("exports a date range as CSV with formula cells neutralised and secrets still redacted", async () => {
     const legacy = { at: "2026-02-10T10:00:00.000Z", threadId: "t1", requestId: "r1", botName: "=HYPERLINK(\"https://evil\")", tool: "Bash",
       summary: "export STRIPE_API_KEY=sk-live-abcdefghijklmnop1234", decision: "user-approved", source: "user",

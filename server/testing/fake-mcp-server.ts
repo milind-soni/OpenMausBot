@@ -32,8 +32,9 @@ else {
     }
     if (frame.method === "tools/call") {
       if (process.env.FAKE_MCP_CALL_FILE) writeFileSync(process.env.FAKE_MCP_CALL_FILE, JSON.stringify(frame.params));
-      process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id,
-        result: { content: [{ type: "text", text: "Fixture notes read through MCP." }] } })}\n`);
+      // FAKE_MCP_RESULT_FILE: what every call answers, read at call time
+      const text = process.env.FAKE_MCP_RESULT_FILE ? readFileSync(process.env.FAKE_MCP_RESULT_FILE, "utf8") : "Fixture notes read through MCP.";
+      process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { content: [{ type: "text", text }] } })}\n`);
     }
   });
 }

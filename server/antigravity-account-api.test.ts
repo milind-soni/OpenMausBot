@@ -103,8 +103,30 @@ it("adds independent accounts, switches a bot between their models, and preserve
   expect(readFileSync(tokenPath("google-original"), "utf8")).toBe("{}");
   await waitForExit(child, { signal: "SIGTERM" });
   await launch(Number(new URL(base).port));
-  const list = await api("GET", "/api/instances");
-  for (const id of ids) expect(list.body.instances.find((row: any) => row.instanceId === id).snapshot.authenticated).toBe(true);
+  // Until the start-up read reaches an engine, the list answers from the last run's recorded status, which kill() on
+  // Windows (no exit handlers) leaves up to a second behind.
+  await vi.waitFor(async () => {
+    const list = await api("GET", "/api/instances");
+    for (const id of ids) expect(list.body.instances.find((row: any) => row.instanceId === id).snapshot.authenticated).toBe(true);
+  }, { timeout: 15_000, interval: 250 });
   const bots = await api("GET", "/api/bots");
   expect(bots.body.bots.find((bot: any) => bot.id === created.body.bot.id).modelSelection).toMatchObject({ instanceId: ids[1], model: "gemini-fixture" });
 }, 40_000);
+
+it("removes an unused added account but never the original Antigravity account", async () => {
+  const created = await api("POST", "/api/instances/antigravity-accounts", { displayName: "Remove me", sourceInstanceId: "google-original" });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const id = created.body.instanceId as string;
+  mkdirSync(join(tokenPath(id), ".."), { recursive: true });
+  writeFileSync(tokenPath(id), JSON.stringify({ refresh_token: "synthetic-removed" }));
+  expect((await api("DELETE", "/api/instances/google-original")).status).toBe(400);
+  const removed = await api("DELETE", `/api/instances/${id}`);
+  expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+  expect(removed.body.instances.some((row: { instanceId: string }) => row.instanceId === id)).toBe(false);
+  const saved = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+  expect(saved.instances).not.toHaveProperty(id);
+  expect(saved.instances).toHaveProperty("google-original");
+  // The removed account's Google sign-in goes with it; the original account's stays.
+  expect(existsSync(join(tokenPath(id), "..", ".."))).toBe(false);
+  expect(existsSync(tokenPath("google-original"))).toBe(true);
+});

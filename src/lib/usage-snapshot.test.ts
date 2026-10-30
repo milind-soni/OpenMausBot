@@ -89,7 +89,7 @@ function hostileState(): SnapshotState {
       opencodeGo: { configured: true, providerKeys: [HOSTILE] },
       tts: { configured: true, ready: true, voice: HOSTILE, provider: "fish" },
       decider: { provider: "jev", model: HOSTILE, configured: true, enabled: true, jobs: { roomRouting: true } },
-      live: { configured: true, voice: HOSTILE, readTypedReplies: false, idleMinutes: 5 },
+      live: { configured: true, keySource: "live", voice: HOSTILE, readTypedReplies: false, idleMinutes: 5 },
       imageGen: { configured: true, provider: "custom", model: HOSTILE, customUrl: `https://${HOSTILE}.example.com`, customModel: HOSTILE, customKeyConfigured: true },
       profile: { name: HOSTILE, email: `${HOSTILE}@example.com`, aboutMe: HOSTILE },
       language: "ja",
@@ -357,6 +357,14 @@ describe("what counts as a key, a computer source and an app", () => {
   it("counts one xAI key once, though avatar images can use it too", () => {
     const imageGen = { configured: false, provider: "openai" as const, openaiConfigured: false, xaiConfigured: true, customKeyConfigured: false };
     expect(buildUsageSnapshot(minimal({ xai: { configured: true }, imageGen }))).toMatchObject({ key_providers: ["xai"], key_count: 1 });
+  });
+
+  it("counts a separate Live key as openai_live, and Live calls on the OpenAI key from API keys as the openai key only", () => {
+    const live = { configured: true, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    expect(buildUsageSnapshot(minimal({ openai: { configured: true }, live: { ...live, keySource: "openai" } })))
+      .toMatchObject({ key_providers: ["openai"], key_count: 1, live_calls: true });
+    expect(buildUsageSnapshot(minimal({ openai: { configured: true }, live: { ...live, keySource: "live" } })))
+      .toMatchObject({ key_providers: ["openai", "openai_live"], key_count: 2, live_calls: true });
   });
 
   it("leaves archived bots out of every bot count", () => {

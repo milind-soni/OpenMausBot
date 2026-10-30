@@ -1,11 +1,12 @@
-import type { CloudMoveState } from "../../electron/cloud-move.mjs";
 import { hintSeen, type OnboardingStatus, type WelcomeViewer } from "@/lib/onboarding";
+import { CLOUD_WELCOME_DONE } from "../../shared/cloud-hints";
+
+export { CLOUD_WELCOME_DONE };
 
 export const CLOUD_SETUP_HIDDEN = "cloud-setup-hidden";
 export const CLOUD_SETUP_MOVE_SKIPPED = "cloud-setup-move-skipped";
 export const CLOUD_INTENT_ASKED = "cloud-intent-asked";
 export const CLOUD_INTENT_GIVEN = "cloud-intent-given";
-export const CLOUD_WELCOME_DONE = "cloud-welcome-done";
 export const CLOUD_WELCOME_SHOWN = "cloud-welcome-shown";
 
 export const WELCOME_STEPS = ["bring", "engine", "files"] as const;
@@ -29,7 +30,6 @@ export interface CloudSetupFacts {
   planned?: boolean;
   /** The welcome fills the main pane right now. */
   welcomeShown?: boolean;
-  move: { phase: CloudMoveState["phase"]; action?: CloudMoveState["action"]; suggest: boolean } | null;
 }
 
 type StageFacts = Pick<CloudSetupFacts, "viewer" | "connected" | "enginesKnown" | "onboarding">;
@@ -57,7 +57,7 @@ export function welcomeViewAfter(onboarding: OnboardingStatus | undefined, finis
   return open.find((step) => WELCOME_STEPS.indexOf(step) > WELCOME_STEPS.indexOf(finished)) ?? open[0] ?? "done";
 }
 
-export function cloudSetupStage(facts: Omit<CloudSetupFacts, "move">): "none" | "waiting" | "hidden" | "welcome" | "done" | "shown" {
+export function cloudSetupStage(facts: CloudSetupFacts): "none" | "waiting" | "hidden" | "welcome" | "done" | "shown" {
   if (!facts.viewer?.cloudHome || !facts.viewer.canSave) return "none";
   if (!facts.connected || !facts.enginesKnown || !facts.onboarding) return "waiting";
   if (hintSeen(facts.onboarding, CLOUD_SETUP_HIDDEN)) return "hidden";
@@ -69,21 +69,9 @@ export function cloudSetupStage(facts: Omit<CloudSetupFacts, "move">): "none" | 
   return "shown";
 }
 
-const UNDER_WAY = new Set<CloudMoveState["phase"]>(["preparing", "growing", "exporting", "uploading", "checking", "replacing", "restarting", "failed"]);
-
-export function moveStatus(move: CloudSetupFacts["move"], onboarding: OnboardingStatus | undefined): CloudSetupStatus | null {
-  if (!move) return null;
-  if (move.action !== "restore" && move.phase === "done") return "done";
-  if (move.action !== "restore" && UNDER_WAY.has(move.phase)) return "todo";
+function welcomeBringStatus(onboarding: OnboardingStatus | undefined): CloudSetupStatus | null {
   if (hintSeen(onboarding, CLOUD_SETUP_MOVE_SKIPPED)) return "skipped";
-  return move.suggest ? "todo" : null;
-}
-
-function welcomeBringStatus(facts: CloudSetupFacts): CloudSetupStatus | null {
-  const copied = moveStatus(facts.move, facts.onboarding) === "done";
-  if (!copied && hintSeen(facts.onboarding, CLOUD_SETUP_MOVE_SKIPPED)) return "skipped";
-  if (copied || welcomeStepFinished(facts.onboarding, "bring")) return "done";
-  return null;
+  return welcomeStepFinished(onboarding, "bring") ? "done" : null;
 }
 
 /** On a Cloud with the welcome, the compact form of its steps; on one set up before it, the first-job checklist. */
@@ -93,7 +81,7 @@ export function cloudSetupItems(facts: CloudSetupFacts): CloudSetupItem[] {
   if (welcome === "pending") {
     return [
       { id: "cloud", status: "done" },
-      { id: "move", status: welcomeBringStatus(facts) ?? "todo" },
+      { id: "move", status: welcomeBringStatus(facts.onboarding) ?? "todo" },
       { id: "engine", status: !welcomeStepFinished(facts.onboarding, "engine") ? "todo" : facts.engineReady ? "done" : "skipped" },
       { id: "files", status: welcomeStepFinished(facts.onboarding, "files") ? "done" : "todo" },
     ];
@@ -103,7 +91,7 @@ export function cloudSetupItems(facts: CloudSetupFacts): CloudSetupItem[] {
   else if (given) items.push({ id: "job", status: "done" });
   items.push({ id: "engine", status: facts.engineReady ? "done" : "todo" });
   if (given) items.push({ id: "plan", status: facts.planned ? "done" : "todo" });
-  const move = welcome === "ended" ? welcomeBringStatus(facts) ?? moveStatus(facts.move, facts.onboarding) : moveStatus(facts.move, facts.onboarding);
+  const move = welcome === "ended" ? welcomeBringStatus(facts.onboarding) : null;
   if (move) items.push({ id: "move", status: move });
   return items;
 }

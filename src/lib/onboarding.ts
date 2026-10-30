@@ -1,3 +1,6 @@
+import { ONBOARDING_CLOUD_HINT, WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
+import { freeFallback, rankAis, type AiTestState, type RankableAi } from "../../shared/ai-ranking";
+
 export interface OnboardingStatus {
   completedAt: string;
   version: number;
@@ -6,7 +9,7 @@ export interface OnboardingStatus {
   firstTurnAt?: string;
 }
 
-export const WELCOME_VERSION = 1;
+export { ONBOARDING_CLOUD_HINT, WELCOME_VERSION };
 
 export const EMPTY_ONBOARDING: OnboardingStatus = {
   completedAt: "",
@@ -58,6 +61,27 @@ export function completionPatch(now: Date = new Date()): { onboarding: { complet
   return { onboarding: { completedAt: now.toISOString(), version: WELCOME_VERSION } };
 }
 
+/** Kept by an install whose first run ended by meeting its Chief of Staff: its first conversation stays quiet (no
+ * corner notices until a reply, no spotlights). */
+export const MET_CHIEF_HINT = "met-chief-v1";
+
+/** The first run's record: done, marked as the one that met the Chief (MET_CHIEF_HINT), plus any `seen` it settles. */
+export function firstRunPatch(
+  record: OnboardingStatus | undefined,
+  now: Date = new Date(),
+  seen: readonly string[] = [],
+): { onboarding: { completedAt: string; version: number; hintsSeen?: string[] } } {
+  const have = record?.hintsSeen ?? [];
+  const added = [MET_CHIEF_HINT, ...seen].filter((id, index, all) => !have.includes(id) && all.indexOf(id) === index);
+  return { onboarding: { ...completionPatch(now).onboarding, ...(added.length ? { hintsSeen: [...have, ...added] } : {}) } };
+}
+
+/** Where a first run could offer MausBot Cloud: this computer's own page with the Cloud bridge, not a branded build,
+ * a hosted or a remote viewer. A first run there settles the Cloud Pro popup, so it never follows on the next launch. */
+export function cloudBeatPossible(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean }): boolean {
+  return input.bridge && !input.branded && !input.hosted && !input.remote;
+}
+
 export function hintSeen(record: OnboardingStatus | undefined, id: string): boolean {
   return (record?.hintsSeen ?? []).includes(id);
 }
@@ -71,47 +95,24 @@ export function hintSeenPatch(
 }
 
 
-export type BeatId = "hello" | "reel" | "engines" | "import" | "permissions" | "phone" | "cloud" | "bot";
+export type BeatId = "meet" | "chief";
 
-export interface BeatOptions {
-  dictation: boolean;
-  reel: boolean;
-  hosted?: boolean;
-  /** This computer has skills or MCP servers from another AI tool to bring in. */
-  setupImport?: boolean;
-  /** MausBot Cloud can be bought from this desktop now (cloudBeatWanted); the first bot stays the last beat. */
-  cloud?: boolean;
+/** Every screen the first run can show, in the order it shows them. */
+export const BEAT_ORDER: readonly BeatId[] = ["meet", "chief"];
+
+/** Two screens, then the chat: meeting the app (and connecting an AI when none works), then the Chief of Staff. A hosted
+ * place's admin only meets the app: their team's bots and Chief are already set up. */
+export function beatsFor(options: { hosted?: boolean }): BeatId[] {
+  return options.hosted ? ["meet"] : ["meet", "chief"];
 }
 
-export function beatsFor(options: BeatOptions): BeatId[] {
-  if (options.hosted) return ["hello", "bot"];
-  const beats: BeatId[] = ["hello"];
-  if (options.reel) beats.push("reel");
-  beats.push("engines");
-  if (options.setupImport) beats.push("import");
-  if (options.dictation) beats.push("permissions");
-  beats.push("phone");
-  if (options.cloud) beats.push("cloud");
-  beats.push("bot");
-  return beats;
+/** Where a reloaded first run opens: the saved screen while it is offered, else the first. */
+export function resumeBeat(beats: readonly BeatId[], saved: BeatId | undefined): BeatId {
+  return saved && beats.includes(saved) ? saved : beats[0] ?? "meet";
 }
 
-/** The welcome's Cloud beat, recorded when it is shown, so a later Cloud pitch need not repeat it at once. */
-export const ONBOARDING_CLOUD_HINT = "onboarding-cloud-v1";
 export function onboardingCloudOffered(record: OnboardingStatus | undefined): boolean {
   return hintSeen(record, ONBOARDING_CLOUD_HINT);
-}
-
-/** Where the welcome may offer MausBot Cloud at all: this computer's own page with the Cloud bridge, not a branded
- * build, not a hosted or remote viewer. */
-export function cloudBeatPossible(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean }): boolean {
-  return input.bridge && !input.branded && !input.hosted && !input.remote;
-}
-
-/** ...and whether it does: as the buy sheet decides, an account that may buy (buyOfferAllowed) and the Admin's offer
- * loaded. Anything unknown is no beat: onboarding never waits for it. */
-export function cloudBeatWanted(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean; mayBuy: boolean | null; offer: unknown }): boolean {
-  return cloudBeatPossible(input) && input.mayBuy === true && Boolean(input.offer);
 }
 
 let welcomeShown = 0;
@@ -125,40 +126,25 @@ export function welcomeOnScreen(): boolean {
   return welcomeShown > 0;
 }
 
-export function nextBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const index = beats.indexOf(current);
-  if (index < 0 || index + 1 >= beats.length) return null;
-  return beats[index + 1]!;
-}
-
-export function previousBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const index = beats.indexOf(current);
-  if (index <= 0) return null;
-  return beats[index - 1]!;
-}
-
-export function beatWidth(beat: BeatId): number {
-  switch (beat) {
-    case "engines":
-      return 680;
-    case "phone":
-      return 620;
-    case "import":
-      return 540;
-    case "reel":
-      return 720;
-    case "bot":
-    case "cloud":
-      return 520;
-    default:
-      return 460;
+const WELCOME_FINISHED_KEY = "omb.onboarding.welcomeFinished";
+/** The first-run welcome ended in this app session (never a replay): the full-screen Cloud Pro popup waits for a later
+ * launch rather than following it. Kept for the window's session, so a reload counts as the same launch. */
+// Where browser storage is blocked, this page's memory stands in for it.
+let welcomeFinishedRemembered = false;
+export function markWelcomeFinished(): void {
+  try {
+    sessionStorage.setItem(WELCOME_FINISHED_KEY, "1");
+  } catch {
+    welcomeFinishedRemembered = true;
   }
 }
-
-export function flowDotsShown(beat: BeatId): boolean {
-  return beat !== "reel";
+export function welcomeFinishedThisLaunch(): boolean {
+  try {
+    return sessionStorage.getItem(WELCOME_FINISHED_KEY) === "1";
+  } catch {
+    return welcomeFinishedRemembered;
+  }
 }
-
 
 export const DEFAULT_ADMIN_ORIGIN = "https://admin.openmausbot.com";
 
@@ -174,21 +160,54 @@ export function companyModelCount(state: { providers?: Array<{ configured: boole
   return (state?.providers ?? []).reduce((total, provider) => total + (provider.configured ? provider.models.length : 0), 0);
 }
 
-interface SummaryInstance {
-  install?: unknown;
-  managed?: unknown;
+interface AiChoice {
+  driverKind: string;
+  access?: string;
+  readOnly?: boolean;
+  snapshot?: { freeFallback?: boolean };
 }
 
-export function engineSummary<Instance extends SummaryInstance>(
+/** The one way the welcome recommends to connect an AI, in the new-bot default's own order (shared/ai-ranking.ts: a Claude
+ * account first, then a ChatGPT plan), and every other way. */
+export function aiChoices<Instance extends AiChoice>(instances: readonly Instance[]): { recommended?: Instance; others: Instance[] } {
+  const plan = (instance: Instance) => !instance.readOnly && instance.access !== "api" && instance.access !== "custom";
+  const recommended = rankAis(instances.filter(plan))[0] ?? instances.find((instance) => !instance.readOnly);
+  return { recommended, others: instances.filter((instance) => instance !== recommended) };
+}
+
+/** The AI the welcome's Connect an AI step stands on: the best ready AI (the same ranking) that isn't OpenCode's free
+ * backup, passing over one whose test message got no answer. An AI not tested yet is `testing`; none ready is null. */
+export function welcomeAi<Instance extends RankableAi>(
   instances: readonly Instance[],
   ready: (instance: Instance) => boolean,
-  options: { company: boolean },
-): { ready: Instance[]; setup: Instance[]; company: number; allReady: boolean } {
-  const engines = instances.filter((instance) => instance.install);
-  const personal = engines.filter(ready);
-  const setup = engines.filter((instance) => !ready(instance));
-  const company = options.company ? instances.filter((instance) => instance.managed && ready(instance)).length : 0;
-  return { ready: personal, setup, company, allReady: company > 0 || (personal.length > 0 && setup.length === 0) };
+  test: (instance: Instance) => AiTestState | undefined,
+): { instance: Instance; state: AiTestState } | null {
+  let silent: Instance | undefined;
+  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && !freeFallback(candidate)))) {
+    const state = test(instance) ?? "testing";
+    if (state !== "failed") return { instance, state };
+    silent ??= instance;
+  }
+  return silent ? { instance: silent, state: "failed" } : null;
+}
+
+/** It answered its test, or has no way to be tested and is trusted as before. */
+export function aiWorks(found: { state: AiTestState } | null): boolean {
+  return found?.state === "passed" || found?.state === "untestable";
+}
+
+interface SignInStep {
+  snapshot: { state: string; authenticated?: boolean };
+  authentication?: unknown;
+  install?: { server?: unknown; managed?: unknown };
+}
+
+/** Whether the welcome's plain sign-in line fits this setup: a sign-in on the provider's own website, or a setup the app
+ * does by itself before one. A step finished in Terminal keeps the setup's own instructions. */
+export function plainSignIn(instance: SignInStep): boolean {
+  return instance.snapshot.state === "available" && instance.snapshot.authenticated === false
+    ? Boolean(instance.authentication)
+    : Boolean(instance.install?.server || instance.install?.managed);
 }
 
 export function cloudSignInDue<Instance>(

@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
 import {
@@ -8,6 +8,7 @@ import {
   authorizeService,
   connectedServiceSlugs,
   connectedServices,
+  connectedServicesInventory,
   connectionMode,
   connectionStatus,
   listConnectorTools,
@@ -23,6 +24,7 @@ import {
   trustedSessionMcpUrl,
   validateConnectorGrants,
 } from "./composio.ts";
+import { forgetProjectAuthConfigs } from "./composio-project.ts";
 import {
   CONNECTOR_ALLOWED_TOOLS_ENV,
   CONNECTOR_SERVICE_SLUGS_ENV,
@@ -72,6 +74,7 @@ let brokerToolsListFail = false;
 // What /broker/v1/connectors/connected serves; null falls back to github
 // only, the state the existing validation tests were written against.
 let brokerConnectedServicesBody: { services: Record<string, { connected: boolean; status: string }> } | null = null;
+let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
 // The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
@@ -111,6 +114,10 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ services }));
       }
       if (req.method === "GET" && url.pathname === "/broker/v1/connectors/connected") {
+        if (brokerConnectedServicesFail) {
+          res.writeHead(503, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "unavailable" }));
+        }
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify(
           brokerConnectedServicesBody ?? { services: { github: { connected: true, status: "ACTIVE" } } },
@@ -405,6 +412,9 @@ afterAll(async () => {
 });
 
 describe.sequential("Composio Sessions", () => {
+  // Fixtures change the project's auth configs from test to test; production reads them at most once a minute.
+  beforeEach(() => forgetProjectAuthConfigs());
+
   it("rejects broker URL components and invalid tokens from the environment", () => {
     process.env.OMB_COMPOSIO_BROKER_TOKEN = "a".repeat(64);
     try {
@@ -788,10 +798,10 @@ describe.sequential("Composio Sessions", () => {
 
   it("names the project's own auth configs at creation and rebuilds a Session that predates them", async () => {
     customAuthConfigs = [
-      { id: "ac_twitter_old", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", last_updated_at: "2026-08-20T00:00:00Z" },
+      { id: "ac_twitter_old", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true, last_updated_at: "2026-08-20T00:00:00Z" },
       // newest wins, and the slug is matched case-insensitively
-      { id: "ac_twitter", toolkit: { slug: "TWITTER" }, is_composio_managed: false, status: "ENABLED", last_updated_at: "2026-08-25T00:00:00Z" },
-      // Composio-managed, disabled, and switched-off-for-Sessions configs are not the user's choice
+      { id: "ac_twitter", toolkit: { slug: "TWITTER" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true, last_updated_at: "2026-08-25T00:00:00Z" },
+      // Composio-managed and disabled configs are not the person's; one off for Tool Router waits until its app connects
       { id: "ac_github_managed", toolkit: { slug: "github" }, is_composio_managed: true, status: "ENABLED" },
       { id: "ac_slack_disabled", toolkit: { slug: "slack" }, is_composio_managed: false, status: "DISABLED" },
       { id: "ac_notion_off", toolkit: { slug: "notion" }, is_composio_managed: false, is_enabled_for_tool_router: false },
@@ -813,20 +823,21 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
-  it("rebuilds the Session and retries when a toolkit needs the project's own auth config", async () => {
-    customAuthConfigs = [{ id: "ac_twitter", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED" }];
+  it("rebuilds the Session and retries when a toolkit needs an auth config made since the last lookup", async () => {
     sessionAuthConfigs = {};
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "stale-local-user", sessionId: "trs_test" },
     };
     try {
+      await prepareProjectSession("ak_test", { userId: "openmausbot_existing" });
+      customAuthConfigs = [{ id: "ac_twitter_new", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true }];
       const before = calls.length;
       await expect(authorizeService(cfg, "twitter")).resolves.toEqual({ url: "https://connect.composio.dev/link/twitter" });
       const since = calls.slice(before);
       expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/link"))).toHaveLength(2);
       expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/session")).at(-1)?.body).toMatchObject({
         user_id: "openmausbot_existing",
-        auth_configs: { twitter: "ac_twitter" },
+        auth_configs: { twitter: "ac_twitter_new" },
       });
       expect(cfg.composio).toMatchObject({ userId: "openmausbot_existing", sessionId: "trs_test" });
     } finally {
@@ -966,6 +977,24 @@ describe.sequential("Composio Sessions", () => {
 
   it("reads an unreachable connection inventory as no service slugs", async () => {
     await expect(connectedServiceSlugs({})).resolves.toEqual([]);
+  });
+
+  it("keeps the last service slugs when a later read fails, so the bridge's tools stay as they were", async () => {
+    const access = { url: origin + "/broker", token: "e".repeat(64) };
+    brokerConnectedServicesBody = { services: { bland_ai: { connected: true, status: "ACTIVE" } } };
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    try {
+      await expect(connectedServiceSlugs({}, access)).resolves.toEqual(["bland_ai"]);
+      brokerConnectedServicesFail = true;
+      now.mockReturnValue(start + 61_000);
+      await expect(connectedServiceSlugs({}, access)).resolves.toEqual(["bland_ai"]);
+      await expect(connectedServiceSlugs({}, { ...access, token: "d".repeat(64) })).resolves.toEqual([]);
+    } finally {
+      now.mockRestore();
+      brokerConnectedServicesFail = false;
+      brokerConnectedServicesBody = null;
+    }
   });
 
   it("validates grant patches against connected services and the catalog", async () => {
@@ -1123,7 +1152,9 @@ describe.sequential("Composio Sessions", () => {
     };
     connectedAccountsUnavailable = true;
     try {
-      await expect(connectedServices(cfg)).resolves.toMatchObject({
+      const inventory = await connectedServicesInventory(cfg);
+      expect(inventory.complete).toBe(false);
+      expect(inventory.services).toMatchObject({
         github: {
           connected: true,
           status: "ACTIVE",

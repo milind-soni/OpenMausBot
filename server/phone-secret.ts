@@ -1,5 +1,6 @@
 import { createECDH, createHash, type webcrypto } from "node:crypto";
 
+import { desktopCredentialSlot, isCredentialTargetId } from "../shared/credential-request.ts";
 import {
   Aes256Gcm,
   CipherSuite,
@@ -137,6 +138,14 @@ export function assertPhoneSecretRequestMatches(
   authenticatedDeviceId: string,
   expected: { target: string; requestKey: string },
 ): void {
+  // Phone entry hands a key to the desktop's settings; the 1Password token goes to Logins, which a phone cannot reach.
+  if (expected.target === "onePasswordToken") {
+    throw new PhoneSecretError("Paste the 1Password token in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+  }
+  // An AI provider key lives in the server's settings, which only the computer's own app writes.
+  if (isCredentialTargetId(expected.target) && !desktopCredentialSlot(expected.target)) {
+    throw new PhoneSecretError("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+  }
   if (
     context.deviceId !== authenticatedDeviceId ||
     context.target !== expected.target ||
@@ -347,18 +356,27 @@ export class PhoneSecretBridge {
   }
 
   async provide(context: PhoneSecretContext): Promise<void> {
+    await this.withinLimit(async () => this.save(context, await this.openWithinLimit(context)));
+  }
+
+  /** The value a paired phone sealed for this computer, for a secret this server keeps itself and never sends on. */
+  async open(context: PhoneSecretContext): Promise<string> {
+    return this.withinLimit(() => this.openWithinLimit(context));
+  }
+
+  private async withinLimit<T>(work: () => Promise<T>): Promise<T> {
     if (this.active >= this.maximumPending) {
       throw new PhoneSecretError("Another secure credential is still being saved. Try again.", 429);
     }
     this.active += 1;
     try {
-      await this.provideWithinLimit(context);
+      return await work();
     } finally {
       this.active -= 1;
     }
   }
 
-  private async provideWithinLimit(context: PhoneSecretContext): Promise<void> {
+  private async openWithinLimit(context: PhoneSecretContext): Promise<string> {
     if (!this.identity) {
       throw new PhoneSecretError(
         "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
@@ -409,7 +427,10 @@ export class PhoneSecretBridge {
     if (!value || Buffer.byteLength(value) > PHONE_SECRET_MAX_BYTES) {
       throw new PhoneSecretError("The credential must be between 1 and 4096 bytes");
     }
+    return value;
+  }
 
+  private async save(context: PhoneSecretContext, value: string): Promise<void> {
     const requestId = phoneSecretOperationId(context);
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {

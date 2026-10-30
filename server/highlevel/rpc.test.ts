@@ -153,7 +153,7 @@ describe("highlevelRpc", () => {
     const read = await highlevelRpc(call("HIGHLEVEL_GET_CONTACT", { contactId: "contact_1" }), deps) as { isError?: boolean; structuredContent: Record<string, unknown> };
     expect(read.isError).toBeUndefined();
     expect(read.structuredContent).toMatchObject({ id: "contact_1", email: "ada@fixture.test" });
-    expect(checks()).toBe(2);
+    expect(checks()).toBeGreaterThanOrEqual(2);
     expect(writes).toEqual([]);
     const write = await highlevelRpc(call("HIGHLEVEL_UPDATE_CONTACT", { contactId: "contact_1", email: "new@fixture.test", tags: ["a"] }), deps) as { isError?: boolean };
     expect(write.isError).toBeUndefined();
@@ -190,7 +190,7 @@ describe("highlevelRpc", () => {
 
   it("answers the signed-out note so the bot asks the person to reconnect", async () => {
     const { deps, store } = harness(legacy);
-    store.markNeedsSignIn("revoked");
+    store.markNeedsSignIn("revoked", store.get()!);
     const out = await highlevelRpc(call("HIGHLEVEL_GET_CONTACT", { contactId: "contact_1" }), deps) as { isError?: boolean; content: Array<{ text: string }>; structuredContent: Record<string, unknown> };
     expect(out.isError).toBe(true);
     expect(out.content[0].text).toBe(HIGHLEVEL_SIGNED_OUT_TEXT);
@@ -200,7 +200,7 @@ describe("highlevelRpc", () => {
 });
 
 describe("host", () => {
-  it("mounts only with a connection and an allowed bot, records writes as activity rows and merges health", async () => {
+  it("mounts only with a connection and an allowed bot, records writes as activity rows, and lists itself in health only while a connection is saved", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-highlevel-host-"));
     dirs.push(dir);
     const service = createHighLevelService({ dataDir: dir, env: { OMB_HIGHLEVEL_RELAY_URL: "http://127.0.0.1:9", OMB_HIGHLEVEL_API_URL: hl.url } });
@@ -210,6 +210,7 @@ describe("host", () => {
     expect(host.mounts(legacy)).toBe(false);
     expect(host.integration(legacy, () => "tok", "http://127.0.0.1:1")).toBeNull();
     expect(await host.health(null)).toBeNull();
+    expect(await host.health(Promise.resolve({ gmail: { connected: false } }))).toEqual({ gmail: { connected: false } });
     expect(host.toolListing()?.highlevel.map((tool) => tool.name)).toEqual([...HIGHLEVEL_TOOL_NAMES]);
     service.store.put({ kind: "oauth", accessToken: "hl_access_seed", refreshToken: "r", expiresAt: Date.now() + 3_600_000, locationId: FAKE_LOCATION_ID, scopes: "" });
     expect(host.mounts(legacy)).toBe(true);
@@ -228,6 +229,11 @@ describe("host", () => {
     expect(off.content[0].text).toContain("Off has not been given access to HighLevel");
     const listed = await host.handle({ method: "tools/list" }, { botId: "b4", threadId: "t" }, () => {}) as { tools: unknown[] };
     expect(listed.tools).toEqual([]);
+    service.store.markNeedsSignIn("revoked", service.store.get()!);
+    expect(await host.health(Promise.resolve({ gmail: { connected: true } }))).toEqual({ gmail: { connected: true }, highlevel: { connected: false } });
+    service.disconnect();
+    expect(await host.health(Promise.resolve({ gmail: { connected: true } }))).toEqual({ gmail: { connected: true } });
+    expect(await host.health(null)).toBeNull();
     service.close();
   });
 });

@@ -19,7 +19,7 @@ describe("live activity label", () => {
     setLocale("pt-br");
     expect(liveActivityLabel()).toBe("Pensando");
     expect(liveActivityLabel(activity("Bash: pnpm test"))).toBe("Executando um comando");
-    expect(liveActivityLabel(activity("mcp__computer__click"))).toBe("Usando o computador");
+    expect(liveActivityLabel(activity("mcp__computer__click"))).toBe("Usando a tela");
 
     setLocale("ja");
     expect(liveActivityLabel(activity("web_search"))).toBe("ウェブを検索中");

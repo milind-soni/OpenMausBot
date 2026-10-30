@@ -10,6 +10,7 @@ export interface Voice {
   id: string;
   label: string;
   description?: string;
+  publicOwnerId?: string;
 }
 
 export interface Audio {
@@ -46,6 +47,7 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
   try {
     const res = await fetch(`${elevenLabsProviderApi()}/voices`, {
       headers: { "xi-api-key": key },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
     if (res.ok) return { ok: true };
@@ -55,13 +57,19 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
   }
 }
 
-export async function listVoices(key: string, api: string): Promise<Voice[]> {
-  const res = await fetch(`${api}/voices`, {
+async function getJson(key: string, url: string, what: string): Promise<any> {
+  const res = await fetch(url, {
     headers: { "xi-api-key": key },
+    redirect: "error",
     signal: AbortSignal.timeout(20_000),
   });
   const body = await safeJson(res);
-  if (!res.ok) throw new Error(message(res.status, "listing voices", body));
+  if (!res.ok) throw new Error(message(res.status, what, body));
+  return body;
+}
+
+async function accountVoices(key: string, api: string): Promise<Voice[]> {
+  const body = await getJson(key, `${api}/voices`, "listing voices");
   return (body?.voices ?? [])
     .map((v: any): Voice => ({
       id: String(v.voice_id ?? ""),
@@ -71,13 +79,107 @@ export async function listVoices(key: string, api: string): Promise<Voice[]> {
     .filter((v: Voice) => v.id);
 }
 
-export async function synthesize(text: string, voiceId: string, key: string, api: string): Promise<Audio> {
-  const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${FORMAT}`, {
+async function sharedVoices(key: string, api: string, query: string): Promise<Voice[]> {
+  const body = await getJson(key, `${api}/shared-voices?page_size=100&${query}`, "searching the Voice Library");
+  return (body?.voices ?? [])
+    .map((v: any): Voice => ({
+      id: String(v.voice_id ?? ""),
+      label: String(v.name ?? "Voice"),
+      description: [v.accent, v.description].filter(Boolean).join(" · ") || undefined,
+      ...(v.is_added_by_user ? {} : { publicOwnerId: String(v.public_owner_id ?? "") }),
+    }))
+    .filter((v: Voice) => v.id && v.publicOwnerId !== "");
+}
+
+/** A Voice Library share link (`…/share/<owner>/<voice>`), a `voiceId=` link, or a bare voice id. */
+export function pastedVoice(input: string): { id: string; owner?: string } | undefined {
+  const text = input.trim();
+  const share = /\/share\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)(?=$|[/?#])/.exec(text);
+  if (share) return { owner: share[1], id: share[2] };
+  const param = /[?&]voiceId=([A-Za-z0-9]+)(?=$|[&#])/.exec(text);
+  if (param) return { id: param[1] };
+  return /^[A-Za-z0-9]{20}$/.test(text) ? { id: text } : undefined;
+}
+
+const firstOfEachId = (voices: Voice[]) => voices.filter((voice, index) => voices.findIndex((v) => v.id === voice.id) === index);
+
+export async function listVoices(key: string, api: string, { query }: { query?: string } = {}): Promise<Voice[]> {
+  const account = await accountVoices(key, api);
+  const trimmed = query?.trim() ?? "";
+  if (!trimmed) return account;
+  const pasted = pastedVoice(trimmed);
+  if (pasted) {
+    const mine = account.find((voice) => voice.id === pasted.id);
+    if (mine) return [mine];
+    if (pasted.owner) {
+      const owned = await sharedVoices(key, api, `owner_id=${encodeURIComponent(pasted.owner)}`);
+      const match = owned.find((voice) => voice.id === pasted.id);
+      if (match) return [match];
+    }
+  }
+  const needle = trimmed.toLowerCase();
+  const library = await sharedVoices(key, api, `search=${encodeURIComponent(pasted?.id ?? trimmed)}`);
+  return firstOfEachId([...account.filter((voice) => voice.label.toLowerCase().includes(needle)), ...library]);
+}
+
+export async function addSharedVoice(key: string, api: string, publicOwnerId: string, voiceId: string, name: string): Promise<string> {
+  const res = await fetch(`${api}/voices/add/${encodeURIComponent(publicOwnerId)}/${encodeURIComponent(voiceId)}`, {
     method: "POST",
-    headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
-    body: JSON.stringify({ text, model_id: MODEL }),
-    signal: AbortSignal.timeout(60_000),
+    headers: { "xi-api-key": key, "content-type": "application/json" },
+    body: JSON.stringify({ new_name: name }),
+    signal: AbortSignal.timeout(20_000),
+    redirect: "error",
   });
-  if (!res.ok) throw new Error(message(res.status, "speaking", await safeJson(res)));
-  return { bytes: new Uint8Array(await res.arrayBuffer()), mime: "audio/mpeg" };
+  const body = await safeJson(res);
+  if (!res.ok) throw new Error(message(res.status, "adding that voice", body));
+  return typeof body?.voice_id === "string" && body.voice_id ? body.voice_id : voiceId;
+}
+
+// tsconfig.server.json targets ES2023: Promise.withResolvers is ES2024.
+function withResolvers<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+export interface Synthesis {
+  /** The clip's first bytes off the wire; settle while later chunks are still arriving. */
+  firstAudio: Promise<Audio>;
+  /** The complete clip, once every chunk has arrived. */
+  audio: Promise<Audio>;
+}
+
+export function synthesize(text: string, voiceId: string, key: string, api: string): Synthesis {
+  const firstAudio = withResolvers<Audio>();
+  const audio = withResolvers<Audio>();
+  // Callers may consume only `audio`: a failure before the first chunk must not become an unhandled rejection.
+  firstAudio.promise.catch(() => {});
+  void (async () => {
+    try {
+      const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${FORMAT}`, {
+        method: "POST",
+        headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
+        body: JSON.stringify({ text, model_id: MODEL }),
+        redirect: "error",
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) throw new Error(message(res.status, "speaking", await safeJson(res)));
+      if (!res.body) throw new Error("speaking failed: no audio came back");
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.length) continue;
+        chunks.push(value);
+        if (chunks.length === 1) firstAudio.resolve({ bytes: value, mime: "audio/mpeg" });
+      }
+      if (!chunks.length) throw new Error("speaking failed: the audio came back empty");
+      audio.resolve({ bytes: Buffer.concat(chunks), mime: "audio/mpeg" });
+    } catch (error) {
+      firstAudio.reject(error);
+      audio.reject(error);
+    }
+  })();
+  return { firstAudio: firstAudio.promise, audio: audio.promise };
 }

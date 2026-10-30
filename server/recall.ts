@@ -104,6 +104,8 @@ export function renderRecall(passages: readonly RecallPassage[], maxChars = RECA
 
 export interface RecallInput {
   botId: string;
+  /** Whose notes to read: the bot's own, or on a Team Cloud the turn's layer and the team's (audience.ts). Default: the bot's. */
+  memoryIds?: readonly string[];
   message: string;
   /** Empty when conversations must not be searched (rooms, peer or webhook turns). */
   threadIds: readonly string[];
@@ -175,8 +177,9 @@ export function conversationPassages(input: RecallInput, query: string): RecallP
 export function buildRecall(input: RecallInput): RecallResult | null {
   const query = recallQuery(input.message);
   if (!query) return null;
-  const topics = topicPassages(input.botId, query);
-  const notes = selectMemoryPassages(memoryPassages(input.botId, query), topics);
+  const memoryIds = input.memoryIds?.length ? input.memoryIds : [input.botId];
+  const topics = memoryIds.flatMap((id) => topicPassages(id, query));
+  const notes = selectMemoryPassages(memoryIds.flatMap((id) => memoryPassages(id, query)), topics);
   return renderRecall([...notes, ...conversationPassages(input, query)]);
 }
 

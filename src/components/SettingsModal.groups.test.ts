@@ -104,24 +104,24 @@ function rail(html: string): Record<string, string[]> {
 }
 
 describe("Settings rail groups", () => {
-  it("files every page under You, AI, Computers or Account, in that order", () => {
+  it("files every page under You, AI, Devices or Account, in that order", () => {
     expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(["you", "ai", "computers", "account"]);
     const ids = SECTIONS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(18); // 16 + the shared Skills library (AI group) + Logins (Computers)
+    expect(ids).toHaveLength(19); // 16 + the shared Skills library (AI group) + Logins (Devices) + Import (Account)
     for (const entry of SECTIONS) expect(SETTINGS_GROUPS.map((group) => group.id)).toContain(entry.group);
   });
 
   it("shows every desktop page under its labelled group", () => {
     vi.stubGlobal("window", { ogb: { environments: {}, organization: {}, cloudAccount: {} } });
     const html = render();
-    for (const label of ["You", "AI", "Computers", "Account"]) expect(html).toContain(`>${label}</div>`);
+    for (const label of ["You", "AI", "Devices", "Account"]) expect(html).toContain(`>${label}</div>`);
     expect(html).toContain("glass-surface");
     expect(rail(html)).toEqual({
       you: ["general", "appearance", "companion"],
       ai: ["engines", "connections", "decisionModel"],
       computers: ["desktopWorkspaces", "computer", "logins"],
-      account: ["cloudAccount", "organization", "usage", "backups", "experimental"],
+      account: ["cloudAccount", "organization", "usage", "backups", "import", "experimental"],
     });
     expect(html).toContain('<optgroup label="AI">');
   });

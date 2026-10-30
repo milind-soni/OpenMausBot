@@ -9,6 +9,7 @@ import { FileChoosers, setInputFiles } from "./files.ts";
 import { FrameTree, type FrameTreeNode } from "./frames.ts";
 import { PageHealth, type HealthReport } from "./health.ts";
 import { Mouse, type Point } from "./input.ts";
+import { Navigations } from "./navigations.ts";
 import { Keyboard } from "./keyboard.ts";
 import { RefTable, type RefCounter } from "./refs.ts";
 import { captureScreenshot, type Screenshot, type ScreenshotOptions } from "./screencast.ts";
@@ -75,6 +76,7 @@ export class CdpPage implements ActionContext, WaitContext {
   readonly fileChoosers = new FileChoosers();
   readonly health: PageHealth;
   readonly lifecycle: Lifecycle;
+  readonly navigations: Navigations;
   readonly secrets = new SecretGuard();
   /** Resolves once the tab is configured and running. */
   readonly ready: Promise<void>;
@@ -84,7 +86,7 @@ export class CdpPage implements ActionContext, WaitContext {
   #crashed = false;
   #devicePixelRatio: number | null = null;
   #documentStatus: { loaderId: string; status: number } | null = null;
-  #emulated: { width: number; height: number } | null = null;
+  #emulated: { width: number; height: number; zoom: number } | null = null;
 
   constructor(host: PageHost, session: CdpSession, info: TargetInfo) {
     this.#host = host;
@@ -99,6 +101,7 @@ export class CdpPage implements ActionContext, WaitContext {
     this.mouse = new Mouse(session, this.keyboard);
     this.health = new PageHealth(() => this.url());
     this.lifecycle = new Lifecycle(session, info.targetId);
+    this.navigations = new Navigations(session, this.frames, this.lifecycle);
     this.dialogs.watch(session);
     if (host.setup.handleAuth) this.auth.watch(session);
     this.fileChoosers.watch(session);
@@ -274,20 +277,21 @@ export class CdpPage implements ActionContext, WaitContext {
     return result;
   }
 
-  /** The size the page is laid out at apart from its window's, or null when it fills its window. */
-  get emulated(): { width: number; height: number } | null {
+  /** The size the page is laid out at apart from its window's, and how many times larger it is drawn; null when it fills its window. */
+  get emulated(): { width: number; height: number; zoom: number } | null {
     return this.#emulated;
   }
 
-  /** Lays the page out at `size` whatever its window's size, as DevTools' device mode does; null ends that. */
-  async emulateSize(size: { width: number; height: number } | null): Promise<void> {
+  /** Lays the page out at `size` whatever its window's size, drawn `zoom` times larger, as DevTools' device mode does; null ends that. */
+  async emulateSize(size: { width: number; height: number } | null, zoom = 1): Promise<void> {
     if (!size) {
       this.#emulated = null;
       await this.session.send("Emulation.clearDeviceMetricsOverride");
       return;
     }
-    await this.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: await this.devicePixelRatio().catch(() => 1), mobile: false });
-    this.#emulated = size;
+    const ratio = await this.devicePixelRatio().catch(() => 1);
+    await this.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: ratio * zoom, mobile: false });
+    this.#emulated = { width: size.width, height: size.height, zoom };
   }
 
   async devicePixelRatio(): Promise<number> {
@@ -331,7 +335,7 @@ export class CdpPage implements ActionContext, WaitContext {
         height: Math.max(1, Math.max(...ys) - Math.min(...ys)),
       };
     }
-    return captureScreenshot(this.session, await this.devicePixelRatio(), { ...options, ...(clip ? { clip } : {}) });
+    return captureScreenshot(this.session, (await this.devicePixelRatio()) * (this.#emulated?.zoom ?? 1), { ...options, ...(clip ? { clip } : {}) });
   }
 
   async evaluate(expression: string, options: EvaluateOptions = {}): Promise<unknown> {

@@ -1,21 +1,40 @@
 # Bring your own MCP servers
 
 Open **Plugins → MCP servers → Add server** to give your bots tools from an
-MCP server you trust. A server is one of two things:
+MCP server you trust. Paste what you were given into the one box: the
+server's link, a `claude mcp add …` or `claude mcp add-json …` command, an
+`npx`, `uvx` or `docker run` line, or an `mcpServers` JSON block. OpenMausBot
+works out the name, the connection, the headers and the environment, and asks
+only for what the paste left out: a value that was a variable from your
+terminal (`$CF_ID`, `${CF_ID}`) or a placeholder (`YOUR_API_KEY`, `<token>`)
+is never saved as written. **Edit details** shows the whole form:
 
-- **Run a command** — a local stdio server. Add the executable, put each
-  argument on its own line, and add any environment variables as `KEY=value`.
-- **Connect to a URL** — a remote server. Paste its address and, if it needs
-  a token, add it as a header (`Authorization: Bearer …`, one header per
-  line). Most servers speak **Streamable HTTP**; pick **SSE** only for an
-  older server that documents the `/sse` endpoint.
+- **Connect to a URL** — a remote server: its address and, if it needs a
+  token, a header row (`Authorization`, with the value `Bearer …`). Most
+  servers speak **Streamable HTTP**; pick **SSE** only for an older server that
+  documents the `/sse` endpoint.
+- **Run a command** — a local stdio server: the executable, each argument on
+  its own line, and its environment variables as name and value rows.
 
-OpenMausBot saves a new server switched off. Use **Test** to start the command
-(or connect to the address), complete the MCP handshake, and see the tools it
-advertises. Then turn it on. It becomes available to compatible bots on their
-next task; no app restart is needed.
+**Add** saves the server, connects to it (it starts the command or reaches the
+address, completes the MCP handshake and lists the tools) and turns it on when
+it answers: *Connected: 12 tools*. One that doesn't answer stays off with the
+reason. When it refused the keys (HTTP 401 or 403), the line names the headers
+to check and **Fix the keys** asks for just their values, then tests again; when
+it couldn't be reached or timed out, **Try again** tests again. One that wants
+you to sign in opens its sign-in page.
+Compatible bots get it on their next task; no app restart is needed. On a
+Team Cloud everyone on the team can use a server an Admin adds; **Only for
+me**, offered for a server with one key, keeps that key as the Admin's own.
 
-Tokens for URL servers go in headers, never in the address.
+Header and environment values are write-only: typed like passwords, never shown
+again, and a saved one left blank is kept. Tokens for URL servers go in
+headers, never in the address.
+
+**Behind Cloudflare Access or another gateway:** add the headers the gateway
+checks (for Cloudflare Access, a service token's `CF-Access-Client-Id` and
+`CF-Access-Client-Secret`), or paste your `claude mcp add --transport http …
+--header "…"` command and fill in the values it took from your terminal.
 
 ### Whop
 
@@ -135,29 +154,30 @@ needs no token at all. Add a URL server with the address
 https://api.you.com/mcp?profile=free
 ```
 
-leave the headers empty, and press **Test** — the handshake completes and the
+leave the headers empty, and press **Add** — the handshake completes and the
 server advertises `you-search` (web search) and `you-discover` (a directory of
 other MCP servers). The free profile is read-only and rate-limited to 100
-searches a day; there is no key, so none is stored. Turn the server on and
-every compatible bot can search the web on its next task — `you-search` results
+searches a day; there is no key, so none is stored. It turns on as soon as it
+answers, and every compatible bot can search the web on its next task — `you-search` results
 arrive like any other tool result, through the approval cards.
 
 If the free limits are too small, [you.com/platform](https://you.com/platform)
 issues an API key with a higher quota and the `you-contents` tool for
 full-page extraction. Add the same address without `?profile=free` and one
-header line, `Authorization: Bearer <your key>` — the key is kept write-only
+header, `Authorization` with the value `Bearer <your key>` — the key is kept write-only
 like every other header value. `you-research` (multi-step cited reports) is
 served by its own dedicated server, `https://api.you.com/mcp/research` — add
 it the same way, with the same header.
 
 ### Import and choose tools per bot
 
-**Paste config** accepts an `mcpServers` JSON block, a server-name map, or a
-single named entry — commands and URL servers alike, in the shape Claude Code,
-Cursor and Claude Desktop write. Import is all-or-nothing, refuses existing
-names, and adds servers switched off—even if the pasted config says enabled.
-It does not install, execute or connect to them. Test explicitly, then enable
-the servers you trust.
+The paste box also takes an `mcpServers` JSON block, a VS Code `servers`
+block, a server-name map, or a single entry — commands and URL servers alike,
+in the shape Claude Code, Cursor and Claude Desktop write — and several
+`claude mcp add` commands, one per line. Each server is added, connected and
+turned on when it answers, like a single one; a name already taken gets a
+number (`notes-2`), so nothing here is overwritten. An `enabled` in the paste
+is ignored.
 
 The desktop app's first-run tour does the same for you in its **Bring what you
 already use** step (`server/setup-import.ts`). On the computer running
@@ -165,7 +185,7 @@ OpenMausBot, and only for the desktop app's own window there, it reads the
 `mcpServers` of Claude Code (only the top-level key of `~/.claude.json`),
 Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
 (`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
-`config.toml`. Each server goes through Paste config's parser, switched off;
+`config.toml`. Each server goes through the import parser, switched off;
 one already here by command or address is left alone, a different server
 under a name already taken is skipped and named in the result, a name
 OpenMausBot keeps for itself (`browser`, `computer`, `data`…) gets an `mcp-`
@@ -180,7 +200,7 @@ The step also brings in the person's own skills (`~/.claude/skills`,
 `~/.codex/skills`). Each one is copied once, read-only except on Windows, into
 `<data>/imported-skills` (`server/imported-skills.ts`), and every bot uses
 that copy on every engine that works with files: the bot the tour sets up,
-and any bot made later from the New bot dialog, the API, a template, a Chief
+and any bot made later with New bot, the API, a template, a Chief
 of Staff team or a package. Each turn lists them after the bot's own skills,
 with a budget of their own, links them into the task folder's `.claude`,
 `.agents` and `.grok` skills, and runs them as `/name`. A bot's own or library
@@ -210,6 +230,36 @@ restores the default, including future additions. Stop all of that bot’s runni
 turns before changing this selection; the next direct or channel turn gets the
 new list. The list does not filter project-local `.mcp.json` files and is not a
 shell sandbox. Individual tool approvals depend on the engine and approval mode.
+
+### A bot's own servers, and servers that don't start
+
+A bot can add a command server with `add_mcp_server` (saved switched off, as
+always). A conversation folder (`task-workspaces/<bot>/<conversation>`) goes
+when its conversation does, so when the command, its arguments or its
+environment point into one of the bot's conversation folders, those files are
+first copied into the bot's own folder under `tools/`, and the server runs
+from the copy.
+
+Where bots are boxed (a Cloud), each bot's turn sees only its own folders.
+There a server whose files are in the bot's own folder (`workspaces/<bot>`) or
+its conversation folders is that bot's own: it starts only for that bot, and
+the `config.json` entry says so with `"bot": "<bot id>"`. A command that uses
+another bot's files is refused there. On a desktop every bot reaches every
+folder, so such a server stays every bot's. Servers you add in Settings stay
+every bot's. The first time bots run boxed after an update, a server no bot
+owns whose files are in the folders of one existing bot becomes that bot's own
+the same way, once, and you hear about it once: "The Blender tool only works
+for Iris, so it's off for your other bots."
+
+Each enabled command server is also started once for each bot that uses it,
+the way that bot's AI starts it (in the bot's box on a Cloud, from its own
+folder), when it is added, changed or turned on, before a bot's first turn
+with it, and again whenever the bot's AI reports it did not connect. A server
+that doesn't start for a bot is left out of that bot's turns, so its failure
+doesn't follow every session or tool search; you hear about it once, the
+server's row in Settings says who it is off for, and it is tried again on its
+own every half hour (one that started is checked again every six hours). The
+checks are kept in `<data>/mcp-health.json`.
 
 ### Servers with hundreds of tools
 
@@ -317,7 +367,7 @@ and its Admin turns off custom MCP servers, only servers whose name or address
 is on the organization's approved list reach bots. Other configured servers
 stay in your list, marked **Managed by** your organization, but bots do not
 get them, and the "Also use my Claude Code MCP servers" switch has no effect.
-**Paste config** is off, and **Add server** accepts only approved servers.
+**Add server** accepts only approved servers.
 Nothing is written to `config.json`; disconnecting the organization restores
 the list as you configured it. With no organization connection, none of this
 applies.
@@ -419,7 +469,16 @@ servers gets the enabled tools on its next task.
 - **Addresses are checked.** A URL server needs a full `http://` or
   `https://` address with no credentials in it; header names must be valid
   HTTP field names and values a single line.
-- **The result gate covers commands.** Oversized tool results from a stdio
-  server are trimmed before they reach the model (`OMB_MCP_RESULT_BUDGET`).
-  A URL server's results arrive untrimmed.
+- **The result gate covers commands.** An oversized tool result from a stdio
+  server never reaches the model whole (`OMB_MCP_RESULT_BUDGET`, 8,000
+  characters by default). A JSON result is *shaped*: the gate keeps the whole
+  payload on its side, shows the model its shape (keys, array sizes, item
+  keys) and the first records, and lists one read-only tool beside the
+  server's own, `query_result`, that runs a JMESPath query over the held
+  result and returns only what it selects. Answers go through the same
+  budget, so no path returns the whole payload, and the tool is pre-allowed
+  for Claude because it reads nothing the server has not already returned.
+  Held results live as long as the session's MCP connection (64 MB per
+  server, oldest first). A result that is not JSON is cut to the budget as
+  before. A URL server's results arrive untrimmed.
 - `"enabled": false` parks an entry without deleting it.

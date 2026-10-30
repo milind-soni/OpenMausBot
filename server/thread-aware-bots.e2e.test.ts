@@ -185,6 +185,8 @@ beforeAll(async () => {
     `await import(${JSON.stringify(pathToFileURL(FAKE_CLAUDE).href)});`,
   ].join("\n"), { mode: 0o700 });
   writeFileSync(join(data, "config.json"), JSON.stringify({
+    // These tests compare whole conversations; a setup card refreshing after a rename would change under them.
+    features: { smartSetupChoices: false },
     threads: { maxConcurrentPerBot: 2 },
     instances: {
       gated: {
@@ -437,10 +439,11 @@ describe("coordinate_bots on a teammate", () => {
       const send = (botIds: string[]) => api("POST", "/api/internal/coordinate-bots", { botIds, message: "Check it." }, token);
       const outside = await send([other.id]);
       expect(outside.status).toBe(403);
-      expect(outside.body.error).toContain("section boundary");
+      expect(outside.body.error).toContain("Other is not one of the bots Pam is set to talk to");
       const unlisted = await send([far.id]);
       expect(unlisted.status).toBe(403);
-      expect(unlisted.body.error).toContain("allowed peer");
+      expect(unlisted.body.error).toContain("Far is not one of the bots Pam is set to talk to");
+      expect(unlisted.body.error).toContain("in Pam's settings, under Permissions");
       expect((await send([near.id, far.id])).status).toBe(403);
       expect((await send([near.id, far.id, other.id, pm.id, "fifth"])).status).toBe(400);
       for (const bot of [other, far]) expect((await botState(bot.id)).tasks).toHaveLength(1);

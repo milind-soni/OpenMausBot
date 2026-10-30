@@ -135,7 +135,7 @@ describe("which engines a turn is bridged on", () => {
 
   it.each([
     // ACP agents keep their own permissions, Grok among them
-    ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["hermesAgent"],
+    ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["copilotAgent"], ["hermesAgent"],
     ["opencodeGo"], ["antigravityAgent"], ["customAcp"],
     // not shown to qualify, and anything nobody has heard of
     ["museCode"], ["someFutureDriver"], [""],
@@ -542,10 +542,10 @@ describe("which bots a turn is bridged for", () => {
     applyAgentsBridge("thread-apply", mounted, ON, bot, CLAUDE, {}, HOST);
     expect(mounted.agents).toEqual({ command: "node", args: ["agents-proxy.js"], env: { OMB_BOT_ID: "bot-1", OMB_AGENTS_TOOL_BRIDGE: "1" } });
     expect(agentsToolBridged(mounted.agents)).toBe(true);
-    expect(bridgedToolTitle("thread-apply", "use_tool", { name: "list_routines" })).toBe("list_routines");
+    expect(bridgedToolTitle("thread-apply", "use_tool", { name: "list_triggers" })).toBe("list_triggers");
     // the next turn of that thread mounts no agents tools: its mark goes
     applyAgentsBridge("thread-apply", {}, ON, bot, CLAUDE, {}, HOST);
-    expect(bridgedToolTitle("thread-apply", "use_tool", { name: "list_routines" })).toBe("use_tool");
+    expect(bridgedToolTitle("thread-apply", "use_tool", { name: "list_triggers" })).toBe("use_tool");
     // a bot or an engine that is turned down is written in as "0"
     const turnedDown = { agents: { command: "node", args: [] as string[], env: { OMB_AGENTS_TOOL_BRIDGE: "1" } } };
     applyAgentsBridge("thread-apply-acp", turnedDown, ON, bot, { driverKind: "grokAgent" }, {}, HOST);
@@ -598,7 +598,7 @@ describe("the decision cannot fail a turn", () => {
       expect(agentsToolBridgeEnv(ON, bot, engine, {}, host)).toEqual(off);
       const asked = { ...agents(), env: { ...agents().env, OMB_AGENTS_TOOL_BRIDGE: "1" } };
       expect(bridgedAgents("thread-throws", asked, ON, bot, engine, {}, host)).toEqual(bridgedAgents("thread-off-for-comparison", asked, {}, bot, CLAUDE, {}, HOST));
-      expect(bridgedToolTitle("thread-throws", "mcp__agents__use_tool", { name: "list_routines" })).toBe("mcp__agents__use_tool");
+      expect(bridgedToolTitle("thread-throws", "mcp__agents__use_tool", { name: "list_triggers" })).toBe("mcp__agents__use_tool");
       const integrations = { agents: asked };
       applyAgentsBridge("thread-throws-apply", integrations, ON, bot, engine, {}, host);
       expect(integrations.agents.env.OMB_AGENTS_TOOL_BRIDGE).toBe("0");
@@ -674,7 +674,7 @@ describe("the name a bridged call is given", () => {
 
   it("is the tool it ran on a turn that was bridged, for any tool of today's catalog, and its own for anything else", () => {
     bridgedAgents("thread-bridged", agents(), ON, bot, CLAUDE, {}, HOST);
-    for (const tool of ["list_routines", "vm_exec", "shared_computer", "create_bot", "create_options_card", "memory_log", "post_to_room"]) {
+    for (const tool of ["list_triggers", "vm_exec", "shared_computer", "create_bot", "create_options_card", "memory_log", "post_to_room"]) {
       expect(bridgedToolTitle("thread-bridged", "mcp__agents__use_tool", JSON.stringify({ name: tool, arguments: {} }, null, 2)), tool).toBe(`mcp__agents__${tool}`);
       expect(bridgedToolTitle("thread-bridged", "agents_use_tool", { name: tool }), tool).toBe(`agents_${tool}`);
       expect(bridgedToolTitle("thread-bridged", "use_tool", { name: tool }), tool).toBe(tool);
@@ -682,14 +682,14 @@ describe("the name a bridged call is given", () => {
     expect(bridgedToolTitle("thread-bridged", "mcp__agents__use_tool", { name: "made_up" })).toBe("mcp__agents__use_tool");
     expect(bridgedToolTitle("thread-bridged", "mcp__agents__use_tool", { name: FIND_TOOL })).toBe("mcp__agents__use_tool");
     expect(bridgedToolTitle("thread-bridged", "mcp__agents__use_tool", undefined)).toBe("mcp__agents__use_tool");
-    expect(bridgedToolTitle("thread-bridged", "mcp__agents__list_routines", {})).toBe("mcp__agents__list_routines");
+    expect(bridgedToolTitle("thread-bridged", "mcp__agents__list_triggers", {})).toBe("mcp__agents__list_triggers");
     expect(bridgedToolTitle("thread-bridged", "Bash", { name: "vm_exec" })).toBe("Bash");
   });
 
   it("leaves a use_tool row alone on a turn that was not bridged: it is some other server's tool of that name", () => {
     // Grok has a native use_tool, and Codex reports any server's tool by its
     // bare name. Neither turn started a bridged agents server.
-    const call = { name: "list_routines", arguments: {} };
+    const call = { name: "list_triggers", arguments: {} };
     // never decided, switched off, an engine that is not bridged, a bot with a selection
     bridgedAgents("thread-off", agents(), {}, bot, CLAUDE, {}, HOST);
     bridgedAgents("thread-acp", agents(), ON, bot, { driverKind: "grokAgent" }, {}, HOST);
@@ -700,9 +700,9 @@ describe("the name a bridged call is given", () => {
   });
 
   it("follows the thread's latest turn: bridged, then not, then bridged again", () => {
-    const call = { name: "list_routines" };
+    const call = { name: "list_triggers" };
     bridgedAgents("thread-moves", agents(), ON, bot, CLAUDE, {}, HOST);
-    expect(bridgedToolTitle("thread-moves", "use_tool", call)).toBe("list_routines");
+    expect(bridgedToolTitle("thread-moves", "use_tool", call)).toBe("list_triggers");
     // its engine was switched to an ACP agent
     bridgedAgents("thread-moves", agents(), ON, bot, { driverKind: "qwenAgent" }, {}, HOST);
     expect(bridgedToolTitle("thread-moves", "use_tool", call)).toBe("use_tool");
@@ -711,26 +711,26 @@ describe("the name a bridged call is given", () => {
     bridgedAgents("thread-moves", undefined, ON, bot, CLAUDE, {}, HOST);
     expect(bridgedToolTitle("thread-moves", "use_tool", call)).toBe("use_tool");
     bridgedAgents("thread-moves", agents(), ON, bot, CLAUDE, {}, HOST);
-    expect(bridgedToolTitle("thread-moves", "use_tool", call)).toBe("list_routines");
+    expect(bridgedToolTitle("thread-moves", "use_tool", call)).toBe("list_triggers");
   });
 });
 
 describe("the record of bridged turns", () => {
   const agents = () => ({ command: "node", args: [] as string[], env: {} as Record<string, string> });
-  const call = { name: "list_routines" };
+  const call = { name: "list_triggers" };
 
   it("is bounded: the oldest mark goes first, and all it costs is a row shown as use_tool", () => {
     bridgedAgents("thread-oldest", agents(), ON, bot, CLAUDE, {}, HOST);
     bridgedAgents("thread-kept-fresh", agents(), ON, bot, CLAUDE, {}, HOST);
     for (let n = 0; n < BRIDGED_THREADS_MAX - 2; n++) bridgedAgents(`thread-filler-${n}`, agents(), ON, bot, CLAUDE, {}, HOST);
-    expect(bridgedToolTitle("thread-oldest", "use_tool", call)).toBe("list_routines");
+    expect(bridgedToolTitle("thread-oldest", "use_tool", call)).toBe("list_triggers");
     // a thread whose turn is decided again is the newest again
     bridgedAgents("thread-kept-fresh", agents(), ON, bot, CLAUDE, {}, HOST);
     bridgedAgents("thread-one-more", agents(), ON, bot, CLAUDE, {}, HOST);
     expect(bridgedToolTitle("thread-oldest", "use_tool", call)).toBe("use_tool");
-    expect(bridgedToolTitle("thread-kept-fresh", "use_tool", call)).toBe("list_routines");
-    expect(bridgedToolTitle("thread-one-more", "use_tool", call)).toBe("list_routines");
-    expect(bridgedToolTitle("thread-filler-0", "use_tool", call)).toBe("list_routines");
+    expect(bridgedToolTitle("thread-kept-fresh", "use_tool", call)).toBe("list_triggers");
+    expect(bridgedToolTitle("thread-one-more", "use_tool", call)).toBe("list_triggers");
+    expect(bridgedToolTitle("thread-filler-0", "use_tool", call)).toBe("list_triggers");
   });
 });
 
@@ -753,7 +753,7 @@ describe("what the prompt builder and the Activity log load", () => {
 
 describe("the prompt of a bridged turn", () => {
   const parts: PromptPart[] = [
-    { id: "routine", label: "Routines", text: " If the user explicitly asks to schedule routines, use list_routines and propose_routine." },
+    { id: "routine", label: "Routines", text: " If the user explicitly asks to schedule routines, use list_triggers and create_trigger." },
     { id: "memory", label: "Memory", text: "\nMEMORY: the deploy script lives in scripts/." },
     { id: "credential", label: "Credentials", text: " Use request_credential for a missing key." },
   ];
@@ -766,12 +766,12 @@ describe("the prompt of a bridged turn", () => {
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: {} })).toEqual(plain);
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, {})).toEqual(plain);
     expect(plain.text).not.toContain(FIND_TOOL);
-    expect(plain.sections.map((section) => section.id)).toEqual(["persona", "soul", "routine", "memory", "credential"]);
+    expect(plain.sections.map((section) => section.id)).toEqual(["persona", "soul", "routine", "memory", "credential", "reply-habits"]);
   });
 
   it("has the section only when this turn was asked to bridge, once, right after the soul", () => {
     const built = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, bridged);
-    expect(built.sections.map((section) => section.id)).toEqual(["persona", "soul", "tool-bridge", "routine", "memory", "credential"]);
+    expect(built.sections.map((section) => section.id)).toEqual(["persona", "soul", "tool-bridge", "routine", "memory", "credential", "reply-habits"]);
     const section = built.sections.find((entry) => entry.id === "tool-bridge")!;
     expect(section.text).toBe(AGENTS_TOOL_BRIDGE_PROMPT);
     expect(section.bytes).toBe(Buffer.byteLength(AGENTS_TOOL_BRIDGE_PROMPT, "utf8"));

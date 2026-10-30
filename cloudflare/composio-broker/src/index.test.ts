@@ -13,6 +13,7 @@ import worker, {
   requestAlias,
   sha256,
 } from "./index";
+import { streamedBody } from "./test-harness";
 
 const multiAccount = {
   enable: true,
@@ -28,7 +29,7 @@ function session(id: string, userId: string, configured = true) {
   };
 }
 
-function testEnv(fetchCalls: Array<{ url: string; init?: RequestInit }>) {
+function testEnv(fetchCalls: Array<{ url: string; init?: RequestInit }>, userId = "omb_stable") {
   const dbRuns: Array<{ sql: string; values: unknown[] }> = [];
   const env = {
     COMPOSIO_API_BASE: "https://backend.composio.dev/api/v3.1",
@@ -39,8 +40,10 @@ function testEnv(fetchCalls: Array<{ url: string; init?: RequestInit }>) {
         return {
           bind(...values: unknown[]) {
             return {
+              first: async () => ({ id: values[0], composio_user_id: userId, session_id: null, disabled_at: null }),
               run: async () => {
                 dbRuns.push({ sql, values });
+                return { meta: { changes: 1 } };
               },
             };
           },
@@ -64,6 +67,15 @@ describe("connected-apps broker boundaries", () => {
       method: "POST",
       body: "  \n",
     }))).resolves.toBeUndefined();
+  });
+
+  it("stops reading a streamed authorize body once it passes 2 KiB", async () => {
+    const stream = streamedBody(1024, 64);
+    const refused = await requestAlias(new Request("https://broker.test/v1/connectors/gmail/authorize", stream.init)).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(Response);
+    expect((refused as Response).status).toBe(413);
+    expect(stream.read.cancelled).toBe(true);
+    expect(stream.read.bytes).toBeLessThanOrEqual(4 * 1024);
   });
 
   it("accepts only HTTPS Composio MCP endpoints", () => {
@@ -283,7 +295,7 @@ describe("connected-apps broker boundaries", () => {
 
   function accountFixture(installationUser: string) {
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
-    const { env, ctx } = testEnv(fetchCalls);
+    const { env, ctx } = testEnv(fetchCalls, installationUser);
     const installation = { id: "retry-install", composio_user_id: installationUser, session_id: "trs_retry", disabled_at: null };
     const fixture = {
       accounts: [] as Array<{ id: string; status?: string; alias?: string; toolkit: { slug: string } }>,
@@ -506,6 +518,7 @@ describe("MCP relay Session reuse", () => {
                     lastSeenWrites.push(Number(values[0]));
                     row.last_seen_at = Number(values[0]);
                   }
+                  return { meta: { changes: 1 } };
                 },
               };
             },

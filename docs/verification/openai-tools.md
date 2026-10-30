@@ -54,6 +54,17 @@ non-streaming responses, tool errors, and lifecycle edge cases:
 pnpm exec vitest run server/drivers/openai-chat-tools.test.ts server/workspace.test.ts
 ```
 
+OpenAI-compatible and Cerebras turns recover explicit unfinished action
+announcements with at most three nudges per turn. Each nudge must be followed
+by tool progress before another is allowed; otherwise the turn fails as
+incomplete rather than reporting success. The detector also recognizes a clear
+first-person action promise in the last paragraph of an explanation, while
+leaving questions, quoted examples, "let me know" closings and ordinary final
+reports alone. Denials and pending tool failures take precedence over
+announcement recovery. Earlier tool results stay in the conversation, and the
+nudge asks the model not to repeat an operation that may already have taken
+effect; whether a call runs is still decided by the turn's permissions.
+
 One turn stops after 64 model steps, or 200 tool calls in total (each reply
 may carry up to 32). The stop says so in one line with one next action: the
 steps so far already ran, so ask only for what's left (retrying the whole task

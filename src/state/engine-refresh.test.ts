@@ -37,7 +37,7 @@ it("shares an in-flight probe and permits a fresh retry after failure", async ()
 
 it("rejects a malformed status response instead of replacing the last list", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}")));
-  await expect(controls().refreshInstances({ reportErrors: true })).rejects.toThrow("did not return a provider status list");
+  await expect(controls().refreshInstances({ reportErrors: true })).rejects.toThrow("Couldn't get the status of your AIs");
 });
 
 it("releases a hung shared probe after its bounded timeout so retry can work", async () => {

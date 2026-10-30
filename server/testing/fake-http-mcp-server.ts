@@ -13,6 +13,8 @@ export interface FakeHttpMcpOptions {
   transport?: "http" | "sse";
   /** require this header on every request; anything else gets 401 */
   requireHeader?: { name: string; value: string };
+  /** require every one of these headers with these values, as a gateway such as Cloudflare Access does; anything else gets 403 */
+  requireHeaders?: Record<string, string>;
   /** accept a request only when this approves its Authorization header */
   acceptBearer?: (authorization: string | undefined) => boolean;
   /** WWW-Authenticate value sent with a 401 */
@@ -49,6 +51,26 @@ export interface FakeHttpMcpOptions {
   /** with strictInitialize: the schema the server knows (default "2025-06-18"); "2025-11-25" adds
    * elicitation.form/url but still not form.schemaValidation */
   strictSchema?: keyof typeof STRICT_INITIALIZE_SCHEMAS;
+  /** MCP Apps `ui://` resources for resources/list and resources/read */
+  resources?: FakeHttpMcpResource[];
+  /** serverInfo.title in the initialize answer */
+  serverTitle?: string;
+  /** answer only at the server's own path (/mcp; /sse and /messages for SSE) and 404 anywhere else, as a Cloudflare
+   * Worker's McpAgent serves /mcp and not /mcp/ */
+  exactPath?: boolean;
+}
+
+export interface FakeHttpMcpResource {
+  uri: string;
+  name?: string;
+  mimeType?: string;
+  /** the HTML, or `blob` (base64) */
+  text?: string;
+  blob?: string;
+  /** `_meta` on the resources/read content item */
+  _meta?: Record<string, unknown>;
+  /** `_meta` on the resources/list entry, where the MCP Apps draft also allows it */
+  listMeta?: Record<string, unknown>;
 }
 
 /** Known initialize fields: an object lists its fields, `true` is any JSON, `{}` must stay empty. */
@@ -99,6 +121,8 @@ export interface FakeHttpMcpTool {
 export interface FakeHttpMcp {
   url: string;
   seenHeaders: IncomingMessage["headers"][];
+  /** every request's path and query, as it arrived */
+  seenPaths: string[];
   calls: unknown[];
   /** tools/list requests now waiting out `toolsDelayMs` */
   readonly delayedToolsLists: number;
@@ -110,6 +134,8 @@ export interface FakeHttpMcp {
   replies: unknown[];
   /** the params of every initialize the server received, refused or not */
   initializes: unknown[];
+  /** the uri of every resources/read */
+  reads: string[];
   close(): Promise<void>;
 }
 
@@ -125,6 +151,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promise<FakeHttpMcp> {
   const transport = options.transport ?? "http";
   const seenHeaders: FakeHttpMcp["seenHeaders"] = [];
+  const seenPaths: string[] = [];
   const streams = new Set<ServerResponse>();
   const calls: unknown[] = [];
   let delayedToolsLists = 0;
@@ -132,6 +159,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   let tools = options.tools;
   const replies: unknown[] = [];
   const initializes: unknown[] = [];
+  const reads: string[] = [];
   let replied: (() => void) | undefined;
   const ask = () => {
     const waiting = new Promise<void>((resolve) => { replied = resolve; });
@@ -143,7 +171,8 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         jsonrpc: "2.0",
         id: frame.id,
         result: {
-          protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fake-http-mcp", version: "1" },
+          protocolVersion: "2025-06-18", capabilities: { tools: {}, ...(options.resources ? { resources: {} } : {}) },
+          serverInfo: { name: "fake-http-mcp", version: "1", ...(options.serverTitle ? { title: options.serverTitle } : {}) },
           ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
         },
       };
@@ -161,6 +190,23 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
       }
       return { jsonrpc: "2.0", id: frame.id, result: { tools: all } };
     }
+    if (frame.method === "resources/list" && options.resources) {
+      return { jsonrpc: "2.0", id: frame.id, result: { resources: options.resources.map((resource) => ({
+        uri: resource.uri, name: resource.name ?? resource.uri, ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
+        ...(resource.listMeta ? { _meta: resource.listMeta } : {}),
+      })) } };
+    }
+    if (frame.method === "resources/read" && options.resources) {
+      const uri = (frame.params as { uri?: unknown } | undefined)?.uri;
+      reads.push(String(uri));
+      const resource = options.resources.find((candidate) => candidate.uri === uri);
+      if (!resource) return { jsonrpc: "2.0", id: frame.id, error: { code: -32002, message: `Resource not found: ${String(uri)}` } };
+      return { jsonrpc: "2.0", id: frame.id, result: { contents: [{
+        uri: resource.uri, ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
+        ...(resource.blob !== undefined ? { blob: resource.blob } : { text: resource.text ?? "" }),
+        ...(resource._meta ? { _meta: resource._meta } : {}),
+      }] } };
+    }
     if (frame.method === "tools/call" && tools) {
       calls.push(frame.params);
       const refused = options.callError?.(frame.params);
@@ -172,6 +218,15 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   const handle: RequestListener = (req, res) => {
     void (async () => {
       seenHeaders.push({ ...req.headers });
+      seenPaths.push(req.url ?? "");
+      if (options.exactPath && !(transport === "sse" ? ["/sse", "/messages"] : ["/mcp"]).includes((req.url ?? "").split("?")[0]!)) {
+        res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
+        return;
+      }
+      if (options.requireHeaders && Object.entries(options.requireHeaders).some(([name, value]) => req.headers[name.toLowerCase()] !== value)) {
+        res.writeHead(403, { "content-type": "text/plain" }).end("Forbidden");
+        return;
+      }
       if ((options.requireHeader && req.headers[options.requireHeader.name.toLowerCase()] !== options.requireHeader.value)
         || (options.acceptBearer && !options.acceptBearer(req.headers.authorization))) {
         res.writeHead(401, {
@@ -275,11 +330,13 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   return {
     url: `${options.tls ? "https" : "http"}://${host === "::1" ? "[::1]" : host}:${port}/${transport === "sse" ? "sse" : "mcp"}`,
     seenHeaders,
+    seenPaths,
     calls,
     get delayedToolsLists() { return delayedToolsLists; },
     get toolsLists() { return toolsLists; },
     replies,
     initializes,
+    reads,
     setTools: (next) => { tools = next; },
     close: () => new Promise<void>((resolve) => {
       server.closeAllConnections();

@@ -110,7 +110,9 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
   } else {
     args.push(...credentialStoreFlags(platform));
   }
-  if (headless) args.push("--mute-audio");
+  // Chrome for Testing 155 keeps a --top-chrome-webui renderer for the omnibox popups and the WebUI reload button, which
+  // headless never shows: about 50 MB per browser.
+  if (headless) args.push("--mute-audio", "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton");
   if (input.host !== "desktop") args.push("--disk-cache-size=52428800");
   if (input.host === "container") args.push("--disable-dev-shm-usage");
   if (input.sandbox === false) args.push("--no-sandbox");

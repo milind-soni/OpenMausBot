@@ -47,7 +47,7 @@ export function CallRecordRow({ message, transcript, botName, threadId, busy, ha
           <ChevronRight size={13} aria-hidden="true" className="-mr-1 shrink-0 text-ink-tertiary" />
         </button>
         {lines.length > 0 && (
-          <ul className="flex max-w-full min-w-0 flex-col gap-0.5 text-[12.5px]">
+          <ul className="flex max-w-full min-w-0 flex-col gap-0.5 text-[13px]">
             {lines.map((line) => <CallLineItem key={line.id} line={line} busy={busy} />)}
           </ul>
         )}

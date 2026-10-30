@@ -44,9 +44,11 @@ const {
   ATTACHMENTS_DIR,
   ATTACHMENTS_MAX_BYTES,
   ATTACHMENT_PARTIAL_MAX_AGE_MS,
+  DEFAULT_ATTACHMENTS_MAX_BYTES,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
   __resetAttachmentAccountingForTests,
+  attachmentsMaxBytes,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
   extensionForFileMime,
@@ -226,6 +228,17 @@ describe("saveAudio", () => {
   });
 });
 
+describe("attachmentsMaxBytes", () => {
+  it("keeps 512 MB unless OMB_ATTACHMENTS_MAX_BYTES is a positive whole number of bytes", () => {
+    expect(ATTACHMENTS_MAX_BYTES).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    expect(attachmentsMaxBytes({})).toBe(512 * 1024 * 1024);
+    expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: " 4294967296 " })).toBe(4 * 1024 * 1024 * 1024);
+    for (const bad of ["", "0", "-1", "2GB", "1.5", "NaN"]) {
+      expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: bad })).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    }
+  });
+});
+
 describe("aggregate attachment storage", () => {
   beforeEach(() => {
     resetDir();
@@ -244,7 +257,7 @@ describe("aggregate attachment storage", () => {
       throw new Error("expected quota rejection");
     } catch (error) {
       expect(error).toMatchObject({ status: 507 });
-      expect(error).toHaveProperty("message", expect.stringMatching(/storage is full/));
+      expect(error).toHaveProperty("message", "attachments storage is full (512 MB limit)");
     }
     expect(existsSync(referenced.path)).toBe(true);
     expect(statSync(referenced.path).size).toBe(ATTACHMENTS_MAX_BYTES);
@@ -346,6 +359,16 @@ describe("aggregate attachment storage", () => {
     const second = saveImage(Buffer.from("yyy"), "image/png");
     expect(second.bytes).toBe(3);
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("frees quota for a file deleted outside the app once the store looks full", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    realUnlinkSync(first.path);
+    expect(saveImage(Buffer.from("yyy"), "image/png").bytes).toBe(3);
   });
 
   it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {

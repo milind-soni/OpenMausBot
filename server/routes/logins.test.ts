@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BotLogins } from "../bot-logins.ts";
 import { json, readBody } from "../harness/http.ts";
 import { LoginStore } from "../login-store.ts";
-import { OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
+import { ONE_PASSWORD_REFUSED, OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
 import { fakeOnePasswordSdk } from "../testing/fake-onepassword.ts";
 import { requiredScope, type RequestAuth } from "../request-auth.ts";
 import { createLoginRoutes, LOGIN_ERRORS } from "./logins.ts";
@@ -108,10 +108,12 @@ describe("Settings → Logins routes", () => {
   it("connects 1Password with a token it checks first, lists its logins read-only, and never returns the token", async () => {
     const { store, call, answers } = await serve();
     expect((await call("GET", "/api/logins")).body).toEqual({ logins: [], onePassword: { connected: false } });
-    for (const token of ["", "ops_ has spaces", "ops_wrong-fake-token"]) {
+    for (const token of ["", "ops_ has spaces", "ops_wrong-fake-token", "eyJhbGciOiJFUzI1NiJ9.fake-connect-token"]) {
       expect((await call("POST", "/api/logins/1password", { token })).status, token).toBe(400);
     }
-    expect((await call("POST", "/api/logins/1password", { token: "ops_wrong-fake-token" })).body.error).toBe("1Password did not accept the token. Paste a service account token (it starts with ops_), or make a new one.");
+    expect((await call("POST", "/api/logins/1password", { token: "ops_wrong-fake-token" })).body.error).toBe(ONE_PASSWORD_REFUSED);
+    // A Connect token or a password is not a service account token: said so before 1Password is asked.
+    expect((await call("POST", "/api/logins/1password", { token: "eyJhbGciOiJFUzI1NiJ9.fake-connect-token" })).body.error).toBe(LOGIN_ERRORS.notServiceAccount);
     expect(store.onePasswordToken()).toBeNull();
 
     expect(await call("POST", "/api/logins/1password", { token: TOKEN })).toMatchObject({ status: 200, body: { onePassword: { connected: true, vaults: [{ id: "v1", title: "Shared with OMB", items: 1, bots: "all" }], items: 1 } } });

@@ -39,7 +39,7 @@ export function WidgetChart({ node }: { node: WidgetNode }) {
       if (!alive) return;
       const target = document.createElement("div");
       element.replaceChildren(target);
-      const result = await embed(target, { ...spec, ...size.current } as Parameters<typeof embed>[1], { actions: false, config: vegaConfig(theme) });
+      const result = await embed(target, { ...spec, ...size.current } as Parameters<typeof embed>[1], { actions: false, ast: true, config: vegaConfig(theme) });
       if (!alive) { result.finalize(); return; }
       drawn.current = result;
     })().catch((cause) => {

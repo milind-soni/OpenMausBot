@@ -35,10 +35,10 @@ describe("the trial's notice card", () => {
     const element = createElement(CloudTrialNoticeCard, { view, failed, onAction, onClose });
     return { html: renderToStaticMarkup(element), tree: nodes(CloudTrialNoticeCard({ view, failed, onAction, onClose })), onAction, onClose };
   };
-  it("says one message, its next step, and the way to Personal in its last days; it never takes focus", () => {
-    const { html, tree, onAction, onClose } = card(cloudTrialView(trial("active"), { grantedUsd: 5, remainingUsd: 3.2, state: "active" }, { personal: 2900 }));
+  it("says one message, its next step, and the way down in its last days; it never takes focus", () => {
+    const { html, tree, onAction, onClose } = card(cloudTrialView(trial("active", { switchTo: { tier: "starter", amount: 1500 } }), { grantedUsd: 5, remainingUsd: 3.2, state: "active" }));
     for (const text of ["Your free trial ends on Oct 15", "Then Pro is $49/month plus tax, charged on Oct 15.", "Includes $5 of Claude credit: $3.20 left.",
-      "Prefer Personal at $29? Tell us from your Plan page before Oct 15, and we&#x27;ll switch your plan.", "Manage subscription", "Not now"]) expect(html).toContain(text);
+      "Prefer Starter at $15? Tell us from your Plan page before Oct 15, and we&#x27;ll switch your plan.", "Manage subscription", "Not now"]) expect(html).toContain(text);
     expect(html).toContain('role="status"'); expect(html).not.toContain("autofocus"); expect(html).not.toContain('aria-modal="true"');
     expect(html).toContain('data-notice="cloud-trial-active"');
     tree.find(node => node.type === "button" && renderToStaticMarkup(node).includes("Manage subscription"))!.props.onClick();

@@ -1,6 +1,8 @@
 import { parseJson, type JsonValue } from "./schema.ts";
-import { isBotPackage, parseBotPackage, parsePackageDocument, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
+import { isBotPackage, parseBotPackage, parsePackageDocument, upgradeV1, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
+import { PACKAGE_V1_VERSION } from "../shared/package-format.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
+import { grokMarketplaceSlugFrom, grokMarketplaceUrl, grokShareIdFrom, grokShareUrl, type GrokTemplateCard } from "../shared/grok-import.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/milind-soni/openmausbot-teams/main";
@@ -179,6 +181,39 @@ export async function fetchLibraryTeam(slug: string, fetcher: Fetcher = fetch): 
   return fetchShareable(`${TEAM_LIBRARY_RAW_ROOT}/${entry.package ?? entry.manifest}`, fetcher);
 }
 
+const MAX_CHIEF_TEAMS = 30;
+const MAX_ROLE_TEXT = 280;
+
+export interface LibraryRole { name: string; title: string; does?: string; lead?: true }
+export interface LibraryTeamRoles { name: string; summary: string; roles: LibraryRole[] }
+
+const oneLine = (text: string, max: number): string => {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+};
+
+function libraryRoles(team: ParsedShareableTeam): LibraryRole[] {
+  const role = (member: { name: string; title?: string; description?: string }, lead: boolean): LibraryRole => ({
+    name: member.name, title: member.title?.trim() || "Specialist",
+    ...(member.description?.trim() ? { does: oneLine(member.description, MAX_ROLE_TEXT) } : {}),
+    ...(lead ? { lead: true as const } : {}),
+  });
+  if (!("package" in team)) return team.team.members.map((member) => role(member, false));
+  const pkg = team.version === PACKAGE_V1_VERSION ? upgradeV1(team).package : team.package;
+  return pkg.agents.map((agent) => role(agent, agent.key === pkg.team?.leader));
+}
+
+/** Each ready-made team's name, one line and roles: enough for a Chief to create the team itself, one specialist at a
+ * time. A team whose file cannot be read keeps its name and summary with no roles. */
+export async function libraryTeamRoles(fetcher: Fetcher = fetch): Promise<LibraryTeamRoles[]> {
+  const catalog = await fetchTeamCatalog(fetcher);
+  return Promise.all(catalog.teams.slice(0, MAX_CHIEF_TEAMS).map(async (entry) => ({
+    name: entry.name,
+    summary: entry.summary,
+    roles: await fetchShareable(`${TEAM_LIBRARY_RAW_ROOT}/${entry.package ?? entry.manifest}`, fetcher).then(libraryRoles, () => []),
+  })));
+}
+
 function safeSegment(value: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(value) && value !== "." && value !== "..";
 }
@@ -236,4 +271,175 @@ export async function fetchGithubTeam(input: string, fetcher: Fetcher = fetch): 
     }
   }
   throw lastError ?? new Error("No botmrr.md, team.md, or legacy team file was found in that repository");
+}
+
+const GROK_HOSTS = new Set(["x.ai", "www.x.ai"]);
+const MAX_GROK_PAGE_BYTES = 2 * 1024 * 1024;
+const GROK_TIMEOUT_MS = 20_000;
+const MAX_GROK_REDIRECTS = 3;
+
+const statusError = (message: string, status: number) => Object.assign(new Error(message), { status });
+
+function onGrokHost(url: URL): boolean {
+  return url.protocol === "https:" && GROK_HOSTS.has(url.hostname) && !url.username && !url.password && !url.port;
+}
+
+async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  if (Number(response.headers.get("content-length") ?? 0) > maxBytes) throw statusError("That x.ai page is too large", 502);
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw statusError("That x.ai page is too large", 502);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** The Next.js flight data the page streams in `self.__next_f.push([1,"…"])` scripts, decoded and joined. */
+function flightText(html: string): string {
+  const marker = "self.__next_f.push([1,";
+  const parts: string[] = [];
+  for (let at = html.indexOf(marker); at >= 0; at = html.indexOf(marker, at + marker.length)) {
+    const start = at + marker.length;
+    if (html[start] !== '"') continue;
+    let end = start + 1;
+    while (end < html.length && html[end] !== '"') end += html[end] === "\\" ? 2 : 1;
+    try {
+      const chunk: unknown = JSON.parse(html.slice(start, end + 1));
+      if (typeof chunk === "string") parts.push(chunk);
+    } catch {
+      // not a plain string chunk
+    }
+  }
+  return parts.join("");
+}
+
+/** The JSON object that starts at `start`, or null. */
+function objectAt(text: string, start: number): Record<string, unknown> | null {
+  let depth = 0;
+  let quoted = false;
+  for (let i = start; i < text.length && i - start < 64_000; i += 1) {
+    const c = text[i];
+    if (quoted) {
+      if (c === "\\") i += 1;
+      else if (c === '"') quoted = false;
+    } else if (c === '"') quoted = true;
+    else if (c === "{") depth += 1;
+    else if (c === "}" && --depth === 0) {
+      try {
+        const value: unknown = JSON.parse(text.slice(start, i + 1));
+        return isRecord(value) ? value : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** The page's own record for this bot: {id, ownerType, sharerName, botName, description, color, shape}. */
+function embeddedTemplate(html: string, shareId: string): Record<string, unknown> | null {
+  const text = flightText(html);
+  const needle = `"id":${JSON.stringify(shareId)}`;
+  for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
+    const value = objectAt(text, text.lastIndexOf("{", at));
+    if (value && value.id === shareId && typeof value.botName === "string") return value;
+  }
+  return null;
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+function decodeEntities(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, name: string) => {
+    if (name[0] !== "#") return ENTITIES[name.toLowerCase()] ?? match;
+    const code = name[1] === "x" || name[1] === "X" ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10);
+    return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+  });
+}
+
+function metaContent(html: string, property: string): string {
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    if (!new RegExp(`\\b(?:property|name)=["']${property}["']`, "i").test(tag)) continue;
+    const content = tag.match(/\bcontent=(?:"([^"]*)"|'([^']*)')/i);
+    if (content) return decodeEntities(content[1] ?? content[2] ?? "").trim();
+  }
+  return "";
+}
+
+const cardText = (value: unknown, max: number) =>
+  // eslint-disable-next-line no-control-regex
+  typeof value === "string" ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, max) : "";
+
+/** Name, creator and description from a share page: the embedded record first, then the og tags. */
+export function grokCardFromHtml(html: string, shareId: string): GrokTemplateCard {
+  const embedded = embeddedTemplate(html, shareId);
+  let name = cardText(embedded?.botName, 100).replace(/\s+/g, " ");
+  let creator = cardText(embedded?.sharerName, 100).replace(/\s+/g, " ");
+  let description = cardText(embedded?.description, 2_000);
+  if (!name) {
+    const title = metaContent(html, "og:title");
+    const by = title.lastIndexOf(" by ");
+    name = cardText(by > 0 ? title.slice(0, by) : title, 100);
+    creator = by > 0 ? cardText(title.slice(by + 4), 100) : "";
+  }
+  if (!description) description = cardText(metaContent(html, "og:description"), 2_000);
+  if (!name) throw statusError("That x.ai page did not show a Grok Bot. The link may be private, team-only or removed.", 404);
+  const color = typeof embedded?.color === "string" && /^#[0-9a-f]{3,8}$/i.test(embedded.color) ? embedded.color : undefined;
+  return { shareId, name, ...(creator ? { creator } : {}), description, url: grokShareUrl(shareId), ...(color ? { color } : {}) };
+}
+
+/** An x.ai page's HTML: only https://x.ai (or www) and redirects that stay there, within the time and size caps. */
+async function fetchGrokPage(target: URL, fetcher: Fetcher, signal: AbortSignal, notFound: string): Promise<string> {
+  for (let hop = 0; ; hop += 1) {
+    if (!onGrokHost(target)) throw statusError("That Grok Bot link tried to leave x.ai", 502);
+    const response = await fetcher(target.toString(), { headers: { accept: "text/html" }, redirect: "manual", signal });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || hop >= MAX_GROK_REDIRECTS) throw statusError("x.ai did not show the Grok Bot page", 502);
+      target = new URL(location, target);
+      continue;
+    }
+    if (response.status === 404) throw statusError(notFound, 404);
+    if (!response.ok) throw statusError(`x.ai returned HTTP ${response.status}`, 502);
+    return readCapped(response, MAX_GROK_PAGE_BYTES);
+  }
+}
+
+/** The share id a marketplace page's Add button points at: its own entry's addHref, or the page's only one. */
+export function grokShareIdFromMarketplace(html: string, slug: string): string | null {
+  const text = html.replace(/\\"/g, '"');
+  const entry = text.indexOf(`"id":"${slug}"`);
+  const next = entry >= 0 ? text.indexOf('"id":"', entry + 6) : -1;
+  const own = entry >= 0 ? text.slice(entry, next > entry ? next : entry + 4_000).match(/"addHref":"\/bot\/([A-Za-z0-9_-]{21})"/) : null;
+  if (own) return own[1]!;
+  const all = [...new Set([...text.matchAll(/"addHref":"\/bot\/([A-Za-z0-9_-]{21})"/g)].map((match) => match[1]!))];
+  return all.length === 1 ? all[0]! : null;
+}
+
+/** The public card for a Grok Bot share link or marketplace page. Fetches only x.ai pages and redirects that stay on x.ai. */
+export async function fetchGrokTemplateCard(input: string, fetcher: Fetcher = fetch): Promise<GrokTemplateCard> {
+  const signal = AbortSignal.timeout(GROK_TIMEOUT_MS);
+  try {
+    let shareId = grokShareIdFrom(input);
+    const slug = shareId ? null : grokMarketplaceSlugFrom(input);
+    if (!shareId && !slug) throw statusError("Paste a Grok Bot link, like https://x.ai/bot/… or a Grok Bot marketplace page", 400);
+    if (slug) {
+      const market = await fetchGrokPage(new URL(grokMarketplaceUrl(slug)), fetcher, signal, "That Grok Bot marketplace page was not found.");
+      shareId = grokShareIdFromMarketplace(market, slug);
+      if (!shareId) throw statusError("That marketplace page did not link to a Grok Bot to add.", 404);
+    }
+    const html = await fetchGrokPage(new URL(grokShareUrl(shareId!)), fetcher, signal, "That Grok Bot link was not found. It may be private, team-only or removed.");
+    return grokCardFromHtml(html, shareId!);
+  } catch (error) {
+    if ((error as { name?: string }).name === "TimeoutError") throw statusError("x.ai did not answer within 20 seconds. Try again.", 502);
+    throw error;
+  }
 }

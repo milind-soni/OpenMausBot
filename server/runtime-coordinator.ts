@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
-import { composeEnvelope, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
+import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
@@ -198,7 +198,7 @@ export class RuntimeCoordinator implements Coordinator {
     const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
-    const level = this.host.levelOf(target, address(parent));
+    const level = this.host.levelOf(target, this.project(parent));
     const result = this.runtime.enqueue({
       parentId: parent.id,
       origin: parent.origin,
@@ -207,7 +207,7 @@ export class RuntimeCoordinator implements Coordinator {
         threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } },
       mode, reply, brief: text, rework,
       ...(options.doneWhen ? { doneWhen: options.doneWhen } : {}),
-      levels: { own: level.level },
+      levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
       approved: approvalGranted,
       ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),
@@ -290,7 +290,8 @@ export class RuntimeCoordinator implements Coordinator {
     const cards = result.cards && result.cards.ids.length > 0 ? result.cards : undefined;
     const end: EndResult = { ok: result.ok, text: result.text, ...(result.evidence ? { evidence: result.evidence } : {}),
       ...(cards ? { needsInput: { question: cards.question, cards: cards.ids } } : {}),
-      ...(result.cap ? { continue: { note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}) } } : {}) };
+      ...(result.cap ? { continue: { note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}) } } : {}),
+      ...(result.stalled ? { stalled: true } : {}) };
     this.runtime.end(id, end);
   }
 
@@ -368,6 +369,20 @@ export class RuntimeCoordinator implements Coordinator {
       if (parent && !isTerminal(parent) && this.direct(parent, threadId)) out.push(view(n, parent));
     }
     return out;
+  }
+
+  awaitingTeammateThreads(): Set<string> {
+    this.ready();
+    const threads = new Set<string>();
+    for (const n of this.live()) {
+      const parent = n.parentId && n.reply !== "none" ? this.store.get(n.parentId) : undefined;
+      if (parent && !isTerminal(parent) && parent.assignee.destination.groupId === undefined) threads.add(parent.assignee.destination.threadId);
+      const root = view(n);
+      if (!root.parentId && !root.groupId && (root.status === "resume" || (root.status === "waiting" && root.question === undefined && !root.cards?.length))) {
+        threads.add(root.threadId);
+      }
+    }
+    return threads;
   }
 
   liveEdges(): LiveHandoffEdge[] {
@@ -459,10 +474,12 @@ export class RuntimeCoordinator implements Coordinator {
     const node = view(a, parent);
     const resumed = input.turn === "resume";
     const settled = input.settled ?? [];
+    const asked = input.asked ?? [];
     const root = a.parentId === undefined;
     const body = resumed
       ? composeResume(a, this.host.names(node, parent && this.project(parent)),
-        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))))
+        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
+        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))))
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
@@ -474,7 +491,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: "provider_error", text: result.text, ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
     if (question !== undefined) return { kind: "needs_input", question, ...evidence(result) };
     return { kind: "completed", text: result.text, ...evidence(result) };
@@ -496,8 +513,8 @@ export class RuntimeCoordinator implements Coordinator {
   private readable(child: Assignment, parent: Assignment, parentView: HandoffView): Assignment {
     const problem = this.host.validate(view(child, parent), parentView);
     if (!problem) return child;
-    const { evidence: _evidence, ...rest } = child;
-    return { ...rest, result: `Result withheld: ${problem}` };
+    const { evidence: _evidence, question: _question, ...rest } = child;
+    return { ...rest, result: `${child.question === undefined ? "Result" : "Question"} withheld: ${problem}` };
   }
 
   private project(a: Assignment): HandoffView {

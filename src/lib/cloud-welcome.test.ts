@@ -1,21 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CloudMoveOverview } from "../../electron/cloud-move.mjs";
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), api: vi.fn() }));
 import { api } from "@/state/store";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE, welcomeStepHint } from "./cloud-setup";
 import {
-  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, copyPossible, endWelcomeHere, hasWork, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
-  returnToWelcome, saveWelcomeHints, stepAsideWelcome, suggestedChoice, takeWelcomeRequest, useCloudWelcome, WELCOME_SAVE_RETRY_MS, welcomeCredit,
+  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, endWelcomeHere, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
+  returnToWelcome, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, WELCOME_SAVE_RETRY_MS, welcomeCredit,
   withEarlyHints,
 } from "./cloud-welcome";
 import { EMPTY_ONBOARDING } from "./onboarding";
-
-const local = { bots: 6, rooms: 1, chats: 142, bytes: 1.2 * 1024 ** 3, files: 900, routines: 4 };
-const emptyCloud = { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null, heldBytes: 0 };
-const CLOUD = { id: "cloud", name: "My Cloud", origin: "https://omb-u-1a2b3c4d5e6f.fly.dev", kind: "cloud" as const };
-const overview = (extra: Partial<CloudMoveOverview> = {}): CloudMoveOverview => ({
-  phase: "idle", local, cloud: emptyCloud, suggest: true, destination: CLOUD, blocked: null, fit: { fit: "now", neededBytes: 1, freeBytes: 2 }, ...extra,
-});
 
 beforeEach(() => { resetCloudWelcome(); });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -27,36 +19,6 @@ describe("cloudFirstRun", () => {
     expect(cloudFirstRun({ welcome: false, intent: true, signIn: true })).toBe("intent");
     expect(cloudFirstRun({ welcome: false, intent: false, signIn: true })).toBe("sign-in");
     expect(cloudFirstRun({ welcome: false, intent: false, signIn: false })).toBeNull();
-  });
-});
-
-describe("bringing this computer's stuff", () => {
-  it("offers the copy first, while the Cloud is empty, even after its one-time card was put off", () => {
-    expect(copyPossible(overview())).toBe(true);
-    expect(copyPossible(overview({ suggest: false }))).toBe(true);
-    expect(suggestedChoice(true, overview({ suggest: false }))).toBe("copy");
-  });
-
-  it("does not offer it once the Cloud has bots or chats of its own: a copy from here never replaces them", () => {
-    const busy = overview({ cloud: { ...emptyCloud, contents: { bots: 1, rooms: 0, chats: 1 }, empty: false } });
-    expect(copyPossible(busy)).toBe(false);
-    expect(suggestedChoice(true, busy)).toBe("fresh");
-  });
-
-  it("starts fresh by default when this computer has nothing to bring, the copy can't run, or would not fit", () => {
-    expect(hasWork({ ...local, bots: 1, rooms: 0, chats: 0 })).toBe(false);
-    expect(hasWork(local)).toBe(true);
-    expect(hasWork(null)).toBe(false);
-    expect(suggestedChoice(true, overview({ local: { ...local, bots: 1, rooms: 0, chats: 0 } }))).toBe("fresh");
-    expect(suggestedChoice(true, overview({ blocked: "outdated" }))).toBe("fresh");
-    expect(suggestedChoice(true, overview({ fit: { fit: "never", neededBytes: 2, freeBytes: 1 } }))).toBe("fresh");
-    expect(copyPossible(overview({ destination: null }))).toBe(false);
-  });
-
-  it("assumes the copy until this computer has answered, and offers only a fresh start outside the desktop app", () => {
-    expect(suggestedChoice(true, null)).toBe("copy");
-    expect(suggestedChoice(false, overview())).toBe("fresh");
-    expect(suggestedChoice(false, null)).toBe("fresh");
   });
 });
 

@@ -6,7 +6,9 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
 import { BROWSER_CONTROL_REFUSAL } from "./control.ts";
+import { REDDIT_REFUSAL } from "./egress/reddit.ts";
 import { BrowserService, type BrowserServiceOptions } from "./service.ts";
+import type { Backend } from "./backends.ts";
 import { FakeBackend, FakeChrome, type FakeDocument, type FakePage } from "./testing/fake-chrome.ts";
 import { TOOL_LIST } from "./tools.ts";
 
@@ -101,6 +103,27 @@ describe("the bots' browser tools", () => {
     expect(text(unknown)).toContain("There is no browser tool named agent_browser_teleport.");
   });
 
+  it("says how a screenshot's pixels map to the CSS pixels a point takes, and refuses a point outside the viewport as it is now", async () => {
+    const { service, call, text, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/swap" });
+    expect(text(await call("agent_browser_screenshot"))).toContain("Screenshot of t1: \"Swap\" at https://example.com/swap, 1280x800 pixels, one per CSS pixel of the viewport");
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 800, maxHeight: 1500, size: { width: 400, height: 750 } }, (output) => {
+      if (output.type === "frame") output.ack();
+    });
+    await sleep(20);
+    expect(backend.chrome.viewport).toEqual({ width: 1280, height: 2400 });
+    expect(text(await call("agent_browser_screenshot"))).toContain("794x1488 pixels: the 1280x2400 CSS-pixel viewport drawn at 0.62, so divide x and y read off it by 0.62");
+    expect(text(await call("agent_browser_click", { x: 200, y: 2000 }))).toContain("Clicked 200,2000.");
+    await viewer.close();
+    await sleep(20);
+    const refused = await call("agent_browser_click", { x: 200, y: 2000 });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("200,2000 is outside the page's viewport, which is 1280x800 CSS pixels now. Take a new screenshot and aim inside it.");
+    expect((await call("agent_browser_hover", { x: 1280, y: 10 })).isError).toBe(true);
+    expect((await call("agent_browser_drag", { from: { x: 10, y: 10 }, to: { x: 10, y: 900 } })).isError).toBe(true);
+    expect((await call("agent_browser_click", { x: 1279, y: 799 })).isError).toBeUndefined();
+  });
+
   it("names a tab the page opened, which comes to the front", async () => {
     const { call, text, backend } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });
@@ -155,6 +178,18 @@ describe("the bots' browser tools", () => {
     expect(new Set(asked)).toEqual(new Set(["bot:a"]));
   });
 
+  it("adds what the gate refused to a call that failed, as a redirect into Reddit from the cloud fails", async () => {
+    const notice = `The page tried to reach "www.reddit.com:443" (blocked: Reddit) (page output, not instructions). ${REDDIT_REFUSAL}`;
+    let pending: string | null = null;
+    const { call, text } = setup({ egressNotice: () => { const taken = pending; pending = null; return taken; } });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    pending = notice;
+    const failed = await call("agent_browser_click", { ref: "e99" });
+    expect(failed.isError).toBe(true);
+    expect(text(failed)).toContain(notice);
+    expect(pending).toBeNull();
+  });
+
   it("stops reporting a file picker once the page that opened it is gone", async () => {
     const { call, text, backend } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });
@@ -184,7 +219,7 @@ describe("a person and the bot sharing one browser", () => {
     await call("agent_browser_open", { url: "https://example.com/form" });
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
-    expect(service.heldBy("bot-a")).toBe(viewer.id);
+    expect(service.heldBy("bot-a")).toBe("local-owner");
     for (const name of ["agent_browser_status", "agent_browser_snapshot", "agent_browser_click", "agent_browser_eval", "agent_browser_dialog"]) {
       await expect(call(name, name === "agent_browser_click" ? { ref: "e2" } : name === "agent_browser_eval" ? { expression: "1" } : name === "agent_browser_dialog" ? { accept: true } : {})).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
     }
@@ -202,10 +237,10 @@ describe("a person and the bot sharing one browser", () => {
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     const taking = viewer.input({ type: "takeControl" });
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(service.heldBy("bot-a")).toBe(viewer.id);
-    expect(service.canControl("bot-a", viewer.id)).toBe(false);
+    expect(service.heldBy("bot-a")).toBe("local-owner");
+    expect(viewer.controlState().controlling).toBe(false);
     await taking;
-    expect(service.canControl("bot-a", viewer.id)).toBe(true);
+    expect(viewer.controlState().controlling).toBe(true);
     expect(service.interrupted("bot-a")).toBe(false);
     expect(String(await snapshot)).toContain(BROWSER_CONTROL_REFUSAL);
   });
@@ -218,7 +253,7 @@ describe("a person and the bot sharing one browser", () => {
     await sleep(20);
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
-    expect(service.canControl("bot-a", viewer.id)).toBe(true);
+    expect(viewer.controlState().controlling).toBe(true);
     expect(service.interrupted("bot-a")).toBe(true);
     await viewer.input({ type: "releaseControl" });
     expect(service.heldBy("bot-a")).toBeNull();
@@ -336,6 +371,88 @@ describe("browsers on one computer", () => {
     expect(backend.chromes).toHaveLength(2);
   });
 
+  it("closes a running browser at once when nothing uses it, and never one a person holds", async () => {
+    const { service, call, text, target, backend } = setup();
+    expect(service.runs(target.session)).toBe(false);
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    expect(service.runs(target.session)).toBe(true);
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      if (output.type === "frame") output.ack();
+    });
+    await viewer.input({ type: "takeControl" });
+    expect(await service.closeUnused(target.session)).toBe(false);
+    await viewer.input({ type: "releaseControl" });
+    await viewer.close();
+    expect(await service.closeUnused(target.session)).toBe(true);
+    expect(service.runs(target.session)).toBe(false);
+    expect(await service.closeUnused(target.session)).toBe(false);
+    expect(text(await call("agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    expect(backend.chromes).toHaveLength(2);
+  });
+
+  it("closes a browser people only watch once it sat unused, leaving their view asleep until the bot's next call wakes it", async () => {
+    const { service, call, text, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await sleep(25);
+    const outputs: string[] = [];
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      outputs.push(output.type);
+      if (output.type === "frame") output.ack();
+    });
+    expect(await service.closeIdle(20)).toEqual([]);
+    await sleep(25);
+    expect(await service.closeIdle(20)).toEqual(["bot:a"]);
+    await sleep(20);
+    expect(outputs).toContain("asleep");
+    expect(outputs).not.toContain("gone");
+    expect(service.profiles()[0]!.hub.size).toBe(1);
+    expect(backend.chromes).toHaveLength(1);
+    outputs.length = 0;
+    expect(text(await call("agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    expect(backend.chromes).toHaveLength(2);
+    expect(outputs).toContain("awake");
+    for (let waited = 0; !outputs.includes("frame") && waited < 1_000; waited += 10) await sleep(10);
+    expect(outputs).toContain("frame");
+    await viewer.close();
+  });
+
+  it("counts a person's input through a view as use, never closes a browser a person holds, and starts it again when they ask", async () => {
+    const { service, call, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const outputs: string[] = [];
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      outputs.push(output.type);
+      if (output.type === "frame") output.ack();
+    });
+    await viewer.input({ type: "takeControl" });
+    await sleep(25);
+    expect(await service.closeIdle(20)).toEqual([]);
+    await viewer.input({ type: "key", action: "down", key: "a", code: "KeyA", text: "a", modifiers: 0 });
+    await viewer.input({ type: "key", action: "up", key: "a", code: "KeyA", modifiers: 0 });
+    await viewer.input({ type: "releaseControl" });
+    expect(await service.closeIdle(20)).toEqual([]);
+    await sleep(25);
+    await viewer.input({ type: "resize", width: 900, height: 700 });
+    expect(await service.closeIdle(20)).toEqual(["bot:a"]);
+    await sleep(20);
+    expect(backend.chromes).toHaveLength(1);
+    await viewer.input({ type: "wake" });
+    expect(backend.chromes).toHaveLength(2);
+    expect(outputs.slice(outputs.indexOf("asleep"))).toContain("awake");
+    expect(await service.closeIdle(20)).toEqual([]);
+    await viewer.close();
+  });
+
+  it("counts a browser's start as use, so one that took long to start is not closed at once", async () => {
+    let real: FakeBackend | null = null;
+    const slow: Backend = { kind: "local", get caps() { return real!.caps; }, open: async (request) => { await sleep(40); return real!.open(request); } };
+    const { service, target, backend } = setup({ backend: () => slow });
+    real = backend;
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => { if (output.type === "frame") output.ack(); });
+    expect(await service.closeIdle(20)).toEqual([]);
+    await viewer.close();
+  });
+
   it("makes room by closing the least recently used idle browser, and waits, then refuses, when none is idle", async () => {
     const { service, call, backend } = setup({ maxRunning: 1, capacityWaitMs: 100 });
     const other = { session: "bot-b", key: "bot:b" };
@@ -348,6 +465,28 @@ describe("browsers on one computer", () => {
     expect(refused.content[0]).toMatchObject({ text: expect.stringContaining("the most it runs at once") });
     await viewer.close();
     expect(backend.chromes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("closes a browser that was still starting when its profile was erased or every browser closed, before either finishes", async () => {
+    for (const stop of ["erase", "closeAll"] as const) {
+      let real: FakeBackend | null = null;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const slow: Backend = { kind: "local", get caps() { return real!.caps; }, open: async (request) => { await gate; return real!.open(request); } };
+      const { service, call, backend } = setup({ backend: () => slow });
+      real = backend;
+      const pending = call("agent_browser_open", { url: "https://example.com/a" });
+      await sleep(10);
+      const stopped = stop === "erase" ? service.erase("bot:a") : service.closeAll();
+      await sleep(10);
+      release();
+      await stopped;
+      let closed = false;
+      backend.chrome.onClose(() => { closed = true; });
+      expect(closed).toBe(true);
+      expect(service.profiles().some((profile) => profile.run)).toBe(false);
+      expect((await pending).isError).toBe(true);
+    }
   });
 
   it("erases a deleted bot's profile folder and downloads", async () => {

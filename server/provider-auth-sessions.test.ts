@@ -17,6 +17,31 @@ function fixture() {
   return { sessions: new ProviderAuthSessions(), instance, auth };
 }
 
+describe("a finished sign-in", () => {
+  it("is told for the AI it signed in to, whichever way it finished, and never for a flow still waiting or one that failed", async () => {
+    const { instance, auth } = fixture();
+    const signedIn = vi.fn();
+    const sessions = new ProviderAuthSessions({ signedIn });
+    await sessions.start(instance, "owner");
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn).not.toHaveBeenCalled();
+    instance.getAuthentication.mockResolvedValueOnce({ ...auth, phase: "failed" } as never);
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn).not.toHaveBeenCalled();
+
+    await sessions.start(instance, "owner");
+    instance.getAuthentication.mockResolvedValueOnce({ ...auth, phase: "succeeded" } as never);
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn).toHaveBeenLastCalledWith("codex");
+
+    await sessions.start(instance, "owner");
+    await sessions.complete("codex", "owner", "random-flow", "https://localhost/callback?code=x");
+    instance.startAuthentication.mockResolvedValueOnce({ ...auth, phase: "succeeded" });
+    await sessions.start({ ...instance, instanceId: "claude" }, "owner");
+    expect(signedIn.mock.calls).toEqual([["codex"], ["codex"], ["claude"]]);
+  });
+});
+
 describe("provider login ownership", () => {
   it("forgets only the replaced provider's login reservation", async () => {
     const { sessions, instance } = fixture();
@@ -164,5 +189,44 @@ describe("provider sign-out", () => {
     await expect(sessions.start(instance, "owner")).resolves.toMatchObject({ phase: "waiting" });
     const { signOut: _unsupported, ...plain } = instance;
     await expect(sessions.signOut(plain, "owner")).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("a sign-in in progress, as the move and a backup see it (active)", () => {
+  it("counts while the person signs in, and stops at its expiry", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { sessions, instance } = fixture();
+      await sessions.start(instance, "owner");
+      expect(sessions.active).toBe(true);
+      vi.setSystemTime(Date.now() + 61_000);
+      expect(sessions.active).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("stops counting a start that never returns once it would have expired", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { sessions, instance } = fixture();
+      instance.startAuthentication.mockImplementation(() => new Promise(() => {}));
+      void sessions.start(instance, "owner");
+      expect(sessions.active).toBe(true);
+      vi.setSystemTime(Date.now() + 15 * 60_000 - 1);
+      expect(sessions.active).toBe(true);
+      vi.setSystemTime(Date.now() + 1);
+      expect(sessions.active, "stuck busy past its expiry").toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("stops counting a sign-out that never returns after its minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { sessions, instance } = fixture();
+      instance.signOut.mockImplementation(() => new Promise<void>(() => {}));
+      void sessions.signOut(instance, "owner");
+      expect(sessions.active).toBe(true);
+      vi.setSystemTime(Date.now() + 60_000);
+      expect(sessions.active).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 });

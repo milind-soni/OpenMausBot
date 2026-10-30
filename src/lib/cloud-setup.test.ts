@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, cloudSetupItems, cloudSetupStage,
-  cloudWelcomeStage, moveStatus, welcomeStepHint, welcomeView, welcomeViewAfter, type CloudSetupFacts,
+  cloudWelcomeStage, welcomeStepHint, welcomeView, welcomeViewAfter, type CloudSetupFacts,
 } from "./cloud-setup";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "./onboarding";
 
@@ -11,9 +11,8 @@ const record = (extra: Partial<OnboardingStatus> = {}): OnboardingStatus => ({ .
 const before = (extra: Partial<OnboardingStatus> = {}) => record({ ...extra, hintsSeen: [CLOUD_INTENT_ASKED, ...(extra.hintsSeen ?? [])] });
 const finished = (...steps: Array<"bring" | "engine" | "files">) => steps.map(welcomeStepHint);
 const facts = (extra: Partial<CloudSetupFacts> = {}): CloudSetupFacts => ({
-  viewer: owner, connected: true, enginesKnown: true, engineReady: false, onboarding: record(), move: null, ...extra,
+  viewer: owner, connected: true, enginesKnown: true, engineReady: false, onboarding: record(), ...extra,
 });
-const idle = { phase: "idle" as const, suggest: true };
 const steps = (value: CloudSetupFacts) => cloudSetupItems(value).map((item) => `${item.id}:${item.status}`);
 
 describe("cloudWelcomeStage", () => {
@@ -115,12 +114,9 @@ describe("cloudSetupStage", () => {
 describe("cloudSetupItems", () => {
   it("while the welcome is open, is its steps in short, one in: the Cloud exists", () => {
     expect(steps(facts())).toEqual(["cloud:done", "move:todo", "engine:todo", "files:todo"]);
-    expect(steps(facts({ move: idle }))).toEqual(["cloud:done", "move:todo", "engine:todo", "files:todo"]);
   });
 
-  it("takes each of the welcome's steps from the Cloud: copied, started fresh or skipped, and an AI step only once passed there", () => {
-    const copied = { phase: "done" as const, action: "move" as const, suggest: false };
-    expect(steps(facts({ move: copied }))).toContain("move:done");
+  it("takes each of the welcome's steps from the Cloud: brought, started fresh or skipped, and an AI step only once passed there", () => {
     expect(steps(facts({ onboarding: record({ hintsSeen: finished("bring") }) }))).toContain("move:done");
     expect(steps(facts({ onboarding: record({ hintsSeen: [...finished("bring"), CLOUD_SETUP_MOVE_SKIPPED] }) }))).toContain("move:skipped");
     expect(steps(facts({ engineReady: true }))).toContain("engine:todo");
@@ -133,7 +129,7 @@ describe("cloudSetupItems", () => {
     const ended = record({ hintsSeen: [...finished("bring"), CLOUD_WELCOME_DONE] });
     expect(steps(facts({ onboarding: ended }))).toEqual(["cloud:done", "engine:todo", "move:done"]);
     const given = record({ hintsSeen: [CLOUD_WELCOME_DONE, CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN] });
-    expect(steps(facts({ onboarding: given, move: idle }))).toEqual(["cloud:done", "job:done", "engine:todo", "plan:todo", "move:todo"]);
+    expect(steps(facts({ onboarding: given }))).toEqual(["cloud:done", "job:done", "engine:todo", "plan:todo"]);
   });
 
   it("before the welcome, starts one step in: the Cloud exists", () => {
@@ -155,19 +151,5 @@ describe("cloudSetupItems", () => {
     expect(steps(facts({ onboarding: given }))).toEqual(["cloud:done", "job:done", "engine:todo", "plan:todo"]);
     expect(steps(facts({ onboarding: given, engineReady: true, planned: true }))).toEqual(["cloud:done", "job:done", "engine:done", "plan:done"]);
     expect(steps(facts({ onboarding: record({ firstTurnAt: "2026-09-30T08:00:00.000Z" }) }))).not.toContain("plan:todo");
-  });
-
-  it("before the welcome, bringing bots is listed only in the desktop app while main offers it, and is done after a move or skipped", () => {
-    expect(steps(facts({ onboarding: before(), move: null }))).not.toContain("move:todo");
-    expect(moveStatus({ phase: "idle", suggest: false }, record())).toBeNull();
-    expect(steps(facts({ onboarding: before(), move: idle }))).toEqual(["cloud:done", "job:todo", "engine:todo", "move:todo"]);
-    for (const phase of ["preparing", "uploading", "restarting", "failed"] as const) {
-      expect(moveStatus({ phase, action: "move", suggest: false }, record())).toBe("todo");
-    }
-    expect(moveStatus({ phase: "done", action: "move", suggest: false }, record())).toBe("done");
-    expect(moveStatus({ phase: "idle", suggest: false }, record({ hintsSeen: [CLOUD_SETUP_MOVE_SKIPPED] }))).toBe("skipped");
-    expect(moveStatus({ phase: "idle", suggest: true }, record({ hintsSeen: [CLOUD_SETUP_MOVE_SKIPPED] }))).toBe("skipped");
-    expect(moveStatus({ phase: "done", action: "restore", suggest: false }, record())).toBeNull();
-    expect(moveStatus({ phase: "replacing", action: "restore", suggest: false }, record())).toBeNull();
   });
 });

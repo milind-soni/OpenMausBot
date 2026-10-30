@@ -1,7 +1,7 @@
 // The container boundary is the group-local-vm fixture; the provider is an in-process stub recording the tool list per request.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +18,7 @@ let stateFile = "";
 let dumpFile = "";
 let nativeDir = "";
 let stderr = "";
+let fakebin = "";
 let upstream: Server;
 
 type ChatMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string }> };
@@ -31,6 +32,7 @@ const frame = (delta: unknown, finish_reason: string | null) =>
 const FAKE_PODMAN = `#!/usr/bin/env node
 'use strict';
 const readline = require('node:readline');
+const { existsSync } = require('node:fs');
 const TOOLS = [
   { name: 'screenshot', description: 'Capture the VM screen', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'click', description: 'Click at a point', inputSchema: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false } },
@@ -44,7 +46,7 @@ rl.on('line', (line) => {
   if (request.id === undefined) return;
   let result;
   if (request.method === 'initialize') result = { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fake-vm', version: '1' } };
-  else if (request.method === 'tools/list') result = { tools: TOOLS };
+  else if (request.method === 'tools/list') result = { tools: existsSync(__dirname + '/empty-tools') ? [] : TOOLS };
   else if (request.method === 'tools/call') result = { content: [{ type: 'text', text: 'fake vm ran ' + String(request.params?.name) }] };
   else result = { content: [{ type: 'text', text: 'unsupported call' }], isError: true };
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
@@ -90,7 +92,7 @@ beforeAll(async () => {
   stateFile = join(fixtureHome, "vm.json");
   dumpFile = join(fixtureHome, "dump.json");
   vmState({ containers: [] });
-  const fakebin = join(fixtureHome, "fakebin");
+  fakebin = join(fixtureHome, "fakebin");
   mkdirSync(fakebin);
   writeFileSync(join(fakebin, "podman"), FAKE_PODMAN, { mode: 0o700 });
   chmodSync(join(fakebin, "podman"), 0o700);
@@ -161,6 +163,10 @@ beforeAll(async () => {
     try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
   }, Boolean);
   await api("PATCH", "/api/config", { openaiCompat: { key: "fixture-key", url: `http://127.0.0.1:${upstreamPort}/v1`, model: "fixture-model" } });
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
+  const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
+  await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
 });
 
 afterAll(async () => {
@@ -207,9 +213,31 @@ describe("openai-compat Local VM tools", () => {
     await idle(bot.id);
     const continuation = requests[2];
     expect(toolNames(continuation), JSON.stringify({ tools: toolNames(continuation), requests: requests.length })).toContain("computer_screenshot");
+    expect(toolNames(requests[0])).toContain("agents_select_computer");
+    // The continuation is listed the agents tools its request was, select_computer too: the route refuses a second pick.
+    const agentsTools = (request: ChatRequest | undefined) => toolNames(request).filter((name) => name.startsWith("agents_"));
+    expect(agentsTools(continuation)).toEqual(agentsTools(requests[0]));
     expect(toolNames(continuation)).toContain("agents_select_computer");
     const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
     expect(shown.filter((message: any) => message.card)).toEqual([]);
+  }, 60_000);
+
+  it("fails the turn when the Local VM lists no tools, instead of running without them", async () => {
+    vmState({ containers: [] });
+    requests.length = 0;
+    writeFileSync(join(fakebin, "empty-tools"), "");
+    try {
+      const { bot } = await api("POST", "/api/bots", { name: "openai empty vm" });
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm" });
+      await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "openaiCompat", model: "fixture-model" });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Take a screenshot of the desktop." });
+      const messages = async () => (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
+      const shown = await until(messages, list => list.some((message: any) => message.kind === "digest"));
+      expect(requests.map(toolNames), "no provider round may run without the VM tools").toEqual([]);
+      expect(shown.find((message: any) => message.tool?.terminal)?.tool).toMatchObject({ ok: false, name: expect.stringMatching(/Local VM listed no tools/) });
+    } finally {
+      rmSync(join(fakebin, "empty-tools"), { force: true });
+    }
   }, 60_000);
 
   it("mounts the Local VM for a claudeAgent control on the same surface", async () => {

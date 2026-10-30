@@ -11,6 +11,7 @@ import { DriverError, isUnanswered } from "./cdp/errors.ts";
 import { callOnNode, valueInWorld } from "./cdp/evaluate.ts";
 import type { PointerReporter } from "./cdp/actions.ts";
 import { navigable } from "./cdp/page.ts";
+import type { Screenshot } from "./cdp/screencast.ts";
 import { resolveElement } from "./cdp/selectors.ts";
 import { MAX_VISIBLE_TEXT_LENGTH } from "./cdp/snapshot.ts";
 import { BROWSER_CONTROL_REFUSAL, type ProfileControl } from "./control.ts";
@@ -23,6 +24,8 @@ export const DEFAULT_ACTION_MS = 15_000;
 /** Kept back from a call's budget for the reads after its action. */
 const FOLLOW_UP_MS = 5_000;
 const OBSERVE_TEXT_CHARS = 200_000;
+/** The longest an action's answer waits for a navigation the page asked for to show its next page. */
+const NAVIGATION_FOLLOW_MS = 10_000;
 const OBSERVE_PAGE = `({ url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, ${OBSERVE_TEXT_CHARS}) })`;
 const ELEMENT_TEXT = "function () { return String(this.innerText ?? this.textContent ?? this.value ?? ''); }";
 
@@ -59,15 +62,29 @@ export interface ToolContext {
   downloads(): Download[];
 }
 
-/** What a person typed or a bot passed as an address: a bare host means https, loopback http. */
+/** A typed address with its scheme: a bare host means https, loopback http. */
+const withScheme = (text: string) => /^[a-z][a-z\d+.-]*:\/\//iu.test(text) ? text : `${/^(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)/iu.test(text) ? "http" : "https"}://${text}`;
+
+/** What a bot passed as an address. */
 export function agentUrl(raw: string): string {
   const text = raw.trim();
   if (text === "about:blank" || /^data:/iu.test(text)) return text;
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//iu.test(text) ? text : `${/^(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)/iu.test(text) ? "http" : "https"}://${text}`;
   let url: URL;
-  try { url = new URL(candidate); } catch { throw new DriverError("refused", `${text.slice(0, 200)} is not an address the browser can open.`); }
+  try { url = new URL(withScheme(text)); } catch { throw new DriverError("refused", `${text.slice(0, 200)} is not an address the browser can open.`); }
   if (!navigable(url.href)) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.protocol}.`);
   return url.href;
+}
+
+/** An address a person typed in the panel: http(s) only, never credentials, and null rather than an error. */
+export function personUrl(raw: string): string | null {
+  const text = raw.trim().slice(0, 8_192);
+  if (!text || [...text].some((char) => char <= " " || char === "\u007f" || char === "\\")) return null;
+  try {
+    const url = new URL(withScheme(text));
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function remaining(context: ToolContext, preferred = DEFAULT_ACTION_MS): number {
@@ -153,13 +170,25 @@ async function act(context: ToolContext, tab: Tab | null, run: () => Promise<Too
   return context.control.agent(tab, async () => {
     const known = new Set(context.tabs.list().map((candidate) => candidate.id));
     const before = observeChange && tab ? await observe(tab) : null;
+    const mark = before && tab ? tab.page.navigations.mark() : null;
     const result = await run();
     if (!tab || result.isError) return result;
     // An open dialog blocks the page's scripts, so the page is read again only once it is answered.
+    if (mark && !tab.page.dialogs.pending) await tab.page.navigations.follow(mark, Math.min(NAVIGATION_FOLLOW_MS, remaining(context)));
     const after = before && !tab.page.dialogs.pending ? await observe(tab) : null;
     const opened = observeChange ? await openedNote(context, tab, known) : null;
     return withParts(result, before && after ? describePageChange(before, after) : null, opened, dialogNote(tab), context.health(tab));
   });
+}
+
+/** How a picture's pixels map to the CSS pixels the point tools take, so a point read off it lands where it was seen. */
+export function pictureNote(shot: Pick<Screenshot, "width" | "height" | "scale" | "region">, of: "viewport" | "page" | "element" = "viewport"): string {
+  const pixels = `${shot.width}x${shot.height} pixels`;
+  const region = `${Math.round(shot.region.width)}x${Math.round(shot.region.height)} CSS-pixel`;
+  if (of !== "viewport") return `${pixels}: the ${region} ${of === "page" ? "page" : "element"}${shot.scale === 1 ? "" : ` drawn at ${shot.scale}`}.`;
+  return shot.scale === 1
+    ? `${pixels}, one per CSS pixel of the viewport, so x and y read off it are the point the click, hover and drag tools take.`
+    : `${pixels}: the ${region} viewport drawn at ${shot.scale}, so divide x and y read off it by ${shot.scale} for the point the click, hover and drag tools take.`;
 }
 
 async function snapshotResult(context: ToolContext, tab: Tab, { includeImage = false, save = false }: { includeImage?: boolean; save?: boolean } = {}): Promise<ToolResult> {
@@ -169,10 +198,11 @@ async function snapshotResult(context: ToolContext, tab: Tab, { includeImage = f
   if (!includeImage && !save) return textResult(text);
   const shot = await context.paused(tab, () => tab.page.screenshot());
   const saved = save ? context.saveScreenshot(shot.data, tab.page.url()) : null;
+  const shown = includeImage || !save;
   return {
     content: [
-      { type: "text", text: saved ? `${text}\nScreenshot saved at ${saved}` : text },
-      ...(includeImage || !save ? [{ type: "image" as const, data: shot.data.toString("base64"), mimeType: "image/png" }] : []),
+      { type: "text", text: `${text}${saved ? `\nScreenshot saved at ${saved}` : ""}${shown ? `\nThe screenshot is ${pictureNote(shot)}` : ""}` },
+      ...(shown ? [{ type: "image" as const, data: shot.data.toString("base64"), mimeType: "image/png" }] : []),
     ],
   };
 }
@@ -260,7 +290,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       return act(context, tab, async () => {
         await tab.page.bringToFront();
         const shot = await context.paused(tab, () => tab.page.screenshot({ fullPage: call.input.fullPage === true, ...(target && !("x" in target) ? { target } : {}) }));
-        return { content: [{ type: "text", text: `Screenshot of ${pageLabel(describe(tab))}, ${shot.width}x${shot.height} pixels.` }, { type: "image", data: shot.data.toString("base64"), mimeType: "image/png" }] };
+        const note = pictureNote(shot, target ? "element" : call.input.fullPage === true ? "page" : "viewport");
+        return { content: [{ type: "text", text: `Screenshot of ${pageLabel(describe(tab))}, ${note}` }, { type: "image", data: shot.data.toString("base64"), mimeType: "image/png" }] };
       });
     }
     case "agent_browser_click": {

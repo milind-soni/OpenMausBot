@@ -1,4 +1,4 @@
-// propose_profile cards: everything is re-validated at confirm time, since a card can sit open for days.
+// propose_profile applies at once with an Undo. The owner's card (direct-apply.ts) is re-validated at confirm time, since it can sit open for days.
 import { soulDiffLines } from "../shared/line-diff.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestCardData, type ProfileRequestChanges } from "../shared/profile-request.ts";
@@ -289,8 +289,7 @@ export class ProfileRequestService {
 
     const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason);
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
-    // A new working folder widens what the bot's tools reach without asking, so below Full access it keeps the card.
-    const automatic = grant === "full-access" || (grant === "self" && finalChanges.cwd === undefined);
+    const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);
     if (persistence && !persistence.ok) {
       throw new ProfileRequestError(persistence.error, persistence.status);

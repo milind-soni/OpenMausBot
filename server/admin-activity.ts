@@ -1,6 +1,7 @@
 // Who changed what on this server: one NDJSON file per UTC month under <data>/admin-activity, 0600, pruned by the decision
 // log's retention window. Values are redacted (credential-named keys and every headers/env value become "[hidden]") and
 // nothing is sent anywhere. Fire-and-forget: a full disk must not undo a setting that already took effect.
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -223,16 +224,25 @@ export function configChangeRows(before: unknown, after: unknown): Array<Omit<Ad
 
 /** What a bot may do, where, and who may see it; display fields (colour, unread, pins) are not audited. */
 export const BOT_AUDIT_FIELDS = [
-  "approvalMode", "autoApprove", "alwaysAllow", "peers", "approvePeerComms", "computer", "cloudBackend", "autoStartVps",
+  "approvalMode", "autoApprove", "alwaysAllow", "peers", "approvePeerComms", "computer", "cloudBackend", "autoStartVps", "vpsAlias",
   "cwd", "composio", "browser", "browserProfile", "mcpServers", "chiefOfStaff", "managedSections", "section",
   "parkDirectMessages", "hidden", "modelSelection", "helperModel", "visibility",
 ] as const;
 
-export function botAuditSnapshot(bot: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+/** A Team Cloud's bots are everyone's: who renamed one, recoloured it or changed its instructions is recorded too. */
+export const TEAM_BOT_AUDIT_FIELDS = [...BOT_AUDIT_FIELDS, "name", "title", "description", "soul", "color"] as const;
+
+export function botAuditSnapshot(bot: Record<string, unknown> | null | undefined, fields: readonly string[] = BOT_AUDIT_FIELDS): Record<string, unknown> | null {
   if (!bot) return null;
   // "everyone" and no field are one audience.
   const present = (field: string) => bot[field] !== undefined && !(field === "visibility" && bot[field] === "everyone");
-  return Object.fromEntries(BOT_AUDIT_FIELDS.filter(present).map((field) => [field, structuredClone(bot[field])]));
+  return Object.fromEntries(fields.filter(present).map((field) => [field, field === "soul" ? textDigest(bot[field]) : structuredClone(bot[field])]));
+}
+
+/** Instructions may hold anything a person typed: the log keeps only that they changed. */
+function textDigest(value: unknown): { length: number; sha256: string } {
+  const text = String(value);
+  return { length: text.length, sha256: createHash("sha256").update(text).digest("hex").slice(0, 12) };
 }
 
 export function botChangeRows(
@@ -240,9 +250,10 @@ export function botChangeRows(
   before: Record<string, unknown> | null,
   after: Record<string, unknown> | null,
   only?: readonly string[],
+  fields: readonly string[] = BOT_AUDIT_FIELDS,
 ): Array<Omit<AdminActionRow, "at" | "actor">> {
   if (!before || !after) return [];
-  const changed = BOT_AUDIT_FIELDS.filter((field) => (!only || only.includes(field)) && stable(before[field]) !== stable(after[field]));
+  const changed = fields.filter((field) => (!only || only.includes(field)) && stable(before[field]) !== stable(after[field]));
   const rows: Array<Omit<AdminActionRow, "at" | "actor">> = [];
   const bot = { kind: "bot", id: target.id, ...(target.name ? { name: target.name } : {}) };
   if (changed.includes("visibility")) {

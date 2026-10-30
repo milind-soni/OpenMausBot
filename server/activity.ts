@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import { AGENTS_ACTION_TOOLS, agentsCallMember } from "../shared/agents-tool-names.ts";
 import { bridgedCallName } from "./agents-bridge-names.ts";
 import { readDecisions, type DecisionKind, type DecisionRow } from "./decision-log.ts";
 import { isRuntimeEvent, readRecentLines } from "./thread-events.ts";
@@ -53,14 +54,57 @@ function humanize(raw: string): string {
   return spaced ? spaced[0].toUpperCase() + spaced.slice(1) : raw;
 }
 
-function toolkitName(slug: string): string {
+export function toolkitName(slug: string): string {
   return TOOLKIT_NAMES[slug] ?? slug[0] + slug.slice(1).toLowerCase();
 }
 
 /** Composio names its tools TOOLKIT_ACTION_WORDS, all upper case. */
 const COMPOSIO_TOOL = /^([A-Z][A-Z0-9]+)_([A-Z0-9_]+)$/;
 
-export function describeTool(name: string): { app: string | null; label: string } {
+/** The agents server's X and research tools read as their own app. */
+const RESEARCH_TOOL_LABELS: Record<string, { app: string; label: string }> = {
+  x_search: { app: "X", label: "Searched X" },
+  x_user_posts: { app: "X", label: "Read X posts" },
+  x_post: { app: "X", label: "Read an X post" },
+  x_profile: { app: "X", label: "Looked up an X profile" },
+  research_search: { app: "Research", label: "Searched research tools" },
+  research_endpoint: { app: "Research", label: "Read a research tool" },
+};
+
+/** treg's catalog ids name their platform and what they return (`apollo.people.search`): a research call reads as the
+ * kind of thing it looked up, never the vendor. */
+const RESEARCH_CATEGORIES: ReadonlyArray<[RegExp, string]> = [
+  [/^(?:x|twitter|tweets?)$/, "Searched X"],
+  [/^(?:people|persons?|contacts?|emails?|employees?|leads?|prospects?)$/, "Looked up people"],
+  [/^(?:compan(?:y|ies)|organi[sz]ations?|orgs?|firmographics?|business(?:es)?)$/, "Looked up companies"],
+  [/^(?:funding|investors?|investments?|rounds?)$/, "Looked up funding"],
+  [/^news$/, "Read the news"],
+  [/^(?:linkedin|instagram|tiktok|youtube|reddit|facebook|threads|social)$/, "Looked up social data"],
+  [/^trends?$/, "Looked up trends"],
+  [/^(?:serp|google|bing|web)$/, "Searched the web"],
+  [/^(?:seo|backlinks?|keywords?|domains?|rankings?)$/, "Looked up SEO data"],
+  [/^(?:images?|video|voice|tts|speech|generate|generation)$/, "Generated media"],
+];
+
+/** A call's own arguments from its recorded input, which may be a JSON preview. */
+function callArguments(input: unknown): unknown {
+  let args = input;
+  if (typeof input === "string") {
+    try { args = JSON.parse(input); } catch { args = undefined; }
+  }
+  // A bridged call (use_tool) carries the tool's own arguments under `arguments`.
+  return args && typeof args === "object" && "arguments" in args ? (args as { arguments?: unknown }).arguments : args;
+}
+
+function researchCallLabel(input: unknown): string {
+  const own = callArguments(input);
+  const id = own && typeof own === "object" && typeof (own as { id?: unknown }).id === "string" ? (own as { id: string }).id : "";
+  const words = id.toLowerCase().split(/[._@-]+/).slice(1);
+  for (const [pattern, label] of RESEARCH_CATEGORIES) if (words.some((word) => pattern.test(word))) return label;
+  return "Ran a research call";
+}
+
+export function describeTool(name: string, input?: unknown): { app: string | null; label: string } {
   const builtin = BUILTIN_LABELS[name];
   if (builtin) return { app: null, label: builtin };
 
@@ -69,8 +113,17 @@ export function describeTool(name: string): { app: string | null; label: string 
     const action = rest.join("__");
     if (server === "composio") return describeTool(action);
     if (server === "computer") return { app: "Computer", label: humanize(action) };
-    if (server === "agents") return { app: "Team", label: humanize(action) };
+    if (server === "agents") {
+      if (action === "research_call") {
+        const label = researchCallLabel(input);
+        return { app: label === "Searched X" ? "X" : "Research", label };
+      }
+      // An action tool's call reads as what it did: trigger with action=create as "Create trigger".
+      const member = (AGENTS_ACTION_TOOLS[action]?.members.length ?? 0) > 1 ? agentsCallMember(action, callArguments(input)) : action;
+      return Object.hasOwn(RESEARCH_TOOL_LABELS, member) ? RESEARCH_TOOL_LABELS[member]! : { app: "Team", label: humanize(member) };
+    }
     if (server === "highlevel") return { app: "HighLevel", label: humanize(action.replace(/^HIGHLEVEL_/, "")) };
+    if (server === "device") return { app: "Phone", label: humanize(action.replace(/^PHONE_/, "")) };
     if (server.startsWith("claude_ai_")) {
       return { app: server.slice("claude_ai_".length).replace(/_/g, " "), label: humanize(action) };
     }
@@ -101,8 +154,8 @@ const OUTCOME_OF_DECISION: Record<DecisionKind, ActivityOutcome> = {
   "card-shown": "waiting",
 };
 
-function describeRow(base: Omit<ActivityRow, "app" | "label">): ActivityRow {
-  const { app, label } = describeTool(base.tool);
+function describeRow(base: Omit<ActivityRow, "app" | "label">, input?: unknown): ActivityRow {
+  const { app, label } = describeTool(base.tool, input ?? base.summary);
   return { ...base, app, label };
 }
 
@@ -148,8 +201,9 @@ function readToolRuns(eventsDir: string, threadId: string): ActivityRow[] {
           ...(event.turnId ? { turnId: event.turnId } : {}),
           // A bridged call reads as the tool it ran, only where the title itself names the agents server.
           tool: bridgedCallName(event.title ?? "unknown", event.input, { serverNamed: true }),
+          ...(event.step ? { summary: event.step.detail ?? event.step.target } : {}),
           outcome: "running",
-        }),
+        }, event.input),
       );
     } else if (event.type === "item.completed" && event.itemType === "tool" && event.itemId) {
       const run = runs.get(JSON.stringify([event.turnId ?? "", event.itemId]));

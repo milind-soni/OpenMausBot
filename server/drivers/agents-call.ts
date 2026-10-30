@@ -1,15 +1,24 @@
 // Runs one agents tool: check arguments, call the harness, render the model's text. Stateless;
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
+import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
-import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
-import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES, WEEKDAYS } from "./agents-catalog.ts";
+import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
+import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
+import { outOfBounds } from "./agents-schema.ts";
+import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
+import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
+import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
+import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
+import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
+import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -91,182 +100,20 @@ function handoffIds(r: Json): string[] {
   return receipts.map((receipt) => receipt.requestId).filter((id): id is string => typeof id === "string" && id.trim().length > 0);
 }
 const MOVED_ENTRIES_SHOWN = 5;
+const FORGOTTEN_SHOWN = 8;
 
-const SHORT_WEEKDAYS = {
-  mon: "monday",
-  tue: "tuesday",
-  tues: "tuesday",
-  wed: "wednesday",
-  thu: "thursday",
-  thur: "thursday",
-  thurs: "thursday",
-  fri: "friday",
-  sat: "saturday",
-  sun: "sunday",
-} as const satisfies Record<string, (typeof WEEKDAYS)[number]>;
-
-const SUPPORTED_SCHEDULES =
-  'Supported schedules: {"type":"once","at":"2026-09-01T09:00:00+05:30"} (future RFC3339 with explicit offset), ' +
-  '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"}, ' +
-  '{"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"}, ' +
-  'or {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} (monthly at 09:00 on day 1; five fields and an explicit IANA timezone).';
-
-interface NormalizedSchedule {
-  schedule?: Json;
-  error?: string;
+function forgetText(passage: string, r: Json): string {
+  const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  const notes = list(r.forgotten);
+  const aboutMe = list(r.aboutMe);
+  if (!notes.length && !aboutMe.length) {
+    return `Nothing saved mentions ${JSON.stringify(passage)}: not in your notes, not in About me. Try other words for it once; if nothing matches, tell the person it was not saved.`;
+  }
+  const facts = [...new Set([...notes, ...aboutMe])];
+  const shown = facts.slice(0, FORGOTTEN_SHOWN).map((fact) => JSON.stringify(fact)).join(", ");
+  const more = facts.length > FORGOTTEN_SHOWN ? ` and ${facts.length - FORGOTTEN_SHOWN} more` : "";
+  return `Forgotten everywhere it was saved${aboutMe.length ? ", About me included, which all their bots read" : ""}: ${shown}${more}. Confirm to the person in one plain line what you forgot.`;
 }
-
-/** Models stringify nested objects, say "daily" or shorten weekday names; each has one obvious meaning. */
-function normalizeScheduleInput(args: Json): NormalizedSchedule {
-  let raw = args.schedule;
-  if (typeof raw === "string") {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      return { error: `The schedule must be a JSON object, not text. ${SUPPORTED_SCHEDULES}` };
-    }
-  }
-  if (!jsonRecord(raw)) return { error: `The schedule must be a JSON object. ${SUPPORTED_SCHEDULES}` };
-  const type = typeof raw.type === "string" ? raw.type.trim().toLowerCase() : "";
-  const fields = type === "once"
-    ? ["type", "at"]
-    : type === "weekly" || type === "daily"
-      ? ["type", "time", "weekdays"]
-      : type === "interval"
-        ? ["type", "every_minutes", "everyMinutes", "starts_at", "anchorAt", "weekdays", "every_day", "window_start", "window_end", "window", "all_day", "ends_at", "endsAt", "never_ends"]
-        : type === "cron"
-          ? ["type", "expression", "timeZone"]
-          : null;
-  // Providers may send unused optional fields as null; any other unknown field refuses the call.
-  const unsupported = fields && Object.keys(raw).find((key) => raw[key] != null && !fields.includes(key));
-  if (unsupported) {
-    return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from list_routines. ${SUPPORTED_SCHEDULES}` };
-  }
-  if (type === "cron") {
-    try {
-      return { schedule: { ...normalizeCronSchedule({ type, expression: raw.expression, timeZone: raw.timeZone }) } };
-    } catch (error) {
-      return { error: `${error instanceof Error ? error.message : "Invalid cron schedule"}. ${SUPPORTED_SCHEDULES}` };
-    }
-  }
-  if (type === "once") {
-    if (typeof raw.at !== "string" || !raw.at.trim()) {
-      return { error: `A once schedule needs "at": a future RFC3339 date-time with an explicit offset, for example 2026-09-01T09:00:00+05:30.` };
-    }
-    return { schedule: { type: "once", at: raw.at.trim() } };
-  }
-  if (type === "weekly" || type === "daily") {
-    const time = typeof raw.time === "string" ? raw.time.trim() : "";
-    if (!time) return { error: `A ${type} schedule needs "time" in 24-hour HH:MM, for example 09:00.` };
-    let weekdays: string[];
-    if (type === "daily") {
-      weekdays = Array.isArray(raw.weekdays) && raw.weekdays.length ? raw.weekdays : [...WEEKDAYS];
-    } else {
-      if (!Array.isArray(raw.weekdays) || raw.weekdays.length === 0) {
-        return { error: `A weekly schedule needs "weekdays", for example ["monday","friday"] — or use {"type":"daily"} to run every day.` };
-      }
-      weekdays = raw.weekdays;
-    }
-    const normalized: string[] = [];
-    for (const day of weekdays) {
-      const lower = String(day).trim().toLowerCase();
-      const full = (WEEKDAYS as readonly string[]).includes(lower)
-        ? lower
-        : Object.hasOwn(SHORT_WEEKDAYS, lower)
-          ? SHORT_WEEKDAYS[lower as keyof typeof SHORT_WEEKDAYS]
-          : undefined;
-      if (!full) return { error: `Unsupported weekday "${String(day)}". Use full names: ${WEEKDAYS.join(", ")}.` };
-      if (!normalized.includes(full)) normalized.push(full);
-    }
-    return { schedule: { type: "weekly", time, weekdays: normalized } };
-  }
-  if (type === "interval") {
-    for (const flag of ["every_day", "all_day", "never_ends"]) {
-      if (raw[flag] != null && typeof raw[flag] !== "boolean") {
-        return { error: `"${flag}" must be true or false.` };
-      }
-    }
-    if (raw.window != null && (!jsonRecord(raw.window)
-      || Object.keys(raw.window).some((key) => key !== "start" && key !== "end")
-      || typeof raw.window.start !== "string" || typeof raw.window.end !== "string")) {
-      return { error: '"window" must contain "start" and "end" in HH:MM, for example {"start":"09:00","end":"17:00"}.' };
-    }
-    const rawMinutes = raw.every_minutes ?? raw.everyMinutes;
-    const everyMinutes = Number(rawMinutes);
-    if (!Number.isInteger(everyMinutes) || everyMinutes < 5 || everyMinutes > 1_440) {
-      return { error: 'An interval schedule needs "every_minutes": a whole number from 5 to 1440.' };
-    }
-    const rawStart = raw.starts_at ?? raw.anchorAt;
-    if (rawStart !== undefined && (typeof rawStart !== "string" || !rawStart.trim())) {
-      return { error: '"starts_at" must be an RFC3339 date-time with an explicit timezone offset.' };
-    }
-    if (raw.every_day === true && Array.isArray(raw.weekdays) && raw.weekdays.length > 0) {
-      return { error: 'Choose interval "weekdays" or "every_day", not both.' };
-    }
-    let intervalWeekdays: string[] | null | undefined;
-    if (raw.every_day === true) {
-      intervalWeekdays = null;
-    } else if (raw.weekdays !== undefined) {
-      if (!Array.isArray(raw.weekdays) || raw.weekdays.length === 0) {
-        return { error: 'Interval "weekdays" must contain at least one full weekday name.' };
-      }
-      intervalWeekdays = [];
-      for (const day of raw.weekdays) {
-        const lower = String(day).trim().toLowerCase();
-        const full = (WEEKDAYS as readonly string[]).includes(lower)
-          ? lower
-          : Object.hasOwn(SHORT_WEEKDAYS, lower)
-            ? SHORT_WEEKDAYS[lower as keyof typeof SHORT_WEEKDAYS]
-            : undefined;
-        if (!full) return { error: `Unsupported weekday "${String(day)}". Use full names: ${WEEKDAYS.join(", ")}.` };
-        if (!intervalWeekdays.includes(full)) intervalWeekdays.push(full);
-      }
-    }
-    const rawWindow = jsonRecord(raw.window) ? raw.window : undefined;
-    const windowStart = raw.window_start ?? rawWindow?.start;
-    const windowEnd = raw.window_end ?? rawWindow?.end;
-    if (raw.all_day === true && (windowStart !== undefined || windowEnd !== undefined)) {
-      return { error: 'Choose window_start + window_end or "all_day", not both.' };
-    }
-    let window: Json | null | undefined;
-    if (raw.all_day === true) {
-      window = null;
-    } else if (windowStart !== undefined || windowEnd !== undefined) {
-      if (typeof windowStart !== "string" || !windowStart.trim() || typeof windowEnd !== "string" || !windowEnd.trim()) {
-        return { error: 'An interval time window needs both "window_start" and "window_end" in 24-hour HH:MM.' };
-      }
-      window = { start: windowStart.trim(), end: windowEnd.trim() };
-    }
-    const rawEnd = raw.ends_at ?? raw.endsAt;
-    if (raw.never_ends === true && rawEnd !== undefined) {
-      return { error: 'Choose "ends_at" or "never_ends", not both.' };
-    }
-    let endsAt: string | null | undefined;
-    if (raw.never_ends === true) endsAt = null;
-    else if (rawEnd !== undefined) {
-      if (typeof rawEnd !== "string" || !rawEnd.trim()) {
-        return { error: '"ends_at" must be an RFC3339 date-time with an explicit timezone offset.' };
-      }
-      endsAt = rawEnd.trim();
-    }
-    return {
-      schedule: {
-        type: "interval",
-        everyMinutes,
-        ...(typeof rawStart === "string" ? { anchorAt: rawStart.trim() } : {}),
-        ...(intervalWeekdays !== undefined ? { weekdays: intervalWeekdays } : {}),
-        ...(window !== undefined ? { window } : {}),
-        ...(endsAt !== undefined ? { endsAt } : {}),
-      },
-    };
-  }
-  if (type === "hourly" || type === "minutes") {
-    return { error: `Use an interval schedule for every-N-minutes work. ${SUPPORTED_SCHEDULES}` };
-  }
-  return { error: `Unknown schedule type "${type || "(missing)"}". ${SUPPORTED_SCHEDULES}` };
-}
-
-type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
 
 export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, (retained, truncated) => {
   if (context.externalRuntime) throw new Error("External runtime results are not cached");
@@ -283,66 +130,6 @@ function ordinal(n: number): string {
 
 function jsonRecord(value: unknown): value is Json {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function routineAction(value: unknown): RoutineAction | null {
-  return value === "update" || value === "pause" || value === "resume" || value === "run_now" || value === "delete"
-    ? value
-    : null;
-}
-
-function routineFields(args: Json): { fields: Json; error?: string } {
-  const fields: Json = {};
-  const destination = (value: unknown) => value === "box" ? "cloud" : value;
-  if (args.run_on != null && args.runOn != null && destination(args.run_on) !== destination(args.runOn)) {
-    return { fields, error: "Choose one run_on destination; run_on and runOn disagree." };
-  }
-  if (args.timeout_minutes != null && args.timeoutMinutes != null && args.timeout_minutes !== args.timeoutMinutes) {
-    return { fields, error: "Choose one timeout_minutes limit; timeout_minutes and timeoutMinutes disagree." };
-  }
-  const runOn = destination(args.run_on ?? args.runOn);
-  const timeoutMinutes = args.timeout_minutes ?? args.timeoutMinutes;
-  if (runOn != null && runOn !== "maus" && runOn !== "cloud") {
-    return { fields, error: 'Use run_on="maus" for the bot’s current model and configured computer (including VPS), or run_on="box" only for the bot’s cloud computer. Legacy "cloud" also means box.' };
-  }
-  if (timeoutMinutes != null && (
-    typeof timeoutMinutes !== "number" || !Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 240
-  )) {
-    return { fields, error: "timeout_minutes must be a whole number from 5 to 240. Use clear_timeout to remove a limit." };
-  }
-  if (args.continuity != null && typeof args.continuity !== "boolean") {
-    return { fields, error: "continuity must be true or false." };
-  }
-  if (args.run_on_startup != null && args.runOnStartup != null && args.run_on_startup !== args.runOnStartup) {
-    return { fields, error: "Choose one run_on_startup value; run_on_startup and runOnStartup disagree." };
-  }
-  const runOnStartup = args.run_on_startup ?? args.runOnStartup;
-  if (runOnStartup != null && typeof runOnStartup !== "boolean") {
-    return { fields, error: "run_on_startup must be true or false." };
-  }
-  if (args.overlap !== undefined && args.overlap !== "skip" && args.overlap !== "queue") {
-    return { fields, error: "overlap must be skip or queue." };
-  }
-  if (args.clear_timeout != null && typeof args.clear_timeout !== "boolean") {
-    return { fields, error: "clear_timeout must be true or false." };
-  }
-  if (args.clear_timeout === true && timeoutMinutes != null) {
-    return { fields, error: "Choose timeout_minutes or clear_timeout, not both." };
-  }
-  if (typeof args.name === "string") fields.name = args.name.trim();
-  if (typeof args.instructions === "string") fields.instructions = args.instructions.trim();
-  if (args.schedule !== undefined && args.schedule !== null) {
-    const normalized = normalizeScheduleInput(args);
-    if (normalized.error) return { fields, error: normalized.error };
-    fields.schedule = normalized.schedule;
-  }
-  if (runOn != null) fields.runOn = runOn;
-  if (args.clear_timeout === true) fields.timeoutMinutes = null;
-  else if (timeoutMinutes != null) fields.timeoutMinutes = timeoutMinutes;
-  if (typeof args.continuity === "boolean") fields.continuity = args.continuity;
-  if (args.overlap !== undefined) fields.overlap = args.overlap;
-  if (typeof runOnStartup === "boolean") fields.runOnStartup = runOnStartup;
-  return { fields };
 }
 
 /** Full Access is decided by the harness, never inferred from a model claim or a local flag. */
@@ -385,7 +172,11 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
 
-export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const { name, arguments: args } = resolveAgentsCall(called, input);
+  const refused = outOfBounds(name, fullInputSchema(name), args);
+  if (refused) return { text: refused, isError: true };
+  const member = agentsCallMember(name, args);
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
@@ -412,6 +203,14 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return { text: `Attached ${String(body.name ?? "the file")} (${Number(body.bytes ?? 0)} bytes). It now appears in the chat with a preview.` };
   }
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
+  if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
+  if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
+  if (MAUSBOT_TOOL_NAMES.has(name)) return callMausBotTool(name, args, context);
+  if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
+  if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
+  if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
+  if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
+  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };
@@ -449,16 +248,16 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (canonical.group_id === undefined) canonical.group_id = args.groupId;
     if (canonical.done_when === undefined) canonical.done_when = args.doneWhen;
     const ids = canonical.bot_ids;
+    const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
     const usable = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === "string")
       && typeof canonical.message === "string" && canonical.message.trim().length > 0
       && (canonical.thread === undefined || canonical.thread === "standing" || canonical.thread === "new")
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
-      && (canonical.consult === undefined || typeof canonical.consult === "boolean")
-      && (canonical.done_when === undefined || typeof canonical.done_when === "string")
-      && (canonical.reason === undefined || typeof canonical.reason === "string");
+      && optional("consult", "boolean") && optional("in_my_folder", "boolean")
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string");
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
@@ -466,7 +265,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       groupId: canonical.group_id, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
-      thread: canonical.thread, reply: canonical.reply, consult: canonical.consult,
+      thread: canonical.thread, reply: canonical.reply,
+      title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
@@ -500,18 +300,18 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
     const bots = (r.bots as Array<Json>) ?? [];
-    if (!bots.length) return { text: "No other reachable bots yet." };
+    if (!bots.length) return { text: "No other bots you can reach yet." };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
       const state = typeof b.statusText === "string"
         ? (b.status === "available" ? "" : b.statusText)
         : (b.busy ? "busy" : "");
-      const team = typeof b.section === "string" ? `, team: ${peerName(b.section) || "General"}` : "";
+      const team = typeof b.section === "string" ? `, department: ${peerName(b.section) || "General"}` : "";
       return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${team}${state ? `, ${state}` : ""}]`;
     });
     return {
-      text: `Reachable teammates:\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
+      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
     };
   }
   if (name === "list_rooms") {
@@ -624,6 +424,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
   }
+  if (name === "list_team_library") {
+    return { text: JSON.stringify(await api("/api/internal/team-library")) };
+  }
   if (name === "propose_team_setup" || name === "propose_bot_deletion") {
     const deleting = name === "propose_bot_deletion";
     const result = await api(deleting ? "/api/internal/bot-deletion-requests" : "/api/internal/team-setup-requests", {
@@ -652,12 +455,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         instructions,
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
-        ...(args.suggestion === true ? { suggestion: true } : {}),
       }),
     });
-    if (r.state === "pending" && args.suggestion === true) {
-      return { text: `Your suggestion is on one card for the user: ${String(r.title)}. @${botName} has not been created. End this turn; their answer resumes you once. If they choose Not now, do not suggest another specialist in this conversation unless they ask.` };
-    }
     if (r.state === "pending") {
       return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
     }
@@ -666,18 +465,18 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.`,
     };
   }
-  if (name === "create_room") {
-    if (args.section !== undefined) return { text: "Room sections are fixed to your own section; ask the user to move rooms.", isError: true };
+  if (member === "create_room") {
+    if (args.section !== undefined) return { text: "A room you create stays in your own department; ask the user to move it.", isError: true };
     const roomName = String(args.name ?? "").trim();
     const memberIds = Array.isArray(args.member_bot_ids)
       ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
       : [];
     const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
     if (!roomName) {
-      return { text: "create_room needs a room name.", isError: true };
+      return { text: "manage_room action=create needs a room name.", isError: true };
     }
     if (!memberIds.length) {
-      return { text: "create_room needs at least one bot ID in member_bot_ids.", isError: true };
+      return { text: "manage_room action=create needs at least one bot ID in member_bot_ids.", isError: true };
     }
     const r = await api(`/api/internal/create-room`, {
       method: "POST",
@@ -694,12 +493,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members.`,
     };
   }
-  if (name === "manage_room") {
+  if (member === "manage_room") {
     if (args.section !== undefined || args.action === "set_section") return { text: "Moving rooms between sections is user-only.", isError: true };
     const roomId = String(args.room_id ?? "").trim();
     const action = String(args.action ?? "").trim();
     if (!roomId || !action) {
-      return { text: "manage_room needs room_id and action.", isError: true };
+      return { text: "manage_room needs action and, for any action but create, the room_id from list_rooms.", isError: true };
     }
     const memberIds = Array.isArray(args.member_bot_ids)
       ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
@@ -724,6 +523,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   }
   if (name === "request_credential") {
     const credentialId = args.credential_id;
+    if (credentialId === undefined || credentialId === "") return requestCustomSecret(args, context);
     if (!isCredentialTargetId(credentialId)) {
       return { text: "request_credential needs a supported credential_id.", isError: true };
     }
@@ -739,6 +539,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     if (r.alreadyConfigured) {
       return { text: `${r.label ?? CREDENTIAL_TARGETS[credentialId].label} is already configured. Continue the task.` };
+    }
+    if (credentialId === "onePasswordToken") {
+      return { text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready: the person pastes it into its card in OpenMausBot, on their computer or in My Cloud, and OpenMausBot checks it with 1Password before keeping it. End this turn; OpenMausBot will resume the task after they save or decline. Never ask them to paste the token into chat, and never pass it to a command line.` };
     }
     return {
       text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
@@ -781,71 +584,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     } catch (error) {
       return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };
     }
-  }
-  if (name === "list_routines") {
-    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
-    const r = await api(`/api/internal/routines?${query.toString()}`);
-    const routines = Array.isArray(r.routines) ? r.routines : [];
-    const now = typeof r.now === "string" ? r.now : new Date().toISOString();
-    const timeZone = typeof r.timeZone === "string" && r.timeZone ? r.timeZone : "local computer timezone";
-    if (!routines.length) {
-      return { text: `This bot has no routines. Current time: ${now}. Timezone: ${timeZone}.` };
-    }
-    return {
-      text: `This bot's routines (current time: ${now}; timezone: ${timeZone}):\n${JSON.stringify(routines, null, 2)}`,
-    };
-  }
-  if (name === "propose_routine") {
-    const { fields: routine, error: scheduleError } = routineFields(args);
-    if (scheduleError) return { text: scheduleError, isError: true };
-    if (!routine.name || !routine.instructions || !routine.schedule) {
-      return { text: "propose_routine needs name, instructions, and schedule.", isError: true };
-    }
-    const forBotId = String(args.for_bot_id ?? "").trim();
-    const r = await api("/api/internal/routine-requests", {
-      method: "POST",
-      body: JSON.stringify({
-        fromBotId: BOT_ID,
-        fromThreadId: THREAD_ID,
-        action: "create",
-        routine,
-        forBotId: forBotId || undefined,
-      }),
-    });
-    return confirmationResult(r, `the new routine “${routine.name}”`);
-  }
-  if (name === "propose_routine_action") {
-    const routineId = String(args.routine_id ?? "").trim();
-    const action = routineAction(args.action);
-    if (!routineId || !action) {
-      return { text: "propose_routine_action needs a routine_id and supported action.", isError: true };
-    }
-    const forBotId = String(args.for_bot_id ?? "").trim();
-    const body: Json = {
-      fromBotId: BOT_ID,
-      fromThreadId: THREAD_ID,
-      action,
-      routineId,
-      ...(forBotId ? { forBotId } : {}),
-    };
-    if (action === "update") {
-      if (!jsonRecord(args.changes)) {
-        return { text: "The update action needs at least one field in changes.", isError: true };
-      }
-      const { fields: changes, error: scheduleError } = routineFields(args.changes);
-      if (scheduleError) return { text: scheduleError, isError: true };
-      if (!Object.keys(changes).length) {
-        return { text: "The update action needs at least one supported field in changes.", isError: true };
-      }
-      body.changes = changes;
-    } else if (args.changes !== undefined) {
-      return { text: `The ${action} action does not accept changes.`, isError: true };
-    }
-    const r = await api("/api/internal/routine-requests", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    return confirmationResult(r, `${action.replace("_", " ")} on routine ${routineId}`);
   }
   if (name === "propose_profile") {
     if ((args.notifications !== undefined && typeof args.notifications !== "boolean")
@@ -902,11 +640,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     return confirmationResult(r, "the default model change", "model");
   }
-  if (name === "memory_update") {
-    if (!["append", "replace", "remove", "supersede"].includes(String(args.action))
-      || (args.action !== "remove" && (typeof args.text !== "string" || !args.text.trim()))
+  if (member === "memory_update") {
+    const passageOnly = args.action === "remove" || args.action === "forget";
+    if (!["append", "replace", "remove", "supersede", "forget"].includes(String(args.action))
+      || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
       || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
-      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, or remove with old_text.", isError: true };
+      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, or forget with old_text naming what to forget.", isError: true };
     }
     const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
@@ -920,15 +659,16 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       }),
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
+    if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
     const full = r.truncated
-      ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Ask the person to trim MEMORY.md in Settings."
+      ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel."
       : "";
     const shown = moved.slice(0, MOVED_ENTRIES_SHOWN).map((text) => text.split("\n")[0]);
     const more = moved.length > shown.length ? `\n…and ${moved.length - shown.length} more` : "";
     const movedNote = moved.length
-      ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to memory/archive.md (session_search finds them):\n${shown.join("\n")}${more}`
+      ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to your archive (session_search finds them):\n${shown.join("\n")}${more}`
       : "";
     return { text: `Memory updated.${entry}${full}${movedNote}` };
   }
@@ -944,7 +684,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (r.error) return { text: `Couldn't retry that thread: ${String(r.error)}`, isError: true };
     return { text: typeof r.message === "string" ? r.message : "The thread is running again. Its result stays in that thread; you are not woken for it — check it later with session_search or list_threads if you need to." };
   }
-  if (name === "memory_log") {
+  if (member === "memory_log") {
     if (typeof args.text !== "string" || !args.text.trim()) {
       return { text: "memory_log needs text: one line about what happened.", isError: true };
     }
@@ -961,8 +701,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const detail = String(args.detail ?? "").trim();
     if (!kind || !entryName || !detail) return { text: "propose_team_memory needs kind, name, and detail.", isError: true };
     const r = await api("/api/internal/team-memory", {
-      method: "POST",
-      body: JSON.stringify({
+      method: "POST", body: JSON.stringify({
         fromBotId: BOT_ID,
         fromThreadId: THREAD_ID,
         kind,
@@ -972,9 +711,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         aliases: Array.isArray(args.aliases) ? args.aliases.filter((alias) => typeof alias === "string") : undefined,
       }),
     });
-    return confirmationResult(r, `remembering ${entryName} for the team`, "entry");
+    return confirmationResult(r, `the team memory entry for ${entryName}`, "entry");
   }
-  if (name === "session_search") {
+  if (member === "session_search") {
     const q = String(args.query ?? "").trim();
     const since = typeof args.since === "string" ? args.since.trim() : "";
     const until = typeof args.until === "string" ? args.until.trim() : "";
@@ -1015,17 +754,17 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return {
       text:
         `${memoryBlock}${hits.length} ${q ? "matching " : ""}message${hits.length === 1 ? "" : "s"} from your earlier conversations (${q ? "best match first" : "newest first"}):\n${lines.join("\n")}\n\n` +
-        "These are your own past notes. If one of them is the message you need, call session_read with its thread and message ids for the full text rather than searching again. Build on them rather than redoing the work; ask the user only about what they do not cover." +
+        "These are your own past notes. If one of them is the message you need, call session_search with its thread_id and message_id for the full text rather than searching again. Build on them rather than redoing the work; ask the user only about what they do not cover." +
         (crossed
           ? " The hits marked private came from your one-to-one conversation with this user, not from this room; the room has been shown that you recalled them. Use them, and say where something came from if anyone asks."
           : ""),
     };
   }
-  if (name === "session_read") {
+  if (member === "session_read") {
     const threadId = String(args.thread_id ?? "").trim();
     const messageId = String(args.message_id ?? "").trim();
     if (!threadId || !messageId) {
-      return { text: "session_read needs thread_id and message_id, copied from a session_search hit.", isError: true };
+      return { text: "Reading a message needs both thread_id and message_id, copied from a session_search hit.", isError: true };
     }
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, threadId, messageId });
     let r: Json;
@@ -1130,9 +869,29 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       headerKeys ? `Header names on file: ${headerKeys}.` : "",
     ].filter(Boolean).join(" ");
     const local = transport === "command" ? " Enabling a local command runs that command on their computer." : "";
+    const keptIn = Array.isArray(saved.keptIn) ? saved.keptIn.filter((path): path is string => typeof path === "string") : [];
+    const own = (saved.own === true ? " It uses files in your own folder, so it works only for you, not for other bots." : "")
+      + (keptIn.length ? ` Its files were in this conversation's temporary folder, so they were copied to ${keptIn.join(", ")} in your own folder, and it runs from there: change them there.` : "");
     return {
-      text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${named ? ` ${named}` : ""}`,
+      text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${own}${named ? ` ${named}` : ""}`,
     };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
+}
+
+/** A secret OpenMausBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */
+async function requestCustomSecret(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const r = await context.client.apiResponse("/api/internal/request-credential", {
+    method: "POST",
+    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery }),
+  });
+  const label = typeof r.body.label === "string" ? r.body.label : "the secret";
+  if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
+  if (typeof r.body.text === "string") return { text: `${r.body.text} Continue the task.` };
+  const asked = r.body.savedAs === "ref"
+    ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.`
+    : r.body.savedAs === "file" ? ` ${label} was saved earlier as a file for your commands, not as a secretRef, so this card asks for it again.` : "";
+  return {
+    text: `A secure card for ${label} is ready in OpenMausBot, on the computer and on a freshly QR-paired phone.${asked} End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
+  };
 }

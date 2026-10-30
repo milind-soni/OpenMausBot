@@ -11,11 +11,13 @@ import { closeMessageDb,
   indexedMemoryFiles,
   insertMessage,
   insertNotificationLog,
+  lastRowAt,
   latestPersonLineAts,
   logNotification,
+  openRescueMessages,
   latestSaidByBot,
-  markAllNotificationLogRead,
   markNotificationLogRead,
+  markThreadNotificationLogRead,
   readMessageText,
   recentMessages,
   recentNotificationLog,
@@ -60,6 +62,19 @@ describe("message-db", () => {
     const thread = readThread("t1", legacy("t1"));
     expect(thread.messages.map((m) => m.text)).toEqual(["hello, edited", "world"]);
     expect(thread.activeLeafId).toBe("m2");
+  });
+
+  it("finds the first-reply rescue rows that never settled or ended", () => {
+    const rescue = (id: string, state: Record<string, true> = {}) => msg(id, "", {
+      role: "bot", kind: "activity",
+      tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
+        rescue: { botId: "b", threadId: "t1", turnId: id, instanceId: "opencodeGo", ai: "OpenCode", ...state } },
+    });
+    insertMessage("t1", rescue("open"));
+    insertMessage("t1", rescue("settled", { settled: true }));
+    insertMessage("t1", rescue("over", { over: true }));
+    insertMessage("t1", msg("plain", "", { role: "bot", kind: "activity", tool: { name: "notice: something else", ok: true } }));
+    expect(openRescueMessages().map((hit) => [hit.threadId, hit.message.id])).toEqual([["t1", "open"]]);
   });
 
   it("imports a legacy JSON thread file exactly once", () => {
@@ -353,6 +368,24 @@ describe("message-db", () => {
     expect(existsSync(legacy("tail-legacy"))).toBe(false);
   });
 
+  it("lastRowAt reads the time on the row the Store holds last, without loading the conversation", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const lastAt = () => store.messagesFor(bot.threadId).at(-1)?.at;
+    expect(lastRowAt("never-written")).toBeUndefined();
+    const first = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "first", at: 5_000 });
+    expect(lastRowAt(bot.threadId)).toBe(lastAt());
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "earlier clock", at: 1_000 });
+    expect(lastRowAt(bot.threadId)).toBe(1_000);
+    expect(lastRowAt(bot.threadId)).toBe(lastAt());
+    store.insertMessageAfter(bot.threadId, first.id, { role: "bot", kind: "text", text: "inserted" });
+    expect(lastRowAt(bot.threadId)).toBe(lastAt());
+    store.patchMessage(bot.threadId, store.messagesFor(bot.threadId).at(-1)!.id, { at: 7_000 });
+    expect(lastRowAt(bot.threadId)).toBe(7_000);
+    store.branchMessage(bot.threadId, first.id, "edited");
+    expect(lastRowAt(bot.threadId)).toBe(lastAt());
+  });
+
   it("Store round-trips branching through the DB across a restart", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -486,6 +519,18 @@ describe("notification_log", () => {
     expect(recentNotificationLog()).toEqual([logged]);
   });
 
+  it("keeps the one person a notification is for, in a feed made before that was recorded too", () => {
+    closeMessageDb();
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
+    const old = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    old.exec("CREATE TABLE notification_log (id TEXT PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL, bot_id TEXT NOT NULL, bot_name TEXT NOT NULL, thread_id TEXT NOT NULL, group_id TEXT, title TEXT NOT NULL, body TEXT NOT NULL, avatar_url TEXT, read INTEGER NOT NULL DEFAULT 0)");
+    old.exec("INSERT INTO notification_log VALUES ('before', 1, 'done', 'bot-1', 'Scout', 'thread-1', NULL, 'Scout finished', 'Done', NULL, 0)");
+    old.close();
+    const tagged = logNotification({ kind: "mention", botId: "bot-1", botName: "Scout", threadId: "thread-1", title: "Ada mentioned you", body: "@Bob look", forPerson: "p_bobbobbobbobbobbobbobb" });
+    expect(recentNotificationLog()).toEqual([tagged, expect.objectContaining({ id: "before" })]);
+    expect(recentNotificationLog()[1]).not.toHaveProperty("forPerson");
+  });
+
   it("forgets a thread's notifications when the thread is deleted", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000, { threadId: "thread-2" }));
@@ -493,19 +538,31 @@ describe("notification_log", () => {
     expect(recentNotificationLog().map((r) => r.id)).toEqual(["n2"]);
   });
 
-  it("marking read never deletes a row: read-one and read-all only flip the flag", () => {
+  it("marking read never deletes a row: it flips only the named entries' flag", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000));
-    markNotificationLogRead("n1");
+    insertNotificationLog(entry("n3", 3000));
+    markNotificationLogRead(["n1"]);
     let rows = recentNotificationLog();
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.find((r) => r.id === "n1")?.read).toBe(true);
     expect(rows.find((r) => r.id === "n2")?.read).toBe(false);
 
-    markAllNotificationLogRead();
+    markNotificationLogRead(["n1", "n2"]);
     rows = recentNotificationLog();
-    expect(rows).toHaveLength(2);
-    expect(rows.every((r) => r.read)).toBe(true);
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
+  });
+
+  it("reading a conversation reads only its own notifications, a pending question's included", () => {
+    insertNotificationLog(entry("n1", 1000));
+    insertNotificationLog(entry("n2", 2000, { kind: "question" }));
+    insertNotificationLog(entry("n3", 3000, { threadId: "thread-2" }));
+    expect(markThreadNotificationLogRead("thread-1").sort()).toEqual(["n1", "n2"]);
+    const rows = recentNotificationLog();
+    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
+    expect(rows.find((r) => r.id === "n3")?.read).toBe(false);
+    expect(markThreadNotificationLogRead("thread-1")).toEqual([]);
   });
 
   it("keeps only the newest 500 rows, FIFO", () => {

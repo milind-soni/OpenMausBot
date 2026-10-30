@@ -32,6 +32,6 @@ export function CloudHowTo() {
   const skip = () => { track("cloud_howto", { result: "skipped" }); dispatch({ type: "cloudHowTo", open: false }); };
   return <Spotlight anchor={SWITCHER_ANCHOR} placement={placement} mascot="curious" secondary={{ label: t("cloudHowTo.skip"), onClick: skip }} onDone={skip}>
     <p className="font-semibold">{t("cloudHowTo.title")}</p>
-    <p className="mt-1 text-[12.5px] text-ink-secondary">{t("cloudHowTo.body")}</p>
+    <p className="mt-1 text-[13px] text-ink-secondary">{t("cloudHowTo.body")}</p>
   </Spotlight>;
 }

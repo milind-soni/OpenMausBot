@@ -210,16 +210,18 @@ describe("RoutineRequestService", () => {
       appended.push(structuredClone(message.card));
       return append(threadId, message);
     });
-    const ask = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal() });
-    expect(ask.state).toBe("pending");
-    expect(routines.listRoutines()).toHaveLength(0);
-    expect(appended[0]).toMatchObject({ options: ["Confirm", "Cancel"] });
+    // No grant still applies (Triggers v2): the grant only names why, for the decision log.
+    const ask = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal({ instructions: "From the Ask thread." }) });
+    expect(ask).toMatchObject({ state: "applied", result: { action: "create" } });
+    expect(ask).not.toHaveProperty("appliedBy");
+    expect(routines.listRoutines()).toHaveLength(1);
+    expect(appended[0]).toMatchObject({ options: [], dismissed: true });
 
     const submit = (proposal: RoutineProposalInput) => service.submit({ botId: "bot-a", threadId: "full-thread", proposal });
     const created = await submit(createProposal());
     expect(created).toMatchObject({ state: "applied", result: { action: "create" } });
     const routineId = created.result!.resultId;
-    expect(routines.listRoutines()).toHaveLength(1);
+    expect(routines.listRoutines()).toHaveLength(2);
     expect(await submit({ action: "update", routineId, changes: { name: "Updated brief" } }))
       .toMatchObject({ state: "applied", result: { action: "update", resultId: routineId } });
     expect(routines.listRoutines().find((routine) => routine.id === routineId)?.name).toBe("Updated brief");
@@ -234,26 +236,27 @@ describe("RoutineRequestService", () => {
     expect(routines.listRuns()).toHaveLength(1);
     expect(await submit({ action: "delete", routineId })).toMatchObject({ state: "applied" });
     expect(routines.listRoutines().find((routine) => routine.id === routineId)).toBeUndefined();
-    expect(appended.slice(1).every((card) => card.dismissed && card.options.length === 0)).toBe(true);
+    expect(appended.every((card) => card.dismissed && card.options.length === 0)).toBe(true);
     expect(store.messagesFor("full-thread").every((message) => message.card?.answered === "allow")).toBe(true);
     expect(autoApply).toHaveBeenLastCalledWith("bot-a", "full-thread", "bot-a");
   });
 
-  it("rechecks the Full Access grant after cloud readiness and preserves scope validation", async () => {
+  it("reads the grant after cloud readiness for the log, applies either way, and preserves scope validation", async () => {
     let full = true;
     const { service, routines, store } = harness(undefined, async () => {
       full = false;
       return { ready: true };
     }, undefined, () => (full ? "full-access" : null));
-    const changed = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ runOn: "cloud" }) });
-    expect(changed.state).toBe("pending");
-    expect(routines.listRoutines()).toHaveLength(0);
-    expect(store.messagesFor("thread-a")[0]?.card?.dismissed).toBeUndefined();
+    const changed = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ runOn: "cloud", instructions: "On the cloud computer." }) });
+    expect(changed.state).toBe("applied");
+    expect(changed).not.toHaveProperty("appliedBy");
+    expect(routines.listRoutines()).toHaveLength(1);
+    expect(store.messagesFor("thread-a")[0]?.card?.dismissed).toBe(true);
     full = true;
     const own = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal() });
     await expect(service.submit({ botId: "bot-b", threadId: "thread-b", proposal: { action: "delete", routineId: own.result!.resultId } }))
       .rejects.toThrow();
-    expect(routines.listRoutines()).toHaveLength(1);
+    expect(routines.listRoutines()).toHaveLength(2);
     expect(store.messagesFor("thread-b")).toHaveLength(0);
     await expect(service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ instructions: "A different cancelled request." }), canCommit: () => false }))
       .rejects.toThrow("requesting turn ended");
@@ -293,8 +296,9 @@ describe("RoutineRequestService", () => {
     expect(routines.listRoutines()).toHaveLength(0);
     expect(proposed.timeZone).toBe("America/New_York");
     expect(proposed.summary).toContain("0 9 1 * *");
-    expect(proposed.summary).toContain("America/New_York");
-    expect(proposed.detail).toContain("Next 3 runs (America/New_York): Sep 1, 2026, 9:00 AM · Oct 1, 2026, 9:00 AM · Nov 1, 2026, 9:00 AM");
+    expect(proposed.summary).toContain("Monthly on day 1 at 9:00 Eastern time");
+    expect(`${proposed.summary}\n${proposed.detail}`).not.toContain("America/New_York");
+    expect(proposed.detail).toContain("Next 3 runs (Eastern time): Sep 1, 2026, 9:00 AM · Oct 1, 2026, 9:00 AM · Nov 1, 2026, 9:00 AM");
     expect(proposed.nextRunAt).toBe(Date.parse("2026-09-01T13:00:00Z"));
     const message = store.messagesFor("thread-a")[0]!;
     message.card = JSON.parse(JSON.stringify(message.card)) as RoutineRequestOptionCard;
@@ -367,7 +371,8 @@ describe("RoutineRequestService", () => {
 
     expect(routines.listRoutines()).toHaveLength(0);
     expect(proposed.timeZone).toBe("Asia/Kolkata");
-    expect(proposed.summary).toContain("Monday, Wednesday at 09:00 (Asia/Kolkata)");
+    expect(proposed.summary).toContain("Monday, Wednesday at 9:00 India time");
+    expect(proposed.summary).not.toContain("Asia/Kolkata");
     const card = store.messagesFor("thread-a")[0]!.card!;
     expect(card.requestId).toBe(proposed.requestId);
     expect(card.tool).toBe("schedule_routine");
@@ -474,7 +479,7 @@ describe("RoutineRequestService", () => {
                   everyMinutes: routine.schedule.everyMinutes,
                   type: "interval",
                 }
-              : routine.schedule.type === "cron"
+              : routine.schedule.type === "cron" || routine.schedule.type === "limit_reset"
                 ? { ...routine.schedule }
                 : { weekdays: [...routine.schedule.weekdays], time: routine.schedule.time, type: "daily" },
           instructions: routine.instructions,
@@ -749,7 +754,7 @@ describe("RoutineRequestService", () => {
 
     expect(proposed.summary).toContain("Every 15 minutes");
     expect(proposed.summary).toContain("Monday, Friday");
-    expect(proposed.summary).toContain("09:00–17:00");
+    expect(proposed.summary).toContain("during 9:00–17:00 India time");
     expect(proposed.summary).toContain("Sep 30, 2026");
     expect(proposed.summary).toContain("no run limit");
     expect(store.messagesFor("thread-a")[0]?.card?.routineRequest?.operation).toMatchObject({
@@ -848,9 +853,9 @@ describe("RoutineRequestService", () => {
     expect(restrictedWithoutAnchor.summary).toContain(
       "cadence starting at confirmation; first run is the next allowed time",
     );
-    expect(restrictedWithoutAnchor.summary).toContain("Friday (Asia/Kolkata)");
-    expect(restrictedWithoutAnchor.summary).toContain("16:00–17:00 (Asia/Kolkata)");
-    expect(restrictedWithoutAnchor.detail).toContain("Next allowed time after confirmation (Asia/Kolkata)");
+    expect(restrictedWithoutAnchor.summary).toContain("Friday (India time)");
+    expect(restrictedWithoutAnchor.summary).toContain("16:00–17:00 India time");
+    expect(restrictedWithoutAnchor.detail).toContain("Next allowed time after confirmation (India time)");
     expect(restrictedWithoutAnchor.detail).not.toContain("One interval after confirmation");
 
     clock.now = now + 7 * 60_000;
@@ -1692,7 +1697,7 @@ describe("cross-bot routine targeting", () => {
     });
     const card = store.messagesFor("thread-a")[0]?.card;
     expect(card?.title).toContain("for @Ops");
-    expect(card?.subtitle).toContain("engine and permissions");
+    expect(card?.subtitle).toContain("AI and permissions");
     expect(card?.routineRequest?.operation).toMatchObject({ action: "create", forBot: forOps.forBot });
 
     const result = service.resolve({
@@ -1924,66 +1929,46 @@ describe("a bot's own routine changes", () => {
     expect(cards[1]!.routineRequest?.undo).toMatchObject({ name: "Renamed brief", before: { name: "Morning brief" } });
   });
 
-  it("keeps the card for another bot's routine at Ask, and in a guest-driven turn", async () => {
+  it("applies another bot's routine at Ask, and in a guest-driven turn, with no card left open", async () => {
     const { service, routines, store } = own();
     const proposal = createProposal();
     if (proposal.action !== "create") throw new Error("Expected create");
     expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { ...proposal, forBot: { botId: "bot-b", name: "Peer" } } }))
-      .toMatchObject({ state: "pending" });
+      .toMatchObject({ state: "applied", result: { action: "create" } });
     expect(await service.submit({ botId: "bot-a", threadId: "guest-thread", proposal: createProposal({ instructions: "A guest's request." }) }))
-      .toMatchObject({ state: "pending" });
-    expect(routines.listRoutines()).toHaveLength(0);
-    expect(openCards(store, "ask-thread")).toHaveLength(1);
-    expect(openCards(store, "guest-thread")).toHaveLength(1);
+      .toMatchObject({ state: "applied" });
+    expect(routines.listRoutines().map((routine) => routine.botId).sort()).toEqual(["bot-a", "bot-b"]);
+    expect(openCards(store, "ask-thread")).toHaveLength(0);
+    expect(openCards(store, "guest-thread")).toHaveLength(0);
     const peers = routines.create({ botId: "bot-b", name: "Peer digest", prompt: "Digest.", schedule: { type: "daily", time: "09:00", weekdays: [1] } });
     expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action: "pause", routineId: peers.id, forBot: { botId: "bot-b", name: "Peer" } } }))
-      .toMatchObject({ state: "pending" });
-    expect(routines.listRoutines().find((routine) => routine.id === peers.id)?.enabled).toBe(true);
-  });
-
-  it("shows the card past 20 enabled routines at Ask, but not at Full access", async () => {
-    const { service, routines, store } = own();
-    for (let index = 0; index < 20; index += 1) {
-      routines.create({ botId: "bot-a", name: `Routine ${index}`, prompt: `Task ${index}.`, schedule: { type: "daily", time: "09:00", weekdays: [1] } });
-    }
-    const paused = routines.create({ botId: "bot-a", name: "Paused", prompt: "Paused task.", enabled: false, schedule: { type: "daily", time: "09:00", weekdays: [1] } });
-    expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal() })).toMatchObject({ state: "pending" });
-    expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action: "resume", routineId: paused.id } })).toMatchObject({ state: "pending" });
-    expect(openCards(store, "ask-thread")).toHaveLength(2);
-    expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action: "pause", routineId: routines.listRoutines().find((routine) => routine.enabled)!.id } }))
       .toMatchObject({ state: "applied" });
-    expect(await service.submit({ botId: "bot-a", threadId: "full-thread", proposal: createProposal({ instructions: "At Full access." }) }))
-      .toMatchObject({ state: "applied", appliedBy: "full-access" });
+    expect(routines.listRoutines().find((routine) => routine.id === peers.id)?.enabled).toBe(false);
   });
 
-  it("counts only the bot's own enabled routines, and allows the 20th", async () => {
+  it("has no cap: a bot's 21st enabled routine and a resume past 20 apply like any other", async () => {
     const { service, routines, store } = own();
     const daily = { type: "daily" as const, time: "09:00", weekdays: [1] };
-    for (let index = 0; index < 25; index += 1) routines.create({ botId: "bot-b", name: `Peer ${index}`, prompt: `Peer ${index}.`, schedule: daily });
-    for (let index = 0; index < 19; index += 1) routines.create({ botId: "bot-a", name: `Own ${index}`, prompt: `Own ${index}.`, schedule: daily });
+    for (let index = 0; index < 20; index += 1) routines.create({ botId: "bot-a", name: `Own ${index}`, prompt: `Own ${index}.`, schedule: daily });
     const paused = routines.create({ botId: "bot-a", name: "Paused", prompt: "Paused task.", enabled: false, schedule: daily });
-    expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal() }))
-      .toMatchObject({ state: "applied", appliedBy: "self" });
     expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal({ instructions: "The 21st." }) }))
-      .toMatchObject({ state: "pending" });
+      .toMatchObject({ state: "applied", appliedBy: "self" });
     expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action: "resume", routineId: paused.id } }))
-      .toMatchObject({ state: "pending" });
-    expect(openCards(store, "ask-thread")).toHaveLength(2);
+      .toMatchObject({ state: "applied" });
+    expect(routines.listRoutines().filter((routine) => routine.enabled)).toHaveLength(22);
+    expect(openCards(store, "ask-thread")).toHaveLength(0);
   });
 
-  it("is not held back by the open-card budget, which still holds a card past the cap", async () => {
+  it("never asks the open-card budget, since no change leaves a card open", async () => {
     const canPersist = vi.fn((_botId: string, _threadId: string, opensCard: boolean) =>
       opensCard ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" } : { ok: true as const });
     const { service, routines } = harness(undefined, undefined, canPersist, rule);
-    const created = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal() });
-    expect(created).toMatchObject({ state: "applied", appliedBy: "self" });
-    expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action: "pause", routineId: created.result!.resultId } }))
-      .toMatchObject({ state: "applied" });
     for (let index = 0; index < 20; index += 1) {
       routines.create({ botId: "bot-a", name: `Routine ${index}`, prompt: `Task ${index}.`, schedule: { type: "daily", time: "09:00", weekdays: [1] } });
     }
-    await expect(service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal({ instructions: "Past the cap." }) }))
-      .rejects.toThrow("confirm or cancel an existing proposal first");
+    expect(await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal({ instructions: "Past twenty." }) }))
+      .toMatchObject({ state: "applied" });
+    expect(canPersist.mock.calls.every(([, , opensCard]) => opensCard === false)).toBe(true);
   });
 
   it("logs a self-applied routine as the bot's own even if receipt settlement fails", async () => {

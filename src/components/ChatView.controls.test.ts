@@ -29,7 +29,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
-  useShowThreads: () => fixture.showThreads,
+  useShowThreads: () => fixture.advanced && fixture.showThreads,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // The trigger still renders, so the markup assertions in this file see the same header.
@@ -40,7 +40,7 @@ vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
     return props.renderTrigger({ open: false });
   },
 }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite, useReactor: () => "user" }));
 vi.mock("./CitationUI", async (importOriginal) => ({
   ...await importOriginal<typeof import("./CitationUI")>(),
   CitationSelectionToolbar: () => createElement("span", { "data-testid": "citation-toolbar" }),
@@ -54,7 +54,8 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView, ErrorRow, FailedTurnRow, NewConversationInstead, claudeUpdateTarget } = await import("./ChatView");
+const { ChatView, ErrorRow, FailedTurnRow, claudeUpdateTarget } = await import("./ChatView");
+const { NewConversationInstead } = await import("./NewConversationInstead");
 const { activityPreview } = await import("@/lib/failed-turn");
 afterAll(() => vi.unstubAllGlobals());
 
@@ -66,27 +67,127 @@ const bot: Bot = {
     modelSelection: { instanceId: "test", model: "thread-model" }, approvalMode: "ask" }],
 };
 
-describe("Advanced mode in the header menu", () => {
-  const inspector = () => {
+describe("the header's right side", () => {
+  const header = (of: Bot = bot) => {
     fixture.menus = [];
-    renderToStaticMarkup(createElement(ChatView, { bot }));
-    const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
-    return more.items.find((item) => item.key === "inspector")!;
+    fixture.model = null;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: of }));
+    return { markup, controls: markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf("role=\"log\"")) };
   };
 
-  it("keeps the inspector visible but locked, labelled for Advanced mode, in Simple mode", () => {
+  it("keeps the model picker and the bot's computer in view in Simple mode, with ⋯ left to the bot panel", () => {
     fixture.advanced = false;
-    const item = inspector();
-    expect(item.disabled).toBe(true);
-    expect(item.heading).toBe("In Advanced mode");
-    fixture.advanced = true;
+    try {
+      const { markup, controls } = header();
+      expect(controls).toContain("data-test-model-control");
+      expect(fixture.model).toMatchObject({ threadId: "selected" });
+      const computer = controls.match(/<button[^>]*data-tour="computer"[^>]*>/)?.[0] ?? "";
+      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-8"]));
+      expect(markup).not.toContain('data-testid="chat-more"');
+      expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
+      expect(markup).toContain("data-chathead-pill");
+    } finally {
+      fixture.advanced = true;
+    }
   });
 
-  it("leaves the inspector exactly as it was in Advanced mode", () => {
+  it("keeps the computer and ⋯ in a remote client's Simple header, whose settings panel has no room for them", () => {
+    fixture.advanced = false;
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const { markup } = header();
+      expect(markup).not.toContain("data-test-model-control");
+      expect(markup).toContain('data-tour="computer"');
+      expect(markup).toContain('data-testid="chat-more"');
+      const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
+      expect(more.items.map((item) => item.key)).toEqual(["find", "new-thread", "copy", "download"]);
+    } finally {
+      delete window.ogb;
+      fixture.advanced = true;
+    }
+  });
+
+  it("moves Stop out of the Simple header into the composer's round button while a turn runs", () => {
+    fixture.advanced = false;
+    try {
+      const busy = { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) };
+      const { markup, controls } = header(busy);
+      expect(controls).not.toContain("Stop this turn");
+      const stop = markup.match(/<button[^>]*data-composer-stop="slot"[^>]*>/)?.[0] ?? "";
+      expect(stop).toContain('aria-label="Stop this turn"');
+      expect(markup).not.toContain('data-call-button="composer"');
+      expect(header({ ...busy, waitingForTeammates: true, busy: false, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: false, waitingForTeammates: true })) }).markup)
+        .toContain('data-composer-stop="slot"');
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
+  it("keeps Stop in the Advanced header while a turn runs", () => {
+    const { controls } = header({ ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) });
+    expect(controls).toContain('title="Stop this turn"');
+  });
+
+  it("leaves Advanced mode's model, computer and ⋯ exactly as they were, the inspector unlocked", () => {
     fixture.advanced = true;
-    const item = inspector();
-    expect(item.disabled).toBeFalsy();
-    expect(item.heading).toBeUndefined();
+    const { markup } = header();
+    expect(markup).toContain("data-test-model-control");
+    expect(markup).toContain('data-tour="computer"');
+    expect(markup).toContain('data-testid="chat-more"');
+    const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
+    expect(more.items.map((item) => item.key)).toEqual(["find", "copy", "download", "activity", "inspector"]);
+    const inspector = more.items.find((item) => item.key === "inspector")!;
+    expect(inspector.disabled).toBeFalsy();
+    expect(inspector.heading).toBeUndefined();
+  });
+});
+
+describe("the Simple header", () => {
+  it("is one pill: the avatar and name, with a dot for another busy conversation and no title, role or way back", () => {
+    const busyElsewhere: Bot = { ...bot, title: "Research", mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
+    fixture.advanced = false;
+    try {
+      const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+      const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
+      const pill = identity.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/)!;
+      expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
+      expect(pill[1]).toContain(">Pepper</span>");
+      expect(pill[1]).toContain('data-chathead-elsewhere="true"');
+      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "py-[7.5px]", "pr-[13.5px]"]));
+      // Away from the bot's main conversation, the pill names the one on screen.
+      expect(pill[1]).toContain("data-chathead-conversation");
+      for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
+        expect(simple, gone).not.toContain(gone);
+      }
+      window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+      try {
+        const remote = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+        expect(remote).not.toContain("data-chathead-elsewhere");
+        expect(remote).toContain("data-background-activity");
+      } finally {
+        delete window.ogb;
+      }
+    } finally {
+      fixture.advanced = true;
+    }
+    fixture.showThreads = false;
+    const advanced = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+    expect(advanced).not.toContain("data-chathead-elsewhere");
+    expect(advanced).toContain("data-background-activity");
+    expect(advanced).toContain("data-chathead-back");
+    expect(advanced).toContain("data-chathead-role");
+    fixture.showThreads = true;
+  });
+
+  it("opens the bot panel from the pill", () => {
+    fixture.advanced = false;
+    fixture.dispatch.mockClear();
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(markup).toMatch(/<button[^>]*data-chathead-pill="true"[^>]*aria-label="Open Pepper&#x27;s profile"/);
+    } finally {
+      fixture.advanced = true;
+    }
   });
 });
 
@@ -112,6 +213,30 @@ describe("header name", () => {
     expect(pill).toContain("Rename Pepper");
   });
 
+  it("shows the bot's role beside the pill in Advanced mode, taking only the room the name leaves, and leaves it to the bot panel in Simple", () => {
+    fixture.advanced = false;
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: " Research " } }))).not.toContain("data-chathead-role");
+    for (const advanced of [true]) {
+      fixture.advanced = advanced;
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: " Research " } }));
+      const identity = markup.slice(markup.indexOf("data-chathead-identity"), markup.indexOf("data-chathead-controls"));
+      const role = identity.match(/<span data-chathead-role="true" class="([^"]*)"><span title="Research" class="([^"]*)">Research<\/span><\/span>/);
+      expect(role, `advanced ${advanced}`).toBeTruthy();
+      expect(role![1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "max-w-fit", "grow", "basis-0"]));
+      expect(role![2].split(" ")).toEqual(expect.arrayContaining(["truncate", "text-[13px]", "text-ink-secondary"]));
+      expect(identity.indexOf("data-chathead-role")).toBeGreaterThan(identity.indexOf("Rename Pepper"));
+      expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("data-chathead-role");
+    }
+    fixture.advanced = true;
+  });
+
+  it("leaves a Chief's role out of the header when it only repeats the Chief of Staff badge", () => {
+    const header = (title: string) => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, chiefOfStaff: true, title } }));
+    expect(header("chief of staff ")).not.toContain("data-chathead-role");
+    expect(header("Operations lead")).toContain('<span title="Operations lead"');
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: "Chief of Staff" } }))).toContain("data-chathead-role");
+  });
+
   it("draws no working dots in the header pill, keeping one width, while a status still tells a screen reader", () => {
     for (const advanced of [true, false]) {
       fixture.advanced = advanced;
@@ -125,7 +250,7 @@ describe("header name", () => {
       expect(pillOf(busyMarkup)).toBe(pillOf(idleMarkup));
       expect(busyMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true">Working…<\/span>/);
       expect(idleMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true"><\/span>/);
-      expect(busyMarkup).toContain('title="Stop this turn"');
+      expect(busyMarkup).toContain(advanced ? 'title="Stop this turn"' : 'aria-label="Stop this turn"');
     }
     fixture.advanced = true;
   });
@@ -136,8 +261,8 @@ describe("header name", () => {
     }));
     const button = (markup: string) => markup.match(/<button[^>]*data-tour="computer"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
     expect(button(working("browser", true))).toContain('data-testid="computer-button-live"');
-    expect(button(working("browser", true))).toContain('aria-label="Bot&#x27;s computer, In use now"');
-    expect(button(working("browser", false))).toContain('aria-label="Bot&#x27;s computer"');
+    expect(button(working("browser", true))).toContain('aria-label="Bot&#x27;s screen, In use now"');
+    expect(button(working("browser", false))).toContain('aria-label="Bot&#x27;s screen"');
     expect(button(working("browser", false))).not.toContain("computer-button-live");
     expect(button(working("local", true))).not.toContain("computer-button-live");
     const pinned = renderToStaticMarkup(createElement(ChatView, {
@@ -169,14 +294,36 @@ describe("glass header", () => {
     expect(markup.slice(frame, header)).toContain("[--glass-tint:var(--color-app)]");
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
   });
+
+  it("fades the transcript into the canvas under the header in both modes", () => {
+    const bar = (markup: string) => markup.match(/<div data-glass-bar="top"[^>]*>/)?.[0] ?? "";
+    expect(bar(renderToStaticMarkup(createElement(ChatView, { bot })))).toContain('data-glass-fade=""');
+    fixture.advanced = false;
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(bar(markup)).toContain('data-glass-fade=""');
+      expect(bar(markup)).not.toContain("before:hidden");
+      expect(markup).toMatch(/class="glass-scroller [^"]*" style="scroll-padding-bottom:calc\(/);
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
+  it("holds every row's positioned parts inside the transcript, so nothing in it can make the window scroll", () => {
+    // An absolutely positioned reply label with no positioned ancestor in the scroller is placed past
+    // the window, which then scrolls by script: an app frame's scrollIntoView lifts the whole app off the top.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const transcript = markup.match(/class="(glass-scroller-content[^"]*)"[^>]*role="log"/)?.[1] ?? "";
+    expect(transcript.split(" ")).toContain("relative");
+  });
 });
 
 describe("thread control placement", () => {
-  it.each([true, false])("leaves All threads to the sidebar in both modes (advanced: %s)", (advanced) => {
+  it.each([true, false])("leaves All threads out of the header in both modes (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).not.toContain('aria-label="All threads"');
-    expect(markup).toContain('data-testid="chat-more"');
+    expect(markup.includes('data-testid="chat-more"')).toBe(advanced);
     fixture.advanced = true;
   });
 
@@ -192,13 +339,18 @@ describe("thread control placement", () => {
     fixture.advanced = true;
   });
 
-  it("gives the editor its own row in a narrow chat", () => {
+  it("keeps the editor and its controls on one line, wrapping only in a narrow composer", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).toContain("@container/composer");
-    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!;
-    expect(row[1]).toContain("@max-[30rem]/composer:flex-wrap");
-    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!;
-    expect(editor[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
+    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(row).toContain("@max-[30rem]/composer:flex-wrap");
+    expect(row).not.toContain("flex-wrap");
+    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(editor).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
+    expect(editor).not.toContain("basis-full");
+    const textarea = /<textarea[^>]*class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(textarea).toContain("min-h-6");
+    expect(textarea).not.toContain("min-h-14");
   });
 
   it("keeps the composer inert until the deleted thread's replacement transcript arrives", () => {
@@ -246,7 +398,7 @@ describe("thread control placement", () => {
     const action = renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", action: { label: "Open", onClick: () => {} } }));
     for (const markup of [retry, action]) {
       expect(markup).toContain('class="ui-button ui-button-md ');
-      expect(markup).not.toContain("text-[12.5px]");
+      expect(markup).not.toContain("text-[13px]");
     }
   });
   it("directs ChatGPT plan limits to usage settings rather than repeatedly retrying", () => {
@@ -386,23 +538,23 @@ describe("thread control placement", () => {
     fixture.localMessage = "Screen Recording required";
     window.ogb = { platform: "darwin", permOpenSettings: vi.fn(), relaunch: vi.fn() } as unknown as NonNullable<Window["ogb"]>;
     const screen = renderToStaticMarkup(createElement(ErrorRow, {
-      message: "CUA Driver is not ready for this computer — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
+      message: "OpenMausBot can't use this computer yet — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
     }));
     expect(screen).toContain("Open Screen Recording Settings");
     expect(screen).toContain("Relaunch OpenMausBot");
     expect(screen).not.toContain("Open Accessibility Settings");
     fixture.localMessage = "Accessibility required";
     const accessibility = renderToStaticMarkup(createElement(ErrorRow, {
-      message: "CUA Driver is not ready for this computer — Accessibility required",
+      message: "OpenMausBot can't use this computer yet — Accessibility required",
     }));
     expect(accessibility).toContain("Open Accessibility Settings");
     expect(accessibility).not.toContain("Open Screen Recording Settings");
     expect(renderToStaticMarkup(createElement(ErrorRow, {
-      message: "CUA Driver is not ready for this computer — Screen Recording required",
+      message: "OpenMausBot can't use this computer yet — Screen Recording required",
     }))).not.toContain("Open Screen Recording Settings");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout" }))).not.toContain("Open Screen Recording Settings");
     fixture.localReasonCode = "remote-server";
-    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "CUA Driver is not ready for this computer — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "OpenMausBot can't use this computer yet — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
     fixture.localReasonCode = "cua-driver-unavailable";
     fixture.platform = "other";
     fixture.localMessage = "";
@@ -444,14 +596,21 @@ describe("thread control placement", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup.match(/data-test-model-control/g)).toHaveLength(1);
     expect(markup.indexOf("data-test-model-control")).toBeLessThan(markup.indexOf('role="log"'));
-    expect(markup.indexOf("rounded-3xl bg-composer")).toBeGreaterThan(-1);
-    expect(markup.indexOf("data-test-approval-control")).toBeGreaterThan(markup.indexOf("rounded-3xl bg-composer"));
+    expect(markup.indexOf('data-tour="composer"')).toBeGreaterThan(-1);
+    expect(markup.indexOf("data-test-approval-control")).toBeGreaterThan(markup.indexOf('data-tour="composer"'));
     expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
     expect(markup).not.toContain('aria-label="Thread settings"');
     expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", disabled: false, trustedModesAvailable: false });
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
     fixture.approval!.onSelect("auto");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
+  });
+
+  it("changes a working thread's level from the composer, saying the bot is working", () => {
+    renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) } }));
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: true });
+    fixture.approval!.onSelect("full");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
   });
 
   it("keeps both controls hidden for remote clients", () => {
@@ -465,7 +624,7 @@ describe("thread control placement", () => {
   it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    const pill = markup.slice(markup.indexOf("rounded-3xl bg-composer"), markup.indexOf("<textarea"));
+    const pill = markup.slice(markup.indexOf('data-tour="composer"'), markup.indexOf("<textarea"));
     expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
     expect(markup.includes("Where this conversation works")).toBe(advanced);
     fixture.advanced = true;

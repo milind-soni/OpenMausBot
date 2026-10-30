@@ -34,6 +34,12 @@ const fileSchema = z.object({ version: z.literal(1), connection: connectionSchem
 export type HighLevelConnection = z.infer<typeof connectionSchema>;
 type StoreFile = z.infer<typeof fileSchema>;
 
+/** A connection as this store keeps it, from anywhere else (one moved from the person's own computer); null if not. */
+export function parseHighLevelConnection(value: unknown): HighLevelConnection | null {
+  const parsed = connectionSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export interface HighLevelTokenRotation {
   accessToken: string;
   refreshToken?: string;
@@ -42,6 +48,9 @@ export interface HighLevelTokenRotation {
 }
 
 const EMPTY: StoreFile = { version: 1 };
+
+export const sameTokens = (a: HighLevelConnection, b: HighLevelConnection): boolean =>
+  a.accessToken === b.accessToken && a.refreshToken === b.refreshToken;
 
 export class HighLevelStore {
   private readonly file: string;
@@ -106,10 +115,11 @@ export class HighLevelStore {
     return stored;
   }
 
-  /** A refresh rotates both tokens: the new pair replaces the old one at once, so a retry never reuses a spent refresh token. */
-  rotate(tokens: HighLevelTokenRotation): HighLevelConnection | null {
+  /** A refresh rotates both tokens: the new pair replaces the old one at once, so a retry never reuses a spent refresh token.
+   * It lands only on the token version it was started from; null when a newer sign-in, rotation or disconnect came first. */
+  rotate(tokens: HighLevelTokenRotation, from: HighLevelConnection): HighLevelConnection | null {
     const current = this.get();
-    if (!current) return null;
+    if (!current || !sameTokens(current, from)) return null;
     const { problem: _problem, ...rest } = current;
     const next: HighLevelConnection = {
       ...rest,
@@ -123,9 +133,10 @@ export class HighLevelStore {
     return next;
   }
 
-  markNeedsSignIn(problem: string): void {
+  /** Only for the token version HighLevel rejected: a newer sign-in or rotation stays signed in. */
+  markNeedsSignIn(problem: string, rejected: HighLevelConnection): void {
     const current = this.get();
-    if (!current) return;
+    if (!current || !sameTokens(current, rejected)) return;
     this.write({ version: 1, connection: { ...current, state: "needs-sign-in", problem } });
   }
 

@@ -47,18 +47,27 @@ export function teamSize(section: TeamMapSection): { width: number; height: numb
   };
 }
 
-export function layoutTeams(sections: TeamMapSection[], positions: Record<string, Point>): Tile[] {
-  const sizes = sections.map(teamSize);
-  const firstColumnWidth = Math.max(0, ...sizes.filter((_, index) => index % 2 === 0).map((size) => size.width));
+export function layoutTeams(
+  sections: TeamMapSection[],
+  positions: Record<string, Point>,
+  options: { sizes?: ReadonlyArray<{ width: number; height: number }>; columns?: number } = {},
+): Tile[] {
+  const sizes = options.sizes ?? sections.map(teamSize);
+  const columns = Math.max(1, Math.floor(options.columns ?? 2));
+  const columnX = [40];
+  for (let column = 1; column < columns; column++) {
+    const previous = Math.max(0, ...sizes.filter((_, index) => index % columns === column - 1).map((size) => size.width));
+    columnX.push(columnX[column - 1] + previous + 56);
+  }
   let y = 40;
   return sections.map((section, index) => {
-    if (index > 0 && index % 2 === 0) {
-      y += Math.max(sizes[index - 2].height, sizes[index - 1].height) + 56;
+    if (index > 0 && index % columns === 0) {
+      y += Math.max(...sizes.slice(index - columns, index).map((size) => size.height)) + 56;
     }
     const saved = Object.hasOwn(positions, section.key) ? positions[section.key] : undefined;
     return {
       key: section.key,
-      x: saved?.x ?? (index % 2 === 0 ? 40 : 40 + firstColumnWidth + 56),
+      x: saved?.x ?? columnX[index % columns],
       y: saved?.y ?? y,
       ...sizes[index],
     };

@@ -58,6 +58,8 @@ export interface CloudCreditOptions {
   credential: ServiceCredential | null;
   fetch?: typeof fetch;
   onChange?: (ids: string[]) => void;
+  /** The relay's first model, the credit's default, is another now: bots left on the old default follow it. */
+  onDefault?: (from: string, to: string) => void;
   log?: (line: string) => void;
 }
 
@@ -78,6 +80,8 @@ export class CloudCreditProvider {
   /** The credit's engine id, on this Cloud home: also a selection left on it after the token went. */
   owns(instanceId: string): boolean { return instanceId === CLOUD_CREDIT_INSTANCE; }
   status(): CloudCreditStatus { return this.refused ?? "active"; }
+  /** A credit is there and not used up or ended. */
+  lasts(): boolean { return this.options.credential !== null && this.refused === null; }
 
   async start(): Promise<void> {
     if (!this.options.credential) return;
@@ -110,9 +114,11 @@ export class CloudCreditProvider {
       if (!models.length) throw new Error(`the relay answered ${response.status} with no model`);
       this.attempt = 0;
       const changed = models.map(model => model.id).join() !== this.models.map(model => model.id).join() || !this.loaded;
+      const before = this.models[0]?.id;
       this.models = models;
       this.save();
       if (changed) await this.load();
+      if (before && before !== models[0]!.id) this.options.onDefault?.(before, models[0]!.id);
     } catch (error) {
       // Names only: never the token or what the relay sent.
       if (this.loaded) return;
@@ -197,7 +203,7 @@ export class CloudCreditProvider {
   }
 
   /** Its own folder, owned by this server and never a link into a personal one. */
-  private folder(): string {
+  storage(): string {
     let directory = this.options.dataDirectory;
     for (const part of ["providers", "trial-credit"]) {
       directory = join(directory, part);
@@ -227,7 +233,7 @@ export class CloudCreditProvider {
 
   private save(): void {
     try {
-      writeFileAtomic(join(this.folder(), "state.json"), JSON.stringify({ token: this.tokenKey(), models: this.models, ...(this.refused ? { refused: this.refused } : {}) }), { mode: 0o600 });
+      writeFileAtomic(join(this.storage(), "state.json"), JSON.stringify({ token: this.tokenKey(), models: this.models, ...(this.refused ? { refused: this.refused } : {}) }), { mode: 0o600 });
     } catch (error) {
       this.options.log?.(`[trial credit] could not save its state (${error instanceof Error ? error.name : "error"})`);
     }

@@ -10,10 +10,15 @@ export type SharedFolderStatus = "copying" | "synced" | "waiting" | "confirm-del
 export interface SharedFolder {
   id: string; name: string; pcPath: string; status: SharedFolderStatus;
   files: number; done: number; waitingBytes: number; pendingDeletes: number; problem: string | null;
+  /** A folder lent to My Cloud: bots use it live while this computer is on, and this copy while it is away. */
+  lent?: boolean;
+  /** Bots' changes from while this computer was away that met a change of the person's: theirs kept, the bot's beside it. */
+  kept?: Array<{ path: string; beside: string; at: number }>;
 }
 export interface CloudFilesState {
-  /** "unavailable": no Ready My Cloud for this app; "signed-out": sign in again; "offline": My Cloud can't be reached. */
-  phase: "unavailable" | "signed-out" | "offline" | "idle" | "syncing";
+  /** "unavailable": no Ready My Cloud for this app; "signed-out": sign in again; "offline": My Cloud can't be reached;
+   * "asleep": My Cloud sleeps (its plan sleeps when idle), and Files carry on when it wakes. */
+  phase: "unavailable" | "signed-out" | "offline" | "asleep" | "idle" | "syncing";
   lastSyncedAt: number | null;
   disk: CloudFilesDisk | null;
   shared: SharedFolder[];
@@ -48,9 +53,12 @@ export interface CloudFilesBridge {
 export declare function createCloudFilesService(options: Record<string, unknown>): {
   start(): void;
   pass(only?: Set<string> | null): Promise<void>;
+  running(): boolean;
   state(): CloudFilesState;
   check(pcPath: string): Promise<Omit<FolderCheck, "token">>;
   share(pcPath: string): Promise<CloudFilesState>;
+  adopt(folder: { id: string; path: string; name: string; write: boolean }): Promise<CloudFilesState>;
+  lentOf(folderId: string): string | null;
   stopSharing(folderId: string): Promise<CloudFilesState>;
   answerDeletes(folderId: string, remove: boolean): Promise<CloudFilesState>;
   relocate(folderId: string, pcPath: string): Promise<CloudFilesState>;

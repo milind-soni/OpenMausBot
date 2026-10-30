@@ -1,6 +1,7 @@
 // Harness-native approval cards for peer comms (approvePeerComms), resolved before an answer reaches the provider adapter.
 
 import { newId } from "./contracts.ts";
+import { optionCardsForTools } from "./message-db.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -8,7 +9,7 @@ import type { BotRecord, Message, Store } from "./store.ts";
 export { peerAllowKey } from "./peer-approval-key.ts";
 
 /** Only allow authorizes work; absence of an answer is not a user decision. */
-export type PeerApprovalOutcome = "allow" | "deny" | "expired" | "cancelled";
+export type PeerApprovalOutcome = "allow" | "deny" | "cancelled";
 export type PeerApprovalFailure = Exclude<PeerApprovalOutcome, "allow">;
 
 export function peerApprovalFailure(outcome: PeerApprovalFailure): {
@@ -18,8 +19,7 @@ export function peerApprovalFailure(outcome: PeerApprovalFailure): {
 } {
   return {
     error: outcome === "deny" ? "denied by user"
-      : outcome === "expired" ? "the approval card expired without an answer"
-        : "the approval was cancelled before a decision",
+      : "the approval was cancelled before a decision",
     approvalOutcome: outcome,
     approvalSource: outcome === "deny" ? "user" : "system",
   };
@@ -35,7 +35,6 @@ export interface ApprovalBus {
 
 interface Pending {
   resolve: (result: PeerApprovalOutcome) => void;
-  timer: ReturnType<typeof setTimeout>;
   fromBotId: string;
   toBotId: string;
   message: string;
@@ -63,8 +62,6 @@ function settleCard(pending: Pending, behavior: string, source: "user" | "system
 }
 
 const pendingComms = new Map<string, Pending>();
-
-const APPROVAL_TIMEOUT_MS = 15 * 60_000;
 
 function allowKeyAllowed(from: BotRecord, allowKey: string): boolean {
   return from.alwaysAllow?.includes(allowKey) ?? false;
@@ -133,20 +130,11 @@ export function requestPeerApproval(
   }
   return new Promise((resolve) => {
     const requestId = newId();
-    // The card must exist before the entry, so a timeout or an answer can always settle it.
+    // The card must exist before the entry, so an answer or a cancellation can always settle it.
     const card = pushApprovalCard(bus, from, target, message, action, requestId, sourceThreadId);
     announceCard(bus, from, card, sourceThreadId);
-    const timer = setTimeout(() => {
-      const pending = pendingComms.get(requestId);
-      if (!pending) return;
-      pendingComms.delete(requestId);
-      settleCard(pending, "deny", "system");
-      resolve("expired");
-    }, APPROVAL_TIMEOUT_MS);
-    timer.unref?.();
     pendingComms.set(requestId, {
       resolve,
-      timer,
       fromBotId: from.id,
       toBotId: target.id,
       message,
@@ -171,7 +159,6 @@ export function resolvePeerComms(
   const pending = pendingComms.get(requestId);
   if (!pending) return false;
   pendingComms.delete(requestId);
-  clearTimeout(pending.timer);
   const allow = behavior === "allow";
   settleCard(pending, allow ? "allow" : "deny", "user");
   pending.resolve(allow ? "allow" : "deny");
@@ -182,8 +169,7 @@ export function cancelPeerApprovalsFor(botId: string): void {
   for (const [requestId, pending] of Array.from(pendingComms)) {
     if (pending.fromBotId !== botId && pending.toBotId !== botId) continue;
     pendingComms.delete(requestId);
-    clearTimeout(pending.timer);
-    settleCard(pending, "deny", "system");
+      settleCard(pending, "deny", "system");
     pending.resolve("cancelled");
   }
 }
@@ -192,8 +178,7 @@ export function cancelPeerApprovalsForThread(threadId: string): void {
   for (const [requestId, pending] of pendingComms) {
     if (pending.threadId !== threadId) continue;
     pendingComms.delete(requestId);
-    clearTimeout(pending.timer);
-    settleCard(pending, "deny", "system");
+      settleCard(pending, "deny", "system");
     pending.resolve("cancelled");
   }
 }
@@ -213,17 +198,16 @@ function peerCardThreads(bus: ApprovalBus): Set<string> {
 
 export function dismissStalePeerCards(bus: ApprovalBus): number {
   let dismissed = 0;
-  for (const threadId of peerCardThreads(bus)) {
-    for (const message of bus.store.messagesFor(threadId)) {
-      const card = message.card;
-      if (!card?.requestId || card.answered || card.dismissed) continue;
-      if (card.tool !== "ask_bot" && card.tool !== "delegate_bot" && card.tool !== "post_to_room") continue;
-      if (pendingComms.has(card.requestId)) continue;
-      const patched = bus.store.patchMessage(threadId, message.id, {
-        card: { ...card, answered: "deny", dismissed: true },
-      });
-      if (patched) dismissed += 1;
-    }
+  const threads = peerCardThreads(bus);
+  for (const { threadId, messageId } of optionCardsForTools(Object.keys(ACTION_VERB))) {
+    if (!threads.has(threadId)) continue;
+    const card = bus.store.messagesFor(threadId).find((message) => message.id === messageId)?.card;
+    if (!card?.requestId || card.answered || card.dismissed) continue;
+    if (pendingComms.has(card.requestId)) continue;
+    const patched = bus.store.patchMessage(threadId, messageId, {
+      card: { ...card, answered: "deny", dismissed: true },
+    });
+    if (patched) dismissed += 1;
   }
   return dismissed;
 }

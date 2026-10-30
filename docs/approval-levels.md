@@ -1,12 +1,25 @@
 # Approval levels
 
 Approval levels belong to a bot and apply to its next provider turn, including
-when that provider resumes an existing native thread. Each level is one of the
+when that provider resumes an existing native thread. You can also change one
+while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
-explicit grant: Full Access, a saved exact command or MCP read-shaped tool, or
-the narrow built-in web-search allowance under Approve for me. In Full Access,
-OMB also applies its own configuration tools without another approval.
+explicit grant: Full Access, a saved exact command or MCP read-shaped tool,
+the narrow built-in web-search allowance under Approve for me, or a bot reading
+its own files. In Full Access, OMB also applies its own configuration tools
+without another approval.
+
+**A bot reading its own files never asks**, at any level: its standing
+instructions (`SOUL.md`), its skills with every saved revision, its memory and
+its conversation folders. That covers a plain reading command (`cat`, `head`,
+`tail`, `grep`, `rg`, `sed -n`, `ls`, `wc`, `nl`, `stat`) made of plain words
+alone, and Claude's Read, Grep, Glob, LS and NotebookRead, when every path is
+inside the bot's own folders once links are followed. Anything else in the
+command (a pipe, a redirect, a second command, a variable, a glob) asks as
+before, and so does every read in a guest's turn, since a bot's folder holds its
+owner's memory. On a Cloud the bot's box also shows it its own `SOUL.md`,
+read-only.
 
 Every bot and conversation starts at **Full access**, the default T3 Code uses
 too: each engine runs in its own most permissive mode, and a real question or
@@ -41,13 +54,36 @@ desktop app, where the choice crosses a private process channel rather than the
 bot-accessible HTTP API, because it holds restrictions you wrote yourself. It
 is hidden in development, standalone web, and remote pages.
 
-A team's sidebar menu has **Set for all bots in this team…**, for the owner
+### Changing the level while the bot works
+
+You don't have to stop a bot to change its level. From the moment you pick
+one, every approval decision OMB makes in that conversation uses it. How far
+that reaches depends on who runs the tools:
+
+- **API engines** (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras,
+  Groq, Meta): OMB's tool gate reads the level before each tool call, so the
+  change applies from the next call, up or down.
+- **Engines with their own modes** (Codex, Claude, Cursor, Antigravity, Grok
+  Build, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
+  its mode when the turn started and keeps it to the end of the turn. A
+  permission request it still sends is answered at the new level, so raising
+  to Full access applies to the next request. Lowering from Full access, and
+  moving between Ask, Auto-accept edits and Approve for me, applies from the
+  next turn.
+- **Agents whose requests OMB answers** (OpenCode, Cline, Kimi, Hermes, custom
+  ACP agents, Pi's computer-control confirms): every request reaches OMB, so
+  the change applies from the next request, up or down.
+
+A request already on screen stays for you to answer, and an action already
+running finishes. A team change sets the level on working bots too.
+
+A department's sidebar menu has **Set for all bots in this department…**, for the owner
 or an admin. It sets one approval level (Ask, Auto-accept edits, Approve for
-me or Full access), or one model and effort, on every bot in that team. It
+me or Full access), or one model and effort, on every bot in that department. It
 lists what each bot will get before anything changes, then saves the bots one
 at a time with the same request and checks as each bot's own settings. A bot
-that is working, or whose engine does not offer the level, model or effort,
-is skipped and the summary gives the reason. A skipped bot is not changed
+whose engine does not offer the level, model or effort, or that is working
+during a model change, is skipped and the summary gives the reason. A skipped bot is not changed
 later: once its turn ends, run the team change again or set that bot in its
 own settings. A level reaches each bot and every one of its threads, the same
 way for every level, so a thread opened with New thread moves too; a bot is
@@ -72,9 +108,11 @@ set a level on follows the default, and so does each of its threads without a
 level of its own. Bots and threads that saved Ask before Full access became
 the default keep it: choose Full access in the bot's settings, or **Set for
 all bots in this team…**, to move a bot and every one of its threads at once.
-Ask, Auto, and Custom retain their existing OMB configuration review cards.
-Full actions return an applied result and leave a settled receipt, so the bot
-continues in the same turn. Invalid input, unavailable services, or failed
+OpenMausBot adds no review card of its own at any level: a bot's profile,
+working folder, model, skill, team setup and team memory changes apply at
+once and leave a one-line receipt with Undo, so the bot continues in the same
+turn. Routine requests keep their own rule until Triggers v2 replaces them,
+and on My Cloud a turn a guest or a webhook drove still waits for the owner. Invalid input, unavailable services, or failed
 writes return errors, not a request to approve again. An expired native
 permission request is not turned into another Allow/Deny card.
 
@@ -94,9 +132,13 @@ Approve for me, or Full access. The teammate's thread is switched to that
 level, keeps it, and opens with a line saying so ("Approve for me — delegated
 by Clive, a Chief of Staff on Approve for me"); you can still change it in
 that thread. Work a Chief hands out inside a room runs at the Chief's level
-for that turn. The level is computed once when the assignment is written and
-recorded on it (docs/runtime-contract.md §3); the turn runs with exactly that
-level.
+for that turn. It flows down every hop, not just the first: when Ada, working
+for Clive, hands part of it to Bea, Bea's work runs at Clive's level too
+("Approve for me — delegated by Ada, from Clive, a Chief of Staff on Approve
+for me"), in threads and rooms alike. Each hand-off looks up its chain to the
+nearest Chief conversation (`server/host/delegated-level.ts`). The level is
+computed once when the assignment is written and recorded on it
+(docs/runtime-contract.md §3); the turn runs with exactly that level.
 
 It only ever raises: a teammate already on a higher level keeps it, a teammate
 on Custom keeps its own configuration, and a Chief handing work out from an
@@ -104,7 +146,7 @@ Ask conversation passes nothing on. Every engine runs Full access, so only
 Auto-accept edits can be capped: a teammate on an engine without it (Codex,
 whose Ask already writes the workspace) stays on its own level. The teammate's
 own default and its other conversations do not change, and an ordinary bot's
-hand-off still uses the recipient's setting. A consultation (`consult: true`)
+hand-off, with no Chief up its chain, still uses the recipient's setting. A consultation (`consult: true`)
 answers from what the teammate knows and acts on nothing, so no level travels
 with it. Questions and missing credentials still reach you.
 
@@ -241,7 +283,7 @@ silently substitute unrestricted access when a mode is rejected.
 OpenMausBot's built-in agents MCP server describes its scoped reads with
 explicit read-only, non-destructive, idempotent, closed-world metadata:
 `list_bots`, `list_rooms`, `list_threads`, `assignment_status`,
-`session_search`, `session_read`, `list_routines`, and `skills_list`.
+`session_search`, `trigger_info`, and `skills_list`.
 Session recall still enforces own-bot access and records its existing room
 disclosure audit. These hints do not grant access to another bot's conversations.
 Writes, credential requests, proposals, and third-party tools do not inherit

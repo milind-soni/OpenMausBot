@@ -1,6 +1,7 @@
 // Served at POST /api/internal/computer/mcp behind a turn-scoped capability, so the Boat credential never leaves this server.
 import type { ValidateFunction } from "ajv";
 import { isolatedRemoteCommand, runCommand, screenshotBoat } from "./boat.ts";
+import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
 import type { AppConfig } from "./config.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
@@ -30,7 +31,8 @@ const scrollButtons: Record<string, number> = { up: 4, down: 5, left: 6, right: 
 
 let validators: Map<string, ValidateFunction> | undefined;
 
-/** x and y reach the remote shell unquoted, so only the advertised integer schema stands between a model's arguments and a command line. */
+/** x and y reach the remote shell unquoted, so only the advertised integer schema stands between a model's arguments and a command line.
+ * A cloud computer browses from a data centre, so it never opens Reddit. */
 export function cloudComputerCallProblem(name: unknown, args: unknown): string | null {
   validators ??= new Map(CLOUD_COMPUTER_TOOLS.map(entry => [entry.name, compileToolSchema(entry.inputSchema)]));
   const validate = typeof name === "string" ? validators.get(name) : undefined;
@@ -38,6 +40,7 @@ export function cloudComputerCallProblem(name: unknown, args: unknown): string |
   if (!args || typeof args !== "object" || Array.isArray(args) || !validate(args)) {
     return "Tool arguments do not match the advertised input schema; use its required fields and types.";
   }
+  if (name === "open_url" && isRedditAddress(String((args as { url: unknown }).url))) return REDDIT_REFUSAL;
   return null;
 }
 

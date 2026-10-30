@@ -76,49 +76,32 @@ it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and 
   expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id && node.threadId === f.source.activeTaskId)).toBe(true);
 }), 45_000);
 
-it.each(["unmanaged", "outsider", "disallowed-peer"])("refuses supervisor room coordination with %s", reason => withRooms(async f => {
+it("coordinates in a room that mixes departments, with a Chief that manages none of them", () => withRooms(async f => {
   const chief = await addSupervisingChief(f);
-  if (reason === "unmanaged") await f.api(`/api/bots/${chief.id}`, { managedSections: [] }, "PATCH");
-  if (reason === "outsider") {
-    const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Finance")).bot;
-    await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id, outsider.id] });
-  }
-  if (reason === "disallowed-peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], message: "Do not bypass the room boundary" } }];
+  await f.api(`/api/bots/${chief.id}`, { managedSections: [] }, "PATCH");
+  const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Finance")).bot;
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id, outsider.id] });
+  f.plan[outsider.id] = { reply: "Finance numbers checked" };
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, outsider.id], message: "Review the work here" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.find((room: any) => room.id === f.source.id).members.map((bot: any) => bot.id)).toEqual(expect.arrayContaining([chief.id, outsider.id]));
+  const children = f.handoffs();
+  expect(children.map((node: any) => node.botId).sort()).toEqual([chief.id, outsider.id].sort());
+  expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id)).toBe(true);
+}), 45_000);
+
+it("refuses supervisor room coordination with a disallowed peer", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], message: "Do not bypass the peers list" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.handoffs()).toEqual([]);
   const turn = f.provider().find((entry: any) => entry.botId === f.sender.id);
-  expect(turn.evidence.find((entry: any) => entry.step).response.result.isError).toBe(true);
-  if (reason === "disallowed-peer") expect(JSON.parse(turn.evidence[1].result.content[0].text).rooms).toEqual([]);
-  else expect(turn.evidence[1].result.isError).toBe(true);
-}), 45_000);
-
-it("does not extend supervisor access to a different room", () => withRooms(async f => {
-  const chief = await addSupervisingChief(f);
-  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [chief.id] });
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [chief.id], message: "Keep supervisor access in the shared conversation" } }];
-  await f.start(); expect((await f.wait()).status).toBe("settled");
-  expect(f.handoffs()).toEqual([]);
-  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
-  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
-  expect(discovery.rooms.some((room: any) => room.id === f.destination.id)).toBe(false);
-}), 45_000);
-
-it("refuses queued same-room supervisor work when the owner revokes supervision", () => withRooms(async f => {
-  const chief = await addSupervisingChief(f);
-  const gateFile = join(f.session.info.dataDir, "supervisor-result.gate");
-  f.plan[chief.id] = { reply: "PRIVATE_SUPERVISOR_RESULT" };
-  f.plan[f.sender.id].gateFile = gateFile;
-  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id], message: "Review this work" } }];
-  await f.start();
-  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15000 }).toBe("queued");
-  await request(`/api/bots/${chief.id}`, { method: "PATCH", headers: { Origin: f.session.info.url }, body: JSON.stringify({ managedSections: [] }) }, f.session.info.url);
-  writeFileSync(gateFile, "release");
-  expect((await f.wait()).status).toBe("settled");
-  expect(f.nodes().find((node: any) => node.parentId).status).toBe("failed");
-  expect(f.provider().some((turn: any) => turn.botId === chief.id)).toBe(false);
-  expect(JSON.stringify(await f.messages(f.source.activeTaskId))).not.toContain("PRIVATE_SUPERVISOR_RESULT");
-  expect((await f.messages(f.source.activeTaskId)).some((message: any) => message.tool?.name.includes("Result withheld"))).toBe(true);
+  const refused = turn.evidence.find((entry: any) => entry.step).response.result;
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0].text).toContain("Director is set to talk only to certain bots");
+  expect(JSON.parse(turn.evidence[1].result.content[0].text).rooms).toEqual([]);
 }), 45_000);
 
 it("refuses a disallowed peer without starting the recipient", () => withRooms(async f => {
@@ -190,25 +173,13 @@ it("lets an explicitly authorized Chief coordinate another team, which can consu
   expect(bots.find((b: any) => b.id === reviewer.id).managedSections).toBeUndefined();
 }), 45_000);
 
-it("does not let a Chief's grant expose a foreign room transcript to its specialist", () => withRooms(async f => {
+it("withholds a cross-department result if the sender's peers list cuts the recipient off while it runs", () => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
-  const finance = (await f.cli("new-bot", "--name", "Finance", "--section", "Finance")).bot;
-  await f.api(`/api/bots/${f.sender.id}`, { chiefOfStaff: true, managedSections: ["Engineering", "Finance"], acknowledgePeerScope: true }, "PATCH");
-  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [f.target.id, finance.id] });
-  f.plan[f.sender.id].steps[0].expectError = true;
-  await f.start(); expect((await f.wait()).status).toBe("settled");
-  expect(f.handoffs()).toEqual([]);
-  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
-}), 45_000);
-
-it("withholds a cross-team result if the owner revokes access while it runs", () => withRooms(async f => {
-  await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
-  await f.api(`/api/bots/${f.sender.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");
   const gateFile = join(f.session.info.dataDir, "cross-team-revocation.gate");
   f.plan[f.target.id] = { gateFile, reply: "PRIVATE_RESULT_AFTER_REVOCATION" };
   await f.start();
   await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("running");
-  await f.api(`/api/bots/${f.sender.id}`, { managedSections: [] }, "PATCH");
+  await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
   await releaseAfterWithhold(f, gateFile);
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
@@ -217,70 +188,15 @@ it("withholds a cross-team result if the owner revokes access while it runs", ()
   expect(messages.some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
 }), 60_000);
 
-it.each(["rename", "delete"])("withholds an in-flight result after team %s and recreation", mode => withRooms(async f => {
-  await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
-  await f.api(`/api/bots/${f.sender.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");
-  const gateFile = join(f.session.info.dataDir, "team-recreation.gate");
-  f.plan[f.target.id] = { gateFile, reply: "PRIVATE_RESULT_AFTER_TEAM_RECREATION" };
-  await f.start();
-  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("running");
-  await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.sender.id).busy, { timeout: 30_000 }).toBe(false);
-  const move = (section: string) => request(`/api/bots/${f.target.id}`, { method: "PATCH", headers: { Origin: f.session.info.url },
-    body: JSON.stringify({ section }) }, f.session.info.url);
-  await move("Parking");
-  await f.api("/api/sidebar-sections?section=Engineering", mode === "rename" ? { name: "Renamed" } : {}, mode === "rename" ? "PATCH" : "DELETE");
-  await f.api("/api/sidebar-sections", { name: "Engineering" });
-  await move("Engineering");
-  const chief = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.sender.id);
-  expect(chief.managedSections).toEqual([]);
-  await releaseAfterWithhold(f, gateFile);
-  expect((await f.wait()).status).toBe("settled");
-  expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
-  const messages = await f.messages(f.source.activeTaskId);
-  expect(JSON.stringify(messages)).not.toContain("PRIVATE_RESULT_AFTER_TEAM_RECREATION");
-  expect(messages.some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
-}), 60_000);
-
-it.each(["recipient", "source-reader", "destination-reader"])("refuses cross-section work involving a %s without leaking room history", role => withRooms(async f => {
-  if (role === "recipient") await f.api(`/api/bots/${f.target.id}`, { section: "Other company" }, "PATCH");
-  else {
-    const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Other company")).bot;
-    const room = role === "source-reader" ? f.source : f.destination;
-    await f.tool("update_channel", { channel_id: room.id, member_ids: [...room.memberIds, outsider.id] });
-  }
-  f.plan[f.sender.id].steps[0].expectError = true;
-  await f.start(); expect((await f.wait()).status).toBe("settled");
-  expect(f.handoffs()).toEqual([]);
-  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
-  expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Assigned")).toBe(true);
-  const discovery = f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1];
-  if (role === "source-reader") expect(discovery.result.isError).toBe(true);
-  else expect(JSON.parse(discovery.result.content[0].text).rooms).toEqual([]);
-}), 45_000);
-
-it("refuses same-room coordination in a mixed section room", () => withRooms(async f => {
+it("hands work to a bot in another department, into a room whose readers are in other departments", () => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Other company" }, "PATCH");
-  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id] });
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [f.target.id], message: "Review CSV" } }];
+  const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Elsewhere")).bot;
+  for (const room of [f.source, f.destination]) await f.tool("update_channel", { channel_id: room.id, member_ids: [...room.memberIds, outsider.id] });
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  expect(f.handoffs()).toEqual([]);
-}), 45_000);
-
-it("rechecks section membership before queued work dispatch and withholds its result", () => withRooms(async f => {
-  const gateFile = join(f.session.info.dataDir, "recipient-section-change.gate");
-  f.plan[f.target.id].gateFile = gateFile; f.savePlan();
-  await f.cli("send", "--bot", f.target.id, "--text", "Independent task");
-  await f.start();
-  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 10_000 }).toBe("queued");
-  // Model a user changing the fixture's settings from its served UI mid-turn.
-  await request(`/api/bots/${f.target.id}`, { method: "PATCH", headers: { Origin: f.session.info.url },
-    body: JSON.stringify({ section: "Other company" }) }, f.session.info.url);
-  writeFileSync(gateFile, "release");
-  expect((await f.wait()).status).toBe("settled");
-  expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
-  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
-  expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
-  await f.cli("wait", "--bot", f.target.id, "--timeout", "15");
+  const node = f.handoffs()[0];
+  expect(node).toMatchObject({ botId: f.target.id, groupId: f.destination.id, status: "completed" });
+  expect((await f.messages(f.destination.activeTaskId)).some((m: any) => m.text?.includes("Please build CSV"))).toBe(true);
+  expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
 }), 45_000);
 
 it.each([4000, 4001])("enforces the %i-character request boundary on the real server", length => withRooms(async f => {
@@ -565,4 +481,50 @@ it("runs a room member's turn a restart cut again once, told so, and resumes the
     [f.target.id, f.destination.id, f.destination.activeTaskId, true, 1, 2],
   ]);
   expect((await f.messages(f.source.activeTaskId)).filter((m: any) => /turn interrupted/.test(m.tool?.name ?? ""))).toEqual([]);
+}), 60_000);
+
+it("hands work a Chief addresses into its room to the bots it just made, which are not in the room, directly", () => withRooms(async f => {
+  await f.api(`/api/bots/${f.sender.id}`, { section: "Sales OS", chiefOfStaff: true, acknowledgePeerScope: true }, "PATCH");
+  const made = (name: string, key: string) => ({ tool: "create_bot", capture: { [key]: "\\[id: ([^\\]]+)\\]" },
+    arguments: { name, role: `${name} lead`, instructions: `Own the ${name} part of the Sales OS.` } });
+  f.plan[f.sender.id] = {
+    steps: [made("Buyer Research", "buyer"), made("Sales Writer", "writer"), made("Revenue Ops", "ops"),
+      { arguments: { group_id: f.source.id, bot_ids: ["{{buyer}}", "{{writer}}", "{{ops}}"], message: "Draft your part of the Sales OS" } }],
+    reply: "Assigned", resumeReply: "Sales OS parts reviewed",
+  };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+
+  const names = ["Buyer Research", "Sales Writer", "Revenue Ops"];
+  const { bots, groups } = await f.api("/api/bots?messages=0", undefined, "GET");
+  const made3 = names.map(name => bots.find((bot: any) => bot.name === name));
+  expect(made3.map((bot: any) => bot?.section)).toEqual(["Sales OS", "Sales OS", "Sales OS"]);
+  expect(groups.find((room: any) => room.id === f.source.id).memberIds).toEqual([f.sender.id]);
+
+  const children = f.handoffs();
+  expect(children.map((node: any) => node.botId).sort()).toEqual(made3.map((bot: any) => bot.id).sort());
+  for (const node of children) {
+    expect([node.status, node.groupId]).toEqual(["completed", undefined]);
+    const task = made3.find((bot: any) => bot.id === node.botId).tasks.find((t: any) => t.threadId === node.threadId);
+    expect(task.openedBy).toMatchObject({ botId: f.sender.id, threadId: f.source.activeTaskId, kind: "work" });
+  }
+  const turns = f.provider();
+  for (const bot of made3) {
+    const turn = turns.find((entry: any) => entry.botId === bot.id);
+    expect(turn.threadId).toBe(children.find((node: any) => node.botId === bot.id).threadId);
+    expect(JSON.stringify(turn.prompt)).toContain("Draft your part of the Sales OS");
+    expect(`${turn.system}${JSON.stringify(turn.prompt)}`).not.toContain("SOURCE_ONLY");
+  }
+  const sent = JSON.parse(turns.find((entry: any) => entry.botId === f.sender.id).evidence.at(-1).response.result.content[0].text);
+  expect(sent.receipts.map((receipt: any) => receipt.detail)).toEqual(names.map(() => expect.stringContaining("it isn't in this room, so it got this directly")));
+
+  const room = await f.messages(f.source.activeTaskId);
+  const notes = room.filter((m: any) => m.sentDirectly);
+  expect(notes.map((m: any) => m.tool.name)).toEqual(names.map(name => `Sent to ${name} directly: it isn't in this room.`));
+  expect(notes.map((m: any) => [m.sentDirectly, m.threadRef.botId, m.threadRef.threadId])).toEqual(made3.map((bot: any) =>
+    [{ name: bot.name }, bot.id, children.find((node: any) => node.botId === bot.id).threadId]));
+  const results = room.filter((m: any) => m.roomRequest?.phase === "result");
+  expect(results.map((m: any) => m.tool.output).sort()).toEqual(made3.map((bot: any) => `Result from ${bot.id}`).sort());
+  expect(turns.filter((entry: any) => entry.botId === f.sender.id).map((entry: any) => entry.resumed)).toEqual([false, true]);
+  expect(room.filter((m: any) => m.text === "Sales OS parts reviewed")).toHaveLength(1);
+  expect(room.filter((m: any) => m.card && !m.card.autoApplied && !m.card.answered)).toEqual([]);
 }), 60_000);

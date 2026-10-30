@@ -11,7 +11,7 @@ afterAll(() => vi.unstubAllGlobals());
 
 const { botAppsFrom } = await import("./useBotApps");
 const highlevel = (state: "connected" | "signed-out" | "needs-sign-in" | "connecting" | "unavailable") =>
-  ({ state, ...(state === "connected" ? { kind: "oauth" as const, location: { id: "loc_1", name: "Precision Profiles" } } : {}) });
+  ({ state, ...(state === "connected" ? { kind: "oauth" as const, location: { id: "loc_1", name: "Example Profiles" } } : {}) });
 
 const card = (slug: string, label: string): ToolkitCard => ({ slug, label, blurb: `${label} things`, logo: `https://logo.test/${slug}.png`, domain: `${slug}.com` });
 const cards = new Map([card("gmail", "Gmail"), card("slack", "Slack")].map((entry) => [entry.slug, entry]));

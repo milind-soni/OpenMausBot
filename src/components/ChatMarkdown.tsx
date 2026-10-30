@@ -1,6 +1,5 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
 import { createContext, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import type { HighlighterCore } from "shiki/core";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -8,20 +7,16 @@ import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-f
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import { cn } from "@/lib/cn";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 
-import {
-  countLines,
-  downloadSnippetFile,
-  formatLineCount,
-  getLanguageDisplayName,
-  getSnippetFileName,
-  parseFenceInfo,
-} from "../lib/code-block";
+import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { GITHUB_REF_CLASS, isUseMyComputerUrl, LINK_CLASS, UseMyComputerLink, usePageOpener, withPageOpen } from "./ChatLinks";
 import { githubRefFromProps, remarkGithubRefs } from "@/lib/github-refs";
 import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
 import { useThreadLinkMenu } from "@/components/ThreadLinkMenu";
@@ -29,162 +24,15 @@ import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, rema
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
-import { TableFileButton } from "./TableFilePreview";
+import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
+export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
+import { FilePreviewButton } from "./FilePreviewButton";
 
-const highlightCache = new Map<string, string>();
-export const HIGHLIGHT_CACHE_MAX = 200;
-export const HIGHLIGHT_CACHE_MAX_CHARS = 4 * 1024 * 1024;
-function rememberHighlight(key: string, html: string) {
-  if (html.length > HIGHLIGHT_CACHE_MAX_CHARS) return;
-  highlightCache.set(key, html);
-  let chars = 0;
-  for (const cached of highlightCache.values()) chars += cached.length;
-  for (const [oldest, oldestHtml] of highlightCache) {
-    if (highlightCache.size <= HIGHLIGHT_CACHE_MAX && chars <= HIGHLIGHT_CACHE_MAX_CHARS) break;
-    highlightCache.delete(oldest);
-    chars -= oldestHtml.length;
-  }
-}
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
 // mermaid.render() needs an id no earlier call used, failed calls included (they can leave an orphan element).
 let mermaidRenderId = 0;
-const hash = (s: string) => {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(36);
-};
-
-// Shiki's package entry registers every grammar and theme (hundreds of chunks), so each one is imported on its own.
-const LIGHT_THEME = "github-light-default";
-const DARK_THEME = "github-dark-default";
-const grammarLoaders = {
-  javascript: () => import("shiki/langs/javascript.mjs"),
-  jsx: () => import("shiki/langs/jsx.mjs"),
-  typescript: () => import("shiki/langs/typescript.mjs"),
-  tsx: () => import("shiki/langs/tsx.mjs"),
-  json: () => import("shiki/langs/json.mjs"),
-  jsonc: () => import("shiki/langs/jsonc.mjs"),
-  json5: () => import("shiki/langs/json5.mjs"),
-  bash: () => import("shiki/langs/bash.mjs"),
-  powershell: () => import("shiki/langs/powershell.mjs"),
-  fish: () => import("shiki/langs/fish.mjs"),
-  python: () => import("shiki/langs/python.mjs"),
-  html: () => import("shiki/langs/html.mjs"),
-  css: () => import("shiki/langs/css.mjs"),
-  scss: () => import("shiki/langs/scss.mjs"),
-  sass: () => import("shiki/langs/sass.mjs"),
-  less: () => import("shiki/langs/less.mjs"),
-  markdown: () => import("shiki/langs/markdown.mjs"),
-  mdx: () => import("shiki/langs/mdx.mjs"),
-  yaml: () => import("shiki/langs/yaml.mjs"),
-  toml: () => import("shiki/langs/toml.mjs"),
-  xml: () => import("shiki/langs/xml.mjs"),
-  c: () => import("shiki/langs/c.mjs"),
-  cpp: () => import("shiki/langs/cpp.mjs"),
-  csharp: () => import("shiki/langs/csharp.mjs"),
-  rust: () => import("shiki/langs/rust.mjs"),
-  go: () => import("shiki/langs/go.mjs"),
-  ruby: () => import("shiki/langs/ruby.mjs"),
-  php: () => import("shiki/langs/php.mjs"),
-  java: () => import("shiki/langs/java.mjs"),
-  kotlin: () => import("shiki/langs/kotlin.mjs"),
-  swift: () => import("shiki/langs/swift.mjs"),
-  dart: () => import("shiki/langs/dart.mjs"),
-  r: () => import("shiki/langs/r.mjs"),
-  lua: () => import("shiki/langs/lua.mjs"),
-  sql: () => import("shiki/langs/sql.mjs"),
-  graphql: () => import("shiki/langs/graphql.mjs"),
-  proto: () => import("shiki/langs/proto.mjs"),
-  dockerfile: () => import("shiki/langs/dockerfile.mjs"),
-  makefile: () => import("shiki/langs/makefile.mjs"),
-  diff: () => import("shiki/langs/diff.mjs"),
-  wasm: () => import("shiki/langs/wasm.mjs"),
-};
-type GrammarFile = keyof typeof grammarLoaders;
-const grammarAlias: Record<string, GrammarFile> = {
-  js: "javascript", node: "javascript",
-  ts: "typescript",
-  sh: "bash", zsh: "bash", shell: "bash",
-  ps1: "powershell",
-  py: "python",
-  htm: "html",
-  yml: "yaml",
-  md: "markdown",
-  svg: "xml",
-  "c++": "cpp", cc: "cpp", cxx: "cpp",
-  cs: "csharp", "c#": "csharp",
-  rs: "rust",
-  golang: "go",
-  rb: "ruby",
-  kt: "kotlin",
-  gql: "graphql",
-  protobuf: "proto",
-  docker: "dockerfile",
-  make: "makefile",
-};
-const PLAIN_LANGS = new Set(["", "text", "txt", "plaintext", "plain"]);
-let highlighterPromise: Promise<HighlighterCore> | undefined;
-const grammarLoading = new Map<string, Promise<void>>();
-
-function grammarFile(lang: string): GrammarFile | undefined {
-  const alias = grammarAlias[lang];
-  if (alias) return alias;
-  return Object.prototype.hasOwnProperty.call(grammarLoaders, lang) ? lang as GrammarFile : undefined;
-}
-
-function getHighlighter(): Promise<HighlighterCore> {
-  if (highlighterPromise) return highlighterPromise;
-  const created = (async () => {
-    const { createHighlighterCore } = await import("shiki/core");
-    const { createJavaScriptRegexEngine } = await import("shiki/engine/javascript");
-    return createHighlighterCore({
-      themes: [
-        import("shiki/themes/github-light-default.mjs").then((mod) => mod.default),
-        import("shiki/themes/github-dark-default.mjs").then((mod) => mod.default),
-      ],
-      langs: [],
-      engine: createJavaScriptRegexEngine(),
-    });
-  })().catch((error: unknown) => {
-    highlighterPromise = undefined;
-    throw error;
-  });
-  highlighterPromise = created;
-  return created;
-}
-
-function loadGrammar(highlighter: HighlighterCore, file: GrammarFile): Promise<void> {
-  const pending = grammarLoading.get(file);
-  if (pending) return pending;
-  const next = grammarLoaders[file]().then((mod) => highlighter.loadLanguage(mod.default)).catch((error: unknown) => {
-    grammarLoading.delete(file);
-    throw error;
-  });
-  grammarLoading.set(file, next);
-  return next;
-}
-
-async function highlightFence(code: string, lang: string): Promise<string> {
-  const highlighter = await getHighlighter();
-  const requested = lang.trim().toLowerCase();
-  const plain = PLAIN_LANGS.has(requested);
-  const file = plain ? undefined : grammarFile(requested);
-  if (!plain && !file) throw new Error(`No bundled grammar for ${requested}`);
-  if (file) await loadGrammar(highlighter, file);
-  return highlighter.codeToHtml(code, {
-    lang: file ?? "text",
-    themes: { light: LIGHT_THEME, dark: DARK_THEME },
-    defaultColor: "light-dark()",
-  });
-}
-const highlightKey = (lang: string, code: string) => `${lang}:${hash(code)}`;
-// Shiki tokenizes on the renderer's main thread: 100 KB of TypeScript took 1.1 s, 1 MB took 12 s.
-export const HIGHLIGHT_MAX_CHARS = 100_000;
-const mermaidKey = (scheme: "dark" | "light", code: string) => `${scheme}:${hash(code)}`;
+const mermaidKey = (scheme: "dark" | "light", code: string) => `${scheme}:${codeHash(code)}`;
 
 const WINDOWS_PATH = /^[a-zA-Z]:[\\/]/;
 const absolutePath = (value: string): string | null => {
@@ -215,14 +63,15 @@ export const localFilePath = (href?: string): string | null => {
   return href;
 };
 
-export function chatUrlTransform(value: string): string {
-  if (looksLikeThreadRefUrl(value)) return value;
+export function chatUrlTransform(value: string, key = "href"): string {
+  if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
   // for the server's single decode.
   const url = /^[a-zA-Z]:%5C/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
   if (/^file:\/\//i.test(url) || WINDOWS_PATH.test(url) || url.startsWith("\\\\")) {
     return localFilePath(url) ? url : "";
   }
+  if (key === "href" && /^obsidian:\/\//i.test(value)) return value;
   return defaultUrlTransform(value);
 }
 
@@ -241,6 +90,26 @@ const normalizationParseOptions: MarkdownParseOptions = {
   extensions: gfmParseData.micromarkExtensions,
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
 };
+
+/** A single line break in a reply is a line break, as chat apps show it, not a space. */
+function remarkSoftBreaks() {
+  return (tree: { children?: any[] }) => {
+    const visit = (node: { children?: any[] }) => {
+      if (!node.children) return;
+      node.children = node.children.flatMap((child) => {
+        if (child?.type !== "text" || !child.value.includes("\n")) {
+          visit(child);
+          return [child];
+        }
+        return (child.value as string).split("\n").flatMap((value, index) => [
+          ...(index ? [{ type: "break" }] : []),
+          ...(value ? [{ type: "text", value }] : []),
+        ]);
+      });
+    };
+    visit(tree);
+  };
+}
 
 function unwrapLinkedImages() {
   return (tree: { children?: any[] }) => {
@@ -292,139 +161,6 @@ interface BlockProps {
   children?: ReactNode;
 }
 
-export interface CodeBlockProps {
-  code: string;
-  lang: string;
-  initialWrap?: boolean;
-}
-
-export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
-  const highlightable = code.length <= HIGHLIGHT_MAX_CHARS;
-  const [html, setHtml] = useState<string | null>(() => highlightable ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
-  // React compares dangerouslySetInnerHTML by identity: a fresh object each render rebuilds the highlighted DOM.
-  const markup = useMemo(() => (html ? { __html: html } : null), [html]);
-  const { state: copied, copy } = useCopyFeedback(code);
-  const [wrapLines, setWrapLines] = useState(initialWrap);
-  useEffect(() => {
-    setWrapLines(initialWrap);
-  }, [initialWrap]);
-
-  useEffect(() => {
-    if (!highlightable) return setHtml(null);
-    const key = highlightKey(lang, code);
-    const cached = highlightCache.get(key);
-    if (cached) return setHtml(cached);
-    let alive = true;
-    highlightFence(code, lang || "text")
-      .then((out) => {
-        if (!alive) return;
-        rememberHighlight(key, out);
-        setHtml(out);
-      })
-      .catch(() => {
-      });
-    return () => {
-      alive = false;
-    };
-  }, [code, lang, highlightable]);
-
-  const download = () => {
-    const filename = getSnippetFileName(lang);
-    downloadSnippetFile(filename, code);
-  };
-
-  const displayLanguage = getLanguageDisplayName(lang);
-  const lineCount = countLines(code);
-
-  return (
-    <div dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
-      <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
-            {displayLanguage}
-          </span>
-          {lineCount > 0 && (
-            <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-secondary select-none">
-              {formatLineCount(lineCount)}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-          <button
-            type="button"
-            onClick={() => setWrapLines((w) => !w)}
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors ${
-              wrapLines
-                ? "bg-accent/15 text-accent font-medium"
-                : "text-ink-secondary hover:bg-raised hover:text-ink"
-            }`}
-            title={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
-            aria-label={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
-            aria-pressed={wrapLines}
-          >
-            <WrapText size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">{wrapLines ? "Unwrap" : "Wrap"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={download}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title="Download snippet as file"
-            aria-label="Download snippet as file"
-          >
-            <Download size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">Save</span>
-          </button>
-          <button
-            type="button"
-            onClick={copy}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title={copied === "copied" ? "Copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy code"}
-            aria-label={copied === "copied" ? "Code copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy code to clipboard"}
-          >
-            {copied === "failed" ? (
-              <>
-                <X size={12} className="text-danger" aria-hidden="true" />
-                <span className="text-danger font-medium hidden sm:inline">{t("common.copyFailed")}</span>
-              </>
-            ) : copied === "copied" ? (
-              <>
-                <Check size={12} className="text-success" aria-hidden="true" />
-                <span className="text-success font-medium hidden sm:inline">Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy size={12} aria-hidden="true" />
-                <span className="hidden sm:inline">Copy</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-      {markup ? (
-        <div
-          className={`text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3 ${
-            wrapLines
-              ? "whitespace-pre-wrap break-words overflow-x-hidden [&_pre]:!whitespace-pre-wrap [&_pre]:!break-words [&_code]:!whitespace-pre-wrap [&_code]:!break-words"
-              : "overflow-x-auto"
-          }`}
-          dangerouslySetInnerHTML={markup}
-        />
-      ) : (
-        <pre
-          className={`p-3 text-[13px] leading-relaxed text-ink ${
-            wrapLines
-              ? "whitespace-pre-wrap break-words overflow-x-hidden"
-              : "overflow-x-auto"
-          }`}
-        >
-          {code}
-        </pre>
-      )}
-    </div>
-  );
-}
-
 function mermaidScheme(element: HTMLElement | null): "dark" | "light" {
   if (!element || typeof window === "undefined" || typeof window.getComputedStyle !== "function") return "dark";
   try {
@@ -452,6 +188,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
   const { state: copied, copy } = useCopyFeedback(code);
+  const simple = !useAdvancedMode();
 
   useEffect(() => {
     if (typeof MutationObserver === "undefined" || typeof document === "undefined") return;
@@ -502,6 +239,28 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
     };
   }, [code, skinEpoch]);
 
+  const diagram = <>
+    {error && (
+      <p role="alert" className="px-3 pt-2 text-[12px] text-danger">
+        Diagram could not be rendered: {error}
+      </p>
+    )}
+    {markup && <div className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
+    {(showSource || !svg || error) && (
+      <pre className={cn("overflow-x-auto text-[13px]", simple ? "px-3 py-2 leading-5 text-ink-secondary" : "p-3 leading-relaxed text-ink")}>{code}</pre>
+    )}
+  </>;
+  if (simple) {
+    return (
+      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
+        <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copySource")} items={[
+          { key: "source", label: t(showSource ? "code.hideSource" : "code.showSource"), icon: <WrapText size={14} aria-hidden="true" />, active: showSource, onSelect: () => setShowSource((shown) => !shown) },
+          { key: "about", label: t("code.mermaid"), disabled: true, separatorBefore: true, onSelect: () => {} },
+        ]} />
+        {diagram}
+      </div>
+    );
+  }
   return (
     <div ref={frame} dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
@@ -550,20 +309,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
           </button>
         </div>
       </div>
-      {error && (
-        <p role="alert" className="px-3 pt-2 text-[12px] text-danger">
-          Diagram could not be rendered: {error}
-        </p>
-      )}
-      {markup && (
-        <div
-          className="overflow-x-auto p-3 [&_svg]:!max-w-full"
-          dangerouslySetInnerHTML={markup}
-        />
-      )}
-      {(showSource || !svg || error) && (
-        <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-ink">{code}</pre>
-      )}
+      {diagram}
     </div>
   );
 }
@@ -585,7 +331,7 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <TableFileButton path={filePath} name={name ?? fileName(filePath)} message={message} />
+      <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />
       <button
         type="button"
         onClick={() => void save.save()}
@@ -862,17 +608,19 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   // SAFETY: react-markdown hands hast data-* attributes through as string props
   const props = rest as Record<string, unknown>;
   const { threads, currentBotId, message, delivered } = useContext(MessageScopeContext);
-  const linkMenu = useThreadLinkMenu(href);
-  const address = href ? parseThreadRefUrl(href) : null;
+  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener();
+  if (!href) return <span className="break-words">{children}</span>;
+  if (isUseMyComputerUrl(href)) return <UseMyComputerLink>{children}</UseMyComputerLink>;
+  const address = parseThreadRefUrl(href);
   const ref = address ? resolveThreadRefAddress(threads, address, currentBotId) : null;
   if (ref) return <ThreadLink target={ref} ambiguous={ref.ambiguous}>{children}</ThreadLink>;
-  if (address || (href && looksLikeThreadRefUrl(href))) return <span className="break-words">{children}</span>;
+  if (address || looksLikeThreadRefUrl(href)) return <span className="break-words">{children}</span>;
   const localPath = localFilePath(href);
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
     return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} message={message}>{children}</LocalFileLink>;
   }
-  if (!href || !/^https?:\/\//i.test(href)) {
+  if (!/^https?:\/\//i.test(href)) {
     return (
       <a href={href} target="_blank" rel="noreferrer" dir="auto" className={LINK_CLASS}>
         {children}
@@ -883,7 +631,7 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   const Icon = github ? GITHUB_REF_ICONS[github.kind] : null;
   return (
     <LinkHoverCard href={href} github={github}>
-      {(hoverAnchor) => { const anchor = linkMenu.onContextMenu ? { ...hoverAnchor, onContextMenu: linkMenu.onContextMenu } : hoverAnchor; return <>{linkMenu.menu}{Icon ? (
+      {(hoverAnchor) => { const anchor = withPageOpen(href, openPage, linkMenu.onContextMenu ? { ...hoverAnchor, onContextMenu: linkMenu.onContextMenu } : hoverAnchor); return <>{linkMenu.menu}{Icon ? (
         <a {...anchor} href={href} target="_blank" rel="noreferrer" dir="ltr" title={href} data-github-ref={github!.kind} className={GITHUB_REF_CLASS}>
           <Icon size={13} aria-hidden="true" className="shrink-0 self-center text-ink-tertiary" />
           <span>{children}</span>
@@ -896,10 +644,6 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
     </LinkHoverCard>
   );
 }
-
-const LINK_CLASS = "break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]";
-const GITHUB_REF_CLASS =
-  "inline-flex items-baseline gap-1 whitespace-nowrap rounded-full bg-inset px-1.5 align-baseline font-mono text-[0.88em] text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [unicode-bidi:isolate]";
 
 const MARKDOWN_COMPONENTS: Components = {
   pre: MarkdownCode,
@@ -938,10 +682,10 @@ const MARKDOWN_COMPONENTS: Components = {
     return <ol dir={blockDirection(node)} className="list-decimal space-y-1 ps-5">{children}</ol>;
   },
   h1({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="mt-3 text-[18px] font-semibold">{children}</div>;
   },
   h2({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-2 text-[15.5px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
   },
   h3({ node, children }: BlockProps) {
     return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
@@ -953,7 +697,7 @@ const MARKDOWN_COMPONENTS: Components = {
     return <div dir={blockDirection(node)} className="mt-1.5 text-[14px] font-semibold">{children}</div>;
   },
   h6({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+    return <div dir={blockDirection(node)} className="mt-1.5 text-[14px] font-semibold text-ink-secondary">{children}</div>;
   },
   blockquote({ node, children }: BlockProps) {
     return (
@@ -1001,7 +745,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
           rehypePlugins={mathPlugin ? [mathPlugin] : []}
           urlTransform={chatUrlTransform}
           components={MARKDOWN_COMPONENTS}
@@ -1018,7 +762,7 @@ export function samePeers(previous: readonly MentionPeer[], next: readonly Menti
   if (previous.length !== next.length) return false;
   return previous.every((peer, index) => {
     const other = next[index]!;
-    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color;
+    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color && peer.person === other.person;
   });
 }
 

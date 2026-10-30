@@ -12,6 +12,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
+import { withAnswer } from "./testing/your-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
@@ -340,12 +341,13 @@ itHost("R5 queues a member's root on the computer seat at the wait ceiling, FIFO
       driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
       environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile },
     } } }));
-    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
+    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href,
+      "--import", pathToFileURL(join(ROOT, "server/testing/desktop-parent.mjs")).href, join(ROOT, "server/index.ts")], {
       cwd: ROOT, env: {
         PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         HOME: home, USERPROFILE: home, OMB_DATA_DIR: data, APPDATA: join(home, "appdata"), LOCALAPPDATA: join(home, "localappdata"),
         TEMP: home, TMP: home, TMPDIR: home, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
-        OMB_USER_DATA: join(home, "user-data"), OMB_COMPUTER_CALL_WAIT_MS: "4000", OMB_COMPUTER_CALL_ACT_WITHIN_MS: "1000",
+        OMB_TEST_DESKTOP_CUA_CONNECTION: join(home, "user-data", "cua-connection.json"), OMB_COMPUTER_CALL_WAIT_MS: "4000", OMB_COMPUTER_CALL_ACT_WITHIN_MS: "1000",
         OMB_COMPUTER_WAIT_MAX_MS: String(CEILING_MS),
       }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -361,12 +363,13 @@ itHost("R5 queues a member's root on the computer seat at the wait ceiling, FIFO
     const { task: held } = await apiOk("POST", `/api/bots/${holder.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the screen slowly.", threadId: held.threadId });
     await until(() => taskOf(holder.id, held.threadId), (task) => task?.busy === true);
-    expect(await gate(await dumpFor(holder.id))).toEqual({ held: false, helpOpen: false });
+    // On Auto the person is asked once before each turn first uses their computer.
+    expect(await withAnswer(base, held.threadId, gate(await dumpFor(holder.id)))).toEqual({ held: false, helpOpen: false });
     const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter" });
     const { task: wait } = await apiOk("POST", `/api/bots/${waiter.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${waiter.id}/messages`, { text: "R5-DIRECT: use the screen too.", threadId: wait.threadId });
     await until(() => taskOf(waiter.id, wait.threadId), (task) => task?.busy === true);
-    expect((await gate(await dumpFor(waiter.id))).held).toBe(true);
+    expect((await withAnswer(base, wait.threadId, gate(await dumpFor(waiter.id)))).held).toBe(true);
     const direct = (await until(() => rootIn(wait.threadId), (row) => row?.status === "queued"))!;
     expect(direct).toMatchObject({ status: "queued", continuation: { note: expect.stringContaining(SEAT_FREE), count: 1 } });
     rmSync(dumpFile, { force: true });
@@ -519,6 +522,28 @@ it("R7 does not rerun a cut goal step after a restart: its run ended with the re
   expect((await f.roomView(room.id))).toMatchObject({ working: false, busyBotId: null });
   expect(nothingLive(f)).toEqual([]);
 }), hostTimeout(90_000));
+
+it("R7 a goal step the watchdog stops after it posted a credential card fails as stalled and stops the card", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id, { key: "C-STEP", match: ["R7S-GOAL"], steps: [{ tool: "request_credential", arguments: { credential_id: "xaiApiKey", reason: "R7S fixture model" } }],
+    gateFile: f.gate("step"), reply: "R7S-LATE: never shown." });
+  await f.post(room, "R7S-GOAL: set up the Grok model; ask me for the key you need.", { mode: "goal" });
+  const messages = (): Promise<Array<{ id: string; kind: string; secret?: { stopped?: boolean }; goalRun?: { status: string } }>> => f.messages(room.threadId);
+  await expect.poll(async () => (await messages()).find((message) => message.kind === "secret")?.id, { timeout: 30_000 }).toBeTruthy();
+  const card = (await messages()).find((message) => message.kind === "secret")!;
+  const step = f.roomRoots(room.threadId)[0];
+  expect(step).toMatchObject({ status: "running", goalRunId: expect.any(String) });
+  writeFileSync(join(f.dataDir, "stall-turns"), "now");
+  try { await expect.poll(() => f.roomRoots(room.threadId)[0]?.status, { timeout: 20_000 }).toBe("failed"); } finally { rmSync(join(f.dataDir, "stall-turns"), { force: true }); }
+  expect(f.roomRoots(room.threadId)[0]).toMatchObject({ id: step.id, status: "failed", outcome: "stalled", executions: 1 });
+  expect(f.roomRoots(room.threadId)[0].cards).toBeUndefined();
+  expect((await messages()).find((message) => message.id === card.id)?.secret).toMatchObject({ stopped: true });
+  // The run retries a stalled step once: that attempt ends without a decision, and so does the run.
+  f.open("step");
+  await expect.poll(async () => (await messages()).find((message) => message.kind === "goal.run")?.goalRun?.status, { timeout: 30_000 }).not.toBe("working");
+  expect(nothingLive(f)).toEqual([]);
+}, { fake: { OMB_TEST_STALL_CLOCK: "1" } }), hostTimeout(60_000));
 
 it("R8 runs a chained @mention as a root of its own, with the hop recorded", () => scenario(async (f) => {
   const mira = await f.bot("Mira", "Engineering");

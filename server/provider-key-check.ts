@@ -2,7 +2,8 @@
 export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta";
 
 export type ProviderKeyVerdict =
-  | { ok: true; check: "authentication" | "models"; models: string[] }
+  /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
+  | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
 export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta"];
@@ -83,11 +84,9 @@ export async function checkProviderKey(
     if (!body || typeof body !== "object") return { ok: false, reason: "unexpected", status: response.status };
     if (authenticate) {
       const data = (body as { data?: unknown }).data;
-      if (!data || typeof data !== "object" || Array.isArray(data)
-        || typeof (data as { is_free_tier?: unknown }).is_free_tier !== "boolean") {
-        return { ok: false, reason: "unexpected", status: response.status };
-      }
-      return { ok: true, check: "authentication", models: [] };
+      const freeTier = data && typeof data === "object" && !Array.isArray(data) ? (data as { is_free_tier?: unknown }).is_free_tier : undefined;
+      if (typeof freeTier !== "boolean") return { ok: false, reason: "unexpected", status: response.status };
+      return { ok: true, check: "authentication", models: [], freeTier };
     }
     return { ok: true, check: "models", models: modelIds(body) };
   } catch {

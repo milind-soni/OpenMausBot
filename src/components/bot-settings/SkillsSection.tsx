@@ -17,8 +17,9 @@ export interface ManagedSkill {
   enabled: boolean;
   source: string;
   warnings: string[];
-  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one. */
-  origin?: "private" | "library" | "imported";
+  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
+   * "native": loaded by the bot's engine from a skills folder of its own; changed only there. */
+  origin?: "private" | "library" | "imported" | "native";
 }
 
 interface LibraryPoolSkill {
@@ -224,11 +225,11 @@ export function SkillReviewDialog({
         <div id="skill-review-title" className="text-[16px] font-semibold text-ink">
           Review {skill.name} before enabling
         </div>
-        <div className="mt-1 break-all text-[11.5px] text-ink-secondary">
+        <div className="mt-1 break-all text-[12px] text-ink-secondary">
           Source: {skill.source}
         </div>
         {skill.warnings.length > 0 && (
-          <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[11.5px] text-warning">
+          <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning">
             {skill.warnings.join(" · ")}
           </div>
         )}
@@ -384,7 +385,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       <div className="rounded-xl bg-card p-4">
         <div className="flex items-center gap-2">
           <BookOpen size={16} className="text-ink-secondary" />
-          <div className="text-[15px] font-medium text-ink">Learned skills</div>
+          <div className="text-[15px] font-medium text-ink">{t("skills.learned.title")}</div>
         </div>
         <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
           {featureEnabled ? t("skills.learned.hintOn") : t("skills.learned.hintOff")}
@@ -395,12 +396,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
             {libraryPool.length > 0 ? (
               <div className="flex items-center gap-2">
                 <Select size="lg" className="flex-1"
-                  aria-label="Add a skill from the library"
+                  aria-label={t("skills.library.addLabel")}
                   value={addFromLibrary}
                   disabled={Boolean(working)}
                   onChange={(e) => setAddFromLibrary(e.target.value)}
                 >
-                  <option value="">Add a skill from the library…</option>
+                  <option value="">{t("skills.library.addPlaceholder")}</option>
                   {libraryPool.map((skill) => (
                     <option key={skill.name} value={skill.name}>{skill.name}</option>
                   ))}
@@ -411,13 +412,13 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                   onClick={() => void addToBot()}
                   className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </div>
             ) : (
-              <div className="text-[12px] text-ink-secondary">Every skill in the library is already assigned to this bot.</div>
+              <div className="text-[12px] text-ink-secondary">{t("skills.library.allAssigned")}</div>
             )}
-            <div className="text-[11.5px] text-ink-secondary">Import and manage library skills in Settings → Skills.</div>
+            <div className="text-[12px] text-ink-secondary">{t("skills.library.manageHint")}</div>
           </div>
         ) : (
           <>
@@ -430,8 +431,8 @@ export function SkillsSection({ bot }: { bot: Bot }) {
             >
               <input
                 className={inputCls}
-                placeholder="owner/repo, https://github.com/…/SKILL.md, or https://skills.sh/…"
-                aria-label="Import a skill"
+                placeholder={t("skills.import.placeholder")}
+                aria-label={t("skills.import.label")}
                 value={source}
                 onChange={(e) => setSource(e.target.value)}
               />
@@ -440,7 +441,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                 disabled={importing || !source.trim()}
                 className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
-                {importing ? "Importing…" : "Import"}
+                {importing ? t("skills.import.importing") : t("skills.import.button")}
               </button>
             </form>
             {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
@@ -448,9 +449,9 @@ export function SkillsSection({ bot }: { bot: Bot }) {
         )}
 
         {loading ? (
-          <div className="mt-3 text-[12px] text-ink-secondary">Loading…</div>
+          <div className="mt-3 text-[12px] text-ink-secondary">{t("skills.loading")}</div>
         ) : skills.length === 0 ? (
-          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">No installed skills yet.</div>
+          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">{t("skills.empty")}</div>
         ) : (
           <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
             {skills.map((skill) => (
@@ -461,25 +462,27 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     onClick={() => void view(skill)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
-                    {(libraryOn || skill.origin === "imported") && (
+                    <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
+                    {(libraryOn || skill.origin === "imported" || skill.origin === "native") && (
                       <span
-                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-secondary"
-                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : undefined}
+                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
+                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : undefined}
                       >
-                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "library" ? "library" : "private"}
+                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? "library" : "private"}
                       </span>
                     )}
-                    <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
-                    <div className="mt-0.5 text-[10.5px] text-ink-secondary">Used when the bot decides it's relevant</div>
+                    <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">Used when the bot decides it's relevant</div>
                   </button>
-                  <Switch
-                    checked={skill.enabled}
-                    aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
-                    disabled={Boolean(working)}
-                    onClick={() => void toggle(skill)}
-                  />
-                  {skill.origin !== "imported" && (
+                  {skill.origin !== "native" && (
+                    <Switch
+                      checked={skill.enabled}
+                      aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
+                      disabled={Boolean(working)}
+                      onClick={() => void toggle(skill)}
+                    />
+                  )}
+                  {skill.origin !== "imported" && skill.origin !== "native" && (
                     <button
                       aria-label={`Remove ${skill.name}`}
                       title="Remove skill"
@@ -491,16 +494,16 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     </button>
                   )}
                 </div>
-                <div className="mt-1 truncate text-[10.5px] text-ink-secondary" title={skill.source}>Source: {skill.source}</div>
+                <div className="mt-1 truncate text-[11px] text-ink-secondary" title={skill.source}>Source: {skill.source}</div>
                 {skill.warnings.length > 0 && (
-                  <div className="mt-1 text-[10.5px] text-warning">{skill.warnings.join(" · ")}</div>
+                  <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                 )}
               </div>
             ))}
           </div>
         )}
         {staged.length > 0 && (
-          <div className="mt-2 text-[11.5px] text-warning">
+          <div className="mt-2 text-[12px] text-warning">
             {staged.length} proposal{staged.length === 1 ? " is" : "s are"} waiting for a decision in chat.
           </div>
         )}

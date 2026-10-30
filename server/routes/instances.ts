@@ -10,10 +10,12 @@ import {
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
-import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
+import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
+import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
+import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
@@ -26,7 +28,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface InstanceRouteDeps {
   store: Pick<Store, "bots" | "tasks">;
   cfg: AppConfig;
-  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget">;
+  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget" | "forgetSnapshots">;
   sessions: Pick<SessionRegistry, "isLive">;
   providerAuthSessions: Pick<ProviderAuthSessions, "status" | "start" | "revokeOwner" | "signOut" | "complete" | "cancel">;
   hostedModels: boolean;
@@ -41,6 +43,8 @@ export interface InstanceRouteDeps {
   threadBusy(botId: string, threadId: string): boolean;
   botForThread(botId: string, threadId: string): Pick<{ modelSelection: ModelSelection }, "modelSelection"> | null;
   activeGroupTurnForBot(botId: string): { threadId: string } | null;
+  /** The server's tested-AI record (server/tested-ai.ts): a check there also settles the new-bot default. */
+  checkInstance?(instance: ProviderInstance): Promise<EngineCheck>;
 }
 
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
@@ -50,6 +54,29 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     botForThread, activeGroupTurnForBot,
   } = deps;
   const describeInstances = async () => hostedModels ? deps.describeInstances() : withEndpointUrls(await deps.describeInstances(), cfg.instances ?? {});
+  const busyProviderSelections = () => store.bots.flatMap((bot) => {
+    const busyTasks = store.tasks(bot.id).filter((task) => threadBusy(bot.id, task.threadId));
+    const selections = busyTasks.map((task) => botForThread(bot.id, task.threadId)!.modelSelection);
+    if (activeGroupTurnForBot(bot.id) || (bot.busy && busyTasks.length === 0)) selections.push(bot.modelSelection);
+    return selections;
+  });
+  /** After the app installed its own copy of an engine whose CLI found a copy that does not start: point the engine at the
+   * app's copy, as Set CLI would. Not while provider settings are changing or a bot is using the engine. */
+  const useAppCopy = async (instanceId: string, cli: string): Promise<boolean> => {
+    if (providerConfigBusy.get() || busyProviderSelections().some((selection) => selection.instanceId === instanceId)) return false;
+    providerConfigBusy.set(true);
+    providerInstancesChanging.add(instanceId);
+    try {
+      const result = withInstanceCli(cfg, instanceId, cli);
+      const instances = persistableInstanceConfigs(result.config);
+      if (!result.ok || !Object.hasOwn(instances, instanceId)) return false;
+      await persistProviderInstance(instanceId, instances);
+      return true;
+    } finally {
+      providerInstancesChanging.delete(instanceId);
+      providerConfigBusy.set(false);
+    }
+  };
   // One updater per executable: Claude instances can share an install, and two self-updates would race its files.
   const claudeUpdatesInFlight = new Set<string>();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -141,9 +168,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     if (method === "GET" && authStatus) {
       res.setHeader("cache-control", "no-store");
       const state = await providerAuthSessions.status(authStatus[1], auth.kind === "session" ? auth.session.id : "loopback", url.searchParams.get("flowId") ?? "");
+      // A finished device sign-in changed what the engine reports; the page reads the engines next.
+      if (state.phase !== "waiting") registry.forgetSnapshots();
       return json(res, 200, { auth: state });
     }
-    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
+    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|check|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
     if (method === "POST" && instanceAction) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -153,13 +182,21 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const owner = auth.kind === "session" ? auth.session.id : "loopback";
       if (action.startsWith("auth/")) res.setHeader("cache-control", "no-store");
       try {
+        if (action === "check") {
+          const instance = registry.get(instanceId);
+          if (!instance) return json(res, 404, { error: "unknown instance" });
+          res.setHeader("cache-control", "no-store");
+          return json(res, 200, await (deps.checkInstance ?? checkEngine)(instance));
+        }
         if (action === "refresh-models") {
           if (!(await registry.refreshModels(instanceId))) return json(res, 404, { error: "unknown instance" });
           return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "install") {
-          if (!(await registry.installRuntime(instanceId))) return json(res, 404, { error: "Installing this engine from Settings is not available on this server. Use the install command on the machine running OpenMausBot." });
-          return json(res, 200, { instances: await describeInstances() });
+          const installed = await registry.installRuntime(instanceId);
+          if (!installed) return json(res, 404, { error: "Installing this engine from Settings is not available on this server. Use the install command on the machine running OpenMausBot." });
+          const usingAppCopy = installed !== true && await useAppCopy(instanceId, installed.useCli);
+          return json(res, 200, { instances: await describeInstances(), ...(usingAppCopy ? { usingAppCopy: true } : {}) });
         }
         if (action === "auth/start") {
           const instance = registry.get(instanceId);
@@ -169,6 +206,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
           }
           const started = await providerAuthSessions.start(instance, owner);
+          if (started.phase === "succeeded") registry.forgetSnapshots();
           // Revocation can arrive while the CLI is obtaining a device code.
           if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
             providerAuthSessions.revokeOwner(owner);
@@ -180,6 +218,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           await providerAuthSessions.signOut(instance, owner);
+          registry.forgetSnapshots();
           return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "auth/complete") {
@@ -189,6 +228,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const callbackUrl = typeof body?.callbackUrl === "string" ? body.callbackUrl : typeof body?.code === "string" ? body.code : "";
           if (!flowId || !callbackUrl) return json(res, 400, { error: "flowId and a code or callbackUrl are required" });
           await providerAuthSessions.complete(instanceId, owner, flowId, callbackUrl);
+          registry.forgetSnapshots();
           return json(res, 200, { ok: true });
         }
         const body = await readBody(req, 4096);
@@ -224,12 +264,6 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     }
 
     // No command or path comes from the request: the registry supplies this instance's executable. JSON-only.
-    const busyProviderSelections = () => store.bots.flatMap((bot) => {
-      const busyTasks = store.tasks(bot.id).filter((task) => threadBusy(bot.id, task.threadId));
-      const selections = busyTasks.map((task) => botForThread(bot.id, task.threadId)!.modelSelection);
-      if (activeGroupTurnForBot(bot.id) || (bot.busy && busyTasks.length === 0)) selections.push(bot.modelSelection);
-      return selections;
-    });
     const claudeUpdate = /^\/api\/instances\/([\w.-]+)\/claude-update$/.exec(path);
     if (method === "POST" && claudeUpdate) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
@@ -259,6 +293,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
       } finally {
         claudeUpdatesInFlight.delete(target.cli);
+        // Even a failed update may have replaced the executable.
+        registry.forgetSnapshots();
       }
     }
 
@@ -270,7 +306,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory or boolean tools setting." });
+      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes." });
       const body = parsed.data;
       const instanceId = instancePatch[1];
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
@@ -292,6 +328,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
             return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API, Mistral API, Cerebras API, Groq API and Meta API instances only." });
           }
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
+        }
+        if (body.replyWaitMinutes !== undefined) {
+          if (entry.driver !== "openai-compat") return json(res, 400, { error: "The reply wait is available for OpenAI-compatible servers only." });
+          const { replyWaitMinutes: _previous, ...rest } = entry.config as Record<string, unknown>;
+          entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {
@@ -319,8 +360,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const instances = persistableInstanceConfigs(cfg);
       if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: "unknown instance" });
       const addedChatgpt = instances[instanceId].driver === "codex" && instanceId.startsWith("chatgpt-");
-      if (!addedChatgpt && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
-        return json(res, 400, { error: "Only added Claude and ChatGPT accounts and OpenAI-compatible endpoints can be removed here." });
+      const addedAntigravity = instances[instanceId].driver === "antigravityAgent" && instanceId.startsWith("antigravity-");
+      if (!addedChatgpt && !addedAntigravity && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
+        return json(res, 400, { error: "Only added Claude, ChatGPT, and Antigravity accounts and OpenAI-compatible endpoints can be removed here." });
       }
       if (cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
         bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -342,6 +384,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       try {
         delete instances[instanceId];
         await persistProviderInstance(instanceId, instances);
+        // An added Antigravity account's Google sign-in lives in OpenMausBot's data folder too: removing the account deletes it.
+        if (addedAntigravity) await removeAntigravityProfile(instanceId);
         return json(res, 200, { instances: await describeInstances() });
       } finally {
         providerInstancesChanging.delete(instanceId);

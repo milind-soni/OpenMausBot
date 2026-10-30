@@ -3,6 +3,7 @@ import { newId, type RequestOutcome } from "../contracts.ts";
 import { floorBlockForToolCall, type FloorBlock } from "../safety-floor-gate.ts";
 import type { AskQuestion } from "../../shared/ask-question.ts";
 import type { ChatToolCallView } from "./chat-mcp-tools.ts";
+import { REFUSED_NEXT_STEP } from "../reply-habits.ts";
 
 /** `grant`: what "Always allow this session" would keep allowed; absent when the card can only allow once. */
 interface Ask { id: string; tool: string; summary: string; grant?: string }
@@ -17,7 +18,7 @@ interface Card {
 
 /** The text a refused call hands the model; a floor block also raises its line through `notice`. */
 export function refusal(block: FloorBlock | null, notice: (line: string) => void): string {
-  if (!block) return "Permission denied or expired; the tool was not executed.";
+  if (!block) return `Permission denied or expired; the tool was not executed.${REFUSED_NEXT_STEP}`;
   notice(block.line);
   return block.reason;
 }
@@ -75,13 +76,11 @@ export function createChatToolApproval(options: {
       if (closed || options.signal.aborted) return Promise.resolve(null);
       const ask = { id: newId(), tool, summary };
       return new Promise((resolve) => {
-        let timer: ReturnType<typeof setTimeout>;
         const card: Card = {
           kind: "question",
           ask,
           finish(source, decision) {
             if (!pending.delete(ask.id)) return;
-            clearTimeout(timer);
             options.signal.removeEventListener("abort", abort);
             // A timeout or abort resolves null: no system note may occupy the slot the model reads as the person's words.
             const reply = typeof decision?.message === "string" && decision.message.length > 0 ? decision.message : null;
@@ -90,8 +89,6 @@ export function createChatToolApproval(options: {
           },
         };
         const abort = () => card.finish("system");
-        timer = setTimeout(() => card.finish("timeout"), options.timeoutMs ?? 15 * 60_000);
-        timer.unref?.();
         pending.set(ask.id, card);
         options.signal.addEventListener("abort", abort, { once: true });
         options.openQuestion(ask, questions);

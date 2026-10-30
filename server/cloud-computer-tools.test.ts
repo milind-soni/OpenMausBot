@@ -107,6 +107,20 @@ describe("cloud computer tools", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("never opens Reddit in the cloud computer's browser, and says why, before the control gate or the Boat", async () => {
+    const { REDDIT_REFUSAL } = await import("./browser/egress/reddit.ts");
+    for (const url of ["https://www.reddit.com/r/test/", "http://old.reddit.com/", "https://i.redd.it/a.png", "https://reddit.app.link/x", "https://WWW.REDDIT.COM./"]) {
+      const call = rpc({ method: "tools/call", params: { name: "open_url", arguments: { url } } });
+      expect(await call.done, url).toEqual({ isError: true, content: [{ type: "text", text: REDDIT_REFUSAL }] });
+      expect(call.gated()).toBe(0);
+      await expect(tools.runCloudComputerTool(cfg, "bx_23456789", "open_url", { url }, new AbortController().signal))
+        .resolves.toEqual({ isError: true, content: [{ type: "text", text: REDDIT_REFUSAL }] });
+    }
+    expect(calls).toHaveLength(0);
+    await tools.runCloudComputerTool(cfg, "bx_23456789", "open_url", { url: "https://notreddit.com/" }, new AbortController().signal);
+    expect(calls[0].body.command).toMatch(/xdg-open .*https:\/\/notreddit\.com\//);
+  });
+
   it.each([
     ["a person holds control", { held: true, reason: "person" as const }, "A person has taken control of this computer"],
     ["another thread owns the seat", { held: true, blockedReason: "Another thread is using this computer." }, "Another thread is using this computer."],

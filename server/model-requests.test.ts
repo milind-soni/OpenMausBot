@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ModelRequestService, type ModelRequestStore, type OptionCardLike } from "./model-requests.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import type { BotRecord } from "./store.ts";
-import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
+import { appliesNow, type DirectApplyCheck } from "./direct-apply.ts";
 
 interface StoredMessage {
   id: string;
@@ -77,7 +77,7 @@ describe("ModelRequestService", () => {
       botId: bot.id, threadId: bot.threadId,
       selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked",
     });
-    expect(proposal.detail).toContain("Default engine/model:");
+    expect(proposal.detail).toContain("Default AI and model:");
     expect(proposal.detail).toContain("Loses peer coordination and every team tool");
     expect(proposal.detail).toContain("coordinate_bots");
     expect(proposal.detail).toContain("Loses approval levels: edits.");
@@ -97,7 +97,7 @@ describe("ModelRequestService", () => {
       botId: bot.id, threadId: bot.threadId,
       selection: { instanceId: "claude", model: "opus" }, reason: "asked",
     });
-    expect(proposal.detail).toContain("Default engine/model:");
+    expect(proposal.detail).toContain("Default AI and model:");
     expect(proposal.detail).not.toContain("peer coordination");
     expect(proposal.detail).not.toContain("approval levels");
   });
@@ -223,20 +223,20 @@ describe("ModelRequestService", () => {
   });
 });
 
-describe("a bot's own model changes", () => {
-  const rule: DirectApplyCheck = (botId, _threadId, targetBotId) => directApply({ fullAccess: false, botId, targetBotId, blocked: false });
+describe("a bot's model changes below Full access", () => {
+  const rule: DirectApplyCheck = (_botId, threadId) => appliesNow({ fullAccess: false, ownerMustConfirm: threadId === "guest-thread" });
 
-  it("applies its own switch at Ask, keeps the card for a peer's, and undoes once", () => {
+  it("applies its own switch and a peer's at Ask, and undoes once", () => {
     const store = new MemoryStore();
     const bot = addBot(store, "Scout");
     const peer = addBot(store, "Peer");
     const service = new ModelRequestService({ store, autoApply: rule });
     const own = service.submit({ botId: bot.id, threadId: bot.threadId, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" });
-    expect(own).toMatchObject({ state: "applied", appliedBy: "self" });
+    expect(own).toMatchObject({ state: "applied", appliedBy: "level" });
     expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ autoApplied: true, answered: "allow" });
     const other = service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" });
-    expect(other.state).toBe("pending");
-    expect(peer.modelSelection).toEqual({ instanceId: "claude", model: "sonnet" });
+    expect(other).toMatchObject({ state: "applied", appliedBy: "level" });
+    expect(peer.modelSelection).toEqual({ instanceId: "codex", model: "gpt-fixture" });
 
     const undo = () => service.undo({ botId: bot.id, threadId: bot.threadId, requestId: own.requestId });
     expect(undo()).toMatchObject({ state: "undone", targetBotId: bot.id });
@@ -244,16 +244,15 @@ describe("a bot's own model changes", () => {
     expect(undo()).toMatchObject({ state: "already_undone" });
   });
 
-  it("is not held back by the open-card budget, which still holds a card", () => {
+  it("is not held back by the open-card budget, which still holds the owner's card", () => {
     const store = new MemoryStore();
     const bot = addBot(store, "Scout");
-    const peer = addBot(store, "Peer");
     const canPersist = (_botId: string, _threadId: string, opensCard: boolean) =>
       opensCard ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" } : { ok: true as const };
     const service = new ModelRequestService({ store, autoApply: rule, canPersist });
     expect(service.submit({ botId: bot.id, threadId: bot.threadId, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" }).state)
       .toBe("applied");
-    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" }))
+    expect(() => service.submit({ botId: bot.id, threadId: "guest-thread", selection: { instanceId: "claude", model: "opus" }, reason: "asked" }))
       .toThrow("confirm or cancel an existing proposal first");
   });
 

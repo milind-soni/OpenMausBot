@@ -4,8 +4,10 @@ export interface PendingAuthorization {
 }
 
 /** Composio authorization links expire after ten minutes; reopening the page must not renew the clock. */
+export const AUTHORIZATION_LINK_MS = 10 * 60 * 1_000;
+
 export function reusableConnectionUrl(page: PendingAuthorization | null | undefined, now = Date.now()): string | null {
-  return page && now >= page.createdAt && now - page.createdAt < 10 * 60 * 1_000 ? page.url : null;
+  return page && now >= page.createdAt && now - page.createdAt < AUTHORIZATION_LINK_MS ? page.url : null;
 }
 
 /** Reserve the tab during the click, before an authorization request consumes the browser's user activation. */

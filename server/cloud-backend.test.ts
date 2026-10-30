@@ -4,9 +4,11 @@ import {
   BOAT_ACCOUNT_RESOURCES_ERROR,
   CLOUD_BACKEND_CHANGE_ERROR,
   VPS_ALIAS_RESOURCES_ERROR,
+  VPS_BOT_ALIAS_CHANGE_ERROR,
   boatAccountResourceChangeError,
   cloudBackendChangeError,
   vpsAliasResourceChangeError,
+  vpsBotAliasChangeError,
 } from "./cloud-backend.ts";
 
 describe("cloud backend switching", () => {
@@ -35,5 +37,13 @@ describe("cloud backend switching", () => {
   it("keeps an SSH alias attached while its VPS still has local computers", () => {
     expect(vpsAliasResourceChangeError(1)).toBe(VPS_ALIAS_RESOURCES_ERROR);
     expect(vpsAliasResourceChangeError(0)).toBeNull();
+  });
+
+  it.each(activeTurnCases)("rejects a bot's own SSH alias change during %s", (_reason, busy, activeVpsThread) => {
+    expect(vpsBotAliasChangeError(busy, activeVpsThread)).toBe(VPS_BOT_ALIAS_CHANGE_ERROR);
+  });
+
+  it("allows a bot's own SSH alias change while idle", () => {
+    expect(vpsBotAliasChangeError(false, false)).toBeNull();
   });
 });

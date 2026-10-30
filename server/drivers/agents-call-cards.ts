@@ -1,13 +1,41 @@
-// The agents tools that put something in front of the person: the Watcher's options card, the widget tools and raise_escalation.
+// The agents tools that put something in front of the person: the Watcher's options card, the widget tools, the
+// page tools and raise_escalation.
+import { agentsCallMember } from "../../shared/agents-tool-names.ts";
+import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
-export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "update_widget", "raise_escalation"]);
+export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "show_html", "raise_escalation"]);
 
 const CARD_ROUTE = "/api/internal/options-card";
+
+const MASKED = " Something in it read as a secret and was masked before it was stored. Never put secrets in a page or a widget.";
+
+async function callAppTool(name: "show_html" | "update_html", args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const updating = name === "update_html";
+  const parsed = updating ? parseUpdateHtmlInput(args) : parseShowHtmlInput(args);
+  if (!parsed.ok) return { text: parsed.error, isError: true };
+  const page = parsed.value.jsx !== undefined ? { jsx: args.jsx } : parsed.value.path !== undefined ? { path: args.path } : { html: args.html };
+  const body = updating
+    ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}) }
+    : {
+        tool: name, ...page, title: args.title,
+        ...(typeof args.height === "number" ? { height: args.height } : {}),
+        ...(typeof args.fallback_text === "string" ? { fallback_text: args.fallback_text } : {}),
+      };
+  const answer = await context.client.apiResponse(CARD_ROUTE, { method: "POST", body: JSON.stringify(body) });
+  if (!answer.ok) return { text: String(answer.body.error ?? (updating ? "Could not update that page." : "Could not show that page.")), isError: true };
+  const messageId = String(answer.body.messageId ?? "");
+  const masked = answer.body.masked === true ? MASKED : "";
+  return {
+    text: (updating
+      ? `Updated app ${messageId}.`
+      : `Shown as app ${messageId}. To change it, call show_html again with app_id "${messageId}".`) + masked,
+  };
+}
 
 export async function callCardTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { api, apiResponse } = context.client;
@@ -39,9 +67,11 @@ export async function callCardTool(name: string, args: Json, context: ToolCallCo
     };
   }
 
+  if (name === "show_html") return callAppTool(agentsCallMember(name, args) === "update_html" ? "update_html" : "show_html", args, context);
+
   const parsed = parseWidgetInput(args.widget);
   if (!parsed.ok) return { text: parsed.error, isError: true };
-  const updating = name === "update_widget";
+  const updating = agentsCallMember(name, args) === "update_widget";
   if (updating && (typeof args.widget_id !== "string" || !args.widget_id.trim())) {
     return { text: "widget_id: is required, the id show_widget returned.", isError: true };
   }
@@ -62,6 +92,6 @@ export async function callCardTool(name: string, args: Json, context: ToolCallCo
   return {
     text: (updating
       ? `Updated widget ${messageId}.`
-      : `Shown as widget ${messageId}. If it asks the person something, end your turn now: their press arrives as their next message. To change it later, call update_widget with widget_id "${messageId}".`) + masked + (advice ? ` ${advice}` : ""),
+      : `Shown as widget ${messageId}. Its answer arrives as the person's next message, even while you are still working; if they type something else instead, that is their answer. Do what does not depend on it, then end your turn without asking again in text. To change it later, call show_widget again with widget_id "${messageId}".`) + masked + (advice ? ` For you only; never mention it to the person: ${advice}` : ""),
   };
 }

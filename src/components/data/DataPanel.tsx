@@ -252,7 +252,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
     <div ref={panel} className="@container/data flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card text-ink fullscreen:h-full fullscreen:w-full" data-testid="data-panel">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden [container-type:size]" data-testid="data-result">
         {!sheet && !loadError && (
-          <p className="flex items-center justify-center gap-2 py-10 text-[12.5px] text-ink-secondary" role="status">
+          <p className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-secondary" role="status">
             <Loader2 size={14} className="animate-spin" aria-hidden="true" />{t("data.loading")}
           </p>
         )}
@@ -277,7 +277,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
       <div ref={query} id={queryId} style={{ height: queryHeight ?? undefined }} className="flex min-h-0 shrink-0 flex-col overflow-hidden px-3 py-2" data-testid="data-query">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <SqlEditor sql={shown.sql} externalRevision={String(shown.revision)} onChange={edit} />
-          <p role={queryError ? "alert" : undefined} title={queryError ?? undefined} className="mt-1 h-4 shrink-0 truncate text-[11.5px] text-danger" data-testid="data-query-error">{queryError}</p>
+          <p role={queryError ? "alert" : undefined} title={queryError ?? undefined} className="mt-1 h-4 shrink-0 truncate text-[12px] text-danger" data-testid="data-query-error">{queryError}</p>
         </div>
         <div className="shrink-0"><SourcesStrip sources={tables} /></div>
       </div>

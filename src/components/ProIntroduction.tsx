@@ -1,10 +1,13 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { Cloud, Crown } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import { useStore } from "@/state/store";
 import { buyOfferAllowed, cloudPlanLine, cloudPlanView, moneyBackLine, offerTrialDays, usd, type CloudPlanView } from "@/lib/cloud-plan";
 import { useCloudOffer } from "@/lib/use-cloud-offer";
 import { t } from "@/lib/i18n";
+import { SettingRow } from "./SettingsPrimitives";
+import { UpgradeButton, type UpgradeUi } from "./CloudUsageMeter";
+import type { CloudUsage } from "../../electron/cloud-home.mjs";
 
 export function proOfferAvailable(account: CloudAccountState | null): boolean {
   return buyOfferAllowed(cloudPlanView(account));
@@ -40,15 +43,15 @@ export function ProSettingsCard() {
           <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.settingsSummary")}</p>
           {cheapest !== null && <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: usd(cheapest / 100) })}</p>}
           {moneyBack && <p className="mt-1 text-[12px] text-ink-secondary">{moneyBack}</p>}
-          <p className="mt-1 text-[11.5px] text-ink-secondary">{t("pro.disclaimer")}</p></div>
+          <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.disclaimer")}</p></div>
       </div>
       <div className="flex flex-col items-end gap-1">
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className="cursor-pointer text-[12.5px] text-ink-secondary underline underline-offset-2 hover:text-ink"
+          <button type="button" className="cursor-pointer text-[13px] text-ink-secondary underline underline-offset-2 hover:text-ink"
             onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t("pro.seePlans")}</button>
           <button type="button" className="ui-button ui-button-primary" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
         </div>
-        {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
+        {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
           onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>}
       </div>
     </section>;
@@ -65,31 +68,44 @@ export function ProSettingsCard() {
   </section>;
 }
 
-export function LiveProPrompt() {
+export function CloudPlanRow({ place, usage = null, upgrade }: { place: "account" | "plan"; usage?: CloudUsage | null; upgrade?: UpgradeUi }) {
   const { dispatch } = useStore();
   const plan = useCloudPlan();
-  const view = plan?.view;
-  const titleId = useId();
-  const offering = !!view && buyOfferAllowed(view);
+  const offering = plan !== null && buyOfferAllowed(plan.view);
   const offer = useCloudOffer(offering, plan?.account?.offer);
-  const cheapest = offer ? Math.min(...offer.plans.map(entry => entry.amount)) : null;
-  const line = !view || offering ? null : view.kind === "reauth" ? t("pro.reauthShort") : cloudPlanLine(view);
-  return <section aria-labelledby={titleId} data-cloud-plan={view?.kind} className="flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-left">
-    <div className="flex items-center gap-2.5">
-      <Crown size={16} className="shrink-0 text-ink-secondary" aria-hidden="true" />
-      <h2 id={titleId} className="text-[13.5px] font-medium text-ink">{t("call.live.proTitle")}</h2>
-    </div>
-    <p className="text-[12.5px] leading-[1.45] text-ink-secondary">{t("call.live.proExplain")}</p>
-    {offering ? <>
-      {view?.kind === "signed-out" && <button type="button" className="text-left text-[12.5px] text-accent-text underline underline-offset-2" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>}
-      {cheapest !== null && <p className="text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: usd(cheapest / 100) })}</p>}
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className="ui-button ui-button-primary" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(offerTrialDays(offer) !== null ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
-        <button type="button" className="text-[12.5px] text-ink-secondary underline underline-offset-2" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t("pro.seePlans")}</button>
-      </div>
-    </> : view && <>
-      {line && <p className="text-[12.5px] text-ink">{line}</p>}
-      <button type="button" className="ui-button self-start" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("pro.openCloudSettings")}</button>
-    </>}
-  </section>;
+  if (!plan) return null;
+  if (offering) {
+    const trial = offerTrialDays(offer) !== null;
+    const cheapest = offer && offer.plans.length ? Math.min(...offer.plans.map((entry) => entry.amount)) : null;
+    return (
+      <SettingRow title={t("pro.name")} subtitle={place === "plan" && cheapest !== null ? t("pro.fromPrice", { price: usd(cheapest / 100) }) : t("pro.settingsSummary")}>
+        <div className="flex items-center gap-3">
+          {place === "plan" && plan.view.kind === "signed-out" && (
+            <button type="button" className="cursor-pointer text-[13px] text-ink-secondary hover:text-ink"
+              onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>
+          )}
+          <button type="button" data-cloud-offer={trial ? "trial" : "plans"} className="ui-button ui-button-primary"
+            onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
+        </div>
+      </SettingRow>
+    );
+  }
+  const line = plan.view.kind === "reauth" ? t("pro.reauthShort") : cloudPlanLine(plan.view);
+  if (!line) return null;
+  return (
+    <SettingRow title={t("pro.name")} subtitle={line}>
+      {place === "account" ? (
+        <button type="button" data-cloud-plan={plan.view.kind} className="ui-button"
+          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("settings.simple.account.manage")}</button>
+      ) : usage && upgrade ? <UpgradeButton usage={usage} upgrade={upgrade} /> : null}
+    </SettingRow>
+  );
+}
+
+export function CloudPlanFootnote() {
+  const plan = useCloudPlan();
+  const offering = plan !== null && buyOfferAllowed(plan.view);
+  const offer = useCloudOffer(offering, plan?.account?.offer);
+  if (!offering) return null;
+  return [t("pro.disclaimer"), moneyBackLine(offer)].filter(Boolean).join(" ");
 }

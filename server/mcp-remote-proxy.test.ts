@@ -15,7 +15,10 @@ import { SERVER_ROOT } from "./proxy-paths.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { makeTestTls, TEST_TLS_HOST } from "./testing/test-tls.ts";
+import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { whopLikeCatalog } from "./testing/whop-like-catalog.ts";
+import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
+import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
 const TOKEN = "disposable-remote-fixture-token";
 type Frame = { id?: string | number; method?: string; params?: Record<string, unknown> };
@@ -57,6 +60,8 @@ async function remoteFixture(mode: "http" | "event-stream" | "sse") {
           if (mode === "sse") res.writeHead(202).end();
           return;
         }
+        const refusedWith = (frame.params?.arguments as Record<string, unknown>)?.status;
+        if (typeof refusedWith === "number") return res.writeHead(refusedWith).end(TOKEN);
         if ((frame.params?.arguments as Record<string, unknown>)?.error) error = { code: -32000, message: TOKEN };
         else result = { content: [{ type: "text", text: (frame.params?.arguments as Record<string, unknown>)?.large ? "x".repeat(2_000_000) : "read completed" }] };
       } else {
@@ -175,6 +180,36 @@ describe("scoped remote MCP subprocess", () => {
     expect(reply.error).toBeDefined();
     expect(JSON.stringify(reply)).not.toContain(TOKEN);
     expect(stderr).not.toContain(TOKEN);
+  });
+
+  it.each([
+    [403, "HTTP 403", "permission (scope)"],
+    [404, "HTTP 404", "Check its URL"],
+    [429, "HTTP 429", "Try again in a moment"],
+    [503, "HTTP 503", "Try again later"],
+    [418, "Remote MCP request failed (HTTP 418)", "HTTP 418"],
+  ])("names HTTP %i from the remote server without its body", async (status, said, hint) => {
+    fixture = await remoteFixture("http");
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "tools/call", params: { name: "read", arguments: { status } } });
+    const reply = await answer();
+    expect(reply.error.code).toBe(-32603);
+    expect(reply.error.message).toContain(said);
+    expect(reply.error.message).toContain(hint);
+    expect(JSON.stringify(reply)).not.toContain(TOKEN);
+    expect(JSON.stringify(reply)).not.toContain(fixture.spec.url);
+  });
+
+  it("says when the remote server cannot be reached", async () => {
+    fixture = await remoteFixture("http");
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    await fixture.close();
+    send({ id: 2, method: "tools/call", params: { name: "read", arguments: {} } });
+    const reply = await answer();
+    expect(reply.error).toEqual({ code: -32603, message: "Could not reach this MCP server. Check its URL and that it is online." });
+    expect(JSON.stringify(reply)).not.toContain(fixture.spec.url);
   });
 
   it("runs the shipped helpers without a TypeScript source tree", async () => {
@@ -296,6 +331,31 @@ describe("remote MCP tool directory", () => {
     expect(fake.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1", first: 10 } }, { name: "odd_schema", arguments: { id: 7 } }]);
   });
 
+  it("fits the tools it lists to the engine's provider profile, and lists them as they came without one", async () => {
+    const tools = [{ name: "small", description: "Small.", inputSchema: { type: "object", properties: { q: { type: "string" } } } },
+      { name: "create_page", description: "Create a page.", inputSchema: createPageSchema() }];
+    fake = await startFakeHttpMcp({ tools });
+    start(mcpStdioServer(spec(fake.url))!, { ...process.env, [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" });
+    await initialize();
+    const [small, page] = (await request("tools/list")).result.tools;
+    expect(small).toEqual(tools[0]);
+    expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+    const closed = once(child!, "close"); child!.kill(); await closed;
+
+    start(mcpStdioServer(spec(fake.url))!);
+    await initialize();
+    expect((await request("tools/list")).result.tools).toEqual(tools);
+  });
+
+  it("lists no more of a remote server's tools than its share of the model's tool limit", async () => {
+    const tools = ["a", "b", "c"].map((name) => ({ name, inputSchema: { type: "object" } }));
+    fake = await startFakeHttpMcp({ tools });
+    start(mcpStdioServer(spec(fake.url))!, { ...process.env, [TOOL_LIMIT_ENV]: "1" });
+    await initialize();
+    expect((await request("tools/list")).result.tools).toEqual(tools.slice(0, 1));
+  });
+
   it("reads every page of a paginated catalog, once", async () => {
     fake = await startFakeHttpMcp({ tools: catalog, pageSize: 40 });
     start(mcpStdioServer(spec(fake.url), { directory: { name: "whop" } })!);
@@ -406,7 +466,7 @@ describe("remote MCP tool directory", () => {
     start(gated!);
     await initialize();
     const listed = (await request("tools/list")).result.tools;
-    expect(listed.map((tool: { name: string }) => tool.name)).toEqual([SEARCH_TOOL, DESCRIBE_TOOL, CALL_TOOL]);
+    expect(listed.map((tool: { name: string }) => tool.name)).toEqual([SEARCH_TOOL, DESCRIBE_TOOL, CALL_TOOL, "query_result"]);
     expect(listed[0].description).toContain(`${selected.length} tools`);
     const found = json(await call(SEARCH_TOOL, { query: "create payments", limit: 20 })).matches.map((match: { name: string }) => match.name);
     expect(found.every((name: string) => selected.includes(name))).toBe(true);

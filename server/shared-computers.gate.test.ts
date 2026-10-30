@@ -142,7 +142,7 @@ it("brings the whole surface back when features.sharedComputers is turned on", a
   const listed = await internal("GET", "/api/internal/shared-computers");
   expect(listed.status).toBe(200);
   expect(listed.body).toEqual({ computers: [] });
-  expect(await api("GET", "/api/shared-computers")).toEqual({ status: 200, body: { computers: [] } });
+  expect(await api("GET", "/api/shared-computers")).toEqual({ status: 200, body: { computers: [], known: [] } });
 
   expect(await descriptorCapabilities()).toMatchObject({ sharedComputers: true });
 });

@@ -3,8 +3,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
-import { openSse } from "./testing/sse.ts";
 import { STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
+import { unaskedStopMessage } from "./harness/unasked-stop.ts";
 import { roomRetryRequest } from "../src/lib/room-retry.ts";
 
 const CANCELLED = "The request was cancelled by the client.";
@@ -19,7 +19,7 @@ const lastUser = (request: ChatRequest) => {
   return typeof content === "string" ? content : JSON.stringify(content ?? "");
 };
 
-it("keeps a client abort a quiet stop and retries the room request it stopped", async () => {
+it("says in words that a turn nobody stopped was cut off, and retries the room request a client abort stopped", async () => {
   const requests: ChatRequest[] = [];
   const upstream = createServer(async (req, res) => {
     if (req.url === "/v1/models") {
@@ -74,7 +74,6 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
     return result;
   };
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
-  const stream = await openSse(`${fixture.info.url}/api/events`, { origin: fixture.info.url });
   try {
     await api("PATCH", "/api/config", { openaiCompat: { key: "synthetic-fixture-key", url: `http://127.0.0.1:${address.port}/v1`, model: "fixture-model" } });
 
@@ -89,15 +88,12 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
       return found;
     }, { timeout: 10_000, interval: 100 });
     const direct = await messages(bot.activeTaskId);
-    expect(direct.filter((message) => message.tool?.name === STOPPED_TURN_NAME)).toHaveLength(1);
-    expect(direct.some((message) => message.kind === "activity" && /cancelled by the client/i.test(message.tool?.name ?? ""))).toBe(false);
+    expect(direct.filter((message) => message.tool?.name === STOPPED_TURN_NAME)).toHaveLength(0);
+    const failed = direct.filter((message) => message.kind === "activity" && message.tool?.ok === false);
+    expect(failed.map((message) => message.tool.name)).toEqual([`error: ${unaskedStopMessage(CANCELLED)}`]);
     expect(direct.some((message) => message.kind === "text" && message.text === PARTIAL)).toBe(true);
     expect(direct.some((message) => message.card)).toBe(false);
-    expect(JSON.stringify(digest.digest)).not.toContain(PARTIAL);
-    const notices = stream.frames.filter((candidate) => candidate.kind === "notify" && candidate.notification?.botId === bot.id);
-    expect(notices.map((candidate) => candidate.notification.kind)).toEqual([]);
-    const bots = (await api("GET", "/api/bots")).bots as any[];
-    expect(bots.flatMap((candidate) => candidate.tasks ?? []).some((task: any) => /incident/i.test(task.title ?? ""))).toBe(false);
+    expect(digest.digest.reply).toBe(PARTIAL);
 
     const { group } = await api("POST", "/api/groups", {
       name: "Stop room", memberIds: [bot.id],
@@ -128,7 +124,6 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
     expect(resent).toContain("Read the brief.");
     expect(resent).toContain("brief.txt");
   } finally {
-    stream.close();
     await fixture.close();
     upstream.closeAllConnections();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));

@@ -6,6 +6,7 @@ export const LIVE_MODEL = "gpt-live-1";
 const OPENAI_BASE = "https://api.openai.com";
 export const DEFAULT_LIVE_VOICE = "marin";
 export const MAX_SDP_BYTES = 64 * 1024;
+export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
 
 /** The client's data channel is untrusted: it may only hang up; every append goes over the sideband. */
 export const LIVE_DATA_CHANNEL = {

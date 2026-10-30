@@ -88,7 +88,7 @@ process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(home)} + "/${name}.json"; process.env.FAKE_CLAUDE_MODE = "hang"; process.env.FAKE_CLAUDE_RELEASE = ${JSON.stringify(join(home, "release"))}; }`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
-      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi", "claude"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "claude"].map((id) => [id, { driver: "not-a-real-driver" }])),
       codex: { driver: "codex", displayName: "Codex", config: { cli: codex } },
       held: { driver: "claudeAgent", displayName: "Held", config: { cli: held("claude") } },
       teammate: { driver: "claudeAgent", displayName: "Teammate", config: { cli: held("teammate") } },
@@ -225,7 +225,7 @@ it("a guest's request to a bot whose engine needs its shell is refused in one pl
   const guests = await guestThread(bot);
   const refused = await say(owner, bot, "Hello.", guests);
   expect(refused.status).toBe(409);
-  expect(refused.body.error).toBe("This conversation is from before My Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.");
+  expect(refused.body.error).toBe("This conversation is from before the Cloud was only yours, and this bot's AI can't work in it. Start a new conversation.");
   expect(((await api("GET", `/api/threads/${guests}/messages`, { token: owner })).body.messages as any[]).filter((message) => message.role === "user")).toEqual([]);
   expect((await say(owner, bot, "Hello.", await ownThread(bot))).status).toBe(202);
 }, hostTimeout(60_000));
@@ -380,5 +380,5 @@ it("a room a guest opened with a bot whose engine needs its shell refuses the tu
   await leftBehind({ threadId: room.body.group.threadId });
   expect((await api("POST", `/api/groups/${room.body.group.id}/messages`, { token: owner, body: { text: "Hello." } })).status).toBeLessThan(300);
   await expect.poll(async () => ((await api("GET", `/api/threads/${room.body.group.threadId}/messages`, { token: owner })).body.messages as any[])
-    .some((message) => String(message.tool?.name ?? "").includes("this bot's engine can't work in it")), { timeout: hostTimeout(15_000) }).toBe(true);
+    .some((message) => String(message.tool?.name ?? "").includes("this bot's AI can't work in it")), { timeout: hostTimeout(15_000) }).toBe(true);
 }, hostTimeout(60_000));

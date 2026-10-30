@@ -8,23 +8,21 @@ import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { cloudColor, cloudNameShown, DEFAULT_CLOUD_COLOR } from "@/lib/cloud-look";
-import { cloudAddView, offerPlan, sameTerms, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
+import { cloudAddView, offerPlan, sameTerms, startedSleeps, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { welcomeOnScreen } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
+import { AddCloudFlow } from "./cloud-buy/AddCloudFlow";
 import { ChooseScreen } from "./cloud-buy/ChooseScreen";
 import { OneCloudScreen, StatusScreen } from "./cloud-buy/OneCloudScreen";
 import { PayScreen } from "./cloud-buy/PayScreen";
-import { StagingMark } from "./cloud-buy/parts";
-import { SetupScreen } from "./cloud-buy/SetupScreen";
+import { CLOSE, ON_NIGHT, SHEET, StagingMark } from "./cloud-buy/parts";
+import { SetupScreen, TeamReadyScreen, TeamSetupScreen } from "./cloud-buy/SetupScreen";
 import { BrowserSignInScreen, codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
 
-export { planFromKey } from "./cloud-buy/ChooseScreen";
-
 export interface CloudAddActions {
-  choose(tier: string): void;
-  /** The offer's one next step: the in-app sign-in when signed out, else the checkout. */
-  start(): void;
+  /** A plan card's button: the in-app sign-in when signed out, then (or else) that plan's checkout. */
+  start(tier: string): void;
   signIn(): void;
   back(): void;
   email(value: string): void;
@@ -43,14 +41,17 @@ export interface CloudAddActions {
   name(value: string): void;
   color(value: CloudColor): void;
   openCloud(): void;
+  /** A Team or Business plan's Cloud: the team's, opened as the switcher opens it. */
+  openTeam(teamId: string): void;
   notNow(): void;
   interest(): void;
   close(): void;
 }
 
-/** What the sheet holds itself: typed words, the chosen plan, the countdown and short notes. Never a code or a token. */
+/** What the sheet holds itself: typed words, the chosen plan, the countdown and short notes. Never a code or a token.
+ * `current` is the tier of the plan this account already has, from its verified entitlement. */
 export interface CloudAddUi {
-  chosen: string | null; offerShown: CloudOffer | null; now: number; busy: boolean; openFailed: boolean;
+  chosen: string | null; current: string | null; offerShown: CloudOffer | null; now: number; busy: boolean; openFailed: boolean;
   email: string; code: string; profileEmail: string | null;
   look: { typed: string; name: string; color: CloudColor };
   counting: number | null; copied: boolean; payFailed: boolean; interest: "sent" | "failed" | null;
@@ -62,10 +63,10 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
     case "unreachable": return <StatusScreen kind="unreachable" line={t("cloudAdd.unreachable")} onRetry={actions.retry} onClose={actions.close} />;
     case "error": return <StatusScreen kind={`error-${view.reason}`} line={t(view.reason === "rate-limited" ? "cloudAdd.rateLimited" : "cloudAdd.failed")}
       onRetry={actions.retry} onClose={actions.close} />;
-    case "offer": return <ChooseScreen offer={view.offer} chosen={ui.chosen} now={ui.now} busy={ui.busy} signedOut={view.signedOut}
+    case "offer": return <ChooseScreen offer={view.offer} current={ui.current} now={ui.now} busy={ui.busy} signedOut={view.signedOut}
       notice={view.notice ? t(view.notice === "code-expired" ? "cloudAdd.codeExpired" : view.notice === "signin-ended" ? "cloudAdd.signInEnded"
         : view.notice === "terms" ? "cloudBuy.termsChanged" : "cloudAdd.preparing") : null}
-      onChoose={actions.choose} onStart={actions.start} onSignIn={actions.signIn} />;
+      onStart={actions.start} onSignIn={actions.signIn} />;
     case "sign-in": return <SignInScreen phase={view.phase} email={ui.email} code={ui.code} profileEmail={ui.profileEmail} busy={ui.busy} now={ui.now}
       onBack={actions.back} onEmail={actions.email} onSend={actions.sendCode} onChangeEmail={actions.changeEmail} onCode={actions.code}
       onResend={actions.resend} onBrowser={actions.browser} />;
@@ -74,26 +75,28 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
     case "waiting": return <PayScreen plan={view.plan} offer={ui.offerShown} browser={view.browser} late={view.late} link={view.link} email={view.email}
       busy={ui.busy} copied={ui.copied} failed={ui.payFailed} onReopen={actions.reopenCheckout} onCopy={actions.copyLink} onChangePlan={actions.changePlan} />;
     case "starting": case "ready": return <SetupScreen started={view} received={view.kind === "starting" && view.received} step={view.kind === "starting" ? view.step : null}
-      slow={view.kind === "starting" && view.slow} ready={view.kind === "ready"} name={ui.look.name} typed={ui.look.typed} color={ui.look.color}
+      slow={view.kind === "starting" && view.slow} ready={view.kind === "ready"} sleeps={startedSleeps(view, ui.offerShown)} name={ui.look.name} typed={ui.look.typed} color={ui.look.color}
       counting={ui.counting} busy={ui.busy} openFailed={ui.openFailed} onName={actions.name} onColor={actions.color} onOpen={actions.openCloud} onNotNow={actions.notNow} />;
     case "has-cloud": return <OneCloudScreen name={ui.look.name} color={ui.look.color} busy={ui.busy} interest={ui.interest} openFailed={ui.openFailed}
       onInterest={actions.interest} onOpen={actions.openCloud} />;
+    case "team-starting": return <TeamSetupScreen team={view.team} step={view.step} slow={view.slow} />;
+    case "team-ready": return <TeamReadyScreen name={view.team.name} busy={ui.busy} openFailed={ui.openFailed} onOpen={() => actions.openTeam(view.team.id)} />;
     case "settings": return null;
   }
 }
 
-const WIDTH: Partial<Record<CloudAddView["kind"], string>> = { offer: "max-w-[900px]", starting: "max-w-[720px]", ready: "max-w-[720px]" };
+const WIDTH: Partial<Record<CloudAddView["kind"], string>> = { offer: "max-w-[920px]", starting: "max-w-[720px]", ready: "max-w-[720px]" };
 /** Mid sign-in, checkout or setup a stray click beside the sheet (say, back from paying in the browser) must not lose it: there only Close and Esc do. */
-const HELD: ReadonlySet<CloudAddView["kind"]> = new Set(["sign-in", "signing-in", "waiting", "starting"]);
+const HELD: ReadonlySet<CloudAddView["kind"]> = new Set(["sign-in", "signing-in", "waiting", "starting", "team-starting"]);
 
 /** The sheet over the app: one width per screen, the close button, and the staging mark when the app is on staging.
  * Above the z-50 layers (Settings, the welcome flow), which it may be opened over. */
 export function CloudAddSheet({ kind, staging, onClose, children }: { kind: CloudAddView["kind"]; staging: boolean; onClose: () => void; children: ReactNode }) {
-  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && !HELD.has(kind) && onClose()}>
+  return <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && !HELD.has(kind) && onClose()}>
     <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-cloud-add-dialog tabIndex={-1}
-      className={cn("animate-pop-in relative max-h-full w-full overflow-y-auto overscroll-contain rounded-[18px] border border-hairline/70 bg-panel shadow-2xl outline-none", WIDTH[kind] ?? "max-w-[540px]")}>
-      <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className="ui-icon-button absolute end-3.5 top-3.5 z-10"><X size={18} /></button>
-      {staging && <StagingMark className="absolute end-14 top-[19px] z-10" />}
+      className={cn(SHEET, "group/sheet animate-pop-in relative max-h-full w-full overflow-y-auto overscroll-contain outline-none", WIDTH[kind] ?? "max-w-[540px]")}>
+      <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className={cn(CLOSE, ON_NIGHT, "absolute end-4 top-4 z-10")}><X size={16} /></button>
+      {staging && <StagingMark className="absolute end-14 top-[22px] z-10 group-has-[[data-night-card]]/sheet:bg-app" />}
       {children}
     </div>
   </div>;
@@ -101,6 +104,8 @@ export function CloudAddSheet({ kind, staging, onClose, children }: { kind: Clou
 const OFFER_VIEWS: ReadonlyArray<CloudAddView["kind"]> = ["offer", "checking", "unreachable", "waiting", "sign-in", "signing-in"];
 const FOCUSABLE = "button:not([disabled]):not([tabindex='-1']), input:not([disabled]):not([tabindex='-1']), [href], [tabindex='0']";
 const free = (state: CloudAccountState) => state.status === "connected" && state.entitlement?.plan === "free" && !state.purchase && !state.machine;
+const currentTier = (state: CloudAccountState | null | undefined) =>
+  state?.status === "connected" && state.entitlement?.plan === "pro" && state.entitlement.status === "active" ? state.entitlement.tier ?? "pro" : null;
 type AutoOpen = number | "off" | "done" | null;
 type Note = "copied" | "pay-failed" | "interest-sent" | "interest-failed" | null;
 
@@ -126,6 +131,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const [, setTick] = useState(0);
   const [arrived, setArrived] = useState(false);
   const [terms, setTerms] = useState(false);
+  const [extraWide, setExtraWide] = useState(false);
   const open = Boolean(request && bridge);
   const profileEmail = state.config?.profile?.email?.trim() || null;
   // Over the welcome flow the sheet is as good as closed for "ready": main notifies, and nothing switches the window away.
@@ -188,7 +194,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   // Ready shown here ends the purchase for main, so a later Add a Cloud… is one Cloud for now.
   useEffect(() => {
     if ((kind === "waiting" || kind === "starting" || kind === "ready") && !arrived) setArrived(true);
-    if (kind === "ready") void bridge?.readySeen?.().catch(() => {});
+    if (kind === "ready" || kind === "team-ready") void bridge?.readySeen?.().catch(() => {});
   }, [kind]);
   useEffect(() => {
     if (!kind || !request) return;
@@ -240,6 +246,11 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
       await bridge.connectHome();
     })().then(() => close(), () => setOpenFailed(true)).finally(() => setBusy(false));
   };
+  const openTeam = (teamId: string) => {
+    if (busy || !bridge?.openTeam) return;
+    setBusy(true); setOpenFailed(false);
+    void bridge.openTeam(teamId).then(() => close(), () => setOpenFailed(true)).finally(() => setBusy(false));
+  };
   useEffect(() => {
     if (typeof auto !== "number") return;
     const timer = setTimeout(() => { if (auto > 1) setAuto(auto - 1); else openCloud(); }, 1000);
@@ -254,6 +265,12 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     return () => window.removeEventListener("blur", stop);
   }, [counting]);
   if (!open || !view || !request || !bridge || view.kind === "settings") return null;
+  if (view.kind === "has-cloud" && account?.status === "connected" && account.clouds && window.ogb?.cloudAdd
+    && (account.addCloud?.canAdd !== false || (account.adding && !account.adding.done))) {
+    return <CloudAddSheet kind={extraWide ? "offer" : "has-cloud"} staging={account.staging === true} onClose={close}>
+      <AddCloudFlow onClose={close} onFirstCloud={() => {}} onWide={setExtraWide} />
+    </CloudAddSheet>;
+  }
 
   const offerShown = offer ?? null;
   const planNow = () => view.kind === "waiting" && !chosen ? view.plan : offerShown ? offerPlan(offerShown, chosen).tier : null;
@@ -312,10 +329,10 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     })();
   };
   const actions: CloudAddActions = {
-    choose: tier => { setChosen(tier); setChoosing(true); setConflict(false); },
-    start: () => {
+    start: tier => {
+      setChosen(tier); setConflict(false);
       if (view.kind === "offer" && view.signedOut && bridge.signInStart) { enterSignIn(true); return; }
-      run(() => openCheckout(planNow()));
+      run(() => openCheckout(tier));
     },
     signIn: () => enterSignIn(false),
     back: () => { setSignIn(null); void bridge.signInCancel?.().catch(() => {}); },
@@ -350,6 +367,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     name: value => setLook({ typed: value, color: shownLook.color, dirty: true }),
     color: value => setLook({ typed: shownLook.typed, color: value, dirty: true }),
     openCloud,
+    openTeam,
     notNow: () => setAuto("off"),
     interest: () => {
       if (busy || !bridge.interest) return;
@@ -358,7 +376,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     },
     close,
   };
-  const ui: CloudAddUi = { chosen, offerShown, now: now(), busy, openFailed, email: form.email, code: form.code, profileEmail, look: shownLook,
+  const ui: CloudAddUi = { chosen, current: currentTier(account), offerShown, now: now(), busy, openFailed, email: form.email, code: form.code, profileEmail, look: shownLook,
     counting: typeof auto === "number" ? auto : null, copied: note === "copied", payFailed: note === "pay-failed",
     interest: note === "interest-sent" ? "sent" : note === "interest-failed" ? "failed" : null };
   return <CloudAddSheet kind={view.kind} staging={account?.staging === true} onClose={close}><CloudAddPanel view={view} ui={ui} actions={actions} /></CloudAddSheet>;

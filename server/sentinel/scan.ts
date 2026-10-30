@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { DETECTORS } from "./detectors/index.ts";
 import { readQueueRecords, readThreadOwners, readToolRecords, readTurnRecords } from "./sources.ts";
-import { pruneSeen, readIssues, readState, upsertIssues, writeSentinelFiles } from "./store.ts";
+import { markCounted, pruneSeen, readIssues, readState, upsertIssues, writeSentinelFiles } from "./store.ts";
 import type { DetectorConfig, Issue, Observation, SentinelRecord } from "./types.ts";
 
 export const DEFAULT_QUEUE_WAIT_MS = 300_000;
@@ -53,8 +53,9 @@ export function runScan(options: ScanOptions): ScanSummary {
   const issues = readIssues(options.out);
   // A fresh state beside existing issues restarts its cursors: only what follows the newest counted occurrence is new.
   const counted = state.lastScanAt === null && issues.size ? Math.max(...[...issues.values()].map((issue) => issue.lastAt)) : -Infinity;
-  const observations: Observation[] = DETECTORS.flatMap((detector) => detector.detect(records, config)).filter((o) => o.at > counted);
-  const { touched, added } = upsertIssues(issues, state, observations);
+  const detected: Observation[] = DETECTORS.flatMap((detector) => detector.detect(records, config));
+  markCounted(state, detected.filter((o) => o.at <= counted));
+  const { touched, added } = upsertIssues(issues, state, detected.filter((o) => o.at > counted));
   state.logs = turns.offsets;
   state.lastScanAt = now;
   state.fingerprint = fingerprint;

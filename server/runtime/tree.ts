@@ -70,6 +70,9 @@ export const isTerminal = (a: Assignment): boolean => terminal(a.status);
 
 export const awaited = (children: readonly Assignment[]): Assignment[] => children.filter(c => c.reply !== "none");
 
+/** Parked on a question the person answers in words; a card park waits on the card instead. */
+export const asking = (a: Assignment): boolean => a.status === "needs_input" && !(a.cards && a.cards.length > 0);
+
 export function path(store: RuntimeStore, n: Assignment): Assignment[] {
   const out: Assignment[] = [];
   const seen = new Set<string>();

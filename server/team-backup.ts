@@ -1,5 +1,5 @@
 import { newId, type ModelSelection } from "./contracts.ts";
-import { botMascotBody } from "../shared/mascot-bodies.ts";
+import { botBodyId } from "../shared/bot-body.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { MAX_TEAM_BACKUP_BYTES, parseTeamBackup, type BackupTask, type TeamBackup } from "../shared/team-backup.ts";
 import { helperModelAllowed, type BotVisibility } from "../shared/wire.ts";
@@ -41,17 +41,18 @@ function messageText(message: Message): string {
   if (message.kind === "secret") parts.push("[Secret request — not restored]");
   if (message.kind === "signin") parts.push("[Sign-in request — not restored]");
   if (message.routineRun) parts.push(`[Routine: ${message.routineRun.routineName} — ${message.routineRun.status}]`, message.routineRun.summary ?? "", message.routineRun.error ?? "");
-  if (message.goalRun) parts.push(`[Room goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
+  if (message.goalRun) parts.push(`[Goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
   if (message.kind === "screen" || message.attachments?.length) parts.push("[Image or attachment — file not included in this backup]");
   return parts.filter(Boolean).join("\n");
 }
 
-export function createTeamBackup(store: Store, routines: Routine[], name: string): TeamBackup {
+/** `shown`: on a Team Cloud someone else's private chat is never in the exporting person's backup. */
+export function createTeamBackup(store: Store, routines: Routine[], name: string, shown: (threadId: string) => boolean = () => true): TeamBackup {
   const botIds = new Set(store.bots.map((bot) => bot.id));
   const warnings: string[] = [];
   const history = (record: BotRecord | GroupRecord): BackupTask[] => {
     const tasks = record.tasks?.length ? record.tasks : [{ threadId: record.threadId, title: "Conversation", createdAt: record.createdAt }];
-    return tasks.map((task) => ({
+    return tasks.filter((task) => shown(task.threadId)).map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
       titleFromFirstMessage: "titleFromFirstMessage" in task && task.titleFromFirstMessage || undefined,
       openedBy: "openedBy" in task && task.openedBy
@@ -69,7 +70,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       messages: store.messagesFor(task.threadId).map((message) => ({
         id: message.id, role: message.role, text: messageText(message), at: message.at,
         parentId: message.parentId ?? null, replyToId: message.replyToId,
-        from: message.from, peerPost: message.peerPost,
+        from: message.from, peerPost: message.peerPost, ...(message.serverCard ? { serverCard: true as const } : {}),
       })),
     }));
   };
@@ -93,7 +94,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
   });
   const validRoutines = routines.filter((routine) => {
     const room = groups.find((group) => group.key === routine.groupId);
-    const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || (room && !room.dm && room.memberIds.includes(routine.botId)));
+    const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || !routine.groupId || (room && !room.dm && room.memberIds.includes(routine.botId)));
     if (!valid) warnings.push(`Routine “${routine.name}” is not included because its bot, room or coordinator was deleted.`);
     return valid;
   });
@@ -104,6 +105,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       key: bot.id, name: bot.name, title: bot.title, description: bot.description, soul: bot.soul,
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
+      mascotFaceColor: bot.mascotFaceColor ?? undefined,
       chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
       // Grants travel so the team's shape survives, but the import still lands every bot grant-less.
       ...(bot.connectorTools ? { connectorTools: structuredClone(bot.connectorTools) } : {}),
@@ -111,13 +113,15 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       // A bot kept off the helper model stays off it wherever its notes and chats land.
       ...(helperModelAllowed(bot) ? {} : { helperModel: false }),
       memory: memoryFor(bot.id),
-      activeTask: bot.threadId, tasks: history(bot),
+      // Someone else's private chat selected: the backup opens on the first conversation it carries instead.
+      ...((tasks) => ({ activeTask: tasks.some((task) => task.key === bot.threadId) ? bot.threadId : tasks[0]?.key ?? bot.threadId, tasks }))(history(bot)),
     })),
     groups,
     routines: validRoutines.map((routine) => ({
       name: routine.name, prompt: routine.prompt, target: routine.target, botId: routine.botId,
       groupId: routine.groupId, runOn: routine.runOn, schedule: routine.schedule,
       durationMinutes: routine.durationMinutes, timeoutMinutes: routine.timeoutMinutes,
+      ...(routine.checks ? { checks: routine.checks } : {}), ...(routine.access ? { access: routine.access } : {}), ...(routine.deliver ? { deliver: routine.deliver } : {}),
     })),
   });
   if (Buffer.byteLength(JSON.stringify(document)) > MAX_TEAM_BACKUP_BYTES) {
@@ -159,6 +163,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         ? { from: { ...message.from, botId: botIds.get(message.from.botId)! } }
         : message.from ? { text: `${message.from.name}:\n${message.text}` } : {}),
       peerPost: message.peerPost,
+      ...(message.serverCard && message.role === "bot" ? { serverCard: true as const } : {}),
     }));
     store.importTranscript(threadId, messages, task.activeLeafId ? ids.get(task.activeLeafId)! : null);
   };
@@ -168,7 +173,8 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       const bot = store.createBot({
         name: takeImportName(source.name, takenNames), title: source.title, description: source.description, soul: source.soul,
         color: source.color, mascotExpression: source.mascotExpression,
-        mascotBody: botMascotBody(source.mascotBody),
+        mascotBody: botBodyId(source.mascotBody),
+        mascotFaceColor: source.mascotFaceColor,
         modelSelection: selection, section: sectionFor(source.section),
         // who may see the imported team is the importing admin's choice
         ...(options.visibility ? { visibility: options.visibility } : {}),
@@ -218,7 +224,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
             : responder });
       const threads = source.tasks.map((task, i) => {
         if (i === 0) {
-          if (!source.dm) store.renameGroupTask(group.id, group.threadId, task.title);
+          if (!source.dm) store.patchGroupTask(group.id, group.threadId, { title: task.title });
           return group.threadId;
         }
         return store.createGroupTask(group.id, task.title, false)!.threadId;
@@ -237,7 +243,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
     }
     for (const source of backup.routines) {
       createdRoutines.push(routines.create({ ...source, botId: botIds.get(source.botId)!,
-        groupId: source.target === "room-goal" ? groupIds.get(source.groupId!) : undefined, enabled: false }));
+        groupId: source.target === "room-goal" && source.groupId ? groupIds.get(source.groupId) : undefined, enabled: false }));
     }
     return { name: backup.name, bots, groups, routines: createdRoutines };
   } catch (error) {

@@ -5,8 +5,9 @@ import {
   LIVE_COPY, liveCardKind, liveStepLabel, spokenApprovalPrompt, spokenConnectorPrompt, spokenQuestionPrompt, spokenReviewPrompt, spokenSecretPrompt, spokenSignInPrompt,
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
+import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
-import { liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
+import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -46,7 +47,6 @@ export interface LiveCallDeps {
   personKey?(auth: RequestAuth): string | undefined;
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
-  pro(): boolean;
   settings(): { key: string; voice: string; readTypedReplies: boolean; idleMinutes: number };
   createSession(input: { key: string; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
   openSocket(url: string, key: string): LiveSocket;
@@ -69,17 +69,6 @@ export class LiveCallSignedOutError extends LiveSessionError {
   constructor() {
     super("The sign-in that started this call has ended.", 401);
   }
-}
-
-export class LiveCallNeedsProError extends LiveSessionError {
-  constructor() {
-    super("Live calls from your phone need a Pro plan.", 402);
-  }
-}
-
-/** The companion vouches for `device`: a phone cannot choose its device id or drop it. */
-export function liveCallFromPhone(input: { device?: string; client: LiveClient }): boolean {
-  return Boolean(input.device) || input.client === "ios" || input.client === "android";
 }
 
 type AppendKind = "instructions" | "thinking" | "commentary";
@@ -158,10 +147,9 @@ export class LiveCallController {
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string }): Promise<{ call: LiveCallState; sdp: string }> {
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
-    if (liveCallFromPhone(input) && !this.deps.pro()) throw new LiveCallNeedsProError();
     const settings = this.deps.settings();
     const key = settings.key.trim();
-    if (!key) throw new LiveSessionError("Add an OpenAI API key to use Live calls.", 409);
+    if (!key) throw new LiveSessionError(LIVE_NEEDS_KEY, 409);
     const voice = liveVoice(settings.voice);
     const call = this.newCall(input, key, voice);
     // Taken before the first await: a second start in the same tick is refused.
@@ -723,7 +711,7 @@ export class LiveCallController {
     const waiting = message.kind === "connector"
       ? Boolean(connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed)
       : message.kind === "signin"
-        ? Boolean(signIn && !signIn.done && !signIn.cancelled && !signIn.superseded)
+        ? Boolean(signIn && signInWaits(signIn))
         : Boolean(secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed);
     const key = `${message.kind}:${message.id}`;
     if (!waiting || call.announced.has(key)) return;

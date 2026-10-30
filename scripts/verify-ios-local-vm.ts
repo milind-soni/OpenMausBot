@@ -160,7 +160,7 @@ else if (args[0] === 'inspect' && (args[1] === 'openmausbot-computer' || args[1]
     ? require('node:path').join(process.env.OMB_DATA_DIR,'vm-homes',target.label.slice(0,16))
     : require('node:path').join(process.env.OMB_DATA_DIR,'vm-home'),Destination:'/home/cua/workspace',RW:true}],
   HostConfig:{PortBindings:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'${desktop.port}'}]},
-    Privileged:false,Memory:4294967296,MemorySwap:4294967296,NanoCpus:2000000000,PidsLimit:512,
+    Privileged:false,Memory:4294967296,MemorySwap:4294967296,NanoCpus:2000000000,PidsLimit:4096,
     CapDrop:['ALL'],CapAdd:['CAP_SETUID','CAP_SETGID'],IpcMode:'private',ShmSize:536870912,
     CgroupnsMode:'private',SecurityOpt:[],RestartPolicy:{Name:'no',MaximumRetryCount:0}},
   NetworkSettings:{Ports:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'${desktop.port}'}]}}

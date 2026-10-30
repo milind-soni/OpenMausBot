@@ -6,14 +6,33 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.mjs";
+import { typeOneCharacterAtATime, typesInOneBurst } from "./paced-typing.mjs";
+import { helperMissing } from "./lent-screen-failures.mjs";
+import { commandPath } from "./shell-path.mjs";
 
-const LIMIT = 256 * 1024;
+/** Reads stay under the 4 MB body that carries a result to the server (base64 of 2 MiB is 2.8 MB); writes stay small. */
+const READ_LIMIT = 2 * 1024 * 1024;
+const WRITE_LIMIT = 256 * 1024;
+const OUTPUT_LIMIT = 256 * 1024;
+// A process the command left running in the background can hold its output pipes open long after the command ended,
+// and on Windows a grandchild whose parent has exited is outside the tree taskkill /T ends. A command's result is
+// therefore what it wrote by shortly after it exited, and a stopped command ends shortly after the stop.
+const COMMAND_SECONDS = 120;
+/** Below the 300-second wait for response headers in Node's fetch (undici), which carries the result back to the bot. */
+const MAX_COMMAND_SECONDS = 240;
+const PIPE_GRACE_MS = 1000;
+const STOP_GRACE_MS = 5000;
+/** The server reads a result body of at most 4,000,000 bytes. */
+const RESULT_LIMIT = 3_900_000;
 const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
 const GIT_INTERNALS = "Files inside .git cannot be changed through a shared folder: git runs commands from its configuration and hooks";
+const HOME_SETTINGS = "The home folder's hidden files, Library and AppData cannot be changed through a shared folder: shells, git and apps run what they hold";
 
 /** Keys that open a shell or an account, and places that run code by themselves: no folder grant reaches these. Relative to home. */
 const PERSONAL_SECRETS = [
-  ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".netrc", ".git-credentials", ".npmrc", ".pypirc",
+  ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".netrc", ".git-credentials", ".gitconfig", ".npmrc", ".pypirc",
+  // Shell start-up files run in every new terminal and often export API keys.
+  ".profile", ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout",
   ".claude", ".claude.json", ".codex", ".mozilla", ".local/share/keyrings", ".local/bin",
   ".config/gh", ".config/gcloud", ".config/op", ".config/git", ".config/fish", ".config/autostart", ".config/systemd",
   ".config/google-chrome", ".config/chromium", ".config/BraveSoftware", ".config/microsoft-edge",
@@ -21,6 +40,14 @@ const PERSONAL_SECRETS = [
   "Library/Application Support/Google/Chrome", "Library/Application Support/Chromium",
   "Library/Application Support/BraveSoftware", "Library/Application Support/Microsoft Edge",
   "Library/Application Support/Firefox", "Library/Application Support/Arc",
+  ".cua",
+  // Windows: the browsers' saved passwords and cookies, the credential vault and its keys, and what runs at sign-in.
+  "AppData/Local/Google/Chrome/User Data", "AppData/Local/Microsoft/Edge/User Data", "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+  "AppData/Roaming/Mozilla", "AppData/Local/Mozilla",
+  "AppData/Roaming/Microsoft/Credentials", "AppData/Local/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect",
+  "AppData/Roaming/Microsoft/Vault", "AppData/Local/Microsoft/Vault",
+  "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup",
+  "Documents/PowerShell", "Documents/WindowsPowerShell",
 ];
 export function personalSecretPaths(home) {
   return typeof home === "string" && home ? PERSONAL_SECRETS.map(entry => path.join(home, ...entry.split("/"))) : [];
@@ -30,13 +57,19 @@ export { LENT_SCREEN_TOOLS } from "./lent-screen-tools.mjs";
 
 /** Compared the way a case-folding, Unicode-normalizing filesystem compares it. */
 const gitComponent = part => part.normalize("NFC").toLowerCase() === ".git";
-const insideGitInternals = (root, relative) => root.split(path.sep).some(gitComponent) || relative.split("/").some(gitComponent);
+export const insideGitInternals = (root, relative) => root.split(path.sep).some(gitComponent) || relative.split("/").some(gitComponent);
+/** Security: the home folder is lent with editing, so a write through it never reaches its own hidden files and folders,
+ * Library (macOS) or AppData (Windows), where shell start-up files, git's configuration and apps' settings live. */
+export const insideHomeSettings = relative => {
+  const first = relative.split("/").find(part => part && part !== ".");
+  return Boolean(first) && (first.startsWith(".") || ["library", "appdata"].includes(first.normalize("NFC").toLowerCase()));
+};
 const hash = data => createHash("sha256").update(data).digest("hex");
 const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
 const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
 
 /** {dev, ino}, never path text; a root a fresh install has not created yet is skipped. */
-async function protectedIdentities(roots) {
+export async function protectedIdentities(roots) {
   const identities = new Set();
   for (const root of roots ?? []) {
     if (typeof root !== "string" || !root) continue;
@@ -47,7 +80,7 @@ async function protectedIdentities(roots) {
 }
 
 /** A write may create a file that does not exist yet, so walk from the nearest existing ancestor. */
-async function assertOutsideProtected(identities, target) {
+export async function assertOutsideProtected(identities, target) {
   if (!identities.size) return;
   let current = path.resolve(target);
   for (;;) {
@@ -72,12 +105,15 @@ async function assertOutsideProtected(identities, target) {
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 
+const POSIX_PATH = /(?:\/[^/\s]+)+/g;
+/** A Windows folder may hold spaces, so everything up to a line's last backslash goes. */
+const WINDOWS_FOLDERS = /(?:[A-Za-z]:|\\\\[^\\\s]+)\\(?:[^\\\r\n]*\\)*/g;
 /** Job error text crosses to a remote workspace, so absolute paths collapse to their basename (the original is logged here). */
 const basenameMessage = message => {
   const original = String(message);
-  if (!original.match(/(?:\/[^/\s]+)+/g)) return original;
+  if (!original.match(POSIX_PATH) && !original.match(WINDOWS_FOLDERS)) return original;
   console.warn("Shared computer error before path sanitization:", original);
-  return original.replace(/(?:\/[^/\s]+)+/g, matched => matched.slice(matched.lastIndexOf("/") + 1));
+  return original.replace(WINDOWS_FOLDERS, "").replace(POSIX_PATH, matched => matched.slice(matched.lastIndexOf("/") + 1));
 };
 export const sharedComputerError = error => ({ ...text(basenameMessage(error?.message ?? "Computer action failed")), isError: true });
 
@@ -86,12 +122,31 @@ export async function sharedPath(folder, relative = "") {
   const root = await fs.realpath(folder.path);
   if (root !== folder.path) throw new Error("Shared folder moved. Choose it again in Settings.");
   let target = root;
-  for (const part of relative.split("/").filter(part => part && part !== ".")) {
+  const parts = relative.split("/").filter(part => part && part !== ".");
+  for (const [index, part] of parts.entries()) {
     target = path.join(target, part);
-    try { if ((await fs.lstat(target)).isSymbolicLink()) throw new Error("Symbolic links cannot be followed in shared folders"); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
+    let stat = null;
+    try { stat = await fs.lstat(target); }
+    catch (error) {
+      if (error.code === "ENOTDIR") throw new Error(`${parts.slice(0, index).join("/")} is a file, not a folder`);
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (stat?.isSymbolicLink()) throw new Error("Symbolic links cannot be followed in shared folders");
+    // Windows answers ENOENT, not ENOTDIR, past a file, so a file with more of the path after it is refused here.
+    if (stat && !stat.isDirectory() && index < parts.length - 1) throw new Error(`${parts.slice(0, index + 1).join("/")} is a file, not a folder`);
   }
   return target;
+}
+
+/** One level at a time, so a folder swapped for a link between two levels is refused, not followed. */
+async function makeMissingFolders(folder, relative) {
+  const parts = relative.split("/").filter(part => part && part !== ".").slice(0, -1);
+  let current = await fs.realpath(folder.path);
+  for (const part of parts) {
+    current = path.join(current, part);
+    try { await fs.mkdir(current); } catch (error) { if (error.code !== "EEXIST") throw error; }
+    if ((await fs.lstat(current)).isSymbolicLink()) throw new Error("Symbolic links cannot be followed in shared folders");
+  }
 }
 
 function killTree(child) {
@@ -105,8 +160,17 @@ function killTree(child) {
 }
 
 /** No inherited API keys, provider credentials or shell startup files, but still UNRESTRICTED host execution once terminal is on. */
-export function sharedCommand(command, cwd, signal) {
+/** No inherited API keys or provider credentials. On Windows a child without SystemRoot cannot start Winsock, one
+ * without USERPROFILE has no home, and one without TEMP or TMP puts temporary files in the Windows folder. */
+const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
+
+export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
+
+export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
   if (typeof command !== "string" || !command.trim() || command.length > 8000) throw new Error("Give a command of at most 8000 characters");
+  if (!validCommandSeconds(seconds)) throw new Error(`Give timeout_seconds as a whole number from 1 to ${MAX_COMMAND_SECONDS}`);
+  signal.throwIfAborted();
+  const PATH = await commandPath();
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const windows = process.platform === "win32";
@@ -118,32 +182,53 @@ export function sharedCommand(command, cwd, signal) {
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
       // Without PATHEXT, PowerShell treats even .exe files as documents.
-      env: Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]])),
+      env: { ...hostEnvironment(), ...(PATH ? { PATH } : {}) },
     });
-    const chunks = []; let bytes = 0; let reason;
-    const stop = message => { reason = message; killTree(child); };
+    const chunks = []; let bytes = 0; let reason; let settled = false;
+    const graces = [];
+    const settle = (code, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer); for (const grace of graces) clearTimeout(grace);
+      signal.removeEventListener("abort", abort);
+      child.stdout.destroy(); child.stderr.destroy();
+      if (error) reject(error);
+      else if (reason) reject(new Error(reason));
+      else resolve(text({ exitCode: code, output: Buffer.concat(chunks).toString("utf8") }));
+    };
+    const stop = message => {
+      if (settled || reason) return;
+      reason = message;
+      killTree(child);
+      graces.push(setTimeout(() => settle(null), STOP_GRACE_MS));
+    };
     const abort = () => stop("Computer access was revoked or the requesting turn ended. Inspect the result before retrying.");
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => stop("Command timed out after 30 seconds; inspect before retrying."), 30_000);
+    const timer = setTimeout(() => stop(`Command timed out after ${seconds} second${seconds === 1 ? "" : "s"}; inspect before retrying, or give a longer timeout_seconds.`), seconds * 1000);
     for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => {
       bytes += chunk.length;
-      if (bytes <= LIMIT) chunks.push(chunk); else stop("Command output exceeded the limit");
+      if (bytes <= OUTPUT_LIMIT) chunks.push(chunk); else stop("Command output exceeded the limit");
     });
-    const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
-    child.once("error", error => { cleanup(); reject(error); });
-    child.once("close", code => { cleanup(); if (reason) reject(new Error(reason)); else resolve(text({ exitCode: code, output: Buffer.concat(chunks).toString("utf8") })); });
+    child.once("error", error => settle(null, error));
+    child.once("close", code => settle(code));
+    child.once("exit", code => { graces.push(setTimeout(() => settle(code), PIPE_GRACE_MS)); });
   });
 }
 
 /** Persistent transport: Cua observation references survive to the next call. Ending sharing closes this, not the app's daemon. */
-export function createSharedCua(connection) {
+export function createSharedCua(connection, { platform = process.platform } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...connection.mcpEnv },
+    env: { ...hostEnvironment(), ...connection.mcpEnv },
   });
   let sequence = 0; let closed = false; let bytes = 0;
   const pending = new Map();
-  const fail = error => { closed = true; for (const item of pending.values()) item.reject(error); pending.clear(); child.kill(); };
+  const fail = error => {
+    closed = true;
+    const reason = child.pid === undefined ? new Error(helperMissing()) : error;
+    for (const item of pending.values()) item.reject(reason);
+    pending.clear(); child.kill();
+  };
   child.on("error", fail);
   child.stdin.on("error", fail);
   child.on("exit", () => fail(new Error("Computer-control transport closed")));
@@ -166,7 +251,11 @@ export function createSharedCua(connection) {
     signal?.addEventListener("abort", abort, { once: true });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
-  const ready = request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "omb-shared-desktop", version: "1" } }).then(() => child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n'));
+  let driver;
+  const ready = request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "omb-shared-desktop", version: "1" } }).then(answer => {
+    driver = answer?.serverInfo;
+    child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+  });
   ready.catch(() => {});
   return {
     async call(operation, signal) {
@@ -179,6 +268,9 @@ export function createSharedCua(connection) {
       // Every tool and argument is checked here: nothing the server sends reaches the driver unless a lent screen accepts it.
       const lent = lentScreenArguments(operation.tool_name, operation.arguments);
       if (lent.error) throw new Error(lent.error);
+      if (typesInOneBurst(platform, driver?.version, operation.tool_name, lent.arguments)) {
+        return typeOneCharacterAtATime((name, args) => request("tools/call", { name, arguments: args }, signal), lent.arguments);
+      }
       return request("tools/call", { name: operation.tool_name, arguments: lent.arguments }, signal);
     },
     close() { lines.close(); fail(new Error("Computer sharing stopped")); },
@@ -190,7 +282,7 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   if (grant.enabled !== true) throw new Error("Computer sharing is off");
   if (operation.action === "run_command") {
     if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this server");
-    return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal);
+    return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal, operation.timeout_seconds);
   }
   if (["computer_tools", "computer_call"].includes(operation.action)) {
     if (grant.computer !== true) throw new Error("Computer control is not enabled for this server");
@@ -217,17 +309,19 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   const write = operation.action === "write_file";
   if (write && folder.write !== true) throw new Error("This folder is read-only");
   if (write && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
+  if (write && folder.home === true && insideHomeSettings(operation.path ?? "")) throw new Error(HOME_SETTINGS);
   let data;
   if (write) {
     if (typeof operation.content !== "string") throw new Error("Give file content to write");
     data = Buffer.from(operation.content, operation.encoding === "base64" ? "base64" : "utf8");
-    if (data.length > LIMIT) throw new Error("Files are limited to 256 KiB per operation");
+    if (data.length > WRITE_LIMIT) throw new Error("A file written here is limited to 256 KiB");
+    if (!operation.expected_sha256) await makeMissingFolders(folder, operation.path ?? "");
   }
   const flags = (write ? operation.expected_sha256 ? constants.O_RDWR : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
   const file = await fs.open(target, flags, 0o600);
   try {
     const stat = await file.stat({ bigint: true });
-    if (!stat.isFile() || stat.nlink !== 1n || stat.size > LIMIT) throw new Error("Only regular, single-link files up to 256 KiB can be shared");
+    if (!stat.isFile() || stat.nlink !== 1n || stat.size > READ_LIMIT) throw new Error("Only regular, single-link files up to 2 MiB can be shared");
     await sharedPath(folder, operation.path);
     const named = await fs.lstat(target, { bigint: true });
     if (named.ino !== stat.ino || named.dev !== stat.dev || named.isSymbolicLink()) throw new Error("The file changed while opening it; retry after inspecting the folder");
@@ -236,14 +330,14 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
     await assertOutsideProtected(protectedRoots, target);
     let current = Buffer.alloc(0);
     if (!write || operation.expected_sha256) {
-      const buffer = Buffer.alloc(LIMIT + 1);
+      const buffer = Buffer.alloc(READ_LIMIT + 1);
       let total = 0;
       while (total < buffer.length) {
         const { bytesRead } = await file.read(buffer, total, buffer.length - total, total);
         if (!bytesRead) break;
         total += bytesRead;
       }
-      if (total > LIMIT) throw new Error("File grew beyond the 256 KiB limit");
+      if (total > READ_LIMIT) throw new Error("File grew beyond the 2 MiB limit");
       current = buffer.subarray(0, total);
     }
     if (write) {
@@ -259,6 +353,9 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
       return text({ written: true, bytes: data.length, sha256: hash(data) });
     }
     signal.throwIfAborted();
-    return text({ content: current.toString(operation.encoding === "base64" ? "base64" : "utf8"), encoding: operation.encoding ?? "utf8", bytes: current.length, sha256: hash(current) });
+    const read = text({ content: current.toString(operation.encoding === "base64" ? "base64" : "utf8"), encoding: operation.encoding ?? "utf8", bytes: current.length, sha256: hash(current) });
+    // Text full of quotes or control characters grows when escaped twice; base64 never does.
+    if (Buffer.byteLength(JSON.stringify(read)) > RESULT_LIMIT) throw new Error("This file is too big to read as text. Read it with encoding base64.");
+    return read;
   } finally { await file.close(); }
 }

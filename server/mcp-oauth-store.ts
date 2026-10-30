@@ -33,6 +33,12 @@ export type McpOAuthTokens = z.infer<typeof tokensSchema>;
 export type McpOAuthRecord = z.infer<typeof recordSchema>;
 type StoreFile = z.infer<typeof fileSchema>;
 
+/** One sign-in as this store keeps it, from anywhere else (a sign-in moved from the person's own computer); null if not. */
+export function parseMcpOAuthRecord(value: unknown): McpOAuthRecord | null {
+  const parsed = recordSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export class McpOAuthStore {
   private readonly file: string;
 

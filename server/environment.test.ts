@@ -129,14 +129,49 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
-      .toEqual({ remoteSessions: true, sharedComputers: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
-      .toEqual({ remoteSessions: true, cloudHome: true, selfUpdate: "operator", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "only a Cloud home takes a move").not.toHaveProperty("move");
+    // A lent computer may lend its internet connection only to a Cloud home that lends at all.
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, sharedComputers: true }).capabilities)
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, deviceLink: true, myChromeLink: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities).not.toHaveProperty("deviceLink");
+  });
+
+  it("advertises myChromeLink only on a personal Cloud home with lending", () => {
+    const base = { environmentId: "abc", desktopManaged: false };
+    expect(environmentDescriptor({ ...base, sharedComputers: true, cloudHome: true }).capabilities.myChromeLink).toBe(true);
+    expect(environmentDescriptor({ ...base, sharedComputers: true, cloudHome: true, cloudTeam: true }).capabilities).not.toHaveProperty("myChromeLink");
+    expect(environmentDescriptor({ ...base, sharedComputers: true, cloudHome: false }).capabilities).not.toHaveProperty("myChromeLink");
+    expect(environmentDescriptor({ ...base, sharedComputers: false, cloudHome: true }).capabilities).not.toHaveProperty("myChromeLink");
+  });
+
+  it("says a team's Cloud home is a team's, so a sign-in page names the team", () => {
+    const base = { environmentId: "abc", desktopManaged: false, label: "Acme Labs" };
+    expect(environmentDescriptor({ ...base, cloudHome: true, cloudTeam: true }).capabilities.cloudTeam).toBe(true);
+    expect(environmentDescriptor({ ...base, cloudHome: true }).capabilities).not.toHaveProperty("cloudTeam");
   });
 
   it("falls back to the checkout's package.json version, then to unknown", () => {
     delete process.env.OMB_APP_VERSION;
     expect(serverVersion()).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it("reads the version the bundle carries when no package.json sits beside it, as in the Cloud home image", () => {
+    delete process.env.OMB_APP_VERSION;
+    const image = mkdtempSync(join(tmpdir(), "omb-image-"));
+    dirs.push(image);
+    const bundle = join(image, "dist-server");
+    mkdirSync(bundle);
+    expect(serverVersion(bundle)).toBe("unknown");
+    writeFileSync(join(bundle, "package.json"), '{"type":"module"}\n');
+    expect(serverVersion(bundle)).toBe("unknown");
+    writeFileSync(join(bundle, "package.json"), '{"type":"module","version":"0.1.117"}\n');
+    expect(serverVersion(bundle)).toBe("0.1.117");
+    process.env.OMB_APP_VERSION = "0.1.120";
+    expect(serverVersion(bundle)).toBe("0.1.120");
+    delete process.env.OMB_APP_VERSION;
   });
 });

@@ -41,6 +41,20 @@ export function loginFields(fields: readonly SdkField[]): OnePasswordItemFields 
   return { username: username?.value ?? "", password: password?.value ?? "", totp: totp?.value ?? null };
 }
 
+/** The SDK did not load: a fault in this installation, never in the person's token, which was not even checked. */
+export class OnePasswordUnavailableError extends Error {
+  constructor() {
+    super("1Password could not start on this server, so your token was not checked: this installation is missing its 1Password part. Update OpenMausBot, then connect again.");
+    this.name = "OnePasswordUnavailableError";
+  }
+}
+
+/** Why the SDK did not load goes to the server log for whoever reads it; the person gets the plain words. */
+export function onePasswordUnavailable(error: unknown, log: (line: string) => void = (line) => console.warn(line)): OnePasswordUnavailableError {
+  log(`1Password: the SDK did not load: ${(error instanceof Error ? error.message : String(error)).split("\n", 1)[0]}`);
+  return new OnePasswordUnavailableError();
+}
+
 export async function sdkOnePasswordClient(sdk: OnePasswordSdk, token: string, version: string): Promise<OnePasswordClient> {
   const client = await sdk.createClient({ auth: token, integrationName: "OpenMausBot", integrationVersion: version });
   return {
@@ -86,14 +100,17 @@ function bySite(hosts: Iterable<string>): Map<string, string[]> {
   return sites;
 }
 
-/** Words for the person, never the token. */
+export const ONE_PASSWORD_MALFORMED = "That is not a whole 1Password service account token. Copy all of it (it starts with ops_ and is very long), or make a new one in 1Password under Developer → Service accounts.";
+export const ONE_PASSWORD_REFUSED = "1Password did not accept the token: it may have been revoked, expired, or lost access to its vault. Make a new service account token in 1Password and paste it here.";
+
+/** Words for the person, never the token. A fault of this installation is never blamed on the token. */
 export function onePasswordProblem(error: unknown): string {
+  if (error instanceof OnePasswordUnavailableError) return error.message;
   const name = error instanceof Error ? error.name : "";
   const text = error instanceof Error ? error.message : String(error);
   if (name === "RateLimitExceededError" || /rate limit/iu.test(text)) return "1Password is limiting requests right now. Try again in a few minutes.";
-  if (name === "AuthExpiredError" || /invalid|unauthori[sz]ed|authenticat|token|forbidden|401|403/iu.test(text)) {
-    return "1Password did not accept the token. Paste a service account token (it starts with ops_), or make a new one.";
-  }
+  if (/invalid format|deserializ/iu.test(text)) return ONE_PASSWORD_MALFORMED;
+  if (name === "AuthExpiredError" || /invalid|unauthori[sz]ed|authenticat|service account token|forbidden|\b40[13]\b/iu.test(text)) return ONE_PASSWORD_REFUSED;
   if (/fetch|network|ENOTFOUND|ECONN|timed? ?out|dns/iu.test(text)) return "Could not reach 1Password. Check the internet connection and try again.";
   return "1Password could not be read. Try again, or connect it again with a new token.";
 }

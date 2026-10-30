@@ -161,7 +161,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = HOURS;
     await send(bot.id, bot.threadId, "Open the desktop.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: This month's 50 cloud computer hours are used up. They come back on 1 November. See your plan on the Plan page.");
+    expect(row.tool.name).toBe("error: This month's 50 cloud desktop hours are used up. They come back on 1 November. See your plan on the Plan page.");
     expect(row.tool.place).toEqual({ state: "cc-no-hours", params: { bot: "Hours Bot", plan: "Pro", hours: 50, month: "November" }, source: "works-on" });
     await idle(bot.id);
     expect(creates).toBe(1);
@@ -182,7 +182,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = AT_ONCE;
     await send(bot.id, bot.threadId, "Use your desktop too.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Your Personal plan includes 1 cloud computer, and Ada has it. Manage your cloud computers in Settings → Local VM.");
+    expect(row.tool.name).toBe("error: Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Bot desktops.");
     expect(row.tool.place).toEqual({ state: "cc-at-once", params: { bot: "Bo", plan: "Personal", max: 1, holders: ["Ada"] }, source: "works-on" });
   }, 90_000);
 
@@ -193,7 +193,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = DOWN;
     await send(bot.id, bot.threadId, "Open the desktop.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Cloud computers can't start right now. It isn't anything you did. Try again.");
+    expect(row.tool.name).toBe("error: Cloud desktops can't start right now. It isn't anything you did. Try again.");
     expect(row.tool.name).not.toMatch(/boat|box|Works on to Auto/i);
     expect(row.tool.place).toEqual({ state: "cc-unavailable", params: { bot: "Down Bot" }, source: "works-on" });
   }, 90_000);
@@ -207,7 +207,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = refusal(402, "subscription_inactive", "Cloud computers are included with an active Cloud subscription.");
     await send(bot.id, bot.threadId, "Open the desktop.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Your MausBot Cloud plan has ended, so cloud computers are off. See your plan on the Plan page.");
+    expect(row.tool.name).toBe("error: Your MausBot Cloud plan has ended, so cloud desktops are off. See your plan on the Plan page.");
     expect(row.tool.place).toEqual({ state: "cc-ended", params: { bot: "Ended Bot" }, source: "works-on" });
   }, 90_000);
 
@@ -222,7 +222,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = DOWN;
     await send(bot.id, bot.threadId, "Carry on on the desktop.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Cloud computers can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again.");
+    expect(row.tool.name).toBe("error: Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again.");
     expect(row.tool.place).toEqual({ state: "cc-unavailable", params: { bot: "Pinned Bot" }, source: "auto-pin" });
     await idle(bot.id);
     expect(savedTask(bot.id, bot.threadId)?.surface).toBeUndefined();
@@ -244,7 +244,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     const threadId: string = await until(async (): Promise<string> =>
       (await apiOk("GET", "/api/routines")).runs.find((entry: any) => entry.id === run.id)?.threadId ?? "", Boolean, "routine thread");
     const row = await failedRow(threadId);
-    expect(row.tool.name).toBe("error: Cloud computers can't start right now. It isn't anything you did. Change where this routine runs.");
+    expect(row.tool.name).toBe("error: Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs.");
     expect(row.tool.place).toEqual({ state: "cc-unavailable", params: { bot: "Routine Bot" }, source: "routine" });
     expect(row.tool.name).not.toMatch(/Works on/);
   }, 90_000);

@@ -179,7 +179,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     } finally { await instance.dispose(); }
   }, 20_000);
 
-  const cardRaisedFor = async (approvalMode: "ask" | "full") => {
+  const cardRaisedFor = async (approvalMode: "ask" | "full", approvalModeNow?: () => "ask" | "full") => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
       'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fx_write","arguments":"{}"}}]}}]}\n\n'
         + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
@@ -193,7 +193,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     const events: RuntimeEvent[] = [];
     instance.adapter.onEvent((event) => events.push(event));
     await instance.adapter.sendTurn({
-      threadId: "thread", text: "hi", approvalMode,
+      threadId: "thread", text: "hi", approvalMode, ...(approvalModeNow ? { approvalModeNow } : {}),
       integrations: { custom: { fx: toolServer() } },
     });
     await vi.waitFor(() => {
@@ -213,6 +213,11 @@ describe("createOpenAIChatRuntime tool approvals", () => {
 
   it("answers for the person under Full access, so no card is raised", async () => {
     expect(await cardRaisedFor("full")).toBe(false);
+  }, 20_000);
+
+  it("gates each tool call on the level the person has picked by then, not the one the turn started with", async () => {
+    expect(await cardRaisedFor("ask", () => "full")).toBe(false);
+    expect(await cardRaisedFor("full", () => "ask")).toBe(true);
   }, 20_000);
 
   it("still holds an ask_user card for a person under Full access and returns the reply verbatim", async () => {
@@ -466,6 +471,90 @@ describe("createOpenAIChatRuntime mid-turn steer", () => {
     await expect(instance.adapter.steer!("thread", "peer context")).resolves.toBe("refused");
     await instance.dispose();
   });
+
+  it("answers an aside parked while the final answer streamed instead of dropping it", async () => {
+    const answer = (text: string) => new Response(`data: {"choices":[{"index":0,"delta":{"content":"${text}"}}]}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
+    const bodies: string[] = [];
+    let release!: (response: Response) => void;
+    const gate = new Promise<Response>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return bodies.length === 1 ? await gate : answer("noted the follow-up.");
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "t", text: "hi", approvalMode: "full" });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1), { timeout: 10_000 });
+    await expect(instance.adapter.steer!("t", "one more thing")).resolves.toBe("steered");
+    release(answer("first answer."));
+    await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+    await instance.dispose();
+    expect(bodies).toHaveLength(2);
+    const second = JSON.parse(bodies[1]!).messages as Array<{ role: string; content?: unknown }>;
+    expect(second.slice(-2)).toEqual([{ role: "assistant", content: "first answer." }, { role: "user", content: "one more thing" }]);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("tells the person when the turn fails before it reads an accepted aside", async () => {
+    let release!: (response: Response) => void;
+    const gate = new Promise<Response>((resolve) => { release = resolve; });
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      requests += 1;
+      return await gate;
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "t", text: "hi", approvalMode: "full" });
+    await vi.waitFor(() => expect(requests).toBe(1), { timeout: 10_000 });
+    await expect(instance.adapter.steer!("t", "one more thing")).resolves.toBe("steered");
+    release(new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400 }));
+    await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+    await instance.dispose();
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    expect(events).toContainEqual(expect.objectContaining({ type: "runtime.notice", message: expect.stringMatching(/before .* read/) }));
+  }, 20_000);
+
+  it("tells the person when the provider rejects the request that carries an aside", async () => {
+    let release!: (response: Response) => void;
+    const gate = new Promise<Response>((resolve) => { release = resolve; });
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return bodies.length === 1 ? await gate : new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400 });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "t", text: "hi", approvalMode: "full" });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1), { timeout: 10_000 });
+    await expect(instance.adapter.steer!("t", "one more thing")).resolves.toBe("steered");
+    release(new Response('data: {"choices":[{"index":0,"delta":{"content":"first answer."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } }));
+    await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+    await instance.dispose();
+    expect(bodies).toHaveLength(2);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    expect(events).toContainEqual(expect.objectContaining({ type: "runtime.notice", message: expect.stringMatching(/before .* read/) }));
+  }, 20_000);
 
   it("delivers mid-turn asides into the next completion request after the tool round", async () => {
     const toolCallBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fx_write","arguments":"{}"}}]}}]}\n\n'
@@ -744,13 +833,18 @@ describe("createOpenAIChatRuntime HTTP error text", () => {
     return { message: error?.message, calls };
   };
 
-  it("shows an out-of-credits account in the provider's own words, whole, and does not retry it", async () => {
+  it("names an out-of-credits account in plain words with the provider's own reason, and does not retry it", async () => {
     const { message, calls } = await failure(402, JSON.stringify({
       code: "The caller does not have permission to execute the specified operation",
       error: XAI_NO_CREDITS,
     }));
-    expect(message).toBe(`xAI HTTP 402: ${XAI_NO_CREDITS}`);
+    expect(message).toBe("Your xAI account is out of credits (xAI says: \"Your team 0000-fixture has either used all available credits or reached its monthly spending limit\"). Add credits with xAI, then run it again.");
     expect(calls).toBe(1);
+  });
+
+  it("keeps an OpenAI-compatible endpoint's 402 line raw: it names no provider, and the Cloud trial credit reads it", async () => {
+    const events = await runTurn(() => new Response(JSON.stringify({ error: { message: "Insufficient credits", code: "trial_credit_used_up" } }), { status: 402 }));
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: "upstream HTTP 402: Insufficient credits (trial_credit_used_up)" });
   });
 
   it("reads an OpenAI-style error envelope's message", async () => {

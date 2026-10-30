@@ -20,7 +20,7 @@ export function ProposalStatus({ bot, kind }: { bot: Bot; kind: "chief" | "owner
   const { state } = useStore();
   if (draft || !chiefCovers(bot, state.bots)) return null;
   return (
-    <div className="mt-1 text-[11.5px] leading-snug text-ink-secondary">
+    <div className="mt-1 text-[12px] leading-snug text-ink-secondary">
       {t(kind === "chief" ? "botSettings.proposal.chief" : "botSettings.proposal.owner")}
     </div>
   );

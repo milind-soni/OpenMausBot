@@ -2,9 +2,10 @@ import { createElement, type EffectCallback, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { withTourFinished } from "@/lib/guided-tour";
-import { EMPTY_ONBOARDING, WELCOME_VERSION } from "@/lib/onboarding";
+import { EMPTY_ONBOARDING, MET_CHIEF_HINT, WELCOME_VERSION } from "@/lib/onboarding";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[] }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], advanced: true }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: (initial: unknown) => {
@@ -47,6 +48,7 @@ function render(quiet: boolean) {
 
 beforeEach(() => {
   fixture.values = [];
+  fixture.advanced = true;
   store.api.mockReset();
   vi.stubGlobal("window", {});
   const record = { ...EMPTY_ONBOARDING, completedAt: "2026-09-23T00:00:00.000Z", version: WELCOME_VERSION };
@@ -78,6 +80,39 @@ describe("first-conversation spotlights", () => {
     for (const effect of fixture.effects) effect();
     expect(render(false)).toBeNull();
     expect(store.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT", body: expect.stringContaining("spot.approval") }));
+  });
+
+  it("show once the welcome is done, without waiting for the app tour, which no longer starts by itself", () => {
+    const record = { ...EMPTY_ONBOARDING, completedAt: "2026-10-23T00:00:00.000Z", version: WELCOME_VERSION };
+    store.state = { ...store.state, config: { onboarding: record } };
+    render(false);
+    for (const effect of fixture.effects) effect();
+    expect(render(false)?.type).toBe(Spotlight);
+  });
+
+  it("wait while the welcome is open or the app tour runs from Settings", () => {
+    for (const busy of [{ welcomeOpen: true }, { tourOpen: true }]) {
+      fixture.values = [];
+      store.state = { ...store.state, welcomeOpen: false, tourOpen: false, ...busy };
+      render(false);
+      for (const effect of fixture.effects) effect();
+      expect(render(false), JSON.stringify(busy)).toBeNull();
+    }
+  });
+
+  it("stay off in Simple mode, whose cards carry a hint line instead", () => {
+    fixture.advanced = false;
+    render(false);
+    for (const effect of fixture.effects) effect();
+    expect(render(false)).toBeNull();
+  });
+
+  it("show in Advanced mode whichever first run the install had", () => {
+    const record = { ...EMPTY_ONBOARDING, completedAt: "2026-10-27T00:00:00.000Z", version: WELCOME_VERSION, hintsSeen: [MET_CHIEF_HINT] };
+    store.state = { ...store.state, config: { onboarding: { ...record, hintsSeen: [...withTourFinished(record), MET_CHIEF_HINT] } } };
+    render(false);
+    for (const effect of fixture.effects) effect();
+    expect(render(false)).not.toBeNull();
   });
 
   it("stay away from a hosted member, who could never dismiss them for good", () => {

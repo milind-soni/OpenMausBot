@@ -28,8 +28,7 @@ exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
 `http://127.0.0.1:PORT` (the fake GPT-Live that
 `node --experimental-strip-types server/testing/fake-openai-live.ts` prints),
 and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
-reach the fake. `OMB_PRO_PLAN` crosses only as `1`: Live calls from a phone need a Pro plan,
-and that is how a server the desktop app did not start says so.
+reach the fake.
 
 Pass the printed URL explicitly from a second terminal:
 
@@ -53,6 +52,7 @@ Use only mapped, tested commands:
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
@@ -60,13 +60,22 @@ Use only mapped, tested commands:
 - [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
+- [Computer panel focus hand-off](computer-panel-focus.md)
+- [Taking control of a bot's computer](take-control.md)
+- [Saved steps: repeating a computer task without AI](saved-steps.md)
+- [Native dictation retention and send-to-stop](dictation.md)
+- [Proactive routines and the brief](proactive-routines.md)
+- [Waits: tell me when, with no AI while waiting](waits.md)
+- [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
+- [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
 - [Phone web app installation and safe areas](phone-web-app.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
-- [Chief access to additional teams](team-access.md)
+- [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
+- [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Cline engine and native loopback qualification](cline.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
@@ -106,6 +115,15 @@ creating, switching between and recovering named local environments by hand on
 a packaged desktop install; the control surface cannot drive it, so it is not
 in the map above.
 
+The [talk shortcut recipe](talk-shortcut.md) checks hold-to-talk from any app, the
+reply box and the Quick asks chat by hand on a packaged side-by-side build; the
+control surface cannot drive a global shortcut or the microphone, so it is not
+in the map above.
+
+The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
+Cloud home with the desktop's own wiring between them, and runs and checks the
+one-time move as main does.
+
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
 and a synthetic OAuth provider in a disposable workspace.
@@ -113,6 +131,17 @@ and a synthetic OAuth provider in a disposable workspace.
 The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
+
+The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
+category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
+bot's turn getting the `postiz` tools with the token kept out of every answer,
+transcript and log, plain refusals, revocation and disconnect, against loopback
+stand-ins for Postiz.
+
+The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
+included calls with the month's use, the person's own treg key (saved, tested,
+removed, used first) and a used-up month, against loopback stand-ins for treg
+and the relay.
 
 The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
 recovery, safe authorization links and abandoned-account retries through real
@@ -130,6 +159,10 @@ Admin server, including cancellation, revocation and unchanged normal startup.
 
 The [personal Cloud account smoke](cloud-account.md) checks optional browser
 sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
+
+The [rail of Clouds](cloud-rail.md) checks the session's list of Clouds, which
+pages may read the rail, opening a place by its id, hiding the rail, and buying
+another Cloud, with a loopback Admin and the real app in a disposable preview.
 
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
@@ -195,7 +228,8 @@ roles and device revocation through the real HTTP API with a stubbed email
 service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
-default focus, keyboard wrapping and focus return against two disposable bots.
+default focus, keyboard wrapping and focus return against two disposable bots;
+its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
 Active Threads popover's width and inset at each expanded sidebar density in a
@@ -207,6 +241,14 @@ keyless local generation, saved-key handling, and safe errors with a local fake 
 
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
+
+The [custom ACP model fixture](custom-acp-models.md) checks native model and
+thinking choices, independent bot defaults and thread overrides, and retained
+settings and catalogs after restart with an offline ACP engine.
+
+The [GitHub Copilot engine checks](copilot-engine.md) cover its ACP catalog,
+model and effort selection, sign-in detection, and moving a bot or conversation
+between Claude, Copilot and a custom ACP agent with fake engines.
 
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.
@@ -232,6 +274,11 @@ using the real renderer and an isolated fake-engine server.
 
 The [interval restrictions recipe](interval-restrictions.md) checks weekday and
 time-window limits on scheduled routines in that same disposable fixture.
+
+The [automation reports recipe](automation-reports.md) checks that every run
+reports into the bot's chat as one captioned bot message, that quiet runs write
+nothing, that a run's question is answered in that chat, and the concurrency
+rule with the person's own turn, in the real renderer and end to end.
 
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.

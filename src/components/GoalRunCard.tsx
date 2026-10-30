@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import type { Message } from "@/state/store";
+import { t } from "@/lib/i18n";
+import { useStore, type Message } from "@/state/store";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 
 const DETAIL_LIMIT = 280;
@@ -52,7 +53,8 @@ function StatusIcon({ status }: { status: GroupGoalRunCardData["status"] }) {
   }
 }
 
-export function GoalRunCard({ message }: { message: Message }) {
+/** `solo` is a one-on-one chat's run, where the bot works alone; `onStop` ends a working run from the card. */
+export function GoalRunCard({ message, solo = false, onStop }: { message: Message; solo?: boolean; onStop?: () => void }) {
   const run = message.goalRun;
   if (!run) {
     const fallback = compact(message.text, DETAIL_LIMIT);
@@ -81,17 +83,35 @@ export function GoalRunCard({ message }: { message: Message }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="truncate text-[13.5px] font-semibold text-ink">{goal || "Group goal"}</h3>
-            <span aria-live="polite" className={cn("text-[11.5px] font-medium", copy.tone)}>
+            <h3 className="truncate text-[14px] font-semibold text-ink">{goal || "Group goal"}</h3>
+            <span aria-live="polite" className={cn("text-[12px] font-medium", copy.tone)}>
               {copy.label}
             </span>
           </div>
-          {detail && <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</p>}
-          <p className="mt-1 text-[11.5px] text-ink-tertiary">
-            {run.coordinatorName} coordinating · {turns}
+          {detail && <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-secondary">{detail}</p>}
+          <p className="mt-1 text-[12px] text-ink-tertiary">
+            {run.coordinatorName}{solo ? "" : " coordinating"} · {turns}
           </p>
         </div>
+        {onStop && run.status === "working" && (
+          <button
+            type="button"
+            onClick={onStop}
+            className="shrink-0 rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            {t("chat.stop")}
+          </button>
+        )}
       </div>
     </section>
+  );
+}
+
+export function GoalRunRow({ botId, threadId, message }: { botId: string; threadId?: string; message: Message }) {
+  const { dispatch } = useStore();
+  return (
+    <div className="flex justify-start">
+      <GoalRunCard message={message} solo onStop={() => dispatch({ type: "interrupt", botId, threadId })} />
+    </div>
   );
 }

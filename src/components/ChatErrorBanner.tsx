@@ -8,11 +8,13 @@ export function ChatNotice({ notice }: { notice: AppState["notice"] }) {
   return (
     <div className="w-full px-5">
       <div role="status" className="mb-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
-        {notice.kind === "steer-images"
-          ? t("composer.queued.steerImagesHeld")
-          : notice.kind === "bot-gone"
-            ? t("thread.botGone")
-            : notice.botName ? t("thread.goneShowing", { name: notice.botName }) : t("thread.gone")}
+        {notice.kind === "note"
+          ? notice.text
+          : notice.kind === "steer-images"
+            ? t("composer.queued.steerImagesHeld")
+            : notice.kind === "bot-gone"
+              ? t("thread.botGone")
+              : notice.botName ? t("thread.goneShowing", { name: notice.botName }) : t("thread.gone")}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 const ALLOWED_PACKAGE_HOSTS = new Set(["github.com", "www.github.com", "raw.githubusercontent.com"]);
+const GROK_SHARE_PATH = /^\/bot\/([A-Za-z0-9_-]{21})\/?$/;
 
 export function packageUrlFromDeepLink(rawValue) {
   let link;
@@ -16,6 +17,10 @@ export function packageUrlFromDeepLink(rawValue) {
   } catch {
     return null;
   }
+  // A Grok Bot share link opens the same card as pasting it into Templates → Import.
+  const grok = packageUrl.pathname.match(GROK_SHARE_PATH);
+  if (packageUrl.protocol === "https:" && (packageUrl.hostname === "x.ai" || packageUrl.hostname === "www.x.ai") &&
+    !packageUrl.username && !packageUrl.password && !packageUrl.port && grok) return `https://x.ai/bot/${grok[1]}`;
   if (
     packageUrl.protocol !== "https:" ||
     packageUrl.username ||

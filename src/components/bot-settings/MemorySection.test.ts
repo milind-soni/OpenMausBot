@@ -31,7 +31,7 @@ const index = (overrides: Partial<MemoryCapacity> = {}): MemoryCapacity => ({
 describe("MemoryGauge", () => {
   it("always carries the plain sentence about what loads", () => {
     const markup = render(createElement(MemoryGauge, { index: index() }));
-    expect(markup).toContain("only the first 200 lines load each turn");
+    expect(markup).toContain("Only the first 200 lines load each turn");
     expect(markup).toContain('aria-valuenow="20"');
     expect(markup).toContain("bg-accent");
     expect(markup).not.toContain("bg-danger");
@@ -40,7 +40,7 @@ describe("MemoryGauge", () => {
   it("turns red and says how many lines are not being loaded", () => {
     const markup = render(createElement(MemoryGauge, { index: index({ lines: 260, loadedLines: 200, truncated: true }) }));
     expect(markup).toContain("60 lines are not being loaded");
-    expect(markup).toContain("only the first 200 lines load each turn");
+    expect(markup).toContain("Only the first 200 lines load each turn");
     expect(markup).toContain("bg-danger");
     expect(markup).toContain('aria-valuenow="100"');
   });
@@ -65,7 +65,7 @@ describe("MemoryFileRows", () => {
     const markup = render(createElement(MemoryFileRows, { title: "Topic files", hint: "hint", files, onOpen: vi.fn(), onDelete: vi.fn() }));
     expect(markup).toContain("clients.md");
     expect(markup).toContain("120 B");
-    expect(markup).toContain("3 min ago");
+    expect(markup).toContain("3 minutes ago");
     expect(markup).toContain('aria-label="Delete clients.md"');
   });
 
@@ -120,7 +120,7 @@ describe("MemoryJournalList", () => {
   it("reads each row as a sentence with the chat it came from, and offers Undo", () => {
     const markup = render(createElement(MemoryJournalList, { rows, botName: "Scout", reverting: null, onRevert: vi.fn(), now }));
     expect(markup).toContain("Scout added 2 lines to MEMORY.md");
-    expect(markup).toContain("3 min ago");
+    expect(markup).toContain("3 minutes ago");
     expect(markup).toContain("from chat “Follow-up”");
     expect(markup).toContain("+2 −0 · show what changed");
     expect(markup).toContain("+one");

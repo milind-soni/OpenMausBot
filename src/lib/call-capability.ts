@@ -1,17 +1,19 @@
+import { t } from "@/lib/i18n";
+
 export type CallCapabilityHelp = {
   label: string;
   reason: string;
 };
 
-const TURNS_NEED_MAC: CallCapabilityHelp = {
-  label: "Calls where you take turns need the Mac app",
-  reason: "They listen with on-device speech recognition, which only the Mac app has.",
-};
+const turnsNeedMac = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsNeedMac"),
+  reason: t("call.capability.turnsNeedMacReason"),
+});
 
-const TURNS_ON_THIS_COMPUTER: CallCapabilityHelp = {
-  label: "Calls where you take turns work on This computer",
-  reason: "They listen with your Mac's own speech recognition, which only This computer can use.",
-};
+const turnsOnThisComputer = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsOnThisComputer"),
+  reason: t("call.capability.turnsOnThisComputerReason"),
+});
 
 export function callCapabilityHelp(
   capabilities: DesktopCapabilities,
@@ -20,21 +22,21 @@ export function callCapabilityHelp(
   if (!capabilities.dictation.available) {
     switch (capabilities.dictation.reasonCode) {
       case "remote-server":
-        return capabilities.host.platform === "darwin" ? TURNS_ON_THIS_COMPUTER : TURNS_NEED_MAC;
+        return capabilities.host.platform === "darwin" ? turnsOnThisComputer() : turnsNeedMac();
       case "desktop-app-required":
       case "unsupported-platform":
-        return TURNS_NEED_MAC;
+        return turnsNeedMac();
       default:
         return {
-          label: "Calls aren't available on this device",
-          reason: "This device doesn't currently provide the on-device speech recognition needed for calls.",
+          label: t("call.capability.unavailable"),
+          reason: t("call.capability.unavailableReason"),
         };
     }
   }
   if (!speechServiceAvailable) {
     return {
-      label: "The call service is unavailable",
-      reason: "The speech service is unavailable in this app build. Restart or update OpenMausBot.",
+      label: t("call.capability.serviceUnavailable"),
+      reason: t("call.capability.serviceUnavailableReason"),
     };
   }
   return null;

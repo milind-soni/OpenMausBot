@@ -1,4 +1,5 @@
-// A transparent stdio bridge into Cua Driver's MCP server in the Local VM: it defines no tools and parses no MCP messages.
+// A stdio bridge into Cua Driver's MCP server in the Local VM. It defines no tools; the shared bridge only answers ping,
+// makes tool schemas provider-safe and keeps error results text-only.
 import { cuaExecArgs } from "./container-computer.ts";
 import { runMcpBridge } from "./mcp-bridge.ts";
 

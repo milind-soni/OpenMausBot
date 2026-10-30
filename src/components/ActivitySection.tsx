@@ -108,7 +108,7 @@ export function ActivitySection() {
           <Download size={13} aria-hidden="true" />{t("activity.export")}
         </a>
       </div>
-      {error && <p role="alert" className="mt-3 text-[12.5px] text-danger">{t("activity.error", { message: error })}</p>}
+      {error && <p role="alert" className="mt-3 text-[13px] text-danger">{t("activity.error", { message: error })}</p>}
       {!error && entries.length === 0 && !loading && <p className="mt-4 text-[13px] text-ink-secondary">{t("activity.empty")}</p>}
       {entries.length > 0 && (
         <ul className="mt-3 flex flex-col">

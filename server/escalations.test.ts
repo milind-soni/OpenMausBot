@@ -145,3 +145,37 @@ describe("opt-in", () => {
     expect(chiefOfStaffSystemPrompt("chief", team, true, true)).toContain("Team escalations");
   });
 });
+
+describe("a person's private chat on a Team Cloud", () => {
+  const chief = { id: "chief", name: "Clive", section: "ops", chiefOfStaff: true };
+  const mira = { id: "b-mira", name: "Mira", section: "ops", threadId: "th_mira" };
+  const setup = (privateThread?: (threadId: string) => boolean) => {
+    const notified: unknown[] = [], written: unknown[] = [];
+    const store = {
+      bots: [chief, mira], bot: (id: string) => [chief, mira].find((entry) => entry.id === id), tasks: () => [],
+      taskByThread: () => ({ threadId: "th_mira", title: "Ada's interview prep" }), groupByThread: () => undefined, messagesFor: () => [],
+      createTask: () => ({ threadId: "th_chief_notices", title: "notices" }), appendMessage: (threadId: string, message: unknown) => { written.push({ threadId, message }); },
+    };
+    const notices = createChiefNotices({
+      store: store as never, notify: (notification) => { notified.push(notification); }, threadBusy: () => false, botAtThreadCapacity: () => false,
+      groupTurnActive: () => false, startTurn: async () => undefined, assignerOf: () => undefined, escalationsEnabled: () => true,
+      ...(privateThread ? { privateThread } : {}),
+    });
+    return { notices, notified, written };
+  };
+  const ask = { kind: "needs-input" as const, bot: mira as never, threadId: "th_mira", gate: NEEDS_INPUT_GATE, reason: "Which offer should Ada take?", alreadyNotified: false };
+
+  it("tells its person, never a Chief's thread the team (and its admins) reads", () => {
+    const { notices, notified, written } = setup((threadId) => threadId === "th_mira");
+    expect(notices.reportEscalation(ask)).toBe("person");
+    notices.reportIncident({ kind: "failed", bot: mira as never, threadId: "th_mira", detail: "Ada's offer letter could not be read" });
+    expect(written).toEqual([]);
+    expect(notified).toHaveLength(2);
+  });
+
+  it("still goes to the Chief from a chat that is not one person's", () => {
+    const { notices, written } = setup(() => false);
+    expect(notices.reportEscalation(ask)).toBe("chief");
+    expect(JSON.stringify(written)).toContain("Ada's interview prep");
+  });
+});

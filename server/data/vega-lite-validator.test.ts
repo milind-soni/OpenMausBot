@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DataFailure } from "./types.ts";
 import { validateVegaLite } from "./vega-lite-validator.ts";
@@ -26,6 +26,21 @@ describe("validateVegaLite", () => {
     expect(out.width).toBe("container");
     expect(out.mark).toBe("bar");
     expect(bar).not.toHaveProperty("data");
+  });
+
+  it("runs a bot's expressions through the interpreter, never generated code", async () => {
+    const generated = vi.spyOn(globalThis, "Function");
+    try {
+      const out = await validateVegaLite({
+        ...bar,
+        transform: [{ calculate: "datum.amount * 2 + length('ab')", as: "double" }, { filter: "datum.double > 1" }],
+        params: [{ name: "pick", select: "point" }],
+      });
+      expect(out.transform).toHaveLength(2);
+      expect(generated).not.toHaveBeenCalled();
+    } finally {
+      generated.mockRestore();
+    }
   });
 
   it("keeps a spec's own width and leaves concat specs unsized", async () => {

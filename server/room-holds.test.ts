@@ -4,6 +4,7 @@ import {
   addressesEveryone,
   applyHoldDirective,
   classifyHoldDirective,
+  isStopCommand,
   MAX_HELD_MESSAGES,
   rememberHeldMessage,
   stopWordPlacement,
@@ -88,5 +89,20 @@ describe("room member holds", () => {
     for (let i = 0; i < MAX_HELD_MESSAGES + 5; i += 1) held = rememberHeldMessage(held, "scout", { threadId: "t", messageId: `x${i}` });
     expect(held.scout).toHaveLength(MAX_HELD_MESSAGES);
     expect(held.scout.at(-1)?.messageId).toBe(`x${MAX_HELD_MESSAGES + 4}`);
+  });
+});
+
+describe("isStopCommand", () => {
+  it("reads a message made only of stop words and fillers as a stop", () => {
+    for (const text of ["stop", "Stop now!", "please stop", "STOP STOP", "cancel that", "abort", "halt it", "stop everything"]) {
+      expect(isStopCommand(text), text).toBe(true);
+    }
+  });
+
+  it("reads any other message as a message, including a quoted or coded stop", () => {
+    for (const text of ["", "all right", "stop using tabs", "don't stop", "pause", "stop the build and run tests", "`stop`", "\"stop\"", "> stop",
+      "why did it stop?", "it stopped", "never stop", "non-stop", "stop-loss at 5%", "cancel my 3pm", "please stop the server and restart it", "stop\nthen deploy"]) {
+      expect(isStopCommand(text), text).toBe(false);
+    }
   });
 });

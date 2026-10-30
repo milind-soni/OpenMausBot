@@ -3,6 +3,22 @@ import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
 
+/** One coordinate_bots call, as the internal route hands it to the server. */
+export type CoordinateBotsCall = {
+  groupId?: string;
+  botIds: string[];
+  message: string;
+  reason?: string;
+  rework: boolean;
+  thread: "standing" | "new";
+  reply: "resume" | "none";
+  consult: boolean;
+  inMyFolder?: boolean;
+  doneWhen?: string;
+  title?: string;
+  projectId?: string;
+};
+
 export type { LegacyThreadResolver };
 
 export type HandoffStatus = "source" | "queued" | "running" | "waiting" | "resume" | "completed" | "failed" | "cancelled";
@@ -58,6 +74,9 @@ export interface HostTurnResult {
   evidence?: TurnEvidence;
   cap?: { note: string; handoffPath?: string };
   cards?: { question: string; ids: string[] };
+  /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
+   * outcome: it failed as `stalled`, not as a provider error. */
+  stalled?: boolean;
 }
 
 export interface HandoffOpener {
@@ -105,9 +124,10 @@ export interface CoordinatorHost {
   names(node: HandoffView, parent?: HandoffView): EnvelopeNames;
   /** `restored` shows the question again only if the first showing never happened; a root parked on its own cards shows nothing more. */
   park(node: HandoffView, question: string, restored?: boolean): void;
-  /** The level the target thread will really run with, so the envelope states the truth. A Chief's level flows into a room
-   * with the hand-off, never onto the shared thread, so it resolves from `source`. */
-  levelOf(target: RoomAddress, source?: RoomAddress): { level: Level; driverKind?: string };
+  /** The level the target thread will really run with, so the envelope states the truth, and, when that came down a Chief's
+   * chain, the Chief conversation's level. A Chief's level flows into a room with the hand-off, never onto the shared thread,
+   * so it resolves from `source`, the requester's node, whose parents lead up the chain. */
+  levelOf(target: RoomAddress, source?: HandoffView): { level: Level; chief?: Level; driverKind?: string };
   chiefOf(address: RoomAddress): boolean;
   /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];
@@ -141,6 +161,8 @@ export interface Coordinator {
   activeDirect(threadId: string): boolean;
   assignerOf(threadId: string): HandoffView | undefined;
   outstandingDirect(threadId: string): HandoffView[];
+  /** Direct conversations whose turn waits on teammates: an open handoff it made that owes a reply, or a root parked to resume with no question for the person. */
+  awaitingTeammateThreads(): Set<string>;
   liveEdges(): LiveHandoffEdge[];
   stopAwaitingDirect(threadId: string, reason?: string): HandoffView[];
   /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */

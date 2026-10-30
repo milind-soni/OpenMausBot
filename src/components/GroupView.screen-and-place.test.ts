@@ -90,3 +90,11 @@ describe("GroupView: computer/browser session visibility", () => {
     expect(markup).not.toMatch(/width="9"[^>]*height="9"/);
   });
 });
+
+describe("GroupView: the transcript", () => {
+  it("holds every row's positioned parts inside it, as ChatView does, so nothing in it can make the window scroll", () => {
+    const markup = render([bot()], group());
+    const transcript = markup.match(/class="(glass-scroller-content[^"]*)"[^>]*role="log"/)?.[1];
+    expect(transcript?.split(" ")).toContain("relative");
+  });
+});

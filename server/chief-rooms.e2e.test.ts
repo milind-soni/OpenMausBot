@@ -12,7 +12,7 @@ type Room = { id: string; name: string; memberIds: string[]; section?: string; b
 type RpcReply = { result: { isError?: boolean; content: Array<{ text: string }> } };
 type Mounted = { command: string; args: string[]; env: Record<string, string> };
 
-const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 
 it("creates and manages an own-section room through the mounted Chief MCP proxy", async () => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
@@ -105,6 +105,10 @@ it("creates and manages an own-section room through the mounted Chief MCP proxy"
     const saved = (await rooms()).find((candidate) => candidate.id === room.id);
     expect(saved).toMatchObject({ name: "Verified room", memberIds: [chief.id, second.id], bulletin: "Verified short brief ✓", section: "Room verification" });
     evidence.push({ saved });
+    await tool("create_room", { name: "Mixed room", member_bot_ids: [foreign.id] });
+    expect((await rooms()).find((candidate) => candidate.name === "Mixed room"))
+      .toMatchObject({ section: "Room verification", memberIds: [chief.id, foreign.id] });
+    await api("PATCH", `/api/bots/${chief.id}`, { peers: [peer.id, second.id], acknowledgePeerScope: true });
     await tool("create_room", { name: "Forbidden room", member_bot_ids: [foreign.id] }, true);
     await tool("manage_room", { room_id: room.id, action: "add_members", member_bot_ids: [foreign.id] }, true);
     expect((await rooms()).find((candidate) => candidate.id === room.id)).toEqual(saved);

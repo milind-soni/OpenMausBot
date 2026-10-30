@@ -3,6 +3,7 @@
 import { closeSync, createWriteStream, openSync, readSync, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { BACKGROUND_HEADERS, CloudAsleepError, asleepAnswer } from "./cloud-power.mjs";
 import { CHUNK_BYTES, MIN_CHUNK_BYTES } from "./cloud-sync-rules.mjs";
 
 // Slowest connection a transfer is given time for, in bytes per millisecond (32 KB/s).
@@ -18,15 +19,22 @@ export class SyncHttpError extends Error {
   }
 }
 
-export function createSyncClient({ origin, fetch: fetchImpl, chunkBytes = CHUNK_BYTES, minChunkBytes = MIN_CHUNK_BYTES }) {
+/** `power`: My Cloud's power gate (cloud-power.mjs); while it says asleep no call is made. */
+export function createSyncClient({ origin, fetch: fetchImpl, power = null, chunkBytes = CHUNK_BYTES, minChunkBytes = MIN_CHUNK_BYTES }) {
   let chunk = chunkBytes;
   const call = async (method, path, { body, raw, headers = {}, signal, timeoutMs = 60_000 } = {}) => {
+    if (power?.asleep()) throw new CloudAsleepError();
     const response = await fetchImpl(`${origin}${path}`, {
       method, credentials: "include", redirect: "error", cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-      headers: { origin, ...(body !== undefined ? { "content-type": "application/json" } : raw ? { "content-type": "application/octet-stream" } : {}), ...headers },
+      headers: { origin, ...BACKGROUND_HEADERS, ...(body !== undefined ? { "content-type": "application/json" } : raw ? { "content-type": "application/octet-stream" } : {}), ...headers },
       ...(body !== undefined ? { body: JSON.stringify(body) } : raw ? { body: raw } : {}),
     });
+    if (asleepAnswer(response)) {
+      await response.body?.cancel().catch(() => {});
+      power?.hold();
+      throw new CloudAsleepError();
+    }
     if (response.status === 401 || response.status === 403) throw new SyncAuthError("Sign in to My Cloud again.");
     return response;
   };
@@ -50,6 +58,17 @@ export function createSyncClient({ origin, fetch: fetchImpl, chunkBytes = CHUNK_
     trash: () => json("GET", "/api/sync/trash").then((result) => result.entries),
     restore: (entryId) => json("POST", "/api/sync/trash/restore", { body: { entryId } }),
     bots: () => json("GET", "/api/bots?messages=0").then((result) => ({ bots: result?.bots ?? [], groups: result?.groups ?? [] })),
+    // Lent folders (electron/lent-folders.mjs): what this computer lends, a copy in step, and bots' changes waiting for it.
+    lent: (report) => json("POST", "/api/sync/lent", { body: report }),
+    synced: (folderId) => json("POST", `/api/sync/folders/${id(folderId)}/synced`, { body: {} }),
+    staged: (folderId) => json("GET", `/api/sync/folders/${id(folderId)}/staged`).then((result) => result?.staged ?? []),
+    stagedDone: (folderId, changeId, sha256) => json("POST", `/api/sync/folders/${id(folderId)}/staged/${id(changeId)}`, { body: { sha256 } }),
+    async stagedFile(folderId, changeId, temporary) {
+      const response = await call("GET", `/api/sync/folders/${id(folderId)}/staged/${id(changeId)}`);
+      if (!response.ok) throw new SyncHttpError(response.status, await response.json().catch(() => null));
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { flags: "w", mode: 0o600 }));
+      return { sha256: response.headers.get("x-omb-sha256") };
+    },
     async upload({ folderId, path, file, size, sha256, baseSha256 }) {
       let begun;
       try {

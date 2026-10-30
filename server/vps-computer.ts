@@ -21,6 +21,7 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
+import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
@@ -50,7 +51,6 @@ const CONTAINER_ID = /^[a-f0-9]{12,64}$/i;
 const FULL_CONTAINER_ID = /^[a-f0-9]{64}$/i;
 const MANAGED_VPS_CONTAINER_NAME = /^openmausbot-vps-[a-z0-9]{1,12}-[a-f0-9]{12}$/;
 const IMAGE_ID = /^sha256:[a-f0-9]{64}$/i;
-const PIDS_LIMIT = 512;
 const SCREENSHOT_PATH = "/tmp/openmausbot-vps-preview.png";
 // The Cua XFCE base ships Pillow in /opt/venv; a container without it returns the original PNG.
 const SCREENSHOT_TRANSFER = `/opt/venv/bin/python -I -c 'import base64, io, sys
@@ -153,6 +153,8 @@ export interface ManagedVpsOwner {
 export interface ManagedVpsInventoryInstance {
   name: string;
   state: "created" | "restarting" | "running" | "removing" | "paused" | "exited" | "dead" | "unknown";
+  /** The SSH alias whose host holds this container. */
+  vpsAlias: string;
   ownerBotId: string | null;
   ownerName: string | null;
   orphaned: boolean;
@@ -162,7 +164,8 @@ export interface ManagedVpsInventoryInstance {
 export interface ManagedVpsInventory {
   configured: boolean;
   available: boolean;
-  sshAlias: string | null;
+  /** Every alias the listing covers: the default first, then each bot's own. */
+  vpsAliases: string[];
   problem: string | null;
   instances: ManagedVpsInventoryInstance[];
 }
@@ -557,6 +560,7 @@ async function computeVpsComputerStatus(
       labels?.[VPS_MANAGED_LABEL] === "1" &&
       labels?.[VPS_CONTAINER_LABEL] === status.container_name &&
       (environmentLabel === undefined || environmentLabel === vpsEnvironmentId());
+    if (status.managed && status.container_id) raisePidsLimit(status.container_id, detail?.HostConfig?.PidsLimit, run);
     status.network = hasNoPublishedPorts(detail?.HostConfig, detail?.NetworkSettings?.Networks) ? "private" : "unsafe";
     status.mounts = hasNoHostMounts(detail ?? {}) ? "none" : "unsafe";
     status.security = dockerSecurityIsHardened(detail?.HostConfig, { restartPolicy: "any" })
@@ -677,17 +681,18 @@ const VPS_INVENTORY_STATES = new Set<ManagedVpsInventoryInstance["state"]>([
   "dead",
 ]);
 
-function inventoryFailure(alias: string, error: unknown): ManagedVpsInventory {
+type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances"> & { containerIds: Map<string, string> };
+
+function inventoryFailure(alias: string, error: unknown): ManagedVpsAliasScan {
   const detail = (error instanceof Error ? error.message : String(error))
     .replace(/[\r\n\t]+/g, " ")
     .trim()
     .slice(0, 200);
   return {
-    configured: true,
     available: false,
-    sshAlias: alias,
-    problem: `Docker over SSH could not list managed computers${detail ? `: ${detail}` : ""}`,
+    problem: `Docker over SSH could not list managed computers on ${alias}${detail ? `: ${detail}` : ""}`,
     instances: [],
+    containerIds: new Map(),
   };
 }
 
@@ -701,19 +706,11 @@ function managedVpsState(value: unknown, running: unknown): ManagedVpsInventoryI
   return "unknown";
 }
 
-async function scanManagedVpsComputers(
-  cfg: AppConfig,
+async function scanManagedVpsAlias(
+  alias: string,
   owners: ManagedVpsOwner[],
-  runner: VpsCommandRunner = defaultRunner,
-): Promise<{ inventory: ManagedVpsInventory; containerIds: Map<string, string> }> {
-  const alias = vpsSshAlias(cfg);
-  if (!alias) {
-    return {
-      inventory: { configured: false, available: false, sshAlias: null, problem: null, instances: [] },
-      containerIds: new Map(),
-    };
-  }
-
+  runner: VpsCommandRunner,
+): Promise<ManagedVpsAliasScan> {
   try {
     const listed = await runner(vpsDockerArgs(alias, [
       "container",
@@ -729,10 +726,7 @@ async function scanManagedVpsComputers(
       throw new Error("the VPS returned an invalid or unexpectedly large managed-container list");
     }
     if (ids.length === 0) {
-      return {
-        inventory: { configured: true, available: true, sshAlias: alias, problem: null, instances: [] },
-        containerIds: new Map(),
-      };
+      return { available: true, problem: null, instances: [], containerIds: new Map() };
     }
 
     const inspected = await runner(
@@ -786,6 +780,7 @@ async function scanManagedVpsComputers(
       instances.push({
         name,
         state: managedVpsState(detail.State?.Status, detail.State?.Running),
+        vpsAlias: alias,
         ownerBotId: owner?.botId ?? null,
         ownerName: owner?.name ?? null,
         orphaned: !owner,
@@ -795,16 +790,9 @@ async function scanManagedVpsComputers(
     if (seenIds.size !== ids.length) {
       throw new Error("the VPS returned an incomplete managed-container inventory");
     }
-    instances.sort((left, right) =>
-      Number(left.orphaned) - Number(right.orphaned) ||
-      (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name),
-    );
-    return {
-      inventory: { configured: true, available: true, sshAlias: alias, problem: null, instances },
-      containerIds,
-    };
+    return { available: true, problem: null, instances, containerIds };
   } catch (error) {
-    return { inventory: inventoryFailure(alias, error), containerIds: new Map() };
+    return inventoryFailure(alias, error);
   }
 }
 
@@ -812,9 +800,23 @@ export async function listManagedVpsComputers(
   cfg: AppConfig,
   owners: ManagedVpsOwner[],
   runner: VpsCommandRunner = defaultRunner,
+  vpsAliases?: string[],
 ): Promise<ManagedVpsInventory> {
-  cfg = snapshotVpsConfig(cfg);
-  return (await scanManagedVpsComputers(cfg, owners, runner)).inventory;
+  const defaultAlias = vpsSshAlias(snapshotVpsConfig(cfg));
+  const scanning = [...new Set((vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : []).filter(isValidSshAlias))];
+  if (scanning.length === 0) {
+    return { configured: false, available: false, vpsAliases: [], problem: null, instances: [] };
+  }
+  // Concurrently: one dead host must not delay the others behind its timeouts. Promise.all keeps
+  // alias order, so the aggregate below matches the old serial loop exactly.
+  const scans = await Promise.all(scanning.map((alias) => scanManagedVpsAlias(alias, owners, runner)));
+  const problem = scans.find((scan) => !scan.available)?.problem ?? null;
+  const instances = scans.flatMap((scan) => scan.instances).sort((left, right) =>
+    Number(left.orphaned) - Number(right.orphaned) ||
+    (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name) ||
+    left.vpsAlias.localeCompare(right.vpsAlias),
+  );
+  return { configured: true, available: scans.every((scan) => scan.available), vpsAliases: scanning, problem, instances };
 }
 
 export function vpsContainerRunArgs(
@@ -853,8 +855,7 @@ export function vpsContainerRunArgs(
     "4g",
     "--cpus",
     "2",
-    "--pids-limit",
-    String(PIDS_LIMIT),
+    "--pids-limit", String(PIDS_LIMIT),
     "--network",
     "bridge",
     "--ipc",
@@ -1022,12 +1023,11 @@ export async function removeManagedVpsComputer(
   const key = `${alias}:${containerName}`;
   return withVpsLifecycleLock(key, async () => {
     invalidateVpsStatus(key);
-    const scan = await scanManagedVpsComputers(cfg, owners, runner);
-    const inventory = scan.inventory;
-    if (!inventory.available) {
-      throw Object.assign(new Error(inventory.problem ?? "VPS computer inventory is unavailable"), { status: 503 });
+    const scan = await scanManagedVpsAlias(alias, owners, runner);
+    if (!scan.available) {
+      throw Object.assign(new Error(scan.problem ?? "VPS computer inventory is unavailable"), { status: 503 });
     }
-    const instance = inventory.instances.find((candidate) => candidate.name === containerName);
+    const instance = scan.instances.find((candidate) => candidate.name === containerName);
     if (!instance) throw Object.assign(new Error("managed VPS computer not found"), { status: 404 });
     if (instance.inUse) {
       throw Object.assign(new Error("this VPS computer is in use — stop its bot's work first"), { status: 409 });

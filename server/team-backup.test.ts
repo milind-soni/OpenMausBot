@@ -18,13 +18,13 @@ function fixture() {
   const store = new Store(selection);
   const routines = new RoutineManager({
     botState: (id) => store.bot(id) ? "ready" : "missing",
-    goalState: (id, botId) => store.group(id)?.memberIds.includes(botId) ? "ready" : "missing",
+    goalState: (id, botId) => store.group(id ?? "")?.memberIds.includes(botId) ? "ready" : "missing",
     createTask: (id, title) => store.createTask(id, title),
     startTurn: async () => { throw new Error("Import must never run a bot"); },
   });
   const chief = store.createBot({ name: "Mira", section: "Engineering", description: "Full instructions\n".repeat(400) }, { seedMessages: false });
   store.setSoul(chief.id, "  Cite sources.\nRespect the user's current request. 🐭\n");
-  const scout = store.createBot({ name: "Scout", section: "Engineering", mascotBody: "circle" }, { seedMessages: false });
+  const scout = store.createBot({ name: "Scout", section: "Engineering", mascotBody: "circle", mascotFaceColor: "black" }, { seedMessages: false });
   const otherChief = store.createBot({ name: "Ava", section: "Operations" }, { seedMessages: false });
   const archived = store.createBot({ name: "Archived" }, { seedMessages: false });
   store.patchBot(archived.id, { hidden: true });
@@ -74,6 +74,15 @@ describe("additive portable team backups", () => {
     const invalid = structuredClone(backup) as unknown as { bots: Array<{ toolScope: unknown }> };
     invalid.bots[0].toolScope = { allow: null };
     expect(() => parseTeamBackup(invalid)).toThrow();
+  });
+
+  it("backs up and restores a silver bot in silver", () => {
+    const { store, routines } = fixture();
+    const maus = store.createBot({ name: "MausBot", color: "silver" }, { seedMessages: false });
+    const backup = createTeamBackup(store, routines.listRoutines(), "With MausBot");
+    expect(backup.bots.find((bot) => bot.key === maus.id)?.color).toBe("silver");
+    const restored = importTeamBackup(store, routines, JSON.parse(JSON.stringify(backup)), selection());
+    expect(restored.bots.find((bot) => bot.name === "MausBot 2")?.color).toBe("silver");
   });
 
   it("carries a bot's never-use-the-helper switch through backup and import, so its restored notes and chats stay off the helper", () => {
@@ -180,6 +189,7 @@ describe("additive portable team backups", () => {
     expect(store.bot(otherChief.id)?.chiefOfStaff).toBe(true);
     expect(store.bot(archived.id)?.hidden).toBe(true);
     expect(importedScout.mascotBody).toBe(scout.mascotBody);
+    expect(importedScout.mascotFaceColor).toBe("black");
     expect(result.groups[0]).toMatchObject({ name: "Project room 2", section: "Engineering 2", memberIds: [importedChief.id, importedScout.id], defaultResponder: { kind: "member", botId: importedChief.id } });
     expect(result.groups[0].tasks?.map((task) => [task.title, task.createdAt])).toEqual(group.tasks?.map((task) => [task.title, task.createdAt]));
     const roomMessage = store.messagesFor(result.groups[0].threadId)[0];
@@ -247,7 +257,7 @@ describe("additive portable team backups", () => {
     const restoredGroup = result.groups[0];
     const restoredChannel = restoredGroup.tasks!.find((task) => task.title === "Plan the launch review")!;
     expect(restoredChannel.titleFromFirstMessage).toBe(true);
-    store.renameGroupTask(restoredGroup.id, restoredChannel.threadId, UNTITLED_TASK);
+    store.patchGroupTask(restoredGroup.id, restoredChannel.threadId, { title: UNTITLED_TASK });
     expect(store.titleGroupTaskFromFirstMessage(restoredGroup.id, "A later message", restoredChannel.threadId)).toBeNull();
     expect(restoredBot.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("titleFromFirstMessage");
   });
@@ -255,7 +265,7 @@ describe("additive portable team backups", () => {
   it("keeps a conversation's longer turn limit through backup and restore", () => {
     const { store, routines, chief, scout, group } = fixture();
     const threadId = group.tasks!.find((task) => task.title === "Second room task")!.threadId;
-    store.setGroupTaskTurnTimeout(group.id, threadId, 30);
+    store.patchGroupTask(group.id, threadId, { turnTimeoutMinutes: 30 });
     const dm = store.createGroup("Direct", [chief.id, scout.id], true);
     store.patchGroup(dm.id, { turnTimeoutMinutes: 45 });
 

@@ -34,6 +34,8 @@ const profile = (options: { chief?: boolean; skills?: boolean; shared?: boolean;
     OMB_VOICE_NOTES: flag(options.voice ?? false),
     OMB_CLOUD_HOME: flag(options.cloudHome ?? false),
     OMB_MEMORY_ENABLED: flag(options.memory ?? true),
+    // A person's own request, which may pick its computer.
+    OMB_COMPUTER_SELECTION: "1",
   });
 
 /** Every switch combination the harness can ask for, as the wire test's
@@ -51,7 +53,7 @@ function everyProfile(): Array<{ name: string; profile: CatalogProfile }> {
 const bridgeFor = (options: Parameters<typeof profile>[0] = {}) => createToolBridge(availableTools(profile(options)) as BridgeTool[]);
 const names = (tools: readonly { name: string }[]) => tools.map((tool) => tool.name);
 const FULL_CHIEF = { chief: true, skills: true, shared: true, voice: true } as const;
-const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 
 type Match = { name: string; description: string; inputSchema: Record<string, unknown> };
 type FindPayload = { matches: Match[]; next: string };
@@ -75,6 +77,7 @@ describe("what a bridged turn is listed", () => {
       "list_rooms",
       "select_computer",
       "attach_file",
+      "publish_page",
       "post_to_room",
       "request_credential",
       "request_sign_in",
@@ -93,6 +96,7 @@ describe("what a bridged turn is listed", () => {
       "list_rooms",
       "select_computer",
       "attach_file",
+      "publish_page",
       "post_to_room",
       "request_credential",
       "request_sign_in",
@@ -158,8 +162,8 @@ describe("what a bridged turn is listed", () => {
         for (const spelling of reportedAs(hidden.name)) expect(isOutboundTool(spelling), `${name}: ${spelling}`).toBe(false);
       }
     }
-    // today that is the two the hot list names anyway
-    expect(names(availableTools(profile({ ...FULL_CHIEF }))).filter((tool) => reportedAs(tool).some(isOutboundTool))).toEqual(["post_to_room", "send_voice_note"]);
+    // today that is publish_page, listed for it alone, and the two the hot list names anyway
+    expect(names(availableTools(profile({ ...FULL_CHIEF }))).filter((tool) => reportedAs(tool).some(isOutboundTool))).toEqual(["publish_page", "post_to_room", "send_voice_note"]);
     // and the bridge's own two names are not outward either
     for (const spelling of [...reportedAs(USE_TOOL), ...reportedAs(FIND_TOOL)]) expect(isOutboundTool(spelling), spelling).toBe(false);
     // derived, not listed by hand: a future tool named like a send is kept,
@@ -197,7 +201,7 @@ describe("what a bridged turn is listed", () => {
     const tools = availableTools(profile(FULL_CHIEF)) as BridgeTool[];
     const bridge = createToolBridge(tools);
     expect(bridge.listed.find((tool) => tool.name === FIND_TOOL)!.annotations).toEqual(READ_ONLY_ANNOTATIONS);
-    expect(bridge.listed.find((tool) => tool.name === FIND_TOOL)!.annotations).toEqual(tools.find((tool) => tool.name === "list_routines")!.annotations);
+    expect(bridge.listed.find((tool) => tool.name === FIND_TOOL)!.annotations).toEqual(tools.find((tool) => tool.name === "trigger_info")!.annotations);
     expect(bridge.listed.find((tool) => tool.name === USE_TOOL)).not.toHaveProperty("annotations");
   });
 
@@ -239,12 +243,13 @@ describe("what a bridged turn is listed", () => {
 
 describe("find_tool", () => {
   it.each([
-    ["schedule a recurring task every morning", "propose_routine"],
-    ["pause one of my routines", "propose_routine_action"],
-    ["what routines do I have", "list_routines"],
+    ["schedule a recurring task every morning", "trigger"],
+    ["pause or resume one of my routines", "trigger"],
+    ["what routines do I have", "trigger_info"],
     ["change my name and title", "propose_profile"],
     ["switch this bot to a different model", "propose_model"],
     ["search my earlier conversations", "session_search"],
+    ["delete one of my routines for good", "delete_trigger"],
     ["run a shell command in the VM", "vm_exec"],
     ["add an MCP server", "add_mcp_server"],
     ["see how the threads I opened are going", "list_threads"],
@@ -252,13 +257,12 @@ describe("find_tool", () => {
     ["remember a decision for the whole team", "propose_team_memory"],
     ["save this procedure as a reusable skill", "skill_manage"],
     ["create a new specialist bot", "create_bot"],
-    ["delete a teammate", "propose_bot_deletion"],
     ["rename a room or change its members", "manage_room"],
     ["use the desktop the user shared", "shared_computer"],
     ["open a separate job for each pull request", "start_thread"],
-    ["read the whole message from an old conversation", "session_read"],
+    ["read the whole message from an old conversation", "session_search"],
     ["retry the failed thread", "retry_thread"],
-    ["cron", "propose_routine"],
+    ["cron", "trigger"],
   ])("ranks the hidden tool first from how a person would ask: %s", async (query, expected) => {
     const matches = (await found(bridgeFor(FULL_CHIEF), query)).matches;
     expect(matches[0]!.name).toBe(expected);
@@ -268,7 +272,9 @@ describe("find_tool", () => {
   it.each([
     // each of these lands second, behind a tool that does nearly the same
     ["check how a hand-off is going", "assignment_status"],
-    ["make a new room", "create_room"],
+    ["make a new room", "manage_room"],
+    // delete_trigger shares the word
+    ["delete a teammate", "propose_bot_deletion"],
     ["my skills", "skills_list"],
     ["computers shared with this workspace", "list_shared_computers"],
   ])("returns the hidden tool among its few matches for a looser request: %s", async (query, expected) => {
@@ -276,10 +282,10 @@ describe("find_tool", () => {
   });
 
   it("matches on words, not meaning: a request that shares none with any tool gets the names instead", async () => {
-    // A known limit of a lexical search: propose_routine is what "nudge me" wants, but no word of it is in any tool.
+    // A known limit of a lexical search: trigger is what "nudge me" wants, but no word of it is in any tool.
     const payload = await found(bridgeFor(FULL_CHIEF), "nudge me tomorrow at 9");
     expect(payload.matches).toEqual([]);
-    expect(payload.next).toContain("propose_routine");
+    expect(payload.next).toContain("trigger");
   });
 
   it("puts a tool asked for by its exact name first, with what the unbridged turn would have listed: its name, its one-line description and its full input schema", async () => {
@@ -300,6 +306,13 @@ describe("find_tool", () => {
     }
   });
 
+  it("reads a tool's other name, asked for exactly, as the tool it belongs to", async () => {
+    const bridge = bridgeFor(FULL_CHIEF);
+    expect((await found(bridge, "create_trigger")).matches[0]!.name).toBe("trigger");
+    expect((await found(bridge, "list_trigger_events")).matches[0]!.name).toBe("trigger_info");
+    expect((await found(bridge, "update_widget")).matches[0]!.name).toBe("show_widget");
+  });
+
   it("says how to run a match", async () => {
     expect((await found(bridgeFor(FULL_CHIEF), "list my routines")).next).toContain(`${USE_TOOL}({ "name": `);
   });
@@ -314,7 +327,7 @@ describe("find_tool", () => {
       expect(Math.max(...bridge.hidden.map((tool) => JSON.stringify(tool).length)), name).toBeLessThan(20_000);
     }
     const bridge = bridgeFor(FULL_CHIEF);
-    for (const query of ["routine schedule cron timezone interval", "team setup bots models rooms", "propose change profile model routine"]) {
+    for (const query of ["routine schedule cron timezone interval webhook bot", "team setup bots models rooms", "propose change profile model routine"]) {
       const answer = await bridge.find({ query });
       expect(JSON.parse(answer.text).matches.length, query).toBe(FIND_MATCHES_MAX);
       expect(answer.text.length, query).toBeLessThan(24_000);
@@ -363,8 +376,8 @@ describe("use_tool", () => {
     const routed = bridgeFor().use({ name: "session_search", arguments: { query: "pricing audit", limit: 5 } });
     expect(routed).toEqual({ name: "session_search", arguments: { query: "pricing audit", limit: 5 } });
     // a tool that takes nothing may be called with no arguments at all
-    expect(bridgeFor().use({ name: "list_routines" })).toEqual({ name: "list_routines", arguments: {} });
-    expect(bridgeFor().use({ name: "list_routines", arguments: null })).toEqual({ name: "list_routines", arguments: {} });
+    expect(bridgeFor().use({ name: "list_triggers" })).toEqual({ name: "list_triggers", arguments: {} });
+    expect(bridgeFor().use({ name: "list_triggers", arguments: null })).toEqual({ name: "list_triggers", arguments: {} });
   });
 
   it("is neither stricter nor looser than a direct call: the tool reads its own arguments", () => {
@@ -374,8 +387,8 @@ describe("use_tool", () => {
     // it, refuses itself: a wrong type, a missing field, a parameter only
     // a Chief has.
     for (const args of [
-      { name: "propose_routine", arguments: { name: "Brief", instructions: "Summarize.", schedule: JSON.stringify({ type: "Daily", time: "09:00" }) } },
-      { name: "propose_routine", arguments: { name: "Brief", instructions: "Summarize.", schedule: { type: "weekly", time: "09:00", weekdays: ["mon"] } } },
+      { name: "create_trigger", arguments: { name: "Brief", instructions: "Summarize.", schedule: JSON.stringify({ type: "Daily", time: "09:00" }) } },
+      { name: "create_trigger", arguments: { name: "Brief", instructions: "Summarize.", schedule: { type: "weekly", time: "09:00", weekdays: ["mon"] } } },
       { name: "session_read", arguments: { thread_id: 42, extra: true } },
       { name: "propose_profile", arguments: { title: "Lead", reason: "asked", for_bot_id: "bot-other" } },
       { name: "memory_update", arguments: { action: "forget" } },
@@ -413,8 +426,8 @@ describe("use_tool", () => {
   });
 
   it.each([
-    [undefined], [{}], [{ name: "" }], [{ name: "  " }], [{ name: 7 }], [{ name: "list_routines", arguments: [1] }],
-    [{ name: "list_routines", arguments: "{}" }], [{ name: "list_routines", arguments: 5 }], ["list_routines"],
+    [undefined], [{}], [{ name: "" }], [{ name: "  " }], [{ name: 7 }], [{ name: "list_triggers", arguments: [1] }],
+    [{ name: "list_triggers", arguments: "{}" }], [{ name: "list_triggers", arguments: 5 }], ["list_triggers"],
   ])("answers a call that is not the shape of one with the shape it needs: %j", (args) => {
     const routed = bridgeFor().use(args);
     const answer = (routed as { answer: { text: string; isError?: boolean } }).answer;
@@ -424,9 +437,9 @@ describe("use_tool", () => {
 
   it("answers only for its own two names: any other call is left exactly as it came", async () => {
     const bridge = bridgeFor();
-    for (const name of ["post_to_room", "list_routines", "create_bot", "made_up"]) expect(await bridge.route(name, { anything: true }), name).toBeUndefined();
+    for (const name of ["post_to_room", "list_triggers", "create_bot", "made_up"]) expect(await bridge.route(name, { anything: true }), name).toBeUndefined();
     expect(await bridge.route(FIND_TOOL, { query: "what routines do I have" })).toHaveProperty("answer");
-    expect(await bridge.route(USE_TOOL, { name: "list_routines" })).toEqual({ name: "list_routines", arguments: {} });
+    expect(await bridge.route(USE_TOOL, { name: "list_triggers" })).toEqual({ name: "list_triggers", arguments: {} });
     expect(await bridge.route(USE_TOOL, { name: "create_bot", arguments: {} })).toEqual({ name: "create_bot", arguments: {} });
   });
 });
@@ -441,15 +454,15 @@ describe("seeing through a bridged call", () => {
     ] as const) expect(bridgedCallTarget(name, args), `${name} ${JSON.stringify(args)}`).toBeUndefined();
   });
 
-  const isTool = (name: string) => ["list_routines", "vm_exec", "post_to_room"].includes(name);
+  const isTool = (name: string) => ["list_triggers", "vm_exec", "post_to_room"].includes(name);
 
   it("names a bridged call after the tool it ran, in the engine's own spelling", () => {
-    const args = { name: "list_routines", arguments: {} };
+    const args = { name: "list_triggers", arguments: {} };
     for (const prefix of ["", "mcp__agents__", "agents__", "agents_"]) {
       // from the arguments themselves, and from the preview a driver makes of them
-      expect(bridgedCallTitle(`${prefix}use_tool`, args, isTool), prefix).toBe(`${prefix}list_routines`);
-      expect(bridgedCallTitle(`${prefix}use_tool`, toolDetailPreview(args), isTool), prefix).toBe(`${prefix}list_routines`);
-      expect(bridgedCallTitle(`${prefix}use_tool`, JSON.stringify(args), isTool), prefix).toBe(`${prefix}list_routines`);
+      expect(bridgedCallTitle(`${prefix}use_tool`, args, isTool), prefix).toBe(`${prefix}list_triggers`);
+      expect(bridgedCallTitle(`${prefix}use_tool`, toolDetailPreview(args), isTool), prefix).toBe(`${prefix}list_triggers`);
+      expect(bridgedCallTitle(`${prefix}use_tool`, JSON.stringify(args), isTool), prefix).toBe(`${prefix}list_triggers`);
     }
   });
 
@@ -470,25 +483,25 @@ describe("seeing through a bridged call", () => {
   });
 
   it("leaves a title that names no server alone when asked to: a plain use_tool could be any server's", () => {
-    const args = { name: "list_routines" };
-    expect(bridgedCallTitle("use_tool", args, isTool)).toBe("list_routines");
+    const args = { name: "list_triggers" };
+    expect(bridgedCallTitle("use_tool", args, isTool)).toBe("list_triggers");
     expect(bridgedCallTitle("use_tool", args, isTool, false)).toBe("use_tool");
-    for (const prefix of ["mcp__agents__", "agents__", "agents_"]) expect(bridgedCallTitle(`${prefix}use_tool`, args, isTool, false), prefix).toBe(`${prefix}list_routines`);
+    for (const prefix of ["mcp__agents__", "agents__", "agents_"]) expect(bridgedCallTitle(`${prefix}use_tool`, args, isTool, false), prefix).toBe(`${prefix}list_triggers`);
   });
 
   it("leaves every other name as it came", () => {
     // not use_tool, not the agents server's, or naming nothing the catalog has
     for (const [title, input] of [
-      ["mcp__agents__list_routines", {}],
-      ["mcp__agents__find_tool", { query: "list_routines" }],
-      ["mcp__whop__use_tool", { name: "list_routines" }],
-      ["whop_use_tool", { name: "list_routines" }],
+      ["mcp__agents__list_triggers", {}],
+      ["mcp__agents__find_tool", { query: "list_triggers" }],
+      ["mcp__whop__use_tool", { name: "list_triggers" }],
+      ["whop_use_tool", { name: "list_triggers" }],
       ["mcp__agents__use_tool", { name: "made_up" }],
       ["mcp__agents__use_tool", { name: "use_tool" }],
-      ["mcp__agents__use_tool", { arguments: { name: "list_routines" } }],
+      ["mcp__agents__use_tool", { arguments: { name: "list_triggers" } }],
       ["mcp__agents__use_tool", undefined],
       ["mcp__agents__use_tool", "not json"],
-      ["Bash", { name: "list_routines" }],
+      ["Bash", { name: "list_triggers" }],
     ] as const) expect(bridgedCallTitle(title, input, isTool), `${title} ${JSON.stringify(input)}`).toBe(title);
   });
 

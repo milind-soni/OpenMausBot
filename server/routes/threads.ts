@@ -1,14 +1,15 @@
-import type { WireBot, WireGroup, WireTask } from "../../shared/wire.ts";
+import { basename, join } from "node:path";
+
+import type { WireBot, WireGroup } from "../../shared/wire.ts";
 import {
-  ATTACHMENTS_DIR, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment, saveFile, saveImageUpload,
-  validateAttachmentUploadId, type SavedAttachment,
+  ATTACHMENTS_DIR, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment,
+  saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
 } from "../attachments.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import type { AppConfig } from "../config.ts";
+import { speakerOf, type PersonName } from "../replies.ts";
 import type { Coordinator } from "../coordinator.ts";
-import type { ModelSelection } from "../contracts.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { searchMessagesAsync } from "../message-db.ts";
@@ -18,9 +19,11 @@ import {
 } from "../message-file.ts";
 import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
-import type { BotRecord, GroupRecord, Message, Store, TaskRecord } from "../store.ts";
+import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
+
+const UPLOADED_NAME = /^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/;
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
@@ -30,7 +33,8 @@ export interface ThreadRouteDeps {
     | "onChange" | "sections" | "taskByThread" | "tasks">;
   coordinator: Pick<Coordinator, "job">;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
-  cfg: Pick<AppConfig, "profile">;
+  /** What people's lines are called in this conversation (replies.ts PersonName). */
+  userName(threadId: string): PersonName;
   sessions: ResolveOptions["sessions"];
   groupUsageReader: Pick<GroupUsageReader, "refresh">;
   hostedWorkspace: boolean;
@@ -48,23 +52,31 @@ export interface ThreadRouteDeps {
   publicBotQueuedMessages(): ReturnType<typeof queuedSteerSnapshot>;
   publicGroupState(record: GroupRecord): WireGroup;
   wireBot(bot: BotRecord): WireBot;
-  wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
   botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   messageFileRootsForThread(senderId: string, threadId: string): string[];
   viewerFor(auth: RequestAuth): Viewer;
+  /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
+  groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
   visibleTo(viewer: Viewer): VisibleSet;
+  /** A Team Cloud: gives a member their own MausBot once, before their first list of bots. */
+  memberDefaultBot?(email: string): unknown;
+  /** Who uploaded each file: only its uploader discards it, and only while nothing uses it. */
+  uploads: { note(auth: RequestAuth, name: string): void; owns(auth: RequestAuth, name: string): boolean };
+  attachmentInUse(name: string): boolean;
 }
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
-    store, cfg, sessions, groupUsageReader, lendingEnabled,
+    store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
     hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
-    pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot, wireTask,
+    pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
     botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
   } = deps;
   const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
     let m: RegExpMatchArray | null = null;
+    const member = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
+    if (member && method === "GET" && path === "/api/bots") deps.memberDefaultBot?.(member);
     const visible = visibleTo(viewerFor(auth));
     const workspaceAccess = deps.workspaceAccess();
     const desktopMutationToken = deps.desktopMutationToken();
@@ -78,20 +90,24 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const shownBots = store.bots.filter((bot) => visible.bot(bot.id));
       const queued = publicBotQueuedMessages();
       return json(res, 200, {
-        bots: shownBots.map((bot) => memberBot({
-          ...wireBot(bot),
-          tasks: store.tasks(bot.id).map((task) => wireTask(task, bot.modelSelection)),
-          ...messagePage(bot.threadId, limit),
-        }, visible)),
+        bots: shownBots.map((bot) => {
+          const wired = wireBot(bot);
+          // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
+          const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
+          return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
+        }),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
-          const room = { ...publicGroupState(g), ...messagePage(g.threadId, limit) };
-          return visible.everything ? room : memberGroup(room);
+          const group = publicGroupState(g);
+          const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit) };
+          return visible.everything || !visible.member ? room : memberGroup(room);
         }),
         computerControl: Object.fromEntries(
           shownBots.map((bot) => {
             const snapshot = botComputerControlSnapshot(bot.id);
+            // A plea from someone else's private chat (a Team Cloud) names its site and reason: held is all that is shared.
+            if (snapshot.help && visible.hides(snapshot.help.threadId)) return [bot.id, { held: snapshot.held, helpReason: null }];
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
@@ -133,7 +149,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       res.writeHead(200, {
         "content-type": message.mime ?? "image/png",
         "content-length": String(bytes.byteLength),
-        "cache-control": "private, max-age=31536000, immutable",
+        "cache-control": "private, no-store",
       });
       return res.end(bytes);
     }
@@ -191,7 +207,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         if (!senderId) {
           return json(res, 403, { error: "the file's bot author could not be verified" });
         }
-        roots = messageFileRootsForThread(senderId, threadId);
+        const runThread = message.automation?.executionThreadId;
+        const fromRun = runThread && store.botByThread(runThread)?.id === senderId ? messageFileRootsForThread(senderId, runThread) : [];
+        roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun])];
       }
 
       const folderEntry = method === "POST" && body.entry !== undefined
@@ -232,7 +250,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         ...(streamsMessageImage
           ? { "content-disposition": "inline" }
           : { "content-disposition": messageFileDisposition(messageFileDownloadName(downloadName, file.name)) }),
-        "cache-control": streamsMessageImage ? "private, max-age=3600" : "private, no-store",
+        "cache-control": "private, no-store",
         "cdn-cache-control": "no-store",
         "cloudflare-cdn-cache-control": "no-store",
         pragma: "no-cache",
@@ -308,6 +326,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         });
         req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
       });
+      deps.uploads.note(auth, basename(saved.path));
       return json(res, 201, saved);
     }
 
@@ -344,6 +363,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         // Returning must not destroy the socket: the caller still sends the 4xx when the byte count crosses the limit.
         const chunks = req.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>;
         const saved = await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+        deps.uploads.note(auth, basename(saved.path));
         return json(res, 201, saved);
       } catch (error) {
         req.resume();
@@ -353,6 +373,13 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
 
     // Name-locked to the attachments dir: readAttachment refuses anything but a bare generated filename.
     m = path.match(/^\/api\/attachments\/([\w.-]+)$/);
+    if (m && method === "DELETE") {
+      const name = m[1]!;
+      if (!UPLOADED_NAME.test(name) || !deps.uploads.owns(auth, name)) return json(res, 404, { error: "no such attachment" });
+      if (deps.attachmentInUse(name)) return json(res, 409, { error: "This file is already in a message, so it stays." });
+      deleteAttachment(join(ATTACHMENTS_DIR, name));
+      return json(res, 200, { ok: true });
+    }
     if (m && method === "GET") {
       const attachment = readAttachment(m[1]!);
       if (!attachment) return json(res, 404, { error: "no such attachment" });
@@ -457,14 +484,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         });
         return res.end(JSON.stringify({ name: title, threadId, messages: slim }, null, 2));
       }
-      const userName = cfg.profile?.name?.trim() || "User";
+      const userName = userNameFor(threadId);
       const lines: string[] = [`# ${title}`, ""];
       for (const msg of messages) {
-        const sentBy = msg.sender?.name ?? userName;
+        const sentBy = speakerOf(userName, msg);
         const who = msg.role === "user"
           ? msg.via === "api" ? `${sentBy} (via the local API)` : sentBy
           : (msg.from?.name ?? bot?.name ?? "Bot");
-        if ((msg.kind === "text" || msg.kind === "widget") && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
+        if ((msg.kind === "text" || msg.kind === "widget" || msg.kind === "app") && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
         else if (msg.kind === "activity" && msg.tool) lines.push(`> ${msg.tool.name}`, "");
         else if (msg.kind === "screen") lines.push("> [screen capture]", "");
         else if (msg.kind === "options" && msg.card) {

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
+import { MAUS_COLOR_NAMES } from "./wire.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
 
 export const PACKAGE_FORMAT = "openmaus.package";
@@ -43,7 +44,6 @@ export class PackageFormatError extends Error {
   }
 }
 
-const COLORS = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"] as const;
 const AVATAR_MIMES = ["image/png", "image/jpeg", "image/webp"] as const;
 const AVATAR_CROPS = ["circle", "rounded", "square"] as const;
 
@@ -222,7 +222,7 @@ const packageDocumentV1Schema = z.object({
       description: optionalText(4_000),
       soul: soulSchema.optional(),
       appearance: z.object({
-        color: z.enum(COLORS, { error: "is not supported" }),
+        color: z.enum(MAUS_COLOR_NAMES, { error: "is not supported" }),
         mascotExpression: optionalText(80),
         mascotBody: optionalText(40),
       }),
@@ -310,7 +310,7 @@ const avatarSchema = z.object({
 });
 
 const appearanceSchema = z.object({
-  color: z.enum(COLORS, { error: "is not supported" }),
+  color: z.enum(MAUS_COLOR_NAMES, { error: "is not supported" }),
   mascotExpression: optionalText(80),
   mascotBody: optionalText(40),
   avatar: avatarSchema.optional(),
@@ -346,7 +346,7 @@ const agentSchema = z.object({
   description: optionalText(4_000),
   soul: soulSchema.optional(),
   appearance: appearanceSchema,
-  /** A suggestion only: every imported bot starts on Ask. Record browser steps travels as set (no card). */
+  /** A suggestion only: an imported bot starts at the workspace's default level (Full access outside a hosted company workspace). Record browser steps travels as set (no card). */
   approval: z.enum(["ask", "auto"], { error: "must be ask or auto" }).optional(), recordBrowserSteps: z.boolean().optional(),
   playbooks: z.array(key).max(40).optional(),
   skills: z.array(skillName).max(AGENT_MAX_SKILLS).optional(),

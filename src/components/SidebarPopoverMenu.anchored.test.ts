@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  ANCHORED_MENU_WIDTH,
+  MENU_MIN_WIDTH,
   SidebarPopoverMenu,
   anchoredMenuPosition,
   nextMenuIndex,
@@ -13,7 +13,7 @@ import {
 } from "./SidebarPopoverMenu";
 
 const viewport = { width: 1280, height: 800 };
-const menu = { width: ANCHORED_MENU_WIDTH, height: 300 };
+const menu = { width: 280, height: 300 };
 const wideRow = { left: 12, right: 288, top: 740, bottom: 784 };
 const avatar = { left: 14, right: 58, top: 740, bottom: 784 };
 
@@ -102,19 +102,19 @@ describe("the anchored menu in a document", () => {
     host.remove();
   });
 
-  it("portals one 280px sheet to the body, with the group divider and the trailing value and chevron", async () => {
+  it("portals one sheet, at least 237px wide, to the body, with the group divider and the trailing value and chevron", async () => {
     await act(async () => trigger().click());
     const menu = sheet()!;
     expect(menu.parentElement).toBe(document.body);
     expect(menu.style.position).toBe("fixed");
-    expect(menu.style.width).toBe(`${ANCHORED_MENU_WIDTH}px`);
+    expect(menu.style.minWidth).toBe(`${MENU_MIN_WIDTH}px`);
     expect(menu.getAttribute("role")).toBe("menu");
     expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
     expect(menu.textContent).toContain("Pro");
     const support = [...menu.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent?.includes("Help and support"))!;
     expect(support.getAttribute("aria-haspopup")).toBe("menu");
     expect(support.querySelector("svg")).not.toBeNull();
-    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("text-[15px]");
+    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("text-[14px]");
   });
 
   it("opens from the keyboard on the first item and walks the items", async () => {
@@ -143,6 +143,47 @@ describe("the anchored menu in a document", () => {
     expect(document.activeElement).toBe(support);
   });
 
+  describe("hovering a row with a submenu", () => {
+    const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+    const rows = () => [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const hover = (to: Element, from: Element | null, y: number) => act(async () => {
+      from?.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: to, clientX: 100, clientY: y }));
+      to.dispatchEvent(new MouseEvent("pointerover", { bubbles: true, relatedTarget: from, clientX: 100, clientY: y }));
+    });
+
+    it("does not open it when the pointer only passes over the row", async () => {
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      const [usage, support, settings] = rows();
+      await hover(support!, usage!, 60);
+      await wait(100);
+      expect(submenu()).toBeNull();
+      await hover(settings!, support!, 90);
+      await wait(400);
+      expect(submenu()).toBeNull();
+      expect(support!.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("opens it after the pointer rests on the row, and closes it the moment a sibling row takes the pointer", async () => {
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      const [usage, support, settings] = rows();
+      await hover(support!, usage!, 60);
+      await wait(320);
+      expect(submenu()).not.toBeNull();
+      expect(support!.classList.contains("bg-menu-hover")).toBe(false);
+      await hover(settings!, support!, 90);
+      expect(submenu()).toBeNull();
+    });
+
+    it("opens it at once on a click, without moving focus into it", async () => {
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      const support = rows()[1]!;
+      await act(async () => support.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      await flush();
+      expect(submenu()).not.toBeNull();
+      expect(submenu()!.contains(document.activeElement)).toBe(false);
+    });
+  });
+
   it("runs a submenu item and closes everything", async () => {
     await act(async () => trigger().click());
     const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
@@ -159,11 +200,91 @@ describe("the anchored menu in a document", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  describe("inside something that also closes on Escape, such as a panel", () => {
+    const outer = vi.fn();
+    const onWindow = vi.fn();
+    beforeEach(async () => {
+      outer.mockReset();
+      onWindow.mockReset();
+      window.addEventListener("keydown", onWindow);
+      await act(async () => {
+        root.render(createElement("div", { onKeyDown: (event: { key: string }) => outer(event.key) },
+          createElement(SidebarPopoverMenu, { items, ariaLabel: "You", renderTrigger: () => "You" })));
+      });
+    });
+    afterEach(() => window.removeEventListener("keydown", onWindow));
+    const escape = (target: Element) => act(async () => {
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+
+    it("closes a mouse-opened menu on Escape at its trigger, and the panel never sees that Escape", async () => {
+      trigger().focus();
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      expect(sheet()).not.toBeNull();
+      expect(document.activeElement).toBe(trigger());
+      await escape(trigger());
+      expect(sheet()).toBeNull();
+      expect(document.activeElement).toBe(trigger());
+      expect(outer).not.toHaveBeenCalled();
+      expect(onWindow).not.toHaveBeenCalled();
+      // With the menu closed, the next Escape is the panel's again.
+      await escape(trigger());
+      expect(outer).toHaveBeenCalledWith("Escape");
+    });
+
+    it("closes on Escape from inside the portalled sheet before the key bubbles to the panel", async () => {
+      await key(trigger(), "ArrowDown");
+      await flush();
+      const first = sheet()!.querySelector<HTMLElement>('[role="menuitem"]')!;
+      expect(document.activeElement).toBe(first);
+      outer.mockReset();
+      onWindow.mockReset();
+      await escape(first);
+      expect(sheet()).toBeNull();
+      expect(document.activeElement).toBe(trigger());
+      expect(outer).not.toHaveBeenCalled();
+      expect(onWindow).not.toHaveBeenCalled();
+    });
+  });
+
   it("closes on a press outside, but not on a press inside the portalled sheet", async () => {
     await act(async () => trigger().click());
     await act(async () => sheet()!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
     expect(sheet()).not.toBeNull();
     await act(async () => document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
     expect(sheet()).toBeNull();
+  });
+});
+
+describe("a menu opening below its trigger", () => {
+  it("shows a submenu the pointer can pick from", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const picked: string[] = [];
+    const item = (key: string, extra: Partial<SidebarMenuItem> = {}): SidebarMenuItem => ({ key, label: key, onSelect: () => picked.push(key), ...extra });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(createElement(SidebarPopoverMenu, {
+        items: [item("Find"), item("All threads", { submenu: [item("Trip plan"), item("Our chat")] })],
+        ariaLabel: "More",
+        placement: "below",
+        renderTrigger: () => "More",
+      }));
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+    const row = [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) => node.textContent?.includes("All threads"))!;
+    await act(async () => row.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const sub = document.querySelector<HTMLElement>("[data-sidebar-popover-submenu]")!;
+    expect(sub).not.toBeNull();
+    expect(sub.style.visibility).not.toBe("hidden");
+    // The submenu sits outside the menu's own box, so pressing on it must not count as a press outside the menu.
+    const pick = sub.querySelector<HTMLElement>('[role="menuitem"]')!;
+    await act(async () => { pick.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    await act(async () => pick.click());
+    expect(picked).toEqual(["Trip plan"]);
+    await act(async () => root.unmount());
+    host.remove();
   });
 });

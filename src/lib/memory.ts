@@ -61,16 +61,19 @@ export type SaveResult =
   | { ok: true; doc: MemoryDoc; overview: MemoryOverview }
   | { ok: false; conflict: true; current: string; currentHash: string };
 
-export function fetchMemoryOverview(botId: string): Promise<MemoryOverview> {
-  return api(`/api/bots/${botId}/memory`);
+/** `mine`: on a Team Cloud, the signed-in person's own layer of the bot's memory rather than the team's. */
+const memoryRoute = (botId: string, mine: boolean) => `/api/bots/${botId}/memory${mine ? "/mine" : ""}`;
+
+export function fetchMemoryOverview(botId: string, mine = false): Promise<MemoryOverview> {
+  return api(memoryRoute(botId, mine));
 }
 
-export function fetchMemoryDoc(botId: string, path: string): Promise<MemoryDoc> {
-  return api(`/api/bots/${botId}/memory/file?path=${encodeURIComponent(path)}`);
+export function fetchMemoryDoc(botId: string, path: string, mine = false): Promise<MemoryDoc> {
+  return api(`${memoryRoute(botId, mine)}/file?path=${encodeURIComponent(path)}`);
 }
 
-export async function saveMemoryDoc(botId: string, path: string, text: string, expectedHash: string | undefined): Promise<SaveResult> {
-  const response = await fetch(`/api/bots/${botId}/memory/file`, {
+export async function saveMemoryDoc(botId: string, path: string, text: string, expectedHash: string | undefined, mine = false): Promise<SaveResult> {
+  const response = await fetch(`${memoryRoute(botId, mine)}/file`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path, text, expectedHash }),
@@ -84,8 +87,8 @@ export async function saveMemoryDoc(botId: string, path: string, text: string, e
   return { ok: true, doc: { path: saved.path, text: saved.text, hash: saved.hash, exists: saved.exists }, overview: saved.overview };
 }
 
-export function deleteMemoryDoc(botId: string, path: string): Promise<{ overview: MemoryOverview }> {
-  return api(`/api/bots/${botId}/memory/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+export function deleteMemoryDoc(botId: string, path: string, mine = false): Promise<{ overview: MemoryOverview }> {
+  return api(`${memoryRoute(botId, mine)}/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 }
 
 export async function fetchMemoryJournal(botId: string, limit = 50): Promise<MemoryJournalRow[]> {
@@ -178,6 +181,19 @@ export function relativeTime(at: number, now = Date.now()): string {
   return new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+export function localizedRelativeTime(at: number, locale: string, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (seconds < 45) return formatter.format(0, "second");
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return formatter.format(-minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return formatter.format(-hours, "hour");
+  const days = Math.round(hours / 24);
+  if (days < 7) return formatter.format(-days, "day");
+  return new Date(at).toLocaleDateString(locale, { month: "short", day: "numeric" });
+}
+
 export type CapacityLevel = "ok" | "near" | "over";
 
 export interface CapacityStatus {
@@ -192,20 +208,20 @@ export function capacityStatus(index: MemoryCapacity): CapacityStatus {
   const lineShare = index.maxLines ? index.lines / index.maxLines : 0;
   const byteShare = index.maxBytes ? index.bytes / index.maxBytes : 0;
   const level: CapacityLevel = index.truncated ? "over" : Math.max(lineShare, byteShare) >= 0.8 ? "near" : "ok";
-  const sentence = `${index.lines} of ${index.maxLines} lines · ${formatBytes(index.bytes)} of ${formatBytes(index.maxBytes)} — only the first ${index.maxLines} lines load each turn.`;
+  const sentence = `${index.lines} of ${index.maxLines} lines · ${formatBytes(index.bytes)} of ${formatBytes(index.maxBytes)}. Only the first ${index.maxLines} lines load each turn.`;
   let warning: string | null = null;
   if (index.truncated) {
     const missingLines = index.lines - index.loadedLines;
     warning = missingLines > 0
-      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation — ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
-      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation — the rest is not being loaded. Trim this file or move notes into a topic file.`;
+      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation. ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
+      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation. The rest is not being loaded. Trim this file or move notes into a topic file.`;
   }
   return { level, lineShare, byteShare, sentence, warning };
 }
 
-function fileLabel(path: string): string {
+export function fileLabel(path: string): string {
   if (path === MEMORY_INDEX) return "MEMORY.md";
-  if (path.startsWith("memory/log/")) return `the ${path.slice("memory/log/".length).replace(/\.md$/, "")} log`;
+  if (path.startsWith("memory/log/")) return path.slice("memory/log/".length).replace(/\.md$/, "");
   return path.replace(/^memory\//, "").replace(/\.md$/, "");
 }
 
@@ -213,7 +229,7 @@ export function journalSummary(row: MemoryJournalRow, botName: string): string {
   const who = row.actor === "bot" ? botName : row.actor === "import" ? "An import" : row.actor === "upkeep" ? "Memory upkeep" : "You";
   const file = fileLabel(row.path);
   const isIndex = row.path === MEMORY_INDEX;
-  const topic = isIndex ? file : row.path.startsWith("memory/log/") ? file : `the ${file} topic`;
+  const topic = isIndex ? file : row.path.startsWith("memory/log/") ? `the ${file} log` : `the ${file} topic`;
   if (row.kind === "created") return `${who} created ${topic}${row.added ? ` with ${plural(row.added, "line")}` : ""}`;
   if (row.kind === "deleted") return `${who} deleted ${topic}`;
   if (row.added && !row.removed) return `${who} added ${plural(row.added, "line")} to ${topic}`;
@@ -235,6 +251,19 @@ export function journalSource(row: MemoryJournalRow): string | null {
   if (row.actor === "bot") return "during a task";
   if (row.via === "ui") return "in Settings";
   if (row.via === "api") return "through the API";
+  return null;
+}
+
+export function journalSourceKey(row: MemoryJournalRow): "memory.source.undo" | "memory.source.disk" | "memory.source.tidy" | "memory.source.organize" | "memory.source.capture" | "memory.source.captureWithTitle" | "memory.source.chat" | "memory.source.task" | "memory.source.settings" | "memory.source.api" | null {
+  if (row.via === "revert") return "memory.source.undo";
+  if (row.via === "disk") return "memory.source.disk";
+  if (row.via === "tidy") return "memory.source.tidy";
+  if (row.via === "organize") return "memory.source.organize";
+  if (row.via === "capture") return row.threadTitle ? "memory.source.captureWithTitle" : "memory.source.capture";
+  if (row.threadTitle) return "memory.source.chat";
+  if (row.actor === "bot") return "memory.source.task";
+  if (row.via === "ui") return "memory.source.settings";
+  if (row.via === "api") return "memory.source.api";
   return null;
 }
 

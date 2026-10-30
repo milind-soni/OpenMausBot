@@ -271,12 +271,12 @@ describe("what the page shows after the login is sent", () => {
     expect(outcome.text).toBe("Submitted the username and the password for alice@example.com, and a human check (CAPTCHA) appeared. Call request_sign_in so the person finishes signing in.");
   });
 
-  it("sends the person in for a one-time code the page asks for after the password, when no 2FA key is saved", async () => {
+  it("after the password, a code the saved login cannot make is the bot's to read from the person's inbox, or the person's to enter", async () => {
     const { page, fill } = setup("https://example.com/login", LOGIN_FORM, [{ host: "example.com", username: "alice@example.com" }]);
     page.answer = () => ({ navigate: { url: "https://example.com/2fa", html: `<form><input name="otp" autocomplete="one-time-code"><button>Verify</button></form>` } });
     const outcome = await fill();
     expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
-    expect(outcome.text).toBe("Submitted the username and the password for alice@example.com. The page now asks for a one-time code, and the saved login has no 2FA key: call request_sign_in so the person enters it.");
+    expect(outcome.text).toBe("Submitted the username and the password for alice@example.com. The page now asks for a one-time code, and the saved login has no 2FA key. If the site sent it to the person's own email or phone, read it from their connected email or messages and type it in yourself; otherwise call request_sign_in so the person enters it.");
     expect(page.sent).toHaveLength(1);
   });
 });
@@ -323,11 +323,11 @@ describe("one-time codes and fields", () => {
     expect(Array.from({ length: 6 }, (_, index) => page.field(`input[name=d${index}]`).value).join("")).toBe(totpCode(KEY, NOW));
   });
 
-  it("sends the person in when a code is asked for and no 2FA key is saved", async () => {
+  it("points at the person's inbox, then the person, when a code is asked for and no 2FA key is saved", async () => {
     const { page, fill } = setup("https://example.com/2fa", `<input name="verification_code">`, [{ host: "example.com", username: "alice" }]);
     const outcome = await fill();
     expect(outcome.ok).toBe(false);
-    expect(outcome.text).toContain("asks for a one-time code, and the saved login has no 2FA key. Call request_sign_in");
+    expect(outcome.text).toContain("asks for a one-time code, and the saved login has no 2FA key. If the site sent it to the person's own email or phone, read it from their connected email or messages and type it in yourself; otherwise call request_sign_in");
     expect(outcome.held).toBeUndefined();
     expect(page.typed).toEqual([]);
   });

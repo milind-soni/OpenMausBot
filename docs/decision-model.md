@@ -9,7 +9,9 @@ and a model of your choice on [OpenRouter](https://openrouter.ai).
 Everything is in **Settings → Decision model**: the provider, for OpenRouter
 the model, one master switch, that provider's key with **Save** and **Test**,
 and one switch per job it can do. Each provider keeps its own key, so you can
-switch between them without pasting a key again.
+switch between them without pasting a key again. OpenRouter needs no key here
+when you already saved one under **Settings → API keys**: the decision model
+uses that one.
 
 ## Choosing a provider
 
@@ -111,9 +113,25 @@ The log stays on this machine: workspace backups leave it out.
 - **Server or browser use:** in the server's own `config.json` (mode 0600),
   under `decider.key` (Jev) or `decider.openrouterKey` (OpenRouter).
   `OMB_JEV_API_KEY` and `OMB_OPENROUTER_DECIDER_KEY` override them.
-- **Not the engine key:** the OpenRouter key here is separate from the one in
-  **Settings → Engines** (`OMB_OPENROUTER_API_KEY`). Neither is used for the
-  other, and clearing one never affects the other.
+- **The OpenRouter key is shared with your OpenRouter models.** The decision
+  model uses the first of these it finds:
+  1. a key saved here, in **Settings → Decision model** (`decider.openrouterKey`
+     or `OMB_OPENROUTER_DECIDER_KEY`): the optional "use a different key"
+     override, which wins so a key saved before sharing keeps working;
+  2. the OpenRouter key under **Settings → API keys** (`openrouter.key` or
+     `OMB_OPENROUTER_API_KEY`);
+  3. none: it is off until one is saved.
+
+  With the shared key, Settings says **Using your OpenRouter API key** and links
+  to **API keys**; the master switch is available without pasting anything, and
+  **Test** checks the shared key. Choosing OpenRouter does not turn decisions
+  on by itself: the switch stays off until you switch it on. Clearing a key
+  saved here falls back to the shared key and leaves the switch as it is.
+  Decisions spend from the same OpenRouter account as your OpenRouter
+  models. The shared key is sent only to OpenRouter's own address: with an
+  `openrouterBaseUrl` set to anything else, only a key saved here is used. If
+  the shared key is later removed, a switch left on stops having any effect
+  until a key is saved again.
 - **Cloud Pro:** decisions are included, with no key to paste. With no key of
   the person's own, the Cloud home uses its relay token
   (`OMB_CLOUD_DECIDER_TOKEN`), sent only to the Admin's relay, never to Jev
@@ -148,7 +166,8 @@ leave the job off, for rooms that must not leave the machine.
 Switch off **Use Jev for fast decisions** (**Use OpenRouter for fast
 decisions**), or clear the key (on Cloud Pro,
 clearing a key falls back to the included decisions: switch off to stop
-them). To keep Jev on but stop room routing, switch off **Who answers in
+them; with OpenRouter it falls back to the key under **Settings → API keys**,
+so switch off to stop them). To keep Jev on but stop room routing, switch off **Who answers in
 rooms**. To stop one room asking, set its responder to a lead, **Everyone
 responds** or **Only when mentioned**.
 
@@ -169,7 +188,8 @@ responds** or **Only when mentioned**.
 ```
 
 `provider` is `"jev"`, `"openrouter"` or `"off"`. A config with no
-`provider` is Jev, so existing files keep working unchanged.
+`provider` is Jev, so existing files keep working unchanged. `openrouterKey` is
+optional: left empty, the decision model uses the top-level `openrouter.key`.
 
 `baseUrl` points at a Jev-compatible server instead of TypeSafe's. It has no
 Settings UI. It must be https, or http to this machine only. Requests go to
@@ -181,7 +201,8 @@ Settings UI. It must be https, or http to this machine only. Requests go to
 a decisions one). Settings sets it from the model picked, and saving a model
 without it makes it `chat`. `openrouterBaseUrl` points at another
 OpenRouter-compatible server instead of OpenRouter, with the same
-https-or-loopback rule and no Settings UI. A chat model's requests go to
+https-or-loopback rule and no Settings UI; only `openrouterKey` is sent there,
+never the key from **Settings → API keys**. A chat model's requests go to
 `{openrouterBaseUrl}/chat/completions` with `temperature: 0`, a strict JSON
 schema, and `provider.require_parameters`; no `reasoning` option is sent. A
 decisions model's go to `/alpha/decisions` beside it (for the default base,

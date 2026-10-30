@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runControlOmb } from "../scripts/control-omb.ts";
+import { SNAPSHOT_REUSE_MS } from "./harness/registry.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
@@ -228,22 +229,22 @@ describe("removing the Computer engine", () => {
     expect(movedStarter.fallback ?? []).toEqual([]);
     expect(movedStarter.threadId).toBe(main);
     expect(movedStarter.tasks.find((task: any) => task.threadId === other).modelSelection).toEqual(replacement);
-    const starterLine = `${starter.name} now uses ${ENGINE_NAME}. ${REMOVED} ${starter.name} still works on its cloud computer.`;
-    const otherLine = `This conversation now uses ${ENGINE_NAME}. ${REMOVED} It still works on ${starter.name}'s cloud computer.`;
+    const starterLine = `${starter.name} now uses ${ENGINE_NAME}. ${REMOVED} ${starter.name} still works on its cloud desktop.`;
+    const otherLine = `This conversation now uses ${ENGINE_NAME}. ${REMOVED} It still works on ${starter.name}'s cloud desktop.`;
     expect(await server.moveLines(main)).toEqual([starterLine]);
     expect(await server.moveLines(other)).toEqual([otherLine]);
 
     const movedAuto = await server.bot(auto.id);
     expect(movedAuto.modelSelection).toEqual(replacement);
     expect(movedAuto.computer).toBe("cloud");
-    expect(await server.moveLines(auto.threadId)).toEqual([`Atlas now uses ${ENGINE_NAME}. ${REMOVED} Atlas still works on its cloud computer.`]);
+    expect(await server.moveLines(auto.threadId)).toEqual([`Atlas now uses ${ENGINE_NAME}. ${REMOVED} Atlas still works on its cloud desktop.`]);
 
     const movedMixed = await server.bot(mixed.id);
     expect(movedMixed.modelSelection).toEqual(mixed.modelSelection);
     expect(movedMixed.computer).toBeUndefined();
     expect(await server.moveLines(mixed.threadId)).toEqual([]);
     expect(await server.moveLines(mixedConversation.threadId))
-      .toEqual([`This conversation now uses ${ENGINE_NAME}. ${REMOVED} It still works on Iris's cloud computer.`]);
+      .toEqual([`This conversation now uses ${ENGINE_NAME}. ${REMOVED} It still works on Iris's cloud desktop.`]);
     const mixedTask = movedMixed.tasks.find((task: any) => task.threadId === mixedConversation.threadId);
     expect(mixedTask.modelSelection).toEqual(replacement);
     expect(mixedTask).toMatchObject({ surface: "cloud", surfaceAuto: true });
@@ -305,15 +306,17 @@ describe("removing the Computer engine", () => {
     expect((await server.bot(starter.id)).modelSelection.instanceId).toBe("computer");
 
     // Claude arrives (an install, a sign-in or a key); the next look at the
-    // engines moves the bot without a restart.
+    // engines moves the bot without a restart. Installed outside the app, it is
+    // seen once the last status read is older than the reuse window.
     mkdirSync(dirname(cli), { recursive: true });
     writeFileSync(cli, `#!/usr/bin/env node\nawait import(${JSON.stringify(pathToFileURL(FAKE_CLI).href)});\n`, { mode: 0o755 });
+    await new Promise((resolve) => setTimeout(resolve, SNAPSHOT_REUSE_MS));
     const { instances } = await server.api("GET", "/api/instances");
     const model = instances.find((instance: any) => instance.instanceId === "later").models.default;
     await expect.poll(async () => (await server.bot(starter.id)).modelSelection, { timeout: 15_000 })
       .toEqual({ instanceId: "later", model });
     expect(await server.moveLines(starter.threadId)).toEqual([
-      `${starter.name} now uses ${ENGINE_NAME}. ${REMOVED} ${starter.name} still works on its cloud computer.`,
+      `${starter.name} now uses ${ENGINE_NAME}. ${REMOVED} ${starter.name} still works on its cloud desktop.`,
     ]);
     await server.stop();
   }, 120_000);
@@ -340,7 +343,7 @@ describe("removing the Computer engine", () => {
     await expect.poll(async () => (await server.bot(starter.id)).modelSelection.instanceId, { timeout: 15_000 }).toBe("claude");
     expect((await server.bot(starter.id)).computer).toBe("cloud");
     expect(await server.moveLines(starter.threadId)).toEqual([
-      `${starter.name} now uses ${ENGINE_NAME}. ${REMOVED} ${starter.name} still works on its cloud computer.`,
+      `${starter.name} now uses ${ENGINE_NAME}. ${REMOVED} ${starter.name} still works on its cloud desktop.`,
     ]);
     await server.stop();
   }, 120_000);
@@ -364,8 +367,8 @@ describe("removing the Computer engine", () => {
     expect(moved.modelSelection).toEqual({ instanceId: "chat", model: "chat-model" });
     expect(moved.computer).toBeUndefined();
     expect(await server.moveLines(starter.threadId)).toEqual([
-      `${starter.name} now uses Chat Only. ${REMOVED} Chat Only can't use a computer, so ${starter.name} no longer works ` +
-      "on its cloud computer. To use it again, choose a model that can use a computer.",
+      `${starter.name} now uses Chat Only. ${REMOVED} Chat Only can't use a desktop, so ${starter.name} no longer works ` +
+      "on its cloud desktop. To use it again, choose a model that can use a desktop.",
     ]);
     await server.stop();
   }, 120_000);

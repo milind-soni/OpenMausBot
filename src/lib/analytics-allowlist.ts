@@ -15,19 +15,15 @@ export function allow<const T extends string>(value: unknown, list: readonly T[]
 export const KEY_PROVIDER = [
   "anthropic", "openai", "openrouter", "openai_compat", "xai", "mistral", "cerebras", "groq", "meta", "boat", "composio",
   "opencode_go", "custom_endpoint", "elevenlabs", "fish_audio", "jev", "openrouter_decider", "openai_image", "custom_image",
-  "openai_live",
+  "openai_live", "onepassword", "treg", "deepseek", "postiz",
 ] as const;
 export type KeyProvider = (typeof KEY_PROVIDER)[number];
 
-export const SECTION_PROVIDER = {
-  composio: "composio", box: "boat", opencodeGo: "opencode_go", anthropic: "anthropic", openai: "openai",
-  openrouter: "openrouter", openaiCompat: "openai_compat", xai: "xai", mistral: "mistral", cerebras: "cerebras",
-  groq: "groq", meta: "meta",
-} as const satisfies Record<string, KeyProvider>;
-
 const CREDENTIAL_PROVIDER = new Map<string, KeyProvider>(Object.entries({
   boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio",
-  openaiImageApiKey: "openai_image",
+  openaiImageApiKey: "openai_image", onePasswordToken: "onepassword", composioApiKey: "composio", openaiApiKey: "openai",
+  anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq",
+  metaApiKey: "meta", deepseekApiKey: "deepseek",
 } satisfies Record<CredentialTargetId, KeyProvider>));
 
 export function credentialProvider(target: unknown): KeyProvider | "other" {
@@ -36,7 +32,7 @@ export function credentialProvider(target: unknown): KeyProvider | "other" {
 
 export const ENGINE = [
   "claude", "codex", "gemini", "cursor", "opencode", "qwen", "hermes", "cline", "custom_acp", "pi", "openai_compat", "grok",
-  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "meta", "muse_code",
+  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "meta", "muse_code", "deepseek", "copilot",
 ] as const;
 export type Engine = (typeof ENGINE)[number];
 
@@ -45,7 +41,7 @@ const ENGINE_BY_DRIVER = new Map<string, Engine>(Object.entries({
   qwenAgent: "qwen", hermesAgent: "hermes", clineAgent: "cline", customAcp: "custom_acp", piAgent: "pi",
   "openai-compat": "openai_compat", grokAgent: "grok", grok: "grok_api", kimiAgent: "kimi", droidAgent: "droid",
   antigravityAgent: "antigravity", minimax: "minimax", mistral: "mistral", cerebras: "cerebras", groq: "groq",
-  meta: "meta", museCode: "muse_code",
+  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot",
 } satisfies Record<string, Engine>));
 
 export function engineForDriver(driverKind: unknown): Engine | "other" {
@@ -66,9 +62,9 @@ export function engineSlug(
 
 export const APP: readonly string[] = CURATED_CONNECTOR_SLUGS;
 export const BOT_TEMPLATE: readonly string[] = BOT_ROLES.map((role) => role.id);
-export const CLOUD_TIER = ["personal", "pro", "max"] as const;
+export const CLOUD_TIER = ["starter", "personal", "pro", "max"] as const;
 
-export const KEY_VIA = ["settings", "computer_panel", "chat_request"] as const;
+export const KEY_VIA = ["settings", "computer_panel", "chat_request", "apps", "model_picker"] as const;
 export type KeyVia = (typeof KEY_VIA)[number];
 export const KEY_RESULT = ["ok", "rejected", "unverified", "error"] as const;
 export type KeyResult = (typeof KEY_RESULT)[number];
@@ -87,6 +83,6 @@ export const DECIDER = ["jev", "openrouter", "off"] as const;
 export const CONNECTORS_MODE = ["managed", "self_hosted", "unavailable"] as const;
 export const LOCAL_VM_MODE = ["shared", "per_bot", "pool"] as const;
 export const TRIAL_CREDIT = ["active", "used_up", "ended", "none"] as const;
-export const CLOUD_PLAN = ["personal", "pro", "max", "other", "none", "unknown"] as const;
+export const CLOUD_PLAN = ["starter", "personal", "pro", "max", "other", "none", "unknown"] as const;
 export const EDITION = ["oss", "enterprise"] as const;
 export const PLATFORM = ["desktop", "browser"] as const;

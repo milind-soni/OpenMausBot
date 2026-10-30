@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { LocalBackend } from "../backends.ts";
-import { calibrateIdentity, type CalibratedIdentity } from "../chrome/calibrate.ts";
+import { calibrateIdentity, chromeFingerprint, type CalibratedIdentity } from "../chrome/calibrate.ts";
 import type { ScreenSpec } from "../chrome/flags.ts";
 import { sandboxDisabled } from "../chrome/host-setup.ts";
 import { CHROME, FIRST_LAUNCH_MS, HOST, testRoot } from "../cdp/testing/real-chrome.ts";
@@ -13,7 +13,18 @@ import { BrowserService, type BrowserServiceOptions, type BrowserTarget } from "
 
 export type ToolResult = { content: Array<{ type: string; text?: string; data?: string }>; isError?: boolean };
 
-let identity: Promise<CalibratedIdentity> | null = null;
+let calibrated: { fingerprint: string; identity: Promise<CalibratedIdentity> } | null = null;
+
+/** Read again once Chrome updates itself in place, as the server's launcher does: a runner's Chrome can update mid-run. */
+function identityOf(executablePath: string, sandbox: boolean): Promise<CalibratedIdentity> {
+  const fingerprint = chromeFingerprint(executablePath);
+  if (calibrated?.fingerprint !== fingerprint) {
+    const identity = calibrateIdentity({ executablePath, host: HOST, tmpRoot: testRoot(), sandbox, handshakeTimeoutMs: FIRST_LAUNCH_MS });
+    calibrated = { fingerprint, identity };
+    identity.catch(() => { if (calibrated?.identity === identity) calibrated = null; });
+  }
+  return calibrated.identity;
+}
 
 export interface RealService {
   service: BrowserService;
@@ -32,13 +43,12 @@ export async function startService({ screen, egressPort, ...options }: Partial<B
   if (!CHROME) throw new Error("No Chrome to test with.");
   const executablePath = CHROME;
   const sandbox = !sandboxDisabled(process.env);
-  identity ??= calibrateIdentity({ executablePath, host: HOST, tmpRoot: testRoot(), sandbox, handshakeTimeoutMs: FIRST_LAUNCH_MS });
-  const calibrated = await identity;
+  await identityOf(executablePath, sandbox);
   const dataDir = mkdtempSync(join(testRoot(), "omb-browser-service-"));
   const backend = new LocalBackend({
     dataDir,
     host: HOST,
-    binary: async () => ({ path: executablePath, identity: calibrated }),
+    binary: async () => ({ path: executablePath, identity: await identityOf(executablePath, sandbox) }),
     screen: async () => screen ?? { width: 1920, height: 1080, deviceScaleFactor: 1 },
     locale: () => "en-US",
     egressPort: egressPort ?? (async () => null),

@@ -227,7 +227,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
           >
             {loading ? <LoaderCircle size={24} className="animate-spin" /> : <Play size={24} />}
             <span className="text-[12px]">{loading ? t("attach.videoLoading") : error ? t("chat.retry") : t("attach.loadVideo")}</span>
-            {!error && !loading && <span className="text-[10.5px]">{t("attach.videoHint")}</span>}
+            {!error && !loading && <span className="text-[11px]">{t("attach.videoHint")}</span>}
           </button>
         )}
         {(preview || loading || error) && (

@@ -5,7 +5,7 @@ import {
   fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync,
   readSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync,
 } from "node:fs";
-import { isAbsolute, join, parse, posix, relative, resolve, win32 } from "node:path";
+import { isAbsolute, join, parse, posix, relative, resolve, sep, win32 } from "node:path";
 import { homedir } from "node:os";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
@@ -26,8 +26,9 @@ const MAGIC = Buffer.from("OMB-WORKSPACE-1\n");
 const HEADER_BYTES = MAGIC.length + 16 + 12;
 const TAG_BYTES = 16;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
-  ".backups", "tools", "browser", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
+  ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
@@ -37,6 +38,12 @@ const EXCLUDED = new Set([
   "sync",
   // "Also use my Claude Code skills": a link to the person's own ~/.claude/skills, made again on each turn.
   "claude-user-skills",
+  // The bot box's live sockets and seccomp filter (bot-box/box.ts), made again each time the server starts.
+  "box",
+  // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
+  // folder, which no admin reads.
+  "engine-homes",
+  WAITS_FILE,
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
@@ -45,8 +52,9 @@ const EXCLUSION_NOTES = [
   "Installed dependency folders (node_modules) and symbolic links inside conversation work folders; reinstall or recreate them in the project.",
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
+  "Waits bots set up: they end within a week, so ask the bot again after restoring.",
 ];
-const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
+const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, ends every wait, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
 
 type Entry = { path: string; type: "file" | "directory"; size: number; mode: number; sha256?: string };
 interface Manifest extends WorkspaceBackupPrivateMetadata {
@@ -86,9 +94,9 @@ function forbiddenArchivePath(path: string): boolean {
     (path !== folded && ["config.json", "webhooks.json"].includes(folded));
 }
 function preserved(name: string): boolean {
-  // An existing WAL/SHM belongs to the old database: it must never accompany a different restored main database.
+  // An existing WAL/SHM belongs to the old database, and existing waits to the old chats: neither may accompany restored ones.
   const folded = name.toLowerCase();
-  return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded);
+  return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE;
 }
 const SNAPSHOT_DATABASES: Record<string, string> = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db" };
 const LIVE_DATABASE_SIDECARS = new Set(Object.keys(SNAPSHOT_DATABASES).flatMap((name) => [`${name}-wal`, `${name}-shm`]));
@@ -297,11 +305,13 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   const snapshot = join(job.directory, "snapshot");
   folder(join(snapshot, "data"));
   const entries: Entry[] = [];
+  const foldedPaths = new Map<string, string>();
   const warnings = ["Stop external editors and managed desktops before exporting; files written outside this server cannot be frozen by the backup gate.", "Conversation text and user files are not redacted and may contain secrets you pasted. Keep the encrypted backup private.", RESTORE_WARNING];
   let bytes = 0;
   let skippedLinks = 0;
   let skippedDependencies = 0;
   let skippedWorkLinks = 0;
+  let copiedLinks = 0;
   try {
     const root = realpathSync(dataDir);
     for (const [name, snapshotName] of Object.entries(SNAPSHOT_DATABASES)) {
@@ -317,16 +327,16 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
       const snapshotDb = new DatabaseSync(join(snapshot, snapshotName));
       try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
     }
-    const walk = (directory: string, prefix = "") => {
+    const walk = (directory: string, prefix = "", chain: string[] = [root]) => {
       for (const name of readdirSync(directory).sort()) {
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
         if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
-        if (!validRelative(path)) throw new Error("A workspace filename cannot be safely restored on supported platforms.");
-        const source = join(directory, name);
-        const stat = lstatSync(source);
+        if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
+        let source = join(directory, name);
+        let stat = lstatSync(source);
         if (name === "node_modules" && (stat.isDirectory() || stat.isSymbolicLink())) {
           skippedDependencies++;
           continue;
@@ -342,20 +352,33 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
             throw new Error(`Cannot back up symbolic link outside the workspace: ${path}`);
           }
+          const portableRel = rel.replaceAll("\\", "/");
           // Only the app's disposable native-discovery links may be omitted; any other link is user data.
-          if (!/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) ||
-            !rel.replaceAll("\\", "/").startsWith(`workspaces/${path.split("/")[1]}/skills/`)) {
+          if (/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) &&
+            portableRel.startsWith(`workspaces/${path.split("/")[1]}/skills/`)) {
+            skippedLinks++;
+            continue;
+          }
+          const workspace = /^workspaces\/[^/]+\//.exec(path)?.[0];
+          if (!workspace || !portableRel.startsWith(workspace)) {
             throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
           }
-          skippedLinks++;
-          continue;
+          if (chain.some((folder) => folder === target || folder.startsWith(`${target}${sep}`))) {
+            throw new Error(`Cannot back up a symbolic link to the folder that contains it: ${path}`);
+          }
+          source = target;
+          stat = lstatSync(source);
+          copiedLinks++;
         }
         if (entries.length >= MAX_WORKSPACE_BACKUP_FILES) throw new Error("The workspace exceeds the 100,000-entry backup limit.");
+        const caseTwin = foldedPaths.get(path.toLowerCase());
+        if (caseTwin) throw new Error(`Cannot back up names that differ only by letter case, which collide on Windows and macOS; rename one first: ${caseTwin} and ${path}`);
+        foldedPaths.set(path.toLowerCase(), path);
         const destination = join(snapshot, "data", path);
         if (stat.isDirectory()) {
           folder(destination);
           entries.push({ path, type: "directory", size: 0, mode: 0o700 });
-          walk(source, path);
+          walk(source, path, [...chain, source]);
         } else if (stat.isFile()) {
           let copied: { size: number; mode: number; sha256: string };
           if (path === "config.json" || path === "webhooks.json") {
@@ -363,7 +386,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
             if (path === "config.json") writeJson(destination, portableWorkspaceConfig(value));
             else {
               if (!record(value)) throw new Error("Invalid webhook definitions in workspace backup.");
-              if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) delete webhook.secretHash;
+              if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) { delete webhook.secretHash; delete webhook.sealedSecret; }
+              if (Array.isArray(value.deleted)) for (const entry of value.deleted) if (record(entry) && record(entry.webhook)) delete entry.webhook.sealedSecret;
               writeJson(destination, value);
             }
             copied = { size: lstatSync(destination).size, mode: 0o600, sha256: hashFile(destination) };
@@ -377,6 +401,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     walk(root);
     if (skippedLinks) warnings.push(`${skippedLinks} managed skill discovery link(s) were omitted and are recreated by the app.`);
     if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules) were omitted; reinstall them in the project after restoring.`);
+    if (copiedLinks) warnings.push(`${copiedLinks} symbolic link(s) inside a workspace were saved as copies of what they point to; restoring creates regular files and folders there.`);
     if (skippedWorkLinks) warnings.push(`${skippedWorkLinks} symbolic link(s) in conversation work folders were omitted; what they point to is outside this backup.`);
     const summary: WorkspaceBackupSummary = {
       format: "openmaus.workspace-backup", version: 1, id: job.id, createdAt: new Date().toISOString(),
@@ -548,7 +573,9 @@ function validateStaged(directory: string, expected?: Map<string, { type: string
   }
   if (existsSync(join(data, "webhooks.json"))) {
     const value = privateJson(join(data, "webhooks.json"));
-    if (!record(value) || Array.isArray(value.webhooks) && value.webhooks.some((webhook) => record(webhook) && Object.hasOwn(webhook, "secretHash"))) throw new Error("Workspace backup contains webhook credentials.");
+    const carries = (webhook: unknown, fields: string[]) => record(webhook) && fields.some((field) => Object.hasOwn(webhook, field));
+    if (!record(value) || Array.isArray(value.webhooks) && value.webhooks.some((webhook) => carries(webhook, ["secretHash", "sealedSecret"]))
+      || Array.isArray(value.deleted) && value.deleted.some((entry) => record(entry) && carries(entry.webhook, ["sealedSecret"]))) throw new Error("Workspace backup contains webhook credentials.");
   }
   const counts = databaseCounts(join(data, "messages.db"));
   if (counts.messages !== manifest.summary.messages || counts.threads !== manifest.summary.threads) throw new Error("The message database does not match the backup summary.");
@@ -588,6 +615,13 @@ export function readStagedWorkspaceBackup(dataDir: string, id: string): Workspac
   if (!record(ready) || ready.id !== id) throw new Error("This workspace backup is not ready to restore.");
   const manifest = validateManifest(privateJson(join(directory, "staged", "manifest.json")));
   return { id, ...privateMetadata(manifest) };
+}
+
+/** A staged backup's own data folder, and the folder it was made from. */
+export function stagedWorkspaceData(dataDir: string, id: string): { data: string; sourceDataDir: string } {
+  readStagedWorkspaceBackup(dataDir, id);
+  const staged = join(jobPath(dataDir, id), "staged");
+  return { data: join(staged, "data"), sourceDataDir: validateManifest(privateJson(join(staged, "manifest.json"))).sourceDataDir };
 }
 
 export function commitPendingWorkspaceRestore(dataDir: string, id: string) {
@@ -730,12 +764,18 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
       webhook.verificationPending = false;
       const previous = oldHooks.find((old) => record(old) && old.id === webhook.id && old.endpointId === webhook.endpointId);
       // A migrated hook needs a secret rotation: an unknown hash cannot authenticate a caller.
-      webhook.secretHash = record(previous) && typeof previous.secretHash === "string" && /^[a-f0-9]{64}$/.test(previous.secretHash) ? previous.secretHash : randomBytes(32).toString("hex");
+      const kept = record(previous) && typeof previous.secretHash === "string" && /^[a-f0-9]{64}$/.test(previous.secretHash);
+      webhook.secretHash = kept ? previous.secretHash : randomBytes(32).toString("hex");
+      if (kept && typeof previous.sealedSecret === "string" && previous.sealedSecret) webhook.sealedSecret = previous.sealedSecret;
     }
   });
   changeJson("calendar-calls.json", (value) => {
     if (!record(value)) throw new Error("Invalid calendar definitions in workspace backup.");
     if (Array.isArray(value.calls)) for (const call of value.calls) if (record(call)) call.nextRunAt = null;
+  });
+  changeJson("app-triggers.json", (value) => {
+    if (!record(value)) throw new Error("Invalid app automations in workspace backup.");
+    if (Array.isArray(value.triggers)) for (const trigger of value.triggers) if (record(trigger)) trigger.enabled = false;
   });
   if (existsSync(join(prepared, "delegations.json"))) writeJson(join(prepared, "delegations.json"), {});
   if (existsSync(join(prepared, "browser-cleanups.json"))) writeJson(join(prepared, "browser-cleanups.json"), []);

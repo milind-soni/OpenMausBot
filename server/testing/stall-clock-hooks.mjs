@@ -1,6 +1,6 @@
 // Loaded with --import in isolated fixtures when OMB_TEST_STALL_CLOCK=1: once the fixture writes
-// <data dir>/stall-turns, every then-silent turn has spent the stall window, and the watchdog sweeps
-// every 50 ms. No authorization or dispatch decision changes.
+// <data dir>/stall-turns, every then-silent turn with no tool running has spent the stall window, and the
+// watchdog sweeps every 50 ms. No authorization or dispatch decision changes.
 import { registerHooks } from 'node:module';
 import { join } from 'node:path';
 const dataDir = process.env.OMB_DATA_DIR;

@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
@@ -19,6 +19,10 @@ const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const TEST_CAPABILITY_KEY = "comms-test-capability-key-0123456789abcdef";
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
+// A fresh connection per request: a request sent on an idle kept-alive socket while the server's event loop is busy
+// (seconds, on a Windows runner) is reset when Node's keep-alive timeout fires before the server reads it (Node 24).
+const request = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
+  fetch(`${BASE}${path}`, { ...init, headers: { ...init.headers, connection: "close" } });
 const SETTLED = "Your downstream room requests have settled.";
 const WOKE_WITH_RESULT = "woke after delegation: saw the result";
 const WOKE_WITHOUT_RESULT = "woke after delegation: no result";
@@ -97,6 +101,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
   let gateFile = "";
+  // While it exists the plain helper holds every prompt unanswered (FAKE_ACP_HOLD_FILE).
+  let holdFile = "";
   let stderr = "";
   // A loopback OpenAI-compatible engine under the workspace key: a request hangs until the engine is replaced ("hang"),
   // answers "ping from fake", loops on tool calls ("steps"), or is rate-limited ("limit").
@@ -109,7 +115,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     for (;;) {
       if (await predicate()) return;
       if (Date.now() > deadline) {
-        const state = await fetch(`${BASE}/api/bots`).then((res) => res.json()).catch(() => ({ bots: [] })) as any;
+        const state = await request("/api/bots").then((res) => res.json()).catch(() => ({ bots: [] })) as any;
         const tails = (state.bots ?? []).filter((candidate: any) => !candidate.hidden).map((candidate: any) => ({
           name: candidate.name, busy: candidate.busy,
           tail: (candidate.messages ?? []).slice(-6).map((m: any) => ({ role: m.role, kind: m.kind, text: m.text?.slice(0, 300), tool: m.tool?.name, from: m.from?.name })),
@@ -121,7 +127,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     }
   };
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await request(path, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -186,6 +192,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-comms-test-"));
     gateFile = join(home, "helper-gate");
+    holdFile = join(home, "helper-hold");
     const antigravityDirectory = join(home, "fake-antigravity");
     const antigravityCli = join(antigravityDirectory, "agy_acp_server.ts");
     const antigravityHarness = join(
@@ -246,7 +253,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
           // Plain helpers: a helper that consulted in turn would recurse until the depth limit.
           helper: {
             driver: "grokAgent",
-            environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: join(home, "helper.json"), FAKE_ACP_DUMP_PROMPT: "1" },
+            environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: join(home, "helper.json"), FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_HOLD_FILE: holdFile },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // a helper that lists the tools of every MCP server its turn was
@@ -364,7 +371,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     const deadline = Date.now() + 20_000;
     for (;;) {
       try {
-        const res = await fetch(`${BASE}/api/health`);
+        const res = await request("/api/health");
         if (res.ok) break;
       } catch {
       }
@@ -377,6 +384,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     expect(starter).toBeDefined();
     expect((await api("PATCH", `/api/bots/${starter.id}`, { name: "Comms fixture starter" })).status).toBe(200);
   }, 30_000);
+
+  afterEach(() => rmSync(holdFile, { force: true }));
 
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
@@ -401,6 +410,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const helper = await named("Helper", { modelSelection: HELPER });
       const asker = await named("Asker", { modelSelection: ASKER });
 
+      // The helper answers at once, and the run's wait could end between two looks: it holds its answer until the wait is seen.
+      writeFileSync(holdFile, "hold");
       const send = await startRoutine(asker.id, "hey @Helper ping");
       expect(send.status).toBe(201);
       const run = send.body.run;
@@ -419,6 +430,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const [consult] = assignments(helper.id, asker.id);
       expect(consult).toMatchObject({ mode: "consult", reply: "resume", text: "ping from fake" });
       expect(rows().find((node) => node.id === consult.parentId)).toMatchObject({ threadId: run.threadId, botId: asker.id });
+      expect((await runState(run.id)).status).toBe("waiting");
+      rmSync(holdFile);
 
       await waitUntil(async () => {
         askerBot = await bot(asker.id);
@@ -507,20 +520,14 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const send = await startRoutine(chief.id, "Create the specialist team and start the design review.");
       expect(send.status).toBe(201);
       const threadId = send.body.run.threadId;
-      let card: any;
+      // Team setup applies at once at every level, Ask included: its one record is a notice with Undo, and nothing waits on a person.
+      let notice: any;
       await waitUntil(async () => {
         const messages = (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages ?? [];
-        card = messages.find((message: any) => message.card?.requestId && message.card?.title?.includes("Apply setup"))?.card;
-        return Boolean(card);
-      }, 30_000, "create_bot never showed the team setup card");
-      expect((await api("GET", "/api/bots")).body.bots.some((bot: any) => bot.name === "Pixel")).toBe(false);
-      await waitUntil(async () => (await api("GET", "/api/bots")).body.bots.every((bot: any) => !bot.busy), 15_000, "bots never went idle");
-      const applied = await fetch(`${BASE}/api/threads/${threadId}/respond`, {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: BASE },
-        body: JSON.stringify({ requestId: card.requestId, behavior: "allow" }),
-      });
-      expect(applied.status, await applied.clone().text()).toBe(200);
+        notice = messages.find((message: any) => message.card?.requestId && message.card?.teamSetupRequest)?.card;
+        return Boolean(notice);
+      }, 30_000, "create_bot never showed the team setup notice");
+      expect(notice).toMatchObject({ title: "Team setup applied", autoApplied: true, answered: "allow", options: [] });
 
       let operator: any;
       let work: any[] = [];
@@ -539,13 +546,17 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
         title: "Product designer",
         description: "Design and review the user experience.",
         section: "Launch",
-        composio: false,
         autoApprove: false,
         approvePeerComms: false,
         approvalMode: "full",
         modelSelection: defaultSelection,
       });
       expect(operator.chiefOfStaff).toBeFalsy();
+      // A bot a Chief creates starts with the Chief's own connected apps, never more.
+      const atlas = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
+      expect(operator.composio).toEqual(atlas.composio);
+      expect(operator.mcpServers).toEqual(atlas.mcpServers);
+      expect(notice.teamSetupRequest.undo.created).toEqual([operator.id]);
       expect(work.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
     },
     60_000,
@@ -579,6 +590,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const sent = chip(askerBot.messages, "Sent to Helper");
       expect(sent).toBeTruthy();
       expect(sent.tool.output).toBe("followup");
+      expect(sent.doneWhen).toBe("the export opens in Numbers");
       expect(sent.threadRef).toMatchObject({ botId: helper.id, threadId: work.threadId });
       const replied = chip(askerBot.messages, "Helper replied");
       expect(replied.from?.botId).toBe(helper.id);
@@ -767,14 +779,14 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
 
         const taskId = readFileSync(join(home, "chief-task-id"), "utf8").trim();
         expect(taskId).toBeTruthy();
-        const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+        const minted = await request("/api/testing/internal-capability", {
           method: "POST",
           headers: { "content-type": "application/json", "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
           body: JSON.stringify({ botId: chief.id, threadId: sourceThreadId, kind: "agents" }),
         });
         expect(minted.status).toBe(201);
         const { token } = await minted.json() as { token: string };
-        const status = await fetch(`${BASE}/api/internal/assignment-status?id=${taskId}`, {
+        const status = await request(`/api/internal/assignment-status?id=${taskId}`, {
           headers: { authorization: `Bearer ${token}` },
         });
         expect(status.status).toBe(200);

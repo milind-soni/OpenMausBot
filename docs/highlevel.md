@@ -22,7 +22,17 @@ OMB server (desktop or Cloud home)         accounts.openmausbot.com (relay)     
 - **Connect** starts a flow and returns `{flowId, authorizationUrl, expiresAt}`; the app opens the link and polls the
   flow. The server polls the relay for up to 10 minutes; the flow lives in memory only.
 - **Private Integration token** (for agencies that hide the Marketplace): `POST /api/highlevel/token {token, locationId}`.
-  The token is checked with `GET /locations/{locationId}` before it is saved. It never refreshes; a 401 signs it out.
+  The token is created inside the sub-account (Settings → Private Integrations) with the permissions under
+  [Permissions](#permissions-scopes), and checked with `GET /locations/{locationId}` before it is saved, so it needs
+  **View Locations**. A refused check says which case it is (`tokenCheckError` in `server/highlevel/client.ts`), adds
+  HighLevel's own reason (secrets redacted, at most 160 characters) and never repeats the token:
+  - 401 "not authorized for this scope": the token is missing View Locations; turn it on (the token stays the same).
+  - any other 401: the token was not accepted (mistyped, rotated or deleted), or lacks View Locations.
+  - 403: the token belongs to another sub-account, or is an agency-level token.
+  - 404: no location with that ID.
+
+  The token never refreshes. A 401 that rejects the token itself signs it out; a 401 for a missing scope does not (see
+  [Permissions](#permissions-scopes)).
 - **Storage:** `DATA_DIR/highlevel.json.enc`, AES-256-GCM under `DATA_DIR/highlevel-key` (0600), the same scheme as
   saved logins. No keychain in the path, so a Cloud home works the same way. Stored: kind (`oauth` | `token`), access
   token, refresh token, expiry, locationId, companyId, userId, location name, scopes, state (`signed-in` |
@@ -32,6 +42,14 @@ OMB server (desktop or Cloud home)         accounts.openmausbot.com (relay)     
   answers the plain signed-out note until the person reconnects.
 - **Disconnect** (`DELETE /api/highlevel`) removes the tokens. HighLevel's own uninstall is a link in the UI.
 
+### "Please reach out to the agency admin for assistance with installation"
+
+HighLevel's Marketplace install page shows this when the agency that owns the sub-account (often a white-label agency,
+e.g. Growably) does not let sub-account users install apps. It comes from HighLevel, not OpenMausBot, and Connect
+cannot get past it. Either ask the agency admin to install the app for that sub-account (or to allow sub-account
+installs), or use **Use a Private Integration token instead** on the card: a sub-account admin can create one under Settings →
+Private Integrations when the agency allows it.
+
 ## Owner routes (`server/routes/highlevel.ts`, admin or owner session only)
 
 | Route | Answer |
@@ -40,11 +58,13 @@ OMB server (desktop or Cloud home)         accounts.openmausbot.com (relay)     
 | `POST /api/highlevel/sign-in` | `{ flowId, authorizationUrl, expiresAt }` |
 | `GET /api/highlevel/sign-in/:flowId` | `{ phase: waiting \| connected \| failed \| expired, message? }`; 404 `{error}` for an unknown flow |
 | `DELETE /api/highlevel/sign-in/:flowId` | cancels |
-| `POST /api/highlevel/token` | body `{ token, locationId }` → the status; errors are `{ error: "<one plain sentence>" }` |
+| `POST /api/highlevel/token` | body `{ token, locationId }` → the status; errors are `{ error: "<plain sentences>" }` with HighLevel's status (401, 403, 404) or 400 |
 | `DELETE /api/highlevel` | disconnects → the status |
 
-`GET /api/connectors/tools` also carries a `highlevel` entry with the twenty tool names, so the per-bot tool grants
-picker can list them. Cloud health merges `{ highlevel: { connected } }` into its connectors report.
+`GET /api/connectors/tools` also carries a `highlevel` entry with the twenty tool names. Bot settings do not use it for
+HighLevel (see [Per-bot scope](#per-bot-scope)). Cloud health merges `{ highlevel: { connected } }` into its connectors
+report while a HighLevel connection is saved (signed in, or needing sign-in again); a HighLevel never connected is not
+listed.
 
 ## Environment
 
@@ -76,6 +96,7 @@ turn's capability; the server re-reads the live bot on every call for the verdic
 
 Outputs are trimmed objects (ids, names, email, phone, tags, dates, custom fields by name), never raw API dumps.
 Errors are one plain sentence: "HighLevel refused this (403): the connection lacks the contacts.write permission.",
+"HighLevel refused this (401): the connection lacks the View Custom Fields permission (locations/customFields.readonly).",
 "HighLevel has no contact with that id (404).", "HighLevel is rate-limiting; try again in a few seconds."
 
 **Never:** no tool sends SMS, email or WhatsApp, starts a campaign or workflow, books or changes appointments, deletes a
@@ -90,12 +111,49 @@ The same rules as other connected apps, with slug `highlevel`:
 - `bot.composio === false` → no HighLevel tools.
 - `connectorScopes.apps.highlevel`: `read` allows SEARCH/GET/LIST/READ only; `write` allows everything; a scopes record
   without `highlevel` mounts nothing.
-- `connectorTools.highlevel.tools`: `"*"` or a list of tool names. Bot settings show four groups (`shared/highlevel.ts`
-  `HIGHLEVEL_TOOL_GROUPS`): *Contacts and notes* (default for a new bot), *Pipelines and deals*, *Conversations (read)*,
-  *Calendars (read)*; a group is the grant naming its tools. `HIGHLEVEL_GET_LOCATION` is in every group.
+- In the app: **Bot settings → Access → Connected apps**, with "Limit this bot to specific apps" on, gives HighLevel
+  **Off**, **Read** or **Read & write** per bot (`connectorScopes.apps.highlevel`). There is no per-tool picker for
+  HighLevel: the tool-grants picker lists Composio apps only (`AccessSection.tsx` filters `highlevel` out).
+- `connectorTools.highlevel.tools`: `"*"` or a list of tool names, still honoured on every call when a bot record carries
+  one. `shared/highlevel.ts` `HIGHLEVEL_TOOL_GROUPS` defines four groups (*Contacts and notes*, *Pipelines and deals*,
+  *Conversations (read)*, *Calendars (read)*; `HIGHLEVEL_GET_LOCATION` is in every group) for such grants; no screen
+  shows them yet.
+- Whatever the level, sending messages, campaigns, workflows and payments stay blocked for every bot
+  (`FORBIDDEN_PATHS`; see **Never** above).
 - `tools/list` shows only what the bot may run; a refused call answers the connector scope text ("HighLevel is
   read-only for <bot>, and Add note would write to it…") and writes a decision row (`source: connector-scope`).
 - CRM record changes are not messages: no outbound card, no daily allowance; the write scope is the control.
+
+## Permissions (scopes)
+
+Each call needs one HighLevel scope. A Private Integration is given them by name on HighLevel's Private Integrations
+page; the Marketplace app asks for `HIGHLEVEL_SCOPES` (`cloudflare/control-plane/wrangler.jsonc`), which must match the
+scopes approved for the app in HighLevel's developer dashboard. That list does not include
+`locations/customFields.readonly` or `conversations/message.readonly` yet, so a Marketplace connection reads custom
+fields keyed by id and, per HighLevel's API reference, cannot read a conversation's messages until both are added in
+both places.
+
+| Permission (Private Integrations page) | Scope | Used by |
+|---|---|---|
+| View Locations | `locations.readonly` | the token check, `HIGHLEVEL_GET_LOCATION` |
+| View Contacts | `contacts.readonly` | contact search and reads, notes and tasks lists |
+| Edit Contacts | `contacts.write` | contact create and update, tags, add note, add task |
+| View Opportunities | `opportunities.readonly` | pipelines, opportunity search and reads |
+| Edit Opportunities | `opportunities.write` | opportunity create and update |
+| View Custom Fields | `locations/customFields.readonly` | naming custom fields in contact reads and `HIGHLEVEL_GET_LOCATION`; writing custom fields by name |
+| View Conversations | `conversations.readonly` | `HIGHLEVEL_SEARCH_CONVERSATIONS` |
+| View Conversation Messages | `conversations/message.readonly` | `HIGHLEVEL_READ_CONVERSATION` |
+| View Calendars | `calendars.readonly` | `HIGHLEVEL_LIST_CALENDARS` |
+| View Calendar Events | `calendars/events.readonly` | `HIGHLEVEL_LIST_EVENTS` |
+
+The first six cover contacts, notes, tags, tasks and deals; add the last four for conversations and calendars.
+
+HighLevel answers **401** both for a dead token (`Invalid JWT`) and for a live token missing a scope (`The token is not
+authorized for this scope.`). Only the first signs the connection out (and, for OAuth, is refreshed first). A missing
+scope answers the bot "HighLevel refused this (401): the connection lacks the Edit Contacts permission
+(contacts.write)." and the connection stays signed in. The custom-field lookup inside contact reads is optional: without
+View Custom Fields, contacts still read (their custom fields keyed by id), the refusal is cached for 10 minutes, and only
+a write that names a custom field fails, naming the missing permission.
 
 ## Writes in the activity
 
@@ -106,9 +164,16 @@ Every successful write appends an activity row to the thread: `tool.name` `mcp__
 
 - HighLevel: 100 requests / 10 s and 200,000 / day per app per location. The client keeps under **90 / 10 s** per
   location, waits per `Retry-After` / `X-RateLimit-Interval-Milliseconds` (at most 10 s) and retries once on 429,
-  retries once on 5xx, refreshes once on 401 (and ahead of expiry) and retries the call.
+  retries once on 5xx, refreshes once on a dead-token 401 (and ahead of expiry) and retries the call; a missing-scope
+  401 is answered at once.
+- A call that creates a contact, note, task or opportunity is never sent twice. HighLevel takes no idempotency key and
+  may have saved the record before a 5xx or a lost answer. The bot gets an error that says so and checks first.
+- Each tool call checks its turn after retry or budget waits and before each HighLevel API request.
+  Stop prevents later requests. A request already sent can still complete.
 - Access tokens last a day; refresh tokens a year and rotate on every use. The rotated pair is stored before the retry.
-- Results: at most 50 per page; text fields are cut at 4,000 characters; responses over 4 MB are refused.
+  A refresh or a sign-out lands only on the token pair it started from. A call whose tokens were replaced meanwhile
+  retries with the newer tokens of the same location, or stops when another location was connected.
+- Results: at most 50 per page, pages 1 to 1,000; text fields are cut at 4,000 characters; responses over 4 MB are refused.
 - Custom field definitions are cached for 10 minutes per location.
 
 ## Not in v1
@@ -120,9 +185,13 @@ locations at once (one connection per installation).
 ## Tests
 
 - `server/highlevel/client.test.ts`: request shapes, trimming, Version header, refresh-once with rotation persisted,
-  429 backoff, 5xx retry, the budget, plain errors, the store's encryption and the no-messaging guard.
+  refreshes and late 401s that race a reconnect or another refresh,
+  429 backoff, 5xx retry without replaying a create, the budget, plain errors, the store's encryption and the no-messaging guard; a missing scope
+  is not a sign-out (token and OAuth) while a dead token still is; the token check's 401/403/404 sentences and redaction.
 - `server/highlevel/rpc.test.ts`: per-bot scoping (read-only refusal text, grants, tools/list filtering), the write
   record and the host's activity row.
-- `server/highlevel/sign-in.test.ts`: the relay contract, the sign-in flow, the token path and the owner routes.
+- `server/highlevel/cancellation.test.ts`: Stop during 429, 5xx and budget waits, before dispatch, and concurrent call isolation.
+- `server/highlevel/sign-in.test.ts`: the relay contract, the sign-in flow, a replaced flow's late claim, the token path
+  and the owner routes.
 - `server/highlevel.e2e.test.ts`: a real server, fake relay and fake HighLevel, Connect → tools → refresh →
-  revocation → Disconnect → Private Integration token.
+  revocation → Disconnect → Private Integration token, and Stop during a 429 wait without a later write.

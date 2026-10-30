@@ -5,6 +5,12 @@ export type NotifyFrame = Notification;
 
 export type NotificationTarget = Pick<NotifyFrame, "botId" | "threadId">;
 
+/** On a team's page in the desktop app, its name: notifications then say which place they come from ("Acme · Scout"). */
+let placeName: string | null = null;
+export function setNotificationPlace(name: string | null) {
+  placeName = name;
+}
+
 /** Call from the click: browsers may reject a permission request made later from an SSE frame. Resolves to the permission now in force. */
 export async function requestNotificationPermission(): Promise<NotificationPermission | null> {
   if (typeof Notification === "undefined") return null;
@@ -47,6 +53,6 @@ export function showNotification(
       ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
       ...(notificationSoundsEnabled() ? {} : { silent: true }),
     };
-    new Notification(frame.title, options).onclick = open;
+    new Notification(placeName ? `${placeName} · ${frame.title}` : frame.title, options).onclick = open;
   }
 }

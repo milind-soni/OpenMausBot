@@ -16,6 +16,7 @@ export interface ChannelQueueItem {
   via?: "api";
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
+  reaction?: string;
   queuedAt: number;
 }
 
@@ -60,6 +61,7 @@ export function queueChannelMessage(
     via?: "api";
     sender?: ResolvedSender;
     trigger?: UsageTrigger;
+    reaction?: string;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -73,6 +75,7 @@ export function queueChannelMessage(
     via: options.via,
     sender: options.sender,
     trigger: options.trigger,
+    ...(options.reaction ? { reaction: options.reaction } : {}),
     queuedAt: Date.now(),
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });

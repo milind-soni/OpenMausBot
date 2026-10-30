@@ -328,6 +328,65 @@ describe("tasks", () => {
     expect(store.tasks(bot.id).map((t) => t.threadId).sort()).toEqual([first, routine.threadId].sort());
   });
 
+  it("deleteTasks of the open thread opens the newest-active thread, not the newest-created one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { store } = await freshStore();
+      vi.setSystemTime(1_000);
+      const bot = store.createBot();
+      const first = bot.threadId;
+      vi.setSystemTime(2_000);
+      const second = store.createTask(bot.id)!.threadId;
+      vi.setSystemTime(3_000);
+      const newestCreated = store.createTask(bot.id)!.threadId;
+      vi.setSystemTime(4_000);
+      store.appendMessage(first, { role: "user", kind: "text", text: "back to the first one" });
+      vi.setSystemTime(5_000);
+      store.appendMessage(second, { role: "user", kind: "text", text: "and the second" });
+      store.switchTask(bot.id, second);
+
+      store.deleteTasks(bot.id, [second]);
+
+      expect(store.bot(bot.id)!.threadId).toBe(first);
+      expect(store.tasks(bot.id).map((t) => t.threadId)).toEqual([newestCreated, first]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("deleteTasks of the open thread prefers a pinned thread and passes over archived, closed, snoozed and bot-opened ones", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { store } = await freshStore();
+      vi.setSystemTime(1_000);
+      const bot = store.createBot();
+      const pinned = bot.threadId;
+      store.patchTask(bot.id, pinned, { pinned: true });
+      vi.setSystemTime(2_000);
+      const plain = store.createTask(bot.id, "Plain")!.threadId;
+      vi.setSystemTime(3_000);
+      store.patchTask(bot.id, store.createTask(bot.id, "Archived")!.threadId, { archivedAt: 3_000 });
+      vi.setSystemTime(4_000);
+      store.setTaskClosedBy(bot.id, store.createTask(bot.id, "Closed")!.threadId, { botId: bot.id, name: bot.name, at: 4_000 });
+      vi.setSystemTime(5_000);
+      store.createTask(bot.id, "Opened by a bot", true, undefined, { botId: "other", name: "Other", at: 5_000 });
+      vi.setSystemTime(5_500);
+      store.patchTask(bot.id, store.createTask(bot.id, "Snoozed")!.threadId, { snoozedUntil: 0 });
+      vi.setSystemTime(6_000);
+      const open = store.createTask(bot.id, "Open")!.threadId;
+
+      store.deleteTasks(bot.id, [open]);
+      expect(store.bot(bot.id)!.threadId).toBe(pinned);
+
+      store.patchTask(bot.id, pinned, { pinned: undefined });
+      store.switchTask(bot.id, pinned);
+      store.deleteTasks(bot.id, [pinned]);
+      expect(store.bot(bot.id)!.threadId).toBe(plain);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("deleteTasks returns null for an unknown bot and changes nothing", async () => {
     const { store } = await freshStore();
     const bot = store.createBot();

@@ -135,7 +135,7 @@ test("startup delivers a pending Cloud link before default navigation", () => {
   const startup = between("  let restoredOrganizationEntry = false;", "  // Reconcile incomplete setup");
   const delivered = startup.indexOf("const deliveredCloudEntry = await cloudEntry.ready();");
   assert.ok(delivered > startup.indexOf("await deliverOrganizationEntry()"));
-  assert.ok(delivered < startup.indexOf("createWindow()"));
+  assert.ok(delivered < startup.indexOf("await showHome()"));
   assert.ok(main.indexOf("cloudAccountStarted = ensureCloudAccount().start()") < main.indexOf("  let restoredOrganizationEntry = false;"),
     "the saved sign-in starts restoring before the link is delivered");
 });

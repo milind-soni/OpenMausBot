@@ -15,6 +15,12 @@ export interface FakeDriverOptions {
   failCreate?: string;
   /** snapshot() rejects with this message (describe-downgrade path). */
   failSnapshot?: string;
+  /** snapshot() never settles, like a status probe stuck on its CLI. */
+  hangSnapshot?: boolean;
+  /** snapshot() answers only once this settles, so a test can hold a probe in flight. */
+  holdSnapshot?: Promise<unknown>;
+  /** What snapshot() answers instead of an available engine. */
+  answer?: ProviderSnapshot;
   /** effort levels this fake driver declares, forwarded onto capabilities. */
   effortLevels?: readonly EffortLevel[];
 }
@@ -25,6 +31,8 @@ export interface FakeDriverHandle {
   created: Map<string, { instance: ProviderInstance; emit: (e: RuntimeEvent) => void }>;
   decodedConfigs: unknown[];
   disposed: string[];
+  /** One instance id per status probe the driver ran: a real driver spawns its CLI for each. */
+  probes: string[];
 }
 
 export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
@@ -33,6 +41,7 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
     created: new Map(),
     decodedConfigs: [],
     disposed: [],
+    probes: [],
     driver: {
       driverKind: kind,
       metadata: { displayName: `Fake ${kind}` },
@@ -58,8 +67,11 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
           enabled: input.enabled,
           models: handle.driver.models,
           snapshot: async (): Promise<ProviderSnapshot> => {
+            handle.probes.push(input.instanceId);
             if (opts.failSnapshot) throw new Error(opts.failSnapshot);
-            return { state: "available", version: "0.0.0-fake" };
+            if (opts.hangSnapshot) await new Promise<never>(() => {});
+            if (opts.holdSnapshot) await opts.holdSnapshot;
+            return opts.answer ?? { state: "available", version: "0.0.0-fake" };
           },
           adapter: {
             provider: kind,

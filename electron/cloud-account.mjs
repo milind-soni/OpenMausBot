@@ -1,5 +1,7 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
-import { CLOUD_MACHINE_CONNECTABLE, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
+import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
@@ -19,13 +21,38 @@ const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
 const SETUP_REFRESH_MS = 15_000;
+/** While My Cloud sleeps and Files or lending waits for it: the session every 15 s, so they resume soon after it wakes. */
+const ASLEEP_REFRESH_MS = 15_000;
+const WAKE_STATES = Object.freeze(["awake", "waking"]);
 /** While a checkout this app opened waits for its payment and setup: the session every 3 s (30 minutes at most). */
 const WATCH_REFRESH_MS = 3_000;
 const CHECKING_AFTER = 2;
 const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
-export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"]);
+export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "update_popup", "app_onboarding"]);
+export const UPGRADE_SOURCES = Object.freeze(["app_usage", "app_settings"]);
+const UPGRADE_TIERS = Object.freeze(["starter", "personal", "pro", "max"]);
+const UPGRADE_REFUSALS = Object.freeze(["payment_failed", "not_subscribed", "already_on_plan", "plan_change_unavailable", "confirmation_required", "price_changed", "rate_limited"]);
+const CONFIRMATION = /^[A-Za-z0-9_-]{43}$/;
+/** The cancel sheet's reasons, as the Admin takes them. */
+export const CLOUD_CANCEL_ANSWERS = Object.freeze(["feature", "price", "setup", "broken", "later", "other"]);
+const SURVEY_TEXT_MAX = 2_000, SURVEY_WAIT_MS = 8_000;
+/**
+ * The cancel sheet's survey as main sends it: one reason and each box trimmed, at most 2,000 characters. Words without a
+ * reason are kept as `other`; null when nothing was said, and for anything that isn't a survey (it is never sent then).
+ */
+export function cancelSurvey(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const box = value => typeof value === "string" ? value.trim() : "";
+  const answer = CLOUD_CANCEL_ANSWERS.includes(input.answer) ? input.answer : null, expected = box(input.expected), improve = box(input.improve);
+  if ((input.answer !== undefined && input.answer !== null && !answer) || expected.length > SURVEY_TEXT_MAX || improve.length > SURVEY_TEXT_MAX) return null;
+  if (!answer && !expected && !improve) return null;
+  return { answer: answer ?? "other", ...(expected ? { expected } : {}), ...(improve ? { improve } : {}) };
+}
+/** Why the Admin won't open another Cloud's checkout now (POST clouds, 409 `addBlocked`; contract v1). */
+export const ADD_BLOCKS = Object.freeze(["cap", "checkout_open", "rate", "signups_closed"]);
+const ADD_INTERVALS = Object.freeze(["month", "year"]);
 const CHECKOUT_ORIGIN = "https://checkout.dodopayments.com", TEST_CHECKOUT_ORIGIN = "https://test.checkout.dodopayments.com";
 /** Only Dodo's own HTTPS checkout origin, with no credentials and no fragment; anything else is never opened. Staging's
  * Admin sells in Dodo's test mode, so its checkouts are only Dodo's test page. */
@@ -57,19 +84,29 @@ function planHint(value) {
 /** Only the Admin's own JSON "invalid_token" ends a sign-in; a 401/403 page from Cloudflare or a proxy does not. */
 const signInEnded = error => [401, 403].includes(error?.status) && error.code === "invalid_token";
 const sameHint = (left, right) => (left?.tier ?? null) === (right?.tier ?? null) && (left?.active ?? null) === (right?.active ?? null);
+/** Whether the Admin opens another Cloud's checkout for this account now, as its session says (`canAdd` and
+ * `addBlocked`, both optional): without its word the answer is yes, and POST clouds says otherwise. */
+function addOffer(result) {
+  if (result?.canAdd !== false) return { canAdd: true };
+  return { canAdd: false, blocked: ADD_BLOCKS.includes(result.addBlocked) ? result.addBlocked : "cap" };
+}
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message) }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
   let value = { status: "signed-out", message: "restoring" }, generation = 0, timer = null, closed = false, clearing = null, refreshing = null;
   let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0;
   let plan = null, savedHint = null;
-  let offerCache = null, offerPending = null;
+  /** The plan's own Cloud that Cancel and Keep act on, as the last verified session names it. */
+  let renewalCloud = null;
+  let offerCache = null, offerPending = null, waking = false;
   /** The checkout this app opened, its address kept here for Reopen and Copy link: never published, never asked for again. */
   let opened = null;
+  /** Another Cloud this app is buying (POST clouds): its id, name, colour and plan, and its checkout page, kept like `opened`'s. */
+  let adding = null;
   /** An email code on its way: the attempt the Admin answered, kept in main only. */
   let emailed = null;
   const newerPlans = new Set();
@@ -80,8 +117,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   };
   const checkout = () => opened && now() - opened.startedAt < CHECKOUT_KEPT_MS
     ? { plan: opened.plan, startedAt: opened.startedAt, ...(opened.signIn ? { signIn: true } : {}), ...(opened.url ? { link: true } : {}), ...(opened.done ? { done: true } : {}) } : null;
+  const buying = () => adding && now() - adding.startedAt < CHECKOUT_KEPT_MS
+    ? { cloudId: adding.cloudId, name: adding.name, color: adding.color, tier: adding.tier, startedAt: adding.startedAt, ...(adding.url ? { link: true } : {}), ...(adding.done ? { done: true } : {}) } : null;
   const withCheckout = current => {
-    const open = checkout(), next = open ? { ...current, checkout: open } : current;
+    const open = checkout(), add = buying(), shown = waking && current.status === "connected" ? { ...current, waking: true } : current;
+    const next = { ...shown, ...(open ? { checkout: open } : {}), ...(add ? { adding: add } : {}) };
     return staging ? { ...next, staging: true } : next;
   };
   const state = () => {
@@ -93,6 +133,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     return structuredClone(withCheckout(value));
   };
   const watching = () => Boolean(opened && now() - opened.startedAt < CHECKOUT_WATCH_MS);
+  const watchingAdd = () => Boolean(adding && !adding.done && now() - adding.startedAt < CHECKOUT_WATCH_MS);
   const publish = next => { value = next; onState(state()); return state(); };
   const record = (saved, hint) => ({ ...saved, ...(hint ? { planHint: hint } : {}) });
   const stopTimer = () => { if (timer !== null) clearTimer(timer); timer = null; };
@@ -103,11 +144,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
   const current = stamp => !closed && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
-  async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}` } = {}) {
+  async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}`, timeoutMs = 20_000 } = {}) {
     const response = await fetcher(`${origin}${path}`, {
       method, redirect: "error", credentials: "omit", cache: "no-store",
       headers: { accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }), ...(token ? { authorization: `Bearer ${token}`, ...versionHeader } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
     const reader = response.body?.getReader(), chunks = []; let size = 0;
     try {
@@ -123,7 +164,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true });
       throw new Error("Invalid Cloud response.");
     }
-    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval });
+    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked,
+      ...(typeof data?.checkoutUrl === "string" ? { checkoutUrl: data.checkoutUrl } : {}) });
     return data;
   }
   function identity(result) {
@@ -142,10 +184,34 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       !(input.expiresAt === null || timestamp(input.expiresAt)) || !Number.isSafeInteger(input.version) || input.version < 0) throw new Error("Invalid Cloud entitlement.");
     const plan = input.plan === "free" ? "free" : "pro";
     if (input.status === "active" && (plan !== "pro" || input.expiresAt === null || input.expiresAt <= now())) throw new Error("Invalid active Cloud entitlement.");
-    if (newer && !newerPlans.has(input.plan)) { newerPlans.add(input.plan); warn(`[cloud] OMB Cloud sent plan "${input.plan}", newer than this app; treating it as paid.`); }
+    if (newer && !newerPlans.has(input.plan)) { newerPlans.add(input.plan); warn(`[cloud] MausBot Cloud sent plan "${input.plan}", newer than this app; treating it as paid.`); }
     const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : newer ? input.plan : undefined;
     return { plan, ...(tier ? { tier } : {}), status: input.status,
       expiresAt: input.expiresAt, version: input.version };
+  }
+  // Security: an upgrade preview's confirmation stays here, never in a page, and is used once.
+  const confirmations = new Map();
+  async function upgradeFailure(error, signedIn, browser = true) {
+    if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+    if (!browser && (!error?.status || error.opaque || error.status === 504)) return { outcome: "unconfirmed" };
+    if (!error?.opaque && UPGRADE_REFUSALS.includes(error?.code)) return { outcome: "refused", code: error.code };
+    if (browser && grant === signedIn && !error?.opaque && ([404, 405, 501].includes(error?.status) || (error?.status === 503 && error.code === "temporarily_unavailable"))) {
+      await openBrowser(`${origin}/cloud`);
+      return { outcome: "browser" };
+    }
+    return { outcome: "failed" };
+  }
+  /**
+   * An Admin without the app's Cancel and Keep (its own 404, 405 or 501) opens the Cloud page's billing instead. Its `not_found`
+   * is the Cloud, not the route: the session is read again.
+   */
+  async function renewalFailure(error, signedIn) {
+    if (signInEnded(error)) return { outcome: "failed", state: await refresh().catch(() => state()) };
+    if (grant === signedIn && !error?.opaque && [404, 405, 501].includes(error?.status) && error.code !== "not_found") {
+      await openBrowser(`${origin}/cloud/personal/billing`);
+      return { outcome: "browser" };
+    }
+    return { outcome: "failed", state: [404, 409].includes(error?.status) ? await refresh().catch(() => state()) : state() };
   }
   async function revoke(previous) {
     try { await request("session", { method: "DELETE", body: {}, token: previous.token, signal: AbortSignal.timeout(20_000) }); }
@@ -156,10 +222,14 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     const machine = current.status === "connected" ? current.machine : undefined;
     return machine?.origin && CLOUD_MACHINE_CONNECTABLE.includes(machine.status) ? { origin: machine.origin } : null;
   }
+  function otherOwnCloud(cloudId) {
+    const current = state();
+    return current.status === "connected" ? otherOwnClouds(current.clouds).find(cloud => cloud.id === cloudId) ?? null : null;
+  }
   function forget({ quiet = false } = {}) {
     if (clearing) return clearing;
     const previous = grant ?? issued ?? cleanup, stamp = reset();
-    grant = null; issued = null; cleanup = previous; cleanupNeeded = true; plan = null; savedHint = null; opened = null;
+    grant = null; issued = null; cleanup = previous; cleanupNeeded = true; plan = null; savedHint = null; opened = null; adding = null; renewalCloud = null;
     if (!quiet) publish({ status: "signed-out" });
     const operation = (async () => {
       const [persisted, revoked] = await Promise.allSettled([Promise.resolve().then(() => store.write(null)), previous ? revoke(previous) : Promise.resolve()]);
@@ -183,9 +253,13 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw Object.assign(new Error("Cloud identity changed."), { status: 401, code: "invalid_token" });
       }
       const access = entitlement(result.entitlement);
-      const machine = parseCloudSummary(result.cloud);
+      const machine = parseCloudSummary(result.cloud), teams = parseCloudTeams(result.teams);
       const purchase = parseCloudPurchase(result.cloud?.purchase);
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
+      const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null;
+      const clouds = parseCloudList(result.clouds), more = clouds ? addOffer(result) : null, latest = clouds ? releaseVersion(result.latestVersion) : null;
+      const organizations = clouds ? parseOrganizations(result.organizations) : null;
+      const { cloudId: renewingCloud = null, ...renewal } = parseCloudRenewal(result.clouds) ?? {};
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
       if (next.expiresAt !== previous.expiresAt) {
         const replacement = { ...previous, expiresAt: next.expiresAt };
@@ -197,18 +271,29 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         if (!current(stamp) || grant !== previous) return state();
       }
       plan = hint ? { accountId: grant.account.id, ...hint } : null;
+      renewalCloud = renewingCloud;
       failures = 0;
       // A checkout the Admin still holds open, with none kept here (this app restarted mid-checkout): watched as this
       // app's own from first sight, so payment, setup and "ready" are followed as closely as before the restart.
       if (!opened && offer?.checkout && offer.checkout.openUntil > now() && access.status !== "active") {
         opened = { plan: offer.checkout.plan, source: null, startedAt: now() };
       }
+      // Another Cloud at checkout with none kept here (this app restarted mid-checkout, or it was bought elsewhere): watched
+      // as this app's own, so "ready" is said for it too.
+      const waitingCloud = otherOwnClouds(clouds).find(cloud => cloud.status === "checkout");
+      if (!adding && waitingCloud) adding = { cloudId: waitingCloud.id, name: waitingCloud.name, color: waitingCloud.color, tier: waitingCloud.tier, startedAt: now(), url: null };
+      // A checkout kept from the Admin's "one is still open" answer, before the session listed its Cloud: that Cloud now.
+      else if (adding && adding.cloudId === null && waitingCloud) adding = { ...adding, cloudId: waitingCloud.id, name: waitingCloud.name, color: waitingCloud.color, tier: waitingCloud.tier ?? adding.tier };
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
-      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(purchase ? { purchase } : {}),
-        ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), verifiedAt: now(), verifiedUntil });
-      const settingUp = machine?.status === "provisioning" || (access.status === "active" && !machine) || Boolean(purchase);
-      const delay = watching() && machine?.status !== "ready" ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : REFRESH_MS;
+      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
+        ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), ...(renewingCloud ? { renewal } : {}),
+        ...(clouds ? { clouds, addCloud: more } : {}), ...(organizations ? { organizations } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
+      const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
+      const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase) || otherOwnClouds(clouds).some(cloud => cloud.status === "setting_up");
+      const added = adding ? clouds?.find(cloud => cloud.id === adding.cloudId) ?? null : null;
+      const paying = watchingAdd() && Boolean(adding.url) && (!added || added.status === "checkout");
+      const delay = (watching() && planCloud?.status !== "ready") || paying ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : REFRESH_MS;
       schedule(refresh, Math.min(delay, verifiedUntil - now()));
     } catch (error) {
       if (!current(stamp)) return state();
@@ -419,6 +504,65 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     cancel: () => { if (!pending && value.status !== "connecting") return Promise.resolve(state()); opened = null; return signOut(); },
     refresh, signOut,
     async openDashboard() { await openBrowser(`${origin}/cloud`); return state(); },
+    async upgradePreview(plan, source) {
+      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      let result;
+      try { result = await request("upgrade/preview", { method: "POST", body: { plan, source }, token: signedIn.token, timeoutMs: 60_000 }); }
+      catch (error) { return upgradeFailure(error, signedIn); }
+      if (grant !== signedIn || result?.cloudContractVersion !== 1) return { outcome: "failed" };
+      if (["upgraded", "pending"].includes(result.status)) { await refresh(); return { outcome: "settled", status: result.status, tier: TIER.test(result.tier) ? result.tier : plan }; }
+      const cents = value => Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000;
+      if (result.tier !== plan || !cents(result.price) || result.price < 1 || !cents(result.chargeNow) || !cents(result.tax ?? 0) || result.currency !== "USD"
+        || typeof result.trial !== "boolean" || !CONFIRMATION.test(result.confirmation ?? "") || !timestamp(result.expiresAt)) return { outcome: "failed" };
+      confirmations.set(plan, { token: result.confirmation, expiresAt: Math.min(result.expiresAt, now() + 10 * 60_000), account: signedIn.account.id });
+      return { outcome: "preview", preview: { plan, ...(TIER.test(result.from ?? "") ? { from: result.from } : {}), trial: result.trial, price: result.price,
+        chargeNow: result.chargeNow, tax: result.tax ?? 0, ...(timestamp(result.nextBillingAt) ? { nextBillingAt: result.nextBillingAt } : {}), expiresAt: result.expiresAt } };
+    },
+    async upgrade(plan, source) {
+      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+      const signedIn = grant, agreed = confirmations.get(plan);
+      confirmations.delete(plan);
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!agreed || agreed.account !== signedIn.account.id || agreed.expiresAt <= now()) return { outcome: "refused", code: "confirmation_required" };
+      let result;
+      try { result = await request("upgrade", { method: "POST", body: { plan, confirmation: agreed.token, source }, token: signedIn.token, timeoutMs: 120_000 }); }
+      catch (error) { const failure = await upgradeFailure(error, signedIn, false); await refresh().catch(() => {}); return failure; }
+      await refresh().catch(() => {});
+      if (result?.cloudContractVersion !== 1 || !["upgraded", "pending"].includes(result.status)) return { outcome: "failed" };
+      return { outcome: result.status, tier: TIER.test(result.tier ?? "") ? result.tier : plan };
+    },
+    /**
+     * Cancel trial / Cancel plan: the survey first when the person said anything (given SURVEY_WAIT_MS, and let go when it
+     * fails or is refused), then renewal off for the plan's own Cloud, named by the verified session, never by a page.
+     * `cancelled`: when it ends, from the Admin's answer (`renewal`), and whether the survey was kept; `browser`: this Admin
+     * can't cancel from the app yet, so its Cloud page's billing opened instead; `failed`: nothing changed.
+     */
+    async cancelPlan(input) {
+      const signedIn = grant, cloudId = renewalCloud;
+      if (!signedIn || !cloudId || state().status !== "connected") return { outcome: "failed", state: state() };
+      const survey = cancelSurvey(input);
+      let surveyed = false;
+      if (survey) {
+        try { await request("feedback", { method: "POST", body: { cloudId, ...survey }, token: signedIn.token, timeoutMs: SURVEY_WAIT_MS }); surveyed = true; }
+        catch {}
+      }
+      if (grant !== signedIn) return { outcome: "failed", state: state() };
+      let result;
+      try { result = await request(`clouds/${cloudId}/cancel`, { method: "POST", body: {}, token: signedIn.token, timeoutMs: 60_000 }); }
+      catch (error) { return renewalFailure(error, signedIn); }
+      const { cloudId: answered, ...renewal } = result?.cloudContractVersion === 1 ? parseCloudRenewal([result.cloud]) ?? {} : {};
+      return { outcome: "cancelled", renewal: answered === cloudId ? renewal : null, surveyed, state: await refresh().catch(() => state()) };
+    },
+    /** Keep my plan: renewal back on for the same Cloud, as `cancelPlan` names it. */
+    async keepPlan() {
+      const signedIn = grant, cloudId = renewalCloud;
+      if (!signedIn || !cloudId || state().status !== "connected") return { outcome: "failed", state: state() };
+      try { await request(`clouds/${cloudId}/keep`, { method: "POST", body: {}, token: signedIn.token, timeoutMs: 60_000 }); }
+      catch (error) { return renewalFailure(error, signedIn); }
+      return { outcome: "kept", state: await refresh().catch(() => state()) };
+    },
     async offer() {
       const current = state();
       if (current.status === "connected" && current.offer) return current.offer;
@@ -439,6 +583,33 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (result?.ok !== true) throw new Error("Invalid Cloud response.");
     },
     homeTarget,
+    /** The Admin's last verified word on a Cloud whose plan sleeps, kept while a re-check fails; null for any other. */
+    power: () => (value.status === "connected" ? value.machine?.power ?? null : null),
+    /** The same for the Cloud at `origin`: My Cloud's `cloud.power`, or another's from the Clouds list (contract v1, Oct 30). */
+    powerOf: origin => {
+      if (value.status !== "connected" || typeof origin !== "string" || !origin) return null;
+      if (value.machine?.origin === origin) return value.machine.power ?? null;
+      return (value.clouds ?? []).find(cloud => cloud.origin === origin)?.power ?? null;
+    },
+    /** Starts a sleeping Cloud through the Admin (`awake` once started, `waking` if it is still starting), then reads the
+     *  session again so Files and lending resume. Null when there is nothing to wake or the Admin can't say. */
+    async wakeHome() {
+      const current = grant, power = value.status === "connected" ? value.machine?.power : null;
+      if (!current || !power || power.state === "awake") return null;
+      let woke = null;
+      try {
+        const result = await request("wake", { method: "POST", body: {}, token: current.token });
+        woke = WAKE_STATES.includes(result?.state) ? result.state : null;
+      } catch {}
+      await refresh().catch(() => {});
+      return woke;
+    },
+    /** Opening a sleeping Cloud takes a moment: the state says so meanwhile. */
+    setWaking(on) {
+      if (waking === (on === true)) return;
+      waking = on === true;
+      publish(value);
+    },
     async growDisk(sizeGb) {
       const current = grant;
       if (!current || state().status !== "connected") throw new Error("My Cloud is not ready yet.");
@@ -453,14 +624,272 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!disk || !Number.isSafeInteger(disk.gb) || !Number.isSafeInteger(disk.maxGb) || disk.gb < 1 || disk.maxGb < disk.gb) throw new Error("Invalid Cloud disk response.");
       return { supported: true, disk: { gb: disk.gb, maxGb: disk.maxGb } };
     },
-    /** The code goes to main only, for one navigation, and is not kept. */
-    async pairHome() {
-      const target = homeTarget(), current = grant;
+    /** The code goes to main only, for one navigation, and is not kept. `cloudId`: another Cloud of the person's own
+     * that the verified session lists (the Admin answers 404 once it is not theirs any more: `gone`); none is My Cloud,
+     * which an older Admin pairs from the same empty body. The grant must be for that Cloud's own address. */
+    async pairHome(cloudId = null) {
+      const current = grant;
+      if (cloudId !== null) {
+        const cloud = otherOwnCloud(cloudId);
+        if (!current || !cloud) throw Object.assign(new Error("That Cloud is no longer one of yours."), { gone: true });
+        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(`${cloud.name} isn't ready to open yet.`);
+        let result;
+        try { result = await request("pairing", { method: "POST", body: { cloudId }, token: current.token }); } catch (error) {
+          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`${cloud.name} is no longer one of your Clouds.`), { gone: true }); }
+          if (error?.status === 409) throw new Error(`${cloud.name} isn't running right now.`);
+          throw error;
+        }
+        const pairing = parsePairingGrant(result, cloud.origin, now());
+        if (!pairing) throw new Error("Invalid Cloud pairing response.");
+        return pairing;
+      }
+      const target = homeTarget();
       if (!target || !current) throw new Error("My Cloud is not ready to connect yet.");
-      const result = await request("pairing", { method: "POST", body: {}, token: current.token });
+      let result;
+      try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
+        const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);
+        throw why ? new Error(why) : error;
+      }
       const pairing = parsePairingGrant(result, target.origin, now());
       if (!pairing) throw new Error("Invalid Cloud pairing response.");
       return pairing;
+    },
+    /** `origin` is the address of a Cloud the person owns (My Cloud or another of theirs), by the verified session only. */
+    isOwnCloud(origin) {
+      const current = state();
+      if (typeof origin !== "string" || !origin || current.status !== "connected") return false;
+      return current.machine?.origin === origin || (current.clouds ?? []).some(cloud => ownCloud(cloud) && cloud.origin === origin);
+    },
+    /** Buys another Cloud (POST clouds; contract v1): the plan, how often it is paid, its name and its swatch. The
+     * Admin's checkout opens in the browser and its page is kept here for Reopen and Copy link, as the first Cloud's is;
+     * the session is then read every few seconds until the Cloud is paid for. `unsupported`: this Admin sells one Cloud
+     * per account; `blocked` with the Admin's reason. */
+    async addCloud({ tier, interval = "month", name, color = null } = {}) {
+      const cleanName = cleanCloudListName(name);
+      if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) {
+        throw new Error("Invalid Cloud to add.");
+      }
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.clouds) return { outcome: "unsupported" };
+      if (value.addCloud?.canAdd === false) return { outcome: "blocked", blocked: value.addCloud.blocked };
+      let result;
+      try { result = await request("clouds", { method: "POST", body: { tier, interval, name: cleanName, ...(color ? { color } : {}) }, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        // The Admin's own reason wins, whatever the status (409 cap or open checkout, 429 rate, 503 sign-ups closed).
+        const blocked = !error?.opaque && ADD_BLOCKS.includes(error?.blocked) ? error.blocked : null;
+        if (blocked === "checkout_open") {
+          // Another Cloud's checkout is still open: its page is kept here, as one this app opened, to reopen or copy.
+          const open = checkoutDestination(error.checkoutUrl, { fixture, staging });
+          const listed = otherOwnClouds(value.clouds).find(cloud => cloud.status === "checkout") ?? null;
+          if (open && grant === signedIn) {
+            adding = { cloudId: listed?.id ?? null, name: listed?.name ?? cleanName, color: listed ? listed.color : color, tier: listed?.tier ?? tier, startedAt: now(), url: open };
+            publish(value);
+            schedule(refresh, WATCH_REFRESH_MS);
+          }
+        }
+        if (blocked) return { outcome: "blocked", blocked };
+        if (!error?.opaque && error?.status === 409) return { outcome: "blocked", blocked: "cap" };
+        if (!error?.opaque && error?.status === 429) return { outcome: "blocked", blocked: "rate" };
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      const destination = checkoutDestination(result?.checkoutUrl, { fixture, staging });
+      if ((result?.cloudContractVersion !== undefined && result.cloudContractVersion !== 1) || typeof result?.cloudId !== "string" || !CLOUD_ID.test(result.cloudId) || !destination) return { outcome: "failed" };
+      if (grant !== signedIn) return { outcome: "failed" };
+      await openBrowser(destination);
+      adding = { cloudId: result.cloudId, name: cleanName, color, tier, startedAt: now(), url: destination };
+      publish(value);
+      schedule(refresh, WATCH_REFRESH_MS);
+      return { outcome: "opened", state: state() };
+    },
+    /** A new organization on the Team plan this account pays for (POST organizations, contract v1): its name and swatch, and
+     * no checkout. `added` once the Admin made it (the session is read again, so the rail shows it being set up); `blocked`
+     * with the Admin's reason; `taken` when another of the plan's has that name; `unsupported` from an Admin without it. */
+    async addOrganization({ name, color = null } = {}) {
+      const cleanName = cleanCloudListName(name);
+      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid organization to add.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.organizations) return { outcome: "unsupported" };
+      let result;
+      try { result = await request("organizations", { method: "POST", body: { name: cleanName, ...(color ? { color } : {}) }, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && ORGANIZATION_BLOCKS.includes(error?.blocked)) return { outcome: "blocked", blocked: error.blocked };
+        if (!error?.opaque && error?.code === "name_taken") return { outcome: "taken" };
+        if (!error?.opaque && error?.status === 429) return { outcome: "blocked", blocked: "rate" };
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "added", ...(typeof result?.cloud?.id === "string" && CLOUD_ID.test(result.cloud.id) ? { cloudId: result.cloud.id } : {}) };
+    },
+    /** A Cloud's colour (PATCH clouds/:id, contract v1), which only its owner or its team's Super admin and Admins
+     * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
+     * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
+    async setCloudColor(cloudId, color) {
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid Cloud color.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.managed !== false)) return { outcome: "unsupported" };
+      try { await request(`clouds/${encodeURIComponent(cloudId)}`, { method: "PATCH", body: { color }, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && error?.status === 403) return { outcome: "refused" };
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "saved" };
+    },
+    /** Remove from list (POST clouds/:id/hide, contract v1): one of the person's own Clouds the verified session says they may
+     * take off their list (`removable`: it ended, or was never paid for). Only the list changes on the Admin; its files still go
+     * when they were going to. `removed` once the Admin did (the session is read again, so every list here follows); `refused`
+     * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
+     * Remove from list (whose session never says `removable`). */
+    async hideCloud(cloudId) {
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };
+      try { await request(`clouds/${encodeURIComponent(cloudId)}/hide`, { method: "POST", body: {}, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && error?.code === "not_removable") { await refresh().catch(() => {}); return { outcome: "refused" }; }
+        if (!error?.opaque && error?.code === "not_found") { await refresh().catch(() => {}); return { outcome: "gone" }; }
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "removed" };
+    },
+    /** The Cloud being bought's checkout, again: the same page while it is kept here; false when there is none. */
+    async reopenAdd() {
+      const kept = adding;
+      if (!kept?.url) return false;
+      await openBrowser(kept.url);
+      if (adding !== kept) return false;
+      adding = { ...kept, startedAt: now() };
+      publish(value);
+      schedule(refresh, WATCH_REFRESH_MS);
+      return true;
+    },
+    /** For main's clipboard only: that checkout's page. */
+    addLink: () => (adding?.url && now() - adding.startedAt < CHECKOUT_KEPT_MS ? adding.url : null),
+    /** The Cloud this app bought was opened or announced: that purchase is over. */
+    addDone() { if (adding && !adding.done) { adding = { ...adding, done: true }; publish(value); } },
+    /** A one-time code for a team's Cloud, signed by the Admin with this person's membership: main only, for one
+     * navigation. The Admin answers 404 once they are no longer in the team (`gone`), 409 while its Cloud isn't running. */
+    async pairTeam(teamId) {
+      const current = grant, team = value.status === "connected" ? value.teams?.find(entry => entry.id === teamId) ?? null : null;
+      if (!current || !team) throw Object.assign(new Error("You're no longer in this team."), { gone: true });
+      const origin = team.machine?.origin;
+      if (!origin || !CLOUD_MACHINE_CONNECTABLE.includes(team.machine.status)) throw new Error(`${team.name} isn't ready to open yet.`);
+      let result;
+      try { result = await request(`teams/${encodeURIComponent(teamId)}/pairing`, { method: "POST", body: {}, token: current.token }); } catch (error) {
+        if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`You're no longer in ${team.name}.`), { gone: true }); }
+        if (error?.status === 409) throw new Error(`${team.name} isn't running right now.`);
+        throw error;
+      }
+      const pairing = parsePairingGrant(result, origin, now());
+      if (!pairing) throw new Error("Invalid Cloud pairing response.");
+      return pairing;
+    },
+    /** A Cloud that ended and that the Admin still holds, started for its owner's export only: a one-time code for it
+     * (main only, not kept), `starting` while it starts, `notHeld` when it is not held (yet), `deleted` once it is gone.
+     * `installation`: this computer, which the Admin lets take it only if it is the one the Cloud's things come home to. */
+    async exportHome({ installation } = {}) {
+      const current = grant;
+      if (!current) throw new Error("Sign in to MausBot Cloud first.");
+      let result;
+      try { result = await request("export", { method: "POST", body: installation ? { installation } : {}, token: current.token }); } catch (error) {
+        if (error?.status === 409) return { notHeld: true };
+        if (error?.status === 410) return { deleted: true };
+        throw error;
+      }
+      if (result?.cloudContractVersion === 1 && result.state === "starting") return { starting: true };
+      const pairing = typeof result?.origin === "string" && result.origin.startsWith("https://") ? parsePairingGrant(result, result.origin, now()) : null;
+      if (!pairing) throw new Error("Invalid Cloud export response.");
+      return { grant: pairing };
+    },
+    /** Tells the Admin that this computer's move to My Cloud is done, as `installation` (POST /api/cloud/desktop/moved):
+     * only such a computer can be the one an ended Cloud's things come home to. False when the Admin can't take it yet. */
+    async reportMove({ installation }) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("moved", { method: "POST", body: { installation }, token: current.token }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
+    /** Tells the Admin that this computer, as `installation`, keeps its bots on itself again (POST
+     * /api/cloud/desktop/kept): it no longer counts as moved, so an ended Cloud's things never come home to it. False when
+     * the Admin can't take it yet. */
+    async reportKept({ installation }) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
+    /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status; move-status.mjs
+     * builds `report`). False when there is no sign-in or the Admin doesn't take it yet (404). */
+    async reportMoveStatus(report) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("move-status", { method: "POST", body: report, token: current.token, timeoutMs: 15_000 }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
+    /** This sign-in's own X research relay access while its plan is paid:
+     * `{ url, token }` for the local server (electron/included-x.mjs), or null
+     * when there is no sign-in, the Admin says the plan is not active (402) or
+     * it does not offer X research (404). Never kept on disk. The relay must
+     * be on the Cloud's own origin: the token goes nowhere else. */
+    async xResearchAccess() {
+      const current = grant;
+      if (!current) return null;
+      let result;
+      try { result = await request("services/x", { method: "POST", body: {}, token: current.token }); }
+      catch (error) { if (error?.status === 402 || error?.status === 404) return null; throw error; }
+      let relay = null;
+      try { relay = typeof result?.url === "string" ? new URL(result.url) : null; } catch { relay = null; }
+      if (result?.cloudContractVersion !== 1 || !relay || relay.origin !== origin || typeof result.token !== "string" || !/^omb_xd_[A-Za-z0-9_-]{43}$/.test(result.token)) {
+        throw new Error("Invalid Cloud X research response.");
+      }
+      return { url: result.url, token: result.token };
+    },
+    /** This sign-in's own pages token, for any plan: `{ url, token }` for the local server (electron/included-pages.mjs),
+     * or null when there is no sign-in or the Admin does not offer pages yet (404). Never kept on disk. The token route
+     * must be on the Cloud's own origin: the token goes nowhere else. */
+    async pagesAccess() {
+      const current = grant;
+      if (!current) return null;
+      let result;
+      try { result = await request("services/pages", { method: "POST", body: {}, token: current.token }); }
+      catch (error) { if (error?.status === 404) return null; throw error; }
+      let target = null;
+      try { target = typeof result?.url === "string" ? new URL(result.url) : null; } catch { target = null; }
+      if (result?.cloudContractVersion !== 1 || !target || target.origin !== origin || typeof result.token !== "string" || !/^omb_pd_[A-Za-z0-9_-]{43}$/.test(result.token)) {
+        throw new Error("Invalid Cloud pages response.");
+      }
+      return { url: result.url, token: result.token };
+    },
+    /** The account's answer to the product-updates question (GET /api/cloud/desktop/updates-consent), as the Admin sends it. */
+    async updatesConsent() {
+      const current = grant;
+      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      return request("updates-consent", { token: current.token, signal: AbortSignal.timeout(10_000) });
+    },
+    async recordUpdatesConsent(status, textVersion) {
+      const current = grant;
+      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      const result = await request("updates-consent", { method: "POST", body: { status, textVersion }, token: current.token, signal: AbortSignal.timeout(10_000) });
+      if (result?.cloudContractVersion !== 1 || result.consent?.status !== status) throw new Error("Invalid Cloud consent response.");
+    },
+    /** No sign-in: an email typed in the app (POST /api/updates-consent). Returns the receipt that can withdraw it. */
+    async updatesConsentByEmail({ email, installId, textVersion }) {
+      const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status: "opted_in", email, installId, textVersion }, signal: AbortSignal.timeout(10_000) });
+      if (typeof result?.receipt !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(result.receipt)) throw new Error("Invalid Cloud consent response.");
+      return result.receipt;
+    },
+    async withdrawUpdatesConsent({ status, receipt }) {
+      const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status, receipt }, signal: AbortSignal.timeout(10_000) });
+      if (result?.ok !== true) throw new Error("Invalid Cloud consent response.");
     },
     close() { closed = true; reset(); },
   };
@@ -470,7 +899,8 @@ export function cloudMenuSublabel(state, date) {
   if (state?.status !== "connected") return null;
   const trial = state.trial;
   if (state.entitlement?.plan === "pro" && state.entitlement.status === "active") {
-    return (trial?.state === "active" || trial?.state === "ending") ? `Free trial until ${date(trial.endsAt)}` : "Always on";
+    if (trial?.state === "active" || trial?.state === "ending") return `Free trial until ${date(trial.endsAt)}`;
+    return state.machine?.power?.sleeps ? "Sleeps when idle" : "Always on";
   }
   return state.machine || trial ? "Stopped" : null;
 }
@@ -480,7 +910,8 @@ export function cloudPlanSnapshot(state, { notice = null } = {}) {
   const tier = state?.status === "connected" ? state.entitlement?.tier : state?.lastPlan?.tier;
   const named = typeof tier === "string" ? { tier } : {};
   const trial = state?.status === "connected"
-    ? { ...(state.trial ? { trial: state.trial } : {}), ...(state.credit ? { credit: state.credit } : {}), ...(notice && state.trial ? { notice } : {}) } : {};
+    ? { ...(state.trial ? { trial: state.trial } : {}), ...(state.credit ? { credit: state.credit } : {}), ...(notice && state.trial ? { notice } : {}),
+      ...(state.machine?.power?.sleeps ? { sleeps: true } : {}), ...(state.usage ? { usage: state.usage } : {}), ...(state.renewal ? { renewal: state.renewal } : {}) } : {};
   if (state?.status === "connected" && state.entitlement?.plan === "pro") return { status: state.entitlement.status === "active" ? "paid" : "attention", ...named, ...trial };
   if (state?.status === "reauth-required") return { status: "signin", ...(state.lastPlan ? { tier: state.lastPlan.tier ?? "pro" } : {}) };
   if (state?.status !== "connected" && state?.lastPlan) return { status: "checking", ...named };

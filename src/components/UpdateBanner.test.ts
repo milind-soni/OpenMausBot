@@ -8,7 +8,7 @@ import type { UpdaterState } from "@/lib/updater";
 const fixture = vi.hoisted(() => ({ state: { status: "idle" } as UpdaterState }));
 // As the real hook: no state without the desktop app's updater bridge.
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => (window.ogb?.updater ? fixture.state : null) }));
-vi.mock("../lib/brand", () => ({ brand: () => ({ name: "OpenMausBot" }) }));
+vi.mock("../lib/brand", () => ({ brand: () => ({ name: "OpenMausBot" }), productName: () => "MausBot" }));
 import { UpdateBanner } from "./UpdateBanner";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -42,7 +42,7 @@ function serverPageBridge(origin: string, answered: boolean) {
 describe("UpdateBanner", () => {
   it("shows the ready update and its restart on My Cloud's page", () => {
     const html = render({ status: "downloaded", version: "0.2.0" }, { location: { origin: CLOUD }, ogb: serverPageBridge(CLOUD, true) });
-    expect(html).toContain("OpenMausBot 0.2.0 is ready");
+    expect(html).toContain("MausBot 0.2.0 is ready");
     expect(html).toContain("Restart to update");
     expect(html).toContain("Later");
   });
@@ -59,6 +59,13 @@ describe("UpdateBanner", () => {
     { status: "preparing", version: "0.2.0", percent: 100 },
   ] as UpdaterState[])("stays quiet while an update downloads by itself: %o", (state) => {
     expect(render(state)).toBe("");
+  });
+
+  it("says a ready update installs by itself the next time the person is away, beside its Restart", () => {
+    const html = render({ status: "downloaded", version: "0.2.0", installsByItself: true });
+    expect(html).toContain("MausBot installs it by itself the next time you");
+    expect(html).toContain("Restart to update");
+    expect(render({ status: "downloaded", version: "0.2.0", installMode: "handoff", installsByItself: true })).not.toContain("by itself");
   });
 
   it("offers restart only after native preparation is complete", () => {
@@ -83,7 +90,7 @@ describe("UpdateBanner", () => {
 
   it.each(["ETIMEDOUT while staging", "native error ".repeat(30)])("preserves restart recovery for a nonretryable error: %s", (message) => {
     const html = render({ status: "error", retryable: false, message });
-    expect(html).toContain("Quit and reopen OpenMausBot before trying the update again.");
+    expect(html).toContain("Quit and reopen MausBot before trying the update again.");
     expect(html).not.toContain("Try again");
     expect(html).toContain("Dismiss");
   });
@@ -94,12 +101,33 @@ describe("UpdateBanner", () => {
     expect(html).not.toContain("Restart to update");
   });
 
+  it("says why the automatic install did not run before the hand-off steps", () => {
+    const html = render({
+      status: "handed-off", version: "0.2.0", installMode: "restart", terminalOpened: true,
+      message: "This session could not ask for administrator rights.",
+      command: "sudo apt-get install -y '/tmp/x.deb'",
+    });
+    expect(html).toContain("This session could not ask for administrator rights.");
+    expect(html).toContain("paste it in the terminal that opened");
+    // a plain hand-off has nothing extra to explain
+    expect(render({ status: "handed-off", version: "0.2.0", installMode: "handoff", terminalOpened: true, command: "x" }))
+      .toContain("Command copied");
+  });
+
+  it("a .deb that installs itself offers the restart, with the password step explained while it runs", () => {
+    const ready = render({ status: "downloaded", version: "0.2.0", installMode: "restart" });
+    expect(ready).toContain("Restart to update");
+    expect(ready).not.toContain("terminal");
+    const running = render({ status: "installing", version: "0.2.0", installMode: "restart", message: "Installing the update. Enter your password if asked." });
+    expect(running).toContain("Enter your password if asked.");
+  });
+
   it("shows the failure cause as well as the required restart without offering a retry", () => {
     const html = render({ status: "error", retryable: false,
       message: "Not enough disk space to prepare the update. Free some space, then try again. Quit and reopen OpenMausBot before trying the update again.",
     });
     expect(html).toContain("Free some space");
-    expect(html).toContain("Quit and reopen OpenMausBot");
+    expect(html).toContain("Quit and reopen MausBot");
     expect(html).not.toContain("Try again</button>");
   });
 

@@ -67,7 +67,7 @@ function loadFile(forWrite = false): SectionContextFile {
       ...(candidate.data.sections ?? []), ...Object.keys(contexts),
     ].map(sectionContextKey).filter(Boolean))], contexts };
   } catch {
-    if (forWrite) throw new Error("Saved teams and shared instructions could not be read; the existing file was left unchanged");
+    if (forWrite) throw new Error("Saved departments and shared instructions could not be read; the existing file was left unchanged");
     return emptyFile();
   }
 }
@@ -107,9 +107,9 @@ export function ensureSections(names: (string | undefined)[]): boolean {
 export function changeEmptySection(name: string, nextName: string | null): void {
   const data = loadFile(true);
   const index = data.sections.indexOf(name);
-  if (index < 0) throw new Error("No such team");
+  if (index < 0) throw new Error("No such department");
   if (nextName !== null && nextName !== name && data.sections.includes(nextName)) {
-    throw new Error("A team with that name already exists");
+    throw new Error("A department with that name already exists");
   }
   if (nextName === name) return;
   const memoryKey = data.memoryKeys[name] ?? name;

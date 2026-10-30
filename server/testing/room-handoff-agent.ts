@@ -1,4 +1,5 @@
 // Scripted provider fixture that exercises the REAL injected agents MCP proxy.
+import { splitLaunchNote } from "./launch-note.ts";
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -54,7 +55,15 @@ async function askPermission(server: AgentsIntegration, ask: { tool_name: string
   }
 }
 
-async function browserToolCall(server: AgentsIntegration, name: string, args: unknown): Promise<any> {
+/** `{{name}}` in a step's string arguments, and in a scripted entry's reply, becomes what an earlier step's `capture` found. */
+function withCaptured(value: unknown, captured: Record<string, string>): unknown {
+  if (typeof value === "string") return value.replace(/\{\{(\w+)\}\}/g, (whole, name: string) => captured[name] ?? whole);
+  if (Array.isArray(value)) return value.map((item) => withCaptured(item, captured));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withCaptured(item, captured)]));
+  return value;
+}
+
+async function serverToolCall(server: AgentsIntegration, name: string, args: unknown): Promise<any> {
   const child = spawn(server.command, server.args, { env: { ...process.env, ...server.env }, stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.resume();
   try {
@@ -63,10 +72,10 @@ async function browserToolCall(server: AgentsIntegration, name: string, args: un
         try {
           const data = JSON.parse(line);
           if (data.id === 2) resolve(data);
-        } catch { reject(new Error("Fixture browser MCP returned malformed JSON")); }
+        } catch { reject(new Error("Fixture MCP server returned malformed JSON")); }
       });
       child.on("error", reject);
-      child.on("exit", (code, signal) => reject(new Error(`Fixture browser MCP exited before answering: ${signal ?? code}`)));
+      child.on("exit", (code, signal) => reject(new Error(`Fixture MCP server exited before answering: ${signal ?? code}`)));
       const send = (id: number, method: string, params: unknown) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
       send(1, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "claude-code", version: "fixture" } });
       send(2, "tools/call", { name, arguments: args });
@@ -119,7 +128,10 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   }
   const agent = agentEnv(integration);
   const botId = agent.OMB_BOT_ID;
-  const system = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
+  const launchNote = splitLaunchNote(prompt);
+  prompt = launchNote.prompt;
+  const launchSystem = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
+  const system = launchNote.note && typeof launchSystem === "string" ? `${launchSystem}\n\n${launchNote.note}` : launchSystem;
   // Claude snapshots the launch-time system prompt; later instructions arrive in the user message.
   const turnContext = `${system}\n${JSON.stringify(prompt)}`;
   const resumed = turnContext.includes("Your downstream room requests have settled.");
@@ -187,12 +199,22 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       await call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "room-fixture", version: "1" } });
       evidence.push(await call("tools/list"));
       evidence.push(await call("tools/call", { name: "list_room_targets", arguments: {} }));
+      // `server` names another server the turn mounted ("browser", or a person's own MCP server); `capture` { name: regex }
+      // keeps the first group of the result for later steps' `{{name}}`.
+      const captured: Record<string, string> = {};
       for (const step of steps) {
-        const browser = step.server === "browser" ? (launch ? undefined : JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers?.browser as AgentsIntegration | undefined) : undefined;
-        if (step.server === "browser" && !browser) throw new Error("A scripted browser step needs the turn's browser tools");
-        const response = browser ? await browserToolCall(browser, step.tool, step.arguments) : await call("tools/call", { name: step.tool ?? "coordinate_bots", arguments: step.arguments });
+        const server = step.server ? (launch ? undefined : JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers?.[step.server] as AgentsIntegration | undefined) : undefined;
+        if (step.server && !server) throw new Error(`A scripted ${step.server} step needs that server mounted for the turn`);
+        const args = withCaptured(step.arguments, captured);
+        const response = server ? await serverToolCall(server, step.tool, args) : await call("tools/call", { name: step.tool ?? "coordinate_bots", arguments: args });
         evidence.push({ step, response });
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
+        for (const [name, pattern] of Object.entries((step.capture ?? {}) as Record<string, string>)) {
+          const text = (response.result?.content ?? []).map((part: any) => part?.text ?? "").join("\n");
+          const found = new RegExp(pattern).exec(text)?.[1];
+          if (!found) throw new Error(`Scripted capture ${name} found nothing in: ${text.slice(0, 300)}`);
+          captured[name] = found;
+        }
       }
       // A person's answer, like a test gate, is owned by the parent test's timeout.
       if (plan.gateFile || plan.approve || plan.screenCalls) clearTimeout(timer);
@@ -219,9 +241,11 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       if (typeof plan.progressAfterGate === "string") progress?.(plan.progressAfterGate);
       if (plan.delayMs) await new Promise(resolve => { delayTimer = setTimeout(resolve, plan.delayMs); });
       if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");
+      // `failWith`: the turn fails with this engine error, e.g. a signed-out reason.
+      if (typeof plan.failWith === "string") throw new Error(plan.failWith);
       if (plan.failResumed && resumed) throw new Error("Scripted failure of a resumed turn");
       if (approval && approval.behavior !== "allow") return plan.replyIfDenied ?? `${plan.reply} (approval ${approval.behavior})`;
-      if (entry) return plan.reply ?? `Result from ${botId}`;
+      if (entry) return String(withCaptured(plan.reply ?? `Result from ${botId}`, captured));
       return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;
     })()]);
   } finally {
@@ -231,6 +255,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
     appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId: agent.OMB_THREAD_ID, pid: process.pid,
       model: argv.includes("--model") ? arg("--model") : undefined,
       permissionMode: argv.includes("--permission-mode") ? arg("--permission-mode") : undefined,
+      restricted: argv.includes("--restricted"), permissionPromptTool: argv.includes("--permission-prompt-tool"),
       snapshotMode: argv.includes("--system-prompt-snapshot") ? arg("--system-prompt-snapshot") : undefined,
       resumed, system, prompt, evidence, ...(entry ? { planKey: entry.key } : {}), ...(approval ? { approval } : {}), ...(screen ? { screen } : {}), ...launch?.evidence }) + "\n");
   }

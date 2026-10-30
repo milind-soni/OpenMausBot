@@ -1,10 +1,11 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { runScan } from "./scan.ts";
+import { readIssues, STATE_FILE, STATE_VERSION } from "./store.ts";
 import { fixtureDataDir, type FixtureDataDir } from "./testing.ts";
 
 describe("sentinel scan", () => {
@@ -37,5 +38,22 @@ describe("sentinel scan", () => {
     expect(late.touched.map((issue) => issue.kind)).toEqual(["queue_wait"]);
 
     expect(runScan({ ...options, now: enqueued + 420_000 }).scanned).toBe(false);
+  });
+
+  it("does not count an occurrence again after reading a state file from another version", () => {
+    const at = Date.UTC(2026, 9, 14, 12);
+    fixture.activity({ threadId: "t1", id: "m1", at, name: "mcp__agents__send", ok: false, output: "no layer 90" });
+    const options = { dataDir: fixture.dataDir, out };
+    expect(runScan({ ...options, now: at + 60_000 }).added).toBe(1);
+    const state = JSON.parse(readFileSync(join(out, STATE_FILE), "utf8"));
+    writeFileSync(join(out, STATE_FILE), JSON.stringify({ ...state, version: STATE_VERSION - 1, seen: { "tool:m1": at } }));
+    fixture.activity({ threadId: "t1", id: "m2", at: at + 90_000, name: "mcp__agents__send", ok: false, output: "no layer 91" });
+
+    expect(runScan({ ...options, now: at + 120_000 }).added).toBe(1);
+    expect([...readIssues(out).values()].map((issue) => issue.count)).toEqual([2]);
+    fixture.activity({ threadId: "t1", id: "m3", at: at + 150_000, name: "mcp__agents__send", ok: false, output: "no layer 92" });
+
+    expect(runScan({ ...options, now: at + 180_000 }).added).toBe(1);
+    expect([...readIssues(out).values()].map((issue) => issue.count)).toEqual([3]);
   });
 });

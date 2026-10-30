@@ -56,8 +56,11 @@ export interface StepRecord {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Runs every step, acking each frame as a phone does, and returns the events each step brought. */
-export async function runV1Session(driver: LiveDriver, origin: string, { settleMs = 1_200 } = {}): Promise<StepRecord[]> {
+/** Runs every step, acking each frame as a phone does, and returns the events each step brought. Each step waits
+ * `settleMs`, then while `shown` says its events are still incomplete, at most `maxSettleMs` more. */
+export async function runV1Session(driver: LiveDriver, origin: string, { settleMs = 1_200, shown, maxSettleMs = 10_000 }: {
+  settleMs?: number; shown?: (record: StepRecord) => boolean; maxSettleMs?: number;
+} = {}): Promise<StepRecord[]> {
   const sse = new SseRecorder();
   let viewerId = "";
   sse.on("event", (event: { type: string; data: Record<string, unknown> }) => {
@@ -68,8 +71,10 @@ export async function runV1Session(driver: LiveDriver, origin: string, { settleM
   let mark = 0;
   const step = async (name: string, run: () => Promise<unknown>) => {
     const answer = await run().catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+    const record = (): StepRecord => ({ step: name, answer, events: sse.events.slice(mark) });
     await sleep(settleMs);
-    records.push({ step: name, answer, events: sse.events.slice(mark) });
+    for (const until = Date.now() + maxSettleMs; shown && !shown(record()) && Date.now() < until;) await sleep(50);
+    records.push(record());
     mark = sse.events.length;
   };
   const act = (body: Record<string, unknown>) => driver.action(viewerId, body);
@@ -100,7 +105,8 @@ export async function runV1Session(driver: LiveDriver, origin: string, { settleM
   return records;
 }
 
-function shape(value: unknown): unknown {
+/** A value's field names and types, which is what the v1 contract holds an event to. */
+export function shape(value: unknown): unknown {
   if (Array.isArray(value)) return value.length ? [shape(value[0])] : [];
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, inner]) => [key, shape(inner)]));
   return typeof value;

@@ -143,7 +143,9 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
     gate("capture.gate");
     await expect.poll(async () => (await bot()).busy, { timeout: 15_000 }).toBe(false);
     const messages = (await bot()).messages;
-    expect(messages.some((message: any) => typeof message.text === "string" && withoutTurnClock(message.text).includes("reply to: FOLLOWUP_AFTER_SCREEN"))).toBe(true);
+    // The follow-up runs in the conversation's warm engine, so its prompt may lead with the instructions that changed.
+    expect(messages.some((message: any) => message.role === "bot" && typeof message.text === "string" &&
+      withoutTurnClock(message.text).startsWith("reply to: ") && message.text.endsWith("FOLLOWUP_AFTER_SCREEN"))).toBe(true);
     expect(messages.some((message: any) => message.tool?.name?.includes("another thread is working"))).toBe(false);
     const screenIndex = messages.findIndex((message: any) => message.kind === "screen");
     expect(screenIndex).toBeGreaterThanOrEqual(0);
@@ -163,6 +165,7 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
       { headers: { origin: session.info.url } });
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/jpeg");
+    expect(image.headers.get("cache-control")).toBe("private, no-store");
     expect(Buffer.from(await image.arrayBuffer()).toString("base64")).toBe(JPEG);
   }, 30_000);
 

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { teamImportPreview } from "./team-import";
+import { grokImportPreview, teamImportPreview } from "./team-import";
 import { takeImportName } from "../../shared/import-name";
 import { NEWER_PACKAGE_MESSAGE } from "../../shared/package-format";
 
@@ -172,5 +172,52 @@ Create the team.`);
     const broken = fixture("full-team.v2.json");
     broken.package.rooms[0].members.push("ghost");
     expect(() => teamImportPreview(broken)).toThrow("Room desk references unknown agent: ghost");
+  });
+});
+
+describe("Grok Bot import preview", () => {
+  const reply = {
+    format: "openmaus.grok/1",
+    name: "Overheard",
+    description: "Watches the web for mentions of your brand.",
+    instructions: "Watch Reddit, Hacker News and X for mentions. Stay quiet on dead days.",
+    skills: [{ name: "digest", description: "Write the weekday digest.", body: "# Digest\n\nThree bullets at most." }],
+    routines: [
+      { name: "Weekday digest", schedule: "weekdays at 9am", cron: "0 9 * * 1-5", timeZone: "America/New_York", prompt: "Send the digest." },
+      { name: "On mention", schedule: "When someone mentions the brand on X", cron: "", timeZone: "", prompt: "Flag it." },
+    ],
+    plugins: ["X", "Slack"],
+    memories: [],
+  };
+
+  it("previews a pasted reply (code fence and all) as a shared team with what was left out", () => {
+    const pending = teamImportPreview(`Sure!\n\n\`\`\`json\n${JSON.stringify(reply)}\n\`\`\``);
+    expect(pending).toMatchObject({
+      kind: "package",
+      version: 2,
+      name: "Overheard",
+      teamName: "Overheard",
+      description: reply.description,
+      members: [{ name: "Overheard", title: "" }],
+      routines: 1,
+      skills: ["digest"],
+      apps: [{ label: "X", optional: false }, { label: "Slack", optional: false }],
+      leftOut: true,
+    });
+    expect(pending.warnings).toEqual([
+      "Routine “On mention”: it starts on an event, not a clock. It said: When: When someone mentions the brand on X\nFlag it.",
+    ]);
+    // What Add sends is the converted package, never the raw reply.
+    expect((pending.manifest as { format: string }).format).toBe("openmaus.package");
+  });
+
+  it("previews a dropped grokbot-bundle/v1 file, and a reply without the format through the Grok box", () => {
+    const bundle = { format: "grokbot-bundle/v1", persona: { name: "Side", description: "Be the side chat." }, memories: [], skills: [], routines: [], plugins: [] };
+    expect(teamImportPreview(bundle)).toMatchObject({ name: "Side", kind: "package", routines: 0 });
+    expect(teamImportPreview(bundle).leftOut).toBeUndefined();
+    const { format: _format, ...unlabelled } = reply;
+    const pending = grokImportPreview(JSON.stringify(unlabelled), { sourceUrl: "https://x.ai/bot/NIEguoGUjA648fUPle8F5", timeZone: "UTC" });
+    expect((pending.manifest as { package: { author: unknown } }).package.author).toEqual({ name: "Grok Bot creator", url: "https://x.ai/bot/NIEguoGUjA648fUPle8F5" });
+    expect(() => grokImportPreview("thanks, done!")).toThrow(/Copy the whole code block/);
   });
 });

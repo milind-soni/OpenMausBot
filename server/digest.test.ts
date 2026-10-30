@@ -124,6 +124,13 @@ describe("buildTurnDigest", () => {
     expect(long.reply).toHaveLength(200);
   });
 
+  it("masks a credential the reply repeats, as the stored reply is masked", () => {
+    const secret = `${"whsec" + "_"}${"a1B2c3D4".repeat(5)}`;
+    const d = buildTurnDigest({ ...base, activities: [], memory: [], reply: `Connected the watcher to http://127.0.0.1:8800/hooks/wh_abc/${secret}. Done.` });
+    expect(d.reply).toMatch(/^Connected the watcher to http:\/\/127\.0\.0\.1:8800\/hooks\/wh_abc\/«redacted \d+ chars»\.$/u);
+    expect(JSON.stringify(d) + renderDigest(d)).not.toContain(secret);
+  });
+
   it("caps the file lists at 20 entries and records the overflow", () => {
     const changed = Array.from({ length: 30 }, (_, i) => `src/file${i}.ts`);
     const d = buildTurnDigest({ ...base, activities: [], memory: [], files: { changed, added: [], deleted: [] } });

@@ -2,13 +2,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// Mirrors WORKSPACE_CREDENTIAL_ENV in server/config.ts; a test asserts the two lists never drift apart.
+// Mirrors WORKSPACE_CREDENTIAL_ENV in server/credential-env.ts; a test asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
   "XAI_API_KEY",
   "MISTRAL_API_KEY",
   "CEREBRAS_API_KEY",
   "OMB_GROQ_API_KEY",
   "OMB_META_API_KEY",
+  "OMB_DEEPSEEK_API_KEY",
   "OMB_ANTHROPIC_API_KEY",
   "OMB_ANTHROPIC_API_URL",
   "OMB_HOSTED_MODEL_TOKEN",
@@ -23,15 +24,20 @@ export const CREDENTIAL_ENV_NAMES = [
   "OMB_FISH_AUDIO_API_KEY",
   "OMB_JEV_API_KEY",
   "OMB_OPENROUTER_DECIDER_KEY",
+  "OMB_WORKERS_AI_TOKEN",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
   "OMB_OPENAI_LIVE_KEY",
+  "OMB_TREG_KEY",
+  "OMB_POSTIZ_API_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_CLOUD_BOAT_TOKEN",
   "OMB_CLOUD_VOICE_TOKEN",
   "OMB_CLOUD_DECIDER_TOKEN",
   "OMB_CLOUD_AI_TOKEN",
+  "OMB_CLOUD_X_TOKEN",
+  "OMB_CLOUD_CONNECTED_APPS_GRANT",
   // Private even though they are not traditional API credentials.
   "OMB_BROWSER_CONNECTION",
   "OMB_USER_DATA",

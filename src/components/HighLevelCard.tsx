@@ -222,7 +222,7 @@ export function HighLevelCard({ refreshKey = 0, onConnection }: {
             <span className="truncate text-[14px] font-semibold leading-5 text-ink">{t("highlevel.title")}</span>
             {connected && <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />}
           </div>
-          <p className="truncate text-[12.5px] leading-[18px] text-ink-secondary" title={description}>{description}</p>
+          <p className="truncate text-[13px] leading-[18px] text-ink-secondary" title={description}>{description}</p>
         </div>
         {connecting ? (
           <button type="button" onClick={cancel} className={pill}>{t("mcp.auth.cancel")}</button>

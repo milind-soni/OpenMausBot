@@ -4,6 +4,7 @@
  * text), so a confirmation survives a restart without asking the model again.
  */
 
+import type { LimitResetRepeat } from "./limit-reset.ts";
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
 
 export type RoutineRequestRunOn = "maus" | "cloud";
@@ -15,6 +16,8 @@ export interface RoutineRequestIntervalWindow {
 
 export type RoutineRequestSchedule =
   | { type: "once"; at: number }
+  /** The time is the engine's, derived when the routine is saved. */
+  | { type: "limit_reset"; engine: string; repeat: LimitResetRepeat }
   | { type: "daily"; time: string; weekdays: number[] }
   | RoutineCronSchedule
   | {

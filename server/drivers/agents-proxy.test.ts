@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { childEnv } from "../testing/omb-env.ts";
 import { ToolResults } from "../tool-results.ts";
 import { waitForExit } from "../testing/cleanup.ts";
+import { fullInputSchema } from "./agents-catalog.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -61,7 +62,7 @@ let lastRoutineQuery = "";
 let routinesResponse: unknown = {
   now: "2026-08-28T10:30:00.000Z",
   timeZone: "Asia/Kolkata",
-  routines: [
+  triggers: [
     {
       id: "routine-1",
       name: "Morning brief",
@@ -150,9 +151,7 @@ function setProposalResponse(tool: string, response: unknown) {
 
 const proposalCases = [
   { tool: "propose_profile", args: { name: "Kiwi" } },
-  { tool: "propose_routine", args: { name: "Brief", instructions: "Summarize the queue.", schedule: { type: "daily", time: "09:00" } } },
-  { tool: "propose_routine_action", args: { action: "pause", routine_id: "routine-1" } },
-  { tool: "propose_team_setup", args: { operations: [] } },
+  { tool: "propose_team_setup", args: { reason: "Fixture plan", operations: [{ action: "update", botId: "bot-helper", fields: { title: "Fixture" } }] } },
   { tool: "propose_bot_deletion", args: { bot_id: "bot-helper", reason: "User requested deletion" } },
   { tool: "skill_manage", args: { action: "create", skill_md: "---\nname: fixture-skill\ndescription: Fixture only\n---\n# Fixture\n", source: "conversation" } },
   { tool: "skill_manage", args: { action: "update", skill_name: "fixture-skill", skill_md: "---\nname: fixture-skill\ndescription: Updated fixture\n---\n# Fixture\n", source: "conversation" } },
@@ -341,17 +340,18 @@ beforeAll(async () => {
       });
       return;
     }
-    if (req.method === "GET" && req.url?.startsWith("/api/internal/routines?")) {
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/triggers?")) {
       lastRoutineQuery = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify(routinesResponse));
     }
-    if (req.method === "POST" && req.url === "/api/internal/routine-requests") {
+    if (req.method === "POST" && req.url === "/api/internal/trigger-requests") {
       let data = "";
       req.on("data", (c) => (data += c));
       req.on("end", () => {
         lastRoutineRequestBody = JSON.parse(data);
-        res.writeHead(201, { "content-type": "application/json" });
+        const refused = typeof (routineRequestResponse as { error?: unknown }).error === "string";
+        res.writeHead(refused ? 409 : 201, { "content-type": "application/json" });
         res.end(JSON.stringify(routineRequestResponse));
       });
       return;
@@ -461,6 +461,8 @@ beforeAll(async () => {
       OMB_SHARED_COMPUTERS_ENABLED: "1",
       // A Chief's turn, so the Chief-only team tools are mounted too.
       OMB_CHIEF_OF_STAFF: "1",
+      // A person's own request, which may pick its computer.
+      OMB_COMPUTER_SELECTION: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -489,23 +491,24 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
-        // Team setup applies only at Full access; a bot's own routines, skills and profile at any level.
-      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
-        expect(description).toContain("granted Full Access may apply the change immediately");
-        expect(description).toContain("Never claim success from the permission mode alone");
-      } else {
+      // Routines keep their own rule until Triggers v2; everything else applies at every level.
+      if (tool === "propose_routine" || tool === "propose_routine_action") {
         expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
         expect(description).toContain("a change for another bot may wait for the person's confirmation");
-        expect(description).toContain("Never claim success without an applied result");
+        expect(description).toContain("If applied, continue the requested work without another confirmation");
+        expect(description).toContain("Only a pending result requires ending the turn");
+      } else {
+        expect(description).toContain("it applies immediately at every access level, and the person sees it with an Undo where possible");
+        expect(description).toContain("If applied, continue the work without another confirmation");
+        expect(description).toContain("Only a pending result (a Cloud conversation its owner did not drive)");
       }
-      expect(description).toContain("If applied, continue the requested work without another confirmation");
-      expect(description).toContain("Only a pending result requires ending the turn");
+      expect(description).toContain("Never claim success without an applied result");
       expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
-    expect(credential.description).toContain("after the user saves or declines");
+    expect(credential.description).toContain("you resume when they save or decline");
     expect(credential.description).not.toContain("apply the change immediately");
-    for (const name of ["create_room", "manage_room"]) {
+    for (const name of ["manage_room"]) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === name).description;
       expect(description).toContain("Follow the tool result under the effective access level");
       expect(description).not.toContain("If peer approval is enabled");
@@ -542,7 +545,7 @@ describe("agents-proxy MCP surface", () => {
 
   it.each(["failed", "cancelled", "denied"])("does not misreport a %s team result as applied or pending", async state => {
     teamRequestResponse = { state, result: { state, error: "Fixture target changed", bots: [], newTeams: [] } };
-    const response = await callTool("propose_team_setup", { operations: [] });
+    const response = await callTool("propose_team_setup", { reason: "Fixture plan", operations: [{ action: "update", botId: "bot-helper", fields: { title: "Fixture" } }] });
     expect(response.result.isError).toBe(true);
     expect(response.result.content[0].text).toContain("Fixture target changed");
     expect(response.result.content[0].text).toContain("Do not claim it was applied");
@@ -633,25 +636,32 @@ describe("agents-proxy MCP surface", () => {
       "vm_exec",
       "attach_file",
       "show_widget",
-      "update_widget",
+      "show_html",
+      "publish_page",
+      "unpublish_page",
       "post_to_room",
       "create_bot",
       "list_team_setup",
+      "list_team_library",
       "propose_team_setup",
       "propose_bot_deletion",
-      "create_room",
       "manage_room",
       "request_credential",
       "request_sign_in",
       "fill_login",
+      "decide",
+      "extract",
+      "report_bug",
       "memory_update",
       "retry_thread",
       "memory_log",
       "session_search",
-      "session_read",
-      "list_routines",
-      "propose_routine",
-      "propose_routine_action",
+      "trigger_info",
+      "trigger",
+      "delete_trigger",
+      "wait_until",
+      "list_waits",
+      "cancel_wait",
       "propose_profile",
       "propose_model",
       "propose_team_memory",
@@ -665,14 +675,15 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("consult true asks a question");
     expect(coordinate.description).toContain('reply "none" is a one-way notice');
     expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "reply", "consult", "done_when"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
     expect(coordinate.inputSchema.properties.thread.enum).toEqual(["standing", "new"]);
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
     const status = tool("assignment_status");
     expect(status.description).toContain("Read-only");
     expect(status.description).toContain("never needs this to wait");
-    expect(status.inputSchema.properties.wait_ms).toMatchObject({ type: "integer", minimum: 0, maximum: 240_000 });
+    expect(status.inputSchema.properties.wait_ms).toEqual({ type: "integer", description: expect.stringContaining("at most 240000") });
+    expect(fullInputSchema("assignment_status")).toMatchObject({ properties: { wait_ms: { type: "integer", minimum: 0 } } });
     expect(status.inputSchema.required ?? []).toEqual([]);
     expect(JSON.stringify(list.result.tools)).not.toMatch(/Brief synchronous consultation|DEFAULT FOR ASSIGNING WORK|BLOCKING status tool|Never call it in the same turn as delegate_bot|Deprecated alias/);
     for (const name of ["post_to_room", "create_bot", "retry_thread", "list_bots"]) {
@@ -680,8 +691,11 @@ describe("agents-proxy MCP surface", () => {
       expect(tool(name).description, name).not.toMatch(/\b(delegate_bot|ask_bot)\b/);
     }
     const credential = tool("request_credential");
-    expect(credential.description).toContain("freshly QR-paired mobile app show a secure entry card");
-    expect(credential.description).toContain("Never claim a secure field opened unless this request succeeds");
+    expect(credential.description).toContain("on a secure card in the app or a QR-paired phone, never in chat");
+    expect(credential.description).toContain("onePasswordToken: a 1Password service account token");
+    expect(credential.description).toContain("You never see the value");
+    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "label", "reason", "placeholder", "delivery"]);
+    expect(credential.inputSchema.required).toBeUndefined();
   });
 
   it("select_computer inspects actual choices with a GET when no target is given", async () => {
@@ -736,7 +750,7 @@ describe("agents-proxy MCP surface", () => {
       "list_shared_computers",
       "assignment_status", "list_bots", "list_rooms", "list_threads",
       "list_team_setup",
-      "session_search", "session_read", "list_routines", "skills_list",
+      "session_search", "trigger_info", "list_waits", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
       .map((tool: any) => tool.name)).toEqual(readNames);
@@ -754,10 +768,14 @@ describe("agents-proxy MCP surface", () => {
     }
   });
 
-  it("publishes a flat routine schedule schema that survives provider conversion", async () => {
+  it("publishes a flat trigger schedule schema that survives provider conversion", async () => {
     const list = await rpc("tools/list");
-    const create = list.result.tools.find((t: { name: string }) => t.name === "propose_routine");
-    expect(create.inputSchema.required).toEqual(["name", "instructions", "schedule"]);
+    const create = list.result.tools.find((t: { name: string }) => t.name === "trigger");
+    expect(create.inputSchema.required).toEqual(["action"]);
+    expect(create.inputSchema.properties.action.enum).toEqual(["create", "update", "pause", "resume", "run_now"]);
+    expect(Object.keys(create.inputSchema.properties)).not.toContain("changes");
+    expect(create.inputSchema.properties.when.enum).toEqual(["schedule", "app_event", "webhook", "limit_reset"]);
+    expect(create.inputSchema.properties.repeat.enum).toEqual(["once", "every_reset"]);
     const schedule = create.inputSchema.properties.schedule;
     expect(JSON.stringify(create.inputSchema)).not.toMatch(/"oneOf"|"anyOf"|"allOf"|"const"/);
     expect(schedule.type).toBe("object");
@@ -766,7 +784,8 @@ describe("agents-proxy MCP surface", () => {
     expect(schedule.properties.expression.description).toContain("0 9 L * *");
     expect(schedule.properties.expression.description).toContain("MON#2");
     expect(schedule.properties.timeZone.description).toContain("IANA");
-    expect(create.description).toContain("Never approximate unsupported requests");
+    expect(create.description).toContain("never ask for confirmation first");
+    expect(fullInputSchema("trigger")).toMatchObject({ properties: { timeout_minutes: { minimum: 5, maximum: 240 }, schedule: { properties: { every_minutes: { minimum: 5, maximum: 1_440 } } } } });
     expect(schedule.properties.weekdays.items.enum).toEqual([
       "monday",
       "tuesday",
@@ -777,18 +796,18 @@ describe("agents-proxy MCP surface", () => {
       "sunday",
     ]);
     expect(create.inputSchema.properties).not.toHaveProperty("duration_minutes");
-    expect(create.inputSchema.properties.timeout_minutes).toMatchObject({ minimum: 5, maximum: 240 });
+    expect(create.inputSchema.properties.timeout_minutes.description).toContain("from 5 to 240 minutes");
     expect(create.inputSchema.properties.continuity).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.run_on_startup).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.clear_timeout.type).toBe("boolean");
-    expect(schedule.properties.every_minutes).toMatchObject({ minimum: 5, maximum: 1_440 });
+    expect(schedule.properties.every_minutes.description).toContain("from 5 to 1440");
     expect(schedule.properties.window_start.type).toBe("string");
     expect(schedule.properties.window_end.type).toBe("string");
     expect(schedule.properties.ends_at.type).toBe("string");
     expect(schedule.properties.every_day.type).toBe("boolean");
     expect(schedule.properties.all_day.type).toBe("boolean");
     expect(schedule.properties.never_ends.type).toBe("boolean");
-    expect(create.description).toContain("Only a pending result requires ending the turn");
+    expect(create.description).toContain("Edit, Pause and Undo");
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -848,12 +867,12 @@ describe("agents-proxy MCP surface", () => {
   it("names a room the bot is in but cannot post into, with the reason and no id", async () => {
     roomsResponse = {
       rooms: [],
-      unpostable: [{ name: "Planning", reason: "that room includes @Scout, who is outside your section — tell the user what you wanted to post there instead" }],
+      unpostable: [{ name: "Planning", reason: "that room is still being set up — it cannot receive messages yet" }],
     };
     const res = await callTool("list_rooms", {});
     const text = res.result.content[0].text;
     expect(text).toContain("cannot post into");
-    expect(text).toContain("- Planning: that room includes @Scout, who is outside your section");
+    expect(text).toContain("- Planning: that room is still being set up");
     expect(text).toContain("nothing to retry");
     expect(text).not.toContain("[id:");
     roomsResponse = { rooms: [{ id: "room-launch", name: "Launch", members: ["Asker", "Helper"] }] };
@@ -1136,6 +1155,20 @@ describe("agents-proxy MCP surface", () => {
     expect(lastFillBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine" });
   });
 
+  it("asks for any other secret by its name, reason and delivery, never its value", async () => {
+    const res = await callTool("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
+    expect(res.result.isError).toBeFalsy();
+    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is ready in OpenMausBot, on the computer and on a freshly QR-paired phone\. End this turn now/u);
+    expect(lastCredentialBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      label: "Stripe secret key",
+      reason: "To create test charges.",
+      placeholder: "sk_test_…",
+      delivery: "file",
+    });
+  });
+
   it("rejects credential ids outside the fixed allowlist locally", async () => {
     lastCredentialBody = null;
     const res = await callTool("request_credential", { credential_id: "arbitrary.config.path" });
@@ -1293,7 +1326,7 @@ describe("agents-proxy MCP surface", () => {
     const tools = await rpc("tools/list");
     const schema = tools.result.tools.find((tool: { name: string }) => tool.name === "memory_update").inputSchema;
     // No pattern on free-text params: constrained decoding collapses a patterned field to a minimal satisfier.
-    expect(schema.properties.text).toMatchObject({ minLength: 1, maxLength: 1000 });
+    expect(fullInputSchema("memory_update")).toMatchObject({ properties: { text: { minLength: 1, maxLength: 1000 } } });
     expect(schema.properties.text).not.toHaveProperty("pattern");
     memoryStatus = 409;
     memoryResponse = { error: "oldText must match exactly once in the latest memory." };
@@ -1316,7 +1349,7 @@ describe("agents-proxy MCP surface", () => {
       expect(full.result.isError).toBe(false);
       expect(full.result.content[0].text).toBe(
         'Memory updated. Entry: - 2026-09-10 · from chat "Setup" · fact 201\n' +
-        'To stay within what loads each session, moved 1 older entry to memory/archive.md (session_search finds them):\n- 2026-08-01 · from chat "A" · fact 1',
+        'To stay within what loads each session, moved 1 older entry to your archive (session_search finds them):\n- 2026-08-01 · from chat "A" · fact 1',
       );
       expect(lastMemoryBody).toMatchObject({ action: "append", text: "fact 201" });
     }
@@ -1344,7 +1377,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const tool = list.result.tools.find((t: { name: string }) => t.name === "session_search");
     expect(tool.inputSchema.required).toBeUndefined();
-    expect(Object.keys(tool.inputSchema.properties)).toEqual(["query", "since", "until", "limit", "scope"]);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(["query", "since", "until", "limit", "scope", "thread_id", "message_id"]);
     expect(tool.description).toContain("OWN earlier conversations");
 
     const res = await callTool("session_search", { query: "audit broken links", limit: 5 });
@@ -1358,7 +1391,7 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("[2026-09-04 · this conversation · user · thread thread-asker-routine · message m-now]");
     expect(text).toContain('[2026-09-02 · task "Vendor follow-up" · @Scout (another bot — not your user) · thread thread-asker · message m-peer]');
     expect(text).not.toContain("· user · thread thread-asker ·");
-    expect(text).toContain("call session_read with its thread and message ids");
+    expect(text).toContain("call session_search with its thread_id and message_id");
 
     sessionSearchResponse = { hits: [], memoryHits: [] };
     const empty = await callTool("session_search", { query: "nothing like this" });
@@ -1475,9 +1508,9 @@ describe("agents-proxy MCP surface", () => {
     routinesResponse = {
       now: "2026-08-28T10:30:00.000Z",
       timeZone: "Asia/Kolkata",
-      routines: [{ id: "routine-1", name: "Morning brief", enabled: true }],
+      triggers: [{ id: "routine-1", name: "Morning brief", enabled: true }],
     };
-    const res = await callTool("list_routines", {});
+    const res = await callTool("list_triggers", {});
     expect(res.result.content[0].text).toContain("routine-1");
     expect(res.result.content[0].text).toContain("Asia/Kolkata");
     const query = new URL(lastRoutineQuery, "http://localhost").searchParams;
@@ -1486,9 +1519,9 @@ describe("agents-proxy MCP surface", () => {
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
   });
 
-  it("proposes a weekly routine through a confirmation-only request", async () => {
+  it("creates a weekly schedule trigger that applies at once, never asking for confirmation", async () => {
     lastRoutineRequestBody = null;
-    const res = await callTool("propose_routine", {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Morning brief",
       instructions: "Summarize today's priorities.",
       schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] },
@@ -1502,6 +1535,7 @@ describe("agents-proxy MCP surface", () => {
       fromBotId: "bot-asker",
       fromThreadId: "thread-asker-routine",
       action: "create",
+      kind: "schedule",
       routine: {
         name: "Morning brief",
         instructions: "Summarize today's priorities.",
@@ -1512,15 +1546,44 @@ describe("agents-proxy MCP surface", () => {
         runOnStartup: true,
       },
     });
-    expect(res.result.content[0].text).toContain("confirmation card");
-    expect(res.result.content[0].text).toContain("has not been applied");
-    expect(res.result.content[0].text).toContain("do not claim");
+    expect(res.result.content[0].text).toContain("applied at once");
+    expect(res.result.content[0].text).toContain("Do not ask for confirmation");
+    expect(res.result.content[0].text).not.toContain("confirmation card");
     expect(res.result.isError).toBeFalsy();
+  });
+
+  it("creates a webhook trigger with only the fields a webhook has, and refuses schedule fields on it", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("create_trigger", {
+      when: "webhook", name: "Interested replies", instructions: "Draft a follow-up for the lead.", run_on: "maus", webhook_event_types: ["reply.labelled"],
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody).toEqual({
+      fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action: "create", kind: "webhook",
+      webhook: { name: "Interested replies", instructions: "Draft a follow-up for the lead.", runOn: "maus", eventTypes: ["reply.labelled"] },
+    });
+    lastRoutineRequestBody = null;
+    const refused = await callTool("create_trigger", { when: "webhook", name: "Bad", instructions: "x", schedule: { type: "daily", time: "09:00" } });
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[0].text).toContain("takes no schedule");
+    const noWhen = await callTool("create_trigger", { name: "Bad", instructions: "x" });
+    expect(noWhen.result.isError).toBe(true);
+    const eventsOnSchedule = await callTool("create_trigger", { when: "schedule", name: "Bad", instructions: "x", schedule: { type: "daily", time: "09:00" }, webhook_event_types: ["push"] });
+    expect(eventsOnSchedule.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("reports a refused trigger change as a failure the bot must not claim", async () => {
+    setProposalResponse("create_trigger", { error: "An enabled routine with the same instructions already exists" });
+    const res = await callTool("create_trigger", { when: "schedule", name: "Brief", instructions: "x", schedule: { type: "daily", time: "09:00" } });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("did not apply: An enabled routine with the same instructions already exists");
+    expect(res.result.content[0].text).toContain("Do not claim it was applied");
   });
 
   it("forwards for_bot_id when the routine is for another bot", async () => {
     lastRoutineRequestBody = null;
-    const res = await callTool("propose_routine", {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Teammate brief",
       instructions: "Summarize for the teammate.",
       schedule: { type: "weekly", time: "08:00", weekdays: ["tuesday"] },
@@ -1534,25 +1597,25 @@ describe("agents-proxy MCP surface", () => {
 
   it("forwards for_bot_id when the action targets another bot's routine", async () => {
     lastRoutineRequestBody = null;
-    const res = await callTool("propose_routine_action", {
+    const res = await callTool("manage_trigger", {
       action: "pause",
-      routine_id: "routine-morning",
+      trigger_id: "routine-morning",
       for_bot_id: "bot-helper",
     });
     expect(lastRoutineRequestBody.forBotId).toBe("bot-helper");
-    expect(lastRoutineRequestBody.routineId).toBe("routine-morning");
+    expect(lastRoutineRequestBody.triggerId).toBe("routine-morning");
     expect(res.result.isError).toBeFalsy();
   });
 
   it.each(["box", "cloud"])("maps %s execution to the explicit Boat runner without changing stored wire values", async (run_on) => {
-    const res = await callTool("propose_routine", {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Boat check", instructions: "Check explicitly on Boat.",
       schedule: { type: "daily", time: "09:00" }, run_on,
     });
     expect(res.result.isError).toBeFalsy();
     expect(lastRoutineRequestBody.routine.runOn).toBe("cloud");
-    const update = await callTool("propose_routine_action", {
-      action: "update", routine_id: "routine-morning", changes: { run_on, runOn: "cloud" },
+    const update = await callTool("manage_trigger", {
+      action: "update", trigger_id: "routine-morning", changes: { run_on, runOn: "cloud" },
     });
     expect(update.result.isError).toBeFalsy();
     expect(lastRoutineRequestBody.changes.runOn).toBe("cloud");
@@ -1560,13 +1623,13 @@ describe("agents-proxy MCP surface", () => {
 
   it("advertises VPS-compatible default execution separately from the Boat runner", async () => {
     const list = await rpc("tools/list");
-    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "propose_routine");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "trigger");
     expect(routine.inputSchema.properties.run_on.enum).toEqual(["maus", "box"]);
     expect(routine.inputSchema.properties.run_on.description).toContain("INCLUDING a self-hosted VPS");
   });
 
-  it("preserves execution settings copied from list_routines", async () => {
-    const res = await callTool("propose_routine", {
+  it("preserves execution settings copied from list_triggers", async () => {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Cloud check",
       instructions: "Check the queue.",
       schedule: { type: "interval", everyMinutes: 15, anchorAt: "2026-09-01T09:00:00+05:30" },
@@ -1593,7 +1656,7 @@ describe("agents-proxy MCP surface", () => {
     { clear_timeout: "true" },
   ])("refuses malformed execution settings without silently dropping them: %j", async (settings) => {
     lastRoutineRequestBody = null;
-    const res = await callTool("propose_routine", {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Check",
       instructions: "Check the queue.",
       schedule: { type: "daily", time: "09:00" },
@@ -1604,7 +1667,7 @@ describe("agents-proxy MCP surface", () => {
   });
 
   it("proposes a one-time routine with the explicit-offset timestamp intact", async () => {
-    await callTool("propose_routine", {
+    await callTool("create_trigger", { when: "schedule",
       name: "Send follow-up",
       instructions: "Draft the follow-up for review.",
       schedule: { type: "once", at: "2026-09-01T09:00:00+05:30" },
@@ -1616,7 +1679,7 @@ describe("agents-proxy MCP surface", () => {
   });
 
   it("proposes an interval routine with an optional start anchor", async () => {
-    await callTool("propose_routine", {
+    await callTool("create_trigger", { when: "schedule",
       name: "Frequent check",
       instructions: "Check the queue.",
       schedule: {
@@ -1641,14 +1704,14 @@ describe("agents-proxy MCP surface", () => {
 
   it("normalizes cron proposals and updates without losing the explicit zone", async () => {
     const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" };
-    const result = await callTool("propose_routine", {
+    const result = await callTool("create_trigger", { when: "schedule",
       name: "Monthly report", instructions: "Summarize the previous month.",
       schedule: JSON.stringify({ ...schedule, expression: "  0 9  1 * *  " }),
     });
     expect(result.result.isError).toBeFalsy();
     expect(lastRoutineRequestBody.routine.schedule).toEqual(schedule);
-    const update = await callTool("propose_routine_action", {
-      action: "update", routine_id: "routine-1", changes: { schedule: { ...schedule, expression: "0 9 L * *" } },
+    const update = await callTool("manage_trigger", {
+      action: "update", trigger_id: "routine-1", changes: { schedule: { ...schedule, expression: "0 9 L * *" } },
     });
     expect(update.result.isError).toBeFalsy();
     expect(lastRoutineRequestBody.changes.schedule).toEqual({ ...schedule, expression: "0 9 L * *" });
@@ -1664,7 +1727,7 @@ describe("agents-proxy MCP surface", () => {
     { expression: "0 9 1 * *", timeZone: "UTC", weekdays: ["monday"] },
   ])("rejects unsafe cron input before calling the harness: %j", async (schedule) => {
     lastRoutineRequestBody = null;
-    const result = await callTool("propose_routine", { name: "Bad cron", instructions: "Do not run.", schedule: { type: "cron", ...schedule } });
+    const result = await callTool("create_trigger", { when: "schedule", name: "Bad cron", instructions: "Do not run.", schedule: { type: "cron", ...schedule } });
     expect(result.result.isError).toBe(true);
     expect(lastRoutineRequestBody).toBeNull();
   });
@@ -1677,7 +1740,7 @@ describe("agents-proxy MCP surface", () => {
     { never_ends: "true" },
   ])("refuses malformed interval restrictions instead of dropping them: %j", async (restriction) => {
     lastRoutineRequestBody = null;
-    const res = await callTool("propose_routine", {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Restricted check", instructions: "Check the queue.",
       schedule: { type: "interval", every_minutes: 5, ...restriction },
     });
@@ -1685,9 +1748,9 @@ describe("agents-proxy MCP surface", () => {
     expect(lastRoutineRequestBody).toBeNull();
   });
 
-  it("proposes routine updates and destructive actions without applying them", async () => {
-    const update = await callTool("propose_routine_action", {
-      routine_id: "routine-1",
+  it("forwards trigger updates and destructive actions, each reported as applied", async () => {
+    const update = await callTool("manage_trigger", {
+      trigger_id: "routine-1",
       action: "update",
       changes: { name: "Weekday brief", clear_timeout: true, continuity: false, run_on_startup: false },
     });
@@ -1695,13 +1758,13 @@ describe("agents-proxy MCP surface", () => {
       fromBotId: "bot-asker",
       fromThreadId: "thread-asker-routine",
       action: "update",
-      routineId: "routine-1",
+      triggerId: "routine-1",
       changes: { name: "Weekday brief", timeoutMinutes: null, continuity: false, runOnStartup: false },
     });
-    expect(update.result.content[0].text).toContain("has not been applied");
+    expect(update.result.content[0].text).toContain("applied at once");
 
-    await callTool("propose_routine_action", {
-      routine_id: "routine-1",
+    await callTool("manage_trigger", {
+      trigger_id: "routine-1",
       action: "update",
       changes: {
         schedule: {
@@ -1726,17 +1789,17 @@ describe("agents-proxy MCP surface", () => {
       },
     });
 
-    await callTool("propose_routine_action", { routine_id: "routine-1", action: "delete" });
+    await callTool("manage_trigger", { trigger_id: "routine-1", action: "delete" });
     expect(lastRoutineRequestBody).toEqual({
       fromBotId: "bot-asker",
       fromThreadId: "thread-asker-routine",
       action: "delete",
-      routineId: "routine-1",
+      triggerId: "routine-1",
     });
   });
 
   it("coerces the schedule shapes models actually send", async () => {
-    await callTool("propose_routine", {
+    await callTool("create_trigger", { when: "schedule",
       name: "Daily check",
       instructions: "Check things.",
       schedule: { type: "daily", time: "09:00" },
@@ -1747,14 +1810,14 @@ describe("agents-proxy MCP surface", () => {
       weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
     });
 
-    await callTool("propose_routine", {
+    await callTool("create_trigger", { when: "schedule",
       name: "Caps",
       instructions: "x.",
       schedule: { type: "weekly", time: "09:00", weekdays: ["Monday", "FRI"] },
     });
     expect(lastRoutineRequestBody.routine.schedule.weekdays).toEqual(["monday", "friday"]);
 
-    await callTool("propose_routine", {
+    await callTool("create_trigger", { when: "schedule",
       name: "Str",
       instructions: "x.",
       schedule: JSON.stringify({ type: "weekly", time: "09:00", weekdays: ["monday"] }),
@@ -1764,7 +1827,7 @@ describe("agents-proxy MCP surface", () => {
 
   it("answers invalid and unsupported schedules with instructions, before calling the harness", async () => {
     lastRoutineRequestBody = null;
-    const interval = await callTool("propose_routine", {
+    const interval = await callTool("create_trigger", { when: "schedule",
       name: "Interval",
       instructions: "x.",
       schedule: { type: "interval", minutes: 30 },
@@ -1772,7 +1835,7 @@ describe("agents-proxy MCP surface", () => {
     expect(interval.result.isError).toBe(true);
     expect(interval.result.content[0].text).toContain("every_minutes");
 
-    const noDays = await callTool("propose_routine", {
+    const noDays = await callTool("create_trigger", { when: "schedule",
       name: "NoDays",
       instructions: "x.",
       schedule: { type: "weekly", time: "09:00" },
@@ -1781,8 +1844,8 @@ describe("agents-proxy MCP surface", () => {
     expect(noDays.result.content[0].text).toContain("weekdays");
     expect(noDays.result.content[0].text).toContain("daily");
 
-    const unknown = await callTool("propose_routine_action", {
-      routine_id: "routine-1",
+    const unknown = await callTool("manage_trigger", {
+      trigger_id: "routine-1",
       action: "update",
       changes: { schedule: { type: "fortnightly", time: "09:00" } },
     });
@@ -1796,14 +1859,14 @@ describe("agents-proxy MCP surface", () => {
     { type: "interval", every_minutes: 15, start_at: "2026-09-01T09:00:00+05:30" },
   ])("refuses scheduling constraints that would otherwise be silently discarded: %j", async (schedule) => {
     lastRoutineRequestBody = null;
-    const res = await callTool("propose_routine", { name: "Check", instructions: "Check the queue.", schedule });
+    const res = await callTool("create_trigger", { when: "schedule", name: "Check", instructions: "Check the queue.", schedule });
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("Unsupported");
     expect(lastRoutineRequestBody).toBeNull();
   });
 
   it("ignores unused null schedule properties from provider schema conversion", async () => {
-    const res = await callTool("propose_routine", {
+    const res = await callTool("create_trigger", { when: "schedule",
       name: "Check",
       instructions: "Check the queue.",
       schedule: { type: "daily", time: "09:00", at: null, every_minutes: null, starts_at: null },
@@ -1818,15 +1881,15 @@ describe("agents-proxy MCP surface", () => {
 
   it("rejects malformed routine proposals before calling the harness", async () => {
     lastRoutineRequestBody = null;
-    const missing = await callTool("propose_routine", {
+    const missing = await callTool("create_trigger", { when: "schedule",
       name: "No schedule",
       instructions: "This cannot be scheduled yet.",
     });
     expect(missing.result.isError).toBe(true);
     expect(lastRoutineRequestBody).toBeNull();
 
-    const badUpdate = await callTool("propose_routine_action", {
-      routine_id: "routine-1",
+    const badUpdate = await callTool("manage_trigger", {
+      trigger_id: "routine-1",
       action: "update",
       changes: {},
     });
@@ -2034,9 +2097,9 @@ describe("standing external runtime", () => {
 
   it("sees the same one tool surface as every turn: the switches it sets change nothing", async () => {
     const list = await externalRpc("tools/list");
-    // the main child is a Chief's turn; this one is not, so only the role differs
-    const chiefOnly = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
-    const everyTurn = (await rpc("tools/list")).result.tools.filter((tool: any) => !chiefOnly.includes(tool.name));
+    // the main child is a Chief's turn that may pick its computer; this one is neither, so only those differ
+    const chiefOnly = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
+    const everyTurn = (await rpc("tools/list")).result.tools.filter((tool: any) => !chiefOnly.includes(tool.name) && tool.name !== "select_computer");
     const names = list.result.tools.map((tool: any) => tool.name);
     expect(names).toEqual(everyTurn.map((tool: any) => tool.name));
     const teamwork = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
@@ -2153,14 +2216,14 @@ describe("with computer sharing off and no Chief of Staff (the defaults)", () =>
   it("shows a bot that is not a Chief none of the Chief-only tools or parameters", async () => {
     type ListedTool = { name: string; description: string; inputSchema: { properties: Record<string, unknown> } };
     const tools = new Map(((await gatedRpc("tools/list")).result.tools as ListedTool[]).map((tool) => [tool.name, tool]));
-    for (const name of ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"]) {
+    for (const name of ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"]) {
       expect(tools.has(name), name).toBe(false);
     }
     for (const name of ["propose_profile", "propose_model"]) {
       expect(tools.get(name)!.inputSchema.properties).not.toHaveProperty("for_bot_id");
       expect(tools.get(name)!.description).not.toContain("for_bot_id");
     }
-    expect(tools.get("propose_routine_action")!.inputSchema.properties).toHaveProperty("for_bot_id");
+    expect(tools.get("trigger")!.inputSchema.properties).toHaveProperty("for_bot_id");
   });
 
   it("refuses a Chief-only tool called by name without reaching the harness", async () => {
@@ -2210,7 +2273,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false) and done_when are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2236,7 +2299,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "done_when"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");
@@ -2287,9 +2350,9 @@ describe("tool bridge", () => {
   }
 
   /** The main child's switches: a Chief with skills and shared computers. */
-  const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1" };
-  const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
-  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
+  const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
+  const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
+  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
   let chief: Rpc;
   let plain: Rpc;
   let off: Rpc;
@@ -2308,8 +2371,8 @@ describe("tool bridge", () => {
 
   beforeAll(async () => {
     chief = startProxy({ ...CHIEF, OMB_AGENTS_TOOL_BRIDGE: "1" });
-    // not a Chief, nothing optional: the defaults, bridged
-    plain = startProxy({ OMB_AGENTS_TOOL_BRIDGE: "1" });
+    // not a Chief, nothing optional, a person's own request: bridged
+    plain = startProxy({ OMB_COMPUTER_SELECTION: "1", OMB_AGENTS_TOOL_BRIDGE: "1" });
     off = startProxy({ ...CHIEF, OMB_AGENTS_TOOL_BRIDGE: "0" });
     for (const proxy of [chief, plain, off]) {
       expect((await proxy("initialize", { protocolVersion: "2024-11-05" })).result.serverInfo.name).toBe("openmausbot-agents");
@@ -2323,7 +2386,7 @@ describe("tool bridge", () => {
     expect(unbridged.result.tools.map((tool: any) => tool.name)).not.toEqual(expect.arrayContaining(["find_tool"]));
     for (const proxy of [off, rpc]) {
       for (const name of ["find_tool", "use_tool"]) {
-        const refused = await proxy("tools/call", { name, arguments: { query: "routines", name: "list_routines" } });
+        const refused = await proxy("tools/call", { name, arguments: { query: "triggers", name: "list_triggers" } });
         expect(refused.error).toEqual({ code: -32602, message: `Unknown tool: ${name}` });
       }
     }
@@ -2343,11 +2406,11 @@ describe("tool bridge", () => {
       expect(await describes(chief), name).toContain(name);
       expect(await describes(plain), name).not.toContain(name);
     }
-    expect(await describes(chief)).toContain("propose_routine");
-    expect(await describes(plain)).toContain("propose_routine");
+    expect(await describes(chief)).toContain("trigger");
+    expect(await describes(plain)).toContain("trigger_info");
     // find_tool is a read and carries the marks the catalog's reads do; use_tool claims nothing
     const [findTool, useTool] = (await listed(chief)).slice(-2);
-    expect(findTool.annotations).toEqual(unbridged.get("list_routines").annotations);
+    expect(findTool.annotations).toEqual(unbridged.get("trigger_info").annotations);
     expect(findTool.annotations).toMatchObject({ readOnlyHint: true });
     expect(useTool.annotations).toBeUndefined();
   });
@@ -2371,7 +2434,7 @@ describe("tool bridge", () => {
     const unbridged = new Map((await listed(rpc)).map((tool) => [tool.name, tool]));
     const matches = matchesOf(await find(chief, "schedule a recurring task every morning"));
     expect(matches.length).toBeLessThanOrEqual(3);
-    const { name, description, inputSchema } = unbridged.get("propose_routine");
+    const { name, description, inputSchema } = unbridged.get("trigger");
     expect(matches[0]).toEqual({ name, description, inputSchema });
     expect(matchesOf(await find(chief, "create a new specialist bot"))[0]!.name).toBe("create_bot");
     // a search that could not be made is a failed call, told how to search
@@ -2390,25 +2453,25 @@ describe("tool bridge", () => {
   });
 
   it("use_tool runs a hidden tool end to end, with the request and the result a direct call gives", async () => {
-    const routine = { name: "Morning brief", instructions: "Summarize today's priorities.", schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] }, timeout_minutes: 15 };
+    const routine = { when: "schedule", name: "Morning brief", instructions: "Summarize today's priorities.", schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] }, timeout_minutes: 15 };
     // found first, as a bot would, from how a person would ask
-    expect(matchesOf(await find(chief, "schedule a recurring task every morning"))[0]!.name).toBe("propose_routine");
+    expect(matchesOf(await find(chief, "schedule a recurring task every morning"))[0]!.name).toBe("trigger");
     lastRoutineRequestBody = null;
-    const direct = await callTool("propose_routine", routine);
+    const direct = await callTool("create_trigger", routine);
     const directBody = lastRoutineRequestBody;
     lastRoutineRequestBody = null;
     lastAuth = undefined;
-    const bridged = await use(chief, "propose_routine", routine);
+    const bridged = await use(chief, "create_trigger", routine);
     // the same capability, the same request, the same answer
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
     expect(lastRoutineRequestBody).toEqual(directBody);
     expect(lastRoutineRequestBody).toMatchObject({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action: "create", routine: { name: "Morning brief", timeoutMinutes: 15 } });
     expect(bridged.result).toEqual(direct.result);
-    expect(bridged.result.content[0].text).toContain("confirmation card");
+    expect(bridged.result.content[0].text).toContain("applied at once");
     // a tool that takes nothing, called with no arguments at all
     lastRoutineQuery = "";
-    const routines = await use(chief, "list_routines");
-    expect(routines.result).toEqual((await callTool("list_routines", {})).result);
+    const routines = await use(chief, "list_triggers");
+    expect(routines.result).toEqual((await callTool("list_triggers", {})).result);
     expect(new URL(lastRoutineQuery, "http://localhost").searchParams.get("fromBotId")).toBe("bot-asker");
   });
 
@@ -2453,19 +2516,19 @@ describe("tool bridge", () => {
     // What a schema would refuse and the tool takes on purpose
     // (normalizeScheduleInput): a schedule sent as text, "Daily", short
     // weekday names. Bridged, it makes the request a direct call makes.
-    const lenient = { name: "Brief", instructions: "Summarize the queue.", schedule: JSON.stringify({ type: "Weekly", time: "09:00", weekdays: ["mon", "fri"] }) };
+    const lenient = { when: "schedule", name: "Brief", instructions: "Summarize the queue.", schedule: JSON.stringify({ type: "Weekly", time: "09:00", weekdays: ["mon", "fri"] }) };
     lastRoutineRequestBody = null;
-    const direct = await callTool("propose_routine", lenient);
+    const direct = await callTool("create_trigger", lenient);
     const directBody = lastRoutineRequestBody;
     expect(direct.result.isError).toBeFalsy();
     lastRoutineRequestBody = null;
-    const bridged = await use(chief, "propose_routine", lenient);
+    const bridged = await use(chief, "create_trigger", lenient);
     expect(lastRoutineRequestBody).toEqual(directBody);
     expect(lastRoutineRequestBody).toMatchObject({ action: "create", routine: { name: "Brief" } });
     expect(bridged.result).toEqual(direct.result);
     // And what the tool itself refuses, it refuses in its own words either way.
     for (const [name, args] of [
-      ["propose_routine", { name: "Brief", instructions: "Summarize.", schedule: { type: "hourly" } }],
+      ["create_trigger", { when: "schedule", name: "Brief", instructions: "Summarize.", schedule: { type: "hourly" } }],
       ["start_thread", { title: "", message: "x" }],
       ["post_to_room", {}],
     ] as const) {
@@ -2474,7 +2537,7 @@ describe("tool bridge", () => {
       if (name !== "post_to_room") expect((await use(chief, name, args)).result, name).toEqual(refused.result);
     }
     // Only the call's own shape is the bridge's to refuse: a name, and arguments that are an object.
-    for (const shapeless of [{ arguments: {} }, { name: "list_routines", arguments: "{}" }, { name: "list_routines", arguments: [1] }]) {
+    for (const shapeless of [{ arguments: {} }, { name: "list_triggers", arguments: "{}" }, { name: "list_triggers", arguments: [1] }]) {
       expect(refusalOf(await chief("tools/call", { name: "use_tool", arguments: shapeless })), JSON.stringify(shapeless)).toContain('use_tool needs { "name": ');
     }
   });
@@ -2545,7 +2608,7 @@ describe("tool bridge", () => {
 
   it("still answers a hidden tool called by its own name: the profile, not the list, is what a turn may call", async () => {
     lastRoutineQuery = "";
-    const direct = await chief("tools/call", { name: "list_routines", arguments: {} });
+    const direct = await chief("tools/call", { name: "list_triggers", arguments: {} });
     expect(direct.result.isError).toBeFalsy();
     expect(lastRoutineQuery).toContain("fromBotId=bot-asker");
     // and a name outside the profile called directly is the protocol error it always was

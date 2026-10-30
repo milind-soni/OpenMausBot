@@ -37,12 +37,12 @@ These endpoints belong to the remote Cloud service, not the local app server.
   Active Pro requires a non-null future expiry; a free/active combination or
   already-expired active entitlement is refused as an invalid response.
 - `plan: "pro"` means any paid plan; the optional `tier` names it
-  (`personal`, `pro`, `max`, or a later one). A tier is a short lowercase
+  (`starter`, `personal`, `pro`, `max`, or a later one). A tier is a short lowercase
   token (`/^[a-z][a-z0-9-]{0,23}$/`); a missing or malformed one is simply no
   tier and never rejects or downgrades a paid entitlement. A plan string newer
   than the app (for example `"max"`) is read as paid with that tier and
   logged once, instead of failing the whole session. Settings shows
-  "Personal/Pro/Max active", "Cloud active" for a tier it doesn't know, and
+  "Starter/Personal/Pro/Max active", "Cloud active" for a tier it doesn't know, and
   "Pro active" when there is no tier.
 - Only this verified session can display Pro. Verification lasts at most one
   minute and never past credential or active-entitlement expiry; it is never

@@ -1,4 +1,5 @@
 import type { OnboardingStatus } from "@/lib/onboarding";
+import type { LocaleKey } from "@/locales";
 
 export type TourStepId =
   | "tour.composer"
@@ -32,6 +33,8 @@ export interface TourStep {
   placement: "above" | "below" | "right";
   onEnter?: TourEffect;
   onExit?: TourEffect;
+  /** The card's words, when they differ from the step's own `onboarding.tour.*` key. */
+  copy?: LocaleKey;
 }
 
 export const TOUR_STEPS: TourStep[] = [
@@ -47,17 +50,31 @@ export const TOUR_STEPS: TourStep[] = [
   { id: "tour.done", anchor: "composer", placement: "above" },
 ];
 
+// Simple mode's chat header holds only the bot: the model chip and the Computer button moved into the bot panel its
+// pill opens. Those steps point at the pill there, and give up rather than wait if even that is missing (a group chat).
+const SIMPLE_STEPS: Partial<Record<TourStepId, Partial<TourStep>>> = {
+  "tour.model": { anchor: "bot-pill", skipIfMissing: true, copy: "onboarding.tour.model-simple" },
+  "tour.computer": { anchor: "bot-pill", skipIfMissing: true, copy: "onboarding.tour.computer-simple" },
+};
+
+const SIMPLE_TOUR_STEPS: TourStep[] = TOUR_STEPS.map((step) => ({ ...step, ...SIMPLE_STEPS[step.id] }));
+
+/** The steps as the current mode draws them: the same ids and order, so progress carries across a mode switch. */
+export function tourSteps(advanced: boolean): TourStep[] {
+  return advanced ? TOUR_STEPS : SIMPLE_TOUR_STEPS;
+}
+
 function stepDone(record: OnboardingStatus | undefined, id: TourStepId): boolean {
   return (record?.hintsSeen ?? []).includes(id);
 }
 
-export function currentStep(record: OnboardingStatus | undefined): TourStep | null {
-  return TOUR_STEPS.find((step) => !stepDone(record, step.id)) ?? null;
+export function currentStep(record: OnboardingStatus | undefined, advanced = true): TourStep | null {
+  return tourSteps(advanced).find((step) => !stepDone(record, step.id)) ?? null;
 }
 
 export function stepNumber(step: TourStep): { current: number; total: number } {
   const visible = TOUR_STEPS.filter((s) => s.id !== "tour.done");
-  const index = visible.indexOf(step);
+  const index = visible.findIndex((s) => s.id === step.id);
   return { current: index < 0 ? visible.length : index + 1, total: visible.length };
 }
 

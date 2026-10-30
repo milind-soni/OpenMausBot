@@ -9,7 +9,7 @@ import { BotEditorStore, type InstanceInfo, type useStore } from "@/state/store"
 import { EngineSetup, grokKeyInstead } from "./EngineSetup";
 
 const CURL = "curl -fsSL https://x.ai/cli/install.sh | bash";
-const NOT_INSTALLED = "Grok with your grok.com subscription isn't installed on this server. Use an xAI API key instead.";
+const NOT_INSTALLED = "Grok with your grok.com subscription isn't installed here. Use an xAI API key instead.";
 const grok = (snapshot: InstanceInfo["snapshot"]): InstanceInfo => ({
   instanceId: "grok", driverKind: "grokAgent", displayName: "Grok",
   models: { default: "grok-4.7", options: [] }, snapshot,
@@ -49,7 +49,7 @@ describe("signed out: the in-app code", () => {
   it("signs in with xAI's code on a server's page, with no terminal command", () => {
     const html = render(signedOut, undefined);
     expect(html).toContain('data-device-sign-in="grok"');
-    expect(html).toContain("Sign in with your grok.com account so Grok runs on this server");
+    expect(html).toContain("Sign in with your grok.com account so your bots can use Grok");
     expect(html).toContain("Sign in to Grok");
     expect(html).not.toContain("grok login");
     expect(html).not.toContain("Prefer a terminal?");
@@ -77,22 +77,23 @@ describe("Grok cannot run here: an xAI key instead", () => {
   it.each([
     ["a server's page in a browser", undefined, false],
     ["My Cloud in the desktop app's window", desktop, true],
-  ] as const)("says so in one line with one action on %s", (_where, ogb, cloudHome) => {
+  ] as const)("says so in one line, with the xAI key's own field right there on %s", (_where, ogb, cloudHome) => {
     const html = render(missing, ogb, cloudHome);
     expect(grokKeyInstead(missing, cloudHome)).toBe(true);
     expect(html).toContain("data-engine-setup-key-instead");
     expect(html).toContain(NOT_INSTALLED);
-    expect(html.match(/<button/g)).toHaveLength(1);
-    expect(html).toContain("Add xAI key");
+    expect(html).toContain('data-key-row="xai"');
+    expect(html).toMatch(/<input[^>]*placeholder="xai-…"[^>]*aria-label="xAI API key"/);
+    expect(html.match(/data-key-save=/g)).toHaveLength(1);
     expect(html).not.toContain(CURL);
     expect(html).not.toContain("Set up Grok");
     expect(html).not.toContain("Terminal");
   });
 
-  it("opens Settings → API keys", () => {
+  it("takes the key in place instead of sending the person to Settings", () => {
     render(missing, undefined);
-    host.querySelector("button")!.click();
-    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleAppSettings", open: true, section: "connections" });
+    expect(host.querySelector('[data-key-row="xai"] [data-key-input]')).not.toBeNull();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("has no button on a paired desktop, whose Settings hide the keys", () => {

@@ -8,7 +8,7 @@ import { handleToolCall, request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("boots and reports an interrupted routine back to its source room", async () => {
+it("boots, starts an interrupted routine once more, and reports it back to its source room", async () => {
   const fixture = await launchVerificationServer();
   const { url, dataDir, logPath } = fixture.info;
   let restarted: ChildProcess | undefined;
@@ -45,11 +45,13 @@ it("boots and reports an interrupted routine back to its source room", async () 
       if (restarted?.exitCode !== null) throw new Error(readFileSync(logPath, "utf8"));
       return fetch(url + "/api/health").then(r => r.ok).catch(() => false);
     }, { timeout: 10_000, interval: 150 }).toBe(true);
-    const { runs } = await request("/api/routines", {}, url) as any;
-    expect(runs[0]).toMatchObject({ status: "failed", error: "OpenMausBot restarted while this routine was running" });
+    const runs = async () => (await request("/api/routines", {}, url) as any).runs as any[];
+    expect((await runs())[0]).toMatchObject({ status: "queued", retried: "restarted" });
+    await expect.poll(async () => (await runs())[0]?.status, { timeout: 30_000 }).toBe("completed");
+    expect(await runs()).toMatchObject([{ id: "interrupted-room-run", retried: "restarted" }]);
     const { messages } = await request(`/api/threads/${channel.activeTaskId}/messages`, {}, url) as any;
     expect(messages.filter((m: any) => m.routineRun?.runId === "interrupted-room-run"))
-      .toMatchObject([{ routineRun: { status: "failed" } }]);
+      .toMatchObject([{ routineRun: { status: "completed" } }]);
     const { groups } = await request("/api/bots", {}, url) as any;
     expect(groups.find((g: any) => g.id === channel.id).working).toBe(false);
     // Store catches subscriber exceptions, so a healthy server alone does not prove recovery broadcasts were safe.
@@ -58,7 +60,7 @@ it("boots and reports an interrupted routine back to its source room", async () 
     await waitForExit(restarted, { signal: "SIGTERM" });
     await fixture.close();
   }
-}, 30_000);
+}, 60_000);
 
 it("keeps a routine waiting through a restart, reruns its cut teammate once, and completes it", async () => {
   const fixture = await launchVerificationServer();

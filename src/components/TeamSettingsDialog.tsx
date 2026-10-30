@@ -136,7 +136,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
                     <input type="radio" name="team-approval" className="mt-1" checked={mode === option.mode}
                       onChange={() => setMode(option.mode as TeamApprovalMode)} />
                     <span>
-                      <span className="block text-[13.5px] text-ink">{option.label}</span>
+                      <span className="block text-[14px] text-ink">{option.label}</span>
                       <span className="block text-[12px] text-ink-secondary">{option.description}</span>
                     </span>
                   </label>

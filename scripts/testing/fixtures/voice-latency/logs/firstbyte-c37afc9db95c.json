@@ -1,0 +1,35 @@
+{
+  "kind": "voice-latency-firstbyte-row",
+  "label": "firstbyte",
+  "corpusFixtureId": "c37afc9db95cb56f4b9bad17f5f88c4ba4ff9952c9280c9b4f5e777ea87ddfec",
+  "replyId": "unpunctuated-run-319",
+  "shape": "unpunctuated-run",
+  "blockChars": 319,
+  "request": {
+    "route": "text-to-speech",
+    "streamed": true
+  },
+  "firstByteMs": 314,
+  "completeMs": 11177,
+  "firstByteBeforeCompletion": true,
+  "baseCommit": "ed76d9a43",
+  "measuredBuildCommit": "93892765e",
+  "date": "2026-10-18T17:33:37.345Z",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "configSummary": {
+    "provider": "elevenlabs (record stub)",
+    "model": "eleven_flash_v2_5",
+    "voice": "omb-stub-voice"
+  },
+  "synthesis": {
+    "protocol": "elevenlabs-wire stub on loopback; no live engine call, no engine key",
+    "modeled": true,
+    "rtf": 0.5,
+    "audioMsPerChar": 70,
+    "firstByteMs": 300
+  },
+  "modeled": true
+}

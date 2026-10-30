@@ -1,0 +1,304 @@
+{
+ "data": [
+  {
+   "id": "deepseek/deepseek-v4.1-flash-1017",
+   "name": "DeepSeek: DeepSeek V4.1 Flash 1017",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "elorian/glimpse",
+   "name": "Elorian: Glimpse",
+   "pricing": {
+    "prompt": "0.0000006",
+    "completion": "0.000003"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "xingchen-agi/xing4.0-29b-a4b:free",
+   "name": "XingChen: Xing4.0 29B A4B (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "nvidia/nemotron-3.5-super-vl:free",
+   "name": "NVIDIA: Nemotron 3.5 Super VL (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "dots-studio/dots-3-note-preview:free",
+   "name": "Dots Studio: Dots3-Note Preview (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "liquid/lfm-2.5-2.6b:free",
+   "name": "LiquidAI: LFM2.5-2.6B (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "nvidia/nemotron-3.5-lightning:free",
+   "name": "NVIDIA: Nemotron 3.5 Lightning (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "thinkingmachines/inkling-small:free",
+   "name": "Thinking Machines: Inkling Small (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tools"
+   ]
+  },
+  {
+   "id": "poolside/laguna-s-2.1:free",
+   "name": "Poolside: Laguna S 2.1 (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "thinkingmachines/inkling:free",
+   "name": "Thinking Machines: Inkling (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tools"
+   ]
+  },
+  {
+   "id": "poolside/laguna-xs-2.1:free",
+   "name": "Poolside: Laguna XS 2.1 (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "cohere/north-mini-code:free",
+   "name": "Cohere: North Mini Code (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "nvidia/nemotron-3.5-content-safety:free",
+   "name": "NVIDIA: Nemotron 3.5 Content Safety (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature"
+   ]
+  },
+  {
+   "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+   "name": "NVIDIA: Nemotron 3 Ultra (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+   "name": "NVIDIA: Nemotron 3 Nano Omni (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "google/gemma-4-26b-a4b-it:free",
+   "name": "Google: Gemma 4 26B A4B  (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "google/gemma-4-31b-it:free",
+   "name": "Google: Gemma 4 31B (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "google/lyria-3-pro-preview",
+   "name": "Google: Lyria 3 Pro Preview",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature"
+   ]
+  },
+  {
+   "id": "google/lyria-3-clip-preview",
+   "name": "Google: Lyria 3 Clip Preview",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature"
+   ]
+  },
+  {
+   "id": "nvidia/nemotron-3-super-120b-a12b:free",
+   "name": "NVIDIA: Nemotron 3 Super (free)",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "openrouter/free",
+   "name": "Free Models Router",
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  },
+  {
+   "id": "meta-llama/llama-3.3-70b-instruct",
+   "name": "Meta: Llama 3.3 70B Instruct",
+   "pricing": {
+    "prompt": "0.0000001",
+    "completion": "0.00000032"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ]
+  }
+ ]
+}

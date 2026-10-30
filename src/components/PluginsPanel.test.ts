@@ -6,10 +6,8 @@ import {
   hasUsableConnectedApps,
   connectorSetupNotice,
   disconnectAccountConfirmation,
-  mergeCompleteConnectorStatus,
-  mergeCurrentConnectorStatus,
-  onlyLatestConnectorResponses,
 } from "./PluginsPanel";
+import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import {
   accountToReconnect,
   connectedInventoryCopy,

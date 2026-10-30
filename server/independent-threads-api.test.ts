@@ -1,10 +1,11 @@
 // Gates are per model, so two tasks on one bot stay in flight until the test completes or stops each.
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
@@ -13,6 +14,9 @@ import { memoryDate } from "./workspace.ts";
 
 describe("independent bot tasks through the isolated control surface", () => {
   let session: VerificationServer;
+  const cuaRecordDir = mkdtempSync(join(tmpdir(), "omb-independent-cua-"));
+  const cuaRecord = join(cuaRecordDir, "cua-connection.json");
+  afterAll(() => rmSync(cuaRecordDir, { recursive: true, force: true }));
   let models: string[];
   const sockets: Socket[] = [];
   let evidence: Array<Record<string, unknown>>;
@@ -68,7 +72,9 @@ describe("independent bot tasks through the isolated control surface", () => {
 
   beforeEach(async () => {
     // The approval deadline fires only on a marker file.
-    session = await launchVerificationServer({ ...process.env, OMB_TEST_APPROVAL_CLOCK: "1" });
+    // Each server hears the desktop app's driver record from its parent, as the app's own server does; absent, there is none.
+    rmSync(cuaRecord, { force: true });
+    session = await launchVerificationServer({ ...process.env, OMB_TEST_APPROVAL_CLOCK: "1", OMB_TEST_DESKTOP_CUA_CONNECTION: cuaRecord });
     evidence = [{ fixture: session.info }];
     const wrapper = join(session.info.dataDir, "gated-claude.mjs");
     const fake = pathToFileURL(join(process.cwd(), "server/testing/fake-claude-cli.ts")).href;
@@ -621,6 +627,31 @@ describe("independent bot tasks through the isolated control surface", () => {
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
+  it("lets a chat-only session change its thread's model, never the bot's default", async () => {
+    const created = await tool("create_bot", { name: "Client default fixture", instance_id: "claude", model: models[0] });
+    const botId = created.bot.id;
+    const threadId = created.bot.activeTaskId;
+    const opened = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const token = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body.token as string;
+    const asClient = async (method: string, path: string, body: unknown) => {
+      const response = await fetch(`${session.info.url}${path}`, {
+        method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      evidence.push({ authority: "client-only session", method, path, body, status: response.status });
+      return { status: response.status, body: await response.json() as any };
+    };
+    const selection = { instanceId: "claude", model: models[1] };
+    expect((await asClient("PATCH", `/api/bots/${botId}`, { modelSelection: selection })).status).toBe(403);
+    const refused = await asClient("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect((await botState(botId)).modelSelection.model).toBe(models[0]);
+    expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection.model).toBe(models[0]);
+    const threadOnly = await asClient("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection });
+    expect(threadOnly.status, JSON.stringify(threadOnly.body)).toBe(200);
+    expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection).toEqual(selection);
+    expect((await botState(botId)).modelSelection.model).toBe(models[0]);
+  }, 30_000);
+
   it("runs a second engine of the same bot in the selected project folder at the same time", async () => {
     const created = await tool("create_bot", { name: "Shared project fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
@@ -646,12 +677,11 @@ describe("independent bot tasks through the isolated control surface", () => {
 
   it.skipIf(process.platform !== "darwin")("claims the shared computer only on first use and keeps a sibling stop from releasing it", async () => {
     // The fake provider only receives this inert descriptor; no UI driver is launched.
-    const descriptorDir = join(session.info.dataDir, "Library", "Application Support", "OpenMausBot");
-    mkdirSync(descriptorDir, { recursive: true });
-    writeFileSync(join(descriptorDir, "cua-connection.json"), JSON.stringify({
+    writeFileSync(cuaRecord, JSON.stringify({
       mode: "embedded", socketPath: join(session.info.dataDir, "never-used.sock"),
       mcpCommand: join(session.info.dataDir, "never-launched-computer"), mcpArgs: ["mcp"], mcpEnv: {},
     }));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     const created = await tool("create_bot", { name: "Computer lease fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     const taskA = created.bot.activeTaskId;

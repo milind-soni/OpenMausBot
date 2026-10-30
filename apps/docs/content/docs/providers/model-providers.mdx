@@ -43,7 +43,9 @@ just needs your key.
 3. In OpenMausBot, open a bot's model picker, choose OpenCode and press the
    refresh button (**Refresh models**). The provider's models appear in the
    list. OpenMausBot reads the model list from an ACP session on both
-   OpenCode 1.x and 2.x.
+   OpenCode 1.x and 2.x, and each model's effort levels the same way: a model
+   that has them, such as GitHub Copilot's GPT and Claude models, shows them
+   under **Reasoning** in the picker.
 
 OpenMausBot uses your normal OpenCode sign-ins and settings, so there is
 nothing to set up inside the app. Sign in with the same OpenCode version that
@@ -83,7 +85,7 @@ tested that with OpenMausBot.
 
 On a self-hosted server that you start from a terminal, OpenCode also reads
 provider keys exported in that terminal, such as `OPENROUTER_API_KEY`,
-`FIREWORKS_API_KEY` or `DEEPSEEK_API_KEY`. Keys exported
+`FIREWORKS_API_KEY` or `TOGETHER_API_KEY`. Keys exported
 this way reach every engine on that server, and any bot that can run commands
 can read them. On OpenCode 2.x this also has a side effect; see below.
 
@@ -116,6 +118,25 @@ To use more than one provider at once, add extra `openai-compat` engines to
 `config.json` (see [Bring your own engine](https://github.com/milind-soni/OpenMausBot/blob/main/docs/custom-engines.md#any-openai-compatible-endpoint-no-process-at-all)).
 Give each one its own key. An engine without a key uses the key from
 Connections and sends it to that engine's address.
+
+### Free OpenRouter models
+
+A new OpenRouter account with no credit can only use free models. Paid models
+stop with "This model needs OpenRouter credit".
+
+- **Picking one:** the model picker marks free models **(free)**. When the key
+  belongs to a free account, free models that can use tools come first and
+  one of them is the default. Pressing **Test** on the key says so. A model
+  you chose yourself is never changed.
+- **Privacy setting:** if OpenRouter's privacy settings block free models,
+  turns stop with "OpenRouter's privacy settings block this free model". Allow
+  free model endpoints at
+  [openrouter.ai/settings/privacy](https://openrouter.ai/settings/privacy), or
+  pick another model.
+- **Daily limit:** OpenRouter limits how many requests free models take each
+  day, and every step of a bot's turn counts as one. When the limit is used
+  up, wait for it to reset or add credit at
+  [openrouter.ai/credits](https://openrouter.ai/credits) to raise it.
 
 ### Cline engine
 

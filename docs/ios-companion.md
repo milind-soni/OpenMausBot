@@ -221,6 +221,11 @@ the guardian first makes forwarding unavailable, confirms the connector is
 dead, and only then releases the gateway. Another process that later binds a
 local port cannot inherit the public route.
 
+The hop from this computer to Cloudflare runs on the home upload,
+uncompressed, so the sidecar gzips JSON replies of 1 KB or more on that
+private socket when the phone accepts gzip. The event stream, file downloads
+and the LAN port are sent as they always were.
+
 ## Pairing and device security
 
 1. On the Mac, open **Settings → Remote access** and choose **Pair a phone**. The app
@@ -391,6 +396,12 @@ allows, then closes it; foregrounding reconnects from the saved cursor. A hello
 cursor is committed only after a cold hydration succeeds; replayed streams
 advance it one folded frame at a time, so a disconnect during recovery cannot
 skip the remaining gap.
+
+## Phone apps as bot tools
+
+The phone registers the apps it allows with `PUT /api/phones/self`. Behind the sidecar it is identified by the companion header; on a Cloud home it uses its own session. It long-polls `GET /api/phones/self/jobs` (20 s), leases a job with `POST /api/phones/self/jobs/:id/lease`, and answers with `POST /api/phones/self/jobs/:id/result`, sending `{ ok: true, result }` or `{ ok: false, error, code }`. Results over 256 KB are refused as `too_large`. The SSE frame `{ kind: "device.job", phone, id }` tells an open app to poll now.
+
+Bots see these apps as `PHONE_*` tools through the `device` MCP kind. Reads run silently and writes show up as activity rows. A send opens a sheet on the phone and goes only when the person taps Send there; OpenMausBot adds no card of its own. A turn that came from the phone does phone things on the phone; a turn at the computer works the usual way and changes the phone only when the person names it. Only the owner's phone is reachable, so team Clouds never expose it. The contract fixture `server/testing/fixtures/phone-jobs.json` is what the phone apps copy into their own test fixtures.
 
 ## Source layout
 

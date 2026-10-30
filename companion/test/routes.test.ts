@@ -28,6 +28,9 @@ describe("what the app may do", () => {
   // Every request the phone apps make: if one fails, a phone screen is broken.
   const calls: Array<[string, string]> = [
     ["GET", "/api/health"],
+    ["PUT", "/api/phones/self"],
+    ["GET", "/api/phones/self/jobs"],
+    ["POST", "/api/phones/self/jobs/j1/result"],
     ["GET", "/api/config"],
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
@@ -37,12 +40,15 @@ describe("what the app may do", () => {
     ["GET", "/api/companion/endpoints"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
+    ["PATCH", "/api/bots/bot_123"],
+    ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
     ["POST", "/api/bots/bot_123/respond"],
     ["POST", "/api/bots/bot_123/interrupt"],
     ["DELETE", "/api/bots/bot_123/queue/queue_1"],
+    ["POST", "/api/bots/bot_123/queue/queue_1/steer"],
     ["POST", "/api/bots/bot_123/read"],
     ["POST", "/api/bots/bot_123/always-allow"],
     ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
@@ -54,6 +60,8 @@ describe("what the app may do", () => {
     ["DELETE", "/api/team-memory/entry_1"],
     ["POST", "/api/bots/bot_123/active-branch"],
     ["POST", "/api/bots/bot_123/compact"],
+    ["POST", "/api/bots/bot_123/setup-request"],
+    ["DELETE", "/api/bots/bot_123/setup-request"],
     ["POST", "/api/bots/bot_123/tasks"],
     ["POST", "/api/bots/bot_123/tasks/th_1"],
     ["PATCH", "/api/bots/bot_123/tasks/th_1"],
@@ -71,6 +79,7 @@ describe("what the app may do", () => {
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/interrupt"],
     ["DELETE", "/api/groups/room-1/queue/queue_1"],
+    ["POST", "/api/groups/room-1/queue/queue_1/steer"],
     ["POST", "/api/groups/room-1/read"],
     ["POST", "/api/groups/room-1/tasks"],
     ["POST", "/api/groups/room-1/tasks/th_1"],
@@ -78,6 +87,9 @@ describe("what the app may do", () => {
     ["DELETE", "/api/groups/room-1/tasks/th_1"],
     ["GET", "/api/threads/th_1/messages"],
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
+    ["GET", "/api/threads/th_1/messages/msg_2/app"],
+    ["POST", "/api/bots/bot_123/apps/msg_2/rpc"],
+    ["POST", "/api/bots/bot_123/apps/msg_2/context"],
     ["POST", "/api/threads/th_1/messages/msg_2/file"],
     ["POST", "/api/threads/th_1/messages/msg_2/reactions"],
     ["GET", "/api/threads/th_1/export"],
@@ -123,6 +135,11 @@ describe("what the app may do", () => {
 });
 
 describe("what it may not", () => {
+  it("does not list phones to a phone", () => {
+    expect(ask("GET", "/api/phones")?.status).toBe(404);
+    expect(ask("DELETE", "/api/phones/companion%3Ad1")?.status).toBe(404);
+  });
+
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
       ["PUT", "/api/config"],
@@ -236,7 +253,12 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/threads/th_1/messages/msg_2/file")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages/msg_2/file/extra")).toBe(false);
     expect(allowed("GET", "/api/groups/room-1")).toBe(false);
-    expect(allowed("PATCH", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("PUT", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("PATCH", "/api/bots/bot_123/extra")).toBe(false);
+    expect(allowed("PATCH", "/api/bots/bot_123/../other")).toBe(false);
+    expect(ask("PATCH", "/api/bots/bot_123", false)?.status).toBe(401);
     expect(allowed("GET", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123/model/extra")).toBe(false);
@@ -282,6 +304,19 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/live/session")).toBe(false);
     expect(allowed("POST", "/api/live/call")).toBe(false);
     expect(allowed("POST", "/api/live/call/end/extra")).toBe(false);
+  });
+
+  it("allows an app's document, rpc and context and nothing else of apps", () => {
+    for (const [method, path] of [
+      ["POST", "/api/threads/th_1/messages/msg_2/app"],
+      ["GET", "/api/bots/bot_123/apps/msg_2/rpc"],
+      ["GET", "/api/bots/bot_123/apps/msg_2/context"],
+      ["POST", "/api/bots/bot_123/apps/msg_2"],
+      ["POST", "/api/bots/bot_123/apps/msg_2/delete"],
+      ["POST", "/api/bots/bot_123/apps/msg_2/rpc/extra"],
+      ["POST", "/api/bots/bot_123/apps/../rpc"],
+      ["GET", "/api/threads/th_1/messages/msg_2/app/../../../config"],
+    ] as const) expect(allowed(method, path), `${method} ${path}`).toBe(false);
   });
 
   it("is not fooled by a prefix", () => {

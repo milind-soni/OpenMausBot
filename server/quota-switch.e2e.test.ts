@@ -11,13 +11,14 @@ import { readHandoffs } from "./testing/handoff-rows.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
 const LIMITED = "Limited Claude";
-const BACKUP = "Backup Claude";
+const OTHER_SIGN_IN = "Second Claude sign-in";
 const FAKE_CLI = fileURLToPath(new URL("./testing/fake-claude-cli.ts", import.meta.url));
+const FAKE_CODEX = fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url));
 const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 async function withQuotaFixture(
-  options: { env?: Record<string, string> },
+  options: { env?: Record<string, string>; otherSignInOnly?: boolean },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
@@ -39,7 +40,9 @@ async function withQuotaFixture(
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
       claude: engine(LIMITED, { FAKE_CLAUDE_MODE: "usage-limit" }),
-      backup: engine(BACKUP, { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]" }),
+      ...(options.otherSignInOnly
+        ? { backup: engine(OTHER_SIGN_IN, { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]" }) }
+        : { codex: { driver: "codex", config: { cli: FAKE_CODEX }, environment: { FAKE_CODEX_DUMP: backupFile } } }),
     },
   }));
   const evidence: unknown[] = [{ url, options }];
@@ -77,9 +80,20 @@ async function withQuotaFixture(
     await expect.poll(async () => {
       try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
     }, { timeout: 90_000 }).toBe(true);
-    await check({ api, control, respond, backupPrompts: () => jsonLines(backupFile), dataDir });
+    if (!options.otherSignInOnly) {
+      await expect.poll(async () => {
+        const { instances } = await api("GET", "/api/instances") as { instances: any[] };
+        return instances.find((instance) => instance.instanceId === "codex")?.models.options.length > 0;
+      }, { timeout: 30_000 }).toBe(true);
+    }
+    // What the other AI was sent: the fake Claude logs each prompt; the fake Codex keeps its calls in one dump.
+    const sent = () => {
+      if (options.otherSignInOnly) return jsonLines(backupFile);
+      try { return (JSON.parse(readFileSync(backupFile, "utf8")).calls as any[]).filter((call) => call.method === "turn/start"); } catch { return []; }
+    };
+    await check({ api, control, respond, backupPrompts: sent, dataDir });
   } finally {
-    evidence.push({ backupPrompts: jsonLines(backupFile), roots: readHandoffs(dataDir) });
+    evidence.push({ backupPrompts: existsSync(backupFile) ? readFileSync(backupFile, "utf8").slice(0, 20_000) : null, roots: readHandoffs(dataDir) });
     const evidencePath = `${logPath}.quota-switch.json`;
     writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
     await waitForExit(server, { signal: "SIGTERM" });
@@ -88,132 +102,72 @@ async function withQuotaFixture(
   }
 }
 
-/** A bot whose conversation runs on the limited engine, and the turn that
- * meets the limit. */
-async function meetTheLimit(api: (method: string, path: string, body?: unknown) => Promise<any>, control: (...args: string[]) => Promise<any>, text: string) {
+/** A bot whose conversation runs on the limited engine, and the turn that meets the limit. `carriedOn`: another AI may
+ * already have taken the request over by the time the wait ends. */
+async function meetTheLimit(api: (method: string, path: string, body?: unknown) => Promise<any>, control: (...args: string[]) => Promise<any>, text: string, carriedOn = false) {
   const { bot } = await control("new-bot", "--name", "Out of quota");
   const threadId = bot.activeTaskId as string;
   const limited = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).modelSelection;
   await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: { ...limited, instanceId: "claude" }, updateBotDefault: true });
   await control("send", "--bot", bot.id, "--task", threadId, "--text", text);
-  expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
+  expect(carriedOn ? ["failed", "settled"] : ["failed"]).toContain((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status);
   const messages = async () => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
   const state = async () => (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
   return { bot, threadId, messages, state };
 }
 
-it("offers the working engine once, and on the person's answer switches this conversation and resends the exact message", async () => {
-  await withQuotaFixture({}, async ({ api, control, respond, backupPrompts, dataDir }) => {
+it("carries the request on with another AI by itself: the exact message once more there, one notice, the failed root left settled", async () => {
+  await withQuotaFixture({}, async ({ api, control, backupPrompts, dataDir }) => {
     const text = "SUMMARISE_THE_QUARTER_4K";
-    const { bot, threadId, messages, state } = await meetTheLimit(api, control, text);
+    const { bot, threadId, messages, state } = await meetTheLimit(api, control, text, true);
     const { task: sibling } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Sibling keeps its engine" });
 
-    // One account of the failure, and one offer: the engine that works, by name.
-    await expect.poll(async () => (await messages()).filter((message) => message.card?.quotaSwitch).length, { timeout: 20_000 }).toBe(1);
-    const before = await messages();
-    const failures = before.filter((message) => message.tool?.name?.startsWith("error:"));
+    await expect.poll(async () => (await messages()).findLast((message) => message.role === "bot" && message.kind === "text")?.text, { timeout: 30_000 }).toBe("done from fake codex");
+    const after = await messages();
+    const failures = after.filter((message) => message.tool?.name?.startsWith("error:"));
     expect(failures).toHaveLength(1);
     expect(failures[0].tool.name).toMatch(/This Claude account has reached its usage limit/);
-    const offer = before.find((message) => message.card?.quotaSwitch);
-    expect(offer.card).toMatchObject({
-      title: `${LIMITED} is out of quota`,
-      subtitle: "Continue this conversation on another engine?",
-      options: [BACKUP, "Not now"],
-      fixedOptions: true,
-      quotaSwitch: { engines: [{ instanceId: "backup", name: BACKUP }], messageId: before.find((message) => message.role === "user").id },
-    });
-    expect(offer.card.tool).toBeUndefined();
-    // Nothing moved without the answer: same engine, the failed turn's root settled, nothing else begun.
-    expect((await state()).tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ busy: false });
-    expect((await state()).modelSelection.instanceId).toBe("claude");
-    expect(backupPrompts()).toHaveLength(0);
-    const rootsBefore = readHandoffs(dataDir).filter((node) => node.threadId === threadId);
-    expect(rootsBefore.map((node) => [node.status, node.outcome, node.executions])).toEqual([["failed", "provider_error", 1]]);
-    // The card names that root: the answer asks the runtime about the request that ran out, not about the thread.
-    expect(offer.card.quotaSwitch.rootId).toBe(rootsBefore[0]!.id);
-
-    expect(await respond(threadId, { requestId: offer.card.requestId, behavior: "answer", message: BACKUP }))
-      .toEqual({ status: 200, body: { ok: true, outcome: "answered" } });
-    await expect.poll(() => backupPrompts().length, { timeout: 20_000 }).toBe(1);
-    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
-
-    const after = await messages();
-    // The message whose turn failed, sent once more: twice in the conversation, once to the engine that works.
+    expect(after.some((message) => message.card?.quotaSwitch), "nothing to answer").toBe(false);
+    expect(after.filter((message) => message.tool?.name === "notice: continuing on Codex after hitting the usage limit")).toHaveLength(1);
+    // The message whose turn failed, sent once more: twice in the conversation, once to the AI that works.
     expect(after.filter((message) => message.role === "user" && message.text === text)).toHaveLength(2);
     expect(backupPrompts()).toHaveLength(1);
     expect(JSON.stringify(backupPrompts()[0])).toContain(text);
-    expect(after.findLast((message) => message.role === "bot" && message.kind === "text")).toMatchObject({ text: "hello from fake claude", turnSucceeded: true });
-    expect(after.filter((message) => message.tool?.name === `notice: continuing on ${BACKUP} after hitting quota`)).toHaveLength(1);
-    // Settled only once the switch went through, inside the answer's own request: so who answered is on the card.
-    expect(after.find((message) => message.id === offer.id).card).toMatchObject({ answered: "answer", answeredText: BACKUP, answeredBy: { kind: "loopback" } });
-    expect(after.filter((message) => message.card?.quotaSwitch)).toHaveLength(1);
-    expect(after.filter((message) => message.tool?.name?.startsWith("error:"))).toHaveLength(1);
 
     // This conversation moved; the bot's own engine and its other conversation did not.
     const bots = await state();
-    const instances = (await api("GET", "/api/instances")).instances as any[];
-    expect(bots.tasks.find((task: any) => task.threadId === threadId)).toMatchObject({
-      modelSelection: { instanceId: "backup", model: instances.find((instance) => instance.instanceId === "backup").models.default }, busy: false,
-    });
+    expect(bots.tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ modelSelection: { instanceId: "codex" }, busy: false });
     expect(bots.modelSelection.instanceId).toBe("claude");
     expect(bots.tasks.find((task: any) => task.threadId === sibling.threadId).modelSelection?.instanceId ?? bots.modelSelection.instanceId).toBe("claude");
-
     // No job twice: the failed turn's root stayed settled, and the resend is one new root that completed.
-    const roots = readHandoffs(dataDir).filter((node) => node.threadId === threadId);
-    expect(roots.map((node) => [node.status, node.executions])).toEqual([["failed", 1], ["completed", 1]]);
-    expect(roots[0]!.id).toBe(rootsBefore[0]!.id);
-
-    // A second press on the settled card is refused as already answered: it
-    // switches nothing, and its words never reach the bot as a message.
-    const again = await respond(threadId, { requestId: offer.card.requestId, behavior: "answer", message: BACKUP });
-    expect(again).toEqual({ status: 409, body: { error: "this question has already been answered" } });
-    expect((await messages()).filter((message) => message.role === "user")).toHaveLength(2);
-    expect(backupPrompts()).toHaveLength(1);
-    expect(readHandoffs(dataDir).filter((node) => node.threadId === threadId)).toHaveLength(2);
+    expect(readHandoffs(dataDir).filter((node) => node.threadId === threadId).map((node) => [node.status, node.executions])).toEqual([["failed", 1], ["completed", 1]]);
+    // One notice for this bot; the Chief, told of the incident, hears its own if its own turn meets the limit too.
+    const notices = (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
+    expect(notices.map((entry: any) => entry.body)).toEqual([expect.stringMatching(/^Limited Claude reached its limit.*, so Out of quota is using Codex meanwhile\.$/)]);
   });
 }, 240_000);
 
-it.each([
-  { name: "Not now", behavior: "answer", message: "Not now", outcome: "answered" },
-  { name: "typed words that name no offered engine", behavior: "answer", message: "use whichever is fastest", outcome: "answered" },
-  // Decline-only service trust (hosted, Cloud home, OMB_LOOPBACK_TRUST=service): a decline naming an engine chooses nothing.
-  { name: "a decline that carries the offered engine's label", behavior: "deny", message: BACKUP, outcome: "rejected" },
-  { name: "an allow that carries the offered engine's label", behavior: "allow", message: BACKUP, outcome: "rejected" },
-])("changes nothing on $name", async ({ behavior, message, outcome }) => {
-  await withQuotaFixture({}, async ({ api, control, respond, backupPrompts, dataDir }) => {
-    const text = "LEAVE_THIS_WHERE_IT_IS_7M";
-    const { threadId, messages, state } = await meetTheLimit(api, control, text);
-    await expect.poll(async () => (await messages()).filter((entry) => entry.card?.quotaSwitch).length, { timeout: 20_000 }).toBe(1);
-    const offer = (await messages()).find((entry) => entry.card?.quotaSwitch);
-
-    expect(await respond(threadId, { requestId: offer.card.requestId, behavior, message }))
-      .toEqual({ status: 200, body: { ok: true, outcome } });
-
-    const after = await messages();
-    expect(after.find((entry) => entry.id === offer.id).card).toMatchObject({ answered: "answer", answeredText: "Not now" });
-    expect(after.filter((entry) => entry.role === "user")).toHaveLength(1);
-    expect(after.some((entry) => entry.tool?.name?.startsWith("notice:"))).toBe(false);
-    expect((await state()).tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ busy: false });
-    expect((await state()).modelSelection.instanceId).toBe("claude");
-    // Nothing was switched and nothing was sent again: asked once more, the settled
-    // card is refused, and the working engine was never run.
-    expect(await respond(threadId, { requestId: offer.card.requestId, behavior: "answer", message: BACKUP }))
-      .toEqual({ status: 409, body: { error: "this question has already been answered" } });
+it("never moves to another sign-in of the same AI: it says once that the bot waits, and sends nothing again", async () => {
+  await withQuotaFixture({ otherSignInOnly: true }, async ({ api, control, backupPrompts }) => {
+    const { bot, threadId, messages, state } = await meetTheLimit(api, control, "LEAVE_THIS_WHERE_IT_IS_7M");
+    const mine = async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
+    await expect.poll(async () => (await mine()).length, { timeout: 20_000 }).toBe(1);
+    const [notice] = await mine();
+    expect(notice.body).toMatch(/^Limited Claude reached its limit.*, so Out of quota waits.*: no other AI you have set up can take over\.$/);
+    expect((await messages()).filter((entry) => entry.role === "user")).toHaveLength(1);
     expect((await state()).tasks.find((task: any) => task.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     expect(backupPrompts()).toHaveLength(0);
-    expect(readHandoffs(dataDir).filter((node) => node.threadId === threadId).map((node) => node.status)).toEqual(["failed"]);
   });
 }, 240_000);
 
-it("raises no card when OMB_QUOTA_SWITCH=0 switches it off", async () => {
+it("moves nothing when OMB_QUOTA_SWITCH=0 switches it off", async () => {
   await withQuotaFixture({ env: { OMB_QUOTA_SWITCH: "0" } }, async ({ api, control, backupPrompts }) => {
-    const { bot, threadId, messages } = await meetTheLimit(api, control, "NO_OFFER_WHEN_OFF_2B");
-    // A second failed turn is the event that proves the first one's offer was never coming.
-    await control("send", "--bot", bot.id, "--task", threadId, "--text", "STILL_NO_OFFER_3C");
-    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
-    const after = await messages();
-    expect(after.filter((message) => message.tool?.name?.startsWith("error:"))).toHaveLength(2);
-    expect(after.some((message) => message.kind === "options")).toBe(false);
+    const { bot, threadId, messages, state } = await meetTheLimit(api, control, "NO_MOVE_WHEN_OFF_2B");
+    const mine = async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
+    await expect.poll(async () => (await mine()).length, { timeout: 20_000 }).toBe(1);
+    expect((await mine())[0].body).toMatch(/, so Out of quota waits.*: no other AI you have set up can take over\.$/);
+    expect((await messages()).filter((message) => message.role === "user")).toHaveLength(1);
+    expect((await state()).tasks.find((task: any) => task.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     expect(backupPrompts()).toHaveLength(0);
   });
 }, 240_000);

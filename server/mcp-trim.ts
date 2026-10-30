@@ -1,4 +1,6 @@
 export const DEFAULT_RESULT_BUDGET = 8_000;
+/** The gate's own read-only query over a held result (mcp-shape.ts); named here so the banner and the tool never drift apart. */
+export const QUERY_TOOL_NAME = "query_result";
 
 const MIN_BUDGET = 512;
 
@@ -10,12 +12,24 @@ export interface TrimOutcome {
   value?: unknown;
 }
 
+/** The whole result is kept by the gate under `handle` for query_result (mcp-shape.ts). */
+export interface HeldResult {
+  handle: string;
+  /** describeShape() of the held value */
+  shape: string;
+  /** a query known to be valid against the held value */
+  example?: string;
+  /** the text being cut is itself a query_result answer */
+  queried?: boolean;
+}
+
 export interface TrimInput {
   text: string;
   budget?: number;
   spillPath?: string;
   spillHint?: boolean;
   toolName?: string;
+  held?: HeldResult;
 }
 
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -67,8 +81,12 @@ export function truncationBanner(input: {
   spillHint?: boolean;
   structural: boolean;
   short?: boolean;
+  held?: HeldResult;
+  /** the closing banner of a held result: a reminder, not the whole note again */
+  footer?: boolean;
 }): string {
   const size = `${fmt(input.keptChars)} of ${fmt(input.originalChars)} chars`;
+  if (input.held) return heldBanner(input, size);
   if (input.short) return `⚠️ TRUNCATED by OpenMausBot: kept ${size}; the rest was NOT shown. Narrow the call or page.`;
   const counts = input.dropped
     .filter((d) => d.kept < d.total)
@@ -87,8 +105,30 @@ export function truncationBanner(input: {
   return `⚠️ TRUNCATED by OpenMausBot: ${what} The rest was NOT shown. ${next}${where}`;
 }
 
-function wrap(body: string, banner: string): string {
-  return `${banner}\n\n${body}\n\n${banner}`;
+/** The result lives on; the model fetches the rest by query, so the note never suggests a file or a narrower call. */
+function heldBanner(
+  input: { originalChars: number; keptChars: number; dropped: Array<{ key: string; kept: number; total: number }>; held?: HeldResult; short?: boolean; footer?: boolean; structural: boolean },
+  size: string,
+): string {
+  const held = input.held!;
+  const counts = input.dropped
+    .filter((d) => d.kept < d.total)
+    .map((d) => `${d.key || "items"} ${fmt(d.kept)} of ${fmt(d.total)}`)
+    .join(", ");
+  const kept = input.structural && counts ? `kept ${counts} (${size})` : `kept ${size}`;
+  const call = `${QUERY_TOOL_NAME} {"result":"${held.handle}","query":"<JMESPath>"}`;
+  if (held.queried) {
+    if (input.footer) return `⚠️ TRUNCATED by OpenMausBot: ${kept} of your query on "${held.handle}"; narrow it (see above).`;
+    return `⚠️ TRUNCATED by OpenMausBot: your query on "${held.handle}" returned ${fmt(input.originalChars)} chars; ${kept}. The rest was NOT shown. Narrow the query: pick fewer fields with {a: a, b: b}, slice with [0:20], or filter with [?cond]. The result is ${held.shape}.`;
+  }
+  if (input.footer) return `⚠️ SHAPED by OpenMausBot: ${kept}; the rest is held as "${held.handle}" for ${QUERY_TOOL_NAME} (see the note above).`;
+  if (input.short) return `⚠️ SHAPED by OpenMausBot: ${kept}; the rest is held as "${held.handle}": call ${call} for exactly what you need.`;
+  const example = held.example ? ` e.g. ${held.example} or length(@).` : "";
+  return `⚠️ SHAPED by OpenMausBot: result was ${fmt(input.originalChars)} chars; ${kept}. The whole result is held as "${held.handle}" (${held.shape}). For the rest call ${call} and select only the fields and rows you need,${example} Big answers are cut too; never ask for the whole thing.`;
+}
+
+function wrap(body: string, banner: string, footer = banner): string {
+  return `${banner}\n\n${body}\n\n${footer}`;
 }
 
 export function trimStructured(parsed: unknown, budget: number): { value: unknown; dropped: Array<{ key: string; kept: number; total: number }> } | null {
@@ -136,13 +176,19 @@ export function trimResultText(input: TrimInput): TrimOutcome {
 
   const fields = parsed === undefined ? [] : arrayFields(parsed);
   // Banners sized at their widest, so the whole result lands under the budget; the short form when full ones would eat half.
-  const widestOf = (short: boolean) => Math.max(
-    truncationBanner({ originalChars: text.length, keptChars: text.length, dropped: fields.map((f) => ({ key: f.key, kept: Math.max(0, f.items.length - 1), total: f.items.length })), spillPath: input.spillPath, spillHint: input.spillHint, structural: true, short }).length,
-    truncationBanner({ originalChars: text.length, keptChars: text.length, dropped: [], spillPath: input.spillPath, spillHint: input.spillHint, structural: false, short }).length,
-  );
-  const fullRoom = budget - 2 * (widestOf(false) + 2);
+  const held = input.held;
+  const banner = (opts: { dropped: Array<{ key: string; kept: number; total: number }>; structural: boolean; short: boolean; footer?: boolean; keptChars: number }) =>
+    truncationBanner({ originalChars: text.length, spillPath: input.spillPath, spillHint: input.spillHint, held, ...opts });
+  const widestOf = (short: boolean) => {
+    const variants = [
+      { dropped: fields.map((f) => ({ key: f.key, kept: Math.max(0, f.items.length - 1), total: f.items.length })), structural: true },
+      { dropped: [], structural: false },
+    ];
+    return Math.max(...variants.map((v) => banner({ ...v, short, keptChars: text.length }).length + banner({ ...v, short, keptChars: text.length, footer: Boolean(held) }).length));
+  };
+  const fullRoom = budget - (widestOf(false) + 4);
   const short = fullRoom < budget / 2;
-  const room = Math.max(0, short ? budget - 2 * (widestOf(true) + 2) : fullRoom);
+  const room = Math.max(0, short ? budget - (widestOf(true) + 4) : fullRoom);
   if (fields.length) {
     const skeleton = Array.isArray(parsed)
       ? 2
@@ -167,7 +213,7 @@ export function trimResultText(input: TrimInput): TrimOutcome {
       const json = serialize(value);
       if (json !== null && json.length <= room) {
         return {
-          text: wrap(json, truncationBanner({ originalChars: text.length, keptChars: json.length, dropped, spillPath: input.spillPath, spillHint: input.spillHint, structural: true, short })),
+          text: wrap(json, banner({ keptChars: json.length, dropped, structural: true, short }), banner({ keptChars: json.length, dropped, structural: true, short, footer: Boolean(held) })),
           trimmed: true,
           originalChars: text.length,
           value,
@@ -178,7 +224,7 @@ export function trimResultText(input: TrimInput): TrimOutcome {
 
   const cut = cutAt(text, room);
   return {
-    text: wrap(cut, truncationBanner({ originalChars: text.length, keptChars: cut.length, dropped: [], spillPath: input.spillPath, spillHint: input.spillHint, structural: false, short })),
+    text: wrap(cut, banner({ keptChars: cut.length, dropped: [], structural: false, short }), banner({ keptChars: cut.length, dropped: [], structural: false, short, footer: Boolean(held) })),
     trimmed: true,
     originalChars: text.length,
   };

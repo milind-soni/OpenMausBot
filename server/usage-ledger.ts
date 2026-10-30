@@ -2,14 +2,17 @@
 import { readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
+import type { ResolvedSender } from "../shared/wire.ts";
 import type { CostSource } from "./model-prices.ts";
 import { billableFor, type PriceList } from "./prices.ts";
+import type { RequestAuth } from "./request-auth.ts";
 
 /** `helper`: a job the helper model wrote for `botId`, kept apart from `bot` so its cost reads on its own. */
 export type UsageTrigger =
   | { kind: "user"; email?: string; label?: string }
   | { kind: "owner" }
-  | { kind: "routine"; routineId?: string; label?: string }
+  | { kind: "routine"; routineId?: string; label?: string; runId?: string }
   | { kind: "bot"; botId?: string }
   | { kind: "helper"; botId?: string; job?: string };
 
@@ -28,6 +31,21 @@ export interface UsageRow {
   costUsd: number | null;
   costSource?: CostSource;
   trigger: UsageTrigger;
+  /** Trace fields, on rows booked since traces were recorded: older rows have none and show as untimed. */
+  turnId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  /** The turn that delegated, handed off or resumed into this one. */
+  parent?: TraceParent;
+  outcome?: { status: TraceStatus; reason?: string };
+  steps?: number;
+  tools?: number;
+  toolErrors?: number;
+  cacheWrite?: number;
+  reasoning?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  usageStatus?: TraceUsageStatus;
 }
 
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
@@ -121,7 +139,7 @@ export async function flushUsageLedger(dataDir: string): Promise<void> {
 const isTrigger = (value: unknown): value is UsageTrigger =>
   typeof value === "object" && value !== null && typeof (value as UsageTrigger).kind === "string";
 
-const isUsageRow = (value: unknown): value is UsageRow =>
+export const isUsageRow = (value: unknown): value is UsageRow =>
   typeof value === "object" &&
   value !== null &&
   typeof (value as UsageRow).at === "string" &&
@@ -131,7 +149,7 @@ const isUsageRow = (value: unknown): value is UsageRow =>
   typeof (value as UsageRow).output === "number" &&
   isTrigger((value as UsageRow).trigger);
 
-function monthsBetween(from: Date, to: Date): string[] {
+export function monthsBetween(from: Date, to: Date): string[] {
   const keys: string[] = [];
   const cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
   while (cursor.getTime() <= to.getTime()) {
@@ -180,6 +198,18 @@ export function parseUsageRange(from: string | null | undefined, to: string | nu
   if (!start || !end || start.getTime() > end.getTime()) return null;
   if (end.getTime() - start.getTime() > MAX_RANGE_DAYS * DAY_MS) return null;
   return { from: start, to: end };
+}
+
+export function usageTriggerFor(auth: RequestAuth): UsageTrigger {
+  return auth.kind === "session"
+    ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
+    : { kind: "owner" };
+}
+
+export function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: ResolvedSender; peerAsk?: unknown }): UsageTrigger | undefined {
+  if (item.trigger) return item.trigger;
+  if (item.peerAsk) return undefined;
+  return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 
 export function triggerKey(trigger: UsageTrigger): string {

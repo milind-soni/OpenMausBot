@@ -286,6 +286,8 @@ export function createCompanionOriginGateway({
     incoming.pipe(upstream);
   });
   server.on("upgrade", (incoming, socket, head) => {
+    // Node removes its own error listener from a socket it hands to `upgrade`.
+    socket.on("error", () => socket.destroy());
     if (!accepting || !isTargetAlive(target)) return socket.destroy();
     const headers = upgradeHeaders(incoming.headers);
     if (!headers || incoming.method !== "GET") return socket.destroy();
@@ -315,6 +317,13 @@ export function createCompanionOriginGateway({
       writeUpgrade(socket, response);
       remoteSocket = remote;
       upgradedSockets.add(remote);
+      // `pipe` forwards no error, so a reset on one end must end the other.
+      const teardown = () => {
+        socket.destroy();
+        remote.destroy();
+      };
+      socket.on("error", teardown);
+      remote.on("error", teardown);
       remote.once("close", release);
       if (head.length) remote.write(head);
       if (remoteHead.length) socket.write(remoteHead);

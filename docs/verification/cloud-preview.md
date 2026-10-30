@@ -60,6 +60,12 @@ Verify these transitions with computer use:
     alone, and the focused tab's ring must not be clipped by the row. Press
     **Tab** again: focus lands on the selected panel itself before its first
     control.
+14. Close the panel with **Enter** on its focused X, then open it again with
+    **Enter** on **Open computer panel**: the Computer panel focuses its active
+    tab, the **Remote desktop** panel focuses its own X, and closing either
+    returns focus to that opener button. By hand, a pointer click on the opener
+    must leave focus out of the panel entirely; the chat header's own button
+    covers that in the computer panel focus recipe.
 
 The automated browser regression runs these contention, cancellation, decoded
 frame retention, and join-pause checks against the same fixture:

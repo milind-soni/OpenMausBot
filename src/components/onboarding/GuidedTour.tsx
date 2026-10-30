@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readAdvancedMode } from "@/lib/interface-mode";
+import { readAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
@@ -22,7 +22,7 @@ const MASCOT: Record<TourStep["id"], MausState> = {
   "tour.done": "celebrate",
 };
 
-const copy = (id: TourStep["id"], key: string) => t(`onboarding.tour.${id.slice(5)}` as LocaleKey, { key });
+const copy = (step: TourStep, key: string) => t(step.copy ?? (`onboarding.tour.${step.id.slice(5)}` as LocaleKey), { key });
 
 function visible(anchor: string): HTMLElement | null {
   const all = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${anchor}"]`));
@@ -43,7 +43,7 @@ function press(anchor: string): boolean {
 export function GuidedTour() {
   const { state, dispatch } = useStore();
   const record = state.config?.onboarding;
-  const step = currentStep(record);
+  const step = currentStep(record, useAdvancedMode());
   const saving = useRef(false);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   const latestRecord = useRef(record);
@@ -138,7 +138,8 @@ export function GuidedTour() {
     dispatch({ type: "toggleTour", open: false });
   }, [state.computerOpen, state.pluginsOpen, run, save, dispatch]);
 
-  const active = !dismissed && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
+  // Only ever started from Settings (Replay app tour): the welcome no longer hands over to it, now or after a reload.
+  const active = !dismissed && state.tourOpen && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
 
   useEffect(() => {
     if (!active || !step || entered.current === step.id) return;
@@ -191,7 +192,7 @@ export function GuidedTour() {
       secondary={closing ? undefined : { label: t("onboarding.tour.skip"), onClick: finish }}
       onDone={finish}
     >
-      {copy(step.id, sendKeyLabel(sendKey))}
+      {copy(step, sendKeyLabel(sendKey))}
       {failed && <p role="alert" className="mt-2 text-danger">{t("onboarding.tour.error")}</p>}
     </Spotlight>
   );

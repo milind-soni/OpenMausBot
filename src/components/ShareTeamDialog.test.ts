@@ -27,7 +27,7 @@ afterEach(() => {
 describe("Share team", () => {
   it("is in every named team's menu", () => {
     const markup = renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn() }));
-    expect(text(markup)).toMatch(/Add bots .*Rename team .*Share team… .*Delete team/);
+    expect(text(markup)).toMatch(/Add bots .*Rename department .*Share department… .*Delete department/);
     expect(markup.match(/role="menuitem"/g)).toHaveLength(4);
   });
 
@@ -76,7 +76,7 @@ describe("Share team", () => {
     expect(markup).toMatch(/<input type="checkbox"[^>]*\/>step-31/);
     expect(markup).not.toMatch(/checked=""[^>]*\/>step-31/);
     expect(text(renderToStaticMarkup(createElement(ShareSkillChoices, { available: [], ticked: new Set<string>(), counted: true, onToggle: vi.fn() }))))
-      .toContain("This team's bots have no skills.");
+      .toContain("This department's bots have no skills.");
   });
 
   it("saves the document as the file other apps and Admin read", async () => {
@@ -97,10 +97,10 @@ describe("importing a shared team", () => {
     const pending = teamImportPreview(fixture());
     const words = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending, importedNames: ["Morgan", "Scout", "Quill"] })));
     for (const line of [
-      "Shared instructions", "49 per seat", "Morgan leads", "1 group chat", "1 playbooks", "Routines: 2 · paused",
+      "Shared instructions", "49 per seat", "Morgan leads", "1 group chat", "1 playbook(s)", "Routines: 2 · paused",
       "Connections to finish: 1 · keys and passwords are never included", "CRM · https://mcp.example.com/crm",
       "Starter notes: 2", "Preset bots: 1 · appear in New bot",
-      "Included skills — added switched off", "pricing-policy, research-brief", "Offered skills — not added to any bot", "objection-handling",
+      "Included skills (added switched off)", "pricing-policy, research-brief", "Offered skills (not added to any bot)", "objection-handling",
       "Skills arrive switched off and routines paused.",
     ]) expect(words).toContain(line);
     expect(renderToStaticMarkup(createElement(TeamImportDetails, { pending, importedNames: ["Morgan", "Scout", "Quill"] })))

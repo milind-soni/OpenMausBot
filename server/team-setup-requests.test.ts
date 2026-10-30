@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
-import { canAccessTeam } from "./peer-roster.ts";
+import { hasTeamAuthority } from "./peer-roster.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
+import type { DirectApply } from "./direct-apply.ts";
 
 function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>) {
   const bots: BotRecord[] = [];
-  const messages: Array<{ id: string; card?: OptionCardData }> = [];
+  const messages: Array<{ id: string; role?: string; card?: OptionCardData }> = [];
   const teams = ["", "Work", "Engineering", "Private"];
   const bot = (id: string, overrides: Partial<BotRecord> = {}) => {
     const value: BotRecord = { id, threadId: `${id}-thread`, name: id, title: "", description: "", soul: "", section: "Work",
@@ -32,19 +33,21 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
     appendMessage: (_thread: string, input: { card: OptionCardData }) => { const message = { id: `message-${messages.length}`, card: input.card }; messages.push(message); return message; },
     patchMessage: (_thread: string, id: string, patch: { card: OptionCardData }) => { const message = messages.find((item) => item.id === id); if (!message) return null; Object.assign(message, patch); return message; },
     applyTeamSetup: apply,
+    patchBot: (id: string, patch: Partial<BotRecord>) => Object.assign(bots.find((item) => item.id === id)!, patch),
   };
   let sourceExists = true;
-  const deleteBot = vi.fn(async (id: string, revalidate: () => void, request: TeamSetupRequest) => {
+  const deleteBot = vi.fn(async (id: string, revalidate: () => void, request?: TeamSetupRequest) => {
     revalidate();
     const target = bots.find((item) => item.id === id)!;
-    chief.lastTeamSetupReceipt = { requestId: request.requestId, result: { state: "applied", bots: [{ id, name: target.name, action: "deleted" }], newTeams: [] } };
+    if (request) chief.lastTeamSetupReceipt = { requestId: request.requestId, result: { state: "applied", bots: [{ id, name: target.name, action: "deleted" }], newTeams: [] } };
     bots.splice(bots.indexOf(target), 1);
   });
-  const autoApply = vi.fn(() => false);
+  // null: a Cloud turn its owner did not drive, the one place the owner still confirms team setup on a card.
+  const autoApply = vi.fn((): DirectApply | null => null);
   const targetBusy = vi.fn((id: string, _sourceThreadId?: string) => Boolean(store.bot(id)?.busy));
   const validateChange = vi.fn();
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
-  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, canAccessTeam,
+  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
@@ -60,46 +63,13 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
 const specialist = (key: string, section: string, modelSelection = { instanceId: "claude", model: "sonnet" }) => ({ action: "create", key,
   fields: { name: key, title: "Specialist", soul: "Finish the assigned work.", section, modelSelection } });
 
-describe("a specialist the Chief suggests", () => {
-  const suggest = (h: ReturnType<typeof harness>, name: string) => h.service.suggest({ botId: h.chief.id, threadId: h.chief.threadId, suggestion: true,
-    plan: { reason: "The work needs a checker", operations: [specialist(name, "Work")] } });
-
-  it("always waits on a card with Add bot and Not now, even at Full Access", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
-    const card = suggest(h, "Theo");
-    expect(card).toMatchObject({ state: "pending", applied: false, title: "Add @Theo to the team?" });
-    expect(card.detail).toContain("@Clive is suggesting this. You did not ask for it.");
-    expect(h.messages.at(-1)?.card).toMatchObject({ options: ["Add bot", "Not now"], teamSetupRequest: { suggestion: true } });
-    expect(h.apply).not.toHaveBeenCalled();
-    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
-    expect(h.store.bot(h.apply.mock.calls[0]![0].operations[0]!.botId)).toMatchObject({ name: "Theo" });
-  });
-
-  it("keeps one suggestion open per conversation and remembers Not now", async () => {
-    const h = harness();
-    const first = suggest(h, "Theo");
-    expect(() => suggest(h, "Una")).toThrow(/already waiting/);
-    expect((await h.submit([specialist("Asked", "Work")])).state).toBe("pending");
-    expect((await h.resolve(first.requestId, "deny"))?.result.state).toBe("denied");
-    expect(() => suggest(h, "Una")).toThrow(/not now/);
-    expect(h.apply).not.toHaveBeenCalled();
-  });
-
-  it("lets a new suggestion follow one the user applied", async () => {
-    const h = harness();
-    const first = suggest(h, "Theo");
-    await h.resolve(first.requestId);
-    expect(suggest(h, "Una").title).toBe("Add @Una to the team?");
-  });
-});
-
 describe("reviewed Chief team setup", () => {
   it("reviews promotion in an authorized team without changing anything on denial", async () => {
     const h = harness(); h.peer.section = "Engineering";
     const before = structuredClone(h.store.bots);
     const request = h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     expect(request.detail).toContain("Chief of Staff: No → Yes");
-    expect(request.detail).toContain("May coordinate and configure bots in this team");
+    expect(request.detail).toContain("May coordinate and configure bots in this department");
     expect(h.store.bots).toEqual(before);
     expect((await h.resolve(request.requestId, "deny"))?.result.state).toBe("denied");
     expect(h.store.bots).toEqual(before);
@@ -110,7 +80,7 @@ describe("reviewed Chief team setup", () => {
       codex: { driverKind: "codex", agentsMcp: false },
     });
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }]);
-    expect(card.detail).toContain("Default engine/model");
+    expect(card.detail).toContain("Default AI and model");
     expect(card.detail).toContain("Loses peer coordination and every team tool");
     expect(card.detail).toContain("coordinate_bots");
     expect(card.detail).toContain("Loses approval levels: edits.");
@@ -119,7 +89,7 @@ describe("reviewed Chief team setup", () => {
   it("renders nothing extra for a model-only change on the same engine", () => {
     const h = harness({ claude: { driverKind: "claudeAgent", agentsMcp: true } });
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "claude", model: "opus" } } }]);
-    expect(card.detail).toContain("Default engine/model");
+    expect(card.detail).toContain("Default AI and model");
     expect(card.detail).not.toContain("peer coordination");
     expect(card.detail).not.toContain("approval levels");
   });
@@ -134,7 +104,7 @@ describe("reviewed Chief team setup", () => {
       { action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } },
       { action: "update", botId: h.chief.id, fields: { chiefOfStaff: false } },
     ]);
-    expect(replace.detail).toContain("Additional managed-team access is removed");
+    expect(replace.detail).toContain("Access to additional departments is removed");
     expect((await h.resolve(replace.requestId))?.result.state).toBe("applied");
     expect(h.chief.chiefOfStaff).toBe(false);
     expect(h.peer.chiefOfStaff).toBe(true);
@@ -167,13 +137,13 @@ describe("reviewed Chief team setup", () => {
   it("does not advertise new team access for a Chief being demoted in the same plan", () => {
     const h = harness();
     const card = h.propose([specialist("Mira", "Research"), { action: "update", botId: h.chief.id, fields: { chiefOfStaff: false } }], ["Research"]);
-    expect(card.detail).toContain('Create teams: "Research"');
+    expect(card.detail).toContain('Create departments: "Research"');
     expect(card.detail).not.toContain("Authorize @Clive");
   });
   it("shows what stays owner-owned after creation on create cards, and keeps update cards lean", () => {
     const h = harness();
     const create = h.propose([specialist("Mira", "Work")]);
-    expect(create.detail).toContain("New bots stay owner-owned after creation: connected apps off, approvals at Ask, a private workspace by default, avatar untouched.");
+    expect(create.detail).toContain("New bots stay owner-owned after creation: the same connected apps as @Clive, the workspace's default access level, a private workspace by default, avatar untouched.");
     expect(create.detail).toContain("Existing execution permissions are unchanged.");
     const update = h.propose([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);
     expect(update.detail).not.toContain("owner-owned");
@@ -195,7 +165,7 @@ describe("reviewed Chief team setup", () => {
   it("carries a model variant through the plan instead of dropping it", () => {
     const h = harness();
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "claude", model: "sonnet", variant: "stable" } } }]);
-    expect(card.detail).toContain("Default engine/model:");
+    expect(card.detail).toContain("Default AI and model:");
     expect(card.detail).toContain("claude/sonnet (no variant) → claude/sonnet (variant stable)");
   });
   it("coalesces each bot's fields into one review and applies once with a durable receipt", async () => {
@@ -217,7 +187,7 @@ describe("reviewed Chief team setup", () => {
   it("reviews Research, Engineering and Growth with multiple providers and explicit new-team access", async () => {
     const h = harness();
     const request = h.propose([specialist("Mira", "Research"), specialist("Patch", "Engineering", { instanceId: "codex", model: "gpt-fixture" }), specialist("Quill", "Growth")], ["Research", "Growth"]);
-    expect(request.detail).toContain('Create teams: "Research", "Growth"');
+    expect(request.detail).toContain('Create departments: "Research", "Growth"');
     expect(request.detail).toContain("Authorize @Clive");
     expect(h.store.bots).toHaveLength(2);
     expect((await h.resolve(request.requestId))?.result.bots).toHaveLength(3);
@@ -347,8 +317,8 @@ describe("reviewed Chief team setup", () => {
       title: "Research lead", section: "Engineering", modelSelection: { instanceId: "codex", model: "gpt-fixture" },
     } }]);
     expect(card.detail).toContain('Title: "Researcher" → "Research lead"');
-    expect(card.detail).toContain('Section: "Work" → "Engineering"');
-    expect(card.detail).toContain("Default engine/model: claude/sonnet (no variant) → codex/gpt-fixture (no variant)");
+    expect(card.detail).toContain('Department: "Work" → "Engineering"');
+    expect(card.detail).toContain("Default AI and model: claude/sonnet (no variant) → codex/gpt-fixture (no variant)");
   });
   it("shows the model variant on the current selection and its absence on the proposed one", () => {
     const h = harness();
@@ -356,13 +326,13 @@ describe("reviewed Chief team setup", () => {
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: {
       modelSelection: { instanceId: "codex", model: "gpt-fixture" },
     } }]);
-    expect(card.detail).toContain("Default engine/model: claude/sonnet (variant high) → codex/gpt-fixture (no variant)");
+    expect(card.detail).toContain("Default AI and model: claude/sonnet (variant high) → codex/gpt-fixture (no variant)");
   });
 });
 
-describe("Full Access team setup", () => {
+describe("team setup that applies on its own", () => {
   it("applies authorized leadership under Full Access with an explicit receipt", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true); h.peer.section = "Engineering";
+    const h = harness(); h.autoApply.mockReturnValue("full-access"); h.peer.section = "Engineering";
     const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     expect(response).toMatchObject({ applied: true, state: "applied" });
     expect(response.detail).toContain("Chief of Staff: No → Yes");
@@ -370,7 +340,7 @@ describe("Full Access team setup", () => {
     expect(h.peer.managedSections).toBeUndefined();
   });
   it("creates and updates immediately with one settled receipt and an explicit result", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     const append = vi.spyOn(h.store, "appendMessage");
     const response = await h.submit([specialist("Mira", "Research"), { action: "update", botId: h.peer.id, fields: { title: "Research lead" } }], ["Research"]);
     expect(response).toMatchObject({ applied: true, state: "applied", result: { state: "applied", newTeams: ["Research"], bots: [
@@ -380,13 +350,14 @@ describe("Full Access team setup", () => {
     expect(h.peer.title).toBe("Research lead");
     expect(h.apply).toHaveBeenCalledTimes(1);
     expect(h.messages).toHaveLength(1);
-    expect(append.mock.calls[0][1].card).toMatchObject({ answered: "allow", options: [], teamSetupRequest: { resumed: true, result: { state: "applied" } } });
+    // Applied on its own: nobody's answer, so the Chief's conversation stays the owner's alone.
+    expect(append.mock.calls[0][1].card).toMatchObject({ answered: "allow", autoApplied: true, options: [], teamSetupRequest: { resumed: true, result: { state: "applied" } } });
     expect(h.messages.some(({ card }) => card && !card.answered && !card.dismissed)).toBe(false);
     expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "applied" } });
     expect(h.apply).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps Ask pending even when the bot default is Full, and applies only after approval", async () => {
+  it("waits on the owner's card when the turn is not the owner's, and applies only after their answer", async () => {
     const h = harness(); h.chief.approvalMode = "full";
     const response = await h.submit([specialist("Mira", "Work")]);
     expect(response).toMatchObject({ applied: false, state: "pending" });
@@ -399,7 +370,7 @@ describe("Full Access team setup", () => {
   });
 
   it("deletes through the same guarded lifecycle without publishing a pending confirmation", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     const response = await h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.peer.id, reason: "User requested deletion" });
     expect(response).toMatchObject({ state: "applied", applied: true, result: { bots: [{ id: h.peer.id, name: "Ada", action: "deleted" }] } });
     expect(h.store.bot(h.peer.id)).toBeUndefined();
@@ -409,7 +380,7 @@ describe("Full Access team setup", () => {
   });
 
   it("does not apply setup or start deletion with an expired invocation", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     const canCommit = vi.fn(() => false);
     const source = { botId: h.chief.id, threadId: h.chief.threadId, canCommit };
     expect(await h.service.submit({ ...source, plan: { reason: "Requested setup", operations: [specialist("Mira", "Work")] } }))
@@ -423,7 +394,7 @@ describe("Full Access team setup", () => {
   });
 
   it.each(["stopped", "replaced"])("cancels deletion when its invocation is %s during lifecycle checks", async (change) => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     let generation: string | undefined = "original";
     let resume!: () => void;
     const inventory = new Promise<void>((resolve) => { resume = resolve; });
@@ -448,7 +419,7 @@ describe("Full Access team setup", () => {
   });
 
   it("preserves saved deletion when its invocation expires during post-commit cleanup", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     let active = true;
     let resume!: () => void;
     const cleanup = new Promise<void>((resolve) => { resume = resolve; });
@@ -471,7 +442,7 @@ describe("Full Access team setup", () => {
     expect(h.deleteBot).toHaveBeenCalledTimes(1);
   });
 
-  it("does not retain the invocation lease on an Ask card awaiting a human", async () => {
+  it("does not retain the invocation lease on the owner's card", async () => {
     const h = harness(); let active = true;
     const response = await h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId,
       targetBotId: h.peer.id, reason: "remove", canCommit: () => active });
@@ -483,7 +454,7 @@ describe("Full Access team setup", () => {
   });
 
   it("exempts only the requesting self-update turn, not siblings or other bots", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true); h.chief.busy = true;
+    const h = harness(); h.autoApply.mockReturnValue("full-access"); h.chief.busy = true;
     h.targetBusy.mockImplementation((id, sourceThreadId) => Boolean(h.store.bot(id)?.busy) && sourceThreadId !== h.chief.threadId);
     expect(await h.submit([{ action: "update", botId: h.chief.id, fields: { title: "Updated Chief" } }])).toMatchObject({ state: "applied" });
     expect(h.targetBusy).toHaveBeenCalledWith(h.chief.id, h.chief.threadId);
@@ -497,7 +468,7 @@ describe("Full Access team setup", () => {
   });
 
   it("retains model, scope, source, permission-field and deletion safety checks", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     await expect(h.submit([specialist("Mira", "Private")])).rejects.toThrow(/authorized/);
     await expect(h.submit([specialist("Mira", "Work", { instanceId: "claude", model: "unknown" })])).rejects.toThrow(/catalog/);
     await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { approvalMode: "full" } }])).rejects.toThrow();
@@ -509,18 +480,18 @@ describe("Full Access team setup", () => {
     expect(h.messages).toHaveLength(0); expect(h.apply).not.toHaveBeenCalled(); expect(h.deleteBot).not.toHaveBeenCalled();
   });
 
-  it("keeps shared-computer change guards and rechecks Full Access before mutation", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+  it("keeps shared-computer change guards and rechecks the grant before mutation", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     h.validateChange.mockImplementation(() => { throw new TeamSetupError("Team computer is in use", 409); });
     expect(await h.submit([{ action: "update", botId: h.peer.id, fields: { section: "Engineering" } }])).toMatchObject({ state: "cancelled", applied: false, result: { error: "Team computer is in use" } });
     expect(h.validateChange).toHaveBeenCalledWith(h.peer, expect.objectContaining({ section: "Engineering" }));
-    h.autoApply.mockReset().mockReturnValueOnce(true).mockReturnValue(false);
-    expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "cancelled", applied: false, result: { error: expect.stringContaining("Full Access") } });
+    h.autoApply.mockReset().mockReturnValueOnce("level").mockReturnValue(null);
+    expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "cancelled", applied: false, result: { error: expect.stringContaining("on its own") } });
     expect(h.apply).not.toHaveBeenCalled();
   });
 
   it("returns failure without an approval card or success claim when storage fails", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     h.apply.mockImplementation(() => { throw new Error("fixture disk full"); });
     const response = await h.submit([specialist("Mira", "Work")]);
     expect(response).toMatchObject({ state: "failed", applied: false, result: { state: "failed", bots: [], error: "fixture disk full" } });
@@ -531,7 +502,7 @@ describe("Full Access team setup", () => {
   });
 
   it("distinguishes an unapplied deletion failure from saved deletion with cleanup failure", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     const args = { botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.peer.id, reason: "remove" };
     const remove = h.deleteBot.getMockImplementation()!;
     h.deleteBot.mockImplementation(async () => { throw new Error("fixture write failed"); });
@@ -543,11 +514,98 @@ describe("Full Access team setup", () => {
   });
 
   it("preserves an applied result when only writing its settled chat receipt fails", async () => {
-    const h = harness(); h.autoApply.mockReturnValue(true);
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
     vi.spyOn(h.store, "appendMessage").mockImplementation(() => { throw new Error("fixture transcript write failed"); });
     expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "applied", applied: true, result: { error: expect.stringContaining("could not be added") } });
     expect(h.chief.lastTeamSetupReceipt?.result.state).toBe("applied");
     expect(h.apply).toHaveBeenCalledTimes(1);
     expect(h.messages).toHaveLength(0);
+  });
+});
+
+describe("team setup below Full access", () => {
+  const undo = (h: ReturnType<typeof harness>, requestId: string) => h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId });
+
+  it("applies at Ask with no card, and Undo deletes the unused bot it created, once", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    const response = await h.submit([specialist("Mira", "Work")]);
+    expect(response).toMatchObject({ state: "applied", applied: true, appliedBy: "level" });
+    const created = h.store.bots.find((bot) => bot.name === "Mira")!;
+    expect(h.messages[0].card).toMatchObject({ answered: "allow", autoApplied: true, options: [], teamSetupRequest: { undo: { created: [created.id] } } });
+    expect(await undo(h, response.requestId)).toEqual({ claimed: true, state: "undone" });
+    expect(h.deleteBot).toHaveBeenCalledWith(created.id, expect.any(Function));
+    expect(h.store.bot(created.id)).toBeUndefined();
+    expect(h.messages[0].card?.undone).toBe(true);
+    expect(await undo(h, response.requestId)).toEqual({ claimed: true, state: "already_undone" });
+  });
+
+  it("gives updated bots back what the card showed and the Chief its earlier teams", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level"); h.peer.title = "Analyst";
+    const apply = h.apply.getMockImplementation()!;
+    h.apply.mockImplementationOnce((request) => { h.chief.managedSections = ["Engineering", ...request.newTeams]; return apply(request); });
+    const response = await h.submit([specialist("Mira", "Research"), { action: "update", botId: h.peer.id, fields: { title: "Research lead" } }], ["Research"]);
+    expect(h.chief.managedSections).toEqual(["Engineering", "Research"]);
+    expect(h.peer.title).toBe("Research lead");
+    expect(await undo(h, response.requestId)).toMatchObject({ state: "undone" });
+    expect(h.peer.title).toBe("Analyst");
+    expect(h.chief.managedSections).toEqual(["Engineering"]);
+    expect(h.store.bots.some((bot) => bot.name === "Mira")).toBe(false);
+  });
+
+  it("refuses Undo, changing nothing, once a bot it touched changed or the new bot was used", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    const updated = await h.submit([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);
+    h.peer.title = "Person's title";
+    expect(await undo(h, updated.requestId)).toMatchObject({ state: "invalid", stale: true, error: "Changed since, so it can't be undone here." });
+    expect(h.peer.title).toBe("Person's title");
+    const created = await h.submit([specialist("Mira", "Work")]);
+    h.messages.push({ id: "person-line", role: "user" });
+    expect(await undo(h, created.requestId)).toMatchObject({ state: "invalid", stale: true });
+    expect(h.deleteBot).not.toHaveBeenCalled();
+  });
+
+  it("deletes a teammate at Ask with no card and no Undo", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    const response = await h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.peer.id, reason: "User requested deletion" });
+    expect(response).toMatchObject({ state: "applied", applied: true });
+    expect(h.store.bot(h.peer.id)).toBeUndefined();
+    expect(h.messages[0].card?.teamSetupRequest?.undo).toBeUndefined();
+    expect(await undo(h, response.requestId)).toMatchObject({ state: "invalid", status: 409 });
+  });
+});
+
+describe("MausBot's Chief-level team setup", () => {
+  const plan = (operations: unknown[]) => ({ reason: "Requested specialist setup", operations, newTeams: [] });
+
+  it("lets the person's MausBot add a specialist like a Chief, without making it the Chief", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: {} });
+    const request = h.service.propose({ botId: maus.id, threadId: maus.threadId, plan: plan([specialist("Scout", "Work")]) });
+    expect(request.detail).toContain("Scout");
+    expect(maus.chiefOfStaff).toBeUndefined();
+    expect(h.chief.chiefOfStaff).toBe(true);
+  });
+
+  it("never lets MausBot change who the Chief is", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: {} });
+    for (const target of [maus.id, h.peer.id, h.chief.id]) {
+      expect(() => h.service.propose({ botId: maus.id, threadId: maus.threadId,
+        plan: plan([{ action: "update", botId: target, fields: { chiefOfStaff: target !== h.chief.id } }]) })).toThrow(/Only the Chief of Staff changes who the Chief is/);
+    }
+  });
+
+  it("refuses a Team Cloud User's MausBot, which holds no more than its member", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: { person: "user@example.com" } });
+    expect(() => h.service.propose({ botId: maus.id, threadId: maus.threadId, plan: plan([specialist("Scout", "Work")]) }))
+      .toThrow(/Only an active Chief of Staff can propose team setup/);
+  });
+
+  it("never lets a Chief delete MausBot", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: {} });
+    expect(() => h.service.proposeDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: maus.id, reason: "remove" }))
+      .toThrow(/Maus can't be deleted or archived/);
   });
 });

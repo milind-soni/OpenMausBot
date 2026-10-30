@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CircleAlert, X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
-import { openExternalLink } from "@/lib/app-links";
+import { usePageOpener } from "@/lib/page-open";
+import { phonePairingSettingsAction } from "@/lib/phone-pairing";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { resolvedThreadTarget } from "@/lib/thread-target";
+import { openThread } from "@/state/thread-navigation";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import {
-  widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetPayload, type WidgetSettled,
-  type WidgetValues,
+  PHONE_PAIRING_ACTION, widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetOther, type WidgetPayload,
+  type WidgetSettled, type WidgetValues,
 } from "../../../shared/widget";
 import { ASK_QUIET_BUTTON, AskSettledLine, returnFocusToComposer } from "../AskCard";
+import { plainBotBubble } from "../chat-bubble";
 import { WidgetBody } from "./WidgetBody";
-import { WIDGET_COMPACT_BELOW, widgetActionUrl, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
+import { WIDGET_COMPACT_BELOW, widgetActionUrl, widgetThreadTarget, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
 import { kids } from "./widget-style";
 import { newWidgetSendId, sendWidgetAction, type WidgetSendResult } from "./widget-send";
 
 const WIDTH: Record<string, string> = { sm: "max-w-[360px]", md: "max-w-[440px]", lg: "max-w-[600px]", full: "max-w-[600px]" };
-const SURFACE = "w-full overflow-hidden rounded-3xl bg-composer ring-1 ring-composer-ring transition-opacity";
+const SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring transition-opacity";
 const SENT_MS = 1600;
 
 function labelledFields(node: WidgetNode, into = new Set<string>()): Set<string> {
@@ -24,25 +30,29 @@ function labelledFields(node: WidgetNode, into = new Set<string>()): Set<string>
   return into;
 }
 
-function isEmpty(field: WidgetField, values: WidgetValues): boolean {
+function isEmpty(field: WidgetField, values: WidgetValues, other: WidgetOther): boolean {
+  if (Object.hasOwn(other, field.name)) return !other[field.name]!.trim();
   const value = values[field.name];
   return field.type === "Checkbox" ? value !== true : typeof value !== "string" || !value.trim();
 }
 
 export function WidgetMessage({ botId, threadId, message }: { botId: string; threadId?: string; message: Message }) {
+  const simple = !useAdvancedMode();
   const payload = message.widget;
   if (!payload?.root || typeof payload.root !== "object" || typeof payload.root.type !== "string") {
     return message.text
-      ? <div className="chat-text w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">{message.text}</div>
+      ? <div data-chat-bubble={simple ? "simple" : ""} className={plainBotBubble(simple)}>{message.text}</div>
       : null;
   }
-  // update_widget renumbers node ids, so a new revision remounts the card.
+  // Replacing a widget renumbers node ids, so a new revision remounts the card.
   return <WidgetCard key={payload.rev ?? 0} botId={botId} threadId={threadId} messageId={message.id} payload={payload} />;
 }
 
 function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; threadId?: string; messageId: string; payload: WidgetPayload }) {
   const root = payload.root;
-  const { flushBotPatches } = useStore();
+  const { state, dispatch, flushBotPatches } = useStore();
+  const showThreads = useShowThreads();
+  const openPage = usePageOpener();
   const [settledHere, setSettledHere] = useState<WidgetSettled>();
   /**
    * Once the row has spoken since this card's last press, only the row decides, whichever of the patch frame and the
@@ -69,6 +79,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
     return () => observer.disconnect();
   }, []);
   const [edits, setEdits] = useState<WidgetValues>({});
+  const [otherEdits, setOtherEdits] = useState<WidgetOther>({});
   const [pending, setPending] = useState<string>();
   const [sent, setSent] = useState<string>();
   const [problem, setProblem] = useState<{ text: string; field?: string }>();
@@ -100,28 +111,36 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
   const fields = useMemo(() => new Map(widgetFields(root).map((field) => [field.name, field])), [root]);
   const labelled = useMemo(() => labelledFields(root), [root]);
   const values = useMemo(() => ({ ...widgetInitialValues(root), ...edits, ...settled?.values }), [root, edits, settled]);
+  const other = settled ? settled.other ?? {} : otherEdits;
 
   const press = (ref: string) => {
     const entry = actions.get(ref);
     if (!entry || sendingNow.current || pending !== undefined) return;
     if (entry.client) {
+      if (entry.action.type === PHONE_PAIRING_ACTION) dispatch(phonePairingSettingsAction());
       const url = widgetActionUrl(entry);
-      if (url) void openExternalLink(url);
+      if (url) openPage(url);
+      const target = resolvedThreadTarget(widgetThreadTarget(entry), state);
+      if (target) openThread(dispatch, target, state, showThreads);
       return;
     }
     if (settled) return;
     let sending: WidgetValues | undefined;
+    let sendingOther: WidgetOther | undefined;
     if (entry.tone !== "cancel") {
       const scope = widgetFields(widgetScope(root, ref), root);
-      const empty = entry.tone ? scope.find((field) => field.node.required === true && isEmpty(field, values)) : undefined;
+      const empty = entry.tone ? scope.find((field) => field.node.required === true && isEmpty(field, values, other)) : undefined;
       if (empty) {
         setProblem({ text: t("widget.required", { label: empty.label }), field: empty.name });
-        frame.current?.querySelector<HTMLElement>(`[data-widget-field="${empty.name}"]`)?.focus();
+        const where = Object.hasOwn(other, empty.name) ? "data-widget-other" : "data-widget-field";
+        frame.current?.querySelector<HTMLElement>(`[${where}="${empty.name}"]`)?.focus();
         return;
       }
-      sending = Object.fromEntries(scope.map((field) => [field.name, values[field.name] ?? (field.type === "Checkbox" ? false : "")]));
+      const typed = scope.filter((field) => Object.hasOwn(other, field.name) && other[field.name]!.trim());
+      sending = Object.fromEntries(scope.map((field) => [field.name, Object.hasOwn(other, field.name) ? "" : values[field.name] ?? (field.type === "Checkbox" ? false : "")]));
+      if (typed.length) sendingOther = Object.fromEntries(typed.map((field) => [field.name, other[field.name]!]));
     }
-    const key = `${ref}\n${JSON.stringify(sending ?? null)}`;
+    const key = `${ref}\n${JSON.stringify(sending ?? null)}\n${JSON.stringify(sendingOther ?? null)}`;
     const sendId = retry.current?.key === key ? retry.current.sendId : newWidgetSendId();
     retry.current = { key, sendId };
     sendingNow.current = true;
@@ -134,7 +153,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
     // Pending bot settings save before the press starts a turn; if that save fails, nothing is posted.
     const saved: Promise<unknown> = Promise.resolve().then(() => flushBotPatches(botId));
     const unsaved = (): WidgetSendResult => ({ ok: false, refused: false });
-    void saved.then(() => sendWidgetAction({ botId, threadId, messageId, ref, rev: payload.rev ?? 0, values: sending, sendId }), unsaved).then((result) => {
+    void saved.then(() => sendWidgetAction({ botId, threadId, messageId, ref, rev: payload.rev ?? 0, values: sending, other: sendingOther, sendId }), unsaved).then((result) => {
       sendingNow.current = false;
       if (!mounted.current) return;
       if (!result.ok) {
@@ -146,7 +165,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
       }
       retry.current = undefined;
       if (entry.tone) {
-        setSettledHere({ ref, label: entry.label, tone: entry.tone, at: Date.now(), sendId, ...(sending ? { values: sending } : {}) });
+        setSettledHere({ ref, label: entry.label, tone: entry.tone, at: Date.now(), sendId, ...(sending ? { values: sending } : {}), ...(sendingOther ? { other: sendingOther } : {}) });
         return;
       }
       setPending(undefined);
@@ -169,6 +188,17 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
     values,
     setValue: (name, value) => {
       setEdits((current) => ({ ...current, [name]: value }));
+      setOtherEdits(({ [name]: _dropped, ...rest }) => rest);
+      if (problem?.field === name) setProblem(undefined);
+    },
+    other,
+    chooseOther: (name) => {
+      setEdits((current) => ({ ...current, [name]: "" }));
+      setOtherEdits((current) => ({ ...current, [name]: current[name] ?? "" }));
+      if (problem?.field === name) setProblem(undefined);
+    },
+    setOther: (name, text) => {
+      setOtherEdits((current) => ({ ...current, [name]: text }));
       if (problem?.field === name) setProblem(undefined);
     },
     locked: isSettled || pending !== undefined,
@@ -205,7 +235,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
             <div className={cn("flex items-start gap-3 px-4 pt-3.5", kids(root).length ? "pb-3" : "pb-3.5")}>
               <div className="min-w-0 flex-1">
                 {statusText && (
-                  <p className={cn("flex items-center gap-1.5 text-[12.5px] font-semibold leading-[18px] text-accent-text", (title || caption) && "mb-1")}>
+                  <p className={cn("flex items-center gap-1.5 text-[13px] font-semibold leading-[18px] text-accent-text", (title || caption) && "mb-1")}>
                     {typeof status.icon === "string" && <WidgetGlyph name={status.icon} size={14} />}
                     <bdi dir="auto" className="min-w-0 truncate">{statusText}</bdi>
                   </p>

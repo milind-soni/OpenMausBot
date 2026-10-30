@@ -366,6 +366,37 @@ function skillWarnings(skillMd: string, files: readonly SkillFile[]): string[] {
   return unique.length > MAX_WARNINGS ? [...unique.slice(0, MAX_WARNINGS), `${unique.length - MAX_WARNINGS} more warnings in its files`] : unique;
 }
 
+/** A found skill as an import stores it: SKILL.md and the text files beside it, with the scan's warnings. */
+function skillInput(machine: SetupMachine, skill: FoundSkill, budget: { bytes: number }): { input: ImportedSkillInput; leftOut: number } {
+  const copy = skillFiles(machine.fs, skill.folder, budget);
+  return {
+    leftOut: copy.leftOut,
+    input: {
+      name: skill.name,
+      skillMd: skill.text,
+      files: copy.files,
+      entry: {
+        description: skill.parsed.description,
+        source: skill.source,
+        root: skill.root,
+        origin: skill.origin,
+        label: skill.label,
+        sha256: skill.sha256,
+        warnings: skillWarnings(skill.text, copy.files),
+        ...(skill.parsed.license ? { license: skill.parsed.license } : {}),
+        ...(skill.parsed.compatibility ? { compatibility: skill.parsed.compatibility } : {}),
+      },
+    },
+  };
+}
+
+/** The person's own Claude Code skills, read as an import reads them, for a server that cannot see this computer's
+ * ~/.claude/skills: it keeps them as imported skills. */
+export function claudeCodeSkillInputs(machine: SetupMachine = thisMachine()): ImportedSkillInput[] {
+  const budget = { bytes: 0 };
+  return findSkills(machine).filter((skill) => skill.source === "claudeCode").map((skill) => skillInput(machine, skill, budget).input);
+}
+
 /** One copy for every bot, made once however many bots there are or will be. One the scan flags comes in switched off:
  * a person switches it on for a bot after reading it, as with any other import. */
 function importSkills(machine: SetupMachine): NonNullable<SetupImportResult["skills"]> {
@@ -384,24 +415,9 @@ function importSkills(machine: SetupMachine): NonNullable<SetupImportResult["ski
       skip(skill.name, "conflict");
       continue;
     }
-    const copy = skillFiles(machine.fs, skill.folder, budget);
-    result.filesLeftOut += copy.leftOut;
-    inputs.push({
-      name: skill.name,
-      skillMd: skill.text,
-      files: copy.files,
-      entry: {
-        description: skill.parsed.description,
-        source: skill.source,
-        root: skill.root,
-        origin: skill.origin,
-        label: skill.label,
-        sha256: skill.sha256,
-        warnings: skillWarnings(skill.text, copy.files),
-        ...(skill.parsed.license ? { license: skill.parsed.license } : {}),
-        ...(skill.parsed.compatibility ? { compatibility: skill.parsed.compatibility } : {}),
-      },
-    });
+    const { input, leftOut } = skillInput(machine, skill, budget);
+    result.filesLeftOut += leftOut;
+    inputs.push(input);
   }
   const flagged = new Set(inputs.filter((one) => one.entry.warnings.length).map((one) => one.name));
   for (const stored of storeImportedSkills(inputs)) {

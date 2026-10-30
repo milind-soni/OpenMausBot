@@ -1,24 +1,36 @@
 // A SOCKS5 server on loopback that a bot's Chrome sends every connection through. It resolves names itself and
 // connects only to addresses its policy allows, so neither redirects nor DNS rebinding reach anything else, and it
-// carries bytes only: TLS, HTTP/2 and WebSockets pass through unchanged.
+// carries bytes only: TLS, HTTP/2 and WebSockets pass through unchanged. A public destination the caller picks may go
+// out through an upstream instead, the person's own computer, which resolves and checks it there.
 //
 // Adapted from pingdotgg/t3code@00cdceb1 apps/server/src/htmlRender/publicProxy.ts, MIT License, Copyright (c) 2026
 // T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: plain Node in place of Effect, the policy is
-// the caller's and every refusal is reported, localhost names resolve here as Chrome resolves them, and a failed
-// upstream connection gets a SOCKS reply.
+// the caller's and every refusal is reported, localhost names resolve here as Chrome resolves them, a failed
+// upstream connection gets a SOCKS reply, and a connection may go out through an upstream.
 import { lookup } from "node:dns/promises";
-import { connect, createServer, isIP, type Socket } from "node:net";
+import { connect, createServer, isIP, type BlockList, type Socket } from "node:net";
 
-import { namesThisMachine } from "./policy.ts";
+import type { LinkOpened } from "../../../electron/device-link-protocol.mjs";
+import { addressClass, namesThisMachine, ownAddresses } from "./policy.ts";
 
 export interface ResolvedAddress { address: string; family: number }
 export interface GateTarget { host: string; port: number }
 
+/** Another way out for one connection: the person's own computer, which looks the name up and checks it itself. */
+export interface GateUpstream { open(target: GateTarget): Promise<LinkOpened> }
+
 export interface GateOptions {
+  /** Why a destination is refused by its name alone, or null; a name refused here is never looked up. */
+  refuseName?(target: GateTarget): string | null;
   /** Why the connection is refused, or null to connect to exactly these addresses. */
   decide(target: GateTarget, addresses: readonly ResolvedAddress[]): Promise<string | null>;
   onRefusal?(target: GateTarget, reason: string): void;
   resolve?(host: string): Promise<ResolvedAddress[]>;
+  /** Decided per connection, after the name check, for a public destination only; one that ends before it answers
+   * goes the gate's own way. */
+  upstream?(target: GateTarget): GateUpstream | null;
+  /** This machine's own addresses, which never go upstream: its interfaces unless a test passes them. */
+  own?(): BlockList;
 }
 
 export interface EgressGate {
@@ -73,6 +85,13 @@ const reply = (code: number) => Buffer.from([5, code, 0, 1, 0, 0, 0, 0, 0, 0]);
 
 // What a client may send before its tunnel opens; a TLS hello fits easily.
 const MAX_EARLY_BYTES = 64 * 1024;
+
+/** A name for this machine, or an address that is not on the public internet: always the gate's own way, under its own
+ * policy, so a bot's dev server here stays reachable and nothing private is asked of the person's computer. */
+export function staysHere(host: string, own: BlockList = ownAddresses()): boolean {
+  if (/^(?:[^.]+\.)*localhost\.?$/i.test(host)) return true;
+  return isIP(host) !== 0 && addressClass(host, own) !== "public";
+}
 
 /** Answers and closes; whatever the client sent after its request is dropped, not left buffered. */
 function refuse(client: Socket, code: number): void {
@@ -134,15 +153,33 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
       };
       client.on("data", holdEarly);
       void (async () => {
-        const addresses = await resolve(target.host);
-        const refusal = addresses.length ? await options.decide(target, addresses).catch(() => "error") : null;
+        const named = options.refuseName?.(target) ?? null;
+        const through = named === null && !staysHere(target.host, options.own?.()) ? options.upstream?.(target) ?? null : null;
+        if (through) {
+          const opened = await through.open(target).catch((): LinkOpened => ({ gone: true }));
+          if (!("gone" in opened)) {
+            if (client.destroyed) return void ("cancel" in opened && opened.cancel());
+            client.off("data", holdEarly);
+            if ("refused" in opened) {
+              options.onRefusal?.(target, opened.refused);
+              return refuse(client, NOT_ALLOWED);
+            }
+            if ("failed" in opened) return refuse(client, opened.failed === "refused" ? CONNECTION_REFUSED : HOST_UNREACHABLE);
+            client.write(reply(SUCCEEDED));
+            opened.join(client, early);
+            return;
+          }
+          if (client.destroyed) return;
+        }
+        const addresses = named === null ? await resolve(target.host) : [];
+        const refusal = named ?? (addresses.length ? await options.decide(target, addresses).catch(() => "error") : null);
         if (client.destroyed) return;
         client.off("data", holdEarly);
-        if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
         if (refusal !== null) {
           options.onRefusal?.(target, refusal);
           return refuse(client, NOT_ALLOWED);
         }
+        if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
         client.pause();
         // Every checked address, IPv6 and IPv4 alike, so a host is still reached where one family is broken; the
         // lookup hands back only checked addresses, so a name that now resolves elsewhere changes nothing.

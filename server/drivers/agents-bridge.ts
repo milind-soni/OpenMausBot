@@ -5,6 +5,7 @@
 import { isOutboundTool } from "../../shared/outbound.ts";
 import { READ_ONLY_ANNOTATIONS } from "../agent-tool-policy.ts";
 import { bm25Ranker } from "../mcp-directory.ts";
+import { AGENTS_TOOL_ALIASES } from "../../shared/agents-tool-names.ts";
 import type { Json } from "./agents-client.ts";
 
 /** The proxy's switch: "1" lists through the bridge, anything else lists the whole catalog. */
@@ -152,7 +153,7 @@ export function createToolBridge(tools: readonly BridgeTool[]): ToolBridge {
     ...hot,
     {
       name: FIND_TOOL,
-      description: `Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with ${USE_TOOL}. A tool in your tool list is called directly, not found here. Tools reached this way: ${namesList(hidden.map((tool) => tool.name), BRIDGE_NAMES_MAX_CHARS)}`,
+      description: `Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with ${USE_TOOL}. Tools reached this way: ${namesList(hidden.map((tool) => tool.name), BRIDGE_NAMES_MAX_CHARS)}`,
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -182,8 +183,9 @@ export function createToolBridge(tools: readonly BridgeTool[]): ToolBridge {
   async function find(args: unknown): Promise<BridgeAnswer> {
     const query = record(args) && typeof args.query === "string" ? args.query.trim() : "";
     if (!query || query.length > QUERY_CHARS) return { text: FIND_USAGE, isError: true };
-    if (listedNames.has(query)) return { text: `${query} is in your tool list: call it directly.` };
-    const ranked = await bm25Ranker(query, hidden, FIND_MATCHES_MAX);
+    const named = Object.hasOwn(AGENTS_TOOL_ALIASES, query) ? AGENTS_TOOL_ALIASES[query]!.tools[0]! : query;
+    if (listedNames.has(named)) return { text: `${named} is in your tool list: call it directly.` };
+    const ranked = await bm25Ranker(named, hidden, FIND_MATCHES_MAX);
     const matches: Array<Pick<BridgeTool, "name" | "description" | "inputSchema">> = [];
     let chars = 0;
     for (const candidate of ranked.slice(0, FIND_MATCHES_MAX)) {

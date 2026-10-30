@@ -1,13 +1,18 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { hostTimeout } from "./testing/host-timeout.ts";
 import {
   assertSafeCliArgv,
+  cliVersionReader,
   describeSpawnFailure,
   estimatedWindowsCommandLineChars,
+  execCli,
+  killCliTree,
+  spawnCli,
   WINDOWS_SAFE_COMMAND_LINE_CHARS,
 } from "./procs.ts";
 
@@ -71,4 +76,47 @@ describe("spawn ENOENT", () => {
     expect(error.code).toBe("ENOENT");
     expect(describeSpawnFailure(error, process.execPath, missing).setup).toBe(false);
   });
+});
+
+describe("execCli timeout", () => {
+  it.skipIf(process.platform === "win32")("calls back when the CLI traps SIGTERM and outlives its timeout", async () => {
+    const started = Date.now();
+    const err = await new Promise<Error | null>((resolve) => {
+      execCli(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { timeout: hostTimeout(2_000) }, (error) => resolve(error));
+    });
+    // Without the escalation a child that trapped SIGTERM would hold this callback past the test's own timeout.
+    expect(err).toMatchObject({ killed: true });
+    expect(Date.now() - started).toBeLessThan(hostTimeout(15_000));
+  }, hostTimeout(20_000));
+});
+
+describe("out of memory", () => {
+  it.runIf(process.platform === "linux")("a bot's engine is the first the kernel stops, and anything else keeps its score", async () => {
+    const forever = ["-e", "setInterval(() => {}, 1000)"];
+    const engine = spawnCli(process.execPath, forever, { stdio: ["pipe", "pipe", "pipe"] }, "bot");
+    const other = spawnCli(process.execPath, forever, { stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      expect(readFileSync(`/proc/${engine.pid}/oom_score_adj`, "utf8").trim()).toBe("1000");
+      expect(readFileSync(`/proc/${other.pid}/oom_score_adj`, "utf8").trim()).toBe(readFileSync("/proc/self/oom_score_adj", "utf8").trim());
+    } finally {
+      await Promise.all([killCliTree(engine), killCliTree(other)]);
+    }
+  });
+});
+
+describe("CLI version probes", () => {
+  it("keeps the last version through a timed-out probe and names the timeout without one", async () => {
+    const timedOut = await new Promise<Error | null>((resolve) => {
+      execCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
+    });
+    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 8 seconds") });
+    const read = cliVersionReader("claude");
+    expect(read(null, " 2.1.302\n")).toEqual({ version: "2.1.302" });
+    expect(read(timedOut, "")).toEqual({ version: "2.1.302" });
+    const trapped = await new Promise<Error | null>((resolve) => {
+      execCli(process.execPath, ["-e", "process.on('SIGTERM', () => process.exit(1)); setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
+    });
+    expect(read(trapped, "")).toEqual({ version: "2.1.302" });
+    expect(read(Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }), "")).toEqual({ reason: "`claude` CLI not found" });
+  }, hostTimeout(20_000));
 });

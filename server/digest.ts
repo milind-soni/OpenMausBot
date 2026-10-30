@@ -4,6 +4,7 @@ import type { MemoryJournalEntry } from "./memory-journal.ts";
 import type { Message } from "./store.ts";
 
 import type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
+import { redactSecretsInText } from "../shared/redact.ts";
 import { toolIdentity } from "../shared/tool-name.ts";
 export type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 
@@ -71,7 +72,8 @@ export function buildTurnDigest(input: DigestInput): TurnDigest {
     ...(input.files ? { files: boundFiles(input.files) } : {}),
     memory,
     ...(input.memory.length > memory.length ? { memoryDropped: input.memory.length - memory.length } : {}),
-    reply: firstSentence(input.reply),
+    // The digest's copy of the reply is stored and replayed like the reply itself, so it is scrubbed the same way.
+    reply: firstSentence(redactSecretsInText(input.reply)),
     ...(input.usage ? { usage: input.usage } : {}),
     hookCoverage: input.hookCoverage,
   };

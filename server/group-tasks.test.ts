@@ -78,7 +78,7 @@ describe("channel tasks", () => {
     const second = store.createGroupTask(channel.id)!;
     store.appendMessage(second.threadId, { role: "user", kind: "text", text: "private branch" });
 
-    expect(store.renameGroupTask(channel.id, second.threadId, "  Research  ")?.title).toBe("Research");
+    expect(store.patchGroupTask(channel.id, second.threadId, { title: "  Research  " })?.title).toBe("Research");
     expect(store.deleteGroupTask(channel.id, second.threadId)).toMatchObject({ threadId: first });
     expect(store.messagesFor(second.threadId)).toEqual([]);
     expect(store.deleteGroupTask(channel.id, first)).toBeNull();
@@ -167,7 +167,7 @@ describe("channel tasks", () => {
     const channel = store.createGroup("Product", [bot.id]);
     const original = channel.threadId;
     const sibling = store.createGroupTask(channel.id)!;
-    expect(store.setGroupTaskTurnTimeout(channel.id, original, 30)?.turnTimeoutMinutes).toBe(30);
+    expect(store.patchGroupTask(channel.id, original, { turnTimeoutMinutes: 30 })?.turnTimeoutMinutes).toBe(30);
     expect(store.groupTaskByThread(channel.id, sibling.threadId)?.turnTimeoutMinutes).toBeUndefined();
     const dm = store.createGroup("DM", [bot.id], true);
     expect(store.patchGroup(dm.id, { turnTimeoutMinutes: 30 })?.turnTimeoutMinutes).toBe(30);
@@ -176,7 +176,7 @@ describe("channel tasks", () => {
     expect(reloaded.groupTaskByThread(channel.id, original)?.turnTimeoutMinutes).toBe(30);
     expect(reloaded.groupTaskByThread(channel.id, sibling.threadId)?.turnTimeoutMinutes).toBeUndefined();
     expect(reloaded.group(dm.id)?.turnTimeoutMinutes).toBe(30);
-    expect(reloaded.setGroupTaskTurnTimeout(channel.id, original, null)?.turnTimeoutMinutes).toBeUndefined();
+    expect(reloaded.patchGroupTask(channel.id, original, { turnTimeoutMinutes: null })?.turnTimeoutMinutes).toBeUndefined();
     expect(reloaded.patchGroup(dm.id, { turnTimeoutMinutes: null })?.turnTimeoutMinutes).toBeUndefined();
   });
 

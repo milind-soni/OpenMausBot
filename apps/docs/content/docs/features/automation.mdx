@@ -12,15 +12,21 @@ A routine runs once, at a repeating interval, or on selected weekdays. Each run 
 
 Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. OpenMausBot must be running when a local routine becomes due.
 
-### Keep reports in one thread
+### Results arrive in the bot's chat
 
-In a routine's editor, use **Post results to** to choose an existing thread, or leave it on **The bot's main thread**: the conversation you last wrote in, which is also the one conversation you see with threads hidden. You can move a results thread into a folder, such as **OMB management**, just like any other thread.
+Each run works in a conversation of its own, out of the way, and only its result comes to the bot's chat: one message from the bot, with a small line above it naming the automation and when it ran. Reply to it like any other message; the bot knows what its automation found. A run with nothing to tell you stays quiet: no message, no unread dot, no notification, and the automation's card says **Nothing new**.
 
-Each run gets its own execution context, while dated reports collect in the chosen thread. Background execution threads stay out of the normal sidebar and mobile thread pickers. Use **Open run** on a report for its conversation and any approvals, then **Back to results** to return. **Run logs** keeps the execution history, including failures and waiting runs.
+When a run needs you, it asks in that chat. A question in words shows **needs you** on the message; answer it there, or react 👍 or 👎. A choice or an approval the run waits on appears in the chat too, and answering it there, or reacting 👍 or 👎, carries the run on. A sign-in, a connection or a key it needs is named in the chat, with **See run** to it. When a run can't finish, the chat says so once, with what to fix.
 
-A bot schedules, changes, pauses, resumes, and deletes its own routines from chat without asking, and each change shows as one line with **Undo** (see [Changes a bot makes to itself](/docs/features/approvals-and-inspector#changes-a-bot-makes-to-itself)). A routine for another bot asks first unless the conversation has Full access.
+Nothing lands in the middle of your own conversation: if you are chatting with the bot when a run finishes, its message waits and appears right after the bot's reply to you.
 
-Without a chosen thread, each run reports into the bot's main thread as it is when the run starts, wherever the routine was made, so results follow you to the conversation you are in. Changing the destination affects future runs, not the report links for older runs. If you delete a results thread, its hidden execution threads become visible so you can still inspect their work and respond to approvals.
+Files a run links in its message open from the chat, just as they would in the run's own conversation. Use **See run** on a message for the run's full conversation, then **Back to results** to return. **Run logs** keeps the execution history, including failures and waiting runs. Background run conversations stay out of the normal sidebar and mobile thread pickers.
+
+In a routine's editor, use **Post results to** to choose an existing thread, or leave it on **The bot's main thread**: the conversation you last wrote in, which is also the one conversation you see with threads hidden. You can move a results thread into a folder, such as **OMB management**, just like any other thread. On My Cloud, an automation that an outside event starts, or that someone else wrote, reports into a chat of its own, so the chats you write in stay yours alone and can keep using a Mac you lend to My Cloud.
+
+A bot schedules, changes, pauses, resumes, and deletes its own routines from chat without asking, and each change shows as one line with **Undo** (see [Changes a bot makes](/docs/features/approvals-and-inspector#changes-a-bot-makes)). A routine for another bot asks first unless the conversation has Full access.
+
+Without a chosen thread, each run reports into the bot's main thread as it is when the run starts, wherever the routine was made, so results follow you to the conversation you are in. Changing the destination affects future runs, not the messages older runs left. If you delete a results thread, its hidden execution threads become visible so you can still inspect their work and respond to approvals.
 
 ### Remember the last run
 
@@ -41,6 +47,10 @@ Webhooks start the same queued task executor from an external HTTP request. They
 The receiver exposes only health and secret hook routes. It does not expose the broader OpenMausBot API.
 
 Bearer authentication is preferred because it keeps the secret out of URLs and most access logs. A capability URL is available for senders that cannot set headers.
+
+### A bot that sets up its own webhook
+
+When a bot creates a webhook automation from chat, it gets the private address in the result, and it can ask for it again later, so it can paste the address into the other app's setup itself instead of asking you to use **Copy address**. Only the bot the automation belongs to gets it, or a Chief of Staff that can reach that bot (bots with a different audience on a shared workspace cannot), and only in a conversation you drive: never in a run that a webhook or app event started, and never in a My Cloud conversation a guest drives. The address stays in that tool result; chat transcripts, step details and logs show it masked, and the Automations page keeps the secret hidden until you press **Show**. **Copy address** copies the same address the bot has, so copying never breaks a setup; **Replace address** makes a new one and the old one stops working.
 
 ## Reaching a local webhook
 

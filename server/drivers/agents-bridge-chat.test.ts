@@ -49,7 +49,7 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
     requests.push(JSON.parse(data) as ChatRequest);
     if (requests.length === 1) calls(response, "call_guess", "agents_use_tool", { name: "schedule_task", arguments: { every: "morning" } });
     else if (requests.length === 2) calls(response, "call_search", "agents_find_tool", { query: "schedule a recurring task every morning" });
-    else sse(response, { content: "The tool for that is propose_routine." }, "stop");
+    else sse(response, { content: "The tool for that is create_trigger." }, "stop");
   });
   await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
   const address = provider.address();
@@ -81,7 +81,7 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
   // The model was handed the bridged list.
   const handed = requests[0]!.tools!.map((tool) => tool.function.name);
   expect(handed).toEqual(expect.arrayContaining(["agents_coordinate_bots", "agents_find_tool", "agents_use_tool"]));
-  expect(handed).not.toContain("agents_propose_routine");
+  expect(handed).not.toContain("agents_create_trigger");
 
   // The wrong guess came back as a failed call it could read...
   expect(requests[1]!.messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_guess" });
@@ -90,10 +90,10 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
   expect(requests).toHaveLength(3);
   const searched = JSON.parse(requests[2]!.messages.at(-1)!.content as string) as { ok: boolean; result: string };
   expect(searched.ok).toBe(true);
-  expect((JSON.parse(searched.result) as { matches: Array<{ name: string }> }).matches[0]!.name).toBe("propose_routine");
+  expect((JSON.parse(searched.result) as { matches: Array<{ name: string }> }).matches[0]!.name).toBe("trigger");
   const tools = recorder.events.flatMap((event) => event.type === "item.completed" && event.itemType === "tool" ? [event.ok] : []);
   expect(tools).toEqual([false, true]);
-  expect(recorder.events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text" && event.text === "The tool for that is propose_routine.")).toBe(true);
+  expect(recorder.events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text" && event.text === "The tool for that is create_trigger.")).toBe(true);
 
   // It ends the way any turn with a failed tool call ends on this runtime,
   // not as a transport that broke under it.

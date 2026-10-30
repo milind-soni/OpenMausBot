@@ -1,4 +1,4 @@
-import { useEffect, type KeyboardEvent } from "react";
+import { useEffect, type KeyboardEvent, type WheelEvent } from "react";
 import { CalendarClock, Database, FolderOpen, Globe, Monitor, Smartphone, type LucideIcon } from "lucide-react";
 import { readComputerPanelView, writeComputerPanelView, type ComputerPanelView } from "@/lib/computer-panel-view";
 import type { AndroidUsbDevicesStatus } from "./AndroidDevicePanel";
@@ -32,6 +32,14 @@ export const tabPanelProps = (view: ComputerPanelView) => ({
   "aria-labelledby": tabId(view),
   tabIndex: 0,
 }) as const;
+
+/** A plain mouse wheel only scrolls vertically: over a tab row too narrow for its tabs it scrolls the row
+ * sideways. No preventDefault: React's wheel listeners are passive, and nothing behind the row scrolls. */
+export function scrollTabsWithWheel(event: WheelEvent<HTMLElement>): void {
+  const row = event.currentTarget;
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || row.scrollWidth <= row.clientWidth) return;
+  row.scrollLeft += event.deltaY;
+}
 
 export function moveBetweenTabs(
   event: KeyboardEvent<HTMLElement>,

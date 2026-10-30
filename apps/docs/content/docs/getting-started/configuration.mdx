@@ -64,7 +64,7 @@ Source and headless installations can give separate Claude instances different b
 
 ### Claude Code isolation
 
-A bot on the Claude engine sees only what its owner gave it: the MCP servers under **Settings → MCP servers**, its integrations (computer, browser, agents, phone), and its own project's `.mcp.json`. It does **not** load this machine's Claude Code setup — the MCP servers and claude.ai connectors in your user or local Claude config, your skills and agents, your hooks, or your personal `~/.claude/CLAUDE.md`. Loading those into every turn of every bot cost one measured desktop about 407 extra tools and 10k tokens per model call.
+A bot on the Claude engine sees only what its owner gave it: the MCP servers under **Apps → MCP servers**, its integrations (computer, browser, agents, phone), and its own project's `.mcp.json`. It does **not** load this machine's Claude Code setup — the MCP servers and claude.ai connectors in your user or local Claude config, your skills and agents, your hooks, or your personal `~/.claude/CLAUDE.md`. Loading those into every turn of every bot cost one measured desktop about 407 extra tools and 10k tokens per model call.
 
 `OMB_CLAUDE_INHERIT_USER_CONFIG=1` on the OpenMausBot process turns that isolation off again, for every Claude bot, until the variable is removed. It exists to recover a bot that genuinely depended on a user-scope server, and it is easy to forget: nothing in the chat looks different, only the token usage does. While it is set, **Settings → Engines** shows a warning on the Claude engine and the server logs one line at startup. The supported fix is to add the server the bot needs under **Settings → MCP servers** or to the bot project's `.mcp.json`, then unset the variable and restart.
 

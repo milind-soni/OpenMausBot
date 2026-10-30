@@ -7,12 +7,17 @@ import {
   frameForMember,
   memberBody,
   memberBot,
+  memberFramePayload,
   noteSeen,
   parseVisibility,
+  bodyThreadIds,
   pathSubject,
+  requestThreadIds,
   roomFeeds,
+  routineRunVisible,
   routineVisible,
   sameAudience,
+  webhookVisible,
   SEES_EVERYTHING,
   storedVisibility,
   viewerSees,
@@ -25,6 +30,8 @@ import {
 const ADA: Viewer = { kind: "member", email: "ada@example.test" };
 const BOB: Viewer = { kind: "member", email: "bob@example.test" };
 const NOBODY: Viewer = { kind: "member" };
+/** A Team Cloud's admin: every bot, and only their own private chats (audience.ts). */
+const BEN_ADMIN: Viewer = { kind: "all", email: "ben@example.test" };
 
 const bots = [
   { id: "pub", threadId: "t-pub", section: "Ops", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }] },
@@ -169,12 +176,21 @@ describe("VisibleSet", () => {
     expect(routineVisible({ botId: "hr" }, bob)).toBe(false);
     expect(routineVisible({ botId: "pub", groupId: "room-mixed" }, bob)).toBe(false);
   });
+
+  it("shows a room webhook only to someone who sees both its bot and its room", () => {
+    const bob = new VisibleSet(bots, groups, BOB);
+    expect(webhookVisible({ botId: "pub" }, bob)).toBe(true);
+    expect(webhookVisible({ botId: "pub", groupId: "room-pub" }, bob)).toBe(true);
+    expect(webhookVisible({ botId: "pub", groupId: "room-mixed" }, bob)).toBe(false);
+    expect(webhookVisible({ botId: "hr", groupId: "room-pub" }, bob)).toBe(false);
+    expect(webhookVisible({ botId: "hr", groupId: "room-mixed" }, new VisibleSet(bots, groups, SEES_EVERYTHING))).toBe(true);
+  });
 });
 
 describe("live frames for a member", () => {
   const context = (visible: VisibleSet): FrameContext => ({
     visible,
-    webhookBot: (id) => ({ "hook-hr": "hr", "hook-pub": "pub" } as Record<string, string>)[id],
+    webhook: (id) => ({ "hook-hr": { botId: "hr" }, "hook-pub": { botId: "pub" }, "hook-room-mixed": { botId: "pub", groupId: "room-mixed" } } as Record<string, { botId: string; groupId?: string }>)[id],
     freshBot: (id) => ({ id, messages: [{ id: "m1" }] }),
     freshGroup: (id) => ({ id, messages: [] }),
   });
@@ -200,6 +216,8 @@ describe("live frames for a member", () => {
       { kind: "routine.run", run: { id: "r", botId: "pub", groupId: "room-mixed" } },
       { kind: "webhook", webhook: { id: "hook-hr", botId: "hr" } },
       { kind: "webhook.attempt", attempt: { webhookId: "hook-hr" } },
+      { kind: "webhook", webhook: { id: "hook-room-mixed", botId: "pub", groupId: "room-mixed" } },
+      { kind: "webhook.attempt", attempt: { webhookId: "hook-room-mixed" } },
       { kind: "future-kind", threadId: "t-hr" },
     ];
     for (const frame of hidden) expect(frameForMember(frame, ctx, seen()), JSON.stringify(frame)).toBeUndefined();
@@ -214,6 +232,7 @@ describe("live frames for a member", () => {
     expect(frameForMember(hook, ctx, seen())).toBe(hook);
     expect(frameForMember({ kind: "sections", sections: ["Ops", "People"] }, ctx, seen())).toEqual({ kind: "sections", sections: ["Ops"] });
     expect(frameForMember({ kind: "bot.queued", queues: { "t-pub": [1], "t-hr": [2] } }, ctx, seen())).toEqual({ kind: "bot.queued", queues: { "t-pub": [1] } });
+    expect(frameForMember({ kind: "bots.order", botIds: ["hr", "pub", "corp"] }, ctx, seen())).toEqual({ kind: "bots.order", botIds: ["pub", "corp"] });
     const config = { kind: "config", membership: {} };
     expect(frameForMember(config, ctx, seen())).toBe(config);
     expect(frameForMember({ kind: "bot", bot: { id: "corp", visibility: { people: ["@example.test"] }, peers: ["pub", "hr"] } }, ctx, seen()))
@@ -268,5 +287,179 @@ describe("live frames for a member", () => {
   it("strips nothing for someone who sees everything", () => {
     const bot = { id: "hr", visibility: "admins", peers: ["x"] };
     expect(memberBot(bot, new VisibleSet(bots, groups, SEES_EVERYTHING))).toBe(bot);
+  });
+
+  it("keeps a bot's own server alias from every member, whether or not they can see every bot", () => {
+    const open = new VisibleSet(bots.map(({ visibility: _v, ...bot }) => bot), [{ ...groups[0]!, audienceFloor: "everyone" }], BOB);
+    const narrowed = new VisibleSet(bots, groups, ADA);
+    expect(open.everything).toBe(true);
+    expect(narrowed.everything).toBe(false);
+    const bot = { id: "pub", cloudBackend: "vps", vpsAlias: "alpha-vps" };
+    expect(memberBot(bot, open)).toEqual({ id: "pub", cloudBackend: "vps" });
+    expect(memberBot(bot, narrowed)).toEqual({ id: "pub", cloudBackend: "vps" });
+    // The owner and admins share the same everything-visible path and keep it.
+    const admin = new VisibleSet(bots, groups, SEES_EVERYTHING);
+    expect(memberBot(bot, admin)).toBe(bot);
+    expect(memberBody({ bots: [bot] }, admin)).toEqual({ bots: [bot] });
+
+    const room = { id: "room-pub", audienceFloor: "everyone" };
+    const body = { bots: [bot, { id: "hr" }], group: room, result: { bot } };
+    const shown = memberBody(body, open) as typeof body;
+    expect(JSON.stringify(shown)).not.toContain("alpha-vps");
+    expect(shown.bots[1]).toBe(body.bots[1]);
+    // A member who sees every room gets it as it is; only a narrowed member loses the audience floor.
+    expect(shown.group).toBe(room);
+    expect((memberBody(body, narrowed) as typeof body).group).toEqual({ id: "room-pub" });
+
+    // The live frame every member shares, and an untouched frame kept as the same object for the shared bytes.
+    expect(memberFramePayload({ kind: "bot", bot })).toEqual({ kind: "bot", bot: { id: "pub", cloudBackend: "vps" } });
+    const plain = { kind: "bot", bot: { id: "pub" } };
+    expect(memberFramePayload(plain)).toBe(plain);
+    const config = { kind: "config", vpsAlias: "not a bot" };
+    expect(memberFramePayload(config)).toBe(config);
+  });
+});
+
+describe("a Team Cloud's audiences", () => {
+  const ADA_KEY = "p_adaadaadaadaadaadaada1", BEN_KEY = "p_benbenbenbenbenbenben1";
+  const audienceOf = (threadId: string) =>
+    threadId === "t-pub-2" ? `member:${ADA_KEY}` as const : threadId === "t-pub" ? "team" as const : threadId.startsWith("t-room") ? "room:room-pub" as const : undefined;
+  const open = bots.map(({ visibility: _v, ...bot }) => bot);
+  const openGroups = [{ id: "room-pub", threadId: "t-room-pub", memberIds: ["pub"], tasks: [{ threadId: "t-room-pub-2" }] }];
+
+  it("a member sees the team's conversations, the rooms they see and their own; never another member's", () => {
+    const ada = new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY });
+    expect(ada.everything).toBe(false);
+    expect(ada.filtersThreads).toBe(true);
+    expect([ada.thread("t-pub"), ada.thread("t-pub-2"), ada.thread("t-room-pub"), ada.thread("t-room-pub-2")]).toEqual([true, true, true, true]);
+    const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
+    expect([ben.thread("t-pub"), ben.thread("t-pub-2"), ben.thread("t-room-pub")]).toEqual([true, false, true]);
+    expect(ben.bot("pub")).toBe(true);
+    const nobody = new VisibleSet(open, openGroups, NOBODY, undefined, { of: audienceOf, person: null });
+    expect(nobody.thread("t-pub-2")).toBe(false);
+    // The server itself (no person, no audiences) sees everything.
+    expect(new VisibleSet(open, openGroups, SEES_EVERYTHING).thread("t-pub-2")).toBe(true);
+    // Without audiences (a My Cloud, a desktop) nothing changes: an open workspace is everything to a member.
+    expect(new VisibleSet(open, openGroups, BOB).everything).toBe(true);
+  });
+
+  it("an admin, the Owner too, sees every bot and room and the team's conversations, but only their own private chat", () => {
+    const audiences = (threadId: string) => threadId === "t-pub-3" ? `member:${BEN_KEY}` as const : audienceOf(threadId);
+    const withBens = [{ ...open[0]!, tasks: [...open[0]!.tasks!, { threadId: "t-pub-3" }] }, ...open.slice(1)];
+    const admin = new VisibleSet(withBens, openGroups, BEN_ADMIN, undefined, { of: audiences, person: BEN_KEY });
+    expect(admin.everything).toBe(false);
+    expect(admin.filtersThreads).toBe(true);
+    expect(admin.member).toBe(false);
+    expect([admin.thread("t-pub"), admin.thread("t-pub-3"), admin.thread("t-room-pub"), admin.thread("t-room-pub-2")]).toEqual([true, true, true, true]);
+    expect(admin.thread("t-pub-2")).toBe(false);
+    expect(admin.hides("t-pub-2")).toBe(true);
+    expect(admin.hides("t-pub")).toBe(false);
+    // Every bot (a restricted one too), every room and every section stay an admin's.
+    expect(withBens.every((bot) => admin.bot(bot.id))).toBe(true);
+    expect(admin.group("room-pub")).toBe(true);
+    expect(admin.sections(["Ops", "People", "Empty"])).toEqual(["Ops", "People", "Empty"]);
+    // A deleted private chat stays its person's: what still names it (a usage row) is never an admin's.
+    const gone = new VisibleSet(withBens, openGroups, BEN_ADMIN, (threadId) => (threadId === "t-pub-2" ? undefined : { bot: "pub" }), { of: audiences, person: BEN_KEY });
+    expect(gone.thread("t-pub-2")).toBe(false);
+    expect(gone.hides("t-pub-2")).toBe(true);
+    // An unknown conversation with no audience is as before: the route answers it.
+    expect(admin.thread("t-unknown")).toBe(true);
+    expect(admin.hides("t-unknown")).toBe(false);
+  });
+
+  it("a bot sent to an admin keeps its setup but loses another person's chats, their messages and their unread mark", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub", visibility: "everyone", vpsAlias: "box", unread: true,
+      messages: [{ text: "Kumquat" }], hasMore: true, pinnedMessageId: "m1", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2", unread: true }] };
+    const sent = memberBot(bot, admin) as Record<string, unknown>;
+    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", visibility: "everyone", vpsAlias: "box", unread: false, tasks: [{ threadId: "t-pub" }] });
+    expect(JSON.stringify(memberBody({ bots: [bot], bot }, admin))).not.toContain("Kumquat");
+    // A room keeps its audience floor for an admin.
+    const room = { id: "room-pub", audienceFloor: "admins" };
+    expect((memberBody({ group: room }, admin) as { group: unknown }).group).toBe(room);
+    // The selected chat with no main chat to name instead: the field goes, never the hidden id.
+    expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub" });
+  });
+
+  it("a main chat named as another person's private chat is replaced by a conversation the viewer reads, never sent", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub-2", tasks: [{ threadId: "t-pub-2" }, { threadId: "t-pub" }] };
+    const sent = memberBot(bot, admin) as Record<string, unknown>;
+    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+    expect(memberBot({ ...bot, threadId: "t-pub" }, admin)).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+  });
+
+  it("a live frame from another person's private chat never reaches an admin's stream", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const ctx: FrameContext = { visible: admin, webhook: () => undefined, freshBot: () => undefined, freshGroup: () => undefined };
+    const seen: StreamSeen = { bots: new Set(open.map((bot) => bot.id)), groups: new Set(["room-pub"]) };
+    for (const frame of [
+      { kind: "message", threadId: "t-pub-2", message: { text: "Kumquat" } },
+      { kind: "message.patch", threadId: "t-pub-2", message: { text: "Kumquat" } },
+      { kind: "notify", notification: { threadId: "t-pub-2", botId: "pub", body: "Kumquat" } },
+      { kind: "runtime", event: { threadId: "t-pub-2" } },
+      { kind: "screen", botId: "pub", threadId: "t-pub-2" },
+      { kind: "notifications.read", threadId: "t-pub-2", ids: ["n1"] },
+      { kind: "routine.run", run: { botId: "pub", threadId: "t-pub-2", output: "Kumquat" } },
+    ]) expect(frameForMember(frame, ctx, seen), frame.kind).toBeUndefined();
+    expect(frameForMember({ kind: "message", threadId: "t-pub", message: {} }, ctx, seen)).toBeDefined();
+    const queued = frameForMember({ kind: "bot.queued", queues: { "t-pub": [1], "t-pub-2": [2] } }, ctx, seen);
+    expect(queued).toEqual({ kind: "bot.queued", queues: { "t-pub": [1] } });
+    const bot = frameForMember({ kind: "bot", bot: { id: "pub", threadId: "t-pub", visibility: "everyone", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }] } }, ctx, seen);
+    expect(bot).toEqual({ kind: "bot", bot: { id: "pub", threadId: "t-pub", visibility: "everyone", tasks: [{ threadId: "t-pub" }] } });
+    const group = { kind: "group", group: { id: "room-pub", audienceFloor: "admins" } };
+    expect(frameForMember(group, ctx, seen)).toBe(group);
+    // A plea for a hand from Ada's chat: the computer is held, nothing more.
+    expect(frameForMember({ kind: "computer-control", botId: "pub", held: true, helpReason: "Sign in to the bank", help: { botId: "pub", threadId: "t-pub-2", site: "bank.test" } }, ctx, seen))
+      .toEqual({ kind: "computer-control", botId: "pub", held: true, helpReason: null });
+    const teams = { kind: "computer-control", botId: "pub", held: true, helpReason: "Sign in", help: { botId: "pub", threadId: "t-pub", site: "x.test" } };
+    expect(frameForMember(teams, ctx, seen)).toBe(teams);
+    expect(routineRunVisible({ botId: "pub", threadId: "t-pub-2" }, admin)).toBe(false);
+    expect(routineRunVisible({ botId: "pub", threadId: "t-pub", resultsThreadId: "t-pub-2" }, admin)).toBe(false);
+    expect(routineRunVisible({ botId: "pub", threadId: "t-pub" }, admin)).toBe(true);
+  });
+
+  it("sends what a bot is doing now only to someone who may see that chat, as the Activity panel does", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const ctx: FrameContext = { visible: admin, webhook: () => undefined, freshBot: () => undefined, freshGroup: () => undefined };
+    const seen: StreamSeen = { bots: new Set(open.map((bot) => bot.id)), groups: new Set(["room-pub"]) };
+    const step = (threadId: string) => ({ kind: "runtime", event: { type: "turn.progress", threadId, activity: "command", itemId: "c1",
+      target: "payroll.py", detail: "python3 payroll.py --month 10", quiet: { kind: "busy" }, tail: ["paid 12 of 40"] } });
+    const started = (threadId: string) => ({ kind: "runtime", event: { type: "item.started", itemType: "tool", threadId, itemId: "c1",
+      title: "Bash", step: { activity: "command", target: "payroll.py", detail: "python3 payroll.py --month 10" } } });
+    for (const frame of [step("t-pub-2"), started("t-pub-2"), { kind: "message", threadId: "t-pub-2", message: { tool: { name: "Bash", step: { activity: "command", target: "payroll.py" } } } }]) {
+      expect(frameForMember(frame, ctx, seen), JSON.stringify(frame)).toBeUndefined();
+    }
+    const own = step("t-pub");
+    expect(frameForMember(own, ctx, seen)).toBe(own);
+  });
+
+  it("finds every conversation a request names: a task in the path, the query and the body", () => {
+    expect(requestThreadIds("/api/bots/pub/tasks/t-pub-2", new URLSearchParams())).toEqual(["t-pub-2"]);
+    expect(requestThreadIds("/api/bots/pub/tasks/t-pub-2/title", new URLSearchParams("threadId=t-x"))).toEqual(["t-pub-2", "t-x"]);
+    expect(requestThreadIds("/api/groups/g/tasks/t-g", new URLSearchParams())).toEqual(["t-g"]);
+    expect(requestThreadIds("/api/bots/pub/browser/live", new URLSearchParams("threadId=t-pub-2"))).toEqual(["t-pub-2"]);
+    expect(requestThreadIds("/api/bots/pub", new URLSearchParams())).toEqual([]);
+    expect(bodyThreadIds({ threadId: "a", resultsThreadId: "b", threadIds: ["c", 1], envelope: { threadId: "d" }, text: "threadId" })).toEqual(["a", "b", "c", "d"]);
+    expect(bodyThreadIds({ deep: { deeper: { threadId: "x" } } })).toEqual([]);
+    expect(bodyThreadIds([{ threadId: "x" }])).toEqual([]);
+    expect(bodyThreadIds(null)).toEqual([]);
+  });
+
+  it.each([false, true])("reads a request-sized threadIds array, nested: %s", (nested) => {
+    const threadIds = Array<string>(200_000).fill("");
+    threadIds[199_999] = "private-thread";
+    const body = nested ? { envelope: { threadIds } } : { threadIds };
+    expect(bodyThreadIds(body)).toEqual(threadIds);
+  });
+
+  it("a bot sent to a member lists only the conversations that member may see", () => {
+    const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
+    const sent = memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }], vpsAlias: "x" }, ben);
+    expect(sent).toEqual({ id: "pub", tasks: [{ threadId: "t-pub" }] });
+    const ada = new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY });
+    expect(memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }] }, ada).tasks).toHaveLength(2);
+    // Off a team the list is untouched.
+    expect(memberBot({ id: "pub", tasks: [{ threadId: "t-pub-2" }] }, new VisibleSet(bots, groups, BOB)).tasks).toEqual([{ threadId: "t-pub-2" }]);
   });
 });

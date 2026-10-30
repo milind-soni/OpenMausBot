@@ -1,3 +1,4 @@
+import type { CalendarCall } from "./calendar-calls";
 import type { Routine, RoutineRun, RoutineSchedule } from "./routines";
 import { nextCronRuns } from "../../shared/routine-schedule";
 
@@ -12,6 +13,8 @@ export type RoutineCalendarItem = {
   durationMinutes: number;
   routine: Routine | null;
   run: RoutineRun | null;
+  /** A future event of an automation that needs the person: shown in its status colour, not as working. */
+  needsYou?: boolean;
 };
 
 export type CalendarCollisionItem = {
@@ -155,7 +158,7 @@ export function scheduleAt(schedule: Exclude<RoutineSchedule, { type: "interval"
 export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, nextAt: number): RoutineSchedule;
 export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, nextAt: number): RoutineSchedule {
   if (schedule.type === "cron") throw new Error("Edit this routine's schedule to change its cron timing.");
-  if (schedule.type === "once") return { type: "once", at: nextAt };
+  if (schedule.type === "once" || schedule.type === "limit_reset") return { type: "once", at: nextAt };
   if (schedule.type === "interval") {
     return {
       ...schedule,
@@ -235,7 +238,7 @@ export function projectedRoutineItems(
       }
       continue;
     }
-    if (routine.schedule.type === "interval") {
+    if (routine.schedule.type === "interval" || routine.schedule.type === "limit_reset") {
       // The scheduler skips overlapping and stale ticks: reconstructing an unreceipted one would resurrect skipped work.
       const at = routine.nextRunAt;
       if (at != null && at >= from && at < to && !hasReceipt(routine.id, at)) {
@@ -277,4 +280,31 @@ export function calendarRangeLabel(from: number, days: number): string {
     return `${start.toLocaleDateString([], { month: "long" })} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
   }
   return `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
+export type CallOccurrence = {
+  id: string;
+  at: number;
+  durationMinutes: number;
+  call: CalendarCall;
+};
+
+export function projectCalls(calls: CalendarCall[], from: number, to: number): CallOccurrence[] {
+  const items: CallOccurrence[] = [];
+  for (const call of calls) {
+    if (call.schedule.type === "once") {
+      if (call.schedule.at >= from && call.schedule.at < to) {
+        items.push({ id: `call-${call.id}-${call.schedule.at}`, at: call.schedule.at, durationMinutes: call.durationMinutes, call });
+      }
+      continue;
+    }
+    for (let day = startOfDay(from); day < to; day = addDays(day, 1)) {
+      if (!call.schedule.weekdays.includes(new Date(day).getDay())) continue;
+      const at = atLocalTime(day, call.schedule.time);
+      if (at >= from && at < to && at >= call.createdAt) {
+        items.push({ id: `call-${call.id}-${at}`, at, durationMinutes: call.durationMinutes, call });
+      }
+    }
+  }
+  return items.sort((left, right) => left.at - right.at);
 }

@@ -112,7 +112,7 @@ afterEach(() => {
 describe("Computer panel on Cloud computer", () => {
   it("opening it before the bot has a cloud computer creates nothing and says when it starts", async () => {
     await open(makeBot({ computer: "cloud" }));
-    expect(text()).toContain("Scout gets its own cloud computer the first time a task needs one. The first start takes about a minute.");
+    expect(text()).toContain("Scout gets its own cloud desktop from Boat the first time a task needs one. The first start takes about a minute.");
     expect(button("Start it now")).toBeDefined();
     expect(fixture.posts).toEqual([]);
   });
@@ -120,7 +120,7 @@ describe("Computer panel on Cloud computer", () => {
   it("opening it while the cloud computer sleeps wakes nothing", async () => {
     fixture.boatState = "archived";
     await open(makeBot({ computer: "cloud" }));
-    expect(text()).toContain("Scout's cloud computer is asleep. It wakes in a few seconds when Scout needs it.");
+    expect(text()).toContain("Scout's cloud desktop is asleep. It wakes in a few seconds when Scout needs it.");
     expect(button("Wake it now")).toBeDefined();
     expect(fixture.posts).toEqual([]);
   });
@@ -134,7 +134,7 @@ describe("Computer panel on Cloud computer", () => {
 
   it("while the bot only chats, says its cloud computer starts when a task needs it", async () => {
     await open(makeBot({ computer: "cloud", busy: true }));
-    expect(text()).toContain("Scout gets its own cloud computer the first time a task needs one.");
+    expect(text()).toContain("Scout gets its own cloud desktop from Boat the first time a task needs one.");
     expect(button("Start it now")).toBeUndefined();
     expect(fixture.posts).toEqual([]);
   });
@@ -151,7 +151,7 @@ describe("Computer panel on Cloud computer", () => {
     const moved = { tasks: [{ threadId: "thread", title: "Thread", createdAt: 1, approvalMode: "ask", surface: "cloud", surfaceAuto: true }] } as Partial<Bot>;
     fixture.boatState = "archived";
     await open(makeBot(moved));
-    expect(text()).toContain("Scout's cloud computer is asleep. It wakes in a few seconds when Scout needs it.");
+    expect(text()).toContain("Scout's cloud desktop is asleep. It wakes in a few seconds when Scout needs it.");
     expect(button("Wake it now")).toBeUndefined();
     expect(fixture.posts).toEqual([]);
   });
@@ -159,7 +159,7 @@ describe("Computer panel on Cloud computer", () => {
   it("in Simple mode too: opening it creates nothing, and starting it now is the person's button", async () => {
     fixture.advanced = false;
     await open(makeBot({ computer: "cloud" }));
-    expect(text()).toContain("Scout gets its own cloud computer the first time a task needs one. The first start takes about a minute.");
+    expect(text()).toContain("Scout gets its own cloud desktop from Boat the first time a task needs one. The first start takes about a minute.");
     expect(fixture.posts).toEqual([]);
     flushSync(() => button("Start it now")!.click());
     await settle();
@@ -171,14 +171,14 @@ describe("Computer panel on Cloud computer", () => {
     const moved = (busy: boolean) => makeBot({ busy, tasks: [{ threadId: "thread", title: "Thread", createdAt: 1, approvalMode: "ask", surface: "cloud", surfaceAuto: true }] } as Partial<Bot>);
     fixture.boatState = "archived";
     await open(moved(true));
-    expect(text()).toContain("Scout's cloud computer is asleep. It wakes in a few seconds when Scout needs it.");
+    expect(text()).toContain("Scout's cloud desktop is asleep. It wakes in a few seconds when Scout needs it.");
     expect(text()).not.toContain("Your bot is using this computer right now");
     expect(spinning()).toBe(false);
 
     await open(moved(false));
     await vi.advanceTimersByTimeAsync(5_000);
     await settle();
-    expect(text()).toContain("Scout's cloud computer is asleep.");
+    expect(text()).toContain("Scout's cloud desktop is asleep.");
     const looks = fixture.looks;
     await vi.advanceTimersByTimeAsync(30_000);
     await settle();

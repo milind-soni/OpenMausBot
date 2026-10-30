@@ -197,6 +197,28 @@ test("the verified Cloud open in this window may write the clipboard, by the rem
   assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "the main window is gone");
 });
 
+test("once My Cloud is home its page may show notifications, in the main window's main frame only; any other page still may not", () => {
+  const state = { home: null, main: { getURL: () => `${CLOUD}/chat` } };
+  const handlers = appPermissionHandlers({ rendererOrigin: () => LOCAL_ORIGIN, mainContents: () => state.main, cloudHomeOrigin: () => CLOUD, homeOrigin: () => state.home });
+  const ask = (details, contents = state.main) => { let granted; handlers.request(contents, "notifications", (value) => { granted = value; }, details); return granted; };
+  const check = (origin, details, contents = state.main) => handlers.check(contents, "notifications", origin, details);
+  assert.equal(ask(onCloud()), false, "a Cloud the move hasn't reached is not home");
+  state.home = CLOUD;
+  assert.equal(ask(onCloud()), true);
+  assert.equal(check(CLOUD, { isMainFrame: true }), true);
+  assert.equal(ask(onCloud({ isMainFrame: false })), false, "a frame inside it");
+  assert.equal(check(CLOUD, {}), false, "a frame it cannot vouch for");
+  assert.equal(ask(onCloud(), { getURL: () => `${CLOUD}/` }), false, "another window");
+  assert.equal(ask({ requestingUrl: "https://bots.example.test/", isMainFrame: true }), false, "another server");
+  for (const permission of ["geolocation", "camera", "clipboard-read", "fullscreen"]) {
+    let granted; handlers.request(state.main, permission, (value) => { granted = value; }, onCloud());
+    assert.equal(granted, false, permission);
+  }
+  state.home = null;
+  assert.equal(ask(onCloud()), false, "signed out or ended: at once");
+  for (const requesting of ["about:blank", "data:text/html,x", ""]) assert.equal(ask({ requestingUrl: requesting, isMainFrame: true }), false, `${requesting || "(empty)"}: no home is never a match for an opaque origin`);
+});
+
 test("this computer's own page keeps its permissions through the same handlers", () => {
   const { ask, check } = cloudFixture({ home: null });
   const local = { getURL: () => LOCAL_PAGE };
@@ -218,6 +240,7 @@ test("the app installs these handlers, with its one rule for My Cloud and a wait
   assert.match(main, /^  appPermissions = appPermissionHandlers\(\{$/m);
   assert.doesNotMatch(main, /(const|let|var) appPermissions = appPermissionHandlers/);
   assert.match(main, /cloudHomeOrigin: myCloud,\n/);
+  assert.match(main, /homeOrigin: \(\) => homeWindow\.placeOrigin\(\),\n/, "notifications on the page the window shows: My Cloud's, or a team's Cloud's");
   assert.match(main, /cloudHomeRestoring: \(\) => cloudAccountRestoring \? cloudAccountRestored\(\) : null,\n/);
   assert.equal(main.match(/myCloudOrigin\(/g)?.length, 1);
   assert.match(main, /cloudPageSenderAllowed\(event, \{ contents, homeOrigin: myCloud\(\),/);

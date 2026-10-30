@@ -1,7 +1,6 @@
 import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { CloudMoveBridge, CloudMoveOverview, CloudMoveState } from "../../electron/cloud-move.mjs";
 import { setLocale } from "@/lib/i18n";
 import { EMPTY_ONBOARDING, type WelcomeViewer } from "@/lib/onboarding";
 
@@ -57,15 +56,11 @@ const ready = { instanceId: "claude", snapshot: { state: "available", authentica
 /** A Cloud whose first-job question was answered before the welcome existed keeps that checklist. */
 const setUpBeforeWelcome = (...hints: string[]) => { f.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [CLOUD_INTENT_ASKED, ...hints] }; };
 const signedOut = { instanceId: "claude", snapshot: { state: "available", authenticated: false } };
-const local = { bots: 4, rooms: 1, chats: 37, bytes: 1.5 * 1024 ** 3, files: 900 };
-const emptyCloud = { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null, heldBytes: 0 };
-const CLOUD = { id: "cloud", name: "My Cloud", origin: "https://omb-u-1a2b3c4d5e6f.fly.dev", kind: "cloud" as const };
-const overview = (extra: Partial<CloudMoveOverview> = {}): CloudMoveOverview => ({ phase: "idle", local, cloud: emptyCloud, suggest: true, destination: CLOUD, blocked: null, ...extra });
-let bridge: CloudMoveBridge, push: (state: CloudMoveState) => void, lent: unknown[], open: ReturnType<typeof vi.fn>;
+let lent: unknown[];
 let dispatched: unknown[];
 
 beforeEach(() => {
-  vi.clearAllMocks(); f.values = []; f.index = 0; f.effects = []; f.showThreads = true; viewer = owner; lent = []; dispatched = []; push = () => {};
+  vi.clearAllMocks(); f.values = []; f.index = 0; f.effects = []; f.showThreads = true; viewer = owner; lent = []; dispatched = [];
   welcomeShown = false; resetCloudWelcome();
   f.dispatch = action => { dispatched.push(action); };
   f.state = {
@@ -73,13 +68,7 @@ beforeEach(() => {
     bots: [{ id: "b1", threadId: "t1", name: "Maus" }], routines: [],
     config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING } },
   };
-  bridge = {
-    state: vi.fn().mockResolvedValue(overview()), start: vi.fn().mockResolvedValue({ phase: "done" }), cancel: vi.fn().mockResolvedValue({ phase: "failed" }),
-    restorePrevious: vi.fn().mockResolvedValue({ phase: "done" }), dismiss: vi.fn().mockResolvedValue(overview({ suggest: false })),
-    onState: vi.fn(callback => { push = callback; return () => {}; }),
-  };
-  open = vi.fn().mockResolvedValue(undefined);
-  vi.stubGlobal("window", { ogb: { platform: "darwin", cloudMove: bridge, cloudLending: { open } }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  vi.stubGlobal("window", { ogb: { platform: "darwin" }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === "/api/shared-computers") return { computers: lent };
@@ -104,43 +93,32 @@ it("is not shown before the page knows what it is, or before the Cloud has answe
     expect(render().html).toBe("");
     f.state = saved;
   }
-  expect(bridge.state).not.toHaveBeenCalled();
   expect(api).not.toHaveBeenCalled();
 });
 
-it("off a Cloud home, and to a Cloud guest, there is no checklist: the plain Copy this computer here card, only when main suggests it", async () => {
-  const server = { id: "vps", name: "bots.example.test", origin: "https://bots.example.test", kind: "server" as const };
+it("off a Cloud home, and to a Cloud guest, there is no checklist", async () => {
   for (const who of [{ hosted: false, canSave: true }, { ...owner, canSave: false }]) {
     viewer = who; f.values = [];
-    vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false, destination: server }));
     await mount();
     expect(render().html).toBe("");
-    f.values = [];
-    vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: true, destination: server }));
-    await mount();
-    const { html } = render();
-    expect(html).not.toContain("Set up My Cloud");
-    expect(html).toContain("Bring your bots and chats from this Mac");
-    expect(html).toContain("bots.example.test is empty. Copy 4 bots and 37 chats here (about 1.5 GB).");
   }
   expect(api).not.toHaveBeenCalled();
 });
 
-it("on a new Cloud stays out of the way while the welcome fills the window, with no copy card of its own", async () => {
+it("on a new Cloud stays out of the way while the welcome fills the window", async () => {
   welcomeShown = true;
   await mount();
   expect(render().html).toBe("");
-  expect(bridge.state).not.toHaveBeenCalled();
   expect(api).not.toHaveBeenCalled();
 });
 it("when the person steps away from the welcome, it is the welcome's steps in short, and Continue setup goes back to the step", async () => {
   await mount();
   let { html } = render();
-  expect(html).toContain("Set up My Cloud");
+  expect(html).toContain("Set up MausBot Cloud");
   expect(html).toContain("1 of 4 done");
   expect(html).toContain("Bring your stuff");
   expect(html).toContain("Bring your bots, chats and memory, or start fresh.");
-  for (const title of ["Create My Cloud", "Connect your AI", "Files and apps"]) expect(html).toContain(title);
+  for (const title of ["Create the Cloud", "Connect your AI", "Files and apps"]) expect(html).toContain(title);
   expect(html).not.toContain("Give it a first job");
   expect(statuses()).toEqual({ cloud: "done", move: "todo", engine: "todo", files: "todo" });
   button("Continue setup")!.props.onClick!();
@@ -153,7 +131,7 @@ it("when the person steps away from the welcome, it is the welcome's steps in sh
   expect(html).toContain("You&#x27;re on this step");
   f.state.activeView = "routines";
   ({ html } = render());
-  expect(html).toContain("Required. Bots on My Cloud use your own Claude or ChatGPT account, or an API key.");
+  expect(html).toContain("Required. Cloud bots use your own Claude or ChatGPT account, or an API key.");
   button("Continue setup")!.props.onClick!();
   expect(takeWelcomeRequest()).toBe("engine");
   expect(api).not.toHaveBeenCalled();
@@ -170,7 +148,7 @@ it("after the welcome, it goes once an engine can run and asks for nothing else,
   f.state.instances = [ready];
   render(); for (const effect of f.effects) effect();
   f.values.splice(f.ownHooks);
-  expect(render().html).toContain("My Cloud is ready");
+  expect(render().html).toContain("The Cloud is ready");
   f.values = [];
   welcomeShown = true;
   f.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring"), welcomeStepHint("engine")] };
@@ -186,12 +164,11 @@ it("on a Cloud set up before the welcome, starts one step in and leads with a fi
   setUpBeforeWelcome();
   await mount();
   const { html } = render();
-  expect(html).toContain("Set up My Cloud");
-  expect(html).toContain("1 of 4 done");
+  expect(html).toContain("Set up MausBot Cloud");
+  expect(html).toContain("1 of 3 done");
   expect(html).toContain("Give it a first job");
-  for (const title of ["Create My Cloud", "Connect your AI", "Bring your bots from this computer"]) expect(html).toContain(title);
-  expect(statuses()).toEqual({ cloud: "done", job: "todo", engine: "todo", move: "todo" });
-  expect(bridge.state).toHaveBeenCalledOnce();
+  for (const title of ["Create the Cloud", "Connect your AI"]) expect(html).toContain(title);
+  expect(statuses()).toEqual({ cloud: "done", job: "todo", engine: "todo" });
   expect(html).not.toMatch(/workspace|organis/i);
   expect(html).not.toContain('aria-modal="true"');
   expect(html).not.toContain('role="dialog"');
@@ -205,7 +182,7 @@ it("connecting an AI is done when any engine can run; its action shows the exist
   expect(dispatched).toEqual([{ type: "showChat" }]);
   f.state.instances = [signedOut, ready];
   expect(statuses().engine).toBe("done");
-  expect(render().html).toContain("3 of 5 done");
+  expect(render().html).toContain("3 of 4 done");
 });
 it("a first job is done once given or once a turn has finished there, and Give it a job asks the question again", async () => {
   f.state.instances = [ready];
@@ -224,64 +201,21 @@ it("a first job is done once given or once a turn has finished there, and Give i
 it("disappears once an engine can run and a bot has finished a turn there", async () => {
   f.state.instances = [ready];
   f.state.config.onboarding = { ...EMPTY_ONBOARDING, firstTurnAt: "2026-09-30T08:00:00.000Z" };
-  vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false }));
   await mount();
   expect(render().html).toBe("");
 });
 
-it("Hide setup is one click, kept in the Cloud's own settings, and is the move's Not now too", async () => {
+it("Hide setup is one click, kept in the Cloud's own settings", async () => {
   await mount();
   button("Hide setup")!.props.onClick!(); await flush();
   expect(api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: [CLOUD_SETUP_HIDDEN] } }) });
   expect(dispatched).toContainEqual({ type: "configStatus", config: expect.objectContaining({ onboarding: expect.objectContaining({ hintsSeen: [CLOUD_SETUP_HIDDEN] }) }) });
-  expect(bridge.dismiss).toHaveBeenCalledOnce();
   expect(render().html).not.toContain("data-cloud-setup");
   f.values = []; f.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [CLOUD_SETUP_HIDDEN] };
-  vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false }));
   await mount();
   expect(render().html).toBe("");
 });
 
-it("bringing bots opens the copy in place; Copy starts it, and Not now is kept as skipped", async () => {
-  setUpBeforeWelcome();
-  await mount();
-  expect(render().html).not.toContain("Copy 4 bots and 37 chats");
-  expect(button("Copy to My Cloud")).toBeUndefined();
-  expand("Bring your bots from this computer");
-  button("Copy to My Cloud")!.props.onClick!();
-  let { html } = render();
-  expect(html).toContain("My Cloud is empty. Copy 4 bots and 37 chats here (about 1.5 GB).");
-  expect(html).toContain("API keys and sign-ins stay on this computer");
-  button("Copy")!.props.onClick!(); await flush();
-  expect(vi.mocked(bridge.start).mock.calls).toEqual([[undefined]]);
-  push({ phase: "uploading", action: "move", destination: CLOUD, progress: { bytesTransferred: 1, totalBytes: 2 } });
-  expect(render().html).toContain("Uploading to My Cloud");
-  push({ phase: "done", action: "move", destination: CLOUD, moved: { bots: 4, rooms: 1, chats: 37 } });
-  expect(statuses().move).toBe("done");
-
-  f.values = []; f.effects = [];
-  await mount();
-  expand("Bring your bots from this computer");
-  button("Copy to My Cloud")!.props.onClick!();
-  button("Not now")!.props.onClick!(); await flush();
-  expect(bridge.dismiss).toHaveBeenCalledOnce();
-  expect(api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: [CLOUD_INTENT_ASKED, CLOUD_SETUP_MOVE_SKIPPED] } }) });
-  ({ html } = render());
-  expect(statuses().move).toBe("skipped");
-  expect(html).toContain("Skipped");
-});
-
-it("offers bringing bots only in the desktop app", async () => {
-  setUpBeforeWelcome();
-  vi.stubGlobal("window", { ogb: { platform: "win32", cloudMove: bridge }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-  await mount();
-  expect(Object.keys(statuses()).sort()).toEqual(["cloud", "engine", "job", "move"]);
-  f.values = [];
-  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
-  await mount();
-  expect(Object.keys(statuses()).sort()).toEqual(["cloud", "engine", "job"]);
-  expect(render().html).toContain("1 of 3 done");
-});
 it("minimizes to its progress on this device, and opens again", async () => {
   setUpBeforeWelcome();
   const setItem = vi.fn();
@@ -290,7 +224,7 @@ it("minimizes to its progress on this device, and opens again", async () => {
   const toggle = () => render().nodes.find(node => node.type === "button" && (node.props as Record<string, unknown>)["aria-controls"] === "cloud-setup-body")!.props.onClick!();
   toggle();
   let { html } = render();
-  expect(html).toContain("1 of 4 done");
+  expect(html).toContain("1 of 3 done");
   expect(html).not.toContain("Give it a first job");
   expect(button("Hide setup")).toBeUndefined();
   expect(setItem).toHaveBeenLastCalledWith("omb.cloudSetup.collapsed", "1");
@@ -304,30 +238,27 @@ it("minimizes to its progress on this device, and opens again", async () => {
 it("says the Cloud is ready once, in the session that finished it", async () => {
   setUpBeforeWelcome();
   f.state.instances = [ready];
-  vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false }));
   await mount();
-  expect(render().html).toContain("Set up My Cloud");
+  expect(render().html).toContain("Set up MausBot Cloud");
   f.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [CLOUD_INTENT_ASKED], firstTurnAt: "2026-09-30T08:00:00.000Z" };
   render(); for (const effect of f.effects) effect();
   // The mocked hooks are one list across components: the finale is a new child, so it starts fresh.
   f.values.splice(f.ownHooks);
   const { html } = render();
-  expect(html).toContain("My Cloud is ready");
-  expect(html).not.toContain("Set up My Cloud");
+  expect(html).toContain("The Cloud is ready");
+  expect(html).not.toContain("Set up MausBot Cloud");
 });
 
 it("fills its progress from the left by how many steps are done, whichever they are, and picking a step does not move it", async () => {
-  setUpBeforeWelcome();
-  vi.mocked(bridge.state).mockResolvedValue(overview({ phase: "done", suggest: false }));
+  setUpBeforeWelcome(CLOUD_INTENT_GIVEN);
   await mount();
-  push({ phase: "done", action: "move", destination: CLOUD, moved: { bots: 4, rooms: 1, chats: 37 } });
   const filled = () => render().nodes
     .filter(node => String((node.props as { className?: string }).className ?? "").includes("progress-fill"))
     .map(node => (node.props as Record<string, unknown>)["data-filled"] === "");
-  expect(statuses().move).toBe("done");
+  expect(statuses()).toEqual({ cloud: "done", job: "done", engine: "todo", plan: "todo" });
   expect(filled()).toEqual([true, true, false, false]);
   expect(render().html).toContain('aria-valuenow="2"');
-  expand("Connect your AI");
+  expand("Approve its plan");
   expect(filled()).toEqual([true, true, false, false]);
 });
 
@@ -361,16 +292,15 @@ it("is ready only once the job's routine exists, not when the bot's first turn a
   f.state.instances = [ready];
   f.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN], firstTurnAt: "2026-10-06T08:00:00.000Z" };
   f.state.routines = [];
-  vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false }));
   await mount();
-  expect(render().html).toContain("Set up My Cloud");
+  expect(render().html).toContain("Set up MausBot Cloud");
   expect(statuses().plan).toBe("todo");
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(8, 0, 0, 0);
   f.state.routines = [{ id: "r1", name: "Morning news digest", botId: "b1", createdAt: Date.now(), nextRunAt: tomorrow.getTime() }];
   render(); for (const effect of f.effects) effect();
   f.values.splice(f.ownHooks);
   const { html } = render();
-  expect(html).toContain("My Cloud is ready");
+  expect(html).toContain("The Cloud is ready");
   expect(html).toContain("Morning news digest");
   expect(html).toContain("runs tomorrow at");
   expect(html).toContain("Run it now");

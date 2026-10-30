@@ -312,6 +312,13 @@ export function proxyDesktopCompanionUpgrade(req, socket, head, access, activeSo
       activeSockets.delete(socket);
       activeSockets.delete(remote);
     };
+    // `pipe` forwards no error, so a reset on one end must end the other.
+    const teardown = () => {
+      socket.destroy();
+      remote.destroy();
+    };
+    socket.on("error", teardown);
+    remote.on("error", teardown);
     socket.once("close", release);
     remote.once("close", release);
     if (head.length) remote.write(head);
@@ -356,13 +363,20 @@ export async function startDesktopCompanionRelay({
       if (!isLoopbackHost(req.headers.host) || !allowedOrigin(req.headers.origin, req.headers.host)) {
         return json(res, 403, { error: "forbidden: loopback client required" });
       }
-      const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      let pathname;
+      try {
+        pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      } catch {
+        return json(res, 400, { error: "invalid request target" });
+      }
       if (pathname.startsWith("/api/") || pathname.startsWith("/vps-viewer/")) {
         return proxyDesktopCompanionApi(req, res, normalized);
       }
       return serveStatic(req, res, staticDir);
     });
     server.on("upgrade", (req, socket, head) => {
+      // Node removes its own error listener from a socket it hands to `upgrade`.
+      socket.on("error", () => socket.destroy());
       if (!isLoopbackHost(req.headers.host) || !allowedOrigin(req.headers.origin, req.headers.host)) {
         return socket.destroy();
       }

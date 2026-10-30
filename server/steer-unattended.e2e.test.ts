@@ -145,20 +145,20 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
     expect(delivered.status).toBe(202);
     const { runId } = (await delivered.json()) as { runId: string };
 
-    // A webhook run activates its task, so the live turn and the default POST target are the same thread.
+    // A webhook run works in a conversation of its own, out of the way: the turn names it when it POSTs into itself.
     let runThreadId = "";
     await expect.poll(async () => {
       const run = ((await api("GET", "/api/routines")).body.runs ?? []).find((r: { id: string }) => r.id === runId);
       runThreadId = run?.threadId ?? "";
       return Boolean(runThreadId);
     }, { timeout: 20_000 }).toBe(true);
-    await expect.poll(async () => (await getBot(bot.id))?.busy === true && (await getBot(bot.id))?.threadId === runThreadId, {
+    await expect.poll(async () => (await getBot(bot.id))?.busy === true && (await getBot(bot.id))?.threadId !== runThreadId, {
       timeout: 20_000,
     }).toBe(true);
 
     const conn = await connectBroker(runThreadId, bot.id);
     try {
-      const steer = await api("POST", `/api/bots/${bot.id}/messages`, { text: "continue" });
+      const steer = await api("POST", `/api/bots/${bot.id}/messages`, { text: "continue", threadId: runThreadId });
       expect(steer.status).toBe(202);
       expect(steer.body.steered).toBe(true);
 

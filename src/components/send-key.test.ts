@@ -8,11 +8,11 @@ import { SEND_KEYS, type SendKey } from "@/lib/send-key";
 import type { ApprovalModeSelector } from "./ApprovalModeSelector";
 import type { ModelPicker } from "./ModelPicker";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), instances: [] as unknown[], config: undefined as unknown }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), instances: [] as unknown[], config: undefined as unknown, tourOpen: false }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, api: vi.fn(async () => ({})), useStore: () => ({
-    state: { ...original.initialState, instances: fixture.instances, config: fixture.config ?? original.initialState.config },
+    state: { ...original.initialState, instances: fixture.instances, config: fixture.config ?? original.initialState.config, tourOpen: fixture.tourOpen },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -22,7 +22,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: vi.fn() }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => null }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => null, useReactor: () => "user" }));
 vi.mock("./CitationUI", async (importOriginal) => ({
   ...await importOriginal<typeof import("./CitationUI")>(),
   CitationSelectionToolbar: () => createElement("span"),
@@ -103,6 +103,7 @@ beforeEach(() => {
   vi.mocked(api).mockClear();
   fixture.instances = [];
   fixture.config = undefined;
+  fixture.tourOpen = false;
   setSendKey("enter");
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })));
   host = document.createElement("div");
@@ -167,7 +168,7 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
   it("the Cloud's first job starts on the same key", () => {
     setPendingIntent("Watch my inbox");
     render(createElement(CloudIntent));
-    const job = () => textarea('textarea[aria-label="What should My Cloud do while you\'re away?"]');
+    const job = () => textarea('textarea[aria-label="What should the Cloud do while you\'re away?"]');
     expect(job().value).toBe("Watch my inbox");
     const given = () => vi.mocked(api).mock.calls.filter(([, init]) => String(init?.body).includes("cloud-intent-given")).length;
     expectSendKey(mode, job, given);
@@ -219,9 +220,9 @@ describe("the send key in hints", () => {
 
     type(textarea(), "");
     render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-    expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter sends this into the running turn");
+    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter sends this into the running turn");
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
-    expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter queues your message");
+    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter queues your message");
   });
 
   it("names the key in Japanese hints too", () => {
@@ -240,6 +241,7 @@ describe("the send key in hints", () => {
     ["enter", "Enter"], ["shift-enter", "Shift+Enter"], ["mod-enter", "Ctrl+Enter"],
   ] as const)("names the key in the tour's composer step (%s)", (mode, label) => {
     fixture.config = { onboarding: { completedAt: 1, hintsSeen: [] } };
+    fixture.tourOpen = true; // started from Settings: the app tour never starts by itself
     setSendKey(mode);
     render(createElement(GuidedTour));
     expect(document.body.textContent).toContain(`Type anything and press ${label}. Every chat`);

@@ -13,9 +13,24 @@ export interface ContextMessage {
   steered?: boolean;
 }
 
+/** The words a bot's voice notes speak, kept on their audio attachments rather than in the message text. */
+export function voiceNoteTexts(m: Pick<Message, "attachments">): string[] {
+  return (m.attachments ?? []).flatMap((attachment) =>
+    attachment.kind === "audio" && attachment.text?.trim() ? [attachment.text.trim()] : []);
+}
+
+/** What a provider reads for a message: its text, then each voice note's words. This is the exact string the
+ * turn fold used to store as the message text, so moving the words onto the attachment changed no replay.
+ * A room post (`peerPost`, stamped on every post_to_room append) or a webhook post (`webhookPost`) never had
+ * its note folded in — the note is usually the caption itself — so those keep their post text alone. */
+export function contextText(m: Pick<Message, "text" | "attachments" | "peerPost" | "webhookPost">): string {
+  const spoken = m.peerPost !== undefined || m.webhookPost ? [] : voiceNoteTexts(m);
+  return spoken.length ? [m.text?.trim(), ...spoken].filter(Boolean).join("\n\n") : m.text ?? "";
+}
+
 /** A Live call's row (kind "call") is a record for people, never context. */
-export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
-  return Boolean(((m.kind === "text" || m.kind === "widget") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
+  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
 }
 
 export interface HandedState {
@@ -206,6 +221,18 @@ export class Handoffs {
 
   forget(threadId: string): void {
     this.pending.delete(threadId);
+  }
+
+  /** For a turn answered without its engine: nothing it would have handed counts as received. The returned call hands
+   * it on after all, bound to `turnId`, when the engine does run the turn, unless a newer turn has taken the thread. */
+  withhold(threadId: string): (turnId: string) => void {
+    const pending = this.pending.get(threadId);
+    this.pending.delete(threadId);
+    return (turnId) => {
+      if (!pending || this.pending.has(threadId)) return;
+      pending.turnId ??= turnId;
+      this.pending.set(threadId, pending);
+    };
   }
 
   /** Just before sendTurn: an adapter may emit the whole turn before it resolves. */

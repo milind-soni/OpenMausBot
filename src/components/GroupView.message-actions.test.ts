@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group, Message } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), canWrite: true as boolean | null }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
@@ -20,6 +20,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useCaptionChrome: () => ({}),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite, useReactor: () => "user" }));
 
 const { Transcript } = await import("./GroupView");
 const { MessageBoundary } = await import("./ChatView");
@@ -53,6 +54,7 @@ let root: Root;
 beforeEach(() => {
   vi.stubGlobal("window", {});
   fixture.dispatch.mockClear();
+  fixture.canWrite = true;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -72,6 +74,18 @@ describe("room message actions", () => {
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).not.toContain("Show raw markdown");
     expect(html).not.toContain("Pin message");
+  });
+
+  it("offers reactions only to a viewer who may write in the room: one who may not sees who reacted, as labels", () => {
+    const asked: Message = { ...text("a", "bot", "Shall I post it?"), reactions: [{ emoji: "👍", by: "p_ada", name: "Ada" }] };
+    const open = markup([asked]);
+    expect(open).toContain('aria-label="Add reaction"');
+    expect(open).toMatch(/<button[^>]*aria-label="Thumbs up: yes, go ahead: Ada"/);
+    fixture.canWrite = false;
+    const closed = markup([asked]);
+    expect(closed).not.toContain("Add reaction");
+    expect(closed).not.toMatch(/<button[^>]*aria-label="Thumbs up: yes, go ahead: Ada"/);
+    expect(closed).toMatch(/<span role="img" aria-label="Thumbs up: yes, go ahead: Ada"/);
   });
 
   it("puts read aloud, raw markdown and pin in a room reply's more menu", () => {
@@ -123,7 +137,7 @@ describe("room message boundary", () => {
       createElement("p", null, "still here"),
     )));
     expect(host.textContent).toContain("plain words");
-    expect(host.querySelector(".chat-text")?.className).toContain("max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))]");
+    expect(host.querySelector(".chat-text")?.className).toMatch(/max-w-\[min\(var\(--chat-bubble-max\),var\(--chat-bubble-pct\)/);
     expect(host.textContent).toContain("still here");
   });
 });

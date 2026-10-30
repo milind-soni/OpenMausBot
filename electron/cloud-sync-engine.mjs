@@ -8,6 +8,7 @@ import { RESERVE_BYTES, clashPath, neverFromCloud, validWirePath, windowsProblem
 import { planOutputs, planShare } from "./cloud-sync-plan.mjs";
 import { scanPc, sha256File } from "./cloud-sync-scan.mjs";
 import { SyncAuthError } from "./cloud-sync-client.mjs";
+import { CloudAsleepError } from "./cloud-power.mjs";
 
 const TEMP_TAG = ".omb-sync-";
 const TEMP_STALE_MS = 24 * 60 * 60_000;
@@ -17,9 +18,9 @@ export function newReport() {
   return { folders: new Map(), outputsProblem: null };
 }
 
-/** True when the whole pass should stop (signed out, offline), not just this file. */
+/** True when the whole pass should stop (signed out, offline, asleep), not just this file. */
 export function passStopper(error) {
-  return error instanceof SyncAuthError || error?.name === "AbortError" || error?.name === "TimeoutError"
+  return error instanceof SyncAuthError || error instanceof CloudAsleepError || error?.name === "AbortError" || error?.name === "TimeoutError"
     || (error?.name === "TypeError" && /fetch/i.test(String(error.message)));
 }
 

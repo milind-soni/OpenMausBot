@@ -211,10 +211,47 @@ describe("cloud preview recovery in the real renderer", () => {
       await click("Release desktop join");
       await expect.poll(() => stat("joining")).toBe(false);
     }
+    // Keyboard entry and hand-off, on both panel shapes: the tab row when the
+    // panel has one, otherwise its close button.
+    const entryFocus = () => evaluate(`(() => {
+      const active = document.activeElement;
+      const tabs = document.querySelector('[data-testid="computer-tabs"]');
+      return {
+        tab: Boolean(active && tabs && tabs.contains(active) && active.getAttribute('aria-selected') === 'true'),
+        close: Boolean(active && active.hasAttribute('data-computer-panel-close')),
+        opener: Boolean(active && active.textContent.trim() === 'Open computer panel'),
+      };
+    })()`);
+    const panelIsOpen = () => evaluate("Boolean(document.querySelector('[data-computer-panel-close]'))");
+    const openFromItsButton = async () => {
+      await evaluate("(() => { Array.from(document.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Open computer panel').focus(); return true; })()");
+      await ui("press", "--keys", "Enter");
+      await expect.poll(panelIsOpen, { timeout: 5000 }).toBe(true);
+    };
+    const closeFromItsX = async () => {
+      await evaluate("document.querySelector('[data-computer-panel-close]').focus(); true");
+      await ui("press", "--keys", "Enter");
+      await expect.poll(panelIsOpen, { timeout: 5000 }).toBe(false);
+    };
+    expect(await panelIsOpen()).toBe(true);
+    await closeFromItsX();
+    for (const panel of ["computer", "remote"]) {
+      await select("Panel", panel);
+      await openFromItsButton();
+      await expect.poll(entryFocus, { timeout: 5000 }).toMatchObject(panel === "remote" ? { tab: false, close: true } : { tab: true, close: false });
+      await closeFromItsX();
+      await expect.poll(entryFocus, { timeout: 5000 }).toMatchObject({ opener: true, tab: false, close: false });
+    }
+
     process.stdout.write(`${JSON.stringify({ fixture: info!, previewUrl: preview.previewUrl, transport: "simulated; panels and browser real" })}\n`);
     await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
-    expect(child.exitCode).toBe(0);
-    expect(existsSync(info!.dataDir)).toBe(false);
+    // Windows has no signals: kill() terminates the launcher before its own
+    // cleanup runs, so only the graceful platforms can pin the exit code and the
+    // removed data directory.
+    if (process.platform !== "win32") {
+      expect(child.exitCode).toBe(0);
+      expect(existsSync(info!.dataDir)).toBe(false);
+    }
     expect(existsSync(info!.logPath)).toBe(true);
   }, 720_000);
 });

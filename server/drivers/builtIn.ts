@@ -12,7 +12,9 @@ import { OpenCodeDriver } from "./acp/opencode-go.ts";
 import { QwenAgentDriver } from "./acp/qwen.ts";
 import { CustomAcpDriver } from "./acp/custom.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
+import { DeepSeekAgentDriver } from "./acp/deepseek.ts";
 import { ClineAgentDriver } from "./acp/cline.ts";
+import { CopilotAgentDriver } from "./acp/copilot.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
 import { MistralDriver } from "./mistral.ts";
@@ -33,6 +35,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   QwenAgentDriver,
   HermesAgentDriver,
   ClineAgentDriver,
+  CopilotAgentDriver,
   CustomAcpDriver,
   PiDriver,
   OpenAICompatDriver,
@@ -45,4 +48,5 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   GroqDriver,
   MetaDriver,
   MuseCodeDriver,
+  DeepSeekAgentDriver,
 ];

@@ -51,6 +51,12 @@ test("exposes the full local-shell bridge on window.ogb", () => {
   assert.equal(typeof exposed.api.onOpenAppSettings, "function");
 });
 
+test("openLogsFolder asks main for its own logs folder and names no path", async () => {
+  const before = invocations.length;
+  await exposed.api.openLogsFolder("C:\\Windows\\System32");
+  assert.deepEqual(invocations.slice(before), [["desktop:open-logs"]]);
+});
+
 test("copyText forwards only the text over the explicit clipboard:write-text channel", async () => {
   const before = invocations.length;
   await exposed.api.copyText("hello");
@@ -66,6 +72,15 @@ test("browser control forwards a separate per-device capability, not the cloud g
     ["companion:browser-control", "phone-1", true],
     ["companion:browser-control", "phone-1", false],
   ]);
+});
+
+test("the talk bridge asks main over its own channels with only what it understands", async () => {
+  const before = invocations.length;
+  await exposed.api.talkShortcut.state();
+  await exposed.api.talkShortcut.set({ enabled: false, key: "ctrl-shift-space", extra: "x" });
+  await exposed.api.callActive(true);
+  await exposed.api.callActive("yes");
+  assert.deepEqual(invocations.slice(before), [["talk-shortcut:state"], ["talk-shortcut:set", { enabled: false, key: "ctrl-shift-space" }], ["call:active", true], ["call:active", false]]);
 });
 
 test("account prepare asks for the secure address over its own channel and sends nothing from the page", async () => {

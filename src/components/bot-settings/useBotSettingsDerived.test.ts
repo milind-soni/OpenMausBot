@@ -52,7 +52,7 @@ describe("connected apps in bot settings", () => {
 
   it("counts a connected HighLevel as configured connected apps even without the Composio service", () => {
     expect(derive().connectedAppsConfigured).toBe(false);
-    fixture.highlevel = { state: "connected", location: { id: "loc_1", name: "Precision Profiles" } };
+    fixture.highlevel = { state: "connected", location: { id: "loc_1", name: "Example Profiles" } };
     expect(derive().connectedAppsConfigured).toBe(true);
     fixture.highlevel = { state: "needs-sign-in" };
     expect(derive().connectedAppsConfigured).toBe(false);

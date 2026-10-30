@@ -131,8 +131,6 @@ posixOnly("Live call e2e", () => {
         OMB_WEBHOOK_PORT: String(port + 1),
         OMB_OPENAI_LIVE_URL: live.url,
         OMB_OPENAI_LIVE_KEY: LIVE_KEY,
-        // Live calls need Pro: how a server the desktop app did not start says so
-        OMB_PRO_PLAN: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -475,7 +473,8 @@ posixOnly("Live call e2e", () => {
       const lines = async (): Promise<Line[]> => ((await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Line[] }).messages;
       const original = (await lines()).find((m) => m.card?.requestId)!;
       expect((await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
-      await expect.poll(() => isBusy(bot.id), { timeout: 5_000 }).toBe(false);
+      // Stop ends the turn; a loaded CI runner can take longer than a few seconds to wind the fake engine down.
+      await expect.poll(() => isBusy(bot.id), { timeout: 15_000 }).toBe(false);
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "Green", start_ms: 5_000, end_ms: 5_300 });
       live.emit(session.id, { type: "session.delegation.created", offset_ms: 5_400, delegation: { id: "del_late", target: "client" } });
       await expect.poll(async () => (await lines()).find((m) => m.id === original.id)?.card, { timeout: 5_000 }).toMatchObject({ answered: "answer", answeredText: "Green", answeredBy: { kind: "loopback", via: "call" } });
@@ -485,7 +484,7 @@ posixOnly("Live call e2e", () => {
       await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
       await post("/api/live/call/end", { callId: call.callId });
     }
-  }, 40_000);
+  }, 60_000);
 
   it("ends the call and tells clients when the sideband drops", async () => {
     const bot = await createBot();
@@ -659,7 +658,7 @@ posixOnly("Live call on the person's Cloud", () => {
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {
         // Pin the fleet's other defaults so this never probes an installed CLI.
-        ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+        ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
         claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
       },
     }));
@@ -681,8 +680,6 @@ posixOnly("Live call on the person's Cloud", () => {
         OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${HOST}`,
         // no OMB_OPENAI_LIVE_KEY: no plan includes one
         OMB_OPENAI_LIVE_URL: live.url,
-        // and no OMB_PRO_PLAN: a Cloud home is the plan's own machine, so Live
-        // calls need only the key below
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -751,67 +748,50 @@ posixOnly("Live call on the person's Cloud", () => {
   }, 40_000);
 });
 
-// A prelude stands in for Electron's private parent port, fed over Node's IPC; it acks once the server's listeners ran.
-posixOnly("Live calls need Pro: the desktop app's answer reaches its server", () => {
+// No plan anywhere and no Live key: a phone's call starts once the person's own OpenAI key is in Settings → API keys.
+posixOnly("Live calls for everyone, with the person's own OpenAI key", () => {
+  const OPENAI_KEY = "sk-fake-api-keys-openai";
+  const phone = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-byok" };
   let child: ChildProcess;
   let home = "";
   let base = "";
   let output = "";
   let live: FakeOpenAiLive;
 
-  const request = async (method: string, path: string, body?: unknown) => {
+  const request = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const res = await fetch(`${base}${path}`, {
       method,
-      headers: body === undefined ? {} : { "content-type": "application/json" },
+      headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     // SAFETY: test-only JSON bodies, checked field by field below.
     return { status: res.status, body: await res.json().catch(() => null) as any };
   };
-  const tellServer = (message: object) => new Promise<void>((resolve) => {
-    child.once("message", () => resolve());
-    child.send(message);
-  });
 
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     live = await startFakeOpenAiLive();
-    home = mkdtempSync(join(tmpdir(), "omb-live-pro-"));
+    home = mkdtempSync(join(tmpdir(), "omb-live-byok-"));
     const dataDir = join(home, ".openmausbot");
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {
         // Pin the fleet's other defaults so this never probes an installed CLI.
-        ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+        ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
         claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
       },
     }));
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
-    const parentPort = `data:text/javascript,${encodeURIComponent(`
-      const listeners = [];
-      Object.defineProperty(process, "parentPort", { value: {
-        on(event, listener) { if (event === "message") listeners.push(listener); },
-        postMessage() {},
-      } });
-      process.on("message", (data) => {
-        for (const listener of listeners) listener({ data });
-        process.send({ handled: true });
-      });
-      process.channel?.unref();
-    `)}`;
-    child = spawn(process.execPath, ["--import", parentPort, join(SERVER_DIR, "index.ts")], {
+    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: {
         ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
         HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
         OMB_OPENAI_LIVE_URL: live.url,
-        OMB_OPENAI_LIVE_KEY: LIVE_KEY,
-        // as the desktop app starts its server, before its Cloud sign-in is read
-        OMB_PRO_PLAN: "0",
       },
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", (chunk) => (output += chunk));
     child.stderr!.on("data", (chunk) => (output += chunk));
@@ -834,38 +814,45 @@ posixOnly("Live calls need Pro: the desktop app's answer reaches its server", ()
     if (home) await removeTempDir(home);
   });
 
-  it("refuses a phone's start until the desktop app says Pro, starts the desktop's own call without it, and a plan change never ends a running call", async () => {
+  it("asks a phone for a key, never a plan; then calls with the OpenAI key from API keys, and a separate Live key wins", async () => {
     const created = await request("POST", "/api/bots", { name: "Ada", modelSelection: { instanceId: "claude", model: "claude-fake" } });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const botId = created.body.bot.id as string;
-    const start = (client: LiveCallState["client"]) => request("POST", "/api/live/session", { botId, sdp: SDP, client });
+    const start = (client: LiveCallState["client"], headers: Record<string, string> = {}) =>
+      request("POST", "/api/live/session", { botId, sdp: SDP, client }, headers);
+    const hangUp = async (callId: string, session: { id: string }) => {
+      await live.waitForAttach(session.id);
+      expect(await request("POST", "/api/live/call/end", { callId })).toMatchObject({ status: 200, body: { call: { status: "ended" } } });
+    };
 
-    expect(await start("ios")).toEqual({ status: 402, body: { error: "Live calls from your phone need a Pro plan.", needsPro: true } });
+    for (const [client, headers] of [["ios", phone], ["android", {}], ["desktop", {}]] as const) {
+      expect(await start(client, headers), client).toEqual({
+        status: 409, body: { error: "Live calls use your own OpenAI key. Add it in Settings → API keys.", needsKey: true },
+      });
+    }
     expect(live.sessions).toHaveLength(0);
 
-    await tellServer({ type: "openmausbot:pro-plan", pro: true });
-    await tellServer({ type: "openmausbot:pro-plan", pro: "yes" });
-    const started = await start("ios");
-    expect(started.status, JSON.stringify(started.body)).toBe(201);
-    const callId = started.body.call.callId as string;
-    await live.waitForAttach(live.sessions[0]!.id);
-    const liveBy = Date.now() + 10_000;
-    while ((await request("GET", "/api/live/call")).body.call?.status !== "live") {
-      if (Date.now() > liveBy) throw new Error(`the call never went live. output:\n${output}`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
-
-    await tellServer({ type: "openmausbot:pro-plan", pro: false });
-    expect((await request("GET", "/api/live/call")).body).toMatchObject({ call: { callId, status: "live" } });
-    expect(await request("POST", "/api/live/call/end", { callId })).toMatchObject({ status: 200, body: { call: { status: "ended", endReason: "hung-up" } } });
-    expect(await start("android")).toMatchObject({ status: 402, body: { needsPro: true } });
+    const saved = await request("PUT", "/api/config", { openai: { key: OPENAI_KEY } });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body.live).toMatchObject({ configured: true, keySource: "openai" });
+    const fromPhone = await start("ios", phone);
+    expect(fromPhone.status, JSON.stringify(fromPhone.body)).toBe(201);
     expect(live.sessions).toHaveLength(1);
-    const desktop = await start("desktop");
-    expect(desktop.status, JSON.stringify(desktop.body)).toBe(201);
-    expect(live.sessions).toHaveLength(2);
-    expect(await request("POST", "/api/live/call/end", { callId: desktop.body.call.callId })).toMatchObject({ status: 200 });
-    expect(output).toContain("[pro-plan] the desktop app says Pro");
-    expect(output).toContain("[pro-plan] the desktop app says not Pro");
-    expect(output).toContain("rejected private parent message: invalid Pro plan message");
+    expect(live.sessions[0]!.key).toBe(OPENAI_KEY);
+    await hangUp(fromPhone.body.call.callId, live.sessions[0]!);
+
+    const own = await request("PUT", "/api/config", { live: { key: LIVE_KEY } });
+    expect(own.body.live).toMatchObject({ configured: true, keySource: "live" });
+    const fromDesktop = await start("desktop");
+    expect(fromDesktop.status, JSON.stringify(fromDesktop.body)).toBe(201);
+    expect(live.sessions[1]!.key).toBe(LIVE_KEY);
+    await hangUp(fromDesktop.body.call.callId, live.sessions[1]!);
+
+    expect((await request("PUT", "/api/config", { live: { key: "" } })).body.live).toMatchObject({ configured: true, keySource: "openai" });
+    const config = await request("GET", "/api/config");
+    for (const secret of [OPENAI_KEY, LIVE_KEY]) {
+      expect(JSON.stringify(config.body)).not.toContain(secret);
+      expect(output).not.toContain(secret);
+    }
   }, 40_000);
 });

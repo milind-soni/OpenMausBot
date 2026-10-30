@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { LoginBots } from "../shared/logins.ts";
 import { fillLogin, type FillCandidate } from "./login-fill.ts";
-import { loginFields, OnePasswordLogins, onePasswordProblem, sdkOnePasswordClient } from "./onepassword.ts";
+import { loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 import { fakeOnePasswordSdk } from "./testing/fake-onepassword.ts";
 import { parseTotpKey, totpCode } from "./totp.ts";
@@ -140,9 +140,31 @@ describe("1Password logins", () => {
 
   it("refuses a token 1Password does not accept, in words, without keeping anything", async () => {
     const { source } = setup({ token: null });
-    await expect(source.refresh("ops_wrong-fake-token")).rejects.toThrow("1Password did not accept the token.");
+    await expect(source.refresh("ops_wrong-fake-token")).rejects.toThrow(ONE_PASSWORD_REFUSED);
     expect(source.status()).toEqual({ connected: false });
     expect(source.list()).toEqual([]);
+  });
+
+  it("never blames the token when this installation cannot load 1Password, and says so plainly", async () => {
+    const logged: string[] = [];
+    // As the server connects: a require that fails becomes onePasswordUnavailable.
+    const connect = async () => { throw onePasswordUnavailable(new Error("Cannot find module '@1password/sdk'\nRequire stack:\n- /app/dist-server/index.js"), (line) => logged.push(line)); };
+    const source = new OnePasswordLogins({ token: () => null, connect });
+    const refused = source.refresh(TOKEN);
+    await expect(refused).rejects.toThrow("1Password could not start on this server, so your token was not checked");
+    await expect(refused).rejects.not.toThrow(/did not accept|could not be read/u);
+    expect(logged).toEqual(["1Password: the SDK did not load: Cannot find module '@1password/sdk'"]);
+    for (const line of logged) expect(line).not.toContain(TOKEN);
+    expect(onePasswordProblem(new OnePasswordUnavailableError())).toBe(new OnePasswordUnavailableError().message);
+  });
+
+  it("tells a malformed token from one 1Password refused, and does not blame the token for unrelated errors", () => {
+    // What @1password/sdk 0.5.0 says for each.
+    expect(onePasswordProblem(new Error("invalid user input: encountered the following errors: service account token had invalid format"))).toBe(ONE_PASSWORD_MALFORMED);
+    expect(onePasswordProblem(new Error("invalid service account token, please make sure you provide a valid service account token as parameter:  service account deserialization failed, please create another token"))).toBe(ONE_PASSWORD_MALFORMED);
+    expect(onePasswordProblem(new Error("error authenticating: invalid service account token"))).toBe(ONE_PASSWORD_REFUSED);
+    expect(onePasswordProblem(Object.assign(new Error("session expired"), { name: "AuthExpiredError" }))).toBe(ONE_PASSWORD_REFUSED);
+    expect(onePasswordProblem(new SyntaxError("Unexpected token < in JSON at position 0"))).toBe("1Password could not be read. Try again, or connect it again with a new token.");
   });
 
   it("keeps what it read, and says why, when 1Password stops answering", async () => {

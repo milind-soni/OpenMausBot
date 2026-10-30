@@ -23,7 +23,7 @@ export function filterLibrarySkills(
 
 export function LibrarySkillMeta({ skill }: { skill: SkillsLibrarySkillWire }) {
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-ink-secondary">
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-secondary">
       <span className="truncate" title={skill.source}>Source: {skill.source}</span>
       <span>{skill.version ? t("skills.library.version", { version: skill.version }) : t("skills.library.noVersion")}</span>
       <span>{t("skills.library.importedAt", { date: new Date(skill.importedAt).toLocaleDateString() })}</span>
@@ -143,6 +143,28 @@ export function SkillsSection() {
     }
   };
 
+  const toggleEveryBot = async (skill: SkillsLibrarySkillWire) => {
+    if (busy.current) return;
+    busy.current = true;
+    setWorking(skill.name);
+    setError("");
+    try {
+      const response = await fetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ everyBot: !skill.everyBot }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Could not update this skill.");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this skill.");
+    } finally {
+      busy.current = false;
+      setWorking("");
+    }
+  };
+
   const view = async (skill: SkillsLibrarySkillWire, review = false) => {
     setError("");
     try {
@@ -204,8 +226,8 @@ export function SkillsSection() {
                 onClick={() => setActiveTag(null)}
                 className={
                   activeTag === null
-                    ? "rounded-full bg-control px-2.5 py-1 text-[11.5px] font-medium text-ink"
-                    : "rounded-full px-2.5 py-1 text-[11.5px] text-ink-secondary hover:bg-control/50 hover:text-ink"
+                    ? "rounded-full bg-control px-2.5 py-1 text-[12px] font-medium text-ink"
+                    : "rounded-full px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-control/50 hover:text-ink"
                 }
               >
                 {t("skills.library.allTags")}
@@ -217,8 +239,8 @@ export function SkillsSection() {
                   onClick={() => setActiveTag(activeTag === tag ? null : tag)}
                   className={
                     activeTag === tag
-                      ? "rounded-full bg-control px-2.5 py-1 font-mono text-[11.5px] font-medium text-ink"
-                      : "rounded-full px-2.5 py-1 font-mono text-[11.5px] text-ink-secondary hover:bg-control/50 hover:text-ink"
+                      ? "rounded-full bg-control px-2.5 py-1 font-mono text-[12px] font-medium text-ink"
+                      : "rounded-full px-2.5 py-1 font-mono text-[12px] text-ink-secondary hover:bg-control/50 hover:text-ink"
                   }
                 >
                   {tag}
@@ -239,8 +261,8 @@ export function SkillsSection() {
                 <div key={skill.name} className="px-3 py-2.5">
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={() => void view(skill)} className="min-w-0 flex-1 text-left" aria-label={t("skills.library.view", { skill: skill.name })}>
-                      <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
-                      <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
+                      <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
+                      <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
                     </button>
                     <Switch
                       checked={skill.enabled}
@@ -250,8 +272,20 @@ export function SkillsSection() {
                     />
                   </div>
                   <LibrarySkillMeta skill={skill} />
+                  <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-inset px-2.5 py-2">
+                    <div>
+                      <div className="text-[12px] font-medium text-ink">{t("skills.library.everyBot")}</div>
+                      <div className="text-[11px] text-ink-secondary">{t("skills.library.everyBotHint")}</div>
+                    </div>
+                    <Switch
+                      checked={skill.everyBot}
+                      aria-label={t("skills.library.everyBot")}
+                      disabled={Boolean(working || importing)}
+                      onClick={() => void toggleEveryBot(skill)}
+                    />
+                  </div>
                   {skill.warnings.length > 0 && (
-                    <div className="mt-1 text-[10.5px] text-warning">{skill.warnings.join(" · ")}</div>
+                    <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                   )}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-secondary">
                     {skill.assignedBots.length === 0 ? (
@@ -293,7 +327,7 @@ export function SkillsSection() {
                         type="button"
                         disabled={!assignBot || Boolean(working || importing)}
                         onClick={() => void assign(skill)}
-                        className="rounded-lg bg-control px-2.5 py-1 text-[11.5px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                        className="rounded-lg bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
                       >
                         {t("skills.library.assign")}
                       </button>
@@ -371,7 +405,7 @@ function SkillSourceDialog({ viewing, error, working, onClose, onEnable }: {
               </button>
             </div>
             {viewing.review && <LibrarySkillMeta skill={viewing.skill} />}
-            {viewing.skill.warnings.length > 0 && <div className="mt-2 text-[11.5px] text-warning">{viewing.skill.warnings.join(" · ")}</div>}
+            {viewing.skill.warnings.length > 0 && <div className="mt-2 text-[12px] text-warning">{viewing.skill.warnings.join(" · ")}</div>}
             <pre
               tabIndex={0}
               aria-label={`${t("skills.library.view", { skill: viewing.skill.name })}`}

@@ -39,7 +39,7 @@ beforeEach(() => {
 
 it("asks with /setup in front, offers ideas, and says plainly how to skip", () => {
   const { html } = render();
-  expect(html).toContain("What should My Cloud do while you&#x27;re away?");
+  expect(html).toContain("What should the Cloud do while you&#x27;re away?");
   expect(html).toContain("/setup");
   for (const idea of ["News digest", "Watch a page", "Research roundup", "Plan my day"]) expect(html).toContain(idea);
   expect(html).toContain("Skip for now");

@@ -66,7 +66,7 @@ test("every session main creates gets the guard before it loads anything", () =>
   const install = main.indexOf("installServerSessions({");
   assert.ok(install > 0);
   assert.equal(main.indexOf("installServerSessions({", install + 1), -1);
-  assert.ok(main.indexOf("createWindow();", install) > install, "installed before the first window");
+  assert.ok(main.indexOf("await showHome();", install) > install, "installed before the first window");
   assert.doesNotMatch(main, /onBeforeSendHeaders/, "the owner header is added in one place");
   assert.equal(targetsServer(`http://2130706433:${SERVER_PORT}/`, SERVER_PORT), true);
 });

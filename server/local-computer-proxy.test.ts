@@ -11,7 +11,12 @@ import { delimiter, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTROL_UNCONFIRMED } from "./control-client.ts";
 import { gatedLocalComputer } from "./local-computer.ts";
+import { OWN_PROFILE_UNAVAILABLE } from "./local-computer-guidance.ts";
+import { ComputerJournal, parseJournalEntry } from "./saved-steps/journal.ts";
+import { CLICK_SENT_UNCONFIRMED } from "./unconfirmed-click.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { wideSchema } from "./testing/oversized-tool-schema.ts";
+import { TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 
 // A disposable MCP child that never opens a computer or reads user data.
 const FAKE_DRIVER = `
@@ -28,6 +33,39 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
     argv:process.argv.slice(1),
     tail:message.params?.large ? "x".repeat(150000) : ""
   }}) + "\\n");
+});
+`;
+
+// Notepad behind cua-driver 0.28.2 on Windows: of one SendInput burst only the first character lands, the rest repeat the last.
+const PACING_DRIVER = `
+const readline = require("node:readline");
+const hex = (value) => "0x" + value.toString(16);
+const owners = { [0x30a5c]: 4242, [0x1f00]: 77 };
+let front = 0x1f00, document = "";
+const calls = [];
+const answer = (name, args) => {
+  calls.push(name);
+  if (name === "bring_to_front") {
+    const target = args.window_id, previous = front;
+    front = target;
+    return { content: [{ type: "text", text: "front" }], structuredContent: { previous_fg_hwnd: hex(previous), now_fg_hwnd: hex(target), target_hwnd: hex(target), landed_on_target: true } };
+  }
+  if (name === "list_windows") return { content: [{ type: "text", text: "windows" }], structuredContent: { windows: Object.entries(owners).map(([id, pid]) => ({ window_id: Number(id), pid })) } };
+  if (name === "type_text") {
+    const text = args.text;
+    document += text.length < 2 ? text : text[0] + text.at(-1).repeat(text.length - 1);
+    return { content: [{ type: "text", text: "typed" }], structuredContent: { effect: "unverifiable", route: "global_input", delivery: { mode: "foreground" } } };
+  }
+  if (name === "click") return { content: [{ type: "text", text: "foreground_unavailable: exact target HWND 0x30a5c or a verified same-process post-action window was not foreground after the click (actual foreground HWND 0x1f00)" }], isError: true, structuredContent: { code: "tool_invocation_failed" } };
+  return { content: [{ type: "text", text: JSON.stringify({ document, calls, front }) }] };
+};
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  const result = message.method === "initialize"
+    ? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "cua-driver", version: "0.28.2" } }
+    : answer(message.params.name, message.params.arguments);
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
 });
 `;
 
@@ -133,6 +171,80 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
     }
   });
 
+  it("journals each tools/call before the engine sees its reply, and forwards anyway when the journal is slow", async () => {
+    const driver = `
+const readline = require("node:readline");
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result:{content:[{type:"text",text:"private"}],structuredContent:{pid:7,elements:[{element_index:1,role:"AXButton",label:"Go",depth:1,value:"private"}]}}}) + "\\n");
+});
+`;
+    let journalDelayMs = 300;
+    let journalNever = false;
+    const posts: Array<{ at: number; auth: string | undefined; path: string | undefined; body: any }> = [];
+    const server = createServer((request, response) => {
+      if (request.method === "POST") {
+        let raw = "";
+        request.on("data", (chunk) => { raw += chunk; });
+        request.on("end", () => {
+          posts.push({ at: Date.now(), auth: request.headers.authorization, path: request.url, body: JSON.parse(raw) });
+          if (journalNever) return;
+          setTimeout(() => { response.writeHead(200, { "content-type": "application/json" }); response.end("{}"); }, journalDelayMs);
+        });
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ held: false, helpOpen: false }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "darwin", scope: "local-computer" },
+      { url: `http://127.0.0.1:${port}/control?botId=b1`, token: "journal-fixture-token" },
+    );
+    const run = async (env: Record<string, string>, body: (rpc: (id: number) => Promise<{ at: number; message: any }>) => Promise<void>) => {
+      const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+      try {
+        const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+        await body(async (id) => {
+          child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "anything", arguments: { query: "x" } } }) + "\n");
+          const { value } = await lines.next();
+          return { at: Date.now(), message: JSON.parse(value as string) };
+        });
+      } finally {
+        child.kill("SIGKILL");
+      }
+    };
+    try {
+      await run({ OMB_COMPUTER_JOURNAL: "1" }, async (rpc) => {
+        const first = await rpc(1);
+        expect(posts).toHaveLength(1);
+        expect(first.at).toBeGreaterThanOrEqual(posts[0].at + 250);
+        expect(posts[0].path).toBe("/api/internal/computer/journal");
+        expect(posts[0].auth).toBe("Bearer journal-fixture-token");
+        expect(posts[0].body).toEqual({
+          tool: "anything", arguments: { query: "x" },
+          result: { isError: false, structured: { pid: 7, elements: [{ element_index: 1, role: "AXButton", label: "Go", depth: 1, value_read: true }] } },
+        });
+        expect(first.message.result.structuredContent.pid).toBe(7);
+
+        journalNever = true;
+        const startedAt = Date.now();
+        const second = await rpc(2);
+        expect(posts).toHaveLength(2);
+        expect(second.at - startedAt).toBeLessThan(1_500);
+        expect(second.message.id).toBe(2);
+      });
+      posts.length = 0;
+      await run({ OMB_COMPUTER_JOURNAL: "" }, async (rpc) => {
+        await rpc(3);
+        expect(posts).toHaveLength(0);
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
   it("hands every engine a provider-safe tools/list, whatever root schema the driver ships", async () => {
     // cua-driver 0.22.1's browser_prepare root: an anyOf of untyped branches that strict providers refuse.
     const driver = `
@@ -174,6 +286,159 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
       expect(other.result.echo.inputSchema.anyOf).toHaveLength(2);
     } finally {
       child.kill("SIGKILL");
+    }
+  });
+
+  it("fits the driver's tools to the engine's provider profile when the turn carries one", async () => {
+    const wide = wideSchema(110);
+    const driver = `
+const readline = require("node:readline");
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result:{tools:[{name:"configure",inputSchema:${JSON.stringify(wide)}}]}}) + "\\n");
+});
+`;
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "darwin", scope: "local-computer" },
+      { url: "http://127.0.0.1:1/control", token: "schema-fixture-token" },
+    );
+    const listed = async (env: Record<string, string>) => {
+      const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+      try {
+        const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) + "\n");
+        return JSON.parse((await lines.next()).value as string).result.tools[0].inputSchema;
+      } finally {
+        child.kill("SIGKILL");
+      }
+    };
+    expect(JSON.stringify(await listed({ [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" })).length).toBeLessThanOrEqual(12_000);
+    expect(await listed({})).toEqual(wide);
+  });
+
+  it("adds what to do instead to the driver's refusal to attach to the person's signed-in profile", async () => {
+    const refusal = {
+      content: [{ type: "text", text: "refused (browser_consent_required): existing-profile attachment in standard mode requires --grant existing-profile or an embedding authorization host; bounded mode requires a matching manifest" }],
+      structuredContent: { refusal: { code: "browser_consent_required", message: "existing-profile attachment in standard mode requires --grant existing-profile or an embedding authorization host; bounded mode requires a matching manifest" }, status: "refused" },
+    };
+    const driver = `
+const readline = require("node:readline");
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result:${JSON.stringify(refusal)}}) + "\\n");
+});
+`;
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ held: false, helpOpen: false }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "darwin", scope: "local-computer" },
+      { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "guidance-fixture-token" },
+    );
+    const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "browser_prepare", arguments: { pid: 1, window_id: 1, strategy: { kind: "existing_profile" } } } }) + "\n");
+      const answer = JSON.parse((await lines.next()).value as string);
+      expect(answer.result.content).toEqual([...refusal.content, { type: "text", text: OWN_PROFILE_UNAVAILABLE }]);
+      expect(answer.result.structuredContent).toEqual(refusal.structuredContent);
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it.each(["win32", "darwin"] as const)("%s: a foreground type_text reaches the driver so that every character lands", async (platform) => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ held: false, helpOpen: false }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", PACING_DRIVER], env: {}, platform, scope: "local-computer" },
+      { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "typing-fixture-token" },
+    );
+    const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      const rpc = async (id: number, method: string, params: Record<string, unknown> = {}) => {
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        const answer = JSON.parse((await lines.next()).value as string);
+        expect(answer.id).toBe(id);
+        return answer.result;
+      };
+      const state = async (id: number) => JSON.parse((await rpc(id, "tools/call", { name: "read_fixture", arguments: {} })).content[0].text);
+      await rpc(1, "initialize");
+      const text = " Zeile Drei";
+      const typed = await rpc(2, "tools/call", { name: "type_text", arguments: { pid: 4242, window_id: 0x30a5c, delivery_mode: "foreground", text } });
+      const after = await state(3);
+      const clicked = await rpc(4, "tools/call", { name: "click", arguments: { pid: 4242, window_id: 0x30a5c, x: 10, y: 20, delivery_mode: "foreground" } });
+      if (platform === "win32") {
+        expect(after.document).toBe(text);
+        expect(typed.content[0].text).toBe("✅ Typed 11 char(s) on pid 4242 via SendInput (delivery_mode:foreground), one character at a time.");
+        expect(after.calls).toEqual([...[...text].flatMap(() => ["bring_to_front", "type_text"]), "list_windows", "bring_to_front", "read_fixture"]);
+        expect(after.front).toBe(0x1f00);
+        expect(clicked).toEqual({ content: [{ type: "text", text: CLICK_SENT_UNCONFIRMED }], structuredContent: { effect: "unverifiable", route: "global_input", delivery: { mode: "foreground" } } });
+      } else {
+        expect(after.document).toBe(" iiiiiiiiii");
+        expect(after.calls).toEqual(["type_text", "read_fixture"]);
+        expect(clicked.isError).toBe(true);
+      }
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it.each(["win32", "darwin"] as const)("%s: a call the bridge answers itself is never journalled, so its request stays incomplete", async (platform) => {
+    const journal = new ComputerJournal();
+    let generation = "plain";
+    const scope = () => ({ botId: "b1", threadId: "t1", generation });
+    const server = createServer((request, response) => {
+      let raw = "";
+      request.on("data", (chunk) => { raw += chunk; });
+      request.on("end", () => {
+        if (request.method === "POST") {
+          const entry = parseJournalEntry(JSON.parse(raw));
+          if (entry) journal.record(scope(), entry);
+        } else journal.gateChecked(scope());
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(request.method === "POST" ? { ok: true } : { held: false, helpOpen: false }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", PACING_DRIVER], env: {}, platform, scope: "local-computer" },
+      { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "relay-journal-fixture-token" },
+      true,
+    );
+    const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      const rpc = async (id: number, method: string, params: Record<string, unknown> = {}) => {
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        expect(JSON.parse((await lines.next()).value as string).id).toBe(id);
+      };
+      const taken = (request: string) => {
+        const { calls, complete } = journal.take("t1", new Set([request]))!;
+        return { tools: calls.map((call) => call.tool), complete };
+      };
+      await rpc(1, "initialize");
+      await rpc(2, "tools/call", { name: "read_fixture", arguments: {} });
+      expect(taken("plain")).toEqual({ tools: ["read_fixture"], complete: true });
+
+      generation = "relayed";
+      await rpc(3, "tools/call", { name: "type_text", arguments: { pid: 4242, window_id: 0x30a5c, delivery_mode: "foreground", text: "ab" } });
+      await rpc(4, "tools/call", { name: "click", arguments: { pid: 4242, window_id: 0x30a5c, x: 10, y: 20, delivery_mode: "foreground" } });
+      await rpc(5, "tools/call", { name: "read_fixture", arguments: {} });
+      expect(taken("relayed")).toEqual(platform === "win32"
+        ? { tools: ["read_fixture"], complete: false }
+        : { tools: ["type_text", "click", "read_fixture"], complete: true });
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 

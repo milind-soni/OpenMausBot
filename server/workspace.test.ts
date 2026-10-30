@@ -15,6 +15,7 @@ import {
   listMemoryTopics,
   loadMemory,
   memorySystemPrompt,
+  REMEMBER_AND_FORGET,
   supportsWorkspaceFiles,
   readMemoryFile,
   readMemoryTopic,
@@ -113,6 +114,16 @@ describe("workspace", () => {
     expect(loadMemory(BOT)).toBeNull();
     ensureWorkspace(BOT);
     expect(loadMemory(BOT)).toBeNull();
+  });
+
+  it("treats localized factory memory seeds as empty", () => {
+    for (const [language, heading] of [["pt-BR", "# Memória"], ["es", "# Memoria"], ["en", "# Memory"]] as const) {
+      const bot = `${BOT}-${language}`;
+      const dir = ensureWorkspace(bot, language);
+      expect(readFileSync(join(dir, "MEMORY.md"), "utf8")).toContain(heading);
+      expect(loadMemory(bot)).toBeNull();
+      expect(readMemoryFile(bot)).toEqual({ text: "", truncated: false });
+    }
   });
 
   it("loads written memory whole when under budget", () => {
@@ -449,6 +460,11 @@ describe("workspace", () => {
     expect(refused).not.toContain("Change MEMORY.md only with memory_update");
     expect(refused).not.toContain("Record only facts");
     expect(memorySystemPrompt(BOT, { managedWrites: true, fileTools: true })).toContain("Change MEMORY.md only with memory_update");
+    // asked to remember, it saves at once and says so; asked to forget, it forgets everywhere
+    expect(memorySystemPrompt(BOT, { managedWrites: true, fileTools: true })).toContain(REMEMBER_AND_FORGET);
+    expect(refused).not.toContain(REMEMBER_AND_FORGET);
+    expect(REMEMBER_AND_FORGET).toContain("save it now with memory_update append");
+    expect(REMEMBER_AND_FORGET).toContain("call memory_update with action forget");
   });
 
   it("requires explicit remove to delete a memory passage", () => {

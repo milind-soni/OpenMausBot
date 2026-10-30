@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { EXCERPT_SUMMARY_HEADER } from "../shared/wire.ts";
 import { deterministicSummary, draftSummary, foldPoint, summaryPrompt } from "./compaction-summary.ts";
 import type { ReplayEntry } from "./context-rebuild.ts";
 import { createSideJobs, type SideJobInstance, type SideJobsDeps } from "./side-jobs.ts";
@@ -42,6 +43,13 @@ it("preserves prior summaries as labelled source data, not instructions for the 
   expect(prompt).toContain("Attribute assistant claims");
 });
 
+it("opens only the excerpt fallback with the header stored records are recognised by", async () => {
+  expect(EXCERPT_SUMMARY_HEADER).toBe("Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.");
+  expect(deterministicSummary(history).split("\n")[0]).toBe(EXCERPT_SUMMARY_HEADER);
+  const written = await draftSummary(history, { signal: new AbortController().signal, generateText: async () => "The person cancelled the deployment." });
+  expect(written.startsWith(EXCERPT_SUMMARY_HEADER)).toBe(false);
+});
+
 it("works without a model helper", async () => {
   expect(await draftSummary(history, { signal: new AbortController().signal })).toBe(deterministicSummary(history));
 });
@@ -76,16 +84,17 @@ function helperWriter(write: NonNullable<SideJobInstance["generateText"]>, helpe
   const booked: Array<Parameters<SideJobsDeps["book"]>[0]> = [];
   const engines: Record<string, SideJobInstance> = {
     codex: {
-      instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: { agentsMcp: true } },
+      instanceId: "codex", driverKind: "codex", enabled: true, models: { default: "", options: [] }, adapter: { capabilities: { agentsMcp: true } },
       generateMemoryText: async () => { throw new Error("Codex's background call must never write the summary"); },
     },
-    helper: { instanceId: "helper", driverKind: "claudeAgent", enabled: true, adapter: { capabilities: { agentsMcp: true } }, generateText: write },
+    helper: { instanceId: "helper", driverKind: "claudeAgent", enabled: true, models: { default: "", options: [] }, adapter: { capabilities: { agentsMcp: true } }, generateText: write },
   };
   const jobs = createSideJobs({
     bot: () => ({ id: "b1", name: "Scout", threadId: "main", modelSelection: { instanceId: "codex" } }),
     instance: (id) => engines[id] ?? null,
     refusal: () => undefined,
     helper: () => helper,
+    smallModels: { refused: () => new Set(), remember: () => {} },
     assertWithinBudget: () => {},
     book: (row) => booked.push(row),
   });

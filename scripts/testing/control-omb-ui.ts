@@ -29,12 +29,15 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const UI_TOOLS_DIR = join(ROOT, ".omb-scratch", "verify-tools");
 /** Verbs that change the fixture or the page; they take the explicit handle, never discovery. */
 export const UI_MUTATING = new Set(["click", "type", "press", "flag", "eval"]);
+/** The sidebar's Tools section starts open, and a click on its header closes it. */
+export const OPEN_SIDEBAR_TOOLS = "(() => { document.querySelector('[data-tour=tools] button[aria-expanded=false]')?.click(); return true; })()";
 
 const ENTRIES = {
   threads: { entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Chat" },
+  dictation: { entry: "/scripts/testing/dictation-preview.tsx", route: "/__dictation.html", title: "Isolated dictation verification" },
   settings: { entry: "/src/testing/bot-settings.tsx", route: "/__bot-settings.html", title: "Isolated Bot Settings" },
 } as const satisfies Record<string, Parameters<typeof mountPreview>[1]>;
-const FAKE_MODES = ["happy", "exit-early", "hang", "malformed", "stream", "not-logged-in", "slow", "background-result"];
+const FAKE_MODES = ["happy", "exit-early", "hang", "malformed", "stream", "not-logged-in", "slow", "slow-write", "background-result"];
 const SEEDED_BOT = "Pepper";
 const PLATFORM_ENV = ["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"];
 // Where `agent-browser install` unpacks Chrome for Testing below `$HOME/.agent-browser/browsers/chrome-<version>/`.
@@ -421,7 +424,10 @@ export async function launchUi(
   io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process,
   fixtureOptions: { boatFixtureApi?: string } = {},
 ): Promise<void> {
-  const values = parse("ui launch", args, { entry: { type: "string" }, "tool-calls": { type: "string" }, mode: { type: "string" } });
+  const values = parse("ui launch", args, { entry: { type: "string" }, "tool-calls": { type: "string" }, mode: { type: "string" }, engine: { type: "string" } });
+  if (values.engine !== undefined && values.engine !== "codex") {
+    throw new ControlOmbError(`unknown --engine ${JSON.stringify(values.engine)}`, "the fake Claude CLI always runs; --engine codex adds the fake Codex app-server beside it");
+  }
   const entryName = typeof values.entry === "string" ? values.entry : "threads";
   if (!Object.hasOwn(ENTRIES, entryName)) {
     throw new ControlOmbError(`unknown --entry ${JSON.stringify(entryName)}`, `available entries: ${Object.keys(ENTRIES).join(", ")}`);
@@ -458,10 +464,12 @@ export async function launchUi(
     const { binary, chrome } = await ensureUiBrowser(parentEnv, note);
     checkpoint();
     fixture = await launchVerificationServer({ ...parentEnv, ...fakeEnv }, startup.signal, undefined,
-      { binaryPath: binary, executablePath: chrome ?? "" }, undefined, undefined, [], fixtureOptions.boatFixtureApi);
+      { binaryPath: binary, executablePath: chrome ?? "" }, undefined, undefined, values.engine === "codex" ? ["codex"] : [], fixtureOptions.boatFixtureApi);
     checkpoint();
     const api = fixtureApi(fixture.info.url);
     await api("PATCH", "/api/config", { language: "en" });
+    const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; defaultBot?: object }> };
+    for (const bot of bots.filter((bot) => bot.defaultBot)) await api("PATCH", `/api/bots/${bot.id}`, { welcomed: true });
     const created = await runControlOmb(["new-bot", "--name", SEEDED_BOT, "--url", fixture.info.url]) as { bot: { id: string } };
     checkpoint();
     // stdout carries the handle and nothing else; Vite's port and dependency

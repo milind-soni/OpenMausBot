@@ -19,25 +19,35 @@ import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
-import { LiveKeySetup } from "./LiveKeySetup";
-import { LiveProPrompt } from "./ProIntroduction";
+import { LiveKeyNeeded } from "./LiveKeyNeeded";
 import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
+import { onCallStartRequest } from "@/lib/call-start-request";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
+import { openBotSettings } from "./bot-panel/panel-link";
+import { MENU_SHEET } from "./menu-recipe";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 const CALL_ENDPOINT_MS = 850;
 
-export type CallButtonPlacement = "header" | "composer";
+/** `panel`: the small round button beside the bot in its panel, with no chevron. It leaves the composer's + menu to the
+ * composer's own button: two buttons answering it would start two calls. */
+export type CallButtonPlacement = "header" | "composer" | "panel";
 
-export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?: CallButtonPlacement }) {
+/** `fill` (Simple composer): a round button in that colour with its glyph in `ink`, and no chevron; the + menu picks the
+ * call mode. */
+/** `inverse` (phone composer): a round ink-coloured button with an app-coloured glyph: white on Midnight, dark on Meadow. */
+export function CallButton({ bot, placement = "header", fill, ink, inverse }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean }) {
   const { state } = useStore();
   return (
     <CallTargetButton
       placement={placement}
+      fill={fill}
+      ink={ink}
+      inverse={inverse}
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
@@ -60,8 +70,14 @@ export function CallTargetButton({
   liveCapable = false,
   onStart,
   placement = "header",
+  fill,
+  ink = "#ffffff",
+  inverse,
 }: {
   placement?: CallButtonPlacement;
+  fill?: string;
+  ink?: string;
+  inverse?: boolean;
   targetId: string;
   targetName: string;
   threadId?: string;
@@ -99,6 +115,7 @@ export function CallTargetButton({
   const liveMode = canLive && mode === "live";
   const turnsReady = capabilitiesReady && supported && voiceReady;
   const unavailable = !active && !liveElsewhere && !liveMode && !turnsReady;
+  const lineHeldElsewhere = liveMode && !onCall && liveLineHeldElsewhere(media, state.liveCall);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const cloudHome = state.config?.cloudHome === true;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -109,20 +126,17 @@ export function CallTargetButton({
   const setupBot = shownSetupBotId ? state.bots.find((candidate) => candidate.id === shownSetupBotId) : undefined;
   const helpMotion = useMenuMotion(Boolean(unavailable && helpOpen));
   const [menuOpen, setMenuOpen] = useState(false);
-  const keyPopover = canLive && !active && media.needsKey && media.botId === targetId;
-  const proPopover = canLive && !active && media.needsPro && media.botId === targetId;
-  const startPrompt = keyPopover || proPopover;
+  const startPrompt = canLive && !active && media.needsKey && media.botId === targetId;
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const keyRef = useRef<HTMLDivElement>(null);
-  const proRef = useRef<HTMLDivElement>(null);
   const helpId = useId();
   const menuId = useId();
   const keyId = useId();
-  const proId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
+  const round = Boolean(fill) || Boolean(inverse) || placement === "panel";
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
@@ -175,6 +189,18 @@ export function CallTargetButton({
     startCall(targetId);
   };
 
+  // The Simple composer's + menu: the same choice as this button's own call-mode menu, which it replaces there.
+  const requestedStart = useRef<(next: CallMode) => void>(() => {});
+  requestedStart.current = (next) => {
+    // Hidden below while Live's line is held on another device: the + menu must not start a second call either.
+    if (active || liveElsewhere || (next === "live" && !canLive) || lineHeldElsewhere) return;
+    closePopovers();
+    setCallMode(next);
+    start(next);
+  };
+  const answersPlusMenu = placement !== "panel";
+  useEffect(() => answersPlusMenu ? onCallStartRequest(targetId, (next) => requestedStart.current(next)) : undefined, [targetId, answersPlusMenu]);
+
   const popoverOpen = helpOpen || menuOpen || startPrompt;
   useEffect(() => {
     if (!popoverOpen) return;
@@ -194,20 +220,14 @@ export function CallTargetButton({
     };
   }, [popoverOpen, menuOpen, closePopovers]);
 
-  const keyShown = useRef(keyPopover);
+  const keyShown = useRef(startPrompt);
   useEffect(() => {
-    const opened = keyPopover && !keyShown.current;
-    keyShown.current = keyPopover;
-    if (opened) keyRef.current?.querySelector<HTMLInputElement>("input")?.focus();
-  }, [keyPopover]);
-  const proShown = useRef(proPopover);
-  useEffect(() => {
-    const opened = proPopover && !proShown.current;
-    proShown.current = proPopover;
-    if (opened) proRef.current?.focus();
-  }, [proPopover]);
+    const opened = startPrompt && !keyShown.current;
+    keyShown.current = startPrompt;
+    if (opened) keyRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [startPrompt]);
 
-  if (liveMode && !onCall && liveLineHeldElsewhere(media, state.liveCall)) return null;
+  if (lineHeldElsewhere) return null;
   return (
     <div ref={rootRef} className="relative flex items-center gap-0.5">
       <button
@@ -231,16 +251,23 @@ export function CallTargetButton({
           start(liveMode ? "live" : "turns");
         }}
         aria-expanded={unavailable ? helpOpen : startPrompt ? true : undefined}
-        aria-controls={unavailable ? helpId : keyPopover ? keyId : proPopover ? proId : undefined}
+        aria-controls={unavailable ? helpId : startPrompt ? keyId : undefined}
         aria-label={label}
         title={label}
         data-call-button={placement}
+        style={fill && !active ? { backgroundColor: fill, color: ink } : undefined}
         className={cn(
           "relative flex shrink-0 items-center justify-center disabled:opacity-60",
-          "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
-          composer ? "size-8" : "size-9",
+          round ? "rounded-full transition-[color,background,filter]" : "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
+          composer && fill ? "size-7" : composer || placement === "panel" ? "size-8" : "size-9",
           active
             ? "bg-danger text-white hover:brightness-110"
+            : inverse
+              ? "bg-ink text-app hover:opacity-90 max-md:size-9"
+            : fill
+              ? "hover:brightness-110"
+            : placement === "panel"
+              ? unavailable ? "bg-ink/[0.06] text-ink-tertiary hover:text-ink-secondary" : "bg-ink/[0.06] text-ink hover:bg-ink/[0.11]"
             : composer
               ? unavailable
                 ? "bg-control text-ink-tertiary hover:text-ink-secondary"
@@ -251,13 +278,13 @@ export function CallTargetButton({
         )}
       >
         {active
-          ? <PhoneOff size={composer ? 15 : 17} />
-          : composer ? <AudioLines size={16} aria-hidden="true" /> : <Phone size={17} />}
+          ? <PhoneOff size={composer || round ? 15 : 17} />
+          : composer ? fill ? <AudioLines size={15} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
       </button>
-      {canLive && (
+      {canLive && !round && (
         <button
           ref={chevronRef}
           type="button"
@@ -298,28 +325,13 @@ export function CallTargetButton({
         />
       )}
 
-      {keyPopover && liveThreadId !== undefined && (
+      {startPrompt && (
         <div
           ref={keyRef}
           id={keyId}
           className={cn("animate-pop-in absolute right-0 z-30 w-[340px] max-w-[90vw] rounded-xl shadow-2xl", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
         >
-          <LiveKeySetup
-            key={`${targetId}:${liveThreadId}`}
-            compact
-            onSaved={() => void startLiveCall({ botId: targetId, threadId: liveThreadId })}
-          />
-        </div>
-      )}
-
-      {proPopover && (
-        <div
-          ref={proRef}
-          id={proId}
-          tabIndex={-1}
-          className={cn("animate-pop-in absolute right-0 z-30 w-[340px] max-w-[90vw] rounded-xl shadow-2xl outline-none", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
-        >
-          <LiveProPrompt />
+          <LiveKeyNeeded />
         </div>
       )}
 
@@ -354,7 +366,7 @@ export function CallTargetButton({
                 setHelpOpen(false);
                 if (remoteClient) {
                   if (setupBot.id !== targetId) openBot(dispatch, setupBot, showThreads);
-                  dispatch({ type: "toggleSettings", open: true, section: "voice" });
+                  openBotSettings(dispatch, "voice");
                   return;
                 }
                 setVoiceSetupOpen(true);
@@ -407,7 +419,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
         if (event.key === "Tab") onClose();
         else navigateThreadMenu(event);
       }}
-      className={cn("animate-pop-in absolute right-0 z-30 w-[280px] rounded-xl border border-hairline bg-panel p-1.5 text-left shadow-2xl space-y-1", placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
+      className={cn("animate-pop-in absolute right-0 z-30 w-[280px] text-left", MENU_SHEET, placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
     >
       {CALL_MODES.map((entry) => {
         const unavailable = entry.id === "turns" ? turnsUnavailable : null;
@@ -423,13 +435,13 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
               if (!unavailable) onChoose(entry.id);
             }}
             className={cn(
-              "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none hover:bg-raised focus-visible:bg-raised aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
-              mode === entry.id && "bg-raised/60",
+              "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-menu-hover aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
+              mode === entry.id && "bg-menu-active",
             )}
           >
             <span className="min-w-0 flex-1">
-              <span className={cn("block text-[13px] font-medium", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
-              <span className="mt-0.5 block text-[11.5px] leading-[1.4] text-ink-secondary">
+              <span className={cn("block text-[14px] leading-[18px]", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
+              <span className="mt-0.5 block text-[12px] leading-[1.4] text-ink-secondary">
                 {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome })}
               </span>
             </span>
@@ -775,7 +787,7 @@ function Call({ bot }: { bot: Bot }) {
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>
-        <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
+        <div className="flex items-center gap-2 text-[14px] text-ink-secondary">
           {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
           {status}
         </div>
@@ -794,7 +806,7 @@ function Call({ bot }: { bot: Bot }) {
       </div>
 
       {note && (
-        <div className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[12.5px] text-warning">
+        <div className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[13px] text-warning">
           <span>{note}</span>
           <button
             onClick={listen}
@@ -804,7 +816,7 @@ function Call({ bot }: { bot: Bot }) {
           </button>
         </div>
       )}
-      {speech.error && <div className="max-w-[420px] text-center text-[12.5px] text-danger">{speech.error}</div>}
+      {speech.error && <div className="max-w-[420px] text-center text-[13px] text-danger">{speech.error}</div>}
 
       <div className="flex items-center gap-3">
         {speaker.isSpeaking() && (
@@ -814,7 +826,7 @@ function Call({ bot }: { bot: Bot }) {
               speaker.stop();
               listen();
             }}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            className="rounded-full border border-hairline/50 px-4 py-2 text-[14px] text-ink hover:bg-raised"
           >
             Interrupt
           </button>
@@ -827,7 +839,7 @@ function Call({ bot }: { bot: Bot }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-tertiary">
+      <div className="text-[12px] text-ink-tertiary">
         Hold Control + Option to talk · Space interrupts · Esc hangs up
       </div>
     </>

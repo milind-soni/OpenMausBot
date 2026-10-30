@@ -1,5 +1,6 @@
 import type { NotificationTarget } from "@/lib/notify";
 import type { Action, AppState } from "./store";
+import { openOwnTeamChat } from "./team-chats";
 
 interface NotificationThreadOwner {
   id: string;
@@ -66,11 +67,13 @@ export function awayFromMainThread(bot: Pick<NotificationThreadOwner, "threadId"
   return !threadsShown && botOpensTo(bot, false) !== bot.threadId;
 }
 
+/** On a team's Cloud, the person's own conversation with the bot, never the team's main chat (team-chats.ts). */
 export function openBot(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks">,
   threadsShown: boolean,
 ) {
+  if (openOwnTeamChat(dispatch, bot, (threadId) => openBotThread(dispatch, bot, threadId, threadsShown))) return;
   const opened = botOpensTo(bot, threadsShown);
   if (opened === bot.threadId) dispatch({ type: "select", id: bot.id });
   else openBotThread(dispatch, bot, opened, threadsShown);

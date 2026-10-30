@@ -27,7 +27,7 @@ async function installation(options: { refuse?: (name: string) => string | undef
   const routines = new RoutineManager({
     file: join(home, "routines.json"),
     botState: (id) => (store.bot(id) && !store.bot(id)!.hidden ? "ready" : "missing"),
-    goalState: (groupId, botId) => (store.group(groupId)?.memberIds.includes(botId) ? "ready" : "missing"),
+    goalState: (groupId, botId) => (store.group(groupId ?? "")?.memberIds.includes(botId) ? "ready" : "missing"),
     createTask: () => null,
     startTurn: async () => {},
   });
@@ -109,6 +109,18 @@ describe("importing a whole team", () => {
     expect(result.brief).toBe(true);
     expect(result.skipped).toEqual([{ part: "presets[support]", reason: "presets_not_supported_yet" }]);
     expect(app.events.filter((kind) => kind === "bot")).toHaveLength(3);
+  });
+
+  it("brings a new install's chrome MausBot back in chrome from its own export", async () => {
+    const app = await installation();
+    app.store.seedIfEmpty();
+    const { createBotPackageExport } = await import("./package-export.ts");
+    const exported = createBotPackageExport({ name: "Mine", groups: [], routines: [], bots: app.store.bots });
+    const document: PackageDocument = app.parsePackageDocument(JSON.parse(JSON.stringify(exported)));
+    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["MausBot", "chrome"]]);
+    const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    expect(result.bots.map((bot) => app.store.bot(bot.id)?.color)).toEqual(["chrome"]);
   });
 
   it("keeps a routine's run on startup, still arriving paused", async () => {

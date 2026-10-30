@@ -162,3 +162,29 @@ describe("recall from memory files", () => {
     expect(buildRecall({ botId: BOT, message: "schedule the quarterly review", threadIds: [], label: () => "", author: () => "" })).toBeNull();
   });
 });
+
+describe("recall across memory layers (a Team Cloud)", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    rmSync(WORKSPACES_DIR, { recursive: true, force: true });
+  });
+
+  it("reads the layers it is given and no other: the turn's own and the team's, never another member's", () => {
+    const TEAM = BOT, MINE = `${BOT}--member-p_mine`, THEIRS = `${BOT}--member-p_theirs`;
+    writeMemoryTopic(TEAM, "office.md", "---\naliases: [plant]\n---\n- The office plant is Fernando\n");
+    writeMemoryTopic(MINE, "tea.md", "---\naliases: [drinks]\n---\n- Ada prefers oolong tea\n");
+    writeMemoryTopic(THEIRS, "badge.md", "---\naliases: [door]\n---\n- Ben's badge code is 4471\n");
+    const recall = (memoryIds: string[], message: string) => buildRecall({ botId: BOT, memoryIds, message, threadIds: [], label: () => "", author: () => "" })?.text ?? "";
+    const mine = recall([MINE, TEAM], "any plant or drinks or door codes for the badge?");
+    expect(mine).toContain("Fernando");
+    expect(mine).toContain("oolong");
+    expect(mine).not.toContain("4471");
+    const team = recall([TEAM], "any plant or drinks or door codes for the badge?");
+    expect(team).toContain("Fernando");
+    expect(team).not.toContain("oolong");
+    // Without memoryIds a bot reads its own folder only, as before.
+    expect(recall([], "any plant or drinks?")).toContain("Fernando");
+    expect(recall([], "any plant or drinks?")).not.toContain("oolong");
+  });
+});

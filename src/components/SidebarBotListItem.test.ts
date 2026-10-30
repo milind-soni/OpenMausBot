@@ -14,7 +14,8 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { BotDeleteMenuItem } from "./BotMenuDelete";
+import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -221,9 +222,9 @@ describe("BotListItem", () => {
       }
     });
 
-    it("says Expired once nothing can answer it", () => {
+    it("says it got no answer in time once nothing can answer it", () => {
       const markup = renderRow(approval({ expired: true, options: [] }));
-      expect(markup).toContain("Expired");
+      expect(markup).toContain("No answer in time");
       expect(markup).not.toContain("Approval needed");
     });
   });
@@ -240,6 +241,7 @@ describe("BotListItem", () => {
     expect(markup).toContain('data-testid="chief-crown"');
     expect(markup).toContain('aria-label="Chief of Staff"');
     expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    expect(markup.indexOf('data-testid="bot-role"')).toBeGreaterThan(markup.indexOf('data-testid="chief-crown"'));
     expect(markup).not.toContain("Chief of Staff</span>");
     expect(markup).toContain('title="Atlas · Developer · Chief of Staff"');
 
@@ -256,17 +258,33 @@ describe("BotListItem", () => {
   });
 
   const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
+  const roleOf = (markup: string) => /<span data-testid="bot-role"[^>]*><span title="([^"]*)" class="([^"]*)"><span class="sr-only">, <\/span>([^<]*)<\/span>/.exec(markup);
 
-  it("keeps the bot's title out of the row and reads it out with the name", () => {
-    const markup = renderRow(bot({ title: "Developer" }));
+  it("shows the bot's role beside its name as one muted, truncated line, read out after the name", () => {
+    const markup = renderRow(bot({ title: "  Developer ", messages: [{ id: "b1", role: "bot", kind: "text", text: "All set.", at: 1 }] as Bot["messages"] }));
+    const role = roleOf(markup);
+    expect(role?.[1]).toBe("Developer");
+    expect(role?.[3]).toBe("Developer");
+    expect(role?.[2].split(" ")).toEqual(expect.arrayContaining(["truncate", "text-[13px]", "font-normal", "text-ink-secondary"]));
+    expect(markup.indexOf('data-testid="bot-role"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    expect(markup.indexOf('data-testid="bot-role"')).toBeLessThan(markup.indexOf(">All set.<"));
     expect(titleLine.test(markup)).toBe(false);
-    expect(markup).not.toContain(">Developer<");
-    expect(markup).toContain('<span class="sr-only">, Developer</span>');
     expect(markup).toContain('title="Atlas · Developer"');
     expect(markup).toContain('title="Double-click to rename"');
+  });
 
-    expect(renderRow(bot())).not.toContain('class="sr-only">, ');
-    expect(renderRow(bot({ title: "  " }))).not.toContain('class="sr-only">, ');
+  it("gives way to the name: the role takes only the room left and steps aside below a word's width", () => {
+    const wrapper = /<span data-testid="bot-role" class="([^"]*)"/.exec(renderRow(bot({ title: "Developer" })))?.[1].split(" ");
+    expect(wrapper).toEqual(expect.arrayContaining(["@container", "min-w-0", "grow"]));
+    expect(roleOf(renderRow(bot({ title: "Developer" })))?.[2]).toContain("@max-[3rem]:sr-only");
+  });
+
+  it("draws no role for a bot without one", () => {
+    for (const title of ["", "  "]) {
+      const markup = renderRow(bot({ title }));
+      expect(markup).not.toContain('data-testid="bot-role"');
+      expect(markup).not.toContain('class="sr-only">, ');
+    }
   });
 
   it("gives the Chief of Staff the same row as every other bot", () => {
@@ -293,11 +311,12 @@ describe("BotListItem", () => {
     expect(markup).not.toContain("](https://");
   });
 
-  it("shows typing dots instead of preview text while the bot works", () => {
-    const markup = renderRow(bot({ busy: true }));
+  it("says what the bot is doing in place of its preview text while it works, in a line as tall as the preview", () => {
+    const markup = renderRow(bot({ busy: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }));
 
-    expect(markup).toContain("animate-status-pulse");
-    expect(markup).toContain('class="sr-only">Working…');
+    expect(markup).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Thinking</span>');
+    expect(markup).not.toContain(">hello<");
+    expect(markup).not.toContain("animate-status-pulse");
   });
 
   it("marks the avatar with a green presence dot only while the bot works", () => {
@@ -373,9 +392,9 @@ describe("archive / delete confirmation", () => {
 
     expect(copy.title).toContain("Willow");
     expect(copy.body).toMatch(/permanently/i);
-    expect(copy.body).toMatch(/any computer it owns/i);
+    expect(copy.body).toMatch(/any desktop it owns/i);
     expect(copy.body).toMatch(/files and browser sign-ins/i);
-    expect(copy.body).toMatch(/shared team computers remain/i);
+    expect(copy.body).toMatch(/shared department desktops stay/i);
     expect(copy.tone).toBe("danger");
   });
 
@@ -402,8 +421,8 @@ describe("bot deletion feedback", () => {
       onClick: vi.fn(),
     }));
 
-    expect(markup).toContain("Deleting bot and owned computer…");
-    expect(markup).toContain('title="Deleting this bot and any computer it owns"');
+    expect(markup).toContain("Deleting the bot and its desktop…");
+    expect(markup).toContain('title="Deleting this bot and any desktop it owns"');
     expect(markup).toContain('disabled=""');
     expect(markup).toContain('aria-busy="true"');
   });
@@ -421,7 +440,7 @@ describe("bot deletion feedback", () => {
   describe("quiet rows", () => {
     const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
 
-    it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
+    it("reduces an idle bot to one line, its name and role: no title line, no Chief line, no preview", () => {
       const markup = renderRow(bot({
         title: "Developer",
         chiefOfStaff: true,
@@ -431,12 +450,13 @@ describe("bot deletion feedback", () => {
       expect(markup).not.toContain("Chief of Staff</span>");
       expect(markup).not.toContain("Created notes.txt with three lines.");
       expect(markup).toContain(">Atlas<");
+      expect(markup).toContain('<span class="sr-only">, </span>Developer</span>');
       expect(markup).toContain('data-testid="chief-crown"');
       expect(markup).toContain('aria-label="Chief of Staff"');
     });
 
     it("keeps the status line while something is happening", () => {
-      expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
+      expect(renderRow(bot({ busy: true }), true)).toContain('data-sidebar-working-phrase=""');
       expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
       expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
     });

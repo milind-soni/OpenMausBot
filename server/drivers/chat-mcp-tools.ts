@@ -6,13 +6,20 @@ import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { AGENTS_TOOL_ALIASES } from "../../shared/agents-tool-names.ts";
 import { bridgedCallTarget, unbridgedServer } from "./agents-bridge.ts";
 import { chatImage, type ChatImagePart } from "./chat-images.ts";
 import { CALL_TOOL, directoryCallTarget, isDirectoryTool } from "../mcp-directory.ts";
-import { mcpStdioServer } from "../mcp-gate-config.ts";
+import { AppObserver, modelVisible, withUiExtension } from "../mcp-app-observer.ts";
+import { appMountFor, mcpStdioServer } from "../mcp-gate-config.ts";
 import { REMOTE_MCP_STARTUP_MS, remoteMcpSpec } from "../mcp-http.ts";
 import { compileToolSchema } from "../mcp-schema-validator.ts";
+import { fitToolList } from "../mcp-tool-schema.ts";
+import { listsComputerTool } from "../computer-tool-list.ts";
+import { capToolList, shareToolBudget } from "../tool-count-limit.ts";
+import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 export interface ChatToolDefinition {
   type: "function";
@@ -25,9 +32,12 @@ export interface ChatToolCallView { title: string; input: Record<string, unknown
 /** A dispatched operation may already have taken effect: never retry it through a new round. */
 export class ChatToolSessionError extends Error {}
 export interface SkippedChatMcpServer { server: string; reason: string }
+/** A built-in server that listed only its first `listed` of `of` tools, so the turn fits the model's tool limit. */
+export interface TrimmedChatMcpServer { server: string; listed: number; of: number }
 export interface ChatToolSession {
   definitions: ChatToolDefinition[];
   skipped: SkippedChatMcpServer[];
+  trimmed: TrimmedChatMcpServer[];
   validate(name: string, args: unknown): void;
   /** Directory reads and OpenMausBot's own agents server need no card; call_tool shows the tool it runs. */
   view(name: string, args: Record<string, unknown>): ChatToolCallView;
@@ -45,6 +55,9 @@ const DEFAULT_CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
 const OUTPUT_BYTES = 50 * 1024;
 const TOOL_COUNT = 128;
+/** ask_user, which the runtime lists after the MCP tools. */
+const RUNTIME_TOOLS = 1;
+const MCP_TOOL_COUNT = TOOL_COUNT - RUNTIME_TOOLS;
 const MAX_PAGES = 100;
 const SCHEMA_BYTES = 64 * 1024;
 const CATALOG_BYTES = 1024 * 1024;
@@ -54,6 +67,7 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function aborted(): Error { return new Error("MCP operation cancelled"); }
+class McpRequestRefused extends Error {}
 
 /** A chat-runtime bot's tools never get the operator's control-plane secrets; the entry's own env is applied last. */
 export function chatMcpEnvironment(serverEnv: Record<string, string>, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -62,7 +76,7 @@ export function chatMcpEnvironment(serverEnv: Record<string, string>, source: No
   return { ...env, ...serverEnv };
 }
 
-class ChatMcpClient {
+export class ChatMcpClient {
   private readonly frameBytes: number;
   private child: ReturnType<typeof spawnCli>;
   private buffer = "";
@@ -100,12 +114,20 @@ class ChatMcpClient {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
+    // Read before the pending rejections below: only a call still in flight at entry is genuinely uncertain.
+    const inFlight = this.pending.size > 0;
     for (const entry of this.pending.values()) entry.reject(new Error("MCP session closed"));
     this.pending.clear();
     this.buffer = "";
-    // Windows reaps the tree via taskkill /T, which can exceed shorter budgets on a loaded machine.
-    this.closing = killCliTree(this.child, 5_000).then((stopped) => {
-      if (!stopped) throw new Error("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+    // Windows reaps the tree via taskkill /T, which can exceed shorter budgets on a loaded machine;
+    // elsewhere the budget is the TERM grace before KILL, not a verdict race, so it stays short.
+    this.closing = killCliTree(this.child, process.platform === "win32" ? 15_000 : 5_000).then((stopped) => {
+      if (stopped) return;
+      if (!inFlight) {
+        console.warn("chat-mcp: shutdown could not be confirmed within its budget; no call was in flight, so the turn outcome is unaffected");
+        return;
+      }
+      throw new Error("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
     });
     return this.closing;
   }
@@ -142,14 +164,14 @@ class ChatMcpClient {
       const entry = this.pending.get(message.id);
       if (!entry) continue;
       this.pending.delete(message.id);
-      if ("error" in message) entry.reject(new Error("MCP request failed; inspect the configured integration"));
+      if ("error" in message) entry.reject(new McpRequestRefused("MCP request failed; inspect the configured integration"));
       else if (!("result" in message)) entry.reject(new Error("MCP response has no result"));
       else entry.resolve(message.result);
     }
     if (Buffer.byteLength(this.buffer) > this.frameBytes) this.fail(new Error("MCP response exceeds the frame limit"));
   }
 
-  async call(method: string, params: unknown, signal: AbortSignal, timeout: number): Promise<unknown> {
+  async call(method: string, params: unknown, signal: AbortSignal, timeout: number, keepOnRefusal = false): Promise<unknown> {
     if (signal.aborted) { await this.close(); throw aborted(); }
     if (this.closed) throw new Error("MCP session closed");
     const id = this.nextId++;
@@ -174,21 +196,30 @@ class ChatMcpClient {
         catch { finish(new Error("MCP request could not be sent")); }
       });
     } catch (error) {
-      await this.close();
+      if (!(keepOnRefusal && error instanceof McpRequestRefused)) await this.close();
       throw error;
     }
   }
 
-  async tools(signal: AbortSignal, include: (tool: unknown) => boolean = () => true, startupMs = STARTUP_MS): Promise<unknown[]> {
+  async tools(signal: AbortSignal, include: (tool: unknown) => boolean = () => true, startupMs = STARTUP_MS, observer?: AppObserver): Promise<unknown[]> {
     const deadline = Date.now() + startupMs;
     const remaining = () => {
       if (Date.now() >= deadline) throw new Error("MCP startup timed out");
       return deadline - Date.now();
     };
-    const initialized = await this.call("initialize", {
-      protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "openmausbot-chat", version: "1" },
-    }, signal, remaining());
+    const handshake = { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "openmausbot-chat", version: "1" } };
+    let initialized: unknown;
+    if (observer?.mount.extension) {
+      try { initialized = await this.call("initialize", withUiExtension(handshake), signal, remaining(), true); }
+      catch (error) {
+        if (!(error instanceof McpRequestRefused)) throw error;
+        initialized = await this.call("initialize", handshake, signal, remaining());
+      }
+    } else {
+      initialized = await this.call("initialize", handshake, signal, remaining());
+    }
     if (!object(initialized)) throw new Error("MCP initialization returned an invalid result");
+    observer?.initialized(initialized);
     if (signal.aborted) throw aborted();
     this.write({ jsonrpc: "2.0", method: "notifications/initialized" });
     const tools: unknown[] = [];
@@ -197,7 +228,8 @@ class ChatMcpClient {
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const result = await this.call("tools/list", cursor ? { cursor } : {}, signal, remaining());
       if (!object(result) || !Array.isArray(result.tools)) throw new Error("MCP tools/list returned an invalid result");
-      tools.push(...result.tools.filter(include));
+      observer?.listed(result);
+      tools.push(...result.tools.filter((tool) => modelVisible(tool) && include(tool)));
       if (tools.length > TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
       if (result.nextCursor === undefined) return tools;
       if (typeof result.nextCursor !== "string" || !result.nextCursor || cursors.has(result.nextCursor)) throw new Error("MCP tools/list returned an invalid pagination cursor");
@@ -206,6 +238,12 @@ class ChatMcpClient {
     }
     throw new Error("MCP tools/list exceeded the pagination limit");
   }
+}
+
+export function trimmedToolsNotice(trimmed: readonly TrimmedChatMcpServer[]): string | undefined {
+  if (!trimmed.length) return undefined;
+  const servers = trimmed.map(({ server, listed, of }) => `"${server}" listed ${listed} of ${of} tools`).join(", ");
+  return `${servers} to fit the model's ${TOOL_COUNT}-tool limit; the rest are left out of this turn.`;
 }
 
 function boundedText(value: string): string {
@@ -229,11 +267,14 @@ function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown)
   }
 }
 
-export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS): Promise<ChatToolSession> {
+/** Under `schemaProfile` the model reads each tool's schema fitted to its provider; calls are still checked against the full one. */
+export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
+  schemaProfile?: ToolSchemaProfile): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
   const servers: Array<[string, Server]> = [];
+  const observers = new Map<string, AppObserver>();
   const searchable = new Set<string>();
   const eligible = (server: string) => scope === undefined || canUseMcpServer(scope, server);
   if (computerUse && integrations?.localComputer && eligible("computer")) servers.push(["computer", integrations.localComputer]);
@@ -242,12 +283,18 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const agentsServer = integrations?.agents && scope !== undefined ? unbridgedServer(integrations.agents) : integrations?.agents;
   if (agentsServer && eligible("agents")) servers.push(["agents", agentsServer]);
   if (integrations?.composio && eligible("composio")) servers.push(["composio", integrations.composio]);
+  if (integrations?.composioOwn && eligible(OWN_APPS_SERVER)) servers.push([OWN_APPS_SERVER, integrations.composioOwn]);
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.highlevel && eligible("highlevel")) servers.push(["highlevel", integrations.highlevel]);
+  if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
+  const builtIns = servers.length;
+  const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
     if (!eligible(name)) continue;
     const remote = remoteMcpSpec(server) !== undefined;
-    const stdio = mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(remote ? { directory: { name, ...(scope ? { toolScope: scope } : {}) } } : {}) });
+    const apps = appMountFor(name, { integrations });
+    if (apps && !remote) observers.set(name, new AppObserver(apps));
+    const stdio = mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(remote ? { directory: { name, ...(scope ? { toolScope: scope } : {}) } } : {}), ...(apps && remote ? { apps } : {}) });
     if (!stdio) throw new Error("MCP server configuration is invalid");
     if (remote) searchable.add(name);
     servers.push([name, { command: stdio.command, args: stdio.args ?? [], env: stdio.env ?? {} }]);
@@ -256,6 +303,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const clients: ChatMcpClient[] = [];
   const skippable = new Set(Object.keys(integrations?.custom ?? {}));
   const skipped: SkippedChatMcpServer[] = [];
+  const trimmed: TrimmedChatMcpServer[] = [];
   const started = new Map<string, ChatMcpClient>();
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -280,15 +328,22 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const client = new ChatMcpClient(descriptor, computerUse);
       clients.push(client);
       started.set(name, client);
-      const include = (tool: unknown) => scope === undefined || (object(tool) && typeof tool.name === "string"
-        && ((searchable.has(name) && isDirectoryTool(tool.name)) || allowsTool(scope, { kind: "mcp", server: name, name: tool.name })));
-      const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS);
+      const computer = descriptor === integrations?.localComputer;
+      const keeps = (tool: unknown) => !computer || !object(tool) || typeof tool.name !== "string" || listsComputerTool(tool.name, besideBrowser);
+      const include = (tool: unknown) => keeps(tool) && (scope === undefined || (object(tool) && typeof tool.name === "string"
+        && ((searchable.has(name) && isDirectoryTool(tool.name)) || allowsTool(scope, { kind: "mcp", server: name, name: tool.name }))));
+      const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS, observers.get(name));
+      if (!tools.length && scope === undefined && descriptor === integrations?.localComputer) throw new Error("The Local VM listed no tools");
       // Harness mounts are known by descriptor, never by a name a configured server could claim. A grant
       // hashes the descriptor (no credential kept); machine bridges mint a bearer per turn, so theirs last a turn.
       const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
       return { name, client, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === agentsServer,
         hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", tools };
     }));
+    // The agents server keeps its whole list first; a configured server fits in what the built-ins leave, or is skipped.
+    const shares = shareToolBudget(mounts.flatMap((mount, index) => index < builtIns && mount.status === "fulfilled"
+      ? [{ name: String(index), tools: mount.value.tools.length, agents: mount.value.agents }] : [])
+      .sort((a, b) => Number(b.agents) - Number(a.agents)), MCP_TOOL_COUNT);
     for (const [index, mount] of mounts.entries()) {
       const configured = servers[index]![0];
       if (signal.aborted || closed) throw aborted();
@@ -303,25 +358,32 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         await skip(mount.reason);
         continue;
       }
-      const { name: server, client, launch, builtInBrowser, agents, hostComputer, tools } = mount.value;
+      const { name: server, client, launch, builtInBrowser, agents, hostComputer, tools: offered } = mount.value;
+      const tools = capToolList(offered, shares.get(String(index)));
+      if (tools.length < offered.length) {
+        trimmed.push({ server, listed: tools.length, of: offered.length });
+        console.warn(`chat-mcp: "${server}" listed ${tools.length} of ${offered.length} tools to fit the model's ${TOOL_COUNT}-tool limit`);
+      }
       const staged: Array<{ tool: RegisteredTool; definition: ChatToolDefinition }> = [];
       try {
         const originalNames = new Set<string>();
         for (const tool of tools) {
           if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
           originalNames.add(tool.name);
-          if (definitions.length + staged.length >= TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
+          if (definitions.length + staged.length >= MCP_TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
           if (!object(tool.inputSchema) || tool.inputSchema.type !== "object") throw new Error("MCP tools require an object input schema");
           if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > SCHEMA_BYTES) throw new Error("MCP tool schema exceeds the 64KB limit");
           const schema = compileToolSchema(tool.inputSchema);
-          const parameters = { ...tool.inputSchema };
+          const [listed] = schemaProfile ? fitToolList([tool], schemaProfile, (line) => console.warn(`chat-mcp: ${server}: ${line}`)) : [tool];
+          if (!object(listed) || !object(listed.inputSchema)) continue;
+          const parameters = { ...listed.inputSchema };
           const constraints: Record<string, unknown> = {};
           if (computerUse) {
             for (const key of ["anyOf", "oneOf", "allOf", "not"]) {
               if (key in parameters) { constraints[key] = parameters[key]; delete parameters[key]; }
             }
           }
-          const description = (typeof tool.description === "string" ? tool.description : "Configured MCP tool") +
+          const description = (typeof listed.description === "string" ? listed.description : "Configured MCP tool") +
             (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
           const base = chatToolName(server, tool.name);
           let name = base;
@@ -340,6 +402,15 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         registered.set(definition.function.name, tool);
         definitions.push(definition);
       }
+      // Unlisted, so a call by an alias in an earlier tool call reaches the agents server, which runs it as its action
+      // tool; the server holds it to that tool's full schema.
+      if (agents) {
+        for (const [alias, { tools: targets }] of Object.entries(AGENTS_TOOL_ALIASES)) {
+          const listed = staged.find((entry) => targets.includes(entry.tool.name));
+          const name = chatToolName(server, alias);
+          if (listed && !registered.has(name)) registered.set(name, { ...listed.tool, name: alias, schema: compileToolSchema({ type: "object" }) });
+        }
+      }
     }
     if (signal.aborted || closed) throw aborted();
   } catch (error) { await close(); throw error; }
@@ -348,15 +419,16 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (closed || signal.aborted) throw new ChatToolSessionError("MCP session closed");
     const tool = registered.get(name);
     if (!tool) throw new Error("The requested tool was not advertised for this turn");
-    const excluded = (runs: string | undefined) => scope !== undefined && runs !== undefined
-      && !allowsTool(scope, { kind: "mcp", server: tool.server, name: runs });
+    const inner = object(args) ? args.arguments ?? {} : {};
+    const excluded = (runs: string | undefined, runArgs: unknown = args ?? {}) => scope !== undefined && runs !== undefined
+      && !allowsTool(scope, { kind: "mcp", server: tool.server, name: runs }, runArgs);
       // A directory mistake ran nothing and must not end the turn as a failed call.
     const directory = tool.searched && isDirectoryTool(tool.name);
     // Security: should a bridged agents server answer here, use_tool is also judged by the tool it names.
-    if (!directory && (excluded(tool.name) || (tool.agents && excluded(bridgedCallTarget(tool.name, args))))) throw new Error("Tool selection excludes this tool");
+    if (!directory && (excluded(tool.name) || (tool.agents && excluded(bridgedCallTarget(tool.name, args), inner)))) throw new Error("Tool selection excludes this tool");
     omitBlankDefaults(tool.builtInBrowser, tool.name, args);
     if (!object(args) || (!directory && !tool.schema(args))) throw new Error("Tool arguments do not match the advertised input schema; use its required fields and types");
-    if (tool.searched && excluded(target(tool, args))) throw new Error("Tool selection excludes this tool");
+    if (tool.searched && excluded(target(tool, args), inner)) throw new Error("Tool selection excludes this tool");
   };
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
     const tool = registered.get(name);
@@ -367,7 +439,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   return {
-    definitions, skipped, validate, view, close,
+    definitions, skipped, trimmed, validate, view, close,
     async execute(name, args, callSignal) {
       validate(name, args);
       if (callSignal.aborted) { await close(); throw aborted(); }
@@ -376,6 +448,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), callTimeoutMs);
         if (signal.aborted || callSignal.aborted) throw aborted();
         if (!object(result) || !Array.isArray(result.content) || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP tool returned an invalid result; execution outcome may be uncertain");
+        observers.get(tool.server)?.returned({ name: tool.name, arguments: args }, result);
         const parts: string[] = [];
         const images: ChatImagePart[] = [];
         let unsupported = 0;

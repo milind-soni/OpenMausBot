@@ -4,7 +4,7 @@ import type { HighLevelStatus } from "../../shared/highlevel.ts";
 import { HIGHLEVEL_API_ENV, HighLevelClient, HighLevelError, lookupLocation } from "./client.ts";
 import { createHighLevelRelay, highlevelRelayUrl, type HighLevelRelay } from "./relay.ts";
 import { HighLevelSignIn } from "./sign-in.ts";
-import { HighLevelStore } from "./store.ts";
+import { HighLevelStore, type HighLevelConnection } from "./store.ts";
 
 export interface HighLevelServiceOptions {
   dataDir: string;
@@ -27,6 +27,9 @@ export interface HighLevelService {
   cancelSignIn(flowId: string): boolean;
   connectWithToken(token: string, locationId: string): Promise<HighLevelStatus>;
   disconnect(): HighLevelStatus;
+  /** A connection moved here from the person's own computer; one already signed in here is kept, unless `replaces` says
+   * it is the one that computer moved here before. */
+  adopt(connection: HighLevelConnection, replaces?: (current: HighLevelConnection) => boolean): "adopted" | "kept";
   close(): void;
 }
 
@@ -87,6 +90,14 @@ export function createHighLevelService(options: HighLevelServiceOptions): HighLe
       store.clear();
       options.onChange?.();
       return status();
+    },
+    adopt(connection, replaces) {
+      const current = store.get();
+      if (current?.state === "signed-in" && !replaces?.(current)) return "kept";
+      if (signIn) for (const flow of [signIn.active()]) if (flow) signIn.cancel(flow.flowId);
+      store.put(connection);
+      options.onChange?.();
+      return "adopted";
     },
     close: () => signIn?.close(),
   };

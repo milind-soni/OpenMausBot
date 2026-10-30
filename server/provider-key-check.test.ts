@@ -93,18 +93,20 @@ describe("provider key check", () => {
       expect(init?.redirect).toBe("manual");
       if (url.endsWith("/models")) return Response.json({ data: [{ id: "public-model" }] });
       expect(url).toBe("https://openrouter.ai/api/v1/key");
-      const authorized = new Headers(init?.headers).get("authorization") === "Bearer valid-fixture-key";
-      return authorized
-        ? Response.json({ data: { is_free_tier: false, label: "private-key-label", usage: 42 } })
+      const authorization = new Headers(init?.headers).get("authorization");
+      return authorization === "Bearer valid-fixture-key" || authorization === "Bearer free-fixture-key"
+        ? Response.json({ data: { is_free_tier: authorization === "Bearer free-fixture-key", label: "private-key-label", usage: 42 } })
         : Response.json({ error: { message: "Missing Authentication header" } }, { status: 401 });
     };
     expect(await checkProviderKey({ provider: "openaiCompat", key: "invalid-fixture-key" }, openRouter))
       .toEqual({ ok: false, reason: "rejected", status: 401 });
     expect(await checkProviderKey({ provider: "openaiCompat", key: "valid-fixture-key", url: "https://openrouter.ai/api/v1/" }, openRouter))
-      .toEqual({ ok: true, check: "authentication", models: [] });
+      .toEqual({ ok: true, check: "authentication", models: [], freeTier: false });
     expect(await checkProviderKey({ provider: "openrouter", key: "valid-fixture-key" }, openRouter))
-      .toEqual({ ok: true, check: "authentication", models: [] });
-    expect(paths).toHaveLength(3);
+      .toEqual({ ok: true, check: "authentication", models: [], freeTier: false });
+    expect(await checkProviderKey({ provider: "openrouter", key: "free-fixture-key" }, openRouter))
+      .toEqual({ ok: true, check: "authentication", models: [], freeTier: true });
+    expect(paths).toHaveLength(4);
     expect(paths.every((path) => path.endsWith("/key"))).toBe(true);
   });
 

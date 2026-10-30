@@ -4,6 +4,8 @@ import {
   type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
+import type { ChatApps } from "./chat-apps.ts";
+import type { BotFolders } from "./pages/bundle.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
@@ -94,16 +96,36 @@ function canonicalWidget(input: Record<string, unknown>): CanonicalWidget {
 }
 
 /** The route has already checked that the conversation is the calling bot's own. */
-export function createAgentCard(args: {
+export interface AgentCardArgs {
   store: AgentCardStore;
   bot: { id: string; name: string; color: MausColor };
   threadId: string;
   input: unknown;
   /** The row a widget call wrote: the calling session made it, so it is never offered back to it as unseen. */
   authored?(messageId: string): void;
-}): AgentCardResult {
+  /** The server built this card from records, not the bot. */
+  serverCard?: true;
+  apps?: Pick<ChatApps, "createAppCard" | "recordMcpAppCall">;
+  /** The bot's own folders, for a page shown from a folder. */
+  folders?: BotFolders;
+}
+
+export type McpAppCardInput = { tool: "mcp_app" } & Record<string, unknown>;
+
+export function createAgentCard(args: AgentCardArgs & { input: McpAppCardInput }): Promise<AgentCardResult>;
+export function createAgentCard(args: AgentCardArgs & { folders: BotFolders }): AgentCardResult | Promise<AgentCardResult>;
+export function createAgentCard(args: AgentCardArgs): AgentCardResult;
+export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<AgentCardResult> {
   const { store, bot, threadId, input } = args;
   if (!isRecord(input) || input.tool === undefined) return createOptionsCard(args);
+  if (input.tool === "mcp_app") {
+    if (!args.apps?.recordMcpAppCall) return Promise.resolve({ ok: false, status: 400, error: "MCP apps are not available on this computer." });
+    return args.apps.recordMcpAppCall({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });
+  }
+  if (input.tool === "show_html" || input.tool === "update_html") {
+    if (!args.apps) return { ok: false, status: 400, error: "Pages are not available on this computer." };
+    return args.apps.createAppCard({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}), ...(args.folders ? { folders: args.folders } : {}) });
+  }
   if (input.tool !== "show_widget" && input.tool !== "update_widget") {
     return { ok: false, status: 400, error: "tool: must be show_widget or update_widget." };
   }
@@ -113,13 +135,16 @@ export function createAgentCard(args: {
     const widget = canonicalWidget(input);
     if (!widget.ok) return widget;
     // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
-    const message = store.appendMessage(threadId, { role: "bot", kind: "widget", text: widget.text, widget: { v: 1, root: widget.root } });
+    const message = store.appendMessage(threadId, { role: "bot", kind: "widget", text: widget.text, widget: { v: 1, root: widget.root }, ...(args.serverCard ? { serverCard: true as const } : {}) });
     args.authored?.(message.id);
     return { ok: true, messageId: message.id, ...(widget.masked ? { masked: true as const } : {}) };
   }
 
   const existing = store.messagesFor(threadId).find((message) => message.id === input.widget_id);
-  if (!existing || existing.kind !== "widget" || !existing.widget || (existing.from && existing.from.botId !== bot.id)) {
+  // A server-built card keeps `serverCard` through an edit, and that mark is what replay and presses trust; only the server
+  // may edit it, and a bot is told nothing more than that the id is missing.
+  if (!existing || existing.kind !== "widget" || !existing.widget || (existing.from && existing.from.botId !== bot.id) ||
+      (existing.serverCard && !args.serverCard)) {
     return { ok: false, status: 404, error: NO_SUCH_WIDGET };
   }
   if (existing.widget.settled) return { ok: false, status: 409, error: "The person already answered that widget. Show a new one." };
@@ -151,12 +176,17 @@ export type WidgetPress =
     }
   | { ok: false; status: 400 | 404 | 409; error: string };
 
-const BAD_PRESS = "widgetAction must be {messageId, ref, values?, rev?}, with values an object of text and on/off fields.";
+const BAD_PRESS = "widgetAction must be {messageId, ref, values?, other?, rev?}, with values an object of text and on/off fields and other an object of text.";
 const STALE_PRESS = "This widget changed. Check it and press again.";
 
 function isValues(value: unknown): value is Record<string, string | boolean> | undefined | null {
   if (value === undefined || value === null) return true;
   return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string" || typeof entry === "boolean");
+}
+
+function isOther(value: unknown): value is Record<string, string> | undefined | null {
+  if (value === undefined || value === null) return true;
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
 function isRevision(value: unknown): value is number | undefined | null {
@@ -172,9 +202,9 @@ export function prepareWidgetPress(
   sendId: string | undefined,
 ): WidgetPress {
   if (!isRecord(widgetAction)) return { ok: false, status: 400, error: BAD_PRESS };
-  const { messageId, ref, values, rev } = widgetAction;
+  const { messageId, ref, values, other, rev } = widgetAction;
   if (typeof messageId !== "string" || !/^[\w-]+$/.test(messageId) ||
-      typeof ref !== "string" || ref.length < 1 || ref.length > 64 || !isValues(values) || !isRevision(rev)) {
+      typeof ref !== "string" || ref.length < 1 || ref.length > 64 || !isValues(values) || !isOther(other) || !isRevision(rev)) {
     return { ok: false, status: 400, error: BAD_PRESS };
   }
   const stored = () => storedWidget(store, threadId, messageId);
@@ -182,10 +212,10 @@ export function prepareWidgetPress(
   if (!payload?.root) return { ok: false, status: 404, error: "That widget is not in this conversation." };
   const retry = sendId !== undefined && payload.settled?.sendId === sendId;
   if (!retry && !payload.settled && (rev ?? 0) !== (payload.rev ?? 0)) return { ok: false, status: 409, error: STALE_PRESS };
-  const resolved = resolveWidgetAction(retry ? { v: 1, root: payload.root } : payload, ref, values ?? undefined);
+  const resolved = resolveWidgetAction(retry ? { v: 1, root: payload.root } : payload, ref, values ?? undefined, other ?? undefined);
   if (!resolved.ok) return resolved;
   const { label, action, tone } = resolved;
-  const sent = Object.keys(resolved.values).length > 0 ? { values: resolved.values } : {};
+  const sent = { ...(Object.keys(resolved.values).length > 0 ? { values: resolved.values } : {}), ...(resolved.other ? { other: resolved.other } : {}) };
   return {
     ok: true,
     messageId,

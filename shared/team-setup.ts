@@ -39,9 +39,16 @@ export interface TeamSetupRequest {
   operations: TeamSetupOperation[];
   newTeams: string[];
   deletion?: { botId: string; name: string; expectedRevision: string };
-  /** The Chief suggested this bot without being asked. It always waits on
-   * the card, and a "Not now" answer is remembered in its conversation. */
-  suggestion?: true;
   result?: TeamSetupResult;
   resumed?: boolean;
+  /** Set when the setup applied on its own (direct-apply.ts) and Undo can reverse it. */
+  undo?: TeamSetupUndo;
+}
+
+/** Undo deletes the bots a setup created while still unused, gives each updated bot back the values the card showed and
+ * the Chief its earlier teams; `revisions` pin every bot it touched as it applied, so a later change refuses Undo. */
+export interface TeamSetupUndo {
+  created: string[];
+  before: Array<{ botId: string; fields: TeamSetupFields; managedSections?: string[] | null }>;
+  revisions: Record<string, string>;
 }

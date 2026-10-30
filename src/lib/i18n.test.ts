@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { applyBrand, DEFAULT_BRAND } from "./brand";
 import { documentLanguage, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
@@ -35,12 +36,23 @@ describe("t", () => {
     expect(t("engines.cloud")).toBe("Cloud");
   });
 
-  it("keeps new team lifecycle labels available in partial packs, with interpolated names and counts", () => {
+  it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
+    expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
+    expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/brand.json" });
+    try {
+      expect(t("routines.runsOn.localHint")).toBe("Starts while Acme Bots is open here.");
+    } finally {
+      applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    }
+  });
+
+  it("keeps new department lifecycle labels available in partial packs, with interpolated names and counts", () => {
     setLocale("de");
-    expect(t("team.create")).toBe("Create team");
+    expect(t("team.create")).toBe("Create department");
     expect(t("team.moveTo", { name: "Research" })).toBe("Move bots to Research");
     expect(t("team.moveMany", { count: 2 })).toBe("Move 2 bots");
-    expect(t("team.deleteTitle", { name: "Research" })).toBe("Delete Research team?");
+    expect(t("team.deleteTitle", { name: "Research" })).toBe("Delete Research department?");
     expect(t("team.instructionsTitle", { name: "Research" })).toBe("Research shared instructions");
   });
 
@@ -69,6 +81,8 @@ describe("t", () => {
     expect(resolveLocale("pt-PT", available)).toBe("pt");
     expect(resolveLocale("hi-IN", available)).toBe("hi");
     expect(resolveLocale("tr-TR", available)).toBe("tr");
+    expect(resolveLocale("ru-RU", available)).toBe("ru");
+    expect(resolveLocale("ru-RU-x-custom", available)).toBe("ru");
   });
 
   it("every registered pack carries only known keys with non-empty values", () => {
@@ -163,7 +177,7 @@ describe("page language", () => {
 
   it("names every picker language with a valid BCP-47 tag", () => {
     expect(localeChoices.map(({ code }) => documentLanguage(code))).toEqual([
-      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr",
+      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl", "ru", "it", "ko",
     ]);
     for (const { code } of localeChoices) {
       expect(Intl.getCanonicalLocales(documentLanguage(code))).toEqual([documentLanguage(code)]);

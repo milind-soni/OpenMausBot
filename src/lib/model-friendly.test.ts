@@ -1,29 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { friendlyEffort, modelBlurb, simpleEffortLevels } from "./model-friendly";
-
-describe("simple effort levels", () => {
-  it("offers quick, balanced, deep and max when the engine has them", () => {
-    expect(simpleEffortLevels(["none", "low", "medium", "high", "xhigh", "max"], undefined)).toEqual(["low", "medium", "high", "max"]);
-    expect(["low", "medium", "high", "max"].map((level) => friendlyEffort(level as never))).toEqual(["Quick", "Balanced", "Deep", "Max"]);
-  });
-
-  it("uses X-High as the top step when there is no max", () => {
-    expect(simpleEffortLevels(["low", "medium", "high", "xhigh"], undefined)).toEqual(["low", "medium", "high", "xhigh"]);
-  });
-
-  it("never hides the level a bot is already using", () => {
-    expect(simpleEffortLevels(["none", "low", "medium", "high", "xhigh", "max"], "xhigh")).toEqual(["low", "medium", "high", "xhigh", "max"]);
-    expect(simpleEffortLevels(["none", "low", "medium", "high"], "none")).toEqual(["none", "low", "medium", "high"]);
-  });
-
-  it("ignores a stale current level the engine no longer offers", () => {
-    expect(simpleEffortLevels(["low", "high"], "max")).toEqual(["low", "high"]);
-  });
-
-  it("returns nothing for an engine without effort levels", () => {
-    expect(simpleEffortLevels([], undefined)).toEqual([]);
-  });
-});
+import { displayModelLabel, modelBlurb, shortModelLabel } from "./model-friendly";
 
 describe("model blurbs", () => {
   it("describes the well-known Claude families", () => {
@@ -36,5 +12,41 @@ describe("model blurbs", () => {
     expect(modelBlurb({ id: "gpt-5-mini", label: "GPT-5 mini" })).toMatch(/light/);
     expect(modelBlurb({ id: "minimax-m2", label: "MiniMax M2" })).toBeUndefined();
     expect(modelBlurb({ id: "grok-4", label: "Grok 4" })).toBeUndefined();
+  });
+});
+
+describe("a model's name where no provider heading is beside it", () => {
+  it("puts the provider before a bare word, so the chip says what is running", () => {
+    expect(displayModelLabel("Auto", "Cursor")).toBe("Cursor Auto");
+    expect(displayModelLabel("Default", "OpenCode")).toBe("OpenCode Default");
+  });
+
+  it("keeps a name that already says it: the provider's own, a versioned one, a local one", () => {
+    expect(displayModelLabel("Claude Sonnet 5", "Claude")).toBe("Claude Sonnet 5");
+    expect(displayModelLabel("claude sonnet", "Claude")).toBe("claude sonnet");
+    expect(displayModelLabel("GPT-5.5", "OpenAI")).toBe("GPT-5.5");
+    expect(displayModelLabel("Opus 5.5", "Claude")).toBe("Opus 5.5");
+    expect(displayModelLabel("qwen3 (Ollama)", "Claude", true)).toBe("qwen3 (Ollama)");
+    expect(displayModelLabel("Llama", "pi", true)).toBe("Llama");
+    expect(displayModelLabel("Auto", "")).toBe("Auto");
+  });
+});
+
+describe("short model names under a provider heading", () => {
+  it("drops the provider's name a model starts with", () => {
+    expect(shortModelLabel("Claude Sonnet 5", "Claude")).toBe("Sonnet 5");
+    expect(shortModelLabel("Claude Fable 5.1", "Claude")).toBe("Fable 5.1");
+    expect(shortModelLabel("DeepSeek Reasoner", "DeepSeek")).toBe("Reasoner");
+    expect(shortModelLabel("claude opus 5.5", "Claude")).toBe("opus 5.5");
+  });
+
+  it("keeps a name the heading does not start, or whose rest would be only a version", () => {
+    expect(shortModelLabel("Grok 5", "Grok")).toBe("Grok 5");
+    expect(shortModelLabel("OpenAI o3", "OpenAI")).toBe("OpenAI o3");
+    expect(shortModelLabel("GPT-5.6", "OpenAI")).toBe("GPT-5.6");
+    expect(shortModelLabel("qwen3 (Ollama)", "Claude")).toBe("qwen3 (Ollama)");
+    expect(shortModelLabel("Claudette 2", "Claude")).toBe("Claudette 2");
+    expect(shortModelLabel("Claude", "Claude")).toBe("Claude");
+    expect(shortModelLabel("Auto", "")).toBe("Auto");
   });
 });

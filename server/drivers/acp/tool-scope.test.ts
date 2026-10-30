@@ -8,7 +8,7 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
-import { acpNativeIncomingLogMessage } from "./core.ts";
+import { acpNativeIncomingLogMessage } from "./host.ts";
 import { GrokAgentDriver, grokInheritedProfile, grokToolScopeProfile } from "./grok.ts";
 
 const cli = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");

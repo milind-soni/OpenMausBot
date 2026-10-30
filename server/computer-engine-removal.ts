@@ -44,18 +44,18 @@ export function computerEngineMoveText(
   const head = move.scope === "conversation" ? `This conversation now uses ${engine}.`
     : move.scope === "bot-only" ? `${botName} now uses ${engine}; this conversation keeps its own model.`
     : `${botName} now uses ${engine}.`;
-  const noComputer = ` ${engine} can't use a computer, so`;
+  const noComputer = ` ${engine} can't use a desktop, so`;
   const place = move.cloud
-    ? bot ? ` ${botName} still works on its cloud computer.` : ` It still works on ${botName}'s cloud computer.`
+    ? bot ? ` ${botName} still works on its cloud desktop.` : ` It still works on ${botName}'s cloud desktop.`
     : move.noComputer === "auto"
       ? `${noComputer} ${bot ? `${botName} no longer works on its` : `it no longer works on ${botName}'s`}` +
-        " cloud computer. To use it again, choose a model that can use a computer."
+        " cloud desktop. To use it again, choose a model that can use a desktop."
     : move.noComputer === "works-on"
-      ? `${noComputer} ${botName} can't reply on ${engine} while its Works on is Cloud computer.` +
-        " Choose a model that can use a computer, or set Works on to Auto."
+      ? `${noComputer} ${botName} can't reply on ${engine} while its Works on is Cloud desktop.` +
+        " Choose a model that can use a desktop, or set Works on to Auto."
     : move.noComputer === "pin"
-      ? `${noComputer} ${botName} can't reply here while this conversation is pinned to its cloud computer.` +
-        " Choose a model that can use a computer, or clear this conversation's place in the composer."
+      ? `${noComputer} ${botName} can't reply here while this conversation is pinned to its cloud desktop.` +
+        " Choose a model that can use a desktop, or clear this conversation's place in the composer."
     : "";
   const ask = !move.askNow ? ""
     : move.scope === "bot-only" ? ` ${botName}'s permissions are now Ask, but this conversation's stay as they were.`

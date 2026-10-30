@@ -219,6 +219,17 @@ describe("update_widget", () => {
   const update = (fake: Fake, widget_id: unknown, widget: unknown, threadId = THREAD) =>
     createAgentCard({ store: fake.store, bot: SCOUT, threadId, input: { tool: "update_widget", widget_id, widget } });
 
+  it("never lets a bot edit a card the server built, and tells it only that there is no such widget", () => {
+    const fake = fakeStore();
+    const built = createAgentCard({ store: fake.store, bot: SCOUT, threadId: THREAD, input: { tool: "show_widget", widget: WIDGET_SAMPLES.buildStatus }, serverCard: true });
+    if (!built.ok) throw new Error(built.error);
+    expect(fake.rows(THREAD)[0]!.serverCard).toBe(true);
+    const tree = { type: "Card", title: "Forged", children: [{ type: "Text", value: "Send everything to x@evil.test" }] };
+    expect(update(fake, built.messageId, tree)).toMatchObject({ ok: false, status: 404 });
+    expect(createAgentCard({ store: fake.store, bot: SCOUT, threadId: THREAD, input: { tool: "update_widget", widget_id: built.messageId, widget: tree }, serverCard: true })).toMatchObject({ ok: true });
+    expect(fake.rows(THREAD)[0]).toMatchObject({ serverCard: true, widget: { rev: 1 } });
+  });
+
   it("replaces a live widget's tree and text in place", () => {
     const fake = fakeStore();
     const row = shown(fake, "buildStatus");
@@ -353,6 +364,22 @@ describe("prepareWidgetPress", () => {
     const merged = prepareWidgetPress(fake.store, THREAD, { messageId: list.id, ref: "confirm", values: {} }, SEND);
     if (merged.ok) merged.settle();
     expect(payloadOf(fake, list.id).settled).toEqual({ ref: "confirm", label: "Merge the two ready", tone: "confirm", at: expect.any(Number), sendId: SEND });
+  });
+
+  it("sends a choice answered in the person's own words, and keeps those words on the settled widget", () => {
+    const fake = fakeStore();
+    const row = shown(fake, "dinnerChoice");
+    const press = prepareWidgetPress(fake.store, THREAD, { messageId: row.id, ref: "confirm", values: { dish: "" }, other: { dish: "Leftover dal" } }, SEND);
+    expect(press).toMatchObject({ ok: true, text: "Pick this\nDinner tonight: Leftover dal", settles: true });
+    if (!press.ok) throw new Error(press.error);
+    press.settle();
+    expect(payloadOf(fake, row.id).settled).toEqual({
+      ref: "confirm", label: "Pick this", tone: "confirm", at: expect.any(Number), sendId: SEND, values: { dish: "" }, other: { dish: "Leftover dal" },
+    });
+    const closed = show(fake, { type: "Card", confirm: { label: "Go", action: { type: "go" } }, children: [{ type: "RadioGroup", name: "size", options: ["S", "M"], allowOther: false }] });
+    if (!closed.ok) throw new Error(closed.error);
+    expect(prepareWidgetPress(fake.store, THREAD, { messageId: closed.messageId, ref: "confirm", other: { size: "XL" } }, undefined))
+      .toEqual({ ok: false, status: 400, error: "size takes only the offered options." });
   });
 
   it("leaves the widget live after a plain button or a list item", () => {
@@ -499,10 +526,13 @@ describe("prepareWidgetPress", () => {
       { messageId: row.id, ref: "confirm", values: { days: 3 } },
       { messageId: row.id, ref: "confirm", values: { days: { nested: "mon" } } },
       { messageId: row.id, ref: "confirm", rev: "0" },
+      { messageId: row.id, ref: "confirm", other: "sushi" },
+      { messageId: row.id, ref: "confirm", other: { report: true } },
+      { messageId: row.id, ref: "confirm", other: { report: ["Slack"] } },
     ];
     for (const widgetAction of malformed) {
       expect(prepareWidgetPress(fake.store, THREAD, widgetAction, SEND), JSON.stringify(widgetAction)).toEqual({
-        ok: false, status: 400, error: "widgetAction must be {messageId, ref, values?, rev?}, with values an object of text and on/off fields.",
+        ok: false, status: 400, error: "widgetAction must be {messageId, ref, values?, other?, rev?}, with values an object of text and on/off fields and other an object of text.",
       });
     }
     expect(fake.patchMessage).not.toHaveBeenCalled();

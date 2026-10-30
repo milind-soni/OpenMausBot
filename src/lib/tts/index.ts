@@ -1,6 +1,7 @@
 // Audio comes from the harness, which holds the voice keys: the renderer never sees them or calls a voice provider.
 
 import { localSystemVoiceActive, remoteSystemVoice, resolveLocalSystemVoice } from "@/lib/local-voice";
+import { recordBlockTiming, recordPrepared, recordSpeakEnter } from "../voice-latency-probe";
 
 export type SpeechStatus = "idle" | "preparing" | "speaking";
 
@@ -18,10 +19,31 @@ interface SpeakOptions {
   messageId?: string;
 }
 
+/** One spoken reply, fed block by block: blocks come from the committed
+ * splitter (`/api/tts/prepare`), the caller decides when each one is closed,
+ * and `end` settles after the last queued block has played. */
+export interface SpeechStream {
+  /** Queue one utterance block; empty blocks are dropped. */
+  push(block: string): void;
+  /** No further blocks; resolves when everything queued has played. */
+  end(): Promise<void>;
+  /** Split text through the server's committed splitter; rejects like `speak`. */
+  prepare(text: string): Promise<string[]>;
+  /** Adopt the completed reply's message id: the snapshot and the probe
+   * records carry it from here on. */
+  identify(messageId: string | undefined): void;
+  /** Tear down this stream's audio, but only while it is still the speaker's
+   * current stream: a superseded stream must not silence its successor. */
+  cancel(): void;
+  /** Surface a fatal error and kill the stream. */
+  fail(error: string): void;
+}
+
 type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string };
 type TtsErrorBody = { error?: string };
 
 const IDLE: SpeechSnapshot = { status: "idle" };
+const PREFETCH_WINDOW = 3;
 
 export class Speaker {
   private snapshot: SpeechSnapshot = IDLE;
@@ -98,6 +120,20 @@ export class Speaker {
   }
 
   async speak(text: string, opts: SpeakOptions = {}): Promise<void> {
+    const stream = this.begin(opts);
+    let utterances: string[];
+    try {
+      utterances = await stream.prepare(text);
+    } catch (e) {
+      stream.fail(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    for (const utterance of utterances) stream.push(utterance);
+    await stream.end();
+  }
+
+  begin(opts: SpeakOptions = {}): SpeechStream {
+    recordSpeakEnter(opts.messageId);
     this.stop();
     const mine = this.token;
     const controller = new AbortController();
@@ -105,59 +141,164 @@ export class Speaker {
     const live = () => this.token === mine && !controller.signal.aborted;
 
     this.set({ status: "preparing", botId: opts.botId, messageId: opts.messageId });
-    if (localSystemVoiceActive()) {
-      await this.speakWithLocalSystem(text, opts, live);
-      if (this.request === controller) this.request = null;
-      return;
-    }
-    let utterances: string[];
-    try {
-      utterances = await this.prepare(text, opts.voiceId, controller.signal);
-    } catch (e) {
-      if (live()) this.set({ ...IDLE, error: e instanceof Error ? e.message : String(e) });
-      if (this.request === controller) this.request = null;
-      return;
-    }
-    if (!live()) return;
-    if (!utterances.length) {
-      this.set(IDLE);
-      if (this.request === controller) this.request = null;
-      return;
-    }
+    return localSystemVoiceActive()
+      ? this.localStream(opts, live, controller)
+      : this.networkStream(opts, live, controller);
+  }
 
-    type Rendered = { blob: Blob; error?: never } | { blob?: never; error: unknown };
-    const render = (utterance: string): Promise<Rendered> =>
-      this.render(utterance, opts.voiceId, controller.signal).then(
-        (blob) => ({ blob }),
-        (error: unknown) => ({ error }),
-      );
-    let next: Promise<Rendered> | null = render(utterances[0]);
-    for (let i = 0; i < utterances.length; i += 1) {
-      const current = next;
-      next = i + 1 < utterances.length ? render(utterances[i + 1]) : null;
-      if (!current) break;
-      const rendered = await current;
-      if ("error" in rendered) {
+  /** The completed frame's message id must reach the snapshot and the probe
+   * records, which read `opts.messageId` when they fire. */
+  private adoptMessageId(opts: SpeakOptions, live: () => boolean, messageId: string | undefined): void {
+    opts.messageId = messageId;
+    if (live() && this.snapshot.status !== "idle") this.set({ ...this.snapshot, messageId });
+  }
+
+  /** The system voice has no splitter round trip: one utterance per block, the
+   * whole text for a completed reply, so streaming degrades to speaking at the
+   * authoritative frame. */
+  private localStream(opts: SpeakOptions, live: () => boolean, controller: AbortController): SpeechStream {
+    let chain: Promise<void> = Promise.resolve();
+    let closed = false;
+    let pushed = false;
+    return {
+      push: (block) => {
+        if (closed || !block || !live()) return;
+        pushed = true;
+        chain = chain.then(() => (live() ? this.speakWithLocalSystem(block, opts, live) : undefined));
+      },
+      end: async () => {
+        closed = true;
+        await chain;
+        if (!pushed && live()) this.set(IDLE);
+        if (this.request === controller) this.request = null;
+      },
+      prepare: async (text) => [text],
+      identify: (messageId) => this.adoptMessageId(opts, live, messageId),
+      cancel: () => { if (live()) this.stop(); },
+      fail: (error) => {
+        closed = true;
         if (live()) {
-          this.set({
-            ...IDLE,
-            error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error),
-          });
+          controller.abort();
+          this.set({ ...IDLE, error });
         }
         if (this.request === controller) this.request = null;
-        return;
+      },
+    };
+  }
+
+  private networkStream(opts: SpeakOptions, live: () => boolean, controller: AbortController): SpeechStream {
+    type Rendered = { blob: Blob; error?: never } | { blob?: never; error: unknown };
+    const pending: string[] = [];
+    let closed = false;
+    let finished = false;
+    let running = false;
+    let wake: (() => void) | null = null;
+    let settleDrained: () => void = () => {};
+    const drained = new Promise<void>((resolve) => { settleDrained = resolve; });
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      closed = true;
+      wake?.();
+      settleDrained();
+    };
+    const render = (utterance: string, block: number): Promise<Rendered> => {
+      recordBlockTiming(opts.messageId, block, "renderStart");
+      return this.render(utterance, opts.voiceId, controller.signal).then(
+        (blob) => {
+          recordBlockTiming(opts.messageId, block, "renderDone");
+          return { blob };
+        },
+        (error: unknown) => ({ error }),
+      );
+    };
+    const run = async (): Promise<void> => {
+      const inFlight: Promise<Rendered>[] = [];
+      let index = 0;
+      let playedAll = false;
+      for (;;) {
+        while (inFlight.length < PREFETCH_WINDOW && index + inFlight.length < pending.length) {
+          const block = index + inFlight.length;
+          inFlight.push(render(pending[block]!, block));
+        }
+        if (!inFlight.length) {
+          if (closed || !live()) {
+            playedAll = closed;
+            break;
+          }
+          await new Promise<void>((resolve) => { wake = resolve; });
+          wake = null;
+          continue;
+        }
+        const current = inFlight.shift()!;
+        const at = index;
+        index += 1;
+        const rendered = await current;
+        if ("error" in rendered) {
+          if (live()) {
+            this.set({ ...IDLE, error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error) });
+          }
+          controller.abort();
+          return;
+        }
+        if (!live()) {
+          controller.abort();
+          return;
+        }
+        this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: pending[at]! });
+        const played = await this.play(rendered.blob, live, opts.messageId, at);
+        if (!played || !live()) {
+          if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+          controller.abort();
+          return;
+        }
       }
-      if (!live()) return;
-      this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: utterances[i] });
-      const finished = await this.play(rendered.blob, live);
-      if (!finished || !live()) {
-        if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+      if (playedAll && live() && !finished) this.set(IDLE);
+      if (this.request === controller) this.request = null;
+    };
+    const kick = () => {
+      if (finished) return;
+      wake?.();
+      if (running || (!pending.length && !closed)) return;
+      // A microtask lets one batch of pushes fill the prefetch window before
+      // the first render starts, the way the whole-text path always did.
+      running = true;
+      void Promise.resolve().then(run).finally(() => {
+        running = false;
+        finish();
+      });
+    };
+    return {
+      push: (block) => {
+        if (finished || !block) return;
+        pending.push(block);
+        kick();
+      },
+      end: () => {
+        closed = true;
+        kick();
+        return drained;
+      },
+      prepare: async (text) => {
+        const utterances = await this.prepare(text, opts.voiceId, controller.signal);
+        recordPrepared(opts.messageId, utterances.length);
+        return utterances;
+      },
+      identify: (messageId) => this.adoptMessageId(opts, live, messageId),
+      cancel: () => { if (live()) this.stop(); },
+      fail: (error) => {
+        if (finished) return;
+        const wasLive = live();
+        controller.abort();
+        if (wasLive) {
+          if (this.settlePlayback) this.settlePlayback(false);
+          else this.teardownAudio();
+          this.set({ ...IDLE, error });
+        }
         if (this.request === controller) this.request = null;
-        return;
-      }
-    }
-    if (live()) this.set(IDLE);
-    if (this.request === controller) this.request = null;
+        finish();
+      },
+    };
   }
 
   private speakWithLocalSystem(
@@ -165,6 +306,7 @@ export class Speaker {
     opts: SpeakOptions,
     live: () => boolean,
   ): Promise<void> {
+    if (!live()) return Promise.resolve();
     const value = text.trim();
     if (!value) {
       this.set(IDLE);
@@ -243,7 +385,7 @@ export class Speaker {
     return res.blob();
   }
 
-  private play(blob: Blob, live: () => boolean): Promise<boolean> {
+  private play(blob: Blob, live: () => boolean, probeMessageId?: string, probeBlock?: number): Promise<boolean> {
     return new Promise((resolve) => {
       if (!live()) return resolve(false);
       this.teardownAudio();
@@ -257,6 +399,9 @@ export class Speaker {
         settled = true;
         audio.onended = null;
         audio.onerror = null;
+        if (probeMessageId !== undefined && probeBlock !== undefined) {
+          recordBlockTiming(probeMessageId, probeBlock, "audioEnd");
+        }
         if (this.settlePlayback === done) this.settlePlayback = null;
         if (this.audio === audio) this.teardownAudio();
         resolve(ok);
@@ -264,7 +409,14 @@ export class Speaker {
       this.settlePlayback = done;
       audio.onended = () => done(true);
       audio.onerror = () => done(false);
-      audio.play().catch(() => done(false));
+      audio.play().then(
+        () => {
+          if (probeMessageId !== undefined && probeBlock !== undefined) {
+            recordBlockTiming(probeMessageId, probeBlock, "audioStart");
+          }
+        },
+        () => done(false),
+      );
     });
   }
 }

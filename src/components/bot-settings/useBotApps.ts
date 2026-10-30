@@ -23,7 +23,7 @@ export interface BotApps {
 }
 
 let cardsRequest: Promise<Map<string, ToolkitCard>> | null = null;
-function loadAppCards(): Promise<Map<string, ToolkitCard>> {
+export function loadAppCards(): Promise<Map<string, ToolkitCard>> {
   cardsRequest ??= api("/api/connectors/catalog")
     .then((response: { cards?: ToolkitCard[] }) => new Map((response.cards ?? []).map((card) => [card.slug, card])))
     .catch(() => {
@@ -43,7 +43,7 @@ export function highLevelAppCard(): Pick<ToolkitCard, "logo" | "domain" | "label
 }
 
 export function botAppsFrom(
-  bot: Pick<Bot, "composio" | "connectorScopes">,
+  bot: Pick<Bot, "composio" | "connectorScopes" | "connectorTools">,
   inventory: ConnectorInventory | null,
   cards: ReadonlyMap<string, ToolkitCard>,
   highlevel: HighLevelStatus | null = null,

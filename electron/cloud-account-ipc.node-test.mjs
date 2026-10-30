@@ -45,6 +45,29 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
   }
   assert.deepEqual(calls, bridgeMethods.map(method => method === "connectHomeForPhone" ? ["connectHome", "phone"] : [method]));
 });
+test("a team's Cloud opens from the page by its id alone: the team comes from the verified session, and opens as the switcher opens it", async () => {
+  const f = preload();
+  await f.bridge.cloudAccount.openTeam({ toString: () => "team-acme" }, { origin: "https://evil.example.test" });
+  assert.deepEqual(f.invoked, [["cloud-account:openTeam", "team-acme"]]);
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);
+  const handlers = new Map(), shown = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
+  const acme = { id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: "https://omb-t-2.fly.dev" } };
+  let state = { status: "connected", teams: [acme] };
+  localOrigin.setLocalOrigin(origin);
+  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
+    rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, ensureCloudAccount: () => ({ state: () => state }),
+    showHome: async options => { shown.push(JSON.parse(JSON.stringify(options))); } });
+  vm.runInContext(source.slice(start, end), context);
+  const open = handlers.get("cloud-account:openTeam"), page = { sender: contents, senderFrame: frame };
+  await open(page, "team-acme");
+  assert.deepEqual(shown, [{ place: { team: "team-acme", name: "Acme" } }]);
+  await assert.rejects(async () => open(page, "team-other"), /not in that team/);
+  state = { status: "unavailable", teams: [acme] };
+  await assert.rejects(async () => open(page, "team-acme"), /not in that team/, "only a connected session's teams");
+  assert.throws(() => open({ sender: contents, senderFrame: { url: "https://remote.example.test" } }, "team-acme"), /only available/);
+  assert.equal(shown.length, 1);
+});
 test("a checkout from the page carries only a plan and a source, as text; the server menu only 'howto'", async () => {
   const f = preload();
   await f.bridge.cloudAccount.checkout("pro", "app_card", { origin: "https://evil.example.test", paid: true });
@@ -61,7 +84,7 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
   localOrigin.setLocalOrigin(origin);
   let allowed = true;
-  const offer = { plans: [{ tier: "personal", amount: 2900 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
+  const offer = { plans: [{ tier: "starter", amount: 1500 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
   const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => allowed,
@@ -79,4 +102,30 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   allowed = false;
   await assert.rejects(handle(event, "pro", "app_card"), /isn't offered/);
   assert.deepEqual(calls, [["pro", "app_card"], ["pro", "app_onboarding"]]);
+});
+
+test("Cancel and Keep my plan from Settings carry only the survey's words, and only the exact local main frame may ask", async () => {
+  const f = preload();
+  await f.bridge.cloudAccount.cancelPlan({ answer: "price", expected: "words" }, { origin: "https://evil.example.test" });
+  await f.bridge.cloudAccount.cancelPlan();
+  await f.bridge.cloudAccount.keepPlan({ cloudId: "someone-elses" });
+  assert.deepEqual(f.invoked, [["cloud-account:cancelPlan", { answer: "price", expected: "words" }], ["cloud-account:cancelPlan", null], ["cloud-account:keepPlan"]]);
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);
+  const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
+  localOrigin.setLocalOrigin(origin);
+  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
+    rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" },
+    ensureCloudAccount: () => ({ cancelPlan: (...args) => { calls.push(["cancelPlan", ...args]); return { outcome: "cancelled" }; },
+      keepPlan: (...args) => { calls.push(["keepPlan", ...args]); return { outcome: "kept" }; } }) });
+  vm.runInContext(source.slice(start, end), context);
+  const page = { sender: contents, senderFrame: frame };
+  await handlers.get("cloud-account:cancelPlan")(page, { answer: "setup" }, "https://evil.example.test");
+  await handlers.get("cloud-account:keepPlan")(page, "anything");
+  assert.deepEqual(calls, [["cancelPlan", { answer: "setup" }], ["keepPlan"]]);
+  for (const channel of ["cloud-account:cancelPlan", "cloud-account:keepPlan"]) {
+    for (const sender of [{ sender: contents, senderFrame: { url: `${origin}/subframe` } }, { sender: {}, senderFrame: frame },
+      { sender: contents, senderFrame: { url: "https://remote.example.test" } }]) assert.throws(() => handlers.get(channel)(sender, { answer: "price" }), /only available/);
+  }
+  assert.equal(calls.length, 2);
 });

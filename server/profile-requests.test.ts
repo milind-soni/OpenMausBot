@@ -14,7 +14,7 @@ import {
   type ProfileRequestStore,
 } from "./profile-requests.ts";
 import type { BotRecord } from "./store.ts";
-import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
+import { appliesNow, type DirectApplyCheck } from "./direct-apply.ts";
 
 interface StoredMessage {
   id: string;
@@ -505,51 +505,48 @@ describe("propose_profile working folder (cwd)", () => {
   });
 });
 
-describe("a bot's own profile changes", () => {
-  const rule: DirectApplyCheck = (botId, _threadId, targetBotId) => directApply({ fullAccess: false, botId, targetBotId, blocked: false });
+describe("a bot's profile changes below Full access", () => {
+  const rule: DirectApplyCheck = (_botId, threadId) => appliesNow({ fullAccess: false, ownerMustConfirm: threadId === "guest-thread" });
 
-  it("applies its own change at Ask and keeps the card for a peer's", () => {
+  it("applies its own change and a peer's at Ask, each with an Undo", () => {
     const { store, bot, addBot } = harness({ name: "Scout" });
     const peer = addBot({ name: "Peer" });
     const service = new ProfileRequestService({ store, autoApply: rule });
     const own = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Researcher" }, reason: "asked" });
-    expect(own).toMatchObject({ state: "applied", appliedBy: "self" });
+    expect(own).toMatchObject({ state: "applied", appliedBy: "level" });
     expect(bot.title).toBe("Researcher");
     expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ autoApplied: true, answered: "allow", options: [] });
     const other = service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Changed" }, reason: "asked" });
-    expect(other.state).toBe("pending");
+    expect(other).toMatchObject({ state: "applied", appliedBy: "level" });
+    expect(peer.title).toBe("Changed");
+    expect(store.messagesFor(bot.threadId)[1]?.card).toMatchObject({ autoApplied: true, answered: "allow", options: [] });
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: other.requestId })).toMatchObject({ state: "undone", targetBotId: peer.id });
     expect(peer.title).toBe("");
-    expect(store.messagesFor(bot.threadId)[1]?.card).toMatchObject({ options: ["Confirm", "Cancel"] });
   });
 
-  it("keeps the card for its own working folder below Full access, and applies it at Full", () => {
+  it("applies its own working folder at Ask, and Undo puts the old one back", () => {
     const { store, bot } = harness({ name: "Scout" });
-    const fullAccess = (threadId: string) => threadId === "full-thread";
-    const service = new ProfileRequestService({ store, autoApply: (botId, threadId, targetBotId) =>
-      directApply({ fullAccess: fullAccess(threadId), botId, targetBotId, blocked: false }) });
+    const service = new ProfileRequestService({ store, autoApply: rule });
     const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
     try {
-      const asked = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir, title: "Builder" }, reason: "asked" });
-      expect(asked.state).toBe("pending");
+      const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir, title: "Builder" }, reason: "asked" });
+      expect(applied).toMatchObject({ state: "applied", appliedBy: "level" });
+      expect(store.bot(bot.id)!.cwd).toBe(dir);
+      expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId })).toMatchObject({ state: "undone" });
       expect(store.bot(bot.id)!.cwd).toBeUndefined();
       expect(store.bot(bot.id)!.title).toBe("");
-      expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ options: ["Confirm", "Cancel"] });
-      const full = service.submit({ botId: bot.id, threadId: "full-thread", changes: { cwd: dir }, reason: "asked" });
-      expect(full).toMatchObject({ state: "applied", appliedBy: "full-access" });
-      expect(store.bot(bot.id)!.cwd).toBe(dir);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("is not held back by the open-card budget, which still holds a card", () => {
-    const { store, bot, addBot } = harness({ name: "Scout" });
-    const peer = addBot({ name: "Peer" });
+  it("is not held back by the open-card budget, which still holds the owner's card", () => {
+    const { store, bot } = harness({ name: "Scout" });
     const canPersist = vi.fn((_botId: string, _threadId: string, opensCard: boolean) =>
       opensCard ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" } : { ok: true as const });
     const service = new ProfileRequestService({ store, autoApply: rule, canPersist });
     expect(service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Researcher" }, reason: "asked" }).state).toBe("applied");
-    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Changed" }, reason: "asked" }))
+    expect(() => service.submit({ botId: bot.id, threadId: "guest-thread", changes: { title: "Changed" }, reason: "asked" }))
       .toThrow("confirm or cancel an existing proposal first");
     expect(canPersist.mock.calls.map((call) => call[2])).toEqual([false, true]);
   });

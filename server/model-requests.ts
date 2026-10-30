@@ -117,16 +117,16 @@ export function modelCardCopy(args: {
   capabilityLines: string[];
 }): { title: string; summary: string; detail: string } {
   const title = args.crossBot
-    ? "Change @" + args.targetName + "'s default engine/model?"
-    : "Change " + args.targetName + "'s default engine/model?";
+    ? "Change @" + args.targetName + "'s default AI and model?"
+    : "Change " + args.targetName + "'s default AI and model?";
   const lines: string[] = args.crossBot
     ? ["Whose default model: @" + args.targetName, "Why: " + args.reason]
     : ["Why: " + args.reason];
-  lines.push("Default engine/model: " + JSON.stringify(args.before) + " → " + JSON.stringify(args.selection));
+  lines.push("Default AI and model: " + JSON.stringify(args.before) + " → " + JSON.stringify(args.selection));
   lines.push(...args.capabilityLines);
   lines.push("Default models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
   lines.push("Nothing runs.");
-  return { title, summary: title + " · default engine/model", detail: lines.join("\n") };
+  return { title, summary: title + " · default AI and model", detail: lines.join("\n") };
 }
 
 export class ModelRequestService {

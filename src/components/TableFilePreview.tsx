@@ -6,8 +6,8 @@ import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/tabl
 import { t } from "@/lib/i18n";
 
 /** A preview limit, not a download limit: chunked responses are bounded too. */
-export async function readTableResponse(response: Response, signal: AbortSignal): Promise<string> {
-  if (Number(response.headers.get("content-length")) > TABLE_FILE_MAX_BYTES) {
+export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES): Promise<string> {
+  if (Number(response.headers.get("content-length")) > maxBytes) {
     await response.body?.cancel(); throw new Error("size");
   }
   const reader = response.body?.getReader();
@@ -20,7 +20,7 @@ export async function readTableResponse(response: Response, signal: AbortSignal)
       const part = await reader.read();
       if (part.done) break;
       size += part.value.byteLength;
-      if (size > TABLE_FILE_MAX_BYTES) throw new Error("size");
+      if (size > maxBytes) throw new Error("size");
       text += decoder.decode(part.value, { stream: true });
     }
     return text + decoder.decode();

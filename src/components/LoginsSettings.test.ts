@@ -3,11 +3,11 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn(), admin: true as boolean | null }));
+const fixture = vi.hoisted(() => ({ api: vi.fn(), admin: true as boolean | null, config: null as { cloudHome?: boolean } | null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: fixture.api,
-  useStore: () => ({ state: { bots: [{ id: "pepper", name: "Pepper" }, { id: "quill", name: "Quill" }] }, dispatch: vi.fn() }),
+  useStore: () => ({ state: { bots: [{ id: "pepper", name: "Pepper" }, { id: "quill", name: "Quill" }], config: fixture.config }, dispatch: vi.fn() }),
 }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 const { LoginsSettings } = await import("./LoginsSettings");
@@ -25,6 +25,7 @@ const OFF = { connected: false };
 beforeEach(() => {
   fixture.api.mockReset();
   fixture.admin = true;
+  fixture.config = null;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -192,5 +193,27 @@ describe("Settings → Logins", () => {
     await render();
     expect(fixture.api).not.toHaveBeenCalled();
     expect(host.textContent).toContain("Only an admin of this installation can see and change saved logins.");
+  });
+});
+
+describe("Settings → Logins with My Cloud", () => {
+  afterEach(() => { delete (window as { ogb?: unknown }).ogb; });
+  const where = (site: string) => host.querySelector(`[data-login-row="${site}"] [data-login-where]`)?.textContent;
+
+  it("without My Cloud says nothing of sides; on My Cloud itself says its logins are its own and sends nothing", async () => {
+    (window as { ogb?: unknown }).ogb = { cloudLogins: { state: vi.fn().mockResolvedValue({ cloud: null }), send: vi.fn() } };
+    fixture.api.mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-logins-sides]")).toBeNull();
+    expect(host.querySelector("[data-also-cloud]")).toBeNull();
+    expect(where("example.org")).toBeUndefined();
+    act(() => root.unmount());
+    root = createRoot(host);
+    delete (window as { ogb?: unknown }).ogb;
+    fixture.config = { cloudHome: true };
+    fixture.api.mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-logins-cloud-own]")!.textContent).toContain("come here by themselves");
+    expect(host.querySelector("[data-also-cloud]")).toBeNull();
   });
 });

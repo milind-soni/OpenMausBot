@@ -46,9 +46,9 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
         void save();
       }}
     >
-      <div className="text-[13.5px] font-medium text-ink">{t("call.live.keyTitle")}</div>
-      <div className="text-[12.5px] leading-[1.45] text-ink-secondary">{t("call.live.keyExplain")}</div>
-      <div className="text-[12.5px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })}</div>
+      <div className="text-[14px] font-medium text-ink">{t("call.live.keyTitle")}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t("call.live.keyExplain")}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })}</div>
       <input
         type="password"
         autoComplete="off"
@@ -63,7 +63,7 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
       <button
         type="submit"
         disabled={!key.trim() || saving}
-        className="self-start rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+        className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
       >
         {saving ? t("call.live.keySaving") : compact ? t("common.save") : t("call.live.keySaveAndCall")}
       </button>

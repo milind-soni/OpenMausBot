@@ -35,7 +35,7 @@ it("one step on the menu that keeps Add a Cloud, with Skip; nothing when not ask
   const html = render();
   expect(html).toContain('data-spotlight="server-switcher"'); expect(html).toContain('data-placement="below"');
   expect(html).toContain("Add a Cloud from here");
-  expect(html).toContain("Click this menu, then choose Add a Cloud. It&#x27;s also where you switch between this computer and My Cloud.");
+  expect(html).toContain("Click this menu, then choose Add a Cloud. It&#x27;s also where you switch between this computer and the Cloud.");
   expect(html).toContain(">Skip<");
   f.state = { cloudHowTo: false }; expect(render()).toBe("");
 });

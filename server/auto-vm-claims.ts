@@ -1,3 +1,5 @@
+import type { YourComputerCall } from "../shared/your-computer.ts";
+
 export interface AutoVmClaimOwner {
   threadId: string;
   generation: string;
@@ -5,8 +7,8 @@ export interface AutoVmClaimOwner {
 
 export interface AutoVmClaimSlot {
   owner: AutoVmClaimOwner;
-  /** Bind, lease, boot; again only after a network failure. */
-  claim: () => Promise<void>;
+  /** Bind, lease, boot; again only after a network failure. `call` is what the first screen call would open. */
+  claim: (call?: YourComputerCall) => Promise<void>;
   /** Set by startAutoVmClaim; presence means the claim already fired. */
   begin?: Promise<void>;
   /** The fired claim rejected; the slot stays so the gate keeps refusing screen calls instead of forwarding them to an unclaimed VM. */
@@ -23,7 +25,7 @@ export interface AutoVmClaimSlot {
   pendingReason?: string;
   boxId?: string;
   startsComputer?: true;
-  /** Called once after the slot is marked failed; the fail-closed refusal does not depend on it firing. */
+  /** Called once after the slot is marked failed, unless the person declined; the fail-closed refusal does not depend on it firing. */
   onRejected?: (failure: string, error?: unknown) => void;
 }
 
@@ -48,13 +50,13 @@ export function keepTransient(original: unknown, shown: unknown): unknown {
 
 /** Once per dispatch generation, or again after a network failure, at most MAX_CLAIM_ATTEMPTS times. Any other rejection keeps
  * its slot marked failed, and a rejection mutates only the slot it fired from, so a stale claim never touches a newer generation's. */
-export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, generation: string): void {
+export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, generation: string, call?: YourComputerCall): void {
   const slot = table.get(threadId);
   if (!slot || slot.owner.threadId !== threadId || slot.owner.generation !== generation || slot.begin || slot.failed) return;
   const attempt = (slot.attempts ?? 0) + 1;
   slot.attempts = attempt;
   slot.retryReason = undefined;
-  const begin: Promise<void> = slot.claim().then(
+  const begin: Promise<void> = slot.claim(call).then(
     () => { slot.claimed = true; },
     (error: unknown) => {
       const failure = error instanceof Error ? error.message : String(error);
@@ -65,7 +67,8 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
       }
       slot.failed = true;
       slot.failure = failure;
-      slot.onRejected?.(slot.failure, error);
+      // A person's No is an answer, not a failure: the screen calls say so, and nothing reports a broken turn.
+      if ((error as { declined?: unknown } | null)?.declined !== true) slot.onRejected?.(slot.failure, error);
     },
   );
   slot.begin = begin;

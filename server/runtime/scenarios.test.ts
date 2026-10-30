@@ -427,8 +427,8 @@ describe("§2 lifecycle", () => {
     expect(w.runner.parked.size).toBe(0);
     expect(w.runner.reports(child.id)).toHaveLength(1);
     expect(w.store.inbox(chiefOwner, false).filter((i) => i.kind === "settled")).toHaveLength(1);
-    expect(w.runner.runs(root.id)).toHaveLength(1);
-    expect(w.runner.runs(root.id)[0].input!.settled?.map((a) => a.id)).toEqual([child.id]);
+    expect(w.runner.runs(root.id).map((run) => [run.input!.asked?.map((a) => a.id), run.input!.settled?.map((a) => a.id)]))
+      .toEqual([[[child.id], undefined], [undefined, [child.id]]]);
     expect(get(w, root.id).status).toBe("completed");
     invariants(w);
   });
@@ -458,8 +458,9 @@ describe("§2 lifecycle", () => {
     expect(w.rt.answer(child.id, "too late")).toBe(false);
 
     const rootRuns = w.runner.runs(root.id);
-    expect(rootRuns).toHaveLength(1);
-    expect(rootRuns[0].input!.settled?.map((a) => [a.id, a.status, a.outcome])).toEqual([[child.id, "failed", "expired"]]);
+    expect(rootRuns).toHaveLength(2);
+    expect(rootRuns[0].input!.asked?.map((a) => a.id)).toEqual([child.id]);
+    expect(rootRuns[1].input!.settled?.map((a) => [a.id, a.status, a.outcome])).toEqual([[child.id, "failed", "expired"]]);
     expect(w.store.inbox(chiefOwner, false).filter((i) => i.kind === "settled")).toHaveLength(1);
     expect(get(w, root.id).status).toBe("completed");
     invariants(w);
@@ -593,7 +594,8 @@ describe("§5 restart", () => {
     expect(runs[1].input!.answer).toBe("blue");
     expect(get(w, child.id)).toMatchObject({ status: "completed", result: "blue" });
     expect(w.runner.reports(child.id)).toHaveLength(1);
-    expect(w.runner.runs(root.id)).toHaveLength(1);
+    expect(w.runner.runs(root.id).map((run) => [run.input!.asked?.map((a) => a.id), run.input!.settled?.map((a) => a.id)]))
+      .toEqual([[[child.id], undefined], [undefined, [child.id]]]);
     expect(get(w, root.id).status).toBe("completed");
     invariants(w);
   });

@@ -1,5 +1,6 @@
 // Sealed under a key of its own (a 0600 file beside it), never the browser engine's, which every browser process gets in
-// its environment. Neither file is ever backed up, exported or moved: a saved password stays on its computer.
+// its environment. Neither file is ever backed up, exported or moved: a saved password stays on its computer, unless the
+// person sends that one login to their own Cloud with Also use on My Cloud (login-handoff.ts).
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -156,6 +157,15 @@ export class LoginStore {
 
   list(): LoginSummary[] {
     return this.read().logins.map(summarizeLogin).sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
+  }
+
+  /** When each login last changed, for Send to My Cloud's comparison: never a secret. */
+  changes(): Array<{ id: string; site: string; hosts: string[]; exactHost: boolean; username: string; updatedAt: number }> {
+    return this.read().logins.map(({ id, site, hosts, exactHost, username, updatedAt }) => ({ id, site, hosts, exactHost, username, updatedAt }));
+  }
+
+  onePasswordConnectedAt(): number | null {
+    return this.read().onePassword?.connectedAt ?? null;
   }
 
   get(id: string): StoredLogin | null {

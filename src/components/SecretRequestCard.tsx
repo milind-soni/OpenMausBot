@@ -1,21 +1,25 @@
 import { useState, type FormEvent } from "react";
 import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
-import { credentialConfigPatch, credentialResumeOutcome } from "../../shared/credential-request";
+import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget } from "../../shared/credential-request";
 import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
-import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
-import { ASK_FIELD, ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
+import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { productName } from "@/lib/brand";
 
 // Security: the value goes straight to the host's settings, never into the chat.
 
 export function SecretRequestCard({
   botId,
+  color,
   threadId,
   message,
 }: {
   botId: string;
+  color?: Bot["color"];
   threadId: string;
   message: Message;
 }) {
@@ -28,6 +32,7 @@ export function SecretRequestCard({
   const [localError, setLocalError] = useState<string | null>(null);
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
+  const custom = secret.target === CUSTOM_SECRET_TARGET;
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
@@ -42,14 +47,14 @@ export function SecretRequestCard({
       ? "Saved securely. Your bot is continuing the task."
       : "Saved securely. Your bot will continue when its current turn settles."
     : declined
-      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
-      : secret.description;
+      ? `You chose not to provide this credential. ${productName()} could not resume the bot yet.`
+      : custom && secret.reason ? secret.reason : secret.description;
   const footerLabel = stopped
     ? "Stopped"
     : declined
     ? "Continuing without this credential failed"
     : secret.resumed
-      ? "Bot resumed without seeing the key"
+      ? custom && secret.delivery === "file" ? t("secretCard.resumed") : "Bot resumed without seeing the key"
       : error
         ? "The key is safe; resuming failed"
         : "Waiting to resume safely";
@@ -79,25 +84,45 @@ export function SecretRequestCard({
     }
   };
 
+  // Kept behind the card on the server, never in Settings; saving it resumes the bot, and no product event names it.
+  const saveCustom = async () => {
+    if (saving || !value.trim()) return;
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: value.trim() }) });
+      setValue("");
+      returnFocusToComposer();
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const save = async (event?: FormEvent) => {
     event?.preventDefault();
+    if (custom) return saveCustom();
     if (saving || (!value.trim() && !savedLocally)) return;
     setSaving(true);
     setLocalError(null);
     const provider = credentialProvider(secret.target);
     let saved = savedLocally;
     try {
-      if (!savedLocally) {
+      if (!savedLocally && secret.target !== CUSTOM_SECRET_TARGET) {
         const next = value.trim();
-        const status: ConfigStatus = window.ogb?.setCredential
-          ? await window.ogb.setCredential(secret.target, next)
-          : await api("/api/config", {
-              method: "PUT",
-              body: JSON.stringify(credentialConfigPatch(secret.target, next)),
-            });
+        const target = secret.target;
+        // The 1Password token goes to this server's Logins, which checks it with 1Password first, never the settings file.
+        const request = credentialSaveRequest(target, next);
+        const slot = desktopCredentialSlot(target);
+        if (isConfigCredentialTarget(target)) {
+          const status: ConfigStatus = slot && window.ogb?.setCredential
+            ? await window.ogb.setCredential(slot, next)
+            : await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
+          dispatch({ type: "configStatus", config: status });
+        } else await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
         saved = true;
         keySaved(provider, "chat_request", savedKeyResult(provider));
-        dispatch({ type: "configStatus", config: status });
         setValue("");
         setSavedLocally(true);
       }
@@ -172,7 +197,7 @@ export function SecretRequestCard({
       dismissLabel="Not now"
     >
       {remoteClient ? (
-        <div className="text-[12.5px] leading-relaxed text-ink-secondary">
+        <div className="text-[13px] leading-relaxed text-ink-secondary">
           This key must be saved on the host computer. Open this conversation on the host to continue securely.
         </div>
       ) : (
@@ -190,23 +215,26 @@ export function SecretRequestCard({
               aria-label={secret.label}
               className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
             />
-            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} className={ASK_PRIMARY_BUTTON}>
+            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>
               {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
               {savedLocally ? "Continue task" : "Save securely"}
             </button>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-tertiary">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
-              <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
+              <LockKeyhole size={11} />{" "}
+              {!custom ? `Stored securely by ${productName()} and never added to chat.` : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
-            <a
-              href={secret.helpUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-accent-text hover:underline"
-            >
-              Where to get this key <ExternalLink size={11} />
-            </a>
+            {secret.helpUrl && (
+              <a
+                href={secret.helpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-accent-text hover:underline"
+              >
+                Where to get this key <ExternalLink size={11} />
+              </a>
+            )}
           </div>
         </form>
       )}

@@ -31,23 +31,37 @@ export function checkUploadPaths(paths: readonly string[]): void {
 /** File pickers a page opened, intercepted so the agent or the person controlling the tab answers them. */
 export class FileChoosers {
   readonly #waiters = new Set<() => void>();
+  readonly #listeners = new Set<() => void>();
   #open: OpenFileChooser | null = null;
 
   get open(): OpenFileChooser | null {
     return this.#open;
   }
 
+  /** Called whenever a picker opens, is answered or goes away. */
+  onChange(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  #set(open: OpenFileChooser | null): void {
+    this.#open = open;
+    for (const listener of this.#listeners) {
+      try { listener(); } catch {}
+    }
+  }
+
   watch(session: CdpSession): () => void {
     return session.on("Page.fileChooserOpened", (params: Params) => {
       if (typeof params.backendNodeId !== "number") return;
       // A newer picker replaces an unanswered one, as a real browser shows only one.
-      this.#open = {
+      this.#set({
         frameId: String(params.frameId),
         backendNodeId: params.backendNodeId,
         multiple: params.mode === "selectMultiple",
         session,
         openedAt: Date.now(),
-      };
+      });
       for (const waiter of this.#waiters) waiter();
     });
   }
@@ -76,11 +90,11 @@ export class FileChoosers {
     if (paths.length > 1 && !open.multiple) throw new DriverError("refused", "This file picker accepts one file.");
     checkUploadPaths(paths);
     await open.session.send("DOM.setFileInputFiles", { files: [...paths], backendNodeId: open.backendNodeId });
-    if (this.#open === open) this.#open = null;
+    if (this.#open === open) this.#set(null);
   }
 
   forget(session?: CdpSession): void {
-    if (!session || this.#open?.session === session) this.#open = null;
+    if (this.#open && (!session || this.#open.session === session)) this.#set(null);
   }
 }
 

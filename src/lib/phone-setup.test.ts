@@ -114,11 +114,10 @@ describe("phone setup flow", () => {
       }),
     ).toBe("sign-in");
 
-    const skipped = phoneSetupReducer(started, { type: "skip" });
-    expect(skipped.skipped).toBe(true);
-    expect(skipped.active).toBe(false);
+    const stopped = phoneSetupReducer(started, { type: "reset" });
+    expect(stopped.active).toBe(false);
     expect(
-      derivePhoneSetupPhase(skipped, {
+      derivePhoneSetupPhase(stopped, {
         accountStatus: "signed-out",
         accountBusy: false,
         provisioning: false,
@@ -126,9 +125,8 @@ describe("phone setup flow", () => {
       }),
     ).toBe("intro");
 
-    const resumed = phoneSetupReducer(skipped, { type: "resume", deviceIds: ["existing"] });
+    const resumed = phoneSetupReducer(stopped, { type: "resume", deviceIds: ["existing"] });
     expect(resumed.active).toBe(true);
-    expect(resumed.skipped).toBe(false);
   });
 
   it("stops showing provisioning when the secure account fails or times out", () => {

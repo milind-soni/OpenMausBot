@@ -40,8 +40,8 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { initialState } = await import("@/state/store");
-const { EventDetails, EventEditor, RoutinesPage } = await import("./RoutineCalendarPage");
-const { calendarRangeLabel, startOfWeek } = await import("@/lib/routine-calendar");
+const { EventDetails, EventEditor, RoutineEditor } = await import("./RoutineCalendarPage");
+const { TriggersPage: RoutinesPage } = await import("./TriggersPage");
 const { scheduleLabel } = await import("@/lib/schedule-label");
 
 afterAll(() => vi.unstubAllGlobals());
@@ -120,67 +120,98 @@ beforeEach(() => {
   fixture.state = { ...initialState, bots: [bot], routines: [routine], routineRuns: runs };
 });
 
-describe("Routines header", () => {
-  it("shows the title, date navigation, view switch, run logs and New routine", () => {
+describe("Automations page", () => {
+  const failing: RoutineRun = { ...runAt(5, "failed"), id: "fail-1", routineId: "inbox", routineName: "Inbox check", error: "Claude is signed out" };
+  const inbox: Routine = { ...routine, id: "inbox", name: "Inbox check", prompt: "Check the inbox for urgent mail.", nextRunAt: Date.now() + 7_200_000 };
+
+  it("shows the title, List · Calendar, and New, and nothing else above the list", () => {
     const tree = page();
     const header = buttons(tree);
-    expect(tree.some((node) => node.type === "h1" && textOf(node.props.children) === "Routines")).toBe(true);
-    for (const label of ["Previous dates", "Next dates", "Today", "Day", "Week", "List", "Run logs", "New routine"]) {
-      expect(header.has(label), label).toBe(true);
-    }
-    expect(tree.some((node) => textOf(node.props.children) === calendarRangeLabel(startOfWeek(Date.now()), 7))).toBe(true);
-    expect(header.get("Week")!["aria-pressed"]).toBe(true);
+    expect(tree.some((node) => node.type === "h1" && textOf(node.props.children) === "Automations")).toBe(true);
+    for (const label of ["List", "Calendar", "New"]) expect(header.has(label), label).toBe(true);
+    for (const gone of ["Day", "Week", "History", "Run logs", "All", "Schedules", "Webhooks"]) expect(header.has(gone), gone).toBe(false);
+    expect(header.get("List")!["aria-pressed"]).toBe(true);
   });
 
-  it("switches between Day, Week and List", () => {
+  it("lists each automation as one sentence with a plain status line and a switch", () => {
+    const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
+    expect(html).toContain("Every day at 6:30 AM, Runner summarises my inbox and calendar".replace("my inbox", "your inbox"));
+    expect(html).toMatch(/On · last ran [^<]+ · next: [^<]+/);
+    expect(html).not.toMatch(/Latest: |Not run yet|runs OK this week|Run logs/);
+  });
+
+  it("puts Needs you first, with its plain reason and the one button that fixes it", () => {
+    fixture.state = { ...fixture.state!, routines: [routine, inbox], routineRuns: [...runs, failing] };
+    const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
+    expect(html.indexOf('data-automation-status="needs-you"')).toBeGreaterThan(-1);
+    expect(html.indexOf('data-automation-status="needs-you"')).toBeLessThan(html.indexOf('data-automation-status="working"'));
+    expect(html).toContain("Needs you: It&#x27;s signed out. Sign in again so it can run.");
+    expect(html).toContain("Sign in</button>");
+  });
+
+  it("opens one simple panel from its name", () => {
+    click(buttons(page()).get("Morning brief"));
+    expect(page().find(named("AutomationPanel"))!.props.automation).toMatchObject({ id: routine.id, kind: "schedule" });
+  });
+
+  it("switches to the calendar, where an event opens the same panel", () => {
+    click(buttons(page()).get("Calendar"));
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines", view: "calendar", botId: undefined });
+    fixture.state = { ...fixture.state!, routinesFocus: { view: "calendar", nonce: 1 } };
     let tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(7);
-
-    click(buttons(tree).get("Day"));
+    const calendar = tree.find(named("AutomationsCalendar"))!;
+    expect(calendar).toBeDefined();
+    (calendar.props.onOpenAutomation as (id: string) => void)(routine.id);
     tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(1);
-    expect(buttons(tree).get("Day")!["aria-pressed"]).toBe(true);
-
-    click(buttons(tree).get("List"));
-    tree = page();
-    expect(tree.find(named("CalendarGrid"))).toBeUndefined();
-    expect(tree.find(named("RoutineList"))).toBeDefined();
-    expect(buttons(tree).has("Previous dates")).toBe(false);
-
-    click(buttons(tree).get("Week"));
-    tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(7);
+    expect(tree.find(named("AutomationPanel"))!.props.automation).toMatchObject({ id: routine.id });
   });
 
-  it("keeps Run logs one click away", () => {
-    click(buttons(page()).get("Run logs"));
-    expect(page().find(named("RoutineLogs"))).toBeDefined();
+  it("opens the New box, and shows the bot filter only for a long list shared by several bots", () => {
+    click(buttons(page()).get("New"));
+    expect(page().find(named("NewAutomation"))!.props.initialText).toBe("");
+    expect(page().some((node) => node.props["aria-label"] === "All bots")).toBe(false);
+    const many = Array.from({ length: 9 }, (_, index) => ({ ...routine, id: `r${index}`, botId: index % 2 ? bot.id : "other" }));
+    fixture.state = { ...fixture.state!, routines: many, bots: [bot, { ...bot, id: "other", name: "Other" }] };
+    expect(page().some((node) => node.props["aria-label"] === "All bots")).toBe(true);
   });
 
-  it("offers the Webhooks tab only in Advanced mode", () => {
-    expect(buttons(page()).has("Webhooks")).toBe(false);
-    fixture.advanced = true;
+  it("starts Set it up yourself with the bot the New box would have asked, else the only bot, so Save is not dead", () => {
+    click(buttons(page()).get("New"));
+    (page().find(named("NewAutomation"))!.props.onSetUpYourself as (kind: string, botId: string) => void)("schedule", bot.id);
+    const editor = page().find(named("RoutineEditor"))!;
+    expect(editor.props.initialBotId).toBe(bot.id);
+    const chosen = (props: Record<string, unknown>) => (RoutineEditor(props as never) as ReactElement<{ seed: { botIds: string[] } }>).props.seed.botIds;
+    const other = { ...bot, id: "other", name: "Other" };
+    expect(chosen(editor.props)).toEqual([bot.id]);
+    expect(chosen({ ...editor.props, initialBotId: "other", bots: [bot, other] })).toEqual(["other"]);
+    expect(chosen({ ...editor.props, initialBotId: undefined })).toEqual([bot.id]);
+    expect(chosen({ ...editor.props, initialBotId: undefined, bots: [bot, other] })).toEqual([]);
+  });
+
+  it("starts the webhook editor with the bot the New box would have asked too", async () => {
+    const { WebhookEditor } = await import("./WebhookTrigger");
+    click(buttons(page()).get("New"));
+    (page().find(named("NewAutomation"))!.props.onSetUpYourself as (kind: string, botId: string) => void)("webhook", bot.id);
+    expect(page().find(named("WebhookEditor"))!.props.initialBotId).toBe(bot.id);
+    const other = { ...bot, id: "other", name: "Other" };
     fixture.values = [];
-    expect(buttons(page()).has("Webhooks")).toBe(true);
+    const tree = capture(() => WebhookEditor({ bots: [bot, other], initialBotId: "other", onClose: vi.fn(), onCredential: vi.fn() }));
+    const picked = tree.filter((node) => node.type === "button" && String(node.props.className).includes("border-accent/70")).map((node) => textOf(node.props.children));
+    expect(picked).toContain("Other");
+    expect(picked).not.toContain(bot.name);
   });
 
-  it("opens the plain editor from New routine in Simple mode", () => {
-    click(buttons(page()).get("New routine"));
-    expect(page().find(named("EventEditor"))!.props.seed).toMatchObject({ kind: "routine", botIds: [] });
+  it("greets an empty list, and its example fills the New box", () => {
+    fixture.state = { ...fixture.state!, hydrated: true, routines: [], webhooks: [], routineRuns: [], routinesLoadState: "ready" };
+    const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
+    expect(html).toContain("Your bots can do things on their own.");
+    expect(html).toContain("Try: every morning, summarize my inbox");
+    click(buttons(page()).get("Try: every morning, summarize my inbox"));
+    expect(page().find(named("NewAutomation"))!.props.initialText).toBe("every morning, summarize my inbox");
   });
 });
 
 describe("routine drawer", () => {
-  it("opens beside the grid when an occurrence is selected and rings it", () => {
-    let tree = page();
-    const grid = tree.find(named("CalendarGrid"))!;
-    const item = routineItem(routine);
-    (grid.props.onOpen as (value: unknown) => void)(item);
-    tree = page();
-    expect(tree.find(named("EventDetails"))!.props.item).toMatchObject({ id: item.id, routine: { id: routine.id } });
-    expect(tree.find(named("CalendarGrid"))!.props.selectedId).toBe(item.id);
-  });
-
   it("shows bot, plain schedule, instructions, where it runs, results and the last three runs", () => {
     const { html } = details(routineItem(routine));
     for (const text of ["Bot", "Runner", "Schedule", scheduleLabel(routine.schedule), "What to do", routine.prompt,
@@ -200,7 +231,7 @@ describe("routine drawer", () => {
   });
 
   it("describes the Boat runner in plain words", () => {
-    expect(details(routineItem({ ...routine, runOn: "cloud" })).html).toContain("Cloud computer");
+    expect(details(routineItem({ ...routine, runOn: "cloud" })).html).toContain("Cloud desktop");
   });
 
   it("Run now and Pause send the same requests as before", () => {
@@ -239,7 +270,7 @@ describe("routine editor", () => {
     seed: { kind: "routine", at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: routineToEdit },
     bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
   }));
-  const hidden = ['<select aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud computer", "Add attachment", "Post results to", "Routine type"];
+  const hidden = ['<select aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud desktop", "Add attachment", "Post results to", "Routine type"];
 
   it("keeps Simple mode to the basics with everything else behind More options", () => {
     const html = editor();
@@ -248,6 +279,8 @@ describe("routine editor", () => {
     }
     expect(html).toContain('aria-expanded="false"');
     for (const text of hidden) expect(html, text).not.toContain(text);
+    expect(html).toMatch(/>Save<\/button>/);
+    expect(html).not.toMatch(/routine<\/button>/i);
   });
 
   it("marks the routine's repeat choice", () => {
@@ -264,13 +297,29 @@ describe("routine editor", () => {
   it("shows a saved startup choice when the simple editor opens", () => {
     const html = editor({ ...routine, runOnStartup: true });
     expect(html).toContain('aria-expanded="true"');
-    expect(html).toMatch(/<input type="checkbox" aria-label="Also run when OpenMausBot starts"[^>]*checked[^>]*>/);
+    expect(html).toMatch(/<input type="checkbox" aria-label="Also run when MausBot starts"[^>]*checked[^>]*>/);
   });
 
   it("offers Remember the last run for a repeating routine, off unless the routine has it", () => {
     expect(editor(routine)).toMatch(/<input type="checkbox" aria-label="Remember the last run"(?![^>]*checked)[^>]*>/);
     expect(editor({ ...routine, continuity: true })).toMatch(/<input type="checkbox" aria-label="Remember the last run"[^>]*checked[^>]*>/);
     expect(editor(routine)).toContain("Each run starts with the previous run&#x27;s report");
+  });
+
+  it("schedules a goal in the bot's own chat when no group is chosen", () => {
+    const ownGoal: Routine = { ...routine, id: "own-goal", name: "Ship the fix", target: "room-goal", groupId: undefined, resultsThreadId: undefined };
+    const html = editor(ownGoal);
+    expect(html).toContain("Where it runs");
+    expect(html).toMatch(/<option value="" selected="">Just the bot, in its own chat<\/option>/);
+    expect(html).toContain("The bot works on the goal in its own chat until it is done.");
+    expect(html).toContain("Runner");
+    expect(html).not.toContain("Create a group from the sidebar first");
+
+    fixture.values = [];
+    const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: ownGoal }, bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn() };
+    click(buttons(capture(() => EventEditor(props))).get("Save"));
+    const [, init] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ target: "room-goal", botId: bot.id, groupId: null });
   });
 
   it("hides Remember the last run for a one-time routine", () => {
@@ -304,6 +353,22 @@ describe("routine editor", () => {
     expect(JSON.parse(off.body)).toMatchObject({ continuity: false });
   });
 
+  it("turns a one-time routine that already happened back on when it is saved with a new time, and leaves any other's switch alone", async () => {
+    const save = async (saved: Routine) => {
+      fixture.values = [];
+      const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: saved }, bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn() };
+      click(buttons(capture(() => EventEditor(props))).get("Save"));
+      await vi.waitFor(() => expect(fixture.api).toHaveBeenCalled());
+      const [, init] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
+      fixture.api.mockClear();
+      return JSON.parse(init.body);
+    };
+    const once = { ...routine, schedule: { type: "once" as const, at: Date.now() - 3_600_000 }, nextRunAt: null };
+    expect(await save({ ...once, enabled: false })).toMatchObject({ enabled: true });
+    expect(await save({ ...once, enabled: false, schedule: { type: "once", at: Date.now() + 7_200_000 } })).not.toHaveProperty("enabled");
+    expect(await save({ ...routine, enabled: false })).not.toHaveProperty("enabled");
+  });
+
   it("shows a routine with no thread of its own reporting into the bot's main thread", () => {
     fixture.advanced = true;
     const { resultsThreadId: _chosen, ...unchosen } = routine;
@@ -315,7 +380,7 @@ describe("routine editor", () => {
   it("leaves the Advanced editor as it was", () => {
     fixture.advanced = true;
     const html = editor();
-    for (const text of ['placeholder="Add title"', '<select aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud computer", "Post results to", "Routine type", "New event"]) {
+    for (const text of ['placeholder="Add title"', '<select aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud desktop", "Post results to", "Routine type", "New event"]) {
       expect(html, text).toContain(text);
     }
     expect(html).not.toContain("More options");

@@ -32,7 +32,7 @@ export function isStatusActivity(message: Message): boolean {
 export function isToolStep(message: Message): message is Message & { tool: NonNullable<Message["tool"]> } {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
-  if (message.comm || message.threadRef || message.dataResult || isStatusActivity(message)) return false;
+  if (message.comm || message.threadRef || message.relay || message.dataResult || isStatusActivity(message)) return false;
   return failedTurnCause(tool.name) === null;
 }
 
@@ -42,7 +42,35 @@ function foldable(message: Message): boolean {
 
 type TurnFold = Extract<TranscriptItem, { kind: "turn" }>;
 
-function assistantTurnFolds(messages: Message[]): {
+const isNarration = (message: Message, turnId: string) =>
+  message.role === "bot" && message.kind === "text" && message.turnId === turnId && !message.turnTerminal;
+
+/** A turn starts with the person's last message before its first row, or with that row when nobody wrote first. */
+function turnStartedAt(messages: readonly Message[], firstIndex: number, fallback: number): number {
+  for (let i = firstIndex - 1; i >= 0; i -= 1) if (messages[i]!.role === "user") return messages[i]!.at;
+  return messages[firstIndex]?.at ?? fallback;
+}
+
+/** "Worked for 29s", or plain "Worked" for a turn under a second. */
+export function workedLabel(elapsed: number): string {
+  return elapsed >= 1_000 ? t("chat.run.workedFor", { elapsed: formatElapsed(elapsed) }) : t("chat.run.worked");
+}
+
+/** How long each finished turn took, keyed by its answer's id: from its start to the answer. */
+export function turnDurations(messages: readonly Message[]): Map<string, number> {
+  const firstIndex = new Map<string, number>();
+  const durations = new Map<string, number>();
+  messages.forEach((message, index) => {
+    if (!message.turnId) return;
+    if (!firstIndex.has(message.turnId)) firstIndex.set(message.turnId, index);
+    if (message.role !== "bot" || message.kind !== "text" || !message.turnTerminal) return;
+    durations.set(message.id, Math.max(0, message.at - turnStartedAt(messages, firstIndex.get(message.turnId)!, message.at)));
+  });
+  return durations;
+}
+
+/** Once a turn has its answer, the rows `folded` picks go behind one "Worked for 29s" chip at the first of them. */
+function settledTurnFolds(messages: Message[], folded: (message: Message, turnId: string) => boolean): {
   byAnchorId: Map<string, TurnFold>;
   hiddenIds: Set<string>;
 } {
@@ -56,41 +84,29 @@ function assistantTurnFolds(messages: Message[]): {
       !terminal.turnId ||
       !terminal.turnTerminal
     ) return;
+    const turnId = terminal.turnId;
+    const before = messages.slice(0, terminalIndex);
+    const rows = before.filter((message) => folded(message, turnId));
+    if (!rows.length) return;
 
-    const narration = messages.slice(0, terminalIndex).filter((message) =>
-      message.role === "bot" &&
-      message.kind === "text" &&
-      message.turnId === terminal.turnId &&
-      !message.turnTerminal
-    );
-    if (!narration.length) return;
-
-    const anchor = narration[0];
-    const anchorIndex = messages.findIndex((message) => message.id === anchor.id);
-    let startedAt = anchor.at;
-    for (let i = anchorIndex - 1; i >= 0; i -= 1) {
-      if (messages[i].role === "user") {
-        startedAt = messages[i].at;
-        break;
-      }
-    }
-    const elapsed = Math.max(0, terminal.at - startedAt);
-    const label =
-      elapsed >= 1_000
-        ? t("chat.run.workedFor", { elapsed: formatElapsed(elapsed) })
-        : t("chat.run.worked");
-    const fold: TurnFold = {
-      kind: "turn",
-      id: `turn:${terminal.turnId}`,
-      turnId: terminal.turnId,
-      label,
-      messages: narration,
-    };
-    byAnchorId.set(anchor.id, fold);
-    for (const message of narration) hiddenIds.add(message.id);
+    const firstIndex = before.findIndex((message) => message.turnId === turnId);
+    const startedAt = turnStartedAt(messages, firstIndex, rows[0].at);
+    const label = workedLabel(Math.max(0, terminal.at - startedAt));
+    byAnchorId.set(rows[0].id, { kind: "turn", id: `turn:${turnId}`, turnId, label, messages: rows });
+    for (const message of rows) hiddenIds.add(message.id);
   });
 
   return { byAnchorId, hiddenIds };
+}
+
+/** A room shows a member's answer, not its working notes. */
+function assistantTurnFolds(messages: Message[]) {
+  return settledTurnFolds(messages, isNarration);
+}
+
+/** A conversation keeps the bot's own progress lines and folds only its finished tool steps. */
+function toolStepFolds(messages: Message[]) {
+  return settledTurnFolds(messages, (message, turnId) => message.turnId === turnId && foldable(message));
 }
 
 export function roomTurnFolds(messages: Message[]): {
@@ -113,7 +129,7 @@ export function roomTurnFolds(messages: Message[]): {
 function group(messages: Message[], foldAssistantTurns: boolean): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const folds = foldAssistantTurns
-    ? assistantTurnFolds(messages)
+    ? toolStepFolds(messages)
     : { byAnchorId: new Map<string, TurnFold>(), hiddenIds: new Set<string>() };
   let run: Message[] = [];
   const flush = () => {
@@ -128,7 +144,7 @@ function group(messages: Message[], foldAssistantTurns: boolean): TranscriptItem
       items.push(turn);
       continue;
     }
-    if (folds.hiddenIds.has(message.id)) continue;
+    if (folds.hiddenIds.has(message.id) || message.reaction) continue;
     if (foldable(message)) {
       const first = run[0];
       if (

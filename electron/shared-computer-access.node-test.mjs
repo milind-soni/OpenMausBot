@@ -12,7 +12,8 @@ import { createComputerSharing, validateSharedFolders } from "./computer-sharing
 
 async function fixture(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-shared-access-")));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  // Windows keeps a just-ended shell's working folder busy for a moment after the command's result.
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const folder = { id: randomUUID(), name: "Fixture", path: dir, write: false };
   const grant = { enabled: true, folders: [folder], terminal: false, computer: false };
   const run = async operation => executeSharedOperation(grant, { folder_id: folder.id, ...operation }, new AbortController().signal);
@@ -36,9 +37,11 @@ function stubWorkspace() {
   const environmentId = randomUUID();
   const env = { id: "fixture-workspace", name: "Fixture", origin: "https://workspace.test" };
   const json = value => ({ ok: true, status: 200, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
-  const state = { connected: null, work: [] };
-  let deliver;
+  const state = { connected: null, work: [], results: [] };
+  let deliver, settle = () => {};
   state.delivered = new Promise(resolve => { deliver = resolve; });
+  /** Every result, in the order the jobs were answered, once `count` have arrived. */
+  state.answered = count => new Promise(resolve => { settle = () => { if (state.results.length >= count) resolve(state.results); }; settle(); });
   const fetchImpl = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return json({ kind: "session", id: sessionId });
@@ -51,7 +54,7 @@ function stubWorkspace() {
       return json({ job: { id: randomUUID(), operation: { computer_id: state.connected.id, folder_id: state.connected.folders[0]?.id, ...operation } } });
     }
     if (route.endsWith("/lease")) return json({ active: true });
-    if (route.endsWith("/result")) { deliver(body.result); return json({}); }
+    if (route.endsWith("/result")) { deliver(body.result); state.results.push(body.result); settle(); return json({}); }
     if (route.endsWith("/disconnect")) return json({});
     throw new Error(`fixture workspace has no route ${route}`);
   };
@@ -103,6 +106,41 @@ test("selected folders are read-only; writes require an explicit grant and fresh
   await assert.rejects(run({ action: "delete_file", path: "note.txt" }), /Unsupported/);
 });
 
+test("a new file's missing folders are made inside the shared folder, never in a read-only, protected or linked one", async t => {
+  const { dir, folder, grant, run } = await fixture(t);
+  const piece = "articles/pieces/relationship-with-money";
+  await assert.rejects(run({ action: "write_file", path: `${piece}/brief.md`, content: "brief" }), /read-only/);
+  await assert.rejects(stat(path.join(dir, "articles")), { code: "ENOENT" });
+  folder.write = true;
+  await run({ action: "write_file", path: `${piece}/brief.md`, content: "brief" });
+  await run({ action: "write_file", path: `${piece}/notes.md`, content: "notes" });
+  assert.equal(await readFile(path.join(dir, piece, "brief.md"), "utf8"), "brief");
+  assert.equal(await readFile(path.join(dir, piece, "notes.md"), "utf8"), "notes");
+  await writeFile(path.join(dir, "taken"), "a file");
+  await assert.rejects(run({ action: "write_file", path: "taken/inside.md", content: "x" }), /taken is a file, not a folder/);
+  // Windows answers ENOENT, not ENOTDIR, for a path through a file: the same refusal, not a missing-file error.
+  const realLstat = fs.lstat;
+  fs.lstat = async (target, ...rest) => {
+    if (String(target).endsWith(path.join("taken", "inside.md"))) throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    return realLstat(target, ...rest);
+  };
+  try { await assert.rejects(run({ action: "write_file", path: "taken/inside.md", content: "x" }), /taken is a file, not a folder/); }
+  finally { fs.lstat = realLstat; }
+  await assert.rejects(run({ action: "write_file", path: ".git/hooks/pre-commit", content: "x" }), /inside \.git/);
+  await assert.rejects(stat(path.join(dir, ".git")), { code: "ENOENT" });
+  await mkdir(path.join(dir, "vault"));
+  grant.protectedPaths = [path.join(dir, "vault")];
+  await assert.rejects(run({ action: "write_file", path: "vault/deep/planted.json", content: "{}" }), /Desktop credentials|sharing settings/);
+  await assert.rejects(stat(path.join(dir, "vault", "deep")), { code: "ENOENT" });
+  if (process.platform !== "win32") {
+    const outside = await realpath(await mkdtemp(path.join(tmpdir(), "omb-shared-outside-")));
+    t.after(() => rm(outside, { recursive: true, force: true }));
+    await symlink(outside, path.join(dir, "linked"));
+    await assert.rejects(run({ action: "write_file", path: "linked/deep/planted.md", content: "x" }), /Symbolic links/);
+    await assert.rejects(stat(path.join(outside, "deep")), { code: "ENOENT" });
+  }
+});
+
 test("folder boundary rejects traversal, links, oversized files and unknown folder IDs", async t => {
   const { dir, run } = await fixture(t);
   for (const unsafe of ["../escape", "/etc/passwd", "nested/../../escape", "C:\\secret", "note.txt\0"]) {
@@ -115,10 +153,60 @@ test("folder boundary rejects traversal, links, oversized files and unknown fold
     await symlink(dir, path.join(dir, "linked"));
     await assert.rejects(run({ action: "read_file", path: "linked/note.txt" }), /Symbolic links/);
   }
-  await writeFile(path.join(dir, "large.txt"), Buffer.alloc(262145));
-  await assert.rejects(run({ action: "read_file", path: "large.txt" }), /256 KiB/);
+  await writeFile(path.join(dir, "large.txt"), Buffer.alloc(2 * 1024 * 1024 + 1));
+  await assert.rejects(run({ action: "read_file", path: "large.txt", encoding: "base64" }), /2 MiB/);
   await assert.rejects(run({ action: "list_files", folder_id: randomUUID() }), /not been shared/);
   await assert.rejects(validateSharedFolders([{ id: randomUUID(), path: path.parse(dir).root, write: false }]), /specific folders/);
+});
+
+test("a file up to 2 MiB is read whole, as base64 under the server's 4 MB body, while a write stays at 256 KiB", async t => {
+  const { dir, folder, run } = await fixture(t);
+  const bytes = Buffer.alloc(2 * 1024 * 1024, 7);
+  await writeFile(path.join(dir, "photo.bin"), bytes);
+  const read = await run({ action: "read_file", path: "photo.bin", encoding: "base64" });
+  assert.deepEqual(Buffer.from(payload(read).content, "base64"), bytes, "the whole 2 MiB file arrives");
+  const body = JSON.stringify({ jobId: randomUUID(), result: read });
+  assert.ok(Buffer.byteLength(body) < 4_000_000, `the result body is ${Buffer.byteLength(body)} bytes, over the server's 4,000,000`);
+  await writeFile(path.join(dir, "notes.txt"), "a".repeat(300 * 1024));
+  assert.equal(payload(await run({ action: "read_file", path: "notes.txt" })).bytes, 300 * 1024, "a text file over 256 KiB reads too");
+  folder.write = true;
+  await assert.rejects(run({ action: "write_file", path: "big.txt", content: "b".repeat(256 * 1024 + 1) }), /limited to 256 KiB/);
+  await run({ action: "write_file", path: "fits.txt", content: "b".repeat(256 * 1024) });
+  assert.equal((await stat(path.join(dir, "fits.txt"))).size, 256 * 1024);
+});
+
+test("text that escapes past the server's body limit is refused with the way to read it, never sent to fail there", async t => {
+  const { dir, run } = await fixture(t);
+  // Each quote is escaped twice on the way: one byte becomes four.
+  await writeFile(path.join(dir, "quotes.json"), "\"".repeat(1024 * 1024 + 1024));
+  await assert.rejects(run({ action: "read_file", path: "quotes.json" }), /Read it with encoding base64/);
+  const asBase64 = await run({ action: "read_file", path: "quotes.json", encoding: "base64" });
+  assert.equal(payload(asBase64).bytes, 1024 * 1024 + 1024);
+});
+
+test("no folder grant reaches a browser's saved passwords, the Windows credential vault and its keys, startup programs or ~/.cua", async t => {
+  const { personalSecretPaths } = await import("./shared-computer-access.mjs");
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-secrets-home-")));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const secret = (relative) => path.join(home, ...relative.split("/"));
+  const windows = [
+    "AppData/Local/Google/Chrome/User Data", "AppData/Local/Microsoft/Edge/User Data", "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+    "AppData/Roaming/Mozilla", "AppData/Roaming/Microsoft/Credentials", "AppData/Local/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect",
+    "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup", ".cua",
+  ];
+  const listed = new Set(personalSecretPaths(home));
+  assert.deepEqual(windows.filter((relative) => !listed.has(secret(relative))), [], "every one of them is protected");
+  // Through the real boundary: AppData lent as a folder still hides each one.
+  for (const relative of windows) await mkdir(secret(relative), { recursive: true });
+  await writeFile(path.join(secret("AppData/Roaming/Microsoft/Protect"), "master-key"), "dpapi");
+  await writeFile(path.join(secret(".cua"), "token"), "cua");
+  const appData = { id: randomUUID(), name: "AppData", path: secret("AppData"), write: false };
+  const grant = { enabled: true, folders: [appData], terminal: false, computer: false, protectedPaths: personalSecretPaths(home) };
+  const run = (operation) => executeSharedOperation(grant, { folder_id: appData.id, ...operation }, new AbortController().signal);
+  await assert.rejects(run({ action: "read_file", path: "Roaming/Microsoft/Protect/master-key" }), /Desktop credentials/);
+  await assert.rejects(run({ action: "list_files", path: "Local/Google/Chrome/User Data" }), /Desktop credentials/);
+  const lentHome = { id: randomUUID(), name: "cua", path: secret(".cua"), write: false };
+  await assert.rejects(executeSharedOperation({ ...grant, folders: [lentHome] }, { folder_id: lentHome.id, action: "read_file", path: "token" }, new AbortController().signal), /Desktop credentials/);
 });
 
 test("terminal and computer control are separately off, and revocation fails closed", async t => {
@@ -142,11 +230,79 @@ test("explicit terminal grant executes a harmless command and cancellation stops
   const { dir } = await fixture(t);
   const result = payload(await sharedCommand("echo fixture-terminal", dir, new AbortController().signal));
   assert.equal(result.exitCode, 0); assert.match(result.output, /fixture-terminal/);
+  // Stopped once it runs: on Windows a stop while PowerShell is still creating its inner shell can miss that shell,
+  // which taskkill /T cannot see yet, and it would keep this folder busy for its 20 seconds.
+  const started = path.join(dir, "started");
   const stop = new AbortController();
-  const command = process.platform === "win32" ? "Start-Sleep -Seconds 20" : "sleep 20";
+  const command = process.platform === "win32"
+    ? `[IO.File]::WriteAllText('${started.replaceAll("'", "''")}', 'x'); Start-Sleep -Seconds 20`
+    : `echo x > '${started}'; sleep 20`;
   const pending = sharedCommand(command, dir, stop.signal);
-  setTimeout(() => stop.abort(), 80);
+  pending.catch(() => {});
+  const startedBy = Date.now() + 15_000;
+  while (!(await readFile(started, "utf8").catch(() => "")) && Date.now() < startedBy) await delay(50);
+  stop.abort();
   await assert.rejects(pending, /revoked|turn ended/);
+});
+
+test("a command runs up to the time the call asks for, and a time out of range is refused", async t => {
+  const { dir, grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const run = operation => executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", ...operation }, new AbortController().signal);
+  const command = process.platform === "win32" ? "Start-Sleep -Seconds 5" : "sleep 5";
+  const started = Date.now();
+  await assert.rejects(run({ command, timeout_seconds: 1 }), /timed out after 1 second/);
+  assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
+  for (const timeout_seconds of [0, 241, 1.5, "60"]) {
+    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 240/);
+  }
+  assert.equal(payload(await run({ command: "echo fixture-default" })).exitCode, 0);
+  void dir;
+});
+
+/** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */
+async function backgroundHolder(dir, then) {
+  const script = path.join(dir, "holder.mjs");
+  const pidFile = path.join(dir, "holder.pid");
+  // Started outside the fixture's folder: Windows will not delete a folder a live process works in.
+  await writeFile(script, `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";
+const held = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { cwd: ${JSON.stringify(tmpdir())}, detached: true, stdio: "inherit" });
+writeFileSync(${JSON.stringify(pidFile)}, String(held.pid)); held.unref();`);
+  const command = process.platform === "win32"
+    ? `& "${process.execPath}" "${script}"; ${then.win32}`
+    : `"${process.execPath}" "${script}" && ${then.posix}`;
+  const holderPid = async () => Number((await readFile(pidFile, "utf8").catch(() => "")).trim()) || null;
+  return { command, holderPid, release: async () => { const pid = await holderPid(); if (pid) try { process.kill(pid); } catch {} } };
+}
+
+test("a command's result comes back when it ends, though a process it left running still holds its output", { timeout: 20_000 }, async t => {
+  const { dir } = await fixture(t);
+  const holder = await backgroundHolder(dir, { win32: "Write-Output fixture-done", posix: "echo fixture-done" });
+  try {
+    const started = Date.now();
+    const result = payload(await sharedCommand(holder.command, dir, new AbortController().signal));
+    assert.equal(result.exitCode, 0);
+    assert.match(result.output, /fixture-done/);
+    assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
+    assert.ok(await holder.holderPid(), "the background process started");
+  } finally { await holder.release(); }
+});
+
+test("a stopped command ends promptly, though a process it left running still holds its output", { timeout: 20_000 }, async t => {
+  const { dir } = await fixture(t);
+  const holder = await backgroundHolder(dir, { win32: "Start-Sleep -Seconds 20", posix: "sleep 20" });
+  const stop = new AbortController();
+  const pending = sharedCommand(holder.command, dir, stop.signal);
+  pending.catch(() => {});
+  try {
+    const startedBy = Date.now() + 15_000;
+    while (!(await holder.holderPid()) && Date.now() < startedBy) await delay(50);
+    assert.ok(await holder.holderPid(), "the background process started");
+    const stopped = Date.now();
+    stop.abort();
+    await assert.rejects(pending, /revoked|turn ended/);
+    assert.ok(Date.now() - stopped < 8_000, `took ${Date.now() - stopped} ms after the stop`);
+  } finally { stop.abort(); await holder.release(); }
 });
 
 test("Windows terminal preserves command syntax, pipeline output and exit status", { skip: process.platform !== "win32" }, async t => {
@@ -231,6 +387,41 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   assert.equal(next.content[0].text, "2"); assert.equal(next.content[1].type, "image");
   cua.close();
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
+});
+
+test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-windows-fixture.mjs");
+  // Notepad behind cua-driver 0.28.2: of one SendInput burst only the first character lands, the rest repeat the last.
+  await writeFile(script, `import readline from 'node:readline'; let front = 7, document = ''; const calls = [];
+const hex = value => '0x' + value.toString(16);
+const answer = (name, args) => { calls.push(name);
+  if (name === 'bring_to_front') { const previous = front; front = args.window_id; return { content: [], structuredContent: { previous_fg_hwnd: hex(previous), target_hwnd: hex(front) } }; }
+  if (name === 'list_windows') return { content: [], structuredContent: { windows: [{ window_id: 7, pid: 70 }, { window_id: 9, pid: 90 }] } };
+  if (name === 'type_text') { const text = args.text; document += text.length < 2 ? text : text[0] + text.at(-1).repeat(text.length - 1); return { content: [{ type: 'text', text: 'typed' }], structuredContent: { effect: 'unverifiable', route: 'global_input' } }; }
+  return { content: [{ type: 'text', text: JSON.stringify({ document, calls, front }) }] }; };
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'cua-driver',version:'0.28.2'}}:answer(m.params.name, m.params.arguments);
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  const signal = new AbortController().signal;
+  const typing = { action: "computer_call", tool_name: "type_text", arguments: { pid: 90, window_id: 9, delivery_mode: "foreground", text: "Notiz, 28.10" } };
+  const state = async cua => JSON.parse((await cua.call({ action: "computer_call", tool_name: "get_screen_size" }, signal)).content[0].text);
+  for (const platform of ["win32", "darwin"]) {
+    const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] }, { platform });
+    t.after(() => cua.close());
+    const typed = await cua.call(typing, signal);
+    const after = await state(cua);
+    if (platform === "win32") {
+      assert.equal(after.document, "Notiz, 28.10");
+      assert.equal(typed.content[0].text, "✅ Typed 12 char(s) on pid 90 via SendInput (delivery_mode:foreground), one character at a time.");
+      assert.deepEqual(after.calls, [..."Notiz, 28.10"].flatMap(() => ["bring_to_front", "type_text"]).concat("list_windows", "bring_to_front", "get_screen_size"));
+      assert.equal(after.front, 7);
+    } else {
+      assert.equal(after.document, "N00000000000");
+      assert.deepEqual(after.calls, ["type_text", "get_screen_size"]);
+    }
+    cua.close();
+  }
 });
 
 test("a protected directory spelled in another case is still refused", async t => {
@@ -366,6 +557,51 @@ test("filesystem identities keep all 64 bits instead of rounding distinct inode 
     return info;
   });
   assert.equal(payload(await run({ action: "read_file", path: "ordinary.txt" })).content, "allowed");
+});
+
+test("with the whole home folder lent, keys, a browser profile and this app's data are still refused, while ordinary files read", async () => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lent-home-")));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  let sharing;
+  try {
+    // A temporary home: isHomeFolder (and so the home opt-in) follows HOME, and nothing here touches the real one.
+    process.env.HOME = home; process.env.USERPROFILE = home;
+    const put = async (relative, content) => {
+      const file = path.join(home, ...relative.split("/"));
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content);
+    };
+    const secrets = [".ssh/id_ed25519", "Library/Application Support/Google/Chrome/Default/Cookies", ".openmausbot/config.json"];
+    for (const relative of secrets) await put(relative, `fixture ${relative}`);
+    await put("Documents/plan.txt", "an ordinary file");
+    const stub = stubWorkspace();
+    stub.state.work.push(...secrets.map(relative => ({ action: "read_file", path: relative })),
+      { action: "read_file", path: "Library/Application Support/OpenMausBot/computer-sharing.json" },
+      { action: "read_file", path: "Documents/plan.txt" }, { action: "list_files" });
+    // Wired as main wires it: the grants file under the app's own profile, and this app's data folder in protectedPaths.
+    sharing = createComputerSharing({
+      file: path.join(home, "Library", "Application Support", "OpenMausBot", "computer-sharing.json"), fetch: stub.fetchImpl, home,
+      environments: () => [stub.env], enabled: async () => true, cuaConnection: async () => null, protectedPaths: [path.join(home, ".openmausbot")],
+    });
+    const info = await sharing.identity(stub.env);
+    // Lent as the picker lends it after its warning: the home folder itself, read only even when edits are asked for.
+    await sharing.save(stub.env, { folders: [{ id: randomUUID(), path: home, write: true, home: true }], terminal: false, computer: false }, info);
+    const results = await stub.state.answered(secrets.length + 3);
+    assert.deepEqual(stub.state.connected.folders.map(({ write }) => write), [false]);
+    const refused = results.slice(0, secrets.length + 1);
+    for (const [index, result] of refused.entries()) {
+      assert.equal(result.isError, true, `${[...secrets, "the grants file"][index]} is refused`);
+      assert.match(result.content[0].text, /Desktop credentials/);
+    }
+    assert.equal(results[secrets.length + 1].isError, undefined);
+    assert.equal(payload(results[secrets.length + 1]).content, "an ordinary file");
+    const listed = Object.fromEntries(payload(results[secrets.length + 2]).entries.map(({ name, type }) => [name, type]));
+    assert.deepEqual([listed[".ssh"], listed[".openmausbot"], listed.Documents], ["protected", "protected", "directory"]);
+  } finally {
+    sharing?.close();
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("the harness data directory is protected through a broad share", async t => {

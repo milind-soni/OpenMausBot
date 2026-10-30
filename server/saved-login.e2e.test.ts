@@ -2,7 +2,7 @@
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
@@ -16,7 +16,8 @@ const USERNAME = "alice@example.com";
 const INVOICES = { url: "https://example.com/invoices", html: "<title>Invoices</title><h1>March invoices</h1>" };
 
 /** The bridge plays the running browser: the stand-in engine forwards each command, relay command and MCP call here. */
-async function browserFixture(url: string) {
+/** `cuaRecord`: the desktop app's driver record, handed to this server as the app hands it to its own. */
+async function browserFixture(url: string, cuaRecord?: string) {
   const page = new FakeLoginPage(url, LOGIN_FORM);
   const port = await freePortBlock([0], 19_960, 40);
   const engineArgs: string[][] = [];
@@ -76,7 +77,7 @@ else if (args[0] === "mcp") {
 else bridge("/engine", { args, proxy: process.env.AGENT_BROWSER_PROXY }).then((text) => { process.stdout.write(text); process.exit(0); }, () => process.exit(1));
 `, { mode: 0o755 });
 
-  const fixture = await launchVerificationServer({}, undefined, undefined, { binaryPath, executablePath: join(tools, "chrome") }, undefined, { scripted: true });
+  const fixture = await launchVerificationServer(cuaRecord ? { OMB_TEST_DESKTOP_CUA_CONNECTION: cuaRecord } : {}, undefined, undefined, { binaryPath, executablePath: join(tools, "chrome") }, undefined, { scripted: true });
   const base = fixture.info.url;
   const planPath = join(fixture.info.dataDir, "room-plan.json");
   const evidence = () => existsSync(`${planPath}.evidence.jsonl`)
@@ -199,5 +200,45 @@ it.skipIf(process.platform === "win32")("fills a login saved for example.com on 
     expect(JSON.stringify(browser.engineArgs)).not.toContain(PASSWORD);
   } finally {
     await browser.close();
+  }
+}, 120_000);
+
+// Auto mounts this computer only on macOS and Windows, and the stand-in browser is a shebang script.
+it.runIf(process.platform === "darwin")("on Auto, signs in in the bot's own browser beside this computer, never on the person's screen", async () => {
+  // What the desktop app hands its own server once computer control is ready; the driver itself never runs here.
+  const record = join(mkdtempSync(join(tmpdir(), "omb-saved-login-cua-")), "cua-connection.json");
+  writeFileSync(record, JSON.stringify({
+    mode: "embedded", status: "ready", socketPath: join(dirname(record), "cua.sock"), mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+  }), { mode: 0o600 });
+  const browser = await browserFixture("https://example.com/login", record);
+  const { page, api, evidence, answered } = browser;
+  page.answer = () => ({ navigate: INVOICES });
+  try {
+    expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Statements" })).body.bot;
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { browserProfile: "guest" })).status).toBe(200);
+    expect((await api("POST", "/api/logins", { site: "example.com", username: USERNAME, password: PASSWORD, bots: [bot.id] })).status).toBe(201);
+    writeFileSync(browser.planPath, JSON.stringify({ [bot.id]: { turns: [
+      { steps: [{ tool: "fill_login", arguments: {} }], reply: "Signed in." },
+    ] } }));
+
+    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Sign in to example.com and get the invoices.", "--url", browser.base]);
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(1);
+    const [turn] = evidence();
+    expect(turn.system).toContain("Two surfaces are mounted");
+    expect(turn.system).toContain("Web tasks → the built-in browser");
+    expect(turn.system).toContain("use, in this order: your built-in browser, a cloud computer if select_computer offers one, a connected app");
+    const [filled] = answered(0, "fill_login");
+    expect(filled.isError).toBeFalsy();
+    expect(filled.content[0].text).toBe(`Filled the username and the password for ${USERNAME} on example.com and submitted it; the page is now https://example.com/invoices (“Invoices”). Check you are signed in.`);
+    expect(page.sent).toEqual([{ email: USERNAME, password: PASSWORD, csrf: "token-not-a-secret" }]);
+    // The person's own screen was never touched, so nothing asked to use it.
+    const messages = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=100`)).body.messages as any[];
+    expect(messages.some((message) => message.card?.tool === "use_your_computer")).toBe(false);
+    expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
+    expect(JSON.stringify(browser.engineArgs)).not.toContain(PASSWORD);
+  } finally {
+    await browser.close();
+    await removeTempDir(dirname(record));
   }
 }, 120_000);

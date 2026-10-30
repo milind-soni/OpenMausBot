@@ -116,7 +116,7 @@ describe("lazyScreen", () => {
     const load = vi.fn<() => Loaded>()
       .mockRejectedValueOnce(new TypeError("Failed to fetch dynamically imported module"))
       .mockResolvedValue(Label);
-    const Screen = lazyScreen("TriggersPanel", load);
+    const Screen = lazyScreen("TriggersPage", load);
     render(createElement(Screen, { text: "Triggers" }));
     await settle();
     expect(document.querySelector('[role="alert"]')).not.toBeNull();
@@ -236,7 +236,7 @@ describe("launch bundle", () => {
     const deferred = [
       "ActivityPanel", "BotSettingsDialog", "ComputerPanel", "InspectorPanel", "KeyboardShortcutsModal",
       "LocalVmWorkspace", "NewBotDialog", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
-      "RoutinesPage", "SettingsModal", "TeamMapPage", "TriggersPanel",
+      "RoutinesPage", "SettingsModal", "TeamMapPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
     ].map((name) => `components/${name}.tsx`);
     expect(deferred.filter((file) => reached.has(file))).toEqual([]);
   });

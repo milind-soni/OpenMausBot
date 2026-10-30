@@ -17,6 +17,13 @@ test("a wire path is relative, slash-separated and NFC", () => {
   for (const bad of ["", "/a", "a//b", "a/./b", "../a", "a/..", "a\\b", "a\0b", "Café.txt", 7, null]) assert.equal(validWirePath(bad), false, String(bad));
 });
 
+test("wire paths reject unpaired surrogates and accept Unicode scalar values", () => {
+  for (const good of ["\ufffd.txt", "\ud83d\udcc4.txt", "docs/\ud83d\udcc4.txt"]) assert.equal(validWirePath(good), true, good);
+  for (const bad of ["\ud800.txt", "\ud801.txt", "\udbff.txt", "\udc00.txt", "\udfff.txt", "docs/\ud800.txt", "a\ud800", "\udc00\ud800.txt"]) {
+    assert.equal(validWirePath(bad), false, JSON.stringify(bad));
+  }
+});
+
 test("names a Windows PC cannot hold", () => {
   assert.equal(windowsProblem("a/b:c.txt"), "characters");
   assert.equal(windowsProblem("notes./x"), "trailing");
@@ -59,7 +66,13 @@ test("never brings down an agent's or tool's config, or what sync skips, from My
   for (const path of [".mcp.json", "x/.MCP.json", "CLAUDE.md", "docs/Agents.md", ".claude/settings.json", ".Claude/hooks.json", ".codex/config.toml", ".vscode/tasks.json", ".github/workflows/ci.yml", "a.code-workspace", ".envrc", ".git/config", "node_modules/x.js"]) {
     assert.equal(neverFromCloud(path), true, path);
   }
-  for (const path of ["report.md", "docs/readme.md", "claude-notes.md"]) assert.equal(neverFromCloud(path), false, path);
+  for (const path of [".git", "x/.git", ".GIT/config", ".Git/hooks/pre-commit", "repo/.git/HEAD", ".hg/hgrc", ".svn/entries", ".jj/repo", ".bzr/branch",
+    ".devcontainer/devcontainer.json", "Node_Modules/a.js", ".VENV/bin/activate"]) {
+    assert.equal(neverFromCloud(path), true, path);
+  }
+  for (const path of ["report.md", "docs/readme.md", "claude-notes.md", "notes/.gitignore", "my.git/readme.md", "Git notes.md", "venv"]) {
+    assert.equal(neverFromCloud(path), false, path);
+  }
   assert.equal(validWirePath("invoice\u202efdp.exe"), false);
   assert.equal(validWirePath("caf\u00e9.txt"), true);
 });

@@ -279,10 +279,13 @@ A failure in one account is logged and never stops the others:
    be quiet for the same period: the installation is active (not revoked) and
    has not called the control plane, the endpoint row belongs to this account
    and has not been reconciled or updated, the stored tunnel ID still names
-   the listed tunnel, and no request holds the row's lease. Those guards live
-   in the marking SQL itself, so a check-in that races the scan wins. Tunnels
-   with no endpoint row in that account are only counted (`unmatched`), never
-   touched.
+   the listed tunnel, and no request holds the row's lease. The row is
+   `ready`, `error`, or `provisioning`: a request that stopped part-way (its
+   lease expired and nothing has touched the row since) still holds its
+   tunnel, and the same quiet period is the grace that keeps a provisioning
+   under way from being cut. Those guards live in the marking SQL itself, so
+   a check-in that races the scan wins. Tunnels with no endpoint row in that
+   account are only counted (`unmatched`), never touched.
 3. Before each destructive call of a reclaim, cleanup re-reads the tunnel
    from Cloudflare. If it has reconnected, or the installation checked in after
    the mark, the reclaim is cancelled and the row returns to `ready` (or to a
@@ -290,7 +293,8 @@ A failure in one account is logged and never stops the others:
    DELETE or revocation clears the reclaim marker and always deletes.
 4. It writes the account's capacity snapshot (counts, timestamps, pending
    reclaims, and dormant endpoints: those of active installations whose tunnel
-   is gone) and logs one `managed endpoint tunnel scan` summary with the
+   is gone, kept for operators; they hold nothing, so they take no room) and
+   logs one `managed endpoint tunnel scan` summary with the
    account's `hostSuffix`. Until the next scan, scheduled cleanup lowers the
    snapshot's tunnel and DNS record counts by what it deletes, so a slot it
    freed is not counted as used. When usage reaches 90% of the account's
@@ -312,7 +316,10 @@ new endpoints, and decide whether a tunnel-creation `429` is the quota. They
 never refuse an allocation on their own: only Cloudflare does. Keep them equal
 to Cloudflare's real quotas and raise them when Cloudflare raises a quota (a
 limit below the real quota turns a genuine rate limit at that count into a
-ten-minute capacity gate for that account).
+ten-minute capacity gate for that account and, with several accounts, makes
+the account look full, so new endpoints go elsewhere while it still has
+room). `wrangler.jsonc` sets `OMB_DNS_RECORD_LIMIT` to 3500 because the
+`openmausbot.com` zone is on Pro.
 
 `GET /healthz` keeps `ok` and `service` unchanged (desktops gate hosted sign-in
 on them; a full quota must not hide sign-in or recovery) and adds a
@@ -457,25 +464,38 @@ skips it, and each cron run logs their number with
 
 **Choosing an account.** Only a new endpoint row chooses. It goes to the
 eligible account with the most room, `min(tunnelLimit − tunnels,
-dnsRecordLimit − DNS records) − dormant endpoints`, from that account's last
-scan (an unknown DNS count is left out; an unknown tunnel count ranks last;
-ties go to configuration order). The dormant endpoints are a slot set aside
-for each address already handed out whose owner may come back. An account is
-eligible when it takes new endpoints, its last scan is under 30 minutes old
-(so a new account takes nothing before its first cron run), Cloudflare has
-not refused it a resource, or its token, in the last ten minutes, and the
-installation's version is at least its `minAppVersion`. Room only ranks:
-when no account is eligible the primary is used, exactly as with one account.
+dnsRecordLimit − DNS records)` (never below zero), from that account's last
+scan (an unknown DNS count is left out; an unknown tunnel count ranks after
+every account whose room is known; ties go to configuration order). Dormant
+endpoints take no room: they hold no tunnel or record, so a returning owner
+competes for the same free slots as a new installation. An account whose
+scan shows no free tunnel or no free DNS record is never chosen while
+another eligible account has room. An account is eligible when it takes new
+endpoints, its last scan is under 30 minutes old (so a new account takes
+nothing before its first cron run), Cloudflare has not refused it a
+resource, or its token, in the last ten minutes, and the installation's
+version is at least its `minAppVersion`. When no eligible account has room
+the primary is used, exactly as with one account: it is tried, and only
+Cloudflare's refusal answers.
 
 A row that never handed out an address (no tunnel, no DNS record, never
 ready) may move, at most once per request, to the best other eligible account
-under a new hostname: before calling Cloudflare when its account is refusing
-new tunnels, or right after its account refuses the tunnel. Its old account is
-checked first; a tunnel or record that an interrupted earlier request left
-there is adopted instead. Each move logs `managed endpoint relocated` with
-both host suffixes. A row that was ever ready never moves: a reclaimed
-endpoint waits for a slot in its own account and keeps its hostname, so a
-paired phone keeps working.
+with room, under a new hostname: before calling Cloudflare when its account
+is refusing new endpoints or its last scan shows it full, or right after
+its account refuses the tunnel or, at DNS creation, the zone's record quota
+(`81045`). After that DNS refusal the row first deletes the tunnel it holds
+there, whether this request created it or adopted it from an interrupted
+earlier one, re-verified by ID and stable name as cleanup does, and closes
+the account for ten minutes; with nowhere to go it still gives the tunnel
+back, so its next requests are answered by that gate without calling
+Cloudflare. Its old account is checked first; a tunnel or record that an
+interrupted earlier request left there is adopted instead. Each move logs
+`managed endpoint relocated` with both host suffixes. Deleting a row that
+never handed out an address (an idle reclaim, an owner's DELETE) leaves it
+movable. A row that was ever ready never moves: a reclaimed endpoint waits
+for a slot in its own account and keeps its hostname, so a paired phone
+keeps working; a DNS refusal there deletes only a tunnel that request
+created.
 
 **A refused token.** A read-only check cannot show that an account's token
 may create tunnels and DNS records; the first new endpoint there does. With
@@ -545,6 +565,15 @@ Tailscale still work).
    `managed_endpoint_account_config`, and
    `managed_endpoint_account_unconfigured`.
 
+**Raising a zone's record quota.** After moving a zone to a plan with more
+DNS records (Free zones added since September 2024 allow 200, Pro 3,500),
+confirm the new quota with `GET zones/<zone id>/dns_records/usage`
+(`record_quota`), set the account's limit to it (`OMB_DNS_RECORD_LIMIT` for
+the primary, the entry's `dnsRecordLimit` in `CLOUDFLARE_ENDPOINT_ACCOUNTS`
+otherwise; with 3,500 records the account's 1,000 tunnels bind first), and
+deploy. Until that deploy the account looks full at its old limit and gets
+no new endpoint while another account has room.
+
 Each account adds two Cloudflare reads to every cron run (a tunnel page and a
 DNS count), and each move two lookups in the old account. Tokens created by
 the same Cloudflare user share its 1,200 requests per five minutes. On
@@ -579,7 +608,10 @@ Setup, once:
 2. Put the client id in `vars.HIGHLEVEL_CLIENT_ID` (it is public: it appears in the
    authorization URL). Keep `HIGHLEVEL_REDIRECT_URL` and `HIGHLEVEL_SCOPES` in step
    with the app.
-3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009).
+3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009 and 0010).
+   On a running Worker, apply 0010 before deploying a Worker built from this
+   code: its callback marks the flow in `callback_at`. An older Worker
+   ignores the column.
 4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
    deliberately not in `secrets.required`: until it exists the routes answer
    `503 highlevel_unavailable`.

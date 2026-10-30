@@ -411,23 +411,22 @@ it("keeps the person's request on work a thread the bot opened on itself hands o
 }), hostTimeout(120_000));
 
 it("keeps the person's request on work handed on after a card answer, on the root that asked", () => fixture(async (f) => {
-  // On Ask, so the proposed deletion waits on its card.
-  await f.api(`/api/bots/${f.chief.id}`, { approvalMode: "ask" }, "PATCH");
   const seen = new Set<string>();
-  // The card ends a whole chief turn (launch, agents proxy, three tool calls): the slow CI hosts need the full poll budget.
+  // The card ends a whole chief turn (launch, agents proxy, a tool call): the slow CI hosts need the full poll budget.
   const card = async () => {
     let id = "";
     await expect.poll(async () => {
-      id = (await f.messages()).find((m: any) => m.card?.teamSetupRequest && !seen.has(m.card.requestId))?.card.requestId ?? "";
+      id = (await f.messages()).find((m: any) => m.kind === "secret" && !seen.has(m.id))?.id ?? "";
       return id;
     }, { timeout: hostTimeout(30_000) }).not.toBe("");
     seen.add(id);
     return id;
   };
-  const deny = async (requestId: string) => {
+  const answer = async (cardId: string, outcome: "provided" | "dismiss") => {
     f.save();
-    const response = await fetch(`${f.session.info.url}/api/threads/${f.thread}/respond`, { method: "POST",
-      headers: { "content-type": "application/json", origin: f.session.info.url }, body: JSON.stringify({ requestId, behavior: "deny" }) });
+    if (outcome === "provided") await f.api("/api/config", { xai: { key: "xai-fixture-key" } }, "PUT");
+    const response = await fetch(`${f.session.info.url}/api/bots/${f.chief.id}/secret-cards/${cardId}/${outcome}`, { method: "POST",
+      headers: { "content-type": "application/json", origin: f.session.info.url }, body: JSON.stringify({ threadId: f.thread }) });
     expect(response.status, await response.clone().text()).toBeLessThan(300);
   };
   const briefed = async (brief: string) => {
@@ -436,30 +435,30 @@ it("keeps the person's request on work handed on after a card answer, on the roo
     return f.prompt(handed()[0]);
   };
   f.plan[f.lead.id] = { reply: "LEAD_DONE" };
-  const propose = (key: string, brief: string) => ({
-    steps: [{ tool: "propose_bot_deletion", arguments: { bot_id: f.ops.id, reason: "No longer needed" } }], reply: "Proposed",
-    byPrompt: [{ promptIncludes: "team setup decision", plan: f.delegate(key, [f.lead], brief) }],
+  const ask = (key: string, brief: string, credential: string) => ({
+    steps: [{ tool: "request_credential", arguments: { credential_id: credential, reason: "The team needs it" } }], reply: "Asked",
+    byPrompt: [{ promptIncludes: "OpenMausBot credential update", plan: f.delegate(key, [f.lead], brief) }],
   });
 
-  f.plan[f.chief.id] = propose("after-card", "CARD_ONE_BRIEF check the team");
+  f.plan[f.chief.id] = ask("after-card", "CARD_ONE_BRIEF check the team", "xaiApiKey");
   await f.send("PERSON_CARD_ONE please tidy the team");
   const first = await card();
   await f.idle();
-  await deny(first);
+  await answer(first, "provided");
   const afterCard = await briefed("CARD_ONE_BRIEF");
   expect(afterCard).toMatch(assignedBy(f.chief.name));
   expect(afterCard).toContain(personLineage("PERSON_CARD_ONE please tidy the team"));
   // Round one settles first: a line sent into that owed resume would be folded into it.
   await f.wait();
 
-  f.plan[f.chief.id] = propose("late-card", "CARD_TWO_BRIEF check the team");
+  f.plan[f.chief.id] = ask("late-card", "CARD_TWO_BRIEF check the team", "ttsKey");
   await f.send("PERSON_CARD_TWO please tidy the team again");
   const late = await card();
   await f.idle();
-  f.plan[f.chief.id] = { reply: "Hi", byPrompt: propose("late-card", "CARD_TWO_BRIEF check the team").byPrompt };
+  f.plan[f.chief.id] = { reply: "Hi", byPrompt: ask("late-card", "CARD_TWO_BRIEF check the team", "ttsKey").byPrompt };
   await f.send("PERSON_LATER just say hi");
   await f.idle();
-  await deny(late);
+  await answer(late, "dismiss");
   const after = await briefed("CARD_TWO_BRIEF");
   expect(after).toMatch(assignedBy(f.chief.name));
   expect(after).toContain(personLineage("PERSON_CARD_TWO please tidy the team again"));
@@ -806,6 +805,11 @@ const leadRunning = async (f: any, launches = 1) => {
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(launches);
 };
 const cursor = (f: any) => Object.values(f.task().resumeCursors)[0];
+// A terminal message is published before the driver releases its turn: wait, or a loaded runner reaches the previous turn.
+const sourceWaiting = (f: any) => expect.poll(async () => (await f.api("/api/bots")).bots
+  .find((bot: any) => bot.id === f.chief.id).tasks
+  .find((task: any) => task.threadId === f.thread).waitingForTeammates,
+{ timeout: 15_000 }).toBe(true);
 
 it("gives a replacement session the full assignment when a result returns after its resume was rejected", () => fixture(async (f) => {
   await warmUp(f);
@@ -852,13 +856,8 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await expect.poll(() => f.turns().length, { timeout: 10_000 }).toBe(3);
   await expect.poll(() => count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN"), { timeout: 10_000 }).toBe(1);
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
-  // A terminal message is published before the driver releases its turn: wait, or a loaded runner steers into the previous turn.
-  const sourceWaiting = () => expect.poll(async () => (await f.api("/api/bots")).bots
-    .find((bot: any) => bot.id === f.chief.id).tasks
-    .find((task: any) => task.threadId === f.thread).waitingForTeammates,
-  { timeout: 15_000 }).toBe(true);
   for (let i = 0; i < chat; i++) {
-    await sourceWaiting();
+    await sourceWaiting(f);
     expect((await f.send(`chat ${i}`)).steered).toBeUndefined();
     await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + i);
     await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${i}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
@@ -868,7 +867,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   const original = cursor(f);
   await f.setMode("resume=dead-session");
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${chat - 1}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
-  await sourceWaiting();
+  await sourceWaiting(f);
   expect((await f.send("One more question.")).steered).toBeUndefined();
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "recovered reply"), { timeout: 10_000 }).toBe(true);
@@ -886,7 +885,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   expect(records[0].ids).not.toContain(resultMessage.id);
   expect(order.indexOf(records[0].omitted)).toBeGreaterThanOrEqual(order.indexOf(resultMessage.id));
 
-  await sourceWaiting();
+  await sourceWaiting(f);
   f.open(f.gate("r2"));
   await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(5 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "Final" && m.turnTerminal), { timeout: 15_000 }).toBe(true);
@@ -1283,6 +1282,7 @@ it("gives a Codex return the model chosen while its teammate worked", () => fixt
   await f.send("Please have Engineering build the export.");
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
+  await sourceWaiting(f);
   // Codex applies a model only when a thread starts: thread/resume would keep the old one.
   const [, other] = await f.codexModels();
   await f.selectModel(other);
@@ -1307,9 +1307,8 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   await f.send("Please have Engineering build the export.");
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
+  await sourceWaiting(f);
   // An effort the driver does not send leaves the native thread's last value.
-  await expect.poll(async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id)
-    .tasks.find((task: any) => task.threadId === f.thread).waitingForTeammates, { timeout: 15_000 }).toBe(true);
   await f.selectModel(model);
   f.open(f.gate("lead"));
   await f.wait();

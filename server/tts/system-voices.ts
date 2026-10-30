@@ -49,7 +49,8 @@ export async function synthesizeSystem(text: string, voiceId: string | undefined
   try {
     const args = ["-o", out, "--data-format=LEI16@22050"];
     if (voiceId?.trim()) args.push("-v", voiceId.trim());
-    args.push(trimmed);
+    // `say` reads a leading "--input-file=" or "--output-file=" in the text as its own option; after `--` it is speech.
+    args.push("--", trimmed);
     await run(SAY, args, 30_000);
     return { bytes: new Uint8Array(await readFile(out)), mime: "audio/wav" };
   } finally {

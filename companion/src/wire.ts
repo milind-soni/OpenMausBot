@@ -1,8 +1,11 @@
 // Scrubs what a device has no business holding: `resumeCursors` (native
-// session ids, on every bot payload and `bot` frame) and `sshAlias` (a label
-// naming one of the user's servers). Correct whether or not upstream stops
-// sending them.
-const WITHHELD_KEYS = new Set(["resumeCursors", "sshAlias"]);
+// session ids, on every bot payload and `bot` frame), `sshAlias` (a label
+// naming one of the user's servers) and a bot's own alias plus the
+// inventory's alias tags (`vpsAlias`, `vpsAliases`). Correct whether or not
+// upstream stops sending them. Keys only: no phone-reachable string names an
+// alias, and cutting a value out of every string would also cut a short
+// alias such as "vps" out of `cloudBackend: "vps"` and the user's messages.
+const WITHHELD_KEYS = new Set(["resumeCursors", "sshAlias", "vpsAlias", "vpsAliases"]);
 
 export function scrub<T>(value: T): T {
   if (Array.isArray(value)) return value.map(scrub) as unknown as T;

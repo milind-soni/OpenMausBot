@@ -24,6 +24,7 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
+import { PIDS_LIMIT } from "./container-limits.ts";
 import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
@@ -347,6 +348,21 @@ describe("VPS computer", () => {
     expect(fake.calls.some(({ args }) => ["rm", "run", "build", "pull"].includes(args[2]!))).toBe(false);
   });
 
+  it("raises a VPS desktop made under the old 512 process cap in place, once, and leaves a chosen cap alone", async () => {
+    const updates = (fake: ReturnType<typeof fixture>) => fake.calls.filter(({ args }) => args[2] === "update").map(({ args }) => args.slice(2));
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    const old = fixture({ containerId: "d".repeat(64) });
+    await vpsComputerStatus(CONFIG, BOT_ID, old.runner);
+    await settle();
+    await vpsComputerStatus(CONFIG, BOT_ID, old.runner);
+    await settle();
+    expect(updates(old)).toEqual([["update", "--pids-limit", String(PIDS_LIMIT), "d".repeat(64)]]);
+    const chosen = fixture({ containerId: "e".repeat(64), hostConfig: { PidsLimit: 1024 } });
+    await vpsComputerStatus(CONFIG, BOT_ID, chosen.runner);
+    await settle();
+    expect(updates(chosen)).toEqual([]);
+  });
+
   it.each(["no", "always", "on-failure", "unless-stopped"])(
     "reuses a VPS container with operator-selected restart policy %s", async (restartPolicyName) => {
       const fake = fixture({ restartPolicyName });
@@ -440,7 +456,7 @@ describe("VPS computer", () => {
     expect(status.ready).toBe(true);
     const run = provision.calls.find(({ args }) => args[2] === "run")?.args ?? [];
     expect(run).toContain("--memory");
-    expect(run).toContain("--pids-limit");
+    expect(run[run.indexOf("--pids-limit") + 1], "Firefox needs room for its threads").toBe(String(PIDS_LIMIT));
     expect(run).toContain("--ipc");
     expect(run[run.indexOf("--ipc") + 1]).toBe("private");
     expect(run).toContain("--cgroupns");

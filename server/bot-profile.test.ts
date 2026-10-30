@@ -105,11 +105,33 @@ describe("mascotBody", () => {
     });
   });
 
+  it("accepts a Halloween body", () => {
+    expect(parseBotProfilePatch({ mascotBody: "pumpkin" } as never, true)).toEqual({
+      ok: true,
+      patch: { mascotBody: "pumpkin" },
+    });
+  });
+
   it("maps an unknown body to a readable message", () => {
     expect(parseBotProfilePatch({ mascotBody: "hexagram" } as never, true)).toEqual({
       ok: false,
       error:
-        "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, or star",
+        "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
+        "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, or spider",
+    });
+  });
+});
+
+describe("mascotFaceColor", () => {
+  it.each(["white", "black", null] as const)("accepts %s at both profile boundaries", (mascotFaceColor) => {
+    for (const strict of [true, false]) {
+      expect(parseBotProfilePatch({ mascotFaceColor }, strict)).toEqual({ ok: true, patch: { mascotFaceColor } });
+    }
+  });
+
+  it.each(["red", "#ffffff", "", 1, {}, []])("rejects an unsupported color %j", (mascotFaceColor) => {
+    expect(parseBotProfilePatch({ mascotFaceColor } as never, true)).toEqual({
+      ok: false, error: "mascotFaceColor must be white, black, or null",
     });
   });
 });

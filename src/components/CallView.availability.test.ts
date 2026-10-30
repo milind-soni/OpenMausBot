@@ -42,8 +42,8 @@ describe("call capability guidance", () => {
       reasonCode: "remote-server",
     }), false);
     expect(help).toEqual({
-      label: "Calls where you take turns work on This computer",
-      reason: "They listen with your Mac's own speech recognition, which only This computer can use.",
+      label: "Calls where you take turns work with bots on this Mac",
+      reason: "They listen with your Mac's own speech recognition, which only bots on this Mac can use.",
     });
     expect(help).not.toHaveProperty("action");
   });
@@ -91,8 +91,8 @@ describe("call capability guidance", () => {
       engine: "apple-speech",
       onDevice: true,
     }), false)).toEqual({
-      label: "The call service is unavailable",
-      reason: "The speech service is unavailable in this app build. Restart or update OpenMausBot.",
+      label: "Calls aren't available right now",
+      reason: "The speech service is unavailable in this app build. Restart or update MausBot.",
     });
   });
 });

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
-import { harnessHome } from "./env-path.ts";
+import { harnessHome, sealedFixture } from "./env-path.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok";
 
@@ -241,7 +241,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
         return null;
       }
     },
-    ...(process.platform === "darwin" ? { readClaudeKeychain: readDarwinClaudeKeychain } : {}),
+    ...(process.platform === "darwin" && !sealedFixture() ? { readClaudeKeychain: readDarwinClaudeKeychain } : {}),
   });
 }
 

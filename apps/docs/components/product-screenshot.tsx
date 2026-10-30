@@ -15,6 +15,9 @@ const screenshotNames = [
   'docs-computer-panel',
   'docs-connected-apps',
   'docs-automations',
+  'docs-my-cloud-compare',
+  'docs-my-cloud-strip',
+  'docs-my-cloud-switcher',
 ] as const;
 
 type ScreenshotName = (typeof screenshotNames)[number];

@@ -161,11 +161,18 @@ POST /api/bots/:botId/messages
 { "threadId": "...", "sendId": "...", "widgetAction": { "messageId": "...", "ref": "confirm", "rev": 0, "values": { "runs": "weekday" } } }
 ```
 
+A `Select`, a `RadioGroup` and a list with a `name` also offer **Other**: the
+person types their own answer instead of picking an option. The canonical tree
+carries `allowOther: true` on such a field (the bot opts out with
+`allowOther: false`; a tree stored without the prop offers only its options).
+A press answered that way sends the field's value as `""` and the words apart,
+in `other`: `{ "values": { "dish": "" }, "other": { "dish": "Leftover dal" } }`.
+
 `text` is omitted; the server writes it. The route (`server/routes/bot-messages.ts`):
 
-1. loads the widget message and calls `resolveWidgetAction(payload, ref, values)`, which checks the ref exists, the widget is not settled, every value names a field in scope, select and radio values are offered options, dates are inside `min`/`max`, and required fields are filled. Failures are 400, 404 or 409 with a sentence the card shows in place.
+1. loads the widget message and calls `resolveWidgetAction(payload, ref, values, other)`, which checks the ref exists, the widget is not settled, every value names a field in scope, select and radio values are offered options, dates are inside `min`/`max`, and required fields are filled. Words in `other` are taken only for a field that offers Other, never beside a picked option, at most 2,000 characters on one line; they fill a required choice and are sent as that field's `Field: words` line. Failures are 400, 404 or 409 with a sentence the card shows in place.
 2. sends an ordinary user message whose text is the label, followed by one `Field: value` line per filled field with the value whole (a `Textarea` keeps its line breaks), **as a reply to the widget message** (`replyTo`). The reply target handed to the turn is a copy of the widget row carrying `widgetPress: {label, action}`, so the model is told about a press only when one was validated here.
-3. on success, patches the widget with `settled` when the press settles it, including the `values` that were sent so the Details view can show them after a reload. A retry with the same `sendId` returns the same receipt and patches nothing.
+3. on success, patches the widget with `settled` when the press settles it, including the `values` (and `other`) that were sent so the Details view can show them after a reload. A retry with the same `sendId` returns the same receipt and patches nothing.
 
 Three races are closed on the server:
 

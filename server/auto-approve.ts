@@ -1,6 +1,7 @@
 // Nothing here decides whether an action is safe: each level is the provider's own permission mode passed through, and a
 // request reaching this process is one the provider left for a person. The app's own grants are Full access, the person's
-// exact saved commands and remembered MCP read tools, and Approve for me's web search. A bot's question always reaches a human.
+// exact saved commands and remembered MCP read tools, Approve for me's web search, and a bot's plain reads of its own files
+// at every level (own-file-reads.ts). A bot's question always reaches a human.
 
 import { supportsApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import { failedTurnTool, type FailedTurnTool } from "../shared/failed-turn.ts";
@@ -76,6 +77,7 @@ export type AutoVerdictSource =
   | "command-allowlist"
   | "tool-allowlist"
   | "web-search"
+  | "own-files"
   | "native-approval"
   | "explicit-approval-block"
   | "outbound-guard"
@@ -98,6 +100,8 @@ export function autoVerdict(
     commandAllowed?: boolean;
     /** Exact provider/server/tool/config match against a person's saved MCP read grant. */
     toolAllowed?: boolean;
+    /** The request only reads the bot's own files: its SOUL.md, skills, memory and conversation folders. */
+    ownFilesRead?: boolean;
   },
 ): AutoVerdict {
   if (ASKS_A_PERSON.has(bareToolName(tool))) {
@@ -109,6 +113,7 @@ export function autoVerdict(
   if (isOutboundTool(tool)) return { approve: null, source: "outbound-guard" };
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
   if (context?.toolAllowed) return { approve: `approved ${tool} (always allowed)`, source: "tool-allowlist" };
+  if (context?.ownFilesRead) return { approve: `approved ${tool} (its own files)`, source: "own-files" };
   if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {
     return { approve: `approved ${tool} (web search)`, source: "web-search" };
   }
@@ -129,10 +134,10 @@ export function undeliveredApprovalTool(
 
 /** The client translates by key and falls back to this text, which the server keeps sending for older cards. */
 export const HELD_NOTE = {
-  "approval.held.outbound": "This sends something on your behalf, so it always asks first.",
+  "approval.held.outbound": "This sends something on your behalf, so it asks you first.",
   "approval.held.native": "The provider requires your approval for this action.",
   "approval.held.sandbox":
-    "This changes the provider sandbox, so only Full access can approve it automatically.",
+    "This loosens the AI's own safety limits, so only Full access can approve it automatically.",
   "approval.held.undeliveredFull": "Full access couldn't deliver this approval.",
   "approval.held.undelivered": "Approve for me couldn't answer this one.",
 } as const;

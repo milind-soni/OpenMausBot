@@ -8,9 +8,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
+import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { appHandsItOver } from "./testing/your-computer.ts";
+import { THIS_COMPUTER_NOT_READY } from "../shared/your-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CALL_WAIT_MS = 3_000;
@@ -50,10 +54,18 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
+// The seeded Chief answers a failed run with a Team incidents turn on this same engine, and that turn writes the dump.
+async function stepDownSeededChief() {
+  const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
+  if (seeded) await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
+}
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
 const check = (c: any) => createControlClient({ url: c.env.OMB_CONTROL_URL, token: c.env.OMB_CONTROL_TOKEN }).state(true);
+// The runtime outcome of the room's latest coordinated turn, once it has one.
+const roomOutcome = (groupId: string) => until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === groupId)?.outcome,
+  Boolean);
 
 beforeAll(async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), "omb-group-vm-"));
@@ -104,7 +116,9 @@ beforeAll(async () => {
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   startServer = async (computerWaitMaxMs) => {
-    child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
+    // Started as the desktop app starts its own server, which hears the app's driver record over its parent port.
+    child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href,
+      "--import", pathToFileURL(join(ROOT, "server/testing/desktop-parent.mjs")).href, join(ROOT, "server/index.ts")], {
       cwd: ROOT, env: {
         PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
@@ -114,7 +128,7 @@ beforeAll(async () => {
         OMB_BOAT_API: `http://127.0.0.1:${boatPort}`,
         ...(computerWaitMaxMs ? { OMB_COMPUTER_WAIT_MAX_MS: String(computerWaitMaxMs) } : {}),
         OMB_COMPUTER_CALL_WAIT_MS: String(CALL_WAIT_MS),
-        OMB_USER_DATA: join(fixtureHome, "user-data"),
+        OMB_USER_DATA: join(fixtureHome, "user-data"), OMB_TEST_DESKTOP_CUA_CONNECTION: cuaDescriptor,
       }, stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", () => {});
@@ -123,6 +137,7 @@ beforeAll(async () => {
       if (child.exitCode !== null) throw new Error(stderr);
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean);
+    await stepDownSeededChief();
   };
   await startServer();
 });
@@ -572,6 +587,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(computer(after)).toBeTruthy();
       expect(after.systemPrompt).toContain("Local VM");
       expect(after.systemPrompt).not.toContain("call select_computer");
+      // The continuation, which may not pick again, is listed the agents tools its request was, select_computer too.
+      const agentsTools = (dumped: any) => availableTools(catalogProfileFromEnv(dumped.mcpConfig.mcpServers.agents.env));
+      expect(agentsTools(after)).toEqual(agentsTools(before));
+      expect(agentsTools(after).map((tool) => tool.name)).toContain("select_computer");
       await idle(bot.id);
       const state = await api("GET", "/api/bots?messages=30");
       const saved = state.bots.find((b: any) => b.id === bot.id);
@@ -738,6 +757,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const { bots, group } = await room();
     mkdirSync(dirname(cuaDescriptor), { recursive: true });
     writeFileSync(cuaDescriptor, JSON.stringify({ mode: "embedded", socketPath: "/fixture/cua.sock", mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {} }));
+    await appHandsItOver();
     try {
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
       await send(group.id);
@@ -755,6 +775,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(JSON.stringify(await api("GET", "/api/bots?messages=30"))).not.toContain("not available in channels yet");
     } finally {
       rmSync(cuaDescriptor, { force: true });
+      await appHandsItOver();
     }
   });
 
@@ -762,7 +783,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const { bots, group } = await room();
     await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
     await send(group.id);
-    await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("CUA Driver is not ready for this computer"));
+    await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes(THIS_COMPUTER_NOT_READY));
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
   });
@@ -772,6 +793,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
     mkdirSync(dirname(cuaDescriptor), { recursive: true });
     writeFileSync(cuaDescriptor, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    await appHandsItOver();
     try {
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
       await send(group.id);
@@ -782,6 +804,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(existsSync(dumpFile)).toBe(false);
     } finally {
       rmSync(cuaDescriptor, { force: true });
+      await appHandsItOver();
     }
   });
 
@@ -856,6 +879,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
     vmState();
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
+    // The watchdog stopped the turn before dispatch: a stall, not a provider error.
+    expect(await roomOutcome(group.id)).toBe("stalled");
     // Wait out the stall's VM-lease grace so a later turn can take the VM.
     await new Promise(r => setTimeout(r, 6_500));
     await send(group.id);
@@ -863,6 +888,40 @@ describe("Group Local VM ownership on the real isolated server", () => {
     writeFileSync(finishFile, "finish");
     await idle(bots[0].id);
     await stop(group.id); await idle(bots[0].id);
+  });
+  it("says which limit stopped a rerun room turn that stalled during delayed room setup", async () => {
+    const { bots, group } = await room();
+    await send(group.id);
+    await dump();
+    // A restart cuts the running turn; its rerun parks in the pre-id quarantine wait and stalls there.
+    await waitForExit(child, { signal: "SIGTERM" });
+    vmState({ wedgeClear: true }); rmSync(stateFile + ".clearwait", { force: true }); rmSync(dumpFile, { force: true });
+    await startServer();
+    await until(() => existsSync(stateFile + ".clearwait"), Boolean);
+    vmState({ wedgeClear: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    expect(existsSync(dumpFile)).toBe(false);
+    const root = await until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === group.id), node => node?.outcome !== undefined);
+    expect(root).toMatchObject({ outcome: "stalled", restarts: 1 });
+    expect(root?.result).toContain("No activity for 20 minutes — the turn was stopped");
+  });
+  it("says which limit stopped a room turn that stalled during VM readiness, though setup ends before the turn has an outcome", async () => {
+    const { bots, group } = await room();
+    // Park setup in Local VM readiness, before dispatch: the stall revokes the turn's generation, so readiness returns
+    // to a setup that is no longer current and ends it without any room outcome.
+    vmState({ blocked: true }); rmSync(stateFile + ".entered", { force: true });
+    await send(group.id);
+    await until(() => existsSync(stateFile + ".entered"), Boolean);
+    vmState({ blocked: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    expect(existsSync(dumpFile)).toBe(false);
+    const root = await until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === group.id), node => node?.outcome !== undefined);
+    expect(root).toMatchObject({ outcome: "stalled" });
+    expect(root?.result).toContain("No activity for 20 minutes — the turn was stopped");
   });
   it("revokes the previous member and rejects cross-bot control after a shared desktop handoff", async () => {
     const { bots, group } = await room();
@@ -1119,6 +1178,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     if (failure === "stall") vmState({ stall: true });
     await idle(bots[0].id);
     expect((await gate(c)).status).toBe(401);
+    if (failure === "stall") expect(await roomOutcome(group.id)).toBe("stalled");
     await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 2 } });
     vmState({ noContainers: true });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });

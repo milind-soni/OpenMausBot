@@ -21,7 +21,7 @@ describe("Preset bots in the real renderer", () => {
   let child: ChildProcess | undefined;
   afterAll(async () => { await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }); });
 
-  (enabled ? it : it.skip)("shares New bot defaults as a preset file, adds it back, and makes bots from file and organization presets", async () => {
+  (enabled ? it : it.skip)("shares New bot defaults as a preset file, adds it back, and makes bots from file and organization presets in a ready-made bot's review", async () => {
     let stdout = "";
     let stderr = "";
     let info: { ui: string; url: string; botId: string; dataDir: string; logPath: string };
@@ -68,7 +68,7 @@ describe("Preset bots in the real renderer", () => {
     await click("Share as preset…");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("What's in the file");
     let dialog = await snapshot();
-    for (const line of ["Share New bot defaults as a preset", "follow-up", "Never included: model choices, folders, computers, approval levels"]) expect(dialog).toContain(line);
+    for (const line of ["Share New bot defaults as a preset", "follow-up", "Never included: model choices, folders, where bots work, approval levels"]) expect(dialog).toContain(line);
     await ui("screenshot", "--out", evidence("share"));
     await click("Save file");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Saved sky-1.0.0.openmaus.json");
@@ -85,11 +85,11 @@ describe("Preset bots in the real renderer", () => {
     await click("Templates");
     await click("Import");
     await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([window.__presetText], 'sky-1.0.0.openmaus.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Preset bots and skills · no team");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Preset bots and skills · no department");
     const preview = await snapshot();
     expect(preview).toContain("Preset bots: 1 · appear in New bot");
     expect(preview).not.toContain("Team members");
-    expect(preview).toContain("Preset bots — added to New bot");
+    expect(preview).toContain("Preset bots (added to New bot)");
     await ui("screenshot", "--out", evidence("import-preview"));
     await click("Add presets");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Preset bots added to New bot: 1");
@@ -107,7 +107,7 @@ describe("Preset bots in the real renderer", () => {
     await clickWhenFree("New or share");
     await click("Templates");
     await click("Share");
-    await click("Share the General team");
+    await click("Share the General department");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("What's in the file");
     expect(await snapshot()).not.toContain('term "Preset bots"');
     await click("Include my New bot defaults as a preset");
@@ -122,7 +122,9 @@ describe("Preset bots in the real renderer", () => {
     const create = async (value: string, expected: string, shot: string) => {
       const before = await bots();
       await clickWhenFree("New or share");
-      await click("New Bot");
+      await click("Templates");
+      await expect.poll(snapshot, { timeout: 20_000 }).toContain("Add Scout, Researcher");
+      await click("Add Scout, Researcher");
       await expect.poll(async () => (await ui("eval", "--js", "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent.trim() === 'Create bot')?.disabled")).result, { timeout: 20_000 }).toBe(false);
       await expect.poll(() => evaluate("[...document.querySelectorAll('[role=dialog] select optgroup')].map(group => group.label).join(' | ')"), { timeout: 10_000 })
         .toBe("From Acme Partners | Imported presets | Built-in roles");

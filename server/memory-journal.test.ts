@@ -33,6 +33,41 @@ beforeEach(resetMemoryJournalState);
 afterEach(resetMemoryJournalState);
 
 describe("unifiedDiff", () => {
+  it("diffs a shared prefix exactly as the full line table does", () => {
+    const fullTableOps = (a: string[], b: string[]) => {
+      const cols = b.length + 1;
+      const table = new Uint32Array((a.length + 1) * cols);
+      for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+        table[i * cols + j] = a[i] === b[j] ? table[(i + 1) * cols + j + 1] + 1 : Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
+      }
+      const ops: string[] = [];
+      let i = 0;
+      let j = 0;
+      while (i < a.length && j < b.length) {
+        if (a[i] === b[j]) { ops.push(` ${a[i]}`); i++; j++; }
+        else if (table[(i + 1) * cols + j] >= table[i * cols + j + 1]) ops.push(`-${a[i++]}`);
+        else ops.push(`+${b[j++]}`);
+      }
+      while (i < a.length) ops.push(`-${a[i++]}`);
+      while (j < b.length) ops.push(`+${b[j++]}`);
+      return ops;
+    };
+    let seed = 7;
+    const next = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    for (let round = 0; round < 300; round++) {
+      const prefix = Array.from({ length: next(6) }, () => "xyz"[next(3)]!);
+      const a = [...prefix, ...Array.from({ length: next(6) }, () => "xyz"[next(3)]!)];
+      const b = [...prefix, ...Array.from({ length: next(6) }, () => "xyz"[next(3)]!)];
+      const body = (diff: string) => diff.split("\n").slice(2).filter((line) => !line.startsWith("@@"));
+      const diff = unifiedDiff(a.map((line) => `${line}\n`).join(""), b.map((line) => `${line}\n`).join(""), "MEMORY.md", 1_000_000);
+      const expected = fullTableOps(a, b);
+      expect({ a, b, ops: body(diff.text) }).toEqual({ a, b, ops: a.join() === b.join() ? [] : expected.filter((_op, index) =>
+        expected.slice(Math.max(0, index - 2), index + 3).some((near) => !near.startsWith(" "))) });
+      expect(diff.added).toBe(expected.filter((op) => op.startsWith("+")).length);
+      expect(diff.removed).toBe(expected.filter((op) => op.startsWith("-")).length);
+    }
+  });
+
   it("is empty when nothing changed", () => {
     expect(unifiedDiff("a\nb\n", "a\nb\n", "MEMORY.md")).toEqual({ text: "", added: 0, removed: 0, truncated: false });
   });

@@ -132,6 +132,28 @@ describe("propose", () => {
   });
 });
 
+describe("undoAccept", () => {
+  it("removes an addition that applied on its own and brings back the fact it replaced, once", () => {
+    const original = memory.propose("", { kind: "person", name: "Alex", detail: "original" }, source).entry;
+    memory.resolve("", original.id, "accept");
+    const replacement = memory.propose("", { kind: "person", name: "Alex", detail: "replacement" }, source).entry;
+    memory.resolve("", replacement.id, "accept");
+    const revision = memory.list("").find((entry) => entry.id === replacement.id)!.revision!;
+    expect(memory.undoAccept("", replacement.id, revision)).toBe(true);
+    expect(memory.list("").map((entry) => [entry.detail, entry.status])).toEqual([["original", "accepted"]]);
+    expect(memory.undoAccept("", replacement.id, revision)).toBe(false);
+  });
+
+  it("changes nothing once the entry was edited since", () => {
+    const added = memory.propose("", { kind: "term", name: "OMB", detail: "first" }, source).entry;
+    memory.resolve("", added.id, "accept");
+    const revision = memory.list("")[0]!.revision!;
+    memory.update("", added.id, { detail: "a person's edit" });
+    expect(memory.undoAccept("", added.id, revision)).toBe(false);
+    expect(memory.list("")[0]).toMatchObject({ detail: "a person's edit", status: "accepted" });
+  });
+});
+
 describe("resolve, update, remove", () => {
   it("rejects edits that collide with another accepted fact", () => {
     const a = memory.propose("", { kind: "term", name: "Alex", detail: "term" }, source);

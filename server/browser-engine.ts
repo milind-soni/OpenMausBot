@@ -1,15 +1,16 @@
 // The bots' browser engine, agent-browser. Fail closed with a reason a person can act on, never a silently browserless bot.
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
-import { browserProcessesRunning, browserProcessTree, stopBrowserProcesses } from "./browser-processes.ts";
-import { BROWSER_VIEWPORT_ARGS, browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
+import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
+import { BROWSER_VIEWPORT, viewportArgs, type PageSize } from "./browser-page-size.ts";
+import { browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
 import { SIGN_IN_PROMPT } from "./system-prompt.ts";
 import { gateChromeSettings } from "./browser/egress/gate.ts";
 import {
@@ -28,6 +29,20 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 export function browserRestoreKey(session: string): string {
   if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
   return `omb-${createHash("sha256").update(session).digest("hex")}`;
+}
+
+const PROFILES_DIR = "agent-browser-profiles";
+
+/** Where every saved session's Chrome profile lives. */
+export function browserProfilesRoot(dataDir = DATA_DIR): string {
+  return join(dataDir, PROFILES_DIR);
+}
+
+/** A saved session's own Chrome profile, kept between launches: agent-browser 0.37 otherwise starts each Chrome on a new
+ * temporary profile that keeps only the cookies its restore file carries, never IndexedDB. */
+export function browserProfileDirectory(session: string, dataDir = DATA_DIR): string {
+  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
+  return join(browserProfilesRoot(dataDir), createHash("sha256").update(session).digest("hex").slice(0, 32));
 }
 
 /** agent-browser's saved-state dir: `~/.agent-browser[/namespaces/<name>/state]/sessions`. */
@@ -148,6 +163,14 @@ async function closeOnce(binaryPath: string, env: NodeJS.ProcessEnv, session: st
   return tree ? stopBrowserProcesses(tree) : false;
 }
 
+/** Starts a session's browser with its launch settings in `env`, or keeps the running one on its page: `open` without a URL. */
+export async function startBrowserSession(binaryPath: string, env: NodeJS.ProcessEnv, timeoutMs = 30_000): Promise<boolean> {
+  const session = env.AGENT_BROWSER_SESSION;
+  if (!session || !/^[A-Za-z0-9_.-]{1,96}$/.test(session)) return false;
+  await releaseBrowserProfile(env.AGENT_BROWSER_PROFILE);
+  return (await runBrowserCommand(binaryPath, env, ["open", "--json", "--no-webmcp"], Date.now() + timeoutMs)).ok;
+}
+
 /** The command's `data`, or null when the daemon is not running; never launches a stopped session. */
 export async function inRunningBrowser(binaryPath: string, env: NodeJS.ProcessEnv, args: string[], timeoutMs = 15_000): Promise<Record<string, unknown> | null> {
   const session = env.AGENT_BROWSER_SESSION;
@@ -192,12 +215,14 @@ export function agentBrowserStreamPorts(env: NodeJS.ProcessEnv = browserRuntimeE
   catch { return []; }
 }
 
-/** The DevTools ports of the Chromes agent-browser launched, from the profiles it creates in the temp folder. */
-export function agentBrowserDevToolsPorts(temp = tmpdir()): number[] {
-  try {
-    return readdirSync(temp).filter((name) => name.startsWith("agent-browser-chrome-"))
-      .flatMap((name) => portInFile(join(temp, name, "DevToolsActivePort")));
-  } catch { return []; }
+/** The DevTools ports of the Chromes agent-browser launched: on the temporary profiles it creates in the temp folder, and
+ * on the saved sessions' own profiles. */
+export function agentBrowserDevToolsPorts(temp = tmpdir(), profiles = browserProfilesRoot()): number[] {
+  const ports = (directory: string, names: (name: string) => boolean) => {
+    try { return readdirSync(directory).filter(names).flatMap((name) => portInFile(join(directory, name, "DevToolsActivePort"))); }
+    catch { return []; }
+  };
+  return [...ports(temp, (name) => name.startsWith("agent-browser-chrome-")), ...ports(profiles, () => true)];
 }
 
 const preparedBrowserSessions = new Map<string, Promise<void>>();
@@ -213,6 +238,8 @@ export async function prepareBrowserSessionState(
   const env = browserRuntimeEnv({ ...options.env, AGENT_BROWSER_SESSION: session, AGENT_BROWSER_HEADLESS: "1" });
   ensureManagedBrowserConfig(env);
   if (options.persistent === false) return;
+  await releaseBrowserProfile(env.AGENT_BROWSER_PROFILE);
+  check();
   const directory = browserSessionsDirectory(env);
   const key = join(directory, session);
   let pending = preparedBrowserSessions.get(key);
@@ -521,6 +548,8 @@ export function browserEngineStatus(options: BrowserLookupOptions = {}): Browser
     : { kind: "unavailable", reason: `agent-browser publishes no build for ${platform}-${arch}`, installable: false };
 }
 
+const PROFILE_CACHE_ARG = `--disk-cache-size=${64 * 1024 * 1024}`;
+
 /** agent-browser 0.37 relaunches a running Chrome without a word when a command's launch settings differ, so every
  * command for a session must carry these same ones. Chrome fails every connection through port 0. */
 function agentBrowserEgressEnv(env: Record<string, string>, port: number, platform: NodeJS.Platform): Record<string, string> {
@@ -550,6 +579,7 @@ export function agentBrowserIntegration(input: {
   attach?: { cdpUrl?: string };
   /** The Chrome OMB prepared for the engine to start (server/browser/chrome/launcher.ts); unused when attaching. */
   launcher?: Record<string, string>;
+  dataDir?: string;
 }): { command: string; args: string[]; env: Record<string, string> } {
   const sourceEnv = input.env ?? process.env;
   const env: Record<string, string> = {
@@ -574,6 +604,7 @@ export function agentBrowserIntegration(input: {
     // A restore name, not a boolean; fixed-length because agent-browser matches name prefixes.
     env.AGENT_BROWSER_RESTORE = browserRestoreKey(input.session);
     env.AGENT_BROWSER_RESTORE_SAVE = input.persistent === false ? "never" : "auto";
+    if (input.persistent !== false) env.AGENT_BROWSER_PROFILE = browserProfileDirectory(input.session, input.dataDir);
     if (input.headless !== false || displayless) {
       env.AGENT_BROWSER_HEADLESS = "1";
       env.AGENT_BROWSER_HEADED = "0";
@@ -588,15 +619,20 @@ export function agentBrowserIntegration(input: {
     env.AGENT_BROWSER_EXECUTABLE_PATH = bundle.chrome;
   }
   // The gate goes last, so nothing the launcher sets can route Chrome around it; launcher arguments are kept beside its own.
-  if (!input.attach) Object.assign(env, input.launcher, agentBrowserEgressEnv({ ...env, ...input.launcher }, input.egressPort ?? 0, input.platform ?? process.platform));
+  if (!input.attach) {
+    const launch = { ...env, ...input.launcher };
+    // A kept profile's disk cache would otherwise grow to Chrome's default of several hundred megabytes per profile.
+    if (env.AGENT_BROWSER_PROFILE) launch.AGENT_BROWSER_ARGS = [launch.AGENT_BROWSER_ARGS, PROFILE_CACHE_ARG].filter(Boolean).join("\n");
+    Object.assign(env, input.launcher, agentBrowserEgressEnv(launch, input.egressPort ?? 0, input.platform ?? process.platform));
+  }
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
 }
 
-export function setBrowserViewport(binaryPath: string, env: NodeJS.ProcessEnv, timeoutMs = 30_000): Promise<boolean> {
+export function setBrowserViewport(binaryPath: string, env: NodeJS.ProcessEnv, size: PageSize = BROWSER_VIEWPORT, timeoutMs = 30_000): Promise<boolean> {
   if (!ownsBrowserViewport(env)) return Promise.resolve(true);
   return new Promise((settle) => {
     let child: ReturnType<typeof spawn>;
-    try { child = spawn(binaryPath, [...BROWSER_VIEWPORT_ARGS, "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true }); }
+    try { child = spawn(binaryPath, [...viewportArgs(size), "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true }); }
     catch { settle(false); return; }
     let output = "";
     let settled = false;
@@ -656,7 +692,7 @@ export const BUILT_IN_BROWSER_SYSTEM_PROMPT =
 export async function clearBrowserSessionState(
   binaryPath: string,
   session: string,
-  options: { env?: NodeJS.ProcessEnv; encryptionKey?: string; timeoutMs?: number } = {},
+  options: { env?: NodeJS.ProcessEnv; encryptionKey?: string; timeoutMs?: number; dataDir?: string } = {},
 ): Promise<boolean> {
   // agent-browser's state-clear CLI ignores the daemon session and its named form drops the name before dispatch: never use it.
   if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) return false;
@@ -680,6 +716,7 @@ export async function clearBrowserSessionState(
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const candidates = bases.map((base) => new RegExp(`^${base}-candidate-[0-9]+\\.json(?:\\.enc)?$`));
     for (const name of pendingFiles) if (candidates.some((candidate) => candidate.test(name))) remove(join(pendingDirectory, name));
+    rmSync(browserProfileDirectory(session, options.dataDir), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     preparedBrowserSessions.delete(join(directory, session));
     return true;
   } catch { return false; }

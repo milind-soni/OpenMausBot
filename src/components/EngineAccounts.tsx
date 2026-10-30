@@ -10,6 +10,7 @@ import { DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { EngineCard, engineReady, providerName, type EngineCardSummary } from "./EngineLibrary";
 import { CommandRow, EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
+import { MENU_SHEET } from "./menu-recipe";
 
 /** Providers whose accounts are listed together on one card, each signed in on its own. */
 export type AccountGroup = "claude" | "chatgpt";
@@ -106,21 +107,25 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
 
   const item = "ui-menu-row w-full text-left disabled:cursor-not-allowed disabled:opacity-50";
   return (
-    <div ref={menuRef} className="relative">
+    <div ref={menuRef} className="relative flex items-center gap-1">
+      {canRemove && <button type="button" disabled={busy || usedBy > 0} onClick={() => setConfirm("remove")}
+        title={usedBy > 0 ? t("accounts.inUse", { count: String(usedBy) }) : undefined}
+        className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
+        {t("accounts.remove")}
+      </button>}
       <button type="button" onClick={() => setOpen((value) => !value)} disabled={busy} aria-haspopup="menu" aria-expanded={open}
         aria-label={t("accounts.menu", { name: instance.displayName })}
         className="flex size-8 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
         {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 text-[12.5px] shadow-2xl shadow-black/50">
+        <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
           <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
-          {canRemove && <button type="button" role="menuitem" disabled={usedBy > 0} className={cn(item, "text-danger")} onClick={() => { setOpen(false); setConfirm("remove"); }}>{t("accounts.remove")}</button>}
           {canRemove && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
         </div>
       )}
-      {error && <p role="alert" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[11.5px] text-danger shadow-lg">{error}</p>}
+      {error && <p role="alert" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[12px] text-danger shadow-lg">{error}</p>}
       <ConfirmDialog
         open={confirm === "signOut"}
         title={t("accounts.signOutTitle", { name: instance.displayName })}
@@ -226,7 +231,7 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
             ? <>
               <ClaudeSignIn instanceId={instance.instanceId} autoStart onDone={onSignInDone} />
               {instance.claudeAccount?.signInCommand && (
-                <details className="mt-2 text-[11.5px] text-ink-secondary">
+                <details className="mt-2 text-[12px] text-ink-secondary">
                   <summary className="cursor-pointer select-none hover:text-ink">{t("engineSetup.preferTerminal")}</summary>
                   <CommandRow command={instance.claudeAccount.signInCommand} actionLabel={t("engineSetup.openSignIn")} compact />
                 </details>
@@ -278,7 +283,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12.5px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
+      <button type="button" onClick={() => setOpen(true)} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
         <Plus size={14} />{label}
       </button>
     );
@@ -311,13 +316,13 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 }
 
 /** One card for a provider's accounts: who is signed in, one button for whoever is not, and one way to add another. */
-export function AccountsCard({ group, accounts, advanced }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode }) {
+export function AccountsCard({ group, accounts, advanced, bare = false }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode; bare?: boolean }) {
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const primary = accounts[0]!;
   const installed = accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
   return (
-    <EngineCard instance={primary} summary={summaryFor(group, accounts)}>
+    <EngineCard instance={primary} summary={summaryFor(group, accounts)} bare={bare}>
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
         <span className="font-medium text-ink">{t("policy.managedBy", { organization: policy.organizationName })}</span> · {policy.reason}
       </p>}

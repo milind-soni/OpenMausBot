@@ -104,11 +104,10 @@ describe("remembering exact command approvals", () => {
     }));
   });
 
-  it("never offers remembered commands on a durable confirmation", () => {
-    const result = view({ routineRequest: { version: 1, requestId: "request-1", botId: bot.id, threadId: "thread-1", createdAt: 1,
+  it("never offers a routine card from before Triggers v2 for a decision at all", () => {
+    const routine = message({ routineRequest: { version: 1, requestId: "request-1", botId: bot.id, threadId: "thread-1", createdAt: 1,
       operation: { action: "run_now", routineId: "routine-1", expectedUpdatedAt: 1 } } });
-    expect(result.html).not.toContain("Always allow");
-    expect(result.html).toContain("Confirm");
+    expect(pendingApprovals([routine])).toEqual([]);
   });
 
   it("puts the decision on the same row and Cancel turn behind the chevron", () => {
@@ -137,26 +136,31 @@ describe("remembering exact command approvals", () => {
     }
   });
 
-  it("keeps the answers flat, with a ring only for keyboard focus", () => {
+  it("keeps the answers flat and finger-sized: a quiet extra, a neutral Deny and the one primary, a ring only for keyboard focus", () => {
     const tree = PendingApprovalActions({ pending: pendingApprovals([message()])[0]!, bot, threadId: "thread-1", onCancelTurn: vi.fn(), part: "primary" });
     const classes = nodes(tree).filter((node) => node.type === "button").map((node) => String((node.props as { className?: string }).className));
     expect(classes).toHaveLength(3);
     for (const name of classes) {
       expect(name).not.toMatch(/(^|\s)(border|shadow|ring-\d)/);
       expect(name).toContain("focus-visible:ring-2");
-      expect(name).toContain("h-7");
-      expect(name).toContain("text-[13px] font-medium");
-      expect(name).toMatch(/(^|\s)bg-/);
+      expect(name).toContain("min-h-9");
+      expect(name).toContain("pointer-coarse:min-h-11");
+      expect(name).toContain("text-[14px] font-medium");
     }
-    expect(classes[0]).toContain("text-danger");
+    const [always, deny, allow] = classes;
+    expect(always).toContain("text-ink-secondary");
+    expect(always).not.toMatch(/(^|\s)bg-/);
+    expect(deny).toContain("bg-ink/[0.07]");
+    expect(deny).not.toContain("danger");
+    expect(allow).toContain("ui-button-primary");
   });
 
-  it("lines the row up on the text baseline with the command in a 28px mono pill", () => {
+  it("shows the command whole, in a quiet mono block above the answers", () => {
     const pending = pendingApprovals([message()])[0]!;
     const html = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, botName: "Scout" }));
     const row = html.slice(0, html.indexOf('id="approval-details-'));
-    expect(row).toContain("flex flex-wrap items-baseline gap-x-2");
-    expect(row).toMatch(/<code class="[^"]*font-mono text-\[12\.5px\] leading-5[^"]*pb-\[3px\] pt-\[5px\][^"]*"[^>]*><span class="truncate">git status --short<\/span><\/code>/);
-    expect(row).toMatch(/<svg[^>]*class="[^"]*self-center[^"]*"/);
+    expect(row).toContain("Scout wants to run a command");
+    expect(row).toMatch(/<div dir="auto"[^>]*class="[^"]*font-mono[^"]*"[^>]*>git status --short<\/div>/);
+    expect(row).not.toContain("<pre");
   });
 });

@@ -1,190 +1,132 @@
-// Dev-only gallery of the welcome flow's beats, served at /onboarding-preview.html; not in the packaged app.
-import { StrictMode, useEffect, useState } from "react";
-import type { CloudOffer } from "../electron/cloud-home.mjs";
+// Dev-only gallery of the first run's two screens, served at /onboarding-preview.html; not in the packaged app.
+// It answers the app's own requests from a fixture, so it needs no server and never touches one.
+import { Component, StrictMode, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
 import { Select } from "@/components/Select";
-import type { MausMotion } from "@/lib/mascot";
-import { type BeatId, beatsFor } from "@/lib/onboarding";
-import type { SetupImportClient } from "@/lib/setup-import";
+import { EMPTY_ONBOARDING, type BeatId } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
-import { StoreProvider, type Bot } from "@/state/store";
-import type { SetupDetection, SetupImportResult } from "../shared/setup-import";
+import { StoreProvider } from "@/state/store";
 import "./styles.css";
 
-const PREVIEW_BOT = {
-  id: "preview-bot",
-  name: "Maus",
-  color: "green",
-  soul: "",
-} as unknown as Bot;
-
-const BEATS = beatsFor({ dictation: true, reel: true, setupImport: true, cloud: true });
-
-/** The Cloud beat's stand-in for the Admin's offer (the app reads its own). */
-const PREVIEW_CLOUD_OFFER: CloudOffer = { recommended: "pro", creditUsd: 5, reminderDays: 1, refundDays: 14, plans: [
-  { tier: "personal", label: "Personal", amount: 2900, trialDays: 3 }, { tier: "pro", label: "Pro", amount: 4900, trialDays: 3 },
-  { tier: "max", label: "Max", amount: 9900, trialDays: 3 }] };
-
-// A fixture: the preview never looks at this computer's own skills or MCP servers.
-const PREVIEW_DETECTION: SetupDetection = {
-  skills: Array.from({ length: 30 }, (_, i) => ({ name: `skill-${i + 1}`, source: "claudeCode" as const })),
-  tools: [
-    { name: "github", source: "claudeCode" },
-    { name: "linear", source: "claudeCode" },
-    { name: "notion", source: "cursor" },
-    { name: "figma", source: "cursor" },
-  ],
-};
-
-/** ?import=notes answers with something left out; ?import=fail fails. */
-function previewImport(mode: string | null): SetupImportClient {
-  return {
-    detect: async () => PREVIEW_DETECTION,
-    apply: async (request) => {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      if (mode === "fail") throw new Error("fixture failure");
-      const notes = mode === "notes";
-      const result: SetupImportResult = {
-        ...(request.skills ? { skills: { added: PREVIEW_DETECTION.skills.slice(notes ? 1 : 0).map((skill) => skill.name), present: [], skipped: notes ? [{ name: "skill-1", reason: "conflict" as const }] : [], filesLeftOut: notes ? 2 : 0, review: notes ? ["skill-2"] : [] } } : {}),
-        ...(request.tools ? { tools: { added: ["github", "linear", "notion", "figma"], present: [], skipped: [] } } : {}),
-      };
-      return result;
-    },
-  };
-}
-
-/** ?beat=engines&skin=linen&reduced=1&all=1 opens any state directly; ?w=390&h=760 sizes the stage like a narrow window. */
+/** ?screen=chief&ai=0&bots=3&skin=daylight&reduced=1 opens any state directly; ?w=1338&h=870 sizes the stage. */
 function fromUrl() {
   const params = new URLSearchParams(location.search);
-  const beat = params.get("beat") as BeatId | null;
   const skin = params.get("skin") as SkinId | null;
   return {
-    beat: beat && BEATS.includes(beat) ? beat : ("hello" as BeatId),
+    screen: (params.get("screen") === "chief" ? "chief" : "meet") as BeatId,
     skin: skin && SKINS.some((s) => s.id === skin) ? skin : ("midnight" as SkinId),
+    ai: params.get("ai") !== "0",
+    bots: Math.max(0, Math.min(20, Number(params.get("bots")) || 0)),
     reduced: params.get("reduced") === "1",
-    all: params.get("all") === "1",
-    entrance: (params.get("entrance") ?? "arrive") as Exclude<MausMotion, "none">,
-    importMode: params.get("import"),
-    size: { width: Number(params.get("w")) || 1100, height: Number(params.get("h")) || 720 },
+    size: { width: Number(params.get("w")) || 1338, height: Number(params.get("h")) || 870 },
   };
 }
 
-function Stage({ skin, beat, run, scale = 1, entrance, importMode = null }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none">; importMode?: string | null }) {
-  const { width, height } = fromUrl().size;
-  return (
-    <div
-      data-skin={skin}
-      className="relative overflow-hidden rounded-xl border border-hairline/40 bg-app"
-      style={{ width: width * scale, height: height * scale }}
-    >
-      <div style={{ width, height, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-        <WelcomeFlow
-          key={`${skin}-${beat}-${run}`}
-          embedded
-          dictation
-          entrance={entrance}
-          initialBeat={beat}
-          cloudOffer={PREVIEW_CLOUD_OFFER}
-          bot={PREVIEW_BOT}
-          onDone={() => {}}
-          setupImport={{ client: previewImport(importMode), detection: PREVIEW_DETECTION }}
-        />
-      </div>
-    </div>
-  );
+const NAMES = ["Research", "Inbox", "Writer", "Scout", "Ledger", "Atlas", "Pixel", "Harbor", "Juniper", "Quill"];
+const COLORS = ["blue", "orange", "purple", "teal", "pink", "green", "red", "cyan", "yellow", "coral"] as const;
+
+function bot(id: string, name: string, color: string, extra: Record<string, unknown> = {}) {
+  return {
+    id, threadId: `${id}-thread`, name, title: "", description: "", notifications: true, color, unread: false, createdAt: 1,
+    modelSelection: { instanceId: "claude", model: "sonnet" }, messages: [], tasks: [{ threadId: `${id}-thread`, title: "", createdAt: 1 }], ...extra,
+  };
+}
+
+function fixture(url: string, ai: boolean, bots: number): unknown {
+  const path = new URL(url, location.href).pathname;
+  if (path === "/api/bots") {
+    return { bots: [
+      bot("maus", "MausBot", "chrome", { defaultBot: {}, chiefOfStaff: true }),
+      ...Array.from({ length: bots }, (_, i) => bot(`bot-${i}`, NAMES[i % NAMES.length]!, COLORS[i % COLORS.length]!, { title: i % 3 === 0 ? "Finds and summarises" : "" })),
+    ], groups: [], sections: [] };
+  }
+  if (path === "/api/instances") {
+    return { instances: [{
+      instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", install: { docsUrl: "https://docs.anthropic.com" },
+      authentication: { method: "paste-code" }, capabilities: { agentsMcp: true },
+      snapshot: { state: "available", authenticated: ai }, models: { default: "sonnet", options: [] },
+    }, {
+      instanceId: "codex", driverKind: "codex", displayName: "Codex", install: { docsUrl: "https://example.test" },
+      snapshot: { state: "unavailable", authenticated: false }, models: { default: "m", options: [] },
+    }] };
+  }
+  if (path === "/api/config") return { onboarding: EMPTY_ONBOARDING, profile: { name: "", email: "", aboutMe: "" } };
+  if (path === "/api/auth/session") return { kind: "local" };
+  if (path === "/api/routines") return { routines: [], runs: [] };
+  if (path === "/api/notifications") return { notifications: [] };
+  if (path === "/api/webhooks") return { webhooks: [], attempts: [], ingress: null };
+  if (path === "/api/phones") return { phones: [] };
+  if (path === "/api/connectors/connected") return { services: {} };
+  if (path === "/api/connectors/catalog") return { cards: [] };
+  return {};
+}
+
+function answerFromFixture(ai: boolean, bots: number) {
+  const real = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!new URL(url, location.href).pathname.startsWith("/api/")) return real(input, init);
+    return new Response(JSON.stringify(fixture(url, ai, bots)), { status: 200, headers: { "content-type": "application/json" } });
+  };
 }
 
 function Preview() {
   const initial = fromUrl();
   const [skin, setSkin] = useState<SkinId>(initial.skin);
-  const [beat, setBeat] = useState<BeatId>(initial.beat);
-  const [reduced, setReduced] = useState(initial.reduced);
-  const [all, setAll] = useState(initial.all);
+  const [screen, setScreen] = useState<BeatId>(initial.screen);
   const [run, setRun] = useState(0);
-
   useEffect(() => {
-    document.documentElement.dataset.reducedMotion = reduced ? "true" : "false";
-  }, [reduced]);
-
-  // ?debug=1 logs what the guide's face was drawn as, for headless runs.
-  useEffect(() => {
-    if (!new URLSearchParams(location.search).has("debug")) return;
-    const timer = setTimeout(() => {
-      const paths = document.querySelectorAll<SVGPathElement>(".welcome-maus svg path");
-      paths.forEach((el, i) => {
-        console.log(`[maus-debug] path ${i} d=${(el.getAttribute("d") ?? "").slice(0, 60)} transform=${el.getAttribute("transform") ?? ""} opacity=${el.style.opacity}`);
-      });
-      const groups = document.querySelectorAll<SVGGElement>(".welcome-maus svg g[transform]");
-      groups.forEach((el, i) => console.log(`[maus-debug] g ${i} transform=${el.getAttribute("transform")}`));
-    }, 3500);
-    return () => clearTimeout(timer);
-  }, []);
-
+    document.documentElement.dataset.reducedMotion = initial.reduced ? "true" : "false";
+    document.documentElement.dataset.skin = skin;
+  }, [initial.reduced, skin]);
+  const { width, height } = initial.size;
   return (
-    <div data-skin="midnight" className="min-h-screen bg-app p-6 text-ink">
-      <header className="mb-5 flex flex-wrap items-center gap-3">
-        <h1 className="mr-2 text-[18px] font-semibold">Welcome flow</h1>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          Beat
-          <Select size="sm" value={beat} onChange={(e) => setBeat(e.target.value as BeatId)}>
-            {BEATS.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
+    <div className="min-h-screen bg-app p-6 text-ink">
+      <header className="mb-5 flex flex-wrap items-center gap-3 text-[13px] text-ink-secondary">
+        <h1 className="mr-2 text-[18px] font-semibold text-ink">First run</h1>
+        <label className="flex items-center gap-1.5">Screen
+          <Select size="sm" value={screen} onChange={(e) => { setScreen(e.target.value as BeatId); setRun((r) => r + 1); }}>
+            <option value="meet">Meet</option>
+            <option value="chief">Chief of Staff</option>
           </Select>
         </label>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          Skin
-          <Select size="sm" value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} disabled={all}>
-            {SKINS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
+        <label className="flex items-center gap-1.5">Skin
+          <Select size="sm" value={skin} onChange={(e) => setSkin(e.target.value as SkinId)}>
+            {SKINS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
         </label>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> All skins
-        </label>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          <input type="checkbox" checked={reduced} onChange={(e) => setReduced(e.target.checked)} /> Reduced motion
-        </label>
-        <button
-          onClick={() => setRun((r) => r + 1)}
-          className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
-        >
-          Replay entrance
-        </button>
-        <span className="ml-auto text-[12px] text-ink-secondary">
-          Use Back / Continue inside the card to walk the real transitions.
-        </span>
+        <button onClick={() => setRun((r) => r + 1)} className="rounded-lg bg-raised px-3 py-1.5 text-ink hover:bg-raised-hover">Replay</button>
+        <span className="ml-auto">?ai=0 for no AI, ?bots=3 for bots to choose from</span>
       </header>
-
-      {all ? (
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
-          {SKINS.map((s) => (
-            <div key={s.id} className="flex flex-col gap-1.5">
-              <div className="text-[12px] text-ink-secondary">{s.name}</div>
-              <Stage skin={s.id} beat={beat} run={run} scale={0.42} entrance={initial.entrance} importMode={initial.importMode} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Stage skin={skin} beat={beat} run={run} entrance={initial.entrance} importMode={initial.importMode} />
-      )}
+      <div className="relative overflow-hidden rounded-xl border border-hairline/40 bg-app" style={{ width, height }}>
+        <WelcomeFlow key={`${screen}-${run}`} embedded initialBeat={screen} onDone={() => setRun((r) => r + 1)} />
+      </div>
     </div>
   );
 }
 
+class Crash extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    return this.state.error ? <pre className="whitespace-pre-wrap p-6 text-[12px] text-danger">{this.state.error.stack}</pre> : this.props.children;
+  }
+}
+
+const { ai, bots } = fromUrl();
+answerFromFixture(ai, bots);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <DesktopCapabilitiesProvider>
-      <StoreProvider>
-        <Preview />
-      </StoreProvider>
-    </DesktopCapabilitiesProvider>
+    <Crash>
+      <DesktopCapabilitiesProvider>
+        <StoreProvider>
+          <Preview />
+        </StoreProvider>
+      </DesktopCapabilitiesProvider>
+    </Crash>
   </StrictMode>,
 );

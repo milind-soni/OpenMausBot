@@ -21,12 +21,14 @@ export interface FailedTurnTool {
   claudeUpdate?: boolean;
   /** the place this turn could not use, and where that place came from */
   place?: PlaceRow;
+  /** epoch ms when the usage limit that stopped this turn resets, when the engine said */
+  limitResetsAt?: number;
 }
 
 /** The activity row a failed turn is stored as. */
 export function failedTurnTool(
   cause: string,
-  flags: { setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; place?: PlaceRow } = {},
+  flags: { setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number } = {},
 ): FailedTurnTool {
   const words = cause.length > FAILED_TURN_MAX_CHARS ? `${cause.slice(0, FAILED_TURN_MAX_CHARS - 1)}…` : cause;
   return {
@@ -36,6 +38,7 @@ export function failedTurnTool(
     ...(flags.terminal ? { terminal: true } : {}),
     ...(flags.claudeUpdate ? { claudeUpdate: true } : {}),
     ...(flags.place ? { place: flags.place } : {}),
+    ...(flags.limitResetsAt ? { limitResetsAt: flags.limitResetsAt } : {}),
   };
 }
 

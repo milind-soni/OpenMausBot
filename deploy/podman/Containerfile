@@ -9,6 +9,8 @@ COPY apps/docs/package.json ./apps/docs/package.json
 COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.json
 RUN pnpm install --frozen-lockfile
 COPY . .
+# The native modules the bundle cannot hold (DuckDB, resvg, 1Password), staged for the runtime stage.
+RUN node scripts/prepare-duckdb.mjs
 RUN pnpm build:server && pnpm exec vite build
 
 FROM node:24.15.0-bookworm-slim
@@ -25,11 +27,13 @@ RUN curl -fsSL https://github.com/podman-container-tools/podman/releases/downloa
     && install -m 0755 /tmp/bin/podman-remote-static-linux_amd64 /usr/local/bin/podman \
     && rm /tmp/podman.tgz /tmp/bin/podman-remote-static-linux_amd64
 WORKDIR /app
+COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 ENV HOME=/data \
+    OMB_DUCKDB_DIR=/app/duckdb \
     OMB_DATA_DIR=/data/.openmausbot \
     OMB_STATIC_DIR=/app/dist \
     OMB_PORT=8799 \

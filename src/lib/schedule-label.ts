@@ -1,6 +1,7 @@
 import { atLocalTime } from "@/lib/routine-calendar";
 import type { RoutineSchedule } from "@/lib/routines";
 import { cronScheduleLabel } from "../../shared/cron-label";
+import { limitResetWhen } from "@/lib/limit-resets";
 
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -53,6 +54,7 @@ function intervalRestrictions(schedule: Extract<RoutineSchedule, { type: "interv
 
 export function scheduleLabel(schedule: RoutineSchedule | { type: "once"; at: number } | { type: "daily"; time: string; weekdays: number[] }): string {
   if (schedule.type === "cron") return cronScheduleLabel(schedule);
+  if (schedule.type === "limit_reset") return limitResetWhen(schedule);
   if (schedule.type === "once") return `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
   if (schedule.type === "interval") {
     return [intervalLabel(schedule.everyMinutes), ...intervalRestrictions(schedule)].join(" · ");
@@ -70,6 +72,7 @@ export function scheduleLabel(schedule: RoutineSchedule | { type: "once"; at: nu
 
 export function scheduleSentence(schedule: RoutineSchedule): string {
   if (schedule.type === "cron") return cronScheduleLabel(schedule);
+  if (schedule.type === "limit_reset") return limitResetWhen(schedule).toLocaleLowerCase();
   if (schedule.type === "interval") {
     const label = intervalLabel(schedule.everyMinutes);
     const lowercase = label.replace(/^Every /, "every ");

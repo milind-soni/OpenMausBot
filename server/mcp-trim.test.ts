@@ -151,3 +151,20 @@ describe("trimResultText", () => {
     expect(trimResultText({ text: "ok" }).text).toBe("ok");
   });
 });
+
+describe("trimResultText with a held result", () => {
+  it("points the model at query_result for the rest instead of at a file or a narrower call", () => {
+    const text = JSON.stringify({ nextOffset: "1", products: Array.from({ length: 200 }, (_, i) => product(i)) });
+    const out = trimResultText({ text, spillPath: "/data/tool-results/7.json", toolName: "search_products", held: { handle: "r3", shape: "object{nextOffset, products}; products: 200 items{id, name, price, rating, description, images}" } });
+    expect(out.trimmed).toBe(true);
+    expect(out.text.length).toBeLessThan(DEFAULT_RESULT_BUDGET);
+    expect(out.text.startsWith("⚠️ SHAPED by OpenMausBot:")).toBe(true);
+    expect(out.text).toContain('query_result {"result":"r3","query":');
+    expect(out.text).toContain("200 items{id, name, price");
+    expect(out.text).not.toContain("/data/tool-results");
+    expect(out.text).not.toContain("Narrow the call");
+    // the kept records are still whole
+    const kept = JSON.parse(out.text.slice(out.text.indexOf("\n\n") + 2, out.text.lastIndexOf("\n\n⚠️")));
+    expect(kept.products[0]).toEqual(product(0));
+  });
+});

@@ -69,6 +69,11 @@ describe("fastModelFor", () => {
     expect(fastModelFor({ default: "x", options: [{ id: "x", label: "X", provider: "openai" }, { id: "y-flash", label: "Y", provider: "google" }] }, "x")).toBeUndefined();
   });
 
+  it("skips a quick model the engine refused before", () => {
+    expect(fastModelFor(mixed, "gpt-5.4", new Set(["gpt-5.4-mini"]))).toBeUndefined();
+    expect(fastModelFor(claude, "claude-opus-5", new Set(["gpt-5.4-mini"]))).toBe("claude-haiku-4-5");
+  });
+
   it("keeps a model that is already fast, and gives up without a catalog", () => {
     expect(fastModelFor(claude, "claude-haiku-4-5")).toBe("claude-haiku-4-5");
     expect(fastModelFor(undefined, "claude-opus-5")).toBeUndefined();
@@ -129,6 +134,16 @@ describe("routeDirectTurn", () => {
     const worked = [{ role: "user", kind: "text" }, { role: "bot", kind: "activity" }, { role: "bot", kind: "text" }];
     expect(routeDirectTurn(bot, {}, quiet, message, instance, false).quickModel).toBe("Claude Haiku 4.5");
     expect(routeDirectTurn(bot, {}, worked, message, instance, false).tier).toBe("complex");
+  });
+
+  it("never moves a short line when the sign-in can refuse a catalog model, as Codex on a ChatGPT account does", () => {
+    const codex = { models: mixed, adapter: { capabilities: { effortLevels: ["low", "high"] as const } } };
+    const own = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-5.4", effort: "high" as const } };
+    const hi = { text: "hey, how are you?", images: [] };
+    expect(routeDirectTurn(own, {}, [], hi, codex, false).model).toBe("gpt-5.4-mini");
+    expect(routeDirectTurn(own, {}, [], hi, { ...codex, quickModelsUsable: () => false }, false))
+      .toEqual({ tier: "simple", model: "gpt-5.4", effort: "low", variant: undefined });
+    expect(routeDirectTurn(own, {}, [], hi, codex, false, new Set(["gpt-5.4-mini"])).quickModel).toBeUndefined();
   });
 
   it("leaves a thread with its own model and an automated turn alone", () => {

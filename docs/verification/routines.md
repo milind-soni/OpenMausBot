@@ -45,10 +45,10 @@ cloud VM, or external service.
 
 The launcher prepares these cases:
 
-- **Pepper** receives a pending **Agent-created inbox check** confirmation card.
-  The real `propose_routine` MCP handler creates the card using credentials
-  captured from a running fixture turn. The fake model does not decide to call
-  the tool, and the launcher does not confirm the card.
+- **Pepper** gets an **Agent-created inbox check** trigger, applied at once with
+  its live trigger card. The real `trigger` MCP handler (`action: "create"`) creates it using
+  credentials captured from a running fixture turn. The fake model does not
+  decide to call the tool.
 - **Manual inbox check** is created through the routine API and run twice for
   Pepper. Both fresh executions report into **Fleet health reports**, inside
   the **OMB management** folder. Its next scheduled occurrence is an hour later.
@@ -66,10 +66,12 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
 1. In Pepper's source chat, inspect the pending routine card. Confirm it once;
    the card must become settled and exactly one matching routine must appear.
    Reloading must preserve both the routine and the card's settled state.
-   Open that routine and run it. Its lifecycle receipt lands in Pepper's main
-   thread (the open conversation the person last wrote in, here the source
-   chat), not a new "· Results" thread, and leads to the isolated execution
-   thread.
+   Open that routine and run it. Its report lands in Pepper's main thread (the
+   open conversation the person last wrote in, here the source chat), not a new
+   "· Results" thread, as one Pepper message captioned with the routine's name,
+   and the caption's **See run** leads to the isolated execution thread. See
+   [automation reports](automation-reports.md) for quiet runs, questions and
+   the concurrency rule.
 2. Open **Automations → Schedule**. Toggle **List / Calendar**. The list must
    show paused and finished schedules as well as active ones; changing views
    must not change a routine or start a run. Filter by Pepper and Miso and
@@ -101,8 +103,8 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
    reports** thread, not separate sidebar entries for the two executions.
    Right-click the folder (or use its actions menu) → **Mark folder as read**.
    Its unread dots clear without selecting a conversation or resolving any
-   pending approvals. Open the results thread: both dated reports remain.
-9. Use a report's **Open run** to inspect its fresh execution transcript, then
+   pending approvals. Open the results thread: both captioned reports remain.
+9. Use a report's **See run** to inspect its fresh execution transcript, then
    **Back to results**. **Run logs** retains the full execution history.
    A user follow-up sent in a completed execution makes it an ordinary visible
    thread; marking the older run seen must not hide that conversation again.
@@ -189,7 +191,7 @@ accumulated. Manual runs and webhook deliveries remain independent. Pausing
 still cancels queued work. The cron renderer test changes this option, saves
 it, opens the editor again and switches it back.
 
-The List view and `list_routines` expose saved skipped-occurrence counts and
+The List view and `trigger_info` expose saved skipped-occurrence counts and
 recent consecutive failures. Skips count occurrences observed by the scheduler
 while busy, not every interval elapsed while offline. Failure streaks are
 derived from retained terminal receipts (up to the existing history limit),
@@ -247,7 +249,7 @@ that same isolated server and checks that redelivery returns the original run ID
 with one execution. Its retained JSON evidence includes the receipt and transcript.
 
 The results integration fixture additionally proves fresh provider contexts,
-saved destination snapshots, dated result cards, approval links, deleted-thread
-fallback, and continued user conversations staying visible. Native decoding and
+saved destination snapshots, captioned report lines, copied approval cards,
+deleted-thread fallback, and continued user conversations staying visible. Native decoding and
 thread-list tests retain hidden execution records for direct navigation and
 approvals while omitting them from ordinary iOS/Android thread pickers.

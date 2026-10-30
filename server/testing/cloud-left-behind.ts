@@ -1,11 +1,15 @@
 // Fixture: what a guest left on a Cloud home before it was personal, as the server records it
-// (thread-starters.json, lending-routines.json). The server reads both at start, so write them while it is stopped.
+// (thread-starters.json, lending-routines.json, and the guest's revoked key in cloud-owner.json, so the Cloud has had
+// someone besides its owner). The server reads them at start, so write them while it is stopped.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The key of nobody at all; must match server/index.ts CLOUD_NOBODY_KEY. */
 export const CLOUD_NOBODY_KEY = `p_${createHash("sha256").update("cloud-nobody").digest("base64url").slice(0, 22)}`;
+
+/** The guest whose session the Cloud revoked. */
+export const CLOUD_GUEST_KEY = `p_${createHash("sha256").update("a guest who left this behind").digest("base64url").slice(0, 22)}`;
 
 export function markLeftBehind(dataDir: string, of: { threadIds?: readonly string[]; routineIds?: readonly string[] }): void {
   const read = (name: string) => {
@@ -25,5 +29,9 @@ export function markLeftBehind(dataDir: string, of: { threadIds?: readonly strin
       authors.writers[routineId] = CLOUD_NOBODY_KEY;
     }
     writeFileSync(join(dataDir, "lending-routines.json"), JSON.stringify(authors), { mode: 0o600 });
+  }
+  const owner = read("cloud-owner.json");
+  if (owner && !owner.revokedKeys.includes(CLOUD_GUEST_KEY)) {
+    writeFileSync(join(dataDir, "cloud-owner.json"), JSON.stringify({ ...owner, revokedKeys: [...owner.revokedKeys, CLOUD_GUEST_KEY] }), { mode: 0o600 });
   }
 }

@@ -4,16 +4,18 @@ import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Rebuilds scripts/testing/vitest-shard-weights.json, the per-file seconds
-// scripts/testing/duration-sequencer.ts balances the CI shards with:
+// scripts/testing/duration-sequencer.ts balances the CI shards with, one table
+// per platform:
 //
 //   node scripts/testing/update-shard-weights.mjs --run <ci.yml run id> [--run <id> ...]
-//   node scripts/testing/update-shard-weights.mjs <vitest log or --reporter=json file> ...
+//   node scripts/testing/update-shard-weights.mjs [--platform linux|win32|darwin] <vitest log or --reporter=json file> ...
 //
-// --run reads a finished run's Windows vitest logs through `gh`: Windows is
-// the slowest platform, so its seconds decide the split. A file's weight is
-// its median across the inputs in whole seconds, at least one. Every file over
-// five seconds is kept, and every e2e file, so that only a genuinely new e2e
-// file falls back to the sequencer's e2e default. Deleted files are dropped.
+// --run reads a finished run's vitest logs through `gh`, each OS's shards for
+// that OS's table. A file's weight is its median across the inputs in whole
+// seconds, at least one. Every file over five seconds is kept, and every e2e
+// file, so that only a genuinely new e2e file falls back to the sequencer's e2e
+// default. Deleted files are dropped, and a platform no input sampled keeps
+// its table.
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const OUTPUT = "scripts/testing/vitest-shard-weights.json";
 const HEAVY_SECONDS = 5;
@@ -56,27 +58,52 @@ export function buildWeights(samples, exists) {
   return weights;
 }
 
-// One sample per run: its shards together cover every file once.
-function windowsRun(id) {
+export const RUNNER_PLATFORMS = { "ubuntu-latest": "linux", "windows-latest": "win32", "macos-latest": "darwin" };
+const VITEST_JOB = /^vitest \((ubuntu-latest|windows-latest|macos-latest), shard \d+\/\d+\)$/;
+
+/** A run's vitest jobs by platform: one sample per platform, its shards together covering that platform's files once. */
+function runSamples(id) {
   const gh = (...args) => execFileSync("gh", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  const shards = JSON.parse(gh("run", "view", id, "--json", "jobs")).jobs
-    .filter((job) => /^vitest \(windows-latest, shard \d+\/\d+\)$/.test(job.name));
-  if (shards.length === 0) throw new Error(`run ${id} has no Windows vitest jobs`);
-  return new Map(shards.flatMap((job) => [...parseVitestLog(gh("run", "view", id, "--log", "--job", String(job.databaseId)))]));
+  const samples = new Map();
+  for (const job of JSON.parse(gh("run", "view", id, "--json", "jobs")).jobs) {
+    const runner = VITEST_JOB.exec(job.name)?.[1];
+    if (!runner) continue;
+    const platform = RUNNER_PLATFORMS[runner];
+    const sample = samples.get(platform) ?? new Map();
+    for (const [file, seconds] of parseVitestLog(gh("run", "view", id, "--log", "--job", String(job.databaseId)))) sample.set(file, seconds);
+    samples.set(platform, sample);
+  }
+  if (samples.size === 0) throw new Error(`run ${id} has no vitest jobs`);
+  return samples;
+}
+
+/** The weights file with each sampled platform's table rebuilt and the others kept. */
+export function mergePlatformWeights(existing, samplesByPlatform, exists) {
+  const merged = Object.fromEntries(Object.entries(existing).filter(([platform]) => Object.values(RUNNER_PLATFORMS).includes(platform)));
+  for (const [platform, samples] of Object.entries(samplesByPlatform)) {
+    if (samples.length > 0) merged[platform] = buildWeights(samples, exists);
+  }
+  return Object.fromEntries(Object.keys(merged).sort().map((platform) => [platform, merged[platform]]));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
-  const samples = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--run") samples.push(windowsRun(args[++i]));
-    else samples.push((args[i].endsWith(".json") ? parseVitestJson : parseVitestLog)(readFileSync(args[i], "utf8")));
-  }
-  if (samples.length === 0) {
-    console.error("usage: update-shard-weights.mjs --run <ci run id> ... | <vitest log or json report> ...");
+  const usage = () => {
+    console.error("usage: update-shard-weights.mjs --run <ci run id> ... | [--platform linux|win32|darwin] <vitest log or json report> ...");
     process.exit(2);
+  };
+  const args = process.argv.slice(2);
+  const samples = { linux: [], win32: [], darwin: [] };
+  let platform = Object.hasOwn(samples, process.platform) ? process.platform : "linux";
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--run") for (const [sampled, sample] of runSamples(args[++i])) samples[sampled].push(sample);
+    else if (args[i] === "--platform") platform = Object.hasOwn(samples, args[++i]) ? args[i] : usage();
+    else samples[platform].push((args[i].endsWith(".json") ? parseVitestJson : parseVitestLog)(readFileSync(args[i], "utf8")));
   }
-  const weights = buildWeights(samples, (file) => existsSync(resolve(ROOT, file)));
+  if (Object.values(samples).every((list) => list.length === 0)) usage();
+  const existing = existsSync(resolve(ROOT, OUTPUT)) ? JSON.parse(readFileSync(resolve(ROOT, OUTPUT), "utf8")) : {};
+  const weights = mergePlatformWeights(existing, samples, (file) => existsSync(resolve(ROOT, file)));
   writeFileSync(resolve(ROOT, OUTPUT), `${JSON.stringify(weights, null, 2)}\n`);
-  console.log(`${OUTPUT}: ${Object.keys(weights).length} files from ${samples.length} samples`);
+  for (const [name, list] of Object.entries(samples)) {
+    if (list.length > 0) console.log(`${OUTPUT}: ${name} ${Object.keys(weights[name]).length} files from ${list.length} samples`);
+  }
 }

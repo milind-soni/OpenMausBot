@@ -79,7 +79,7 @@ class FakeElement {
   querySelector = vi.fn((_selector: string): FakeElement | null => null);
   querySelectorAll = vi.fn((): FakeElement[] => []);
 }
-const VOICE_PICKER = "select[data-voice-picker]:not([disabled])";
+const VOICE_PICKER = "[data-voice-picker]:not([disabled])";
 const FIRST_FIELD = "input:not([disabled]), select:not([disabled])";
 function paneWith(fields: { voicePicker?: FakeElement; firstField?: FakeElement }) {
   const pane = new FakeElement();
@@ -109,7 +109,7 @@ describe("voice set-up pop-up", () => {
     expect(html).toContain("glass-surface");
     expect(html).toMatch(/role="dialog" aria-modal="true"/);
     expect(html).toContain("Give Pepper a voice");
-    expect(html).toContain("Choose an engine, add its key if it needs one, then pick a voice.");
+    expect(html).toContain("Choose a voice provider, add its key if it needs one, then pick a voice.");
     expect(html).toContain('data-voice-settings="pepper"');
     expect(html).toContain('aria-label="Close voice set-up"');
     expect(html).toContain("All voice settings");
@@ -224,7 +224,7 @@ describe("voice set-up pop-up", () => {
     const actual = await vi.importActual<typeof import("./VoiceSettings")>("./VoiceSettings");
     const card = () => renderToStaticMarkup(createElement(actual.VoiceSettings, { bot: pepper, onPatch: () => {} }));
     const key = 'aria-label="ElevenLabs key"';
-    const pickerTag = (html: string) => html.match(/<select\b[^>]*>/g)?.find((tag) => tag.includes("data-voice-picker"));
+    const pickerTag = (html: string) => html.match(/<\w+\b[^>]*>/g)?.find((tag) => tag.includes("data-voice-picker"));
 
     fixture.config = { tts: { configured: false, provider: "elevenlabs" } };
     const needsKey = card();
@@ -282,7 +282,7 @@ describe("voice set-up pop-up", () => {
   it("says the voice is ready and starts the call from there", () => {
     const view = render({ ready: true, callName: "Standup" });
     expect(view.html).toContain('role="status"');
-    expect(view.html).toContain("Voice is ready — you can call Standup now.");
+    expect(view.html).toContain("Voice is ready. You can call Standup now.");
     expect(view.html).toContain('data-state="happy"');
     click(byAttribute(view, "data-voice-setup-start"));
     expect(view.props.onStartCall).toHaveBeenCalledOnce();

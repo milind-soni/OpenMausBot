@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_MANAGED_COMPOSIO_BROKER_URL,
   ensureManagedComposioCredentials,
   managedComposioAccess,
+  managedComposioBrokerUrl,
   managedComposioChildEnvironment,
   normalizeManagedComposioBrokerUrl,
 } from "./managed-composio.mjs";
@@ -16,6 +18,15 @@ describe("managed Composio desktop registration", () => {
     });
     expect(managedComposioAccess("https://broker.example", {})).toBeNull();
     expect(managedComposioAccess("", { composioBrokerToken: TOKEN })).toBeNull();
+  });
+
+  it("uses the default service only in a shipped build (the packaged app, a Cloud home's image); an explicit URL wins", () => {
+    expect(DEFAULT_MANAGED_COMPOSIO_BROKER_URL).toMatch(/^https:\/\//);
+    expect(managedComposioBrokerUrl(undefined, true)).toBe(DEFAULT_MANAGED_COMPOSIO_BROKER_URL);
+    expect(managedComposioBrokerUrl("  ", true)).toBe(DEFAULT_MANAGED_COMPOSIO_BROKER_URL);
+    expect(managedComposioBrokerUrl(undefined, false)).toBe("");
+    expect(managedComposioBrokerUrl(" http://127.0.0.1:8787/ ", false)).toBe("http://127.0.0.1:8787");
+    expect(managedComposioBrokerUrl("http://broker.example", true)).toBe("");
   });
 
   it("accepts HTTPS and loopback development brokers but rejects insecure remote URLs", async () => {

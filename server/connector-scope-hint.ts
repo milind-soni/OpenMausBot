@@ -81,25 +81,36 @@ export function annotateFailedCall(
   return true;
 }
 
-/** Anything else, an unreadable body included, is returned byte for byte. */
-export function withScopeHint(bytes: Uint8Array, contentType: string, slugs: readonly string[]): Uint8Array {
+/** Adds `hint` to each failed tool result in an MCP answer that matches `pattern`. Anything else, an unreadable body
+ * included, is returned byte for byte. */
+export function withFailedCallHint(
+  bytes: Uint8Array,
+  contentType: string,
+  pattern: RegExp,
+  hint: (slugs: readonly string[]) => string,
+  slugs: readonly string[],
+): Uint8Array {
   const text = new TextDecoder().decode(bytes);
-  if (!SCOPE_ERROR.test(text)) return bytes;
+  if (!pattern.test(text)) return bytes;
   try {
     if (/text\/event-stream/i.test(contentType)) {
       let changed = false;
       const lines = text.split("\n").map((line) => {
         if (!line.startsWith("data:")) return line;
         const frame = JSON.parse(line.slice(5));
-        if (!annotateFailedCall(frame, SCOPE_ERROR, scopeHint, slugs)) return line;
+        if (!annotateFailedCall(frame, pattern, hint, slugs)) return line;
         changed = true;
         return `data: ${JSON.stringify(frame)}`;
       });
       return changed ? new TextEncoder().encode(lines.join("\n")) : bytes;
     }
     const frame = JSON.parse(text);
-    return annotateFailedCall(frame, SCOPE_ERROR, scopeHint, slugs) ? new TextEncoder().encode(JSON.stringify(frame)) : bytes;
+    return annotateFailedCall(frame, pattern, hint, slugs) ? new TextEncoder().encode(JSON.stringify(frame)) : bytes;
   } catch {
     return bytes;
   }
+}
+
+export function withScopeHint(bytes: Uint8Array, contentType: string, slugs: readonly string[]): Uint8Array {
+  return withFailedCallHint(bytes, contentType, SCOPE_ERROR, scopeHint, slugs);
 }

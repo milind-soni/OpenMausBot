@@ -395,7 +395,7 @@ describe("whole-team export (package v2)", () => {
   });
 
   it("refuses plainly when there is nothing to share, a bad version or too much", () => {
-    expect(() => createTeamPackageExport({ ...fixture(), team: "Empty" })).toThrow("Add a bot to this team before sharing it.");
+    expect(() => createTeamPackageExport({ ...fixture(), team: "Empty" })).toThrow("Add a bot to this department before sharing it.");
     expect(() => createTeamPackageExport({ ...fixture(), release: "one" })).toThrow("Use a version like 1.2.3.");
     const huge = fixture();
     huge.skillsByBot = new Map([["lead", Array.from({ length: 17 }, (_, index) => ({
@@ -488,7 +488,7 @@ describe("whole-team export (package v2)", () => {
       expect((crowded as Error).message).toBe("Morgan has more than 30 skills. Choose fewer skills and try again.");
       const conflict = refusal(new Map([["lead", [skill("pricing")]], ["scout", [conflicting]]]));
       expect(conflict).toBeInstanceOf(TeamExportError);
-      expect((conflict as Error).message).toBe('Two bots in this team have different skills named "pricing". Leave that skill out and try again.');
+      expect((conflict as Error).message).toBe('Two bots in this department have different skills named "pricing". Leave that skill out and try again.');
     });
   });
 

@@ -53,7 +53,7 @@ describe("presets in New bot", () => {
   it("says where a preset came from and what it adds, switched on only from the organization", () => {
     expect(presetSummaryLines(preset())).toEqual([
       "From Sales skills 2.0.1", "Kind and precise.", "Skills, added switched off: objection-handling",
-      "Starter notes: MEMORY.md", "Playbooks: Qualify a lead", "The model, computer, approval level and connected apps stay as set here.",
+      "Starter notes: MEMORY.md", "Playbooks: Qualify a lead", "The model, where it works, approval level and connected apps stay as set here.",
     ]);
     expect(presetSummaryLines(preset({ source: "org", publisherName: "Acme Partners", skillsEnabled: true })).slice(0, 3)).toEqual([
       "From Sales skills 2.0.1 · Acme Partners", "Kind and precise.", "Skills, added switched on: objection-handling",

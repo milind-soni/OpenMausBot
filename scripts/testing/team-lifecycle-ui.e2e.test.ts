@@ -8,7 +8,7 @@ import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { request } from "../mcp-server.ts";
 import { mountPreview, type MountedPreview } from "./preview-fixture.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { OPEN_SIDEBAR_TOOLS, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
@@ -76,9 +76,9 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     const b = (await control("new-bot", "--name", "Engineer", "--section", "Engineering") as any).bot;
 
     await click("New or share");
-    await click("Create team");
-    await type("Team name", "Delivery");
-    await click("Create team");
+    await click("Create department");
+    await type("Department name", "Delivery");
+    await click("Create department");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Delivery"');
     expect((await api("/api/bots?messages=0")).sections).toContain("Delivery");
     const teamMenu = async (name: string) => ui("eval", "--js", `(() => {
@@ -92,12 +92,12 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await ui("press", "--keys", "Escape");
     expect((await ui("eval", "--js", "document.activeElement.closest('[data-section]')?.dataset.section")).result).toBe("Delivery");
     await teamMenu("Delivery");
-    await click("Rename team");
+    await click("Rename department");
     await click("Cancel");
     expect((await ui("eval", "--js", "document.activeElement.closest('[data-section]')?.dataset.section")).result).toBe("Delivery");
     await teamMenu("Delivery");
-    await click("Rename team");
-    await type("Team name", "Dispatch");
+    await click("Rename department");
+    await type("Department name", "Dispatch");
     await click("Save name");
     await expect.poll(snapshot).toContain('button "Dispatch"');
     expect((await ui("eval", "--js", "document.querySelector('[data-section=Dispatch] button')?.getAttribute('aria-expanded')")).result).toBe("false");
@@ -106,11 +106,11 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await ui("eval", "--js", "location.reload(); true");
     await expect.poll(snapshot, { timeout: 15_000 }).toContain('button "Dispatch"');
     await teamMenu("Dispatch");
-    await click("Rename team");
-    await type("Team name", "Delivery");
+    await click("Rename department");
+    await type("Department name", "Delivery");
     await click("Save name");
     await expect.poll(snapshot).toContain('button "Delivery"');
-    await click("Tools");
+    await ui("eval", "--js", OPEN_SIDEBAR_TOOLS);
     await click("Team map");
     await manage("Delivery");
     await click("Move bots to Delivery");
@@ -121,8 +121,8 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await manage("Delivery");
     await click("Move bots to Delivery");
     await click("Researcher");
-    // Hold only the creation response: persistence and SSE remain real. The
-    // user can dismiss the nested dialog while that request is in flight.
+    // Hold only the creation response: persistence and SSE remain real, and
+    // the unsaved ticks above must survive the wait.
     await ui("eval", "--js", `(() => {
       const original = window.fetch.bind(window);
       window.fetch = async (input, init) => {
@@ -136,14 +136,11 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
       return true;
     })()`);
     await click("New Bot");
-    await expect.poll(async () => (await ui("eval", "--js", "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent.trim() === 'Create bot')?.disabled")).result).toBe(false);
-    await click("Create bot");
     let created: { id: string; name: string };
     await expect.poll(async () => {
       created = (await ui("eval", "--js", "window.createdTeamMember ?? null")).result;
       return Boolean(created?.id);
     }, { timeout: 10_000 }).toBe(true);
-    await click("Close");
     await ui("eval", "--js", "window.releaseTeamMember(); true");
     const checked = async (name: string) => (await ui("eval", "--js",
       `document.querySelector(${JSON.stringify(`[role="checkbox"][aria-label=${JSON.stringify(name)}]`)})?.getAttribute('aria-checked')`)).result;
@@ -160,16 +157,16 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
 
     await ui("eval", "--js", "location.reload(); true");
     await expect.poll(snapshot, { timeout: 15_000 }).toContain('button "Delivery"');
-    await click("Tools");
+    await ui("eval", "--js", OPEN_SIDEBAR_TOOLS);
     await click("Team map");
     await manage("Delivery");
     expect(await snapshot()).toContain("Edit Delivery shared instructions");
     // A second fixture client moves the bots out. SSE must keep the empty
     // team visible and make rename/delete available without a reload.
     await api("/api/sidebar-sections", "POST", { name: "", botIds: [a.id, b.id, created!.id] });
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Rename Delivery team");
-    await click("Rename Delivery team");
-    await type("Team name", "Launch");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Rename Delivery department");
+    await click("Rename Delivery department");
+    await type("Department name", "Launch");
     await click("Save name");
     await manage("Launch");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Edit Launch shared instructions");
@@ -177,8 +174,8 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     const screenshot = join(ROOT, ".omb-scratch", "verify-evidence", "team-lifecycle.png");
     await ui("screenshot", "--out", screenshot);
     await teamMenu("Launch");
-    await click("Delete team");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain('alertdialog "Delete Launch team?"');
+    await click("Delete department");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('alertdialog "Delete Launch department?"');
     await ui("eval", "--js", `(() => {
       const original = window.fetch.bind(window); window.teamDeleteRequests = 0;
       window.fetch = async (url, init) => {
@@ -188,7 +185,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
         }
         return original(url, init);
       };
-      const button = [...document.querySelectorAll('[role="alertdialog"] button')].find(node => node.textContent === 'Delete team');
+      const button = [...document.querySelectorAll('[role="alertdialog"] button')].find(node => node.textContent === 'Delete department');
       button.click(); button.click(); return true;
     })()`);
     await expect.poll(async () => (await ui("eval", "--js", "document.querySelector('[role=alertdialog]')?.getAttribute('aria-busy')")).result).toBe("true");
@@ -196,43 +193,43 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     expect((await ui("eval", "--js", "document.activeElement.getAttribute('role')")).result).toBe("alertdialog");
     expect((await ui("eval", "--js", "[...document.querySelectorAll('[role=alertdialog] button')].every(button => button.disabled)")).result).toBe(true);
     await ui("press", "--keys", "Escape");
-    expect(await snapshot()).toContain('alertdialog "Delete Launch team?"');
+    expect(await snapshot()).toContain('alertdialog "Delete Launch department?"');
     await ui("press", "--keys", "Tab");
     expect((await ui("eval", "--js", "document.activeElement.getAttribute('role')")).result).toBe("alertdialog");
     await ui("eval", "--js", "window.releaseTeamDelete(); true");
     await expect.poll(async () => (await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Cancel");
     await ui("press", "--keys", "Shift+Tab");
-    expect((await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Delete team");
-    await click("Delete team");
+    expect((await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Delete department");
+    await click("Delete department");
     await expect.poll(async () => (await ui("eval", "--js", "window.teamDeleteRequests")).result).toBe(2);
     await ui("eval", "--js", "window.releaseTeamDelete(); true");
     await expect.poll(async () => (await api("/api/bots?messages=0")).sections.includes("Launch")).toBe(false);
     // The server commits before the pending DELETE response reaches React.
     // Finish this UI action before the next fixture client creates a section;
     // otherwise its SSE update can race the previous response's section list.
-    await expect.poll(snapshot).not.toContain('alertdialog "Delete Launch team?"');
+    await expect.poll(snapshot).not.toContain('alertdialog "Delete Launch department?"');
 
     // Section management is available where the section lives, without
     // requiring the team map. Cancel and Escape must leave its brief intact.
     await api("/api/sidebar-sections", "POST", { name: "Sidebar empty" });
     await api("/api/section-context?section=Sidebar%20empty", "PUT", { text: "Keep this until deletion is confirmed." });
-    await click("Delete Sidebar empty section");
-    await expect.poll(snapshot).toContain('alertdialog "Delete Sidebar empty team?"');
+    await click("Delete Sidebar empty department");
+    await expect.poll(snapshot).toContain('alertdialog "Delete Sidebar empty department?"');
     expect(await focused()).toBe("Cancel");
     await ui("press", "--keys", "Shift+Tab");
-    expect(await focused()).toBe("Delete team");
+    expect(await focused()).toBe("Delete department");
     await ui("press", "--keys", "Tab");
     expect(await focused()).toBe("Cancel");
     await ui("press", "--keys", "Escape");
-    await expect.poll(focused).toBe("Delete Sidebar empty section");
+    await expect.poll(focused).toBe("Delete Sidebar empty department");
     expect((await api("/api/sidebar-sections")).sections).toContain("Sidebar empty");
     expect((await api("/api/section-context?section=Sidebar%20empty")).text).toBe("Keep this until deletion is confirmed.");
-    await click("Delete Sidebar empty section");
+    await click("Delete Sidebar empty department");
     await click("Cancel");
-    await expect.poll(focused).toBe("Delete Sidebar empty section");
+    await expect.poll(focused).toBe("Delete Sidebar empty department");
     expect((await api("/api/sidebar-sections")).sections).toContain("Sidebar empty");
-    await click("Delete Sidebar empty section");
-    await click("Delete team");
+    await click("Delete Sidebar empty department");
+    await click("Delete department");
     await expect.poll(async () => (await api("/api/sidebar-sections")).sections.includes("Sidebar empty")).toBe(false);
     await expect.poll(() => evaluate('Boolean(document.querySelector("[data-sidebar-section-id=\\"section:Sidebar empty\\"]"))')).toBe(false);
     expect((await fetch(`${info.url}/api/section-context?section=Sidebar%20empty`)).status).toBe(404);
@@ -244,13 +241,13 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     const transcript = (await control("messages", "--bot", a.id, "--limit", "10") as any).messages;
     expect(transcript.length).toBeGreaterThan(0);
     const deleteSectionByIcon = async (name: string) => {
-      await click(`Delete ${name} section`);
-      await expect.poll(snapshot).toContain(`alertdialog "Delete ${name} team?"`);
+      await click(`Delete ${name} department`);
+      await expect.poll(snapshot).toContain(`alertdialog "Delete ${name} department?"`);
       expect(await focused()).toBe("Cancel");
       expect(await evaluate("document.querySelector('[role=alertdialog]')?.textContent")).toContain(
         "Bots and group chats move to General with their conversations intact.",
       );
-      await click("Delete team");
+      await click("Delete department");
       await expect.poll(async () => (await api("/api/sidebar-sections")).sections.includes(name)).toBe(false);
       await expect.poll(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(`[data-sidebar-section-id="section:${name}"]`)}))`)).toBe(false);
     };

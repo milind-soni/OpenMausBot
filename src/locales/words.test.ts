@@ -4,14 +4,9 @@ import { expect, it } from "vitest";
 
 import en from "./en.json";
 
-const ALLOWED = new Set([
-  "engines.account.apiKey", // the Anthropic Console's "workspace API key"
-  "engineSetup.device.enableHint", // a ChatGPT "workspace admin"
-]);
-
 it("English copy says Organization and installation, not Organisation or workspace", () => {
   const offending = Object.entries(en)
-    .filter(([key, value]) => !ALLOWED.has(key) && (/organis/i.test(value) || /(?<!Slack )\bworkspaces?\b/i.test(value)))
+    .filter(([, value]) => /organis/i.test(value) || /(?<!Slack )\bworkspaces?\b/i.test(value))
     .map(([key]) => key);
   expect(offending).toEqual([]);
 });

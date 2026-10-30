@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import type { WireBot } from "../shared/wire.ts";
+import { splitLaunchNote } from "./testing/launch-note.ts";
 import { turnClockLine } from "./turn-clock.ts";
 
 const ZONE = "Asia/Kolkata";
 // ICU may report the zone by its older alias (Asia/Calcutta), so the test asks the same runtime.
 const REPORTED = new Intl.DateTimeFormat("en-US", { timeZone: ZONE }).resolvedOptions().timeZone;
-const CLOCK = new RegExp(`^Current time when this message was sent: \\w+day, (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}) ${REPORTED.replace("/", "\\/")} \\(UTC\\+05:30\\)\\.\n\n`);
+const CLOCK = new RegExp(`^Current time when this message was sent: \\w+day, (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}) ${REPORTED.replace("/", "\\/")} \\(India time, UTC\\+05:30\\)\\.\n\n`);
 
 const minute = (at: number) => /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.exec(turnClockLine(at, REPORTED))![0];
 
@@ -32,6 +33,8 @@ it("stamps every direct and room turn with the time it was sent", async () => {
     try {
       return readFileSync(prompts, "utf8").trim().split("\n").filter(Boolean)
         .map((line) => JSON.parse(line) as { message?: { content?: unknown } } | string)
+        // a new session's first message carries the volatile half of the instructions ahead of the person's words
+        .map((prompt) => splitLaunchNote(prompt).prompt)
         // a stream-json user message: plain text, or text blocks beside images
         .map((prompt) => {
           const content = typeof prompt === "string" ? prompt : prompt.message?.content;

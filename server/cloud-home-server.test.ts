@@ -83,7 +83,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
       // Pin the fleet's other defaults so this never probes an installed CLI.
-      ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
     },
   }));
@@ -122,6 +122,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   ownerToken = await ownerPairing();
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // of its own on the same Claude: a second failed turn in the health read. Stepped down, each test's turns are its own.
+  const seeded = ((await api("GET", "/api/bots?messages=0")).body.bots as any[]).find((bot) => bot.chiefOfStaff);
+  expect((await api("PATCH", `/api/bots/${seeded.id}`, { body: { chiefOfStaff: false } })).status).toBe(200);
 }, 30_000);
 
 async function ownerPairing(): Promise<string> {

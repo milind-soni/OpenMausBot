@@ -85,6 +85,8 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
       return { summary: `${e.itemType}${e.title ? `: ${clip(oneLine(e.title))}` : " started"}`, tone: "plain" };
     case "item.updated":
       return { summary: `${e.itemType} updated${typeof e.tokens === "number" ? ` · ${e.tokens} tok` : ""}`, tone: "plain" };
+    case "turn.progress":
+      return { summary: `live: ${[e.activity, e.tool, e.file, typeof e.bytes === "number" ? `${e.bytes} bytes` : undefined].filter(Boolean).join(" · ")}`, tone: "plain" };
     case "item.completed":
       if (e.itemType === "assistant_text") return { summary: `assistant: ${clip(oneLine(e.text))}`, tone: "plain" };
       if (e.itemType === "assistant_image") return { summary: "assistant image generated", tone: "plain" };

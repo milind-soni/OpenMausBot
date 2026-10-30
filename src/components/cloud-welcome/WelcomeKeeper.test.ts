@@ -3,7 +3,6 @@ import { createElement, Fragment } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CloudMoveBridge, CloudMoveOverview } from "../../../electron/cloud-move.mjs";
 import { EMPTY_ONBOARDING } from "@/lib/onboarding";
 import { setLocale } from "@/lib/i18n";
 
@@ -40,11 +39,6 @@ import { WelcomeKeeper } from "./WelcomeKeeper";
 import { resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
 
 const owner = { hosted: false, canSave: true, cloudHome: true };
-const CLOUD = { id: "cloud", name: "Studio Cloud", origin: "https://omb-u-1a2b3c4d5e6f.fly.dev", kind: "cloud" as const };
-const overview: CloudMoveOverview = {
-  phase: "idle", local: { bots: 6, rooms: 1, chats: 142, bytes: 1024 ** 3, files: 900 }, suggest: true, destination: CLOUD, blocked: null,
-  cloud: { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null, heldBytes: 0 },
-};
 
 let host: HTMLDivElement;
 let root: Root;
@@ -82,10 +76,7 @@ beforeEach(() => {
     if (patch.onboarding) server = { ...server, onboarding: { ...server.onboarding, ...patch.onboarding } };
     return Promise.resolve().then(() => structuredClone(server));
   });
-  const bridge: CloudMoveBridge = {
-    state: vi.fn().mockResolvedValue(overview), start: vi.fn(), cancel: vi.fn(), restorePrevious: vi.fn(), dismiss: vi.fn(), onState: vi.fn(() => () => {}),
-  };
-  window.ogb = { platform: "darwin", cloudMove: bridge, workspaces: { state: vi.fn().mockResolvedValue({ local: false, name: "Studio Cloud" }), menu: vi.fn() } } as unknown as typeof window.ogb;
+  window.ogb = { platform: "darwin", workspaces: { state: vi.fn().mockResolvedValue({ local: false, name: "Studio Cloud" }), menu: vi.fn() } } as unknown as typeof window.ogb;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);

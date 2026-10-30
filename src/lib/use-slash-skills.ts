@@ -13,18 +13,18 @@ export function enabledSlashSkills(body: SkillsResponse | null | undefined): Sla
       : []);
 }
 
-export function useSlashSkills(botId: string | undefined, active: boolean): SlashSkill[] {
+export function useSlashSkills(botId: string | undefined, threadId: string, active: boolean): SlashSkill[] {
   const [skills, setSkills] = useState<{ botId: string; list: SlashSkill[] } | null>(null);
   useEffect(() => {
     if (!botId || !active) return;
     let cancelled = false;
-    api(`/api/bots/${botId}/skills`)
+    api(`/api/bots/${botId}/skills?threadId=${encodeURIComponent(threadId)}`)
       .then((body) => { if (!cancelled) setSkills({ botId, list: enabledSlashSkills(body as SkillsResponse) }); })
       .catch(() => { if (!cancelled) setSkills({ botId, list: [] }); });
     return () => {
       cancelled = true;
       setSkills(null);
     };
-  }, [botId, active]);
+  }, [botId, threadId, active]);
   return active && skills && skills.botId === botId ? skills.list : [];
 }

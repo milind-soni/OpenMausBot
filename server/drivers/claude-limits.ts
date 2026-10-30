@@ -1,4 +1,5 @@
 import { hostTimeZone } from "../turn-clock.ts";
+import { engineFailureMessage, type EngineFailureKind } from "./engine-errors.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
 export interface ClaudeLimit {
@@ -7,6 +8,9 @@ export interface ClaudeLimit {
   window: string | null;
   /** epoch seconds */
   resetsAt: number | null;
+  /** The plan still had room: this model runs on extra usage and its credits are used up, so `resetsAt` is the
+   * billing period's reset and other models on the same account keep working. */
+  credits?: true;
 }
 
 /** The window refusing this account per the CLI's `rate_limit_info` ("allowed", "allowed_warning",
@@ -14,11 +18,12 @@ export interface ClaudeLimit {
  * 2.1.295), or null. A rejected window with extra usage in use still runs the turn on credits. */
 export function claudeLimitRefusal(info: unknown): ClaudeLimit | null {
   if (!info || typeof info !== "object") return null;
-  const { status, rateLimitType, resetsAt, isUsingOverage } = info as Record<string, unknown>;
+  const { status, rateLimitType, resetsAt, isUsingOverage, errorCode, overageDisabledReason } = info as Record<string, unknown>;
   if (status !== "rejected" || isUsingOverage === true) return null;
   return {
     window: typeof rateLimitType === "string" ? rateLimitType : null,
     resetsAt: typeof resetsAt === "number" && Number.isFinite(resetsAt) && resetsAt > 0 ? resetsAt : null,
+    ...(errorCode === "credits_required" || overageDisabledReason === "out_of_credits" ? { credits: true as const } : {}),
   };
 }
 
@@ -42,9 +47,31 @@ const CLAUDE_LIMIT_NAMES: Record<string, string> = {
   seven_day_sonnet: "weekly Sonnet limit",
 };
 
+/** A weekly window for one model family (seven_day_opus, seven_day_sonnet…), not the overage windows. */
+const modelWindow = (window: string | null | undefined): boolean => /^seven_day_(?!overage)[a-z]+$/.test(window ?? "");
+
+/** The reset to hold the whole engine until: only a window every model shares refuses the account, so a credits refusal
+ * or one model's weekly window leaves the engine free for its other models. */
+export function claudeEngineReset(limit: ClaudeLimit | null | undefined): { limitResetsAt: number } | undefined {
+  if (!limit?.resetsAt || limit.credits || modelWindow(limit.window)) return undefined;
+  return { limitResetsAt: limit.resetsAt * 1000 };
+}
+
+/** The runtime error's facts for a usage limit: what it refuses, and when that resets when Claude said. A model's own
+ * window resets that model alone; extra usage credits name only the billing period's end, which is no countdown. */
+export function claudeLimitFacts(limit: ClaudeLimit | null | undefined): { limit: "engine" | "model" | "credits"; limitResetsAt?: number } {
+  if (limit?.credits) return { limit: "credits" };
+  if (modelWindow(limit?.window)) return { limit: "model", ...(limit?.resetsAt ? { limitResetsAt: limit.resetsAt * 1000 } : {}) };
+  return { limit: "engine", ...claudeEngineReset(limit) };
+}
+
 export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now = Date.now(), timeZone = hostTimeZone()): string {
+  if (limit?.credits) {
+    return "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. " +
+      "Your plan's own usage is not affected: switch this bot to a model your plan includes, or add extra usage in your Claude account.";
+  }
   const name = limit?.window && Object.hasOwn(CLAUDE_LIMIT_NAMES, limit.window) ? CLAUDE_LIMIT_NAMES[limit.window] : "usage limit";
-  const meanwhile = /^seven_day_(?:opus|sonnet)$/.test(limit?.window ?? "") ? "choose another model for this bot" : "switch this bot to another engine or Claude account";
+  const meanwhile = modelWindow(limit?.window) ? "choose another model for this bot" : "switch this bot to another AI or Claude account";
   if (limit?.resetsAt && limit.resetsAt * 1000 > now) {
     let resets: string;
     try {
@@ -56,4 +83,24 @@ export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now
   }
   const words = said?.trim().replace(/[.\s]+$/, "");
   return `This Claude account has reached its ${name}${words ? ` (Claude says: "${words}")` : ""}. For now, ${meanwhile}.`;
+}
+
+/** Claude Code 2.1.295's api-error kinds (the assistant frame's `error`) that say the cause outright. */
+const CLAUDE_ERROR_KINDS: Record<string, EngineFailureKind> = {
+  billing_error: "credits",
+  overloaded: "overloaded",
+  server_error: "server",
+  rate_limit: "rate_limit",
+};
+
+/** An api-error frame or error result in plain words. Claude Code sends the frame as a synthetic message whose
+ * stop_reason is "stop_sequence", with `error` (billing_error, overloaded, server_error, rate_limit, invalid_request,
+ * model_not_found, unknown…) and its text ("API Error: 529 …", "Credit balance is too low"); the result repeats the
+ * text with `api_error_status`. Each is one plain row, never a reply: a kind or status OMB words is named, anything
+ * else keeps Claude's own words. */
+export function claudeApiErrorMessage(frame: { error?: unknown; api_error_status?: unknown }, text: string): string {
+  const said = text.trim();
+  const kind = typeof frame.error === "string" && Object.hasOwn(CLAUDE_ERROR_KINDS, frame.error) ? CLAUDE_ERROR_KINDS[frame.error] : null;
+  const status = typeof frame.api_error_status === "number" ? frame.api_error_status : undefined;
+  return engineFailureMessage("Claude", said, { kind, status }) ?? said;
 }

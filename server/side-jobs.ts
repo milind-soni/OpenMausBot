@@ -4,7 +4,9 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { helperModelAllowed } from "../shared/wire.ts";
-import type { ProviderAdapter, ProviderInstance, TextGenerationOptions } from "./contracts.ts";
+import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
+import { refusesModel } from "./quick-model-fallback.ts";
+import { fastModelFor } from "./turn-route.ts";
 import type { UsageRow, UsageTrigger } from "./usage-ledger.ts";
 
 /** config.json `helper`: a connected instance and optionally one of its models. Stored config only, so a settings
@@ -32,9 +34,10 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
   return HELPER_MODEL_ID.test(model) ? { instanceId, model } : null;
 }
 
-export type SideJob = "compaction" | "memory" | "skill-review";
+/** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative";
 
-export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText"> & {
+export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
 };
 
@@ -43,7 +46,7 @@ export interface SideJobBot {
   name: string;
   /** Where a spend alert a call raises is shown. */
   threadId: string;
-  modelSelection: { instanceId: string };
+  modelSelection: { instanceId: string; model?: string };
   helperModel?: boolean;
 }
 
@@ -57,6 +60,8 @@ export interface SideJobsDeps {
   instance: (instanceId: string) => SideJobInstance | null | undefined;
   refusal: (instance: SideJobInstance) => string | undefined;
   helper: () => { instanceId: string; model?: string } | null;
+  /** Small models each engine instance refused, kept across restarts. */
+  smallModels: { refused(instanceId: string): ReadonlySet<string>; remember(instanceId: string, model: string): void };
   /** Hosted workspaces only. */
   modelAllowed?: (selection: { instanceId: string; model: string }) => boolean;
   assertWithinBudget: () => void;
@@ -71,9 +76,12 @@ export interface SideJobs {
 
 type TextCall = (prompt: string, options?: TextGenerationOptions) => Promise<string>;
 
+/** Jobs someone is waiting on, and the representative, which must never get tools, run only on a one-off text call:
+ * generateMemoryText starts a whole agent process. */
+const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions", "representative"]);
+
 function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined {
-  // generateMemoryText starts a whole agent process: background jobs only, never the summary a turn waits on.
-  const call = job === "compaction" ? instance.generateText : instance.generateText ?? instance.generateMemoryText;
+  const call = ONE_OFF_ONLY.has(job) ? instance.generateText : instance.generateText ?? instance.generateMemoryText;
   return call?.bind(instance);
 }
 
@@ -85,14 +93,43 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     said = line;
   };
 
+  const ownFallback = (bot: SideJobBot, instance: SideJobInstance): SmallModelFallback => ({
+    ...(bot.modelSelection.instanceId === instance.instanceId && bot.modelSelection.model ? { model: bot.modelSelection.model } : {}),
+    refused: deps.smallModels.refused(instance.instanceId),
+    onRefused: (model) => {
+      deps.log?.(`small model ${model} refused on ${instance.instanceId}: background text runs on the bot's own model`);
+      deps.smallModels.remember(instance.instanceId, model);
+    },
+  });
+
+  /** The engine's fastest model by the quick-turn rule. Not for Claude: its one-off call already runs its own small model,
+   * without thinking. */
+  const quickModel = (bot: SideJobBot, own: SideJobInstance): { model?: string } => {
+    if (own.driverKind === "claudeAgent" || own.quickModelsUsable?.() === false) return {};
+    const current = bot.modelSelection.instanceId === own.instanceId && bot.modelSelection.model ? bot.modelSelection.model : own.models.default;
+    const model = fastModelFor(own.models, current, deps.smallModels.refused(own.instanceId));
+    return model && (!deps.modelAllowed || deps.modelAllowed({ instanceId: own.instanceId, model })) ? { model } : {};
+  };
+
+  /** A refused quick model is remembered, so the next card skips it; there is no time left to retry this one. */
+  const rememberRefusal = (write: SideJobText["generateText"], own: SideJobInstance, model: string): SideJobText["generateText"] =>
+    async (prompt, options) => {
+      try {
+        return await write(prompt, options);
+      } catch (error) {
+        if (refusesModel(error instanceof Error ? error.message : String(error), model)) deps.smallModels.remember(own.instanceId, model);
+        throw error;
+      }
+    };
+
   /** Every call checks the spend limit: one upkeep pass makes several in a row. */
-  const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, model?: string): SideJobText["generateText"] =>
+  const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions): SideJobText["generateText"] =>
     async (prompt, options) => {
       deps.assertWithinBudget();
       const threadId = `${job}-${randomUUID()}`;
       return call(prompt, {
         ...options,
-        ...(model ? { model } : {}),
+        ...fixed(),
         onUsage: (usage) => deps.book({
           botId: bot.id,
           botName: bot.name,
@@ -156,12 +193,17 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
       if (call) {
         // The summary belongs to a turn that already passed the spend limit and is not booked on its own.
         if (job === "compaction") return { via: "engine", generateText: call };
-        return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }) };
+        if (job === "setup-suggestions") {
+          const quick = quickModel(bot, own);
+          const write = booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own), ...quick }));
+          return { via: "engine", generateText: quick.model ? rememberRefusal(write, own, quick.model) : write };
+        }
+        return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own) })) };
       }
       if (!helperModelAllowed(bot)) return null;
       const helper = usableHelper();
       if (!helper) return null;
-      return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, helper.model) };
+      return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, () => (helper.model ? { model: helper.model } : {})) };
     },
   };
 }

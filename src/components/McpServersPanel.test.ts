@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseMcpArguments, parseMcpEnvironment, parseMcpHeaders, parseMcpOAuthClient } from "./McpServersPanel";
+import { draftBody, draftFor, draftFromPaste, parseMcpArguments, parseMcpOAuthClient, rowsBody, secretRow, soleKey } from "./mcp-draft";
 import { parseMcpResultBudget, withResultBudget } from "./McpResultBudgetField";
 import { setLocale, t } from "@/lib/i18n";
 
@@ -42,41 +42,35 @@ describe("MCP server form", () => {
     ]);
   });
 
-  it("preserves write-only saved values without putting them back in the form", () => {
-    expect(parseMcpEnvironment("TOKEN=\nMODE=read-only", ["TOKEN"])).toEqual({
-      ok: true,
-      env: { TOKEN: true, MODE: "read-only" },
+  it("keeps a saved write-only value behind a blank row and never fills it back in", () => {
+    const draft = draftFor({ name: "notes", command: "npx", args: ["-y", "notes-mcp"], envKeys: ["TOKEN"], enabled: true });
+    expect(draft.env.map(({ name, value, saved }) => ({ name, value, saved }))).toEqual([{ name: "TOKEN", value: "", saved: true }]);
+    expect(rowsBody([...draft.env, secretRow({ name: "MODE", value: "read-only" })], "env")).toEqual({ ok: true, values: { TOKEN: true, MODE: "read-only" } });
+    const remote = draftFor({ name: "gate", type: "http", url: "https://mcp.example.com/route", headerKeys: ["CF-Access-Client-Id", "CF-Access-Client-Secret"], enabled: false });
+    expect(draftBody({ ...remote, headers: [remote.headers[0]!, { ...remote.headers[1]!, value: "new-secret" }] }, undefined)).toEqual({
+      ok: true, body: { type: "http", url: "https://mcp.example.com/route", headers: { "CF-Access-Client-Id": true, "CF-Access-Client-Secret": "new-secret" } },
     });
   });
 
-  it("rejects malformed and duplicate environment names", () => {
-    expect(parseMcpEnvironment("NOT A KEY=value")).toEqual({
-      ok: false,
-      error: { key: "mcp.env.invalidName", params: { key: "NOT A KEY" } },
-    });
-    expect(parseMcpEnvironment("TOKEN=one\nTOKEN=two")).toEqual({
-      ok: false,
-      error: { key: "mcp.env.duplicate", params: { key: "TOKEN" } },
-    });
+  it("refuses a row without a name, a bad or repeated name, and a new row without a value, naming the row and never its value", () => {
+    expect(rowsBody([secretRow({ name: "", value: "" })], "header")).toEqual({ ok: true, values: {} });
+    expect(rowsBody([secretRow({ name: "", value: "sk-live-1" })], "header")).toEqual({ ok: false, error: { key: "mcp.err.rowName" } });
+    expect(rowsBody([secretRow({ name: "Bad Header", value: "sk-live-1" })], "header")).toEqual({ ok: false, error: { key: "mcp.headers.invalidName", params: { key: "Bad Header" } } });
+    expect(rowsBody([secretRow({ name: "NOT A KEY", value: "v" })], "env")).toEqual({ ok: false, error: { key: "mcp.env.invalidName", params: { key: "NOT A KEY" } } });
+    expect(rowsBody([secretRow({ name: "X-A", value: "1" }), secretRow({ name: "X-A", value: "2" })], "header")).toEqual({ ok: false, error: { key: "mcp.headers.duplicate", params: { key: "X-A" } } });
+    expect(rowsBody([secretRow({ name: "CF-Access-Client-Id", value: "" })], "header")).toEqual({ ok: false, error: { key: "mcp.err.missingValue", params: { name: "CF-Access-Client-Id" } } });
   });
 
-  it("reads headers as Name: value lines, keeping saved values behind blanks", () => {
-    expect(parseMcpHeaders("Authorization: Bearer abc:def\nX-Org:acme\n\nCookie: ", ["Cookie"])).toEqual({
-      ok: true,
-      headers: { Authorization: "Bearer abc:def", "X-Org": "acme", Cookie: true },
-    });
-    expect(parseMcpHeaders("Authorization Bearer x")).toEqual({
-      ok: false,
-      error: { key: "mcp.headers.useColon", params: { line: "Authorization Bearer x" } },
-    });
-    expect(parseMcpHeaders("Bad Header: x")).toEqual({
-      ok: false,
-      error: { key: "mcp.headers.invalidName", params: { key: "Bad Header" } },
-    });
-    expect(parseMcpHeaders("X-A: 1\nX-A: 2")).toEqual({
-      ok: false,
-      error: { key: "mcp.headers.duplicate", params: { key: "X-A" } },
-    });
+  it("puts what was pasted for a variable back between the text around it", () => {
+    const draft = draftFromPaste({ transport: "remote", name: "api", type: "http", url: "https://api.example.com/mcp", headers: [
+      { name: "Authorization", value: "", gap: { kind: "variable", names: ["TOKEN"], before: "Bearer ", after: "" } },
+    ] });
+    const body = (value: string) => draftBody({ ...draft, headers: [{ ...draft.headers[0]!, value }] }, undefined);
+    expect(body("sk-1")).toMatchObject({ ok: true, body: { headers: { Authorization: "Bearer sk-1" } } });
+    expect(body("Bearer sk-1")).toMatchObject({ ok: true, body: { headers: { Authorization: "Bearer sk-1" } } });
+    expect(body("")).toEqual({ ok: false, error: { key: "mcp.err.missingValue", params: { name: "Authorization" } } });
+    expect(soleKey({ ...draft, headers: [{ ...draft.headers[0]!, value: "sk-1" }] })).toBe("Bearer sk-1");
+    expect(draftBody({ ...draft, url: "https://<tenant>.example.com/mcp" }, undefined)).toEqual({ ok: false, error: { key: "mcp.paste.urlMissing" } });
   });
 
   it("sends a sign-in app only with a client id, keeping a saved secret behind a blank", () => {
@@ -91,14 +85,14 @@ describe("MCP server form", () => {
     expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app", clientSecret: "new" }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app", clientSecret: "new" });
   });
 
-  it("retains the offending input while an existing error changes language", () => {
+  it("retains the offending name while an existing error changes language", () => {
     setLocale("de");
-    const result = parseMcpEnvironment("TOKEN_WITHOUT_EQUALS");
+    const result = rowsBody([secretRow({ name: "TOKEN WITH SPACE", value: "v" })], "env");
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected an environment error");
 
-    expect(t(result.error.key, result.error.params)).toContain("TOKEN_WITHOUT_EQUALS");
+    expect(t(result.error.key, result.error.params)).toContain("TOKEN WITH SPACE");
     setLocale("en");
-    expect(t(result.error.key, result.error.params)).toBe('Use KEY=value for “TOKEN_WITHOUT_EQUALS”.');
+    expect(t(result.error.key, result.error.params)).toBe("“TOKEN WITH SPACE” is not a valid environment variable.");
   });
 });

@@ -66,16 +66,15 @@ describe("peer approval card lifecycle", () => {
     expect(store.messagesFor(from.threadId).find((m) => m.id === card.id)?.card?.answered).toBe("deny");
   });
 
-  it("expires without attributing a decision to the user, and rejects late answers", async () => {
+  it("keeps the card pending for days and still takes the person's answer", async () => {
     vi.useFakeTimers();
     const verdict = requestPeerApproval(bus, from, target, "ping", "delegate_bot");
     const card = pendingCard(store, from)!;
-    await vi.advanceTimersByTimeAsync(15 * 60_000);
-    expect(await verdict).toBe("expired");
-    expect(store.messagesFor(from.threadId).find(m => m.id === card.id)?.card)
-      .toMatchObject({ answered: "deny", dismissed: true });
-    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(false);
-    expect(pendingCard(store, from)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+    expect(pendingCard(store, from)?.id).toBe(card.id);
+    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(true);
+    expect(await verdict).toBe("allow");
+    expect(resolvePeerComms(bus, card.card!.requestId!, "deny")).toBe(false);
   });
 
   it("tells the person the bot is waiting on them: a waiting state and a notification", async () => {
@@ -308,5 +307,24 @@ describe("peer approval card lifecycle", () => {
     expect(dismissStalePeerCards(bus)).toBe(0);
     expect(pendingCard(store, from)).toBeTruthy();
     cancelPeerApprovalsFor(from.id); // don't leave a timer pending
+  });
+
+  it("reads only the conversations that hold a peer card", () => {
+    const quiet = store.createTask(from.id, "Quiet", false)!;
+    store.appendMessage(quiet.threadId, { role: "user", kind: "text", text: "nothing to approve here" });
+    store.appendMessage(target.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Pick one", subtitle: "", options: ["A", "B"], requestId: "an-ordinary-question" },
+    });
+    store.appendMessage(from.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "@Asker wants to contact @Helper", subtitle: "ping", options: ["Allow", "Deny"], requestId: "stale", tool: "ask_bot" },
+    });
+    const read = vi.spyOn(store, "messagesFor");
+
+    expect(dismissStalePeerCards(bus)).toBe(1);
+    expect(new Set(read.mock.calls.map(([threadId]) => threadId))).toEqual(new Set([from.threadId]));
   });
 });

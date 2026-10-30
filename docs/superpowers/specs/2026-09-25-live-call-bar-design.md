@@ -152,7 +152,7 @@ One active call per harness. Responsibilities, moved from today's renderer
 
 | Route | Body | Result |
 |---|---|---|
-| `POST /api/live/session` | `{ botId, threadId?, sdp, client: "desktop" \| "ios" \| "android" }` | `201 { call: LiveCallState, transport: { type: "webrtc", sdp } }` · `402 { error, needsPro: true }` without a Pro plan (see **Live calls need Pro**) · `409 { error, needsKey: true }` without a key · `409 { error, activeCall }` when a call is running · `404` unknown bot/thread · OpenAI refusals as today (`liveErrorMessage`) |
+| `POST /api/live/session` | `{ botId, threadId?, sdp, client: "desktop" \| "ios" \| "android" }` | `201 { call: LiveCallState, transport: { type: "webrtc", sdp } }` · `409 { error, needsKey: true }` without a key (see **Who may call, and with which key**) · `409 { error, activeCall }` when a call is running · `404` unknown bot/thread · OpenAI refusals as today (`liveErrorMessage`) |
 | `POST /api/live/call/end` | `{ callId }` | `200 { call }` after `session.closed` or 5 s |
 | `GET /api/live/call` | — | `200 { call: LiveCallState \| null }` |
 | `PATCH /api/live/settings` | `{ voice?, readTypedReplies?, idleMinutes? }` | `200 { live: LiveSettings }` — non-secret settings only; the key is never writable from a phone |
@@ -162,46 +162,28 @@ One active call per harness. Responsibilities, moved from today's renderer
 with `endReason` one of the codes under **End reasons**. A phone's
 `POST /api/live/session` is bound to the device id the companion forwards; a
 start from a phone that was unpaired is refused with `401`.
-`LiveSettings = { configured, voice, readTypedReplies, idleMinutes }` (also in
+`LiveSettings = { configured, keySource?, voice, readTypedReplies, idleMinutes }` (also in
 `GET /api/config` as `live`). SSE: `{ kind: "live.call", botId, threadId, call: LiveCallState | null }`
 (frames are keyed by `kind`; the top-level `botId`/`threadId` let the member
 filter hide calls on bots a member cannot see), passed through the companion's
 scrubber unchanged. A client that connects mid-call reads `GET /api/live/call`.
 
-Config (`config.live`): `key` (secret, desktop credential store, unchanged),
-`voice`, `readTypedReplies` (boolean, default true), `idleMinutes` (1–60,
-default 5).
+Config (`config.live`): `key` (secret, desktop credential store, unchanged;
+optional, see below), `voice`, `readTypedReplies` (boolean, default true),
+`idleMinutes` (1–60, default 5).
 
-### Live calls need Pro
+### Who may call, and with which key
 
-Starting a Live call needs an active OMB Cloud plan of any tier (Personal, Pro
-or Max): `entitlement.plan === "pro"` and `status === "active"`. One pure
-function decides, `liveCallsAllowed` in `electron/pro-plan.mjs`, with a table
-test of every plan state. A payment received and still being linked counts.
-Signed out, free, or a plan that is not active does not. While the plan cannot
-be checked (not read yet, signing in, OMB Cloud unreachable, or this computer's
-sign-in ended), the plan last verified decides: the account's `lastPlan`, else
-the last answer this side had. A Cloud home is the plan's own machine and
-always counts.
-
-Only the desktop app's Cloud sign-in knows the plan. Main applies the rule and
-hands its server the answer alone, never the account: `OMB_PRO_PLAN` ("1" or
-"0") when it spawns the server, then `{ type: "openmausbot:pro-plan", pro }`
-over the utility process's private parent port on every sign-in change and
-whenever a server it started is ready (`server/pro-plan.ts` holds it). A
-server the desktop app did not start (dev, tests, headless or Docker) says Pro
-with `OMB_PRO_PLAN=1`.
-
-`POST /api/live/session` without Pro answers
-`402 { "error": "Live calls need a Pro plan.", "needsPro": true }`, checked in
-`LiveCallController.start` before the key, so a person without Pro is never
-asked for one. It covers every client (the companion passes the body through
-to the phones unchanged). The plan is asked when a call starts and never
-during one: a running call is not cut off by a plan change. The desktop shows
-the Pro card under the call button where the key form would be: an offer only
-where `buyOfferAllowed` allows it (signed out, signing in first; or free), and
-otherwise the plan and the way to OMB Cloud settings, never an offer. No Try
-again.
+Live calls are for everyone: no plan is asked for, from any client. A call
+uses the person's own OpenAI key: the separate Live key (`config.live.key`)
+when one is saved, else the OpenAI API key from Settings → API keys
+(`config.openai.key`); `liveCallKey` in `server/live-settings.ts`.
+`LiveSettings.keySource` says which (`live` or `openai`); `configured` is true
+when either exists. Without a key, `POST /api/live/session` answers
+`409 { "error": "Live calls use your own OpenAI key. Add it in Settings → API keys.", "needsKey": true }`.
+The desktop and web app show that sentence under the call button with **Open
+API keys**; a phone, which cannot edit keys, says the same with the path on
+the computer. Only OpenAI GPT-Live is supported, so the copy names OpenAI.
 
 ### Message label
 
@@ -274,8 +256,9 @@ Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
 ## Desktop
 
 - **Start:** the phone icon starts the remembered mode; a chevron next to it
-  opens a menu with **Take turns** / **Live**. First Live call without a key →
-  the existing key form, in a popover under the call button.
+  opens a menu with **Take turns** / **Live**. A Live call without a key →
+  "Live calls use your own OpenAI key. Add it in Settings → API keys." with
+  **Open API keys**, in a popover under the call button.
 - **Media lives app-wide** (`src/lib/live-call-media.ts`, mounted once at the
   app root), so switching chats does not end the call.
 - **Call bar** (in the call's chat, above the composer): bot, "Live with Ada ·
@@ -517,8 +500,7 @@ spoken line is answered aloud). The docs page says so.
 
 | Situation | Behaviour |
 |---|---|
-| No Pro plan | 402 `needsPro`, before the key. Desktop: the Pro card under the call button. Phones: their own Pro prompt (SupaMaus/mausbot-mobile); no Try again |
-| No key on the computer | Desktop: key popover. Phones: "Set up Live calls on your computer first.", no Try again |
+| No key on the computer | 409 `needsKey`. Desktop and web: "Live calls use your own OpenAI key. Add it in Settings → API keys." with **Open API keys**. Phones: the same, with the path on the computer; no Try again |
 | Another call running | 409 with the active call; the client says who is on the line, no Try again. Every client hides its Live call button while another device holds the line, so this is only a race |
 | Phone cannot reach the computer | Call button explains; no call starts |
 | OpenAI refuses (key, quota, voice) | Clear message in the bar (existing `liveErrorMessage`) |

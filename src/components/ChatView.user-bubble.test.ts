@@ -16,7 +16,7 @@ vi.mock("./DesktopCapabilities", () => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => false, useShowThreadsChoice: () => false, setShowThreads: vi.fn() }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useReactor: () => "user" }));
 vi.mock("./CitationUI", () => ({ CitationSelectionToolbar: () => null, SentCitations: () => null }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: () => null }));
@@ -49,13 +49,14 @@ describe("bot-colored user bubbles", () => {
     expect(html).toContain("hello from me");
   });
 
-  it("paints the person's bubble with a gradient of the bot and readable text", () => {
+  it("paints the person's bubble in one flat tone of the bot, with readable text", () => {
     fixture.colorMine = true;
     const tone = userBubbleTone("yellow");
     const html = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(html).toContain("user-bubble-colored");
     expect(html).toContain(`background-color:${tone.background}`);
-    expect(html).toContain(`background-image:${tone.gradient}`);
+    expect(html).toContain("background-image:none");
+    expect(html).not.toContain(tone.gradient);
     expect(html).toContain(`--color-ink:${tone.ink}`);
     expect(html).toContain("hello from me");
     const mine = html.indexOf("user-bubble-colored");

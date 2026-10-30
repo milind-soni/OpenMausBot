@@ -53,6 +53,7 @@ describe("bot patch queue", () => {
       { approvalMode: "ask" },
       expect.any(AbortSignal),
       expect.objectContaining({ approvalMode: "auto" }),
+      false,
     );
 
     await queue.flush("bot-1");
@@ -67,6 +68,7 @@ describe("bot patch queue", () => {
       { modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" } },
       expect.any(AbortSignal),
       expect.objectContaining({ id: "bot-1" }),
+      false,
     );
 
     await queue.flush("bot-1");
@@ -81,6 +83,7 @@ describe("bot patch queue", () => {
       { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } } },
       expect.any(AbortSignal),
       expect.objectContaining({ id: "bot-1" }),
+      false,
     );
   });
 
@@ -160,6 +163,8 @@ describe("bot patch queue", () => {
           computer: patch.computer ?? undefined,
           connectorTools: patch.connectorTools ?? undefined,
           connectorScopes: patch.connectorScopes ?? undefined,
+          phoneApps: patch.phoneApps ?? undefined,
+          peers: patch.peers ?? undefined,
         });
       },
       reconcile: async () => bot(),

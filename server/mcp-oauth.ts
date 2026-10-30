@@ -215,6 +215,22 @@ export class McpOAuthManager {
     return record.state === "signed-in" && record.tokens ? "signed-in" : "needs-sign-in";
   }
 
+  /** The sign-in kept for an entry, with its tokens: only for moving it to the person's own Cloud, never for a route. */
+  signInRecord(name: string, url: string): McpOAuthRecord | undefined {
+    return this.store.get(name, url);
+  }
+
+  /** A sign-in moved here from the person's own computer, for the entry at this address. A sign-in this server already
+   * has is kept, unless `replaces` says it is the one that computer moved here before (it refreshed there since). The
+   * app's secret, when it has one, came with the entry itself. */
+  adopt(name: string, url: string, record: McpOAuthRecord, replaces?: (current: McpOAuthRecord) => boolean): "adopted" | "kept" {
+    const current = this.store.get(name, url);
+    if (current && this.authState(name, url) === "signed-in" && !replaces?.(current)) return "kept";
+    this.cancel(name);
+    this.store.put(name, { ...record, url, state: record.tokens ? "signed-in" : "needs-sign-in" });
+    return "adopted";
+  }
+
   markNeedsSignIn(name: string, url: string): void {
     const { tokens: _dropped, ...rest } = this.store.get(name, url) ?? { url };
     this.store.put(name, { ...rest, url, state: "needs-sign-in" });

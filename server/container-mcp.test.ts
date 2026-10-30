@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CONTAINER, CUA_EXECUTABLE, CUA_SOCKET } from "./container-computer.ts";
+import { omittedFromErrorNote } from "./mcp-error-result.ts";
 
 const temporary: string[] = [];
 
@@ -109,5 +110,54 @@ posixOnly("Local VM Cua MCP bridge", () => {
         `-e CUA_DRIVER_RS_TELEMETRY_ENABLED=0 ${CONTAINER} ` +
         `${CUA_EXECUTABLE} mcp --socket ${CUA_SOCKET}`,
     );
+  });
+  it("never hands an engine an error result that carries a screenshot", async () => {
+    const bin = await mkdtemp(join(tmpdir(), "openmausbot-container-mcp-error-"));
+    temporary.push(bin);
+    const fakeDocker = join(bin, "docker");
+    // cua-driver 0.37.0 answers a refused action with its error text plus a screenshot; success keeps its screenshot.
+    await writeFile(
+      fakeDocker,
+      `#!/bin/sh\n` +
+        `while IFS= read -r line; do\n` +
+        `  case "$line" in\n` +
+        `    *'"id":1'* ) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"refused"},{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}],"isError":true}}' ;;\n` +
+        `    *'"id":2'* ) printf '%s\\n' '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]}}' ;;\n` +
+        `  esac\n` +
+        `done\n`,
+      { mode: 0o700 },
+    );
+    await chmod(fakeDocker, 0o700);
+
+    const input =
+      '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"click","arguments":{}}}\n' +
+      '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_desktop_state","arguments":{}}}\n';
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("./container-mcp.ts", import.meta.url)), "docker", CONTAINER, CUA_SOCKET],
+        {
+          env: { ...process.env, OMB_EXTRA_PATH: bin, NODE_NO_WARNINGS: "1" },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+      child.stdin.end(input);
+    });
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        result: { content: [{ type: "text", text: "refused" }, { type: "text", text: omittedFromErrorNote(1) }], isError: true },
+      },
+      { jsonrpc: "2.0", id: 2, result: { content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] } },
+    ]);
   });
 });

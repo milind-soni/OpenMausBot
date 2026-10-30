@@ -61,7 +61,8 @@ describe("U1: one line and at most one action for every state", () => {
   });
 
   it("keeps jargon out of what subscribers read", () => {
-    const boatAllowed = new Set<PlaceState>(["cc-needs-key", "cc-provider"]);
+    // Boat is named where its account is needed, and credited (our sponsor) where a bot first gets its cloud desktop.
+    const boatAllowed = new Set<PlaceState>(["cc-needs-key", "cc-provider", "cc-new"]);
     for (const state of PLACE_STATES) {
       const view = placeViewOf(state, { ...PARAMS, words: "x" }, { role: "admin", server: "my-cloud" });
       const words = `${view.short} ${view.line} ${view.action?.label ?? ""}`;
@@ -78,26 +79,26 @@ describe("U1: one line and at most one action for every state", () => {
   it("uses the plan's state table copy", () => {
     const admin = { role: "admin" as const, server: "my-cloud" as const };
     expect(placeViewOf("cc-no-hours", { hours: 50, month: "November" }, admin)).toMatchObject({
-      short: "No hours left", line: "This month's 50 cloud computer hours are used up. They come back on 1 November.",
+      short: "No hours left", line: "This month's 50 cloud desktop hours are used up. They come back on 1 November.",
       action: { id: "see-plan", label: "See your plan" },
     });
     expect(placeViewOf("cc-at-once", { plan: "Personal", max: 1, holders: ["Ada"] }, admin).line)
-      .toBe("Your Personal plan includes 1 cloud computer, and Ada has it.");
+      .toBe("Your Personal plan includes 1 cloud desktop, and Ada has it.");
     expect(placeViewOf("cc-at-once", { plan: "Pro", max: 2, holders: ["Ada", "Bo"] }, admin).line)
-      .toBe("Your Pro plan includes 2 cloud computers, and Ada and Bo have them.");
+      .toBe("Your Pro plan includes 2 cloud desktops, and Ada and Bo have them.");
     // A refusal known only by its code still reads whole.
-    expect(placeViewOf("cc-at-once", { plan: "Pro", max: 2 }, admin).line).toBe("All the cloud computers your plan includes are in use.");
-    expect(placeViewOf("cc-no-hours", {}, admin).line).toBe("This month's cloud computer hours are used up.");
+    expect(placeViewOf("cc-at-once", { plan: "Pro", max: 2 }, admin).line).toBe("All the cloud desktops your plan includes are in use.");
+    expect(placeViewOf("cc-no-hours", {}, admin).line).toBe("This month's cloud desktop hours are used up.");
     expect(placeViewOf("cc-unavailable", {}, admin)).toMatchObject({
-      short: "Not available now", line: "Cloud computers can't start right now. It isn't anything you did.", action: { id: "try-again" },
+      short: "Not available now", line: "Cloud desktops can't start right now. It isn't anything you did.", action: { id: "try-again" },
     });
     expect(placeViewOf("cc-on-my-cloud", {}, { role: "admin", server: "mac" })).toMatchObject({
-      line: "Cloud computers from your plan work for bots on My Cloud for now.", action: { id: "open-my-cloud", label: "Open My Cloud" },
+      line: "Cloud desktops from your plan work for Cloud bots for now.", action: { id: "open-my-cloud", label: "Open the Cloud" },
     });
     expect(placeViewOf("auto", {}, { role: "admin", server: "mac" }).line)
       .toBe("Uses the built-in browser, a private desktop on this computer, or this computer's screen, whichever the task needs.");
     expect(placeViewOf("cc-provider", { bot: "Scout", words: "Start the $20/month Boat plan." }, admin))
-      .toMatchObject({ short: "Couldn't start", line: "Your Boat account couldn't start Scout's cloud computer: Start the $20/month Boat plan." });
+      .toMatchObject({ short: "Couldn't start", line: "Your Boat account couldn't start Scout's cloud desktop: Start the $20/month Boat plan." });
   });
 });
 
@@ -134,11 +135,11 @@ describe("placeState", () => {
   });
 
   it("words the Auto line for where this server runs", () => {
-    expect(placeView(facts({ place: "auto" })).line).toMatch(/starts its cloud computer by itself/);
+    expect(placeView(facts({ place: "auto" })).line).toMatch(/starts its cloud desktop by itself/);
     expect(placeView(facts({ place: "auto", server: "pc" })).line).not.toMatch(/Local VM/);
-    expect(placeView(facts({ place: "auto", server: "linux" })).line).toMatch(/Local VM/);
+    expect(placeView(facts({ place: "auto", server: "linux" })).line).toMatch(/a running private desktop/);
     expect(placeView(facts({ engine: { name: "Claude", computer: true, browser: true, signedIn: false } })).line)
-      .toBe("Sign in to Claude on My Cloud first. Scout uses it on the cloud computer too.");
+      .toBe("Sign in to Claude in the Cloud first. Scout uses it on its cloud desktop too.");
   });
 });
 
@@ -151,7 +152,7 @@ describe("a failed place, by where it came from", () => {
     expect(view("works-on").action).toEqual({ id: "try-again", label: "Try again" });
     expect(view("pin", "advanced").action).toEqual({ id: "clear-pin", label: "Clear this conversation's place" });
     expect(view("pin", "simple").action).toEqual({ id: "clear-pin", label: "Use Auto" });
-    expect(view("auto-pin")).toMatchObject({ line: "Cloud computers can't start right now. It isn't anything you did. This conversation is back on Auto.", action: { id: "try-again" } });
+    expect(view("auto-pin")).toMatchObject({ line: "Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto.", action: { id: "try-again" } });
     expect(view("routine").action).toEqual({ id: "change-routine", label: "Change where it runs" });
     expect(view("room").action).toBeNull();
   });
@@ -164,13 +165,13 @@ describe("a failed place, by where it came from", () => {
 
   it("stores the line and its action as words a phone can read", () => {
     expect(placeRowText({ state: "cc-no-hours", params: { bot: "Scout", hours: 50, month: "November" }, source: "works-on" }))
-      .toBe("This month's 50 cloud computer hours are used up. They come back on 1 November. See your plan on the Plan page.");
+      .toBe("This month's 50 cloud desktop hours are used up. They come back on 1 November. See your plan on the Plan page.");
     expect(placeRowText(row("auto-pin")))
-      .toBe("Cloud computers can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again.");
-    expect(placeRowText(row("routine"))).toBe("Cloud computers can't start right now. It isn't anything you did. Change where this routine runs.");
-    expect(placeRowText(row("room"))).toBe("Cloud computers can't start right now. It isn't anything you did.");
+      .toBe("Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again.");
+    expect(placeRowText(row("routine"))).toBe("Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs.");
+    expect(placeRowText(row("room"))).toBe("Cloud desktops can't start right now. It isn't anything you did.");
     expect(placeRowText({ state: "cc-cannot", params: { bot: "Scout", model: "Llama" }, source: "works-on" }))
-      .toBe("Llama can't use a computer. Choose a model that can, such as Claude or ChatGPT. Choose another model in Scout's settings.");
+      .toBe("Llama can't use a desktop. Choose a model that can, such as Claude or ChatGPT. Choose another model in Scout's settings.");
   });
 });
 

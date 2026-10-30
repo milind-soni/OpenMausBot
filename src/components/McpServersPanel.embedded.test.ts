@@ -34,8 +34,8 @@ function render(embedded: boolean, whopCard = false) {
 }
 
 /** useState order in McpServersPanel: the server whose sign-in is open, then its flow. */
-const SIGNING_IN = 7;
-const SIGN_IN_FLOW = 8;
+const SIGNING_IN = 6;
+const SIGN_IN_FLOW = 7;
 
 beforeEach(() => {
   vi.stubGlobal("window", {});
@@ -48,10 +48,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Your MCP servers inside the Apps pop-up", () => {
-  it("lists each server with Test, Edit and an on/off switch, plus Paste config and Add MCP server", () => {
+  it("lists each server with Test, Edit and an on/off switch, plus one Add MCP server", () => {
     const html = render(true);
     expect(html).toContain("Your MCP servers");
-    expect(html).toContain("Paste config");
     expect(html).toContain("Add MCP server");
     expect(html.match(/role="switch"/g)?.length).toBeGreaterThanOrEqual(3); // two servers + the Claude Code switch
     expect(html).toMatch(/aria-label="Turn notes off" type="button" role="switch" aria-checked="true"/);
@@ -59,6 +58,16 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     expect(html).toContain('aria-label="Edit notes"');
     expect(html.match(/> Test</g)).toHaveLength(2);
     expect(html).not.toContain("overflow-y-auto");
+  });
+
+  it("says which computer a server of another computer's runs on, and offers no sign-in to it here", () => {
+    const oauth = { clientId: "c", scopes: [], clientSecretConfigured: false, redirectUri: "http://127.0.0.1:1/cb" };
+    fixture.servers = [{ name: "notes", type: "http", url: "http://127.0.0.1:9/mcp", headerKeys: [], enabled: true, oauth, runsOn: { environmentId: "env-1", label: "Milind's MacBook" } }];
+    const html = render(true).replaceAll("&#x27;", "'");
+    expect(html).toContain("Runs on Milind's MacBook, so it isn't started here.");
+    expect(html).not.toContain("Sign in");
+    fixture.servers = [{ name: "docs", type: "http", url: "https://mcp.example.com/mcp", headerKeys: [], enabled: true, oauth }];
+    expect(render(true)).toContain("Sign in");
   });
 
   it("keeps its own scroll and wording when shown on its own", () => {
@@ -72,7 +81,7 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     const html = render(true, true);
     expect(html).toContain('data-app-tile="whop"');
     expect(html).toContain('aria-label="Connect Whop"');
-    expect(html).toContain("no API key needed");
+    expect(html).toContain("No API key needed");
     expect(html).toContain("admin access across businesses");
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("Your MCP servers");

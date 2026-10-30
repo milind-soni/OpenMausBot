@@ -1,12 +1,12 @@
-// agent-browser keeps a session's cookies and storage in the running Chrome and in the restore file it autosaves
-// (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text, 12-byte nonce
-// first, 16-byte tag last); signing out clears both. The key stays in this server process; no bot or page ever sees it.
+// agent-browser keeps a session's cookies and storage in the running Chrome, in its kept profile, and in the restore file
+// it autosaves (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text,
+// 12-byte nonce first, 16-byte tag last); signing out clears all three. The key stays in this server process; no bot or page ever sees it.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { browserRestoreKey, browserSessionsDirectory, inRunningBrowser } from "./browser-engine.ts";
+import { browserRestoreKey, browserSessionsDirectory, closeBrowserSession, inRunningBrowser, startBrowserSession } from "./browser-engine.ts";
 import { browserRuntimeEnv } from "./browser-runtime.ts";
 
 export interface SignedInSite {
@@ -39,6 +39,9 @@ export interface CdpListeners { event?(message: CdpEvent): void; closed?(): void
 export interface BrowserSitesDeps {
   engine?: (target: BrowserSitesTarget, args: string[]) => Promise<Record<string, unknown> | null>;
   connect?: (url: string) => Promise<Cdp>;
+  /** Starts the stopped browser of a session with a kept profile, so a sign-out reaches the profile too. */
+  start?: (target: BrowserSitesTarget) => Promise<boolean>;
+  stop?: (target: BrowserSitesTarget) => Promise<boolean>;
 }
 
 interface Cookie { name: string; domain: string; path: string; partitionKey?: unknown }
@@ -292,8 +295,15 @@ async function signOutLive(cdp: Cdp, site: string | null, live: SavedState): Pro
   }
 }
 
-const defaultEngine = (target: BrowserSitesTarget, args: string[]) =>
-  inRunningBrowser(target.binaryPath, browserRuntimeEnv({ ...target.env, AGENT_BROWSER_SESSION: target.session }), args);
+const sessionEnv = (target: BrowserSitesTarget) => browserRuntimeEnv({ ...target.env, AGENT_BROWSER_SESSION: target.session });
+const defaultEngine = (target: BrowserSitesTarget, args: string[]) => inRunningBrowser(target.binaryPath, sessionEnv(target), args);
+const defaultStart = (target: BrowserSitesTarget) => startBrowserSession(target.binaryPath, sessionEnv(target));
+const defaultStop = (target: BrowserSitesTarget) => closeBrowserSession(target.binaryPath, sessionEnv(target));
+
+function keptProfile(target: BrowserSitesTarget): boolean {
+  const dir = target.env.AGENT_BROWSER_PROFILE;
+  return !!dir && existsSync(dir);
+}
 
 async function runningState(target: BrowserSitesTarget, deps: BrowserSitesDeps): Promise<SavedState | null> {
   const scratch = mkdtempSync(join(tmpdir(), "omb-browser-state-"));
@@ -342,8 +352,24 @@ async function visit(target: BrowserSitesTarget, deps: BrowserSitesDeps, site: s
     const after = savedState(directory, target.session, target.encryptionKey);
     return { running: false, sites: signedInSites(after.cookies, after.origins) };
   };
-  const live = await runningState(target, deps);
-  if (!live) return stopped();
+  let live = await runningState(target, deps);
+  const starting = !live && signOut && keptProfile(target);
+  if (starting) {
+    if (!await (deps.start ?? defaultStart)(target)) throw new Error("The browser could not start to sign out. Try again.");
+    live = await runningState(target, deps);
+  }
+  try {
+    if (!live) return stopped();
+    const result = await signOutLiveState(target, deps, site, signOut, live, stopped);
+    return starting ? { ...result, running: false } : result;
+  } finally {
+    if (starting) await (deps.stop ?? defaultStop)(target).catch(() => false);
+  }
+}
+
+async function signOutLiveState(target: BrowserSitesTarget, deps: BrowserSitesDeps, site: string | null, signOut: boolean, live: SavedState, stopped: () => SignedInSites): Promise<SignedInSites> {
+  const directory = directoryOf(target);
+  const listed = (sites: SignedInSite[]) => site === null || sites.some((entry) => entry.site === site);
   const sites = signedInSites(live.cookies, live.origins);
   if (!signOut || !listed(sites)) return { running: true, sites };
   const answer = await (deps.engine ?? defaultEngine)(target, ["get", "cdp-url"]);

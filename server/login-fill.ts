@@ -33,6 +33,8 @@ export interface FillLoginInput {
   submit?: boolean;
   candidates(pageHost: string): Promise<FillCandidate[]>;
   available(): Promise<Array<LoginPlace & { username: string }>>;
+  /** Why 1Password's logins may be missing just now. */
+  trouble?(): string | undefined;
 }
 
 export type FilledField = "username" | "password" | "code";
@@ -255,6 +257,7 @@ function sameDocumentUrl(a: string, b: string): boolean {
 }
 
 const FIELD_WORDS: Record<FilledField, string> = { username: "the username", password: "the password", code: "the one-time code" };
+const CODE_FROM_INBOX = "If the site sent it to the person's own email or phone, read it from their connected email or messages and type it in yourself; otherwise call request_sign_in so the person enters it.";
 
 interface PageState { href: string; title: string; present: boolean; busy: boolean; submitted: boolean; leaving: boolean; alert: string; human: boolean }
 
@@ -285,7 +288,9 @@ export async function fillLogin(input: FillLoginInput, deps: FillLoginDeps): Pro
   const pageHost = fillable.pageHost;
   const all = await input.candidates(pageHost);
   if (!all.length) {
-    return { ok: false, host: pageHost, text: `No saved login for ${pageHost}. A login fills on its own site and the sign-in hosts saved with it, never on another site. ${listed(await input.available())} Open that site's login page, or call request_sign_in so the person signs in.` };
+    const trouble = input.trouble?.();
+    const missing = trouble ? ` 1Password could not be read just now, so its logins may be missing: ${trouble}` : "";
+    return { ok: false, host: pageHost, text: `No saved login for ${pageHost}. A login fills on its own site and the sign-in hosts saved with it, never on another site. ${listed(await input.available())}${missing} Open that site's login page, or call request_sign_in so the person signs in.` };
   }
   let chosen = all;
   const wanted = input.username?.trim();
@@ -436,15 +441,15 @@ class LoginRun {
         await this.page(UNMARK, this.nonce);
         if (fields.code > 0 && !this.secretsHaveTotp()) {
           return step > 0
-            ? this.outcome(true, `Submitted ${this.filledWords()} for ${this.who()}. The page now asks for a one-time code, and the saved login has no 2FA key: call request_sign_in so the person enters it.`)
-            : this.outcome(false, `This page on ${this.host} asks for a one-time code, and the saved login has no 2FA key. Call request_sign_in so the person can enter the code.`);
+            ? this.outcome(true, `Submitted ${this.filledWords()} for ${this.who()}. The page now asks for a one-time code, and the saved login has no 2FA key. ${CODE_FROM_INBOX}`)
+            : this.outcome(false, `This page on ${this.host} asks for a one-time code, and the saved login has no 2FA key. ${CODE_FROM_INBOX}`);
         }
         return !fields.username && !fields.password && fields.code === 0
           ? this.outcome(false, `No login fields found on ${this.host}. Open its sign-in page (the one with the username, password or code box), then call fill_login again.`)
           : this.outcome(false, `Could not fill the login fields on ${this.host}: the page did not take the typing. Click the field once, then call fill_login again, or call request_sign_in.`);
       }
       const codeMissing = fields.code > 0 && !this.secretsHaveTotp();
-      const codeNote = codeMissing ? " The page also asks for a one-time code, and the saved login has no 2FA key: if it still needs one after the form is sent, call request_sign_in." : "";
+      const codeNote = codeMissing ? ` The page also asks for a one-time code, and the saved login has no 2FA key: if it still needs one after the form is sent, ${CODE_FROM_INBOX[0]!.toLowerCase()}${CODE_FROM_INBOX.slice(1)}` : "";
       if (!this.submit) return this.leave(`Submit the form now (its sign-in button, or Enter).${codeNote}`);
       if (fields.human) return this.leave(`It was not submitted: the page shows a human check (CAPTCHA). Call request_sign_in so the person completes it and presses the sign-in button.${codeNote}`);
       let sent: Submitted;

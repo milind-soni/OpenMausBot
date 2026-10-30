@@ -2,15 +2,20 @@ import { errorTranscript } from "../shared/client-cancel.ts";
 import { isOutboundTool } from "../shared/outbound.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { buildTurnDigest, digestTools } from "./digest.ts";
+import { stopCause } from "./drivers/engine-errors.ts";
 import type { TurnEvidence } from "./runtime/types.ts";
 import type { Message } from "./store.ts";
 
 const REASON_CHARS = 600;
 
+type RuntimeError = RuntimeEvent & { type: "runtime.error" };
+
 export interface TurnStop {
   turnId?: string;
   cause?: string;
   error?: string;
+  /** The engine's own flags on that error (a setup or credit refusal, a stall, a usage limit and its reset). */
+  flags?: Pick<RuntimeError, "setup" | "stalled" | "trialCredit" | "limitResetsAt" | "limit">;
   handoffPath?: string;
 }
 
@@ -28,6 +33,10 @@ export class TurnStops {
     const stop = this.#turn(event.threadId, event.turnId);
     if (event.type === "cap.exhausted") stop.handoffPath = event.handoffPath;
     else stop.error = error;
+    if (event.type === "runtime.error") {
+      const { setup, stalled, trialCredit, limitResetsAt, limit } = event;
+      if (setup || stalled || trialCredit || limitResetsAt || limit) stop.flags = { setup, stalled, trialCredit, limitResetsAt, limit };
+    }
   }
 
   stopping(threadId: string, turnId: string | undefined, cause: string): void {
@@ -46,10 +55,10 @@ export class TurnStops {
     return stop && (!turnId || !stop.turnId || stop.turnId === turnId) ? stop : undefined;
   }
 
-  /** The turn's own last error, else the provider's stop token; undefined for a turn that did not fail. */
+  /** The turn's own last error, else the provider's stop reason in words; undefined for a turn that did not fail. */
   failureCause(event: { threadId: string; turnId?: string; ok: boolean; stopReason?: string | null }): string | undefined {
     if (event.ok) return undefined;
-    return this.read(event.threadId, event.turnId)?.error ?? (event.stopReason?.trim() || undefined);
+    return this.read(event.threadId, event.turnId)?.error ?? stopCause(event.stopReason);
   }
 
   forget(threadId: string): void {

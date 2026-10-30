@@ -189,6 +189,50 @@ describe("Handoffs", () => {
     expect(f.records.get("claude")).toEqual({ session: "s", through: "m5", ids: [] });
   });
 
+  it("counts nothing of a withheld turn as received, so the next turn offers its line and reply once", () => {
+    const order = ids(4);
+    const f = setup(order, { session: "s", through: "m1", ids: [] });
+    f.replies.set("turn", ["m3"]);
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    f.handoffs.withhold("t");
+    f.event({ type: "turn.started" });
+    f.event({ type: "item.started", itemType: "tool", title: "mcp__computer__click" });
+    f.event({ type: "item.completed", itemType: "assistant_text", text: "Done." });
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    expect(unseenIds(order, f.records.get("claude")!)).toEqual(["m2", "m3"]);
+  });
+
+  it("hands a withheld turn on when its engine runs it after all", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.replies.set("turn", ["m3"]);
+    f.handoffs.begin("t", "claim", {
+      botId: "b", instanceId: "claude", config: "c", resumeCursor: "s", started: { sent: [] }, recovery: { sent: [] },
+      resumed: { sent: [] }, placed: [], carried: ["m2"], own: ["m2"],
+    });
+    f.handoffs.dispatching("t", "claim");
+    const handOn = f.handoffs.withhold("t");
+    f.handoffs.bindTurn("t", "claim", "turn");
+    expect(f.handoffs.current("t")).toBeUndefined();
+    handOn("turn");
+    f.event({ ...output, turnId: "other-turn" });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m3", ids: [] });
+  });
+
+  it("never hands a withheld turn over a newer turn's handoff", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    const handOn = f.handoffs.withhold("t");
+    f.start({ resumeCursor: "s", carried: ["m3"], own: ["m3"] });
+    const newer = f.handoffs.current("t");
+    handOn("turn");
+    expect(f.handoffs.current("t")).toBe(newer);
+    expect(() => new Handoffs({ order: () => [], read: () => undefined, write: () => {}, replies: () => [] }).withhold("t")("turn")).not.toThrow();
+  });
+
   it("does not count provider-client error narration or a failed completion as acceptance", () => {
     const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
     f.start({ resumeCursor: "s", placed: ["m2"], carried: ["m3"] });
@@ -422,6 +466,10 @@ describe("isContextMessage", () => {
   it("is what a provider reads: text, compaction records and room results, never a Live call's row", () => {
     expect(isContextMessage({ kind: "text", text: "what is six times seven" })).toBe(true);
     expect(isContextMessage({ kind: "text", text: "" })).toBe(false);
+    // A voice-only reply: its words sit on the audio attachment, and the provider still reads them.
+    expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(true);
+    expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg" }] })).toBe(false);
+    expect(isContextMessage({ kind: "text", text: "", webhookPost: true, attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(false);
     expect(isContextMessage({ kind: "compaction" })).toBe(true);
     expect(isContextMessage({ kind: "text", roomRequest: { id: "r1", phase: "result" } })).toBe(true);
     expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
@@ -442,5 +490,11 @@ describe("isContextMessage", () => {
     expect(isContextMessage({ kind: "widget", text: "" })).toBe(false);
     expect(isContextMessage({ kind: "widget" })).toBe(false);
     expect(isContextMessage({ kind: "options", text: "Pick one" })).toBe(false);
+  });
+
+  it("keeps an app row by its text fallback", () => {
+    expect(isContextMessage({ kind: "app", text: "[App] Sales by month\nRevenue up 12%" })).toBe(true);
+    expect(isContextMessage({ kind: "app", text: "" })).toBe(false);
+    expect(isContextMessage({ kind: "app" })).toBe(false);
   });
 });

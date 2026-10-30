@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "name": "voice-latency-corpus",
+  "replies": [
+    {
+      "id": "unpunctuated-run-319",
+      "shape": "unpunctuated-run",
+      "text": "the deploy finished and everything looks stable consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably temporarily"
+    },
+    {
+      "id": "code-list-211",
+      "shape": "code-list",
+      "text": "Install these first consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway together:\n- `npm i`\n- `pnpm i`\n- `go run`\n- `cargo run`\n- `docker cp`\n- `git pull`\n- `make all`"
+    },
+    {
+      "id": "em-dash-list-153",
+      "shape": "em-dash-list",
+      "text": "Setup checks — config reload — secret rotation — edge routing — retry budgets — queue draining — cache warming — health probes — it consistently graceful"
+    },
+    {
+      "id": "typical-medium-26",
+      "shape": "typical-medium",
+      "text": "Sure, tomorrow works fine. I will bring the annotated numbers to the review and keep the diff short so nobody has to scroll. Let me know if the slot moves."
+    },
+    {
+      "id": "staccato-92",
+      "shape": "staccato",
+      "text": "Right away. Any minute. Right away. Any minute. Right away. Any minute. Right away. Ping me."
+    },
+    {
+      "id": "mixed-late-319",
+      "shape": "mixed-late-block",
+      "text": "Here is where the migration stands after this week's work. The accounts service now writes both schemas side by side. Backfills are at ninety two percent and holding steady overnight. The read path cut over on Tuesday with no error-rate movement. Remaining work is the cleanup of the old table and its indexes. I will keep the dashboard current so you can watch the tail drain. Nothing here needs a decision from you until the cutover vote. the migration is now stable enough that we can stop the dual writes whenever you are ready consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably straightaway consistently considerably settled"
+    },
+    {
+      "id": "typical-01",
+      "shape": "typical",
+      "text": "The nightly build came back clean tonight. The nightly build came back clean, so the release candidate ships tomorrow. I moved the retry logic into the shared client. I moved the retry logic into the shared client and added a regression test. Your summary landed and two people approved it."
+    },
+    {
+      "id": "typical-02",
+      "shape": "typical",
+      "text": "I moved the retry logic into the shared client and added a regression test. Your summary landed and two people approved it. Your summary landed in the thread, and two people replied with approvals. Start with [the overview](https://example.test/overview) before the details. The cache spike was a cold start, not a regression. The cache miss spike was a cold start after the deploy, not a regression. I drafted the migration notes for the runbook."
+    },
+    {
+      "id": "typical-03",
+      "shape": "typical",
+      "text": "The cache spike was a cold start, not a regression. The cache miss spike was a cold start after the deploy, not a regression. I drafted the migration notes for the runbook. I drafted the migration notes and linked them from the runbook index page. Search latency is back under the agreed budget."
+    },
+    {
+      "id": "typical-04",
+      "shape": "typical",
+      "text": "I drafted the migration notes and linked them from the runbook index page. Search latency is back under the agreed budget. Search latency is back under the budget we agreed on in last month's review. The flaky test now uses the injected timer. The flaky test was a clock assumption; it now uses the injected timer. We keep the old endpoint one more release."
+    },
+    {
+      "id": "typical-05",
+      "shape": "typical",
+      "text": "The flaky test now uses the injected timer. The flaky test was a clock assumption; it now uses the injected timer. We keep the old endpoint one more release. We should keep the old endpoint around for one more release before removal. I checked the logs and found nothing past the alert."
+    },
+    {
+      "id": "typical-06",
+      "shape": "typical",
+      "text": "We should keep the old endpoint around for one more release before removal. I checked the logs and found nothing past the alert. I checked the incident logs and found nothing past the first alert window. Run `npm install` once, then `pnpm build` from the repository root. The dashboard splits build time from deploy time. The dashboard now separates build time from deploy time, as you requested. Both dependency advisories are patched in this build."
+    },
+    {
+      "id": "typical-07",
+      "shape": "typical",
+      "text": "The dashboard splits build time from deploy time. The dashboard now separates build time from deploy time, as you requested. Both dependency advisories are patched in this build. Two dependencies had security advisories, and both are patched in this build. Queue depth settles within a minute of each batch."
+    },
+    {
+      "id": "typical-08",
+      "shape": "typical",
+      "text": "Two dependencies had security advisories, and both are patched in this build. Queue depth settles within a minute of each batch. The queue depth settles within a minute of each batch finishing overnight. The feature flag stays on for staging only for now. I left the feature flag on for the staging workspace only, for now. Review notes are attached with owners per action."
+    },
+    {
+      "id": "typical-09",
+      "shape": "typical",
+      "text": "The feature flag stays on for staging only for now. I left the feature flag on for the staging workspace only, for now. Review notes are attached with owners per action. Notes from the review are attached, with an owner next to each action. The script exits non-zero on a checksum mismatch."
+    },
+    {
+      "id": "typical-10",
+      "shape": "typical",
+      "text": "Notes from the review are attached, with an owner next to each action. The script exits non-zero on a checksum mismatch. The script now exits non-zero when the backup checksum does not match. The **key finding** is that the error came from one mislabeled queue. Region failover took forty seconds in the drill. Region failover took forty seconds in the drill, under the agreed target. I rebased the branch and resolved the import move."
+    },
+    {
+      "id": "typical-11",
+      "shape": "typical",
+      "text": "Region failover took forty seconds in the drill. Region failover took forty seconds in the drill, under the agreed target. I rebased the branch and resolved the import move. I rebased the branch on the latest main and resolved the moved import path. Uploads skip re-encoding for already-right sizes."
+    },
+    {
+      "id": "typical-12",
+      "shape": "typical",
+      "text": "I rebased the branch on the latest main and resolved the moved import path. Uploads skip re-encoding for already-right sizes. The upload path skips re-encoding for files already in the right size. One alert fired; it was the expected rotation. One alert fired during the window; it was the expected certificate rotation. The docs page shows the new limits and a note."
+    },
+    {
+      "id": "typical-13",
+      "shape": "typical",
+      "text": "One alert fired; it was the expected rotation. One alert fired during the window; it was the expected certificate rotation. The docs page shows the new limits and a note. The docs page shows the new limits and a short note about the change. Memory use is flat across a full day of traffic."
+    },
+    {
+      "id": "typical-14",
+      "shape": "typical",
+      "text": "The docs page shows the new limits and a short note about the change. Memory use is flat across a full day of traffic. Memory use stays flat across a full day of traffic with the pool enabled. Start with [the overview](https://example.test/overview) before the details. Open items are grouped by owner for the standup. I grouped the open items by owner so the standup can go in a fixed order. The new path is faster on every shape we tested."
+    },
+    {
+      "id": "typical-15",
+      "shape": "typical",
+      "text": "Open items are grouped by owner for the standup. I grouped the open items by owner so the standup can go in a fixed order. The new path is faster on every shape we tested. The comparison shows the new path is faster on every shape we tested. We can drop the shim once callers use the typed API."
+    },
+    {
+      "id": "typical-16",
+      "shape": "typical",
+      "text": "The comparison shows the new path is faster on every shape we tested. We can drop the shim once callers use the typed API. We can drop the shim once the last caller moves to the typed API. The audit export names the actor per change. The audit export now includes the actor for every permission change. Draft announcement copy is ready for your edits."
+    },
+    {
+      "id": "typical-17",
+      "shape": "typical",
+      "text": "The audit export names the actor per change. The audit export now includes the actor for every permission change. Draft announcement copy is ready for your edits. Draft copy for the announcement is ready for your edits whenever you are. The warm pool cut cold starts under a second."
+    },
+    {
+      "id": "typical-18",
+      "shape": "typical",
+      "text": "Draft copy for the announcement is ready for your edits whenever you are. The warm pool cut cold starts under a second. The warm pool cut cold-start time to under a second for most requests. Run `npm install` once, then `pnpm build` from the repository root."
+    }
+  ]
+}

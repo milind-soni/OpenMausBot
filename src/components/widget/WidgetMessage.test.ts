@@ -170,7 +170,7 @@ describe("drawing a widget", () => {
   it("falls back to the row's text when there is no tree to draw", () => {
     mount({ id: "w1", role: "bot", kind: "widget", at: 1, text: "the readable fallback" });
     expect(host.textContent).toBe("the readable fallback");
-    expect(host.querySelector(".chat-text")?.className).toContain("max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))]");
+    expect(host.querySelector(".chat-text")?.className).toMatch(/max-w-\[min\(var\(--chat-bubble-max\),var\(--chat-bubble-pct\)/);
     expect(find("[data-widget]")).toBeNull();
   });
 
@@ -257,7 +257,8 @@ describe("drawing a widget", () => {
     expect(field<HTMLInputElement>("starts").type).toBe("date");
     expect(field<HTMLInputElement>("starts").min).toBe("2026-10-13");
     expect(field<HTMLInputElement>("stopOnRed").checked).toBe(true);
-    expect(Array.from(report.options).map((option) => option.value)).toEqual(["", "discord:releases", "chat"]);
+    expect(Array.from(report.options).map((option) => option.value).slice(0, 3)).toEqual(["", "discord:releases", "chat"]);
+    expect(Array.from(report.options).map((option) => option.textContent).slice(3)).toEqual([t("question.other")]);
     expect(report.options[0]!.disabled).toBe(true);
     expect(report.value).toBe("");
   });
@@ -526,6 +527,19 @@ describe("pressing", () => {
     mount(row(sample("kitchenSink")));
     await press(button("Open the docs")!);
     expect(openExternal).toHaveBeenLastCalledWith("https://mausbot.com/docs");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("opens a published page's open_url in the bot's browser panel in the desktop app, and posts nothing", async () => {
+    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+    const dispatch = vi.fn();
+    const withBrowser = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "scout" }], groups: [], config: { features: { browser: true }, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({ type: "Card", children: [{ type: "Button", label: "Open page", onClickAction: { type: "open_url", payload: { url: PAGE } } }] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withBrowser, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open page")!);
+    expect(dispatch.mock.calls).toEqual([[{ type: "toggleComputer", open: true }]]);
+    expect(openExternal).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

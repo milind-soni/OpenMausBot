@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
 import {
   applyPiLocalCatalog,
-  buildMcpServers,
   decodePiFrame,
   ensurePiInjectModel,
   fetchPiModels,
@@ -681,6 +681,43 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nbare");
   });
 
+  it("waits for a slow new_session reply before it sends the prompt, and says so in the chat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-slow-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-slow", { FAKE_PI_DUMP: dump });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const sent = instance.adapter.sendTurn({ threadId: "t-pi-session-slow-" + randomUUID(), text: "hi", model: "openai/gpt-4o" });
+      await recorder.until((e) => e.type === "turn.started");
+      await vi.advanceTimersByTimeAsync(20_001);
+      const { turnId } = await sent;
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      expect(done).toMatchObject({ ok: true });
+      const order = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => Object.keys(JSON.parse(line) as object)[0]).filter((key) => ["sessionReplied", "setModel", "prompt"].includes(key));
+      expect(order).toEqual(["sessionReplied", "setModel", "prompt"]);
+      expect(recorder.events.find((e) => e.type === "runtime.notice" && e.turnId === turnId)).toMatchObject({ message: expect.stringMatching(/Pi is taking longer than usual/) });
+    } finally {
+      vi.useRealTimers();
+      removeTempDir(dir);
+    }
+  });
+
+  it("stops waiting for the session reply when the turn is stopped, and sends nothing after", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-stop-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-slow", { FAKE_PI_DUMP: dump, FAKE_PI_SESSION_DELAY_MS: "60000" });
+    const threadId = "t-pi-session-stop-" + randomUUID();
+    const sent = instance.adapter.sendTurn({ threadId, text: "hi", model: "openai/gpt-4o" });
+    await recorder.until((e) => e.type === "turn.started");
+    await instance.adapter.interruptTurn(threadId);
+    const { turnId } = await sent;
+    expect(recorder.events.find((e) => e.type === "turn.completed" && e.turnId === turnId)).toMatchObject({ stopReason: "cancelled" });
+    const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as object);
+    expect(rows.some((row) => "setModel" in row || "prompt" in row)).toBe(false);
+    removeTempDir(dir);
+  });
+
   it("fails promptly when the pi process exits before replying", async () => {
     await create("exit-early");
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-exit", text: "hi" });
@@ -837,7 +874,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(JSON.stringify(recorder.events)).not.toContain("pi-input-secret");
     expect(JSON.stringify(recorder.events)).not.toContain("pi-output-secret");
     expect(done).toMatchObject({ ok: true, stopReason: "end_turn" });
-    expect((done as { usage: { input: number; output: number } }).usage).toEqual({ input: 12, output: 2 });
+    expect((done as { usage: { input: number; output: number } }).usage).toEqual({ input: 17, output: 3 });
     const text = recorder.events.find(
       (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
     ) as { text: string } | undefined;
@@ -1020,49 +1057,22 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
   });
 
-  it("cancels an unanswered ask after 15 minutes", async () => {
+  it("keeps an unanswered question open for days and still takes the person's answer", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-timeout-"));
     const dump = join(dir, "dump.jsonl");
     await create("question-select", { FAKE_PI_DUMP: dump });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let opened: RuntimeEvent;
     try {
       await instance.adapter.sendTurn({ threadId: "t-pi-timeout", text: "go" });
-      const opened = await recorder.until((e) => e.type === "request.opened");
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
-      await recorder.until((e) => e.type === "turn.completed");
-      const rows = readFileSync(dump, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; cancelled?: boolean } });
-      expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
+      opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+      expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("cancels an ask's fail-safe timer when the turn is interrupted", async () => {
-    await create("question-select");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const scheduled = vi.spyOn(globalThis, "setTimeout");
-    const cancelled = vi.spyOn(globalThis, "clearTimeout");
-    try {
-      await instance.adapter.sendTurn({ threadId: "t-ask-interrupt", text: "go" });
-      await recorder.until((e) => e.type === "request.opened");
-      const askIndex = scheduled.mock.calls.findIndex(([, delay]) => delay === 15 * 60_000);
-      expect(askIndex).toBeGreaterThanOrEqual(0);
-      const askTimer = scheduled.mock.results[askIndex].value;
-      expect(cancelled).not.toHaveBeenCalledWith(askTimer);
-      await instance.adapter.interruptTurn("t-ask-interrupt");
-      await recorder.until((e) => e.type === "turn.completed");
-      // This ask's timer, not all timers: killCliTree may still be polling for the real child.
-      expect(cancelled).toHaveBeenCalledWith(askTimer);
-    } finally {
-      scheduled.mockRestore();
-      cancelled.mockRestore();
-      vi.useRealTimers();
-    }
+    await instance.adapter.respondToRequest("t-pi-timeout", opened.requestId!, { behavior: "deny" });
+    expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ behavior: "deny", source: "user" });
   });
 
   it("respondToRequest is unavailable for an ask that is not pending", async () => {

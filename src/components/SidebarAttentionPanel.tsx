@@ -20,7 +20,7 @@ export function SidebarAttentionPanel({ entries, density, onUnpin, onJump, colla
       aria-label={t("attention.title")}
       className={cn("mx-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/30", compact ? "mb-1.5" : "mb-2")}
     >
-      <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[11.5px] font-medium text-ink-secondary">
+      <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[12px] font-medium text-ink-secondary">
         <button
           type="button"
           onClick={onToggle}
@@ -34,7 +34,7 @@ export function SidebarAttentionPanel({ entries, density, onUnpin, onJump, colla
         <Activity size={compact ? 11 : 12} aria-hidden="true" className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t("attention.title")}</span>
         {entries.length > 0 && (
-          <span className="text-[10.5px] font-normal tabular-nums">{entries.length}</span>
+          <span className="text-[11px] font-normal tabular-nums">{entries.length}</span>
         )}
         <button
           type="button"

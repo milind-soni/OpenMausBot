@@ -10,9 +10,11 @@ export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "to
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
 export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
 export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
+export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
+export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.simple.v1";
 export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
 export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
 export const PINNED_CIRCLE_ORDER_KEY = "openmausbot.pinnedCircleOrder.v1";
@@ -168,14 +170,14 @@ export function useSidebarToolsLayout(): SidebarToolsLayout {
   return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
 }
 
-export function clampSidebarWidth(width: number, viewportWidth: number): number {
-  return Math.max(240, Math.min(480, viewportWidth - 320, Math.round(width)));
+export function clampSidebarWidth(width: number, viewportWidth: number, max = 480): number {
+  return Math.max(240, Math.min(max, viewportWidth - 320, Math.round(width)));
 }
 
-export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null): number | null {
+export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key = SIDEBAR_WIDTH_KEY): number | null {
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    const raw = target?.getItem(SIDEBAR_WIDTH_KEY);
+    const raw = target?.getItem(key);
     if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
     const width = Number(raw);
     return width >= 240 && width <= 480 ? width : null;
@@ -184,10 +186,10 @@ export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null): num
   }
 }
 
-export function saveSidebarWidth(width: number, storage?: Pick<Storage, "setItem"> | null): void {
+export function saveSidebarWidth(width: number, storage?: Pick<Storage, "setItem"> | null, key = SIDEBAR_WIDTH_KEY): void {
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    target?.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    target?.setItem(key, String(width));
   } catch {
   }
 }
@@ -443,4 +445,15 @@ export function saveSectionOrder(
   storage?: Pick<Storage, "setItem"> | null,
 ): void {
   saveStringList(SIDEBAR_SECTION_ORDER_KEY, ids, storage);
+}
+
+export function loadSimpleSectionOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
+  return loadStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, storage);
+}
+
+export function saveSimpleSectionOrder(
+  ids: string[],
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  saveStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, ids, storage);
 }

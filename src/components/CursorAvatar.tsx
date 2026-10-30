@@ -14,7 +14,11 @@ import {
   mouthFrame,
   type Ring,
 } from "./cursor-face-data"
+import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, morphUnitsPerMs, nextMascotFrame, type BodyMotion } from "./mascot-motion"
+import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
+export { MOTION, bodyTransform }
+export type { BodyMotion }
 export {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -43,69 +47,9 @@ export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
 
 export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]
 
-const VIEW_BOX = `-15 -15 ${FACE_BOX + 30} ${FACE_BOX + 30}`
+const VIEW_BOX = `-15 -15 ${VIEW_SPAN} ${VIEW_SPAN}`
 const SPHERE_C = 114.2705
 const SPHERE_R = 105
-
-
-export interface BodyMotion {
-  bob?: [number, number]
-  sway?: [number, number]
-  pulse?: [number, number]
-  circle?: [number, number]
-  jitter?: [number, number]
-  tilt?: number
-  squash?: number
-  enter?: [number, number]
-  settle?: number
-}
-
-export const MOTION = {
-  sleeping: { pulse: [0.028, 4600], tilt: 2 },
-  waking: { enter: [0.92, 700], pulse: [0.03, 2200] },
-  idle: { pulse: [0.014, 3600] },
-  listening: { bob: [2, 2600], pulse: [0.012, 2600] },
-  thinking: { sway: [1.6, 3000], pulse: [0.01, 3000] },
-  searching: { bob: [3, 1400], sway: [2.2, 1400] },
-  working: { bob: [2.5, 900], squash: 0.22 },
-
-  excited: { bob: [9, 520], sway: [3, 1040], squash: 0.35 },
-  surprised: { enter: [1.14, 340], jitter: [0.8, 120] },
-  suspicious: { sway: [2.4, 2600], tilt: -3 },
-  angry: { jitter: [1.3, 95], tilt: 2 },
-  drowsy: { pulse: [0.026, 5000], tilt: 3 },
-  happy: { bob: [5, 820], squash: 0.28 },
-  curious: { sway: [3.4, 1900], tilt: -4 },
-  confused: { sway: [3, 2200] },
-  bored: { pulse: [0.016, 5200], tilt: 2 },
-  proud: { bob: [1.6, 2400], pulse: [0.02, 2400] },
-  shy: { pulse: [0.016, 3000], tilt: 4 },
-  sad: { pulse: [0.02, 4600], tilt: 3 },
-  laughing: { bob: [7, 430], squash: 0.4 },
-  scared: { jitter: [2.2, 75] },
-  playful: { bob: [6, 620], sway: [5, 1240], squash: 0.3 },
-  celebrate: { bob: [10, 480], sway: [4, 960], squash: 0.35 },
-
-  orbit: { circle: [6, 3200] },
-  radar: { sway: [6, 2400], pulse: [0.012, 2400] },
-  progress: { pulse: [0.022, 1600] },
-
-  spawning: { enter: [0.02, 820], pulse: [0.014, 3600] },
-  humming: { pulse: [0.016, 2800] },
-  loading: { sway: [2.2, 1500], pulse: [0.012, 1500] },
-  dictating: { bob: [2, 2000] },
-  writing: { bob: [1.6, 1100] },
-  sending: { bob: [3, 900] },
-  receiving: { bob: [3, 900] },
-  uploading: { bob: [3, 1000] },
-  notifying: { bob: [4, 700], sway: [2.5, 700] },
-  alerting: { jitter: [2.6, 85] },
-  dragging: { tilt: -6, sway: [2, 900] },
-  bouncing: { bob: [12, 560], squash: 0.45 },
-  'powering-down': { settle: 0.05, tilt: 4 },
-} satisfies Record<CursorState, BodyMotion>
-
-const SETTLE_MS = 1400
 
 
 const TAU = Math.PI * 2
@@ -271,8 +215,7 @@ function glyphAmount(spec: GlyphSpec, elapsed: number): number {
   if (position < start) return 0
   const into = position - start
   const remaining = spec.hold - into
-  const EASE = 200
-  return Math.max(0, Math.min(1, Math.min(into, remaining) / EASE))
+  return Math.max(0, Math.min(1, Math.min(into, remaining) / GLYPH_EASE_MS))
 }
 
 export interface EffectFrame {
@@ -939,77 +882,6 @@ export function mouthPath(frame: { x: number; y: number; angle: number }, spec: 
 export const anchorTransform = (a: { x: number; y: number; scale: number }) =>
   `translate(${a.x} ${a.y}) scale(${a.scale}) translate(${-FACE_CENTRE[0]} ${-FACE_CENTRE[1]})`
 
-const easeOutBack = (t: number) => {
-  const c = 1.7
-  const u = t - 1
-  return 1 + (c + 1) * u * u * u + c * u * u
-}
-
-const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t))
-
-export function bodyTransform(motion: BodyMotion, elapsed: number, strength: number): string {
-  if (strength <= 0) return ''
-  const centre = FACE_BOX / 2
-  const ground = FACE_BOX
-  const wave = (period: number, phase = 0) => Math.sin((elapsed / period) * Math.PI * 2 + phase)
-
-  let dx = 0
-  let dy = 0
-  let rotation = motion.tilt ? motion.tilt * strength : 0
-  let scale = 1
-  let sx = 1
-  let sy = 1
-
-  if (motion.bob) {
-    const [amplitude, period] = motion.bob
-    const p = wave(period)
-    dy -= amplitude * strength * p
-    if (motion.squash) {
-      const amount = motion.squash * strength * Math.max(0, -p)
-      sy = 1 - amount * 0.5
-      sx = 1 + amount * 0.5
-    }
-  }
-  if (motion.circle) {
-    const [radius, period] = motion.circle
-    dx += radius * strength * wave(period)
-    dy += radius * strength * wave(period, Math.PI / 2)
-  }
-  if (motion.sway) {
-    const [degrees, period] = motion.sway
-    rotation += degrees * strength * wave(period)
-  }
-  if (motion.pulse) {
-    const [fraction, period] = motion.pulse
-    scale *= 1 + fraction * strength * wave(period)
-  }
-  if (motion.jitter) {
-    const [amplitude, period] = motion.jitter
-    dx += amplitude * strength * wave(period)
-    dy += amplitude * strength * wave(period * 0.63, 1.1)
-  }
-  if (motion.enter) {
-    const [from, duration] = motion.enter
-    const t = elapsed / duration
-    scale *= t >= 1 ? 1 : from + (1 - from) * easeOutBack(Math.max(t, 0))
-  }
-  if (motion.settle !== undefined) {
-    const t = Math.min(Math.max(elapsed / SETTLE_MS, 0), 1)
-    scale *= 1 + (motion.settle - 1) * easeInOut(t) * strength
-  }
-
-  const parts: string[] = []
-  if (dx || dy) parts.push(`translate(${dx.toFixed(2)} ${dy.toFixed(2)})`)
-  if (rotation) parts.push(`rotate(${rotation.toFixed(2)} ${centre} ${centre})`)
-  if (scale !== 1) {
-    parts.push(`translate(${centre} ${centre}) scale(${scale.toFixed(4)}) translate(${-centre} ${-centre})`)
-  }
-  if (sx !== 1 || sy !== 1) {
-    parts.push(`translate(${centre} ${ground}) scale(${sx.toFixed(4)} ${sy.toFixed(4)}) translate(${-centre} ${-ground})`)
-  }
-  return parts.join(' ')
-}
-
 
 export interface CursorAvatarProps {
   state?: CursorState
@@ -1031,6 +903,7 @@ export interface CursorAvatarProps {
   paused?: boolean
   silhouette?: CursorSilhouette
   gradient?: [string, string, string]
+  picture?: string | null
   eyeColor?: string
   title?: string | null
   className?: string
@@ -1064,7 +937,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       autoExpression = true,
       paused = false,
       silhouette = DEFAULT_SILHOUETTE,
-      gradient = DEFAULT_GRADIENT,
+      gradient = DEFAULT_GRADIENT, picture,
       eyeColor = "#ffffff",
       title,
       className,
@@ -1074,6 +947,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
   ) {
     const reactId = useId()
     const uid = useMemo(() => 'mascot' + reactId.replace(/[^a-zA-Z0-9]/g, ''), [reactId])
+    const svg = useRef<SVGSVGElement | null>(null)
     const eye0 = useRef<SVGPathElement | null>(null)
     const eye1 = useRef<SVGPathElement | null>(null)
     const mouth = useRef<SVGPathElement | null>(null)
@@ -1082,13 +956,28 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const trailLayer = useRef<SVGGElement | null>(null)
     const confettiLayer = useRef<SVGGElement | null>(null)
     const glyphLayer = useRef<SVGGElement | null>(null)
+    const ticket = useRef<MascotTicket | null>(null)
+    const wake = () => ticket.current?.wake()
 
-    const prefersReducedMotion = useMemo(
-      () => globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
-      []
-    )
-    const motionStrength = motion ?? (prefersReducedMotion ? 0 : 1)
-    const lastState: CursorState = state
+    const reduced = usePrefersReducedMotion()
+    const motionStrength = motion ?? (reduced ? 0 : 1)
+    const paint = `url(#${uid}-grad)`
+    const props = {
+      state,
+      expression,
+      gaze,
+      turn,
+      spring,
+      eyeScale,
+      paused,
+      reduced,
+      lookAround,
+      motionStrength,
+      effects,
+      glyphs,
+      paint,
+      sizePx: typeof size === 'number' ? size : 160,
+    }
 
     const engine = useRef({
       current: clone(EXPRESSIONS[0]),
@@ -1100,66 +989,53 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       expression: 0,
       morph: 1,
       velocity: 0,
+      travel: 0,
       blinkStart: noTimestamp(),
       spinStart: noTimestamp(),
       spinDuration: 900,
       last: 0,
       stateStart: 0,
-      lastState,
+      lastState: state,
       lastBodyTransform: '',
-      pausedPaint: '',
-      props: {
-        state,
-        expression,
-        gaze,
-        turn,
-        spring,
-        eyeScale,
-        paused,
-        lookAround,
-        motionStrength,
-        effects,
-        glyphs,
-      },
+      faceStale: true,
+      faceMoving: false,
+      effectsStill: '',
+      props,
     })
-    engine.current.props = {
-      state,
-      expression,
-      gaze,
-      turn,
-      spring,
-      eyeScale,
-      paused,
-      lookAround,
-      motionStrength,
-      effects,
-      glyphs,
-    }
+    engine.current.props = props
 
     const selectExpression = (index: number) => {
       const e = engine.current
       const i = ((index % EXPRESSION_COUNT) + EXPRESSION_COUNT) % EXPRESSION_COUNT
       if (i === e.expression && e.morph >= 1) return
-      e.current = displayed(e)
-      e.currentMouth = displayedMouth(e)
-      e.currentGaze = displayedGaze(e)
+      const from = { rings: displayed(e), mouth: displayedMouth(e), gaze: displayedGaze(e) }
+      e.current = from.rings
+      e.currentMouth = from.mouth
+      e.currentGaze = from.gaze
       e.target = EXPRESSIONS[i]
       e.targetMouth = MOUTHS[i]
       e.targetGaze = GAZE[i]
+      e.travel = faceTravelUnits(from, { rings: e.target, mouth: e.targetMouth, gaze: e.targetGaze })
       e.expression = i
       e.morph = 0
       e.velocity = 0
+      e.last = performance.now()
+      wake()
     }
 
     React.useImperativeHandle(
       ref,
       () => ({
         blink: () => {
+          if (engine.current.props.reduced) return
           engine.current.blinkStart = performance.now()
+          wake()
         },
         spin: (durationMs = 900) => {
+          if (engine.current.props.reduced) return
           engine.current.spinDuration = durationMs
           engine.current.spinStart = performance.now()
+          wake()
         },
         setExpression: selectExpression,
       }),
@@ -1171,7 +1047,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     }, [state, expression])
 
     useEffect(() => {
-      if (!autoExpression || expression !== undefined || paused) return
+      if (!autoExpression || expression !== undefined || paused || reduced) return
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
         const [lo, hi] = EXPR_CADENCE[state]
@@ -1188,28 +1064,30 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       }
       tick()
       return () => clearTimeout(timer)
-    }, [state, autoExpression, expression, paused])
+    }, [state, autoExpression, expression, paused, reduced])
 
     useEffect(() => {
       const cadence = BLINK[state]
-      if (!autoBlink || !cadence || paused) return
+      if (!autoBlink || !cadence || paused || reduced) return
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
         timer = setTimeout(() => {
           engine.current.blinkStart = performance.now()
+          wake()
           tick()
         }, cadence[0] + Math.random() * (cadence[1] - cadence[0]))
       }
       tick()
       return () => clearTimeout(timer)
-    }, [state, autoBlink, paused])
+    }, [state, autoBlink, paused, reduced])
 
     useEffect(() => {
-      let frame = 0
-      let wake: ReturnType<typeof setTimeout> | undefined
-      engine.current.last = performance.now()
+      engine.current.faceStale = true
+      wake()
+    }, [state, expression, gaze?.x, gaze?.y, turn, eyeScale, lookAround, paused, reduced, motionStrength, effects, glyphs, paint, showMouth, size])
 
-      const draw = (e: typeof engine.current, now: number, spinTurn: number) => {
+    useEffect(() => {
+      const drawFace = (e: typeof engine.current, now: number, spinTurn: number) => {
         const p = e.props
         const g = displayedGaze(e)
         const look = p.lookAround ?? 0.35
@@ -1265,25 +1143,28 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           )
           mouthEl.style.opacity = depth > 0.02 ? '1' : '0'
         }
+      }
 
+      const drawBody = (e: typeof engine.current, now: number, showEffects: boolean, showGlyphs: boolean) => {
+        const p = e.props
+        if (p.state !== e.lastState) {
+          e.lastState = p.state
+          e.stateStart = now
+        }
         const bodyEl = bodyGroup.current
         if (bodyEl) {
-          if (p.state !== e.lastState) {
-            e.lastState = p.state
-            e.stateStart = now
-          }
-          const transform = bodyTransform(
-            MOTION[p.state] ?? {},
-            now - e.stateStart,
-            p.motionStrength ?? 1
-          )
+          const transform = bodyTransform(MOTION[p.state] ?? {}, now - e.stateStart, p.motionStrength ?? 1)
           if (transform !== e.lastBodyTransform) {
             e.lastBodyTransform = transform
             if (transform) bodyEl.setAttribute('transform', transform)
             else bodyEl.removeAttribute('transform')
           }
         }
-
+        const spec = EFFECTS[p.state]
+        const glyph = spec?.glyph && showGlyphs ? glyphAmount(spec.glyph, now - e.stateStart) : 0
+        const still = `${p.state}|${showEffects}|${showGlyphs}|${glyph}|${p.paint}`
+        if (!spec?.confetti && !spec?.trails && e.effectsStill === still) return
+        e.effectsStill = still
         updateEffects({
           trails: trailLayer.current,
           confetti: confettiLayer.current,
@@ -1292,40 +1173,31 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           state: p.state,
           elapsed: now - e.stateStart,
           strength: p.motionStrength ?? 1,
-          paint: paintRef.current,
-          showEffects: p.effects !== false,
-          showGlyphs: p.glyphs !== false,
+          paint: p.paint,
+          showEffects,
+          showGlyphs,
         })
       }
 
-      const step = (now: number) => {
+      const frame = (now: number): number => {
         const e = engine.current
         const p = e.props
-        // Check pause before re-arming (else idle faces tick at display rate), but paint the resting face once: the SVG
-        // layers hold no expression until the first draw.
-        if (p.paused) {
-          e.last = now
-          const still = `${p.state}|${p.expression ?? ''}|${paintRef.current}`
-          if (e.pausedPaint !== still) {
-            e.pausedPaint = still
-            draw(e, now, 0)
-          }
-          wake = setTimeout(() => {
-            frame = requestAnimationFrame(step)
-          }, 250)
-          return
-        }
-        e.pausedPaint = ''
-        frame = requestAnimationFrame(step)
-        const dt = Math.min((now - e.last) / 1000, 0.1)
-        e.last = now
-
+        const dt = Math.min(Math.max(now - e.last, 0) / 1000, 0.05)
         const f = p.spring ?? 7
-        e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
-        e.morph += e.velocity * dt
-        if (!Number.isFinite(e.morph)) {
+        e.last = now
+        if (p.paused || p.reduced) {
           e.morph = 1
           e.velocity = 0
+          e.blinkStart = null
+          e.spinStart = null
+        } else {
+          e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
+          e.morph += e.velocity * dt
+          const settled = Math.abs(1 - e.morph) * e.travel < 0.05 && Math.abs(e.velocity) * e.travel < 0.5
+          if (settled || !Number.isFinite(e.morph)) {
+            e.morph = 1
+            e.velocity = 0
+          }
         }
 
         let spinTurn = 0
@@ -1335,26 +1207,43 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           else spinTurn = 360 * tt
         }
 
-        draw(e, now, spinTurn)
+        const faceMoving = () => e.morph < 1 || e.blinkStart !== null || e.spinStart !== null
+        if (e.faceStale || e.faceMoving || faceMoving()) drawFace(e, now, spinTurn)
+        e.faceStale = false
+        e.faceMoving = faceMoving()
+        const showEffects = p.effects !== false && !p.paused
+        const showGlyphs = p.glyphs !== false && !p.paused && !p.reduced
+        drawBody(e, now, showEffects, showGlyphs)
+        if (p.paused) return Infinity
+        return nextMascotFrame(now, {
+          motion: MOTION[p.state] ?? {},
+          effects: EFFECTS[p.state],
+          stateElapsedMs: now - e.stateStart,
+          strength: p.motionStrength ?? 1,
+          showEffects,
+          showGlyphs,
+          sizePx: p.sizePx,
+          faceUnitsPerMs: morphUnitsPerMs(e.velocity, e.morph, f, e.travel),
+          blinkingOrSpinning: e.blinkStart !== null || e.spinStart !== null,
+        })
       }
 
-      frame = requestAnimationFrame(step)
+      engine.current.last = performance.now()
+      const added = mascotClock().add(frame, svg.current)
+      ticket.current = added
       return () => {
-        cancelAnimationFrame(frame)
-        if (wake !== undefined) clearTimeout(wake)
+        added.remove()
+        ticket.current = null
       }
     }, [])
 
-    const paint = `url(#${uid}-grad)`
-    const paintRef = useRef(paint)
-    paintRef.current = paint
-
-    const dimension = size.constructor === Number ? `${size}px` : size
+    const dimension = typeof size === 'number' ? `${size}px` : size
     const label = title === undefined ? `${silhouette.name} mascot` : title
     const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
 
     return (
       <svg
+        ref={svg}
         viewBox={VIEW_BOX}
         width={dimension}
         height={dimension}
@@ -1381,8 +1270,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           <g ref={trailLayer} />
           <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
-          <g clipPath={`url(#${uid}-clip)`}>
+          {picture ? <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" /> : <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />}
+          <g clipPath={`url(#${uid}-clip)`} visibility={picture ? 'hidden' : undefined}>
             <g transform={anchorTransform(silhouette.anchor)}>
               <path ref={eye0} fill={eyeColor} />
               <path ref={eye1} fill={eyeColor} />
@@ -1418,15 +1307,9 @@ function displayed(e: { current: Ring[]; target: Ring[]; morph: number }): Ring[
   )
 }
 
-function displayedMouth(e: { currentMouth: number[]; targetMouth: number[]; morph: number }) {
-  const m = clamp(e.morph, 0, 1)
-  return e.currentMouth.map((v, i) => v + (e.targetMouth[i] - v) * m)
-}
-
-function displayedGaze(e: { currentGaze: number[]; targetGaze: number[]; morph: number }) {
-  const m = clamp(e.morph, 0, 1)
-  return e.currentGaze.map((v, i) => v + (e.targetGaze[i] - v) * m)
-}
+const towards = (from: number[], to: number[], morph: number) => from.map((v, i) => v + (to[i] - v) * clamp(morph, 0, 1))
+const displayedMouth = (e: { currentMouth: number[]; targetMouth: number[]; morph: number }) => towards(e.currentMouth, e.targetMouth, e.morph)
+const displayedGaze = (e: { currentGaze: number[]; targetGaze: number[]; morph: number }) => towards(e.currentGaze, e.targetGaze, e.morph)
 
 function blinkScale(e: { blinkStart: number | null }, now: number) {
   if (e.blinkStart === null) return 1

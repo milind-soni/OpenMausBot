@@ -15,7 +15,8 @@ export const mask = (value: string) => (REDACTION_MARKER.test(value) ? value : `
 
 const KEY_PREFIXES: RegExp[] = [
   /\bom[dg]_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // desktop device and model-only credentials
-  /\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g, // anthropic / openai / stripe
+  /\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g, // anthropic / openai
+  /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}/g, // stripe secret and restricted keys
   /\bxai-[A-Za-z0-9_-]{20,}/g, // xai (grok)
   /\bgsk_[A-Za-z0-9]{40,}/g, // groq
   /\bcsk-[A-Za-z0-9]{32,}/g, // cerebras
@@ -27,6 +28,7 @@ const KEY_PREFIXES: RegExp[] = [
   /\bAKIA[0-9A-Z]{16}\b/g, // aws access key id
   /\bAIza[0-9A-Za-z_-]{30,}/g, // google api key
   /\bnpm_[A-Za-z0-9]{20,}/g, // npm
+  /\bwhsec_[A-Za-z0-9_-]{20,}/g, // webhook secrets, alone or in an automation's address
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, // jwt
 ];
 const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));

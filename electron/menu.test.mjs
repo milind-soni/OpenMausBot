@@ -32,6 +32,29 @@ describe("buildApplicationMenu", () => {
       }),
     );
 
+  it.each(["darwin", "linux", "win32"])("lists a saved local environment by its folder, so switching servers never fails on %s", platform => {
+    const onSwitch = vi.fn();
+    const local = { id: "e1", kind: "local", name: "Work", dataDir: "/Users/me/.openmausbot-work" };
+    const tailnet = { id: "t1", name: "Mac mini", origin: "https://mac-mini.tail1f3f14.ts.net" };
+    const template = build(platform, { environments: [local, tailnet], activeId: "t1", onSwitch });
+    const items = template.find(entry => entry.label === "Server").submenu;
+    expect(items.find(entry => entry.label === "Work — /Users/me/.openmausbot-work")).toMatchObject({ checked: false });
+    expect(items.find(entry => entry.label === "Mac mini — mac-mini.tail1f3f14.ts.net")).toMatchObject({ checked: true });
+    items.find(entry => entry.label.startsWith("Work")).click();
+    expect(onSwitch).toHaveBeenCalledWith("e1");
+  });
+
+  it.each(["darwin", "linux", "win32"])("offers Open at Login on %s, in the app menu on macOS and the File menu elsewhere", (platform) => {
+    const onToggle = vi.fn();
+    const template = build(platform, { openAtLogin: { checked: false, onToggle } });
+    const item = template[0].submenu.find((entry) => entry.id === "open-at-login");
+    expect(template[0].label).toBe(platform === "darwin" ? "OpenMausBot" : "File");
+    expect(item).toMatchObject({ label: "Open at Login", type: "checkbox", checked: false });
+    item.click();
+    expect(onToggle).toHaveBeenCalledWith(true);
+    expect(build(platform).flatMap((menu) => menu.submenu ?? []).some((entry) => entry.id === "open-at-login")).toBe(false);
+  });
+
   it("macOS app menu wires an explicit Preferences item to the settings callback", () => {
     const onOpenSettings = vi.fn();
     const template = build("darwin", { onOpenSettings });
@@ -71,5 +94,22 @@ describe("buildApplicationMenu", () => {
     submenu.find(entry => entry.id === "add-cloud").click();
     expect(onAddCloud).toHaveBeenCalledOnce();
     expect(submenu.find(entry => entry.id === "add-cloud").label).toBe("Add a Cloud…");
+  });
+
+  it("once My Cloud is home, lists only the other saved servers with Back to My Cloud, and has no Server menu without any", () => {
+    const home = { origin: "https://omb-t-1.fly.dev", onBack: vi.fn() };
+    const cloud = { id: "c", name: "My Cloud", origin: home.origin };
+    const office = { id: "o", name: "Office", origin: "https://office.example.test" };
+    const alone = build("darwin", { environments: [cloud], activeId: "c", home });
+    expect(alone.find((entry) => entry.label === "Server")).toBeUndefined();
+    const onSwitch = vi.fn();
+    const both = build("darwin", { environments: [cloud, office], activeId: "o", home, onSwitch });
+    const items = both.find((entry) => entry.label === "Server").submenu.filter((entry) => entry.label);
+    expect(items.map((entry) => entry.label)).toEqual(["Back to My Cloud", "Office — office.example.test", "Add Server from Copied Pairing Link…", "Forget “Office”"]);
+    items[0].click();
+    expect(home.onBack).toHaveBeenCalledOnce();
+    expect(items.some((entry) => /This computer|organization|Add a Cloud|Connect to a server/.test(entry.label))).toBe(false);
+    const onCloud = build("darwin", { environments: [cloud, office], activeId: "c", home }).find((entry) => entry.label === "Server").submenu;
+    expect(onCloud.find((entry) => entry.id === "back-to-my-cloud").enabled).toBe(false);
   });
 });

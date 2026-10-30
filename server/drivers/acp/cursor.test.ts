@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { RuntimeEvent } from "../../contracts.ts";
 import { ensureDirs } from "../../config.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -437,20 +438,20 @@ describe("CursorAgentDriver", () => {
       expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     });
 
-    it("cancels an unanswered card after 15 minutes", async () => {
+    it("keeps an unanswered card open for days and still takes the person's answer", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let opened: RuntimeEvent;
       try {
-        await start("t-cursor-ask-timeout");
-        const opened = await recorder.until((e) => e.type === "request.opened");
-        await vi.advanceTimersByTimeAsync(15 * 60_000);
-        expect(await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId)).toMatchObject({
-          behavior: "deny", source: "timeout",
-        });
+        await start("t-cursor-ask-no-timeout");
+        opened = await recorder.until((e) => e.type === "request.opened");
+        await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+        expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
       } finally {
         vi.useRealTimers();
       }
+      await instance.adapter.respondToRequest("t-cursor-ask-no-timeout", opened.requestId!, { behavior: "answer", message: "Blue" });
       await recorder.until((e) => e.type === "turn.completed");
-      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [{ questionId: "color", selectedOptionIds: ["blue-id"] }] } } });
     });
   });
 
@@ -621,6 +622,74 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
       await instance.dispose();
       delete process.env.FAKE_ACP_SESSION_MODELS;
       // A stale FAKE_ACP_DUMP makes the next test's fake CLI die on ENOENT.
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("declares the parameterized picker and turns Fast off for a plain slug, on for a -fast slug", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-fast-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_CURSOR_FAST = "1";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,composer-2.5|Composer 2.5";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-fast",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      for (const [model, fast] of [["composer-2.5", "false"], ["composer-2.5-fast", "true"]]) {
+        const turn = await instance.adapter.sendTurn({ threadId: `t-cursor-${model}`, text: "hi", model });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+        expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
+          { method: "session/set_model", params: { sessionId: expect.any(String), modelId: "composer-2.5" } },
+          { method: "session/set_config_option", params: { sessionId: expect.any(String), configId: "fast", value: fast } },
+        ]);
+      }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_CURSOR_FAST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("fails the turn before prompting when Cursor keeps Fast on after being asked to turn it off", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-fast-stuck-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_CURSOR_FAST = "stuck";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,composer-2.5|Composer 2.5";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-fast-stuck",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-fast-stuck", text: "hi", model: "composer-2.5" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: false });
+      expect(JSON.stringify(recorder.events)).toContain('Cursor did not confirm Fast off (fast is \\"true\\")');
+      expect(recorder.events.some((e) => e.type === "content.delta")).toBe(false);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_CURSOR_FAST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
       delete process.env.FAKE_ACP_DUMP;
       await removeTempDir(scratch);
     }

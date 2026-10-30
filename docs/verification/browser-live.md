@@ -38,7 +38,10 @@ UI and harness, then removes its temporary data; the server log remains.
    A Cmd shortcut such as Cmd+C must not delay that. Keep **Type or paste
    text…** open past 8 seconds: control stays yours until it closes. Press
    **Take control**, then wait a minute: it stays yours until **Hand back**,
-   which returns it at once. **Type a password or code…** shows a masked
+   which returns it at once. Leave it untouched for 5 minutes: control goes
+   back to the bot by itself, kept or not. Close the panel while you hold it:
+   the bot gets it back 2 minutes later, unless you open the panel again
+   first, on any device, which carries on with your hold. **Type a password or code…** shows a masked
    field; its text reaches the selected page field and appears in no log,
    response or other view.
    Holding a mouse button or key down must never hand back. Reconnect the
@@ -51,16 +54,26 @@ UI and harness, then removes its temporary data; the server log remains.
    switch to it (a clean browser), then back to Own browser. The previous page
    remains. Rename a shared profile without changing its identity. Confirmed
    deletion clears its bot references without deleting another profile's data.
-5. Open a second isolated browser tab on the preview. Interact in one; the
-   other must not receive new page frames or accept input. Hand-back and
-   disconnect must never release another viewer's control lease.
+5. Open the panel in a second window signed in as you, then take control in
+   the first: the second shows the page and says the bot is paused for you,
+   and its **Hand back** returns the browser at once. Interacting in the second
+   moves your hold there; the first takes no more input. Open it as a
+   different person (another member's session): that view gets no page frames
+   and no input, and its hand-back or disconnect never ends your hold. Hide the app's
+   window or tab while a panel only watches: its view must leave (the browser
+   stops streaming and may idle-close) and reconnect on its own when the app
+   shows again. A panel holding the browser keeps its view while hidden.
 6. Test narrow (390 px) and desktop widths, fullscreen, tabs, overflow typing,
    and explicit browser restart. No horizontal document overflow or permanent
    settings panels should appear. Profile changes are disabled during control.
-   The complete browser image must fit the panel without changing the remote
-   page's resolution. Click the same test-page controls at each size: input
-   must follow the contained image, not its surrounding letterboxing. Empty
-   margins must not click the page; a drag begun on the image can finish there.
+   The page fills the panel: it is never narrower than 1280 CSS pixels, so
+   sites keep their desktop layout, and its height follows the panel's shape
+   up to twice its width; only a taller panel shows bands above and below.
+   Resizing the panel resizes the page once the bot's running action ends, and
+   with no view open the page is 1280x720 again at the bot's next action.
+   Click the same test-page controls at each size: input must land where the
+   image shows them. Bands must not click the page; a drag begun on the image
+   can finish there.
 7. Reconnect while a restart is still finishing, or change profiles before an
    earlier command finishes. A late response must not disconnect the new view,
    change its error state, or acknowledge an old frame as the new viewer.
@@ -90,14 +103,41 @@ UI and harness, then removes its temporary data; the server log remains.
    the vault under 1Password in Settings → Logins: Pepper no longer lists or
    fills it. Unit tests use a fake SDK and reach no network.
 
+11. Page dialogs: give the test page a button that calls `confirm()`, take control and press it. The question shows over
+   the page within a second, with Dismiss and Accept, only in the view that holds the browser. Answering lets the click
+   finish, and typing goes on. Answer after more than 30 seconds: the click still finishes, with no restart. A page
+   that hangs (`while (true) {}`) is restarted for you after about 35 seconds. The panel reconnects, and sign-ins
+   are kept.
+
+### A narrow panel filled
+
+Run `node --experimental-strip-types scripts/control-omb.ts ui launch --entry threads`, turn on
+`features.browser`, allow the test page's loopback port in `browserEngine.egress.allow`, open the
+bot's screen and its Browser tab in Simple mode, and open the test page. The page must reach every
+edge of the panel at 1280 CSS pixels wide; Maximize shows it at the window's own size; a preset
+from the menu (new engine) still shows bands on purpose.
+
+| | Midnight | Daylight |
+| --- | --- | --- |
+| Before: 1280x720 with bands | ![Before, Midnight](images/browser-fill/before-midnight-simple.png) | ![Before, Daylight](images/browser-fill/before-daylight-simple.png) |
+| After: 1280x2406, the panel's shape | ![After, Midnight](images/browser-fill/after-midnight-simple.png) | ![After, Daylight](images/browser-fill/after-daylight-simple.png) |
+
+| Maximized, before | Maximized, after | A wider Advanced panel | Tablet preset (new engine) |
+| --- | --- | --- | --- |
+| ![Before](images/browser-fill/before-midnight-maximized.png) | ![After](images/browser-fill/after-midnight-maximized.png) | ![Wide](images/browser-fill/after-midnight-advanced-wide.png) | ![Tablet](images/browser-fill/after-new-engine-tablet-preset.png) |
+
+`scripts/testing/browser-fill.e2e.test.ts` runs the agent-browser side against the pinned engine and
+`server/browser/viewers/viewers.e2e.test.ts` the new engine's (`OMB_CDP_CHROME`).
+
 Focused automated coverage:
 
 ```sh
-pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.ts \
-  server/harness-mcp-proxy.test.ts server/browser-live.test.ts \
+pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.ts server/browser-page-size.test.ts \
+  server/harness-mcp-proxy.test.ts server/browser-live.test.ts server/browser-dialogs.test.ts \
   server/browser-live-routes.test.ts server/browser-codex-path.integration.test.ts \
-  src/lib/browser-input-queue.test.ts src/lib/browser-control.test.ts src/lib/browser-profiles.test.ts \
-  src/components/BrowserProfilesManager.test.ts src/components/BrowserViewport.test.ts \
+  src/lib/browser-stream-v1.test.ts src/lib/browser-stream-client.test.ts src/lib/browser-control.test.ts \
+  src/lib/browser-profiles.test.ts src/components/BrowserProfilesManager.test.ts \
+  src/components/browser/StreamSurface.test.ts server/routes/browser-viewers.test.ts \
   src/components/BrowserPanel.test.ts src/components/SignInRequestCard.test.ts \
   server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/login-store.test.ts \
   server/totp.test.ts server/routes/logins.test.ts src/components/LoginsSettings.test.ts \

@@ -51,11 +51,11 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.body.replaceChildren(); delete window.ogb; });
 
-describe("Shared with My Cloud", () => {
+describe("Shared with the Cloud", () => {
   it("says what sharing does, shows nothing shared yet, and always offers Add a folder", async () => {
     await mount();
     expect(page()).toContain("Files");
-    expect(page()).toContain("Bots on My Cloud can use these folders, even when this computer is off. They never change your files here.");
+    expect(page()).toContain("Cloud bots can use these folders, even when this computer is off. They change files here only in folders you let them edit.");
     expect(page()).toContain("Nothing shared yet.");
     expect(button("Add a folder")).toBeTruthy();
     expect(page()).not.toMatch(/sync/i);
@@ -65,8 +65,8 @@ describe("Shared with My Cloud", () => {
     await mount({ ...base, shared: [folder("synced"), folder("copying"), folder("waiting"), folder("confirm-deletes"), folder("missing"), folder("problem", { problem: "My Cloud's disk had an error." })] });
     expect(row("synced").textContent).toContain("Up to date");
     expect(row("copying").textContent).toContain("Copying… 400 of 1,200");
-    expect(row("waiting").textContent).toContain("Waiting for room on My Cloud");
-    expect(row("confirm-deletes").textContent).toContain("3 files were removed from this folder here. Remove them from My Cloud too?");
+    expect(row("waiting").textContent).toContain("Waiting for room in the Cloud");
+    expect(row("confirm-deletes").textContent).toContain("3 files were removed from this folder here. Remove them from the Cloud too?");
     expect(row("missing").textContent).toContain("Can't find this folder. Was it moved?");
     expect(row("problem").textContent).toContain("My Cloud's disk had an error.");
     for (const status of ["synced", "copying", "problem"]) expect(buttons(row(status)).map((node) => node.getAttribute("aria-label"))).toEqual([`More for Folder ${status}`]);
@@ -75,9 +75,21 @@ describe("Shared with My Cloud", () => {
     await click("Keep them", row("confirm-deletes"));
     expect(bridge.answerDeletes).toHaveBeenLastCalledWith("f-confirm-deletes", false);
     await mount({ ...base, shared: [folder("confirm-deletes", { pendingDeletes: 1 }), folder("missing")] });
-    expect(row("confirm-deletes").textContent).toContain("1 file was removed from this folder here. Remove it from My Cloud too?");
-    await click("Remove from My Cloud", row("confirm-deletes"));
+    expect(row("confirm-deletes").textContent).toContain("1 file was removed from this folder here. Remove it from the Cloud too?");
+    await click("Remove from the Cloud", row("confirm-deletes"));
     expect(bridge.answerDeletes).toHaveBeenLastCalledWith("f-confirm-deletes", true);
+  });
+
+  it("says in its one line, for a week, when a bot's change met the person's own: both kept, and where", async () => {
+    const kept = [{ path: "todo.md", beside: "todo (new from My Cloud, 27 Oct 2026).md", at: Date.now() - 60_000 }];
+    await mount({ ...base, shared: [folder("synced", { lent: true, kept })] });
+    expect(row("synced").textContent).toContain("Kept both versions of “todo.md”: yours, and the bot's as “todo (new from My Cloud, 27 Oct 2026).md”.");
+    expect(row("synced").textContent).not.toContain("Up to date");
+    await mount({ ...base, shared: [folder("synced", { lent: true, kept: [{ ...kept[0]!, at: Date.now() - 8 * 24 * 60 * 60_000 }] })] });
+    expect(row("synced").textContent).toContain("Up to date");
+    // Something to do comes first.
+    await mount({ ...base, shared: [folder("missing", { lent: true, kept })] });
+    expect(row("missing").textContent).toContain("Can't find this folder. Was it moved?");
   });
 
   it("finds a moved folder, or stops sharing it after saying what that does", async () => {
@@ -87,7 +99,7 @@ describe("Shared with My Cloud", () => {
     expect(bridge.locate).toHaveBeenCalledWith("f-missing");
     await click("Stop sharing", row("missing"));
     expect(dialog()?.textContent).toContain("Stop sharing “Folder missing”?");
-    expect(dialog()?.textContent).toContain("My Cloud's copy moves to its trash for 30 days. Nothing on this computer changes.");
+    expect(dialog()?.textContent).toContain("The Cloud's copy moves to its trash for 30 days. Nothing on this computer changes.");
     await click("Cancel", dialog()!);
     expect(dialog()).toBeNull();
     expect(bridge.stopSharing).not.toHaveBeenCalled();
@@ -112,11 +124,11 @@ describe("Shared with My Cloud", () => {
   it("shows how full My Cloud is, and offers more space when it is almost full", async () => {
     const disk = { totalBytes: 10 * GB, freeBytes: 6 * GB, usedBytes: 4 * GB, sharedBytes: GB, warn: false };
     await mount({ ...base, disk });
-    expect(page()).toContain("4 GB of 10 GB used on My Cloud");
+    expect(page()).toContain("4 GB of 10 GB used in the Cloud");
     expect(page()).not.toContain("almost full");
     await act(async () => emit({ ...base, disk: { ...disk, usedBytes: 9 * GB, freeBytes: GB, warn: true } }));
-    expect(page()).toContain("9 GB of 10 GB used on My Cloud");
-    expect(page()).toContain("My Cloud is almost full.");
+    expect(page()).toContain("9 GB of 10 GB used in the Cloud");
+    expect(page()).toContain("The Cloud is almost full.");
     await click("Get more space");
     expect(bridge.moreSpace).toHaveBeenCalledOnce();
   });
@@ -137,8 +149,8 @@ describe("Add a folder", () => {
     bridge.share.mockResolvedValue({ ...base, shared: [folder("copying", { name: "Plans" })] });
     await mount();
     await click("Add a folder");
-    expect(dialog()?.textContent).toContain("Share “Plans” with My Cloud?");
-    expect(dialog()?.textContent).toContain("120 files · 3 MB. My Cloud keeps a copy and updates it when you change files here. Bots on My Cloud can read it.");
+    expect(dialog()?.textContent).toContain("Share “Plans” with the Cloud?");
+    expect(dialog()?.textContent).toContain("120 files · 3 MB. The Cloud keeps a copy and updates it when you change files here. Cloud bots can read it.");
     await click("Cancel", dialog()!);
     expect(bridge.share).not.toHaveBeenCalled();
     bridge.pickFolder.mockResolvedValue(check("Plans", { files: 50_000, partial: true }));
@@ -186,7 +198,7 @@ describe("folders a move to My Cloud left here", () => {
     await mount(base, ["/Users/ada/site", "/Users/ada/notes", "/Users/ada/x.docx", "/Users/ada"]);
     expect(bridge.checkFolders).toHaveBeenCalledExactlyOnceWith(["/Users/ada/site", "/Users/ada/notes", "/Users/ada/x.docx", "/Users/ada"]);
     const shown = dialog()!;
-    expect(shown.textContent).toContain("Share these folders with My Cloud?");
+    expect(shown.textContent).toContain("Share these folders with the Cloud?");
     expect(shown.textContent).toContain("120 files · 3 MB");
     expect(shown.textContent).toContain("1 file · 2 KB");
     expect(shown.textContent).toContain("Not a folder on this computer.");
@@ -199,7 +211,7 @@ describe("folders a move to My Cloud left here", () => {
     expect(dialog()).toBeNull();
   });
 
-  it("asks nothing until My Cloud is ready, and nothing without suggestions", async () => {
+  it("asks nothing until The Cloud is ready, and nothing without suggestions", async () => {
     await mount({ ...base, phase: "unavailable" }, ["/Users/ada/site"]);
     expect(bridge.checkFolders).not.toHaveBeenCalled();
     await mount();
@@ -211,7 +223,7 @@ describe("Your bots' work", () => {
   it("switches saving what Cloud bots make, says where it goes, and opens that folder", async () => {
     bridge.setOutputs.mockResolvedValue({ ...base, outputs: { ...base.outputs, enabled: true } });
     await mount();
-    expect(page()).toContain("Save what bots on My Cloud make to this computer");
+    expect(page()).toContain("Save what Cloud bots make to this computer");
     expect(page()).toContain("In Documents › MausBot, one folder for each bot.");
     expect(button("Open folder")).toBeUndefined();
     const toggle = document.querySelector<HTMLButtonElement>('[role="switch"]')!;
@@ -231,14 +243,14 @@ describe("My Cloud's state", () => {
     await mount();
     expect(bridge.onState).toHaveBeenCalledOnce();
     await act(async () => emit({ ...base, phase: "offline" }));
-    expect(page()).toContain("My Cloud can't be reached right now. Files carry on when it's back.");
+    expect(page()).toContain("The Cloud can't be reached right now. Files carry on when it's back.");
     act(() => root.unmount());
     expect(off).toHaveBeenCalledOnce();
   });
 
   it("asks to sign in again, through Settings → MausBot Cloud", async () => {
     await mount({ ...base, phase: "signed-out", shared: [folder("synced")] });
-    expect(page()).toContain("Sign in to My Cloud again to keep sharing files.");
+    expect(page()).toContain("Sign in to the Cloud again to keep sharing files.");
     expect(row("synced")).toBeTruthy();
     await click("Open MausBot Cloud settings");
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
@@ -246,12 +258,12 @@ describe("My Cloud's state", () => {
 
   it("without a Ready My Cloud, explains Files works with it and opens its settings", async () => {
     await mount({ ...base, phase: "unavailable" });
-    expect(page()).toContain("Files work with My Cloud.");
+    expect(page()).toContain("Files works with MausBot Cloud.");
     expect(button("Add a folder")).toBeUndefined();
     await click("Open MausBot Cloud settings");
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
     delete window.ogb;
     await mount();
-    expect(page()).toContain("Files work with My Cloud.");
+    expect(page()).toContain("Files works with MausBot Cloud.");
   });
 });

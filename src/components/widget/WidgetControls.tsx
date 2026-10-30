@@ -1,14 +1,20 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type Ref } from "react";
 import { Calendar, Check, ChevronsUpDown, LoaderCircle, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { WIDGET_LIMITS, widgetNumber, widgetString, type WidgetActionEntry, type WidgetField, type WidgetNode, type WidgetValues } from "../../../shared/widget";
+import {
+  WIDGET_LIMITS, threadActionTarget, widgetNumber, widgetString, widgetTakesOther, type WidgetActionEntry, type WidgetField, type WidgetNode, type WidgetOther, type WidgetValues,
+} from "../../../shared/widget";
 import { isWidgetDot, widgetIcon, widgetIconFilled } from "./widget-icons";
 
 export interface WidgetForm {
   uid: string;
   values: WidgetValues;
   setValue: (name: string, value: string | boolean) => void;
+  /** A name is here while Other is the choice for that field, with the words typed so far. */
+  other: WidgetOther;
+  chooseOther: (name: string) => void;
+  setOther: (name: string, text: string) => void;
   locked: boolean;
   invalid?: string;
   errorId: string;
@@ -27,7 +33,7 @@ export interface WidgetForm {
 export const WIDGET_COMPACT_BELOW = 400;
 
 const INERT: WidgetForm = {
-  uid: "widget", values: {}, setValue: () => {}, locked: true, errorId: "widget-error", fields: new Map(), actions: new Map(),
+  uid: "widget", values: {}, setValue: () => {}, other: {}, chooseOther: () => {}, setOther: () => {}, locked: true, errorId: "widget-error", fields: new Map(), actions: new Map(),
   press: () => {}, imagesAllowed: false, allowImages: () => {}, labelled: new Set(), compact: false, name: "",
 };
 const WidgetFormContext = createContext<WidgetForm>(INERT);
@@ -70,6 +76,12 @@ export function widgetActionUrl(entry: WidgetActionEntry | undefined): string | 
   const payload = entry?.client ? entry.action.payload : undefined;
   const url = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.url : undefined;
   return typeof url === "string" && /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+export function widgetThreadTarget(entry: WidgetActionEntry | undefined): { botId: string; threadId: string } | { groupId: string; threadId: string } | undefined {
+  const target = entry?.client ? threadActionTarget(entry.action) : undefined;
+  if (!target) return undefined;
+  return target.groupId !== undefined ? { groupId: target.groupId, threadId: target.threadId } : { botId: target.botId!, threadId: target.threadId };
 }
 
 export function WidgetButton({ actionRef, label, look, iconStart, iconEnd, block = false, disabled = false }: {
@@ -128,6 +140,9 @@ export function useWidgetField(node: WidgetNode) {
     form, name, disabled, invalid,
     set: (value: string | boolean) => form.setValue(name, value),
     text: typeof form.values[name] === "string" ? form.values[name] as string : "",
+    takesOther: widgetTakesOther(node),
+    other: Object.hasOwn(form.other, name) ? form.other[name] : undefined,
+    chooseOther: () => form.chooseOther(name),
     control: {
       id: widgetFieldId(form, name),
       name,
@@ -153,22 +168,58 @@ function optionsOf(node: WidgetNode): Array<{ label: string; value: string }> {
   });
 }
 
+/** Canonical option values are trimmed, so no bot's option can be this one. */
+const OTHER_OPTION = " other";
+
 export function WidgetSelect({ node, bare }: { node: WidgetNode; bare: boolean }) {
   const field = useWidgetField(node);
   const open = node.clearable === true;
-  return (
+  const choosingOther = field.other !== undefined;
+  const select = (
     <span className={cn("relative min-w-0 items-center", bare ? "inline-flex" : "flex w-full")}>
       <select
         {...field.control}
-        value={field.text}
-        onChange={(event) => field.set(event.target.value)}
-        className={cn(bare ? WIDGET_BARE : WIDGET_FIELD, "appearance-none", bare ? "ps-2 pe-7 text-end [field-sizing:content]" : "pe-9", !field.text && "text-ink-tertiary")}
+        value={choosingOther ? OTHER_OPTION : field.text}
+        onChange={(event) => (event.target.value === OTHER_OPTION ? field.chooseOther() : field.set(event.target.value))}
+        className={cn(bare ? WIDGET_BARE : WIDGET_FIELD, "appearance-none", bare ? "ps-2 pe-7 text-end [field-sizing:content]" : "pe-9", !field.text && !choosingOther && "text-ink-tertiary")}
       >
         <option value="" disabled={!open} hidden={!open}>{widgetString(node, "placeholder") ?? t("widget.choose")}</option>
         {optionsOf(node).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        {field.takesOther && <option value={OTHER_OPTION}>{t("question.other")}</option>}
       </select>
       <ChevronsUpDown aria-hidden="true" size={14} className={cn("pointer-events-none absolute text-ink-tertiary", bare ? "end-2" : "end-3")} />
     </span>
+  );
+  if (!field.takesOther) return select;
+  return (
+    <span className={cn("min-w-0 flex-col gap-2", bare ? "inline-flex items-end" : "flex w-full")}>
+      {select}
+      {choosingOther && <WidgetOtherInput name={field.name} disabled={field.disabled} focus />}
+    </span>
+  );
+}
+
+/** Where the person types their own answer once Other is their choice. */
+export function WidgetOtherInput({ name, disabled, focus, ref }: { name: string; disabled: boolean; focus: boolean; ref?: Ref<HTMLInputElement> }) {
+  const form = useWidgetForm();
+  const invalid = form.invalid === name;
+  return (
+    <input
+      ref={ref}
+      type="text"
+      dir="auto"
+      data-widget-other={name}
+      autoFocus={focus && !disabled}
+      value={form.other[name] ?? ""}
+      disabled={disabled}
+      maxLength={WIDGET_LIMITS.fieldValue}
+      placeholder={t("question.otherPlaceholder")}
+      aria-label={t("question.otherPlaceholder")}
+      aria-invalid={invalid || undefined}
+      aria-describedby={invalid ? form.errorId : undefined}
+      onChange={(event) => form.setOther(name, event.target.value)}
+      className={WIDGET_FIELD}
+    />
   );
 }
 
@@ -244,7 +295,24 @@ export function WidgetCheckbox({ node }: { node: WidgetNode }) {
 export function WidgetRadioGroup({ node, labelledBy }: { node: WidgetNode; labelledBy?: string }) {
   const field = useWidgetField(node);
   const { id, "aria-invalid": invalid, "aria-describedby": describedBy, "aria-label": ariaLabel } = field.control;
-  return (
+  const choosingOther = field.other !== undefined;
+  const choice = (key: string, checked: boolean, onChange: () => void, label: string, first: boolean) => (
+    <label key={key} className={cn("relative inline-flex min-w-0 items-center gap-2 text-[14px] leading-5 text-ink", field.disabled ? "cursor-not-allowed" : "cursor-pointer")}>
+      <input
+        type="radio"
+        name={id}
+        value={key}
+        checked={checked}
+        disabled={field.disabled}
+        onChange={onChange}
+        data-widget-field={first ? field.name : undefined}
+        className="peer sr-only"
+      />
+      <WidgetRadioMark on={checked} invalid={field.invalid} />
+      <span dir="auto" className="min-w-0">{label}</span>
+    </label>
+  );
+  const group = (
     <div
       role="radiogroup"
       id={id}
@@ -255,22 +323,15 @@ export function WidgetRadioGroup({ node, labelledBy }: { node: WidgetNode; label
       aria-describedby={describedBy}
       className={cn("flex min-w-0", node.direction === "col" ? "flex-col gap-2.5" : "flex-wrap gap-x-[18px] gap-y-2", field.disabled && "opacity-60")}
     >
-      {optionsOf(node).map((option, index) => (
-        <label key={option.value} className={cn("relative inline-flex min-w-0 items-center gap-2 text-[14px] leading-5 text-ink", field.disabled ? "cursor-not-allowed" : "cursor-pointer")}>
-          <input
-            type="radio"
-            name={id}
-            value={option.value}
-            checked={field.text === option.value}
-            disabled={field.disabled}
-            onChange={() => field.set(option.value)}
-            data-widget-field={index === 0 ? field.name : undefined}
-            className="peer sr-only"
-          />
-          <WidgetRadioMark on={field.text === option.value} invalid={field.invalid} />
-          <span dir="auto" className="min-w-0">{option.label}</span>
-        </label>
-      ))}
+      {optionsOf(node).map((option, index) => choice(option.value, field.text === option.value, () => field.set(option.value), option.label, index === 0))}
+      {field.takesOther && choice(OTHER_OPTION, choosingOther, field.chooseOther, t("question.other"), false)}
+    </div>
+  );
+  if (!field.takesOther) return group;
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      {group}
+      {choosingOther && <WidgetOtherInput name={field.name} disabled={field.disabled} focus />}
     </div>
   );
 }

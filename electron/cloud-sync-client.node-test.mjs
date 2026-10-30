@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { SyncAuthError, createSyncClient } from "./cloud-sync-client.mjs";
+import { CloudAsleepError, createCloudPowerGate } from "./cloud-power.mjs";
 
 const ORIGIN = "https://omb-u-1a2b3c4d5e6f.fly.dev";
 const reply = (status, body, headers = {}) => new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -16,6 +17,29 @@ test("sends the Cloud origin and the window's sign-in, and turns 401 into a sign
   assert.equal(seen[0][0], `${ORIGIN}/api/sync`);
   assert.equal(seen[0][1].headers.origin, ORIGIN);
   assert.equal(seen[0][1].credentials, "include");
+});
+
+test("marks every call as background work, so My Cloud never counts Files as the person using it", async () => {
+  const seen = [];
+  const client = createSyncClient({ origin: ORIGIN, fetch: async (url, init) => { seen.push(init.headers); return reply(200, { folders: [] }); } });
+  await client.summary();
+  await client.changes(0, 10, new AbortController().signal);
+  assert.deepEqual(seen.map((headers) => headers["x-omb-background"]), ["1", "1"]);
+});
+
+test("My Cloud going to sleep: its 503 asleep answer holds Files back, and nothing is called while it sleeps", async () => {
+  const at = 1_792_355_000_000;
+  let power = { state: "awake", since: at, sleeps: true }, calls = 0;
+  const gate = createCloudPowerGate({ power: () => power });
+  const client = createSyncClient({ origin: ORIGIN, power: gate, fetch: async () => { calls++; return reply(503, { error: "asleep" }, { "x-omb-cloud-power": "asleep" }); } });
+  await assert.rejects(client.changes(0, 10, new AbortController().signal), CloudAsleepError);
+  assert.equal(gate.asleep(), true);
+  await assert.rejects(client.summary(), CloudAsleepError);
+  assert.equal(calls, 1);
+  power = { state: "awake", since: at + 60_000, sleeps: true };
+  const plain = createSyncClient({ origin: ORIGIN, power: gate, fetch: async () => { calls++; return reply(503, { error: "busy" }); } });
+  await assert.rejects(plain.summary(), (error) => !(error instanceof CloudAsleepError) && error.status === 503, "any other 503 is offline, as before");
+  assert.equal(calls, 2);
 });
 
 test("an upload resumes where My Cloud says it got to, halves parts a proxy refuses, and commits", async (t) => {

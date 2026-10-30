@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronLeft, Search, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Search, X } from "lucide-react";
 
-import { api, useStore, type Bot } from "@/state/store";
-import type { BotOverview } from "@/lib/bot-overview-types";
+import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { BOT_SECTIONS } from "./bot-settings/sections";
 import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
@@ -20,18 +18,17 @@ import { AccessSection } from "./bot-settings/AccessSection";
 import { ModelSection } from "./bot-settings/ModelSection";
 import { PermissionsSection } from "./bot-settings/PermissionsSection";
 import { VoiceSection } from "./bot-settings/VoiceSection";
-import { HistorySection, type HistoryRow } from "./bot-settings/HistorySection";
+import { HistorySection } from "./bot-settings/HistorySection";
 import { UsageSection } from "./bot-settings/UsageSection";
 import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { SimpleBotPanel } from "./bot-settings/SimpleBotPanel";
+import { BotPanel } from "./bot-panel/PanelShell";
+import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
+import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import type { PromptPreviewData } from "./bot-settings/PromptPreview";
 
 const sectionLabel = (entry: (typeof BOT_SECTIONS)[number]) => (entry.labelKey ? t(entry.labelKey) : entry.label);
-
-const SIMPLE_PANEL_SECTIONS: ReadonlySet<(typeof BOT_SECTIONS)[number]["id"]> = new Set(["overview", "identity", "soul"]);
 
 function sectionMatches(entry: (typeof BOT_SECTIONS)[number], query: string): boolean {
   if (!query) return true;
@@ -42,7 +39,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   bot: Bot;
   overlay?: boolean;
 }) {
-  const { state, dispatch, flushBotPatches } = useStore();
+  const { state, dispatch } = useStore();
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -51,12 +48,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const collapsed = !state.botSettingsExpandAccordion;
   const q = query.trim().toLowerCase();
   const advanced = useAdvancedMode();
-  const wantsFullView = !collapsed && !SIMPLE_PANEL_SECTIONS.has(section) && !state.botSettingsExpandRemembered;
-  const [showAll, setShowAll] = useState(wantsFullView);
-  useEffect(() => {
-    if (wantsFullView) setShowAll(true);
-  }, [wantsFullView, section]);
-  const simpleView = !advanced && !showAll;
+  const simpleView = !advanced;
+  const linkedSection = !collapsed && !state.botSettingsExpandRemembered ? section : null;
   const slackUrl = useSlackManagementUrl(bot.id);
   const ownerOrAdmin = useOwnerOrAdmin();
   const sections = BOT_SECTIONS
@@ -64,130 +57,11 @@ export function BotSettingsDialog({ bot, overlay = false }: {
     .filter((entry) => entry.id !== "visibility" || (!window.ogb && ownerOrAdmin === true));
   const visibleSections = sections.filter((entry) => sectionMatches(entry, q));
 
-  const [overview, setOverview] = useState<BotOverview | null>(null);
-  const [overviewError, setOverviewError] = useState(false);
-  const [prompt, setPrompt] = useState<PromptPreviewData | null>(null);
-  const [promptError, setPromptError] = useState(false);
-  const [historyRows, setHistoryRows] = useState<HistoryRow[] | null>(null);
-  const [historyError, setHistoryError] = useState(false);
-  const [historyRevision, setHistoryRevision] = useState<string | null>(null);
-  const historyRequest = useRef(0);
-  const [rollingBack, setRollingBack] = useState(false);
-  const [rollbackTarget, setRollbackTarget] = useState<{ id: string; expectedRevision: string } | null>(null);
-
-  const factsSignature = useMemo(
-    () =>
-      JSON.stringify([
-        bot.name,
-        bot.title,
-        bot.description,
-        bot.soul,
-        bot.computer,
-        bot.cloudBackend,
-        bot.cwd,
-        bot.autoApprove,
-        bot.approvePeerComms,
-        bot.peers,
-        bot.section,
-        bot.composio,
-        bot.browser,
-        bot.mcpServers,
-        bot.chiefOfStaff,
-        bot.managedSections,
-        bot.modelSelection,
-      ]),
-    [
-      bot.name,
-      bot.title,
-      bot.description,
-      bot.soul,
-      bot.computer,
-      bot.cloudBackend,
-      bot.cwd,
-      bot.autoApprove,
-      bot.approvePeerComms,
-      bot.peers,
-      bot.section,
-      bot.composio,
-      bot.browser,
-      bot.mcpServers,
-      bot.chiefOfStaff,
-      bot.managedSections,
-      bot.modelSelection,
-    ],
-  );
-
-  // Await the existing write queue rather than racing a second debounce.
-  useEffect(() => {
-    if (section !== "overview" || simpleView) return;
-    let cancelled = false;
-    const fetchOverviewAndPrompt = async () => {
-      await flushBotPatches(bot.id);
-      if (cancelled) return;
-      void api(`/api/bots/${bot.id}/overview`)
-        .then((data: BotOverview) => {
-          if (cancelled) return;
-          setOverview(data);
-          setOverviewError(false);
-        })
-        .catch(() => {
-          if (!cancelled) setOverviewError(true);
-        });
-      void api(`/api/bots/${bot.id}/system-prompt`)
-        .then((data: PromptPreviewData) => {
-          if (cancelled) return;
-          setPrompt(data);
-          setPromptError(false);
-        })
-        .catch(() => {
-          if (!cancelled) setPromptError(true);
-        });
-    };
-
-    void fetchOverviewAndPrompt();
-    return () => {
-      cancelled = true;
-    };
-  }, [bot.id, section, simpleView, factsSignature, state.routines, state.webhooks, flushBotPatches]);
-
-  const loadHistory = useCallback(() => {
-    const request = ++historyRequest.current;
-    setHistoryError(false);
-    return flushBotPatches(bot.id)
-      .then(() => api(`/api/bots/${bot.id}/history?limit=100`))
-      .then((data: { rows: HistoryRow[]; revision: string }) => {
-        if (request !== historyRequest.current) return;
-        setHistoryRows(data.rows);
-        setHistoryRevision(data.revision);
-      })
-      .catch(() => {
-        if (request === historyRequest.current) setHistoryError(true);
-      });
-  }, [bot.id, flushBotPatches]);
-
-  useEffect(() => {
-    if (section !== "history") return;
-    void loadHistory();
-    return () => { historyRequest.current++; };
-  }, [section, loadHistory]);
-
-  const rollbackHistory = async (target: { id: string; expectedRevision: string }) => {
-    if (rollingBack) return;
-    setRollbackTarget(null);
-    setRollingBack(true);
-    try {
-      await flushBotPatches(bot.id);
-      await api(`/api/bots/${bot.id}/history/rollback`, {
-        method: "POST",
-        body: JSON.stringify(target),
-      });
-    } catch (e: unknown) {
-        dispatch({ type: "error", message: e instanceof Error ? e.message : "Couldn't undo that change." });
-    } finally {
-      await loadHistory();
-      setRollingBack(false);
-    }
-  };
+  const { overview, overviewError, prompt, promptError } = useBotOverview(bot, {
+    overview: section === "overview" && !simpleView,
+    prompt: section === "overview" && !simpleView,
+  });
+  const history = useBotHistory(bot, section === "history" && !simpleView);
 
   useEffect(() => {
     if (collapsed) return;
@@ -206,7 +80,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       if (nested && nested.getClientRects().length > 0) return;
       // BotInstructionsDialog portals to document.body: a key pressed with focus outside this dialog is not ours.
       if (dialog && event.target instanceof Node && !dialog.contains(event.target)) return;
-      if (event.key === "Escape") {
+      // A popover or field inside that already handled this Escape keeps the panel open.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         dispatch({ type: "toggleSettings", open: false });
       }
@@ -267,17 +142,15 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       case "visibility":
         return <VisibilitySection bot={bot} />;
       case "history":
-        return historyRows === null && historyError ? (
+        return history.rows === null && history.error ? (
           <div className="rounded-xl bg-card p-4 text-[13px] text-ink-secondary">Couldn’t load history.</div>
         ) : (
           <HistorySection
             bot={bot}
-            rows={historyRows}
-            refreshError={historyRows !== null && historyError}
-            onRollback={(id) => {
-              if (historyRevision) setRollbackTarget({ id, expectedRevision: historyRevision });
-            }}
-            rollingBack={rollingBack || !historyRevision}
+            rows={history.rows}
+            refreshError={history.rows !== null && history.error}
+            onRollback={history.requestRollback}
+            rollingBack={history.rollingBack || !history.revision}
           />
         );
       case "usage":
@@ -291,42 +164,22 @@ export function BotSettingsDialog({ bot, overlay = false }: {
     <>
       <aside
         ref={dialogRef}
+        id={simpleView ? BOT_PANEL_ID : undefined}
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={cn(
-          "animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none focus-visible:outline-none",
-          overlay
-            ? "md:inset-auto md:right-0 md:top-0 md:bottom-0 md:w-[min(420px,42vw)] md:shadow-2xl"
-            : "md:static md:z-auto md:w-[min(420px,42vw)] md:shrink-0",
-        )}
+        className={sidePanelCls(overlay, simpleView)}
       >
         {simpleView ? (
-          <SimpleBotPanel
+          <BotPanel
             bot={bot}
             derived={derived}
             headerClassName={padClass}
-            slackUrl={slackUrl}
+            linkedSection={linkedSection}
             onClose={() => dispatch({ type: "toggleSettings", open: false })}
-            onAllSettings={() => setShowAll(true)}
-            onAddSkill={() => {
-              setShowAll(true);
-              dispatch({ type: "toggleSettings", open: true, section: "skills" });
-            }}
           />
         ) : <>
-        {!advanced && (
-          <button
-            type="button"
-            data-bot-settings-back
-            onClick={() => setShowAll(false)}
-            className={cn("flex shrink-0 items-center gap-1 self-start px-3 pt-3 text-[13px] text-ink-secondary hover:text-ink", padClass)}
-          >
-            <ChevronLeft size={15} className="pointer-events-none" />
-            {t("botSettings.simple.back")}
-          </button>
-        )}
-        <div {...dragProps} className={cn("flex shrink-0 items-center justify-between px-4 py-3", !advanced ? undefined : padClass)}>
+        <div {...dragProps} className={cn("flex shrink-0 items-center justify-between px-4 py-3", padClass)}>
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
             {bot.name}
           </span>
@@ -354,16 +207,16 @@ export function BotSettingsDialog({ bot, overlay = false }: {
               if (query) setQuery("");
               else dispatch({ type: "toggleSettings", open: false });
             }}
-            placeholder="Search"
-            aria-label="Search settings"
+            placeholder={t("botSettings.search")}
+            aria-label={t("botSettings.searchAria")}
             className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {visibleSections.length === 0 && (
-            <div className="px-4 py-4 text-[12.5px] leading-relaxed text-ink-secondary">
-              Nothing matches “{query.trim()}”
+            <div className="px-4 py-4 text-[13px] leading-relaxed text-ink-secondary">
+              {t("botSettings.searchNone", { query: query.trim() })}
             </div>
           )}
           {sections.map((entry) => {
@@ -418,16 +271,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         </div>
         </>}
       </aside>
-      <ConfirmDialog
-        open={rollbackTarget !== null}
-        title="Restore previous instructions?"
-        body="Replaces current SOUL with the version before this change. Current version stays in History."
-        confirmLabel="Restore instructions"
-        tone="neutral"
-        returnFocusRef={dialogRef}
-        onCancel={() => setRollbackTarget(null)}
-        onConfirm={() => { if (rollbackTarget) void rollbackHistory(rollbackTarget); }}
-      />
+      <HistoryRollbackDialog history={history} returnFocusRef={dialogRef} />
     </>
   );
 }

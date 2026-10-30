@@ -7,10 +7,10 @@ import { cloudFilesBridge, useCloudFiles } from "@/lib/cloud-files";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { useStore } from "@/state/store";
-import { formatMoveBytes } from "./CloudMove";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { Switch } from "./SettingsPrimitives";
+import { MENU_SHEET } from "./menu-recipe";
 
 const REFUSAL: Record<string, LocaleKey> = {
   "too-broad": "files.refusal.tooBroad", "app-data": "files.refusal.appData", "already-shared": "files.refusal.alreadyShared",
@@ -21,18 +21,27 @@ type Run = (action: () => Promise<CloudFilesState | void>) => Promise<void>;
 type Ask = { kind: "share"; check: FolderCheck } | { kind: "stop"; folder: SharedFolder } | { kind: "suggest"; checks: FolderCheck[]; chosen: string[] };
 
 const count = (value: number) => new Intl.NumberFormat(activeLocale()).format(value);
+const formatBytes = (value: number) => {
+  const power = value >= 1024 ** 3 ? 3 : value >= 1024 ** 2 ? 2 : 1;
+  return `${new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: power === 3 ? 1 : 0 }).format(value / 1024 ** power)} ${["", "KB", "MB", "GB"][power]}`;
+};
 
 export function folderSize(check: FolderCheck): string {
   const files = check.partial ? t("files.countMore", { count: count(check.files) })
     : check.files === 1 ? t("files.countOne") : t("files.count", { count: count(check.files) });
-  return `${files} · ${formatMoveBytes(check.bytes)}`;
+  return `${files} · ${formatBytes(check.bytes)}`;
 }
 
 export function refusalText(refusal: string, listed = false): string {
   return t(listed && refusal === "not-a-folder" ? "files.refusal.notAFolderListed" : REFUSAL[refusal] ?? "files.refusal.other");
 }
 
-export function folderStatus(folder: SharedFolder): string {
+/** A bot's change that met one of the person's is said for a week: theirs kept, the bot's beside it. */
+const KEPT_SHOWN_MS = 7 * 24 * 60 * 60_000;
+
+export function folderStatus(folder: SharedFolder, now = Date.now()): string {
+  const kept = folder.kept?.[0];
+  if (kept && now - kept.at < KEPT_SHOWN_MS && (folder.status === "synced" || folder.status === "copying")) return t("files.status.keptBoth", { file: kept.path, copy: kept.beside });
   if (folder.status === "copying") return t("files.status.copying", { done: count(folder.done), files: count(folder.files) });
   if (folder.status === "confirm-deletes") return t(folder.pendingDeletes === 1 ? "files.status.deletesOne" : "files.status.deletes", { count: count(folder.pendingDeletes) });
   if (folder.status === "problem") return folder.problem || t("files.status.problem");
@@ -100,7 +109,7 @@ function FilesPage({ bridge }: { bridge: CloudFilesBridge }) {
   if (!state) return null;
   if (state.phase === "unavailable") return <Unavailable />;
   return <>
-    {state.phase === "offline" && <p role="status" className="rounded-xl bg-card px-4 py-3 text-[13px] text-ink-secondary">{t("files.offline")}</p>}
+    {(state.phase === "offline" || state.phase === "asleep") && <p role="status" data-files-phase={state.phase} className="rounded-xl bg-card px-4 py-3 text-[13px] text-ink-secondary">{t(state.phase === "asleep" ? "files.asleep" : "files.offline")}</p>}
     {state.phase === "signed-out" && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card px-4 py-3">
       <p className="text-[13px] text-ink">{t("files.signedOut")}</p>
       <button type="button" className="ui-button" onClick={() => dispatch(SETTINGS)}>{t("files.openSettings")}</button>
@@ -203,7 +212,7 @@ function FolderMenu({ name, busy, onOpen, onStop }: { name: string; busy: boolea
   return <div ref={ref} className="relative shrink-0">
     <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={t("files.more", { name })}
       className="ui-icon-button hover:bg-control hover:text-ink" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
-    {open && <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 text-[12.5px] shadow-2xl shadow-black/50">
+    {open && <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
       {item(t("files.openHere"), onOpen)}
       {item(t("files.stop"), onStop, true)}
     </div>}
@@ -213,7 +222,7 @@ function FolderMenu({ name, busy, onOpen, onStop }: { name: string; busy: boolea
 function Storage({ disk, busy, onMore }: { disk: CloudFilesDisk; busy: boolean; onMore: () => void }) {
   const percent = disk.totalBytes > 0 ? Math.min(100, Math.round((disk.usedBytes / disk.totalBytes) * 100)) : 0;
   return <div className="flex flex-col gap-1.5">
-    <span className="text-[12px] text-ink-secondary">{t("files.storage", { used: formatMoveBytes(disk.usedBytes), total: formatMoveBytes(disk.totalBytes) })}</span>
+    <span className="text-[12px] text-ink-secondary">{t("files.storage", { used: formatBytes(disk.usedBytes), total: formatBytes(disk.totalBytes) })}</span>
     <div className="h-1 w-full overflow-hidden rounded-full bg-control" aria-hidden="true">
       <div className={cn("h-full rounded-full", disk.warn ? "bg-warning" : "bg-accent")} style={{ width: `${percent}%` }} />
     </div>

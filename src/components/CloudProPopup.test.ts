@@ -29,12 +29,12 @@ const ph = vi.hoisted(() => {
   return ph;
 });
 vi.mock("posthog-js", () => ph.module());
-import { CloudProPopup, cloudProCloudPageView, cloudProElsewhereView, cloudProPopupView, otherDialogOpen, useOtherDialogOpen, type CloudProPopupView } from "./CloudProPopup";
+import { CloudProPopup, cloudProCloudPageView, cloudProPopupView, otherDialogOpen, useOtherDialogOpen, type CloudProPopupView } from "./CloudProPopup";
 import { Spotlight } from "./onboarding/Spotlight";
 
 const DAY = 86_400_000, NOW = Date.UTC(2026, 9, 16);
 const plans = [
-  { tier: "personal", label: "Personal", amount: 2900, trialDays: 7 },
+  { tier: "starter", label: "Starter", amount: 1500, trialDays: 7 },
   { tier: "pro", label: "Pro", amount: 4900, trialDays: 7 },
   { tier: "max", label: "Max", amount: 9900, trialDays: 7 },
 ];
@@ -61,7 +61,7 @@ function oneDesktop(): Desktop {
   registerDesktopPrefs({
     ipcMain: { handle: (channel, handler) => void handlers.set(channel, handler), on: (channel, listener) => void listeners.set(channel, listener) },
     read: () => saved, write: value => { saved = JSON.parse(JSON.stringify(value)); },
-    page: event => (event as { origin: string }).origin === MY_CLOUD ? "cloud" : "local", cloudOffered: async () => true, thisComputer: async () => true,
+    page: event => (event as { origin: string }).origin === MY_CLOUD ? "cloud" : "local", cloudOffered: async () => true,
   });
   return origin => {
     let ogb: Ogb | undefined;
@@ -92,12 +92,12 @@ describe("what the popup offers, by plan", () => {
   it("no plan: the in-app checkout, with the trial, prices, credit and money-back from the live offer", () => {
     const signedOut = cloudProPopupView({ status: "signed-out" }, TRIAL_OFFER) as CloudProPopupView;
     expect(signedOut).toMatchObject({ primary: { via: "add-cloud", label: "Start free trial" }, seePlans: true, plan: "none", signedIn: false, email: null,
-      badge: "Free for 7 days", price: "Then from $29/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan.", current: null });
+      badge: "Free for 7 days", price: "Then from $15/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan.", current: null });
     expect(signedOut.points).toContain("$5 of Claude credit to start");
     const costlier = { ...PLAIN_OFFER, plans: PLAIN_OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 1000 })) };
     expect(cloudProPopupView(free, costlier)).toMatchObject({ primary: { via: "add-cloud", label: "Upgrade to Cloud Pro" },
-      plan: "none", signedIn: true, email: "person@example.test", badge: null, price: "MausBot Cloud plans from $39/month + tax.", moneyBack: null });
-    expect((cloudProPopupView(free, costlier) as CloudProPopupView).points).toContain("Cloud computers and voice included");
+      plan: "none", signedIn: true, email: "person@example.test", badge: null, price: "MausBot Cloud plans from $25/month + tax.", moneyBack: null });
+    expect((cloudProPopupView(free, costlier) as CloudProPopupView).points).toContain("Voice and cloud desktops by Boat included");
   });
 
   it("a plan: Manage plan in Settings → MausBot Cloud for every plan, no Compare plans, never a checkout, a price or the browser", () => {
@@ -110,7 +110,7 @@ describe("what the popup offers, by plan", () => {
       [onPlan("ultra"), "other", "Manage plan", "Cloud active · verified by MausBot Cloud"],
       [{ ...free, purchase: { state: "confirming" } }, "none", "Manage plan", "MausBot Cloud · payment received"],
       [{ ...free, entitlement: { plan: "pro", tier: "pro", status: "inactive", expiresAt: null, version: 3 } }, "none", "Manage plan", "Pro · not active right now"],
-      [{ status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }, "unknown", "Manage plan", "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+      [{ status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }, "unknown", "Manage plan", "Sign in again to use the Cloud on this computer. Your plan is not affected."],
       [{ status: "signed-out", message: "restore-removed" }, "none", "Manage plan", null],
     ];
     for (const [account, plan, label, current] of cases) {
@@ -120,7 +120,7 @@ describe("what the popup offers, by plan", () => {
     }
   });
 
-  it("My Cloud's page: a plan manages in Settings on This computer, never the plan page in the browser; a plan being checked waits; no plan read offers none", () => {
+  it("My Cloud's page: a plan manages in that page's Settings, never the plan page in the browser; a plan being checked waits; no plan read offers none", () => {
     const cases: Array<[CloudPlanSnapshot, string, boolean, string]> = [
       [{ status: "paid", tier: "personal" }, "personal", true, "Personal active · verified by MausBot Cloud"],
       [{ status: "paid", tier: "pro", trial: running }, "trial", true, "Pro free trial · verified by MausBot Cloud"],
@@ -128,22 +128,17 @@ describe("what the popup offers, by plan", () => {
       [{ status: "paid", tier: "ultra" }, "other", true, "Cloud active · verified by MausBot Cloud"],
       [{ status: "attention", tier: "max" }, "none", true, "Max · not active right now"],
       [{ status: "attention" }, "none", true, "MausBot Cloud · not active right now"],
-      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use the Cloud on this computer. Your plan is not affected."],
     ];
     for (const [snapshot, plan, signedIn, current] of cases) {
-      expect(cloudProCloudPageView(snapshot), plan).toMatchObject({ primary: { via: "settings-on-this-computer", label: "Manage plan" }, seePlans: false, plan, signedIn,
+      expect(cloudProCloudPageView(snapshot), plan).toMatchObject({ primary: { via: "settings", label: "Manage plan" }, seePlans: false, plan, signedIn,
         email: null, current, badge: null, price: null, moneyBack: null });
     }
     expect(cloudProCloudPageView(null)).toBe("loading");
     expect(cloudProCloudPageView({ status: "checking", tier: "pro" })).toBe("offline");
-    expect(cloudProCloudPageView({ status: "none" })).toEqual(cloudProElsewhereView());
+    expect(cloudProCloudPageView({ status: "none" })).toBe("offline");
   });
 
-  it("a saved server's page: no plan, price or Compare plans, one way on, through This computer", () => {
-    expect(cloudProElsewhereView()).toEqual({ primary: { via: "this-computer", label: "Continue on this computer" }, seePlans: false, plan: "unknown", signedIn: false,
-      email: null, badge: null, points: ["Routines run on time, day and night", "Reach your bots from your phone, even with this computer off", "Cloud computers and voice included"],
-      price: null, moneyBack: null, current: null });
-  });
 });
 
 describe("the popup as a dialog", () => {
@@ -171,7 +166,7 @@ describe("the popup as a dialog", () => {
     const dialog = container.querySelector('[role="dialog"]')!;
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent).toBe("MausBot Cloud Pro");
-    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent).toContain("Then from $29/month + tax.");
+    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent).toContain("Then from $15/month + tax.");
     expect(document.activeElement!.id).toBe("cloud-pro-popup-title");
     const order: Array<string | null> = [];
     for (let i = 0; i < 5; i++) { expect(press("Tab").defaultPrevented).toBe(true); order.push(focused()); }
@@ -306,10 +301,10 @@ describe("who clicked, through the app's analytics", () => {
 
   it("a click by someone signed in is tied to their Cloud account's email first; showing, Not now and close never are", async () => {
     const report = await fresh(true);
-    for (const action of ["upgrade", "manage", "see_plans"] as const) report(action, person);
-    for (const action of ["shown", "not_now", "close"] as const) report(action, person);
-    report("upgrade", { plan: "none", signedIn: false, email: null });
-    const event = (action: string, signedIn = true) => ["capture", "cloud_pro_popup", { action, plan: "none", signed_in: signedIn }];
+    for (const action of ["upgrade", "manage", "see_plans"] as const) report(action, person, "local");
+    for (const action of ["shown", "not_now", "close"] as const) report(action, person, "local");
+    report("upgrade", { plan: "none", signedIn: false, email: null }, "local");
+    const event = (action: string, signedIn = true) => ["capture", "cloud_pro_popup", { action, plan: "none", signed_in: signedIn, page: "local" }];
     expect(sent()).toEqual([identify, event("upgrade"), identify, event("manage"), identify, event("see_plans"),
       event("shown"), event("not_now"), event("close"), event("upgrade", false)]);
   });
@@ -320,7 +315,7 @@ describe("who clicked, through the app's analytics", () => {
     first.analytics.setAnalyticsEnabled(false);
     const second = await pageOn(desktop, port(18799), new Map());
     expect(second.analytics.analyticsEnabled()).toBe(false);
-    second.report("manage", person);
+    second.report("manage", person, "local");
     expect(ph.loads).toBe(0); expect(ph.calls).toEqual([]);
   });
 
@@ -330,7 +325,7 @@ describe("who clicked, through the app's analytics", () => {
     expect(ph.loads).toBe(0);
     const second = await pageOn(desktop, port(18799), new Map());
     expect(second.analytics.analyticsEnabled()).toBe(false);
-    second.report("upgrade", person);
+    second.report("upgrade", person, "local");
     expect(ph.calls).toEqual([]);
   });
 
@@ -340,23 +335,23 @@ describe("who clicked, through the app's analytics", () => {
     first.analytics.setAnalyticsEnabled(true);
     const second = await pageOn(desktop, port(28799), new Map([["omb-analytics-opt-out", "1"]]));
     expect(second.analytics.analyticsEnabled()).toBe(true);
-    second.report("manage", person);
-    expect(sent()).toEqual([identify, ["capture", "cloud_pro_popup", { action: "manage", plan: "none", signed_in: true }]]);
+    second.report("manage", person, "local");
+    expect(sent()).toEqual([identify, ["capture", "cloud_pro_popup", { action: "manage", plan: "none", signed_in: true, page: "local" }]]);
   });
 
   it("with no switch kept yet, a page on another port than the first counts a click without the email: the first port's storage may hold an older opt-out", async () => {
     const desktop = oneDesktop();
     const fallback = await pageOn(desktop, port(18799), new Map());
     expect(fallback.analytics.analyticsEnabled(), "this port's storage holds no choice").toBe(true);
-    fallback.report("upgrade", person);
-    const upgrade = ["capture", "cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: true }];
+    fallback.report("upgrade", person, "local");
+    const upgrade = ["capture", "cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: true, page: "local" }];
     expect(sent()).toEqual([upgrade]);
     const first = await pageOn(desktop, port(8799), new Map());
-    first.report("upgrade", person);
+    first.report("upgrade", person, "local");
     expect(sent(), "the first port's own storage holds no opt-out").toEqual([identify, upgrade]);
     first.analytics.setAnalyticsEnabled(true);
     const later = await pageOn(desktop, port(28799), new Map());
-    later.report("upgrade", person);
+    later.report("upgrade", person, "local");
     expect(sent(), "once the desktop keeps a switch, every port knows").toEqual([identify, upgrade]);
   });
 
@@ -367,7 +362,7 @@ describe("who clicked, through the app's analytics", () => {
     const cloud = await pageOn(desktop, MY_CLOUD, new Map());
     expect(cloud.analytics.analyticsEnabled()).toBe(false);
     const view = cloudProCloudPageView({ status: "paid", tier: "pro" }) as CloudProPopupView;
-    cloud.report("shown", view); cloud.report("manage", view);
+    cloud.report("shown", view, "my_cloud"); cloud.report("manage", view, "my_cloud");
     expect(ph.loads).toBe(0); expect(ph.calls).toEqual([]);
     expect(window.ogb?.desktopAnalytics?.set, "only This computer's page sets it").toBeUndefined();
     await pageOn(desktop, port(18799), new Map()).then(page => page.analytics.setAnalyticsEnabled(true));
@@ -379,7 +374,7 @@ describe("who clicked, through the app's analytics", () => {
 
   it("sends nothing at all with usage analytics off", async () => {
     const report = await fresh(false);
-    for (const action of ["shown", "upgrade", "manage", "see_plans", "not_now", "close"] as const) report(action, person);
+    for (const action of ["shown", "upgrade", "manage", "see_plans", "not_now", "close"] as const) report(action, person, "local");
     expect(ph.loads).toBe(0);
     expect(ph.calls).toEqual([]);
   });

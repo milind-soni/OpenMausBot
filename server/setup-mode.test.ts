@@ -76,7 +76,7 @@ describe("setupSystemPrompt", () => {
   it("is the skill_manage-naming block when active with skills on", () => {
     const prompt = setupSystemPrompt(true, { skills: true, connectedApps: AVAILABLE });
     expect(prompt.startsWith("\n\n")).toBe(true);
-    for (const tool of ["propose_profile", "propose_routine", "skill_manage", "request_credential"]) {
+    for (const tool of ["propose_profile", "trigger", "skill_manage", "request_credential"]) {
       expect(prompt).toContain(tool);
     }
     expect(prompt).toContain("at most four questions");
@@ -87,7 +87,7 @@ describe("setupSystemPrompt", () => {
     for (const prompt of [setupSystemPrompt(true, { connectedApps: AVAILABLE }), setupSystemPrompt(true, { skills: false, connectedApps: AVAILABLE })]) {
       expect(prompt).not.toContain("skill_manage");
       expect(prompt).toContain("propose_profile");
-      expect(prompt).toContain("propose_routine");
+      expect(prompt).toContain("trigger for a schedule or webhook");
       expect(prompt).toContain("request_credential");
       expect(prompt).toContain("describe procedures plainly in your standing instructions");
     }
@@ -118,6 +118,18 @@ describe("setupSystemPrompt working-folder clause and result ordering", () => {
     expect(text).toContain("Full Access does not supply answers, credentials, or broader permissions for another bot");
     expect(text).not.toContain("each of which the user must confirm");
     expect(text).not.toContain("propose it paused");
+  });
+});
+
+describe("setupSystemPrompt for a Chief of Staff", () => {
+  it("tells a Chief to stay the Chief and add the job to what it already does", () => {
+    const chief = setupSystemPrompt(true, { chief: true, connectedApps: AVAILABLE });
+    expect(chief).toContain("You are also the Chief of Staff, and setting yourself up does not change that");
+    expect(chief).toContain("add this job to your standing instructions instead of replacing them");
+    for (const prompt of [setupSystemPrompt(true, { connectedApps: AVAILABLE }), setupSystemPrompt(true, { chief: false, connectedApps: AVAILABLE })]) {
+      expect(prompt).not.toContain("Chief of Staff");
+    }
+    expect(setupSystemPrompt(false, { chief: true, connectedApps: AVAILABLE })).toBe("");
   });
 });
 

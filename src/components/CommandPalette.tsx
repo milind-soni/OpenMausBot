@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot as BotIcon, MessageSquare, Search, Users } from "lucide-react";
 import { api, openBot, useStore, type Bot, type Group } from "@/state/store";
+import { t } from "@/lib/i18n";
 import { rankByName } from "@/lib/palette-rank";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
@@ -155,7 +156,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline/50 bg-card shadow-2xl shadow-black/60"
+        className="popover-surface flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline/50 bg-card shadow-2xl shadow-black/60"
       >
         <div className="flex items-center gap-3 border-b border-hairline/40 px-4 py-3">
           <Search size={16} className="shrink-0 text-ink-secondary" />
@@ -163,7 +164,8 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search bots, channels, messages…"
+            aria-label={t("commandPalette.searchLabel")}
+            placeholder={t("commandPalette.searchPlaceholder")}
             className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <kbd className="shrink-0 rounded-md border border-hairline/40 px-1.5 py-0.5 text-[11px] text-ink-secondary">
@@ -190,7 +192,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
                 <BotIcon size={16} className="shrink-0 text-ink-secondary" />
                 <span className="truncate text-[14px] text-ink">{bot.name}</span>
                 {bot.title && (
-                  <span className="min-w-0 truncate text-[12.5px] text-ink-secondary">{bot.title}</span>
+                  <span className="min-w-0 truncate text-[13px] text-ink-secondary">{bot.title}</span>
                 )}
               </>,
             ),
@@ -231,7 +233,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
                     {hit.name}
                     {hit.task ? <span className="font-normal text-ink-secondary"> · {hit.task}</span> : null}
                   </span>
-                  <span className="line-clamp-2 text-[12.5px] text-ink-secondary">
+                  <span className="line-clamp-2 text-[13px] text-ink-secondary">
                     {before}<mark className="rounded-sm bg-accent/25 px-0.5 text-ink">{match}</mark>{after}
                   </span>
                 </>,

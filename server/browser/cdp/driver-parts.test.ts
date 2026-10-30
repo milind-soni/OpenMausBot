@@ -7,6 +7,7 @@ import { humanChecksIn, reportableUrl } from "./health.ts";
 import { headedUserAgent, identityDifferences, identityFromProbe } from "./identity.ts";
 import { editingCommands, Keyboard, keyDescription, parseChord } from "./keyboard.ts";
 import { parseRef, RefCounter, RefTable } from "./refs.ts";
+import { pictureScale } from "./screencast.ts";
 import { parseSelector } from "./selectors.ts";
 import { isSensitiveInput } from "./sensitive.ts";
 
@@ -178,6 +179,17 @@ describe("small rules", () => {
       { url: "https://www.google.com/recaptcha/api2/anchor?k=1", parentId: "main" },
       { url: "https://newassets.hcaptcha.com/captcha/v1/static/hcaptcha.html", parentId: "main" },
     ]).map((check) => check.kind)).toEqual(["Cloudflare Turnstile", "reCAPTCHA", "hCaptcha"]);
+  });
+
+  it("draws a picture one pixel per CSS pixel up to 1280 wide, 1568 tall and 1.2 megapixels, and in hundredths below that", () => {
+    expect(pictureScale({ width: 1280, height: 800 })).toBe(1);
+    expect(pictureScale({ width: 390, height: 844 })).toBe(1);
+    expect(pictureScale({ width: 1280, height: 937 })).toBe(1);
+    expect(pictureScale({ width: 1280, height: 2400 })).toBe(0.62);
+    expect(pictureScale({ width: 1280, height: 2560 })).toBe(0.6);
+    expect(pictureScale({ width: 2400, height: 1300 })).toBe(0.53);
+    expect(pictureScale({ width: 1280, height: 16_384 })).toBe(0.09);
+    expect(pictureScale({ width: 0, height: 0 })).toBe(1);
   });
 
   it("treats passwords, codes and card numbers as values a snapshot never shows", () => {

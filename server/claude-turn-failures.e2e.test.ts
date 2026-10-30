@@ -118,7 +118,7 @@ it("reports an account's weekly limit with its reset to the person and the Chief
     const thread = await messages(pesto.activeTaskId);
     const failed = thread.filter((m) => m.kind === "activity" && m.tool?.ok === false);
     expect(failed).toHaveLength(1);
-    expect(failed[0].tool.name).toMatch(/^error: This Claude account has reached its weekly limit, which resets .+\. Until then, switch this bot to another engine or Claude account\.$/);
+    expect(failed[0].tool.name).toMatch(/^error: This Claude account has reached its weekly limit, which resets .+\. Until then, switch this bot to another AI or Claude account\.$/);
     expect(failed[0].tool).not.toHaveProperty("setup");
     expect(failed[0].tool).not.toHaveProperty("claudeUpdate");
     expect(thread.some((m) => m.role === "bot" && m.kind === "text" && /hit your weekly limit/.test(m.text ?? ""))).toBe(false);

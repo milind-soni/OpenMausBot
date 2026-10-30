@@ -12,7 +12,8 @@ export function latestRoutineRun(routineId: string, runs: readonly RoutineRun[])
 
 export function routineRunLabel(run: RoutineRun): string {
   if (run.goalStatus) return t(`routines.goal.${run.goalStatus}`);
-  return t(`routines.status.${run.status}`);
+  const status = t(`routines.status.${run.status}`);
+  return run.retried && run.status !== "queued" ? t(`routines.retried.${run.retried}`, { status }) : status;
 }
 
 export function routineRunTone(run: RoutineRun): string {

@@ -1,9 +1,8 @@
 import { useSyncExternalStore } from "react";
 
-export const ADVANCED_MODE_KEY = "omb-advanced-mode";
+import { hasPriorRun } from "./prior-run";
 
-// Read before main.tsx's first-paint writes: applySkin stamps omb-skin on every boot.
-const PRIOR_RUN_KEYS = ["omb-skin", "omb-installed", "omb-email-gate", "omb-drafts", "omb-show-threads"];
+export const ADVANCED_MODE_KEY = "omb-advanced-mode";
 
 let sessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
@@ -23,7 +22,7 @@ export function readAdvancedMode(): boolean {
     const stored = store?.getItem(ADVANCED_MODE_KEY);
     if (stored === "1") return true;
     if (stored === "0") return false;
-    return PRIOR_RUN_KEYS.some((key) => store?.getItem(key) != null);
+    return hasPriorRun(store);
   } catch {
     return false;
   }

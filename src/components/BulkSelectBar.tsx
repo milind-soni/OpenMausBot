@@ -26,6 +26,26 @@ export async function deleteThreadsInBulk(owner: { botId: string } | { groupId: 
   }
 }
 
+export function bulkDeleteBody(rows: readonly SelectableRow[], selected: Selection, freshConversation: boolean): string {
+  const pinned = rows.filter((row) => selected.has(row.threadId) && row.pinned === true).length;
+  const everything = rows.length > 0 && rows.every((row) => selected.has(row.threadId));
+  return [
+    t("task.bulk.confirmBody"),
+    pinned > 0 ? t("task.bulk.pinnedNote", { count: pinned }) : null,
+    freshConversation && everything ? t("task.bulk.freshNote") : null,
+  ].filter(Boolean).join(" ");
+}
+
+export function bulkDeleteOutcome(outcome: BulkDeleteResult): string {
+  const done = summarizeDelete(outcome.responses);
+  return [
+    t("task.bulk.result", { count: done.deleted }),
+    done.busy > 0 ? t("task.bulk.resultBusy", { count: done.busy }) : null,
+    done.missing > 0 ? t("task.bulk.resultMissing", { count: done.missing }) : null,
+    outcome.error ? t("task.bulk.resultError", { message: outcome.error }) : null,
+  ].filter(Boolean).join(" ");
+}
+
 const OLDER_DAYS = 30;
 
 const chip = "rounded-full border border-hairline/50 px-2.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40";
@@ -82,28 +102,15 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
   const [result, setResult] = useState<string | null>(null);
   const count = selected.size;
   const overLimit = maxDeletable !== undefined && count > maxDeletable;
-  const pinned = rows.filter((row) => selected.has(row.threadId) && row.pinned === true).length;
-  const everything = rows.length > 0 && rows.every((row) => selected.has(row.threadId));
-  const body = [
-    t("task.bulk.confirmBody"),
-    pinned > 0 ? t("task.bulk.pinnedNote", { count: pinned }) : null,
-    freshConversation && everything ? t("task.bulk.freshNote") : null,
-  ].filter(Boolean).join(" ");
+  const body = bulkDeleteBody(rows, selected, freshConversation);
   const run = () => {
     const ids = [...selected];
     setPending(true);
     setResult(null);
     void onDelete(ids).then((outcome) => {
-      const done = summarizeDelete(outcome.responses);
       const gone = new Set(outcome.responses.flatMap((response) => response.deleted));
-      const lines = [
-        t("task.bulk.result", { count: done.deleted }),
-        done.busy > 0 ? t("task.bulk.resultBusy", { count: done.busy }) : null,
-        done.missing > 0 ? t("task.bulk.resultMissing", { count: done.missing }) : null,
-        outcome.error ? t("task.bulk.resultError", { message: outcome.error }) : null,
-      ].filter(Boolean);
       onChange((previous) => new Set([...previous].filter((id) => !gone.has(id))));
-      setResult(lines.join(" "));
+      setResult(bulkDeleteOutcome(outcome));
       setPending(false);
       setConfirming(false);
     });

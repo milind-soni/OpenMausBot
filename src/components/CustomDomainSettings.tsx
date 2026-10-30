@@ -51,7 +51,7 @@ export function CustomDomainDnsRecord({ domain, serverIpv4 }: { domain: string; 
           </div>
         ))}
       </dl>
-      <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("settings.domain.recordHint")}</p>
+      <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.domain.recordHint")}</p>
     </section>
   );
 }
@@ -143,7 +143,7 @@ export function CustomDomainSettings() {
               <label htmlFor="custom-domain" className="block text-[13px] font-medium text-ink">{t("settings.domain.label")}</label>
               <input id="custom-domain" type="text" value={domain} disabled={busy !== null} onChange={(event) => { setDomain(event.target.value); setNotice(null); setError(null); }} placeholder="bots.yourcompany.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-accent focus:outline-none disabled:opacity-50" />
               <CustomDomainDnsRecord domain={domain} serverIpv4={status.serverIpv4} />
-              <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("settings.domain.httpsNeeded")}</p>
+              <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.domain.httpsNeeded")}</p>
               <div className="flex flex-wrap gap-2 pt-1">
                 <button type="submit" disabled={!domain.trim() || busy !== null} className="ui-button ui-button-primary">
                   {busy === "saving" ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
@@ -152,8 +152,8 @@ export function CustomDomainSettings() {
                 {status.customDomain && <button type="button" disabled={busy !== null} onClick={() => void save(true)} className="rounded-lg bg-control px-3 py-2 text-[12px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50">{busy === "removing" ? t("settings.domain.removing") : t("settings.domain.remove")}</button>}
               </div>
             </form>
-            {status.publicUrl && <p className="break-all text-[11.5px] text-ink-secondary">{t("settings.domain.current")}: <span className="text-ink">{status.publicUrl}</span></p>}
-            {status.customDomain && <p className="text-[11.5px] leading-relaxed text-ink-secondary">{status.fallbackUrl ? t("settings.domain.fallback", { url: status.fallbackUrl }) : t("settings.domain.noFallback")}</p>}
+            {status.publicUrl && <p className="break-all text-[12px] text-ink-secondary">{t("settings.domain.current")}: <span className="text-ink">{status.publicUrl}</span></p>}
+            {status.customDomain && <p className="text-[12px] leading-relaxed text-ink-secondary">{status.fallbackUrl ? t("settings.domain.fallback", { url: status.fallbackUrl }) : t("settings.domain.noFallback")}</p>}
             <CustomDomainGuide status={status} />
           </>
         )}

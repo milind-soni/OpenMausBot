@@ -139,6 +139,23 @@ describe("the credit's engine on a Cloud home", () => {
     expect(loaded[1]!.instance.models.default).toBe("claude-haiku-5");
   });
 
+  it("says when the relay's default changes, so bots left on the old one follow it; never on a first list or the same default", async () => {
+    const first = vi.fn();
+    await make({ registry: fakeRegistry().registry, fetch: relay(200, MODELS), onDefault: first }).start();
+    expect(first).not.toHaveBeenCalled();
+    const same = vi.fn();
+    const again = make({ registry: fakeRegistry().registry, fetch: relay(200, { data: [...MODELS.data, { id: "claude-opus-5" }] }), onDefault: same });
+    await again.start();
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(join(data, "providers", "trial-credit", "state.json"), "utf8")).models).toHaveLength(3));
+    expect(same).not.toHaveBeenCalled();
+    const onDefault = vi.fn();
+    const { registry, loaded } = fakeRegistry();
+    void make({ registry, fetch: relay(200, { data: [MODELS.data[1], MODELS.data[0]] }), onDefault }).start();
+    await vi.waitFor(() => expect(onDefault).toHaveBeenCalledWith("claude-haiku-4-5", "claude-sonnet-5"));
+    expect(onDefault).toHaveBeenCalledOnce();
+    expect(loaded.at(-1)!.instance.models.default).toBe("claude-sonnet-5");
+  });
+
   it("asks again, more and more slowly, while the relay cannot answer or is paused, and never logs what it sent", async () => {
     vi.useFakeTimers();
     const { registry, loaded } = fakeRegistry(), log = vi.fn();

@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { chromeForTestingExecutable, chromeForTestingPin, type installChromeForTesting } from "./install.ts";
-import { ChromeLauncher } from "./launcher.ts";
+import { ChromeLauncher, runsLauncher } from "./launcher.ts";
 import { chromeHost } from "./resolve.ts";
 import type { IdentitySidecars } from "./sidecar.ts";
 
@@ -160,6 +160,18 @@ describe("the Chrome launcher", () => {
     expect(calibrate).toHaveBeenCalledTimes(2);
   });
 
+  it("moves the next browser to the time zone the owner's app gives the server later, as the server's own clock moves", async () => {
+    const machine = mac({ env: { TZ: "UTC" } });
+    const chrome = launcher(machine);
+    await chrome.ready(headless(chrome.path));
+    expect(readFileSync(chrome.path, "utf8")).toContain("TZ='UTC'");
+    (machine.env as NodeJS.ProcessEnv).TZ = "Asia/Jerusalem";
+    expect(chrome.env()).toEqual({ AGENT_BROWSER_EXECUTABLE_PATH: chrome.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" });
+    const script = readFileSync(chrome.path, "utf8");
+    expect(script).toContain("TZ='Asia/Jerusalem'");
+    expect(script).toContain(`'--user-agent=${identity("155").userAgent}'`);
+  });
+
   it("starts the launcher once before any bot needs it, with the person's own home on a Mac whatever HOME the server has", async () => {
     const machine = mac();
     const checkLauncher = vi.fn(async () => {});
@@ -178,6 +190,19 @@ describe("the Chrome launcher", () => {
     chmodSync(machine.chrome, 0o755);
   });
 
+  it.skipIf(process.platform === "win32")("counts a launcher check that only ran out of time as running, and still refuses one that fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-launcher-check-"));
+    folders.push(root);
+    const slow = join(root, "slow.sh"), failing = join(root, "failing.sh");
+    // A Cloud machine just after a restart: the launcher starts but answers late.
+    writeFileSync(slow, "#!/bin/sh\nexec sleep 5\n", { mode: 0o755 });
+    writeFileSync(failing, "#!/bin/sh\nexit 3\n", { mode: 0o755 });
+    await expect(runsLauncher(slow, process.env, 200)).resolves.toBeUndefined();
+    await expect(runsLauncher(failing, process.env, 5_000)).rejects.toThrow(/the browser launcher does not run here/);
+    chmodSync(slow, 0o644);
+    await expect(runsLauncher(slow, process.env, 5_000)).rejects.toThrow(/the browser launcher does not run here/);
+  });
+
   it("changes nothing on OMB_BROWSER_LEGACY_SHELL=1", async () => {
     const machine = mac({ env: { OMB_BROWSER_LEGACY_SHELL: "1", OMB_RESOURCES_PATH: "/Applications/OpenMausBot.app/Contents/Resources" } });
     const calibrate = vi.fn();
@@ -190,15 +215,15 @@ describe("the Chrome launcher", () => {
     expect(readdirSync(machine.root)).not.toContain("data");
   });
 
-  it("gives a started browser its identity only when it is this launcher's headless Chrome", async () => {
-    const machine = mac();
+  it("gives a started browser its identity, with the person's languages as a list, only when it is this launcher's headless Chrome", async () => {
+    const machine = mac({ env: { LANG: "pt_BR.UTF-8" } });
     const attached = sidecars();
     const chrome = launcher(machine, { sidecars: attached });
     await chrome.started("bot-1", headless(chrome.path));
     expect(attached.ensure).not.toHaveBeenCalled();
     await chrome.ready(headless(chrome.path));
     await chrome.started("bot-1", headless(chrome.path));
-    expect(attached.ensure).toHaveBeenCalledExactlyOnceWith("bot-1", headless(chrome.path), identity("155"));
+    expect(attached.ensure).toHaveBeenCalledExactlyOnceWith("bot-1", headless(chrome.path), { ...identity("155"), acceptLanguage: "pt-BR,pt,en-US,en" });
     await chrome.started("bot-2", { command: "/engine/agent-browser", env: { AGENT_BROWSER_EXECUTABLE_PATH: chrome.path } });
     await chrome.started("bot-3", { command: "/engine/agent-browser", env: { ...headless(chrome.path).env, AGENT_BROWSER_AUTO_CONNECT: "1" } });
     await chrome.started("bot-4", headless("/bundle/chrome-headless-shell"));

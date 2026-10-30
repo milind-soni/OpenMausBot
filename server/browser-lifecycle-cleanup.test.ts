@@ -349,8 +349,10 @@ describe("closing this data dir's browsers nothing uses", () => {
     info.mockRestore();
   });
 
-  it("closes an unused browser after ten minutes unless config.json says otherwise", () => {
+  it("closes an unused browser after ten minutes, three on a Cloud home, unless config.json says otherwise", () => {
     expect(browserIdleMs({})).toBe(10 * 60_000);
+    expect(browserIdleMs({}, { cloudHome: true })).toBe(3 * 60_000);
     expect(browserIdleMs({ browserEngine: { idleTimeoutMinutes: 2 } })).toBe(2 * 60_000);
+    expect(browserIdleMs({ browserEngine: { idleTimeoutMinutes: 20 } }, { cloudHome: true })).toBe(20 * 60_000);
   });
 });

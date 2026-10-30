@@ -105,23 +105,11 @@ describe("live call media", () => {
   });
 
   it("asks for a key and releases the microphone", async () => {
-    request.mockRejectedValueOnce(new ApiError("Add an OpenAI API key to use Live calls.", 409, { needsKey: true }));
+    request.mockRejectedValueOnce(new ApiError("Live calls use your own OpenAI key. Add it in Settings → API keys.", 409, { needsKey: true }));
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({ phase: "idle", needsKey: true });
     expect(track.stopped).toBe(true);
     expect(currentCall()).toBeNull();
-  });
-
-  it("shows the Pro prompt, never the key form, and releases the microphone", async () => {
-    request.mockRejectedValueOnce(new ApiError("Live calls from your phone need a Pro plan.", 402, { needsPro: true }));
-    await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia()).toMatchObject({ phase: "idle", needsPro: true, needsKey: false, botId: "b1", threadId: "t1", notice: null, action: null });
-    expect(track.stopped).toBe(true);
-    expect(peer.closed).toBe(true);
-    expect(currentCall()).toBeNull();
-    expect(endRequests()).toEqual([]);
-    await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia()).toMatchObject({ phase: "starting", needsPro: false, callId: "c1" });
   });
 
   it("says who is on the line when another call runs", async () => {
@@ -450,7 +438,7 @@ describe("live call media", () => {
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({
       phase: "failed",
-      notice: "Live calls need a microphone, and this window can't use one. Open OpenMausBot at a secure https address to make the call.",
+      notice: "Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call.",
       action: null,
     });
     expect(currentCall()).toBeNull();
@@ -494,21 +482,12 @@ describe("live call media", () => {
   });
 
   it("drops the key prompt only for the bot it was left for", async () => {
-    request.mockRejectedValueOnce(new ApiError("Add an OpenAI API key to use Live calls.", 409, { needsKey: true }));
+    request.mockRejectedValueOnce(new ApiError("Live calls use your own OpenAI key. Add it in Settings → API keys.", 409, { needsKey: true }));
     await startLiveCall({ botId: "b1", threadId: "t1" });
     dismissStartPrompt("b2");
     expect(liveMedia()).toMatchObject({ needsKey: true, botId: "b1" });
     dismissStartPrompt("b1");
     expect(liveMedia()).toMatchObject({ phase: "idle", needsKey: false, botId: null });
-  });
-
-  it("drops the Pro prompt only for the bot it was left for", async () => {
-    request.mockRejectedValueOnce(new ApiError("Live calls from your phone need a Pro plan.", 402, { needsPro: true }));
-    await startLiveCall({ botId: "b1", threadId: "t1" });
-    dismissStartPrompt("b2");
-    expect(liveMedia()).toMatchObject({ needsPro: true, botId: "b1" });
-    dismissStartPrompt("b1");
-    expect(liveMedia()).toMatchObject({ phase: "idle", needsPro: false, botId: null });
   });
 
   it("plays blocked audio on the next click and clears the hint", async () => {
@@ -778,7 +757,7 @@ describe("a blocked microphone", () => {
       pageMicrophone,
     });
     await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Live calls need a microphone, and this window can't use one. Open OpenMausBot at a secure https address to make the call.", action: null });
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call.", action: null });
     expect(liveMedia().notice).not.toMatch(/browser/i);
     expect(pageMicrophone).not.toHaveBeenCalled();
   });

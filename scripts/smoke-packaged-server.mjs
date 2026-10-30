@@ -123,6 +123,14 @@ while (Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
+// The image ships dist-server without the repo's package.json (Dockerfile): the version must come from the bundle.
+let versionReport = null;
+if (listening) {
+  try {
+    versionReport = (await (await fetch(`http://127.0.0.1:${port}/.well-known/openmausbot/environment`, { signal: AbortSignal.timeout(5_000) })).json()).version;
+  } catch (error) { versionReport = String(error); }
+}
+
 let searchReport = null;
 if (listening) {
   try {
@@ -386,6 +394,12 @@ if (!listening) {
   console.error(`the packaged server never served /api/health on port ${port}.`);
   console.error(`exit code: ${child.exitCode}`);
   console.error(output.trim() || "(no output)");
+  process.exit(1);
+}
+
+const repoVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+if (!process.env.OMB_SMOKE_DIST && versionReport !== repoVersion) {
+  console.error(`The packaged server reports version ${JSON.stringify(versionReport)}, not ${repoVersion}.`);
   process.exit(1);
 }
 

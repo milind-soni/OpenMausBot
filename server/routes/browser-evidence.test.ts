@@ -56,14 +56,14 @@ describe("recorded browser step routes", () => {
     expect(rest).toMatchObject({ steps: [{ step: 3 }], nextAfter: null });
   });
 
-  it("serves a screenshot as an immutable private JPEG, and nothing else", async () => {
+  it("serves a screenshot as an uncached private JPEG, and nothing else", async () => {
     const { base, record } = await serve();
     const one = await record("thread-1", Buffer.from("jpeg bytes"));
     const image = await fetch(`${base}/api/threads/thread-1/evidence/${GEN}/${one.image}`);
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/jpeg");
     expect(image.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(image.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    expect(image.headers.get("cache-control")).toBe("private, no-store");
     expect(Buffer.from(await image.arrayBuffer()).toString()).toBe("jpeg bytes");
     for (const path of [`/api/threads/thread-1/evidence/${GEN}/step-999999.jpg`, `/api/threads/other/evidence/${GEN}/${one.image}`, `/api/threads/other/evidence`]) {
       expect((await fetch(`${base}${path}`)).status, path).toBe(404);

@@ -24,6 +24,7 @@ import {
 import { notifyDeviceRevoked } from "./harness-notice.ts";
 import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
+import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
 
 // Only Electron supplies this port; Electron children fail closed until initialized.
@@ -133,7 +134,8 @@ const companion = createServer(proxy);
 // `createServer(proxy)` handles plain HTTP only; noVNC's WebSocket arrives as
 // Node's separate `upgrade` event.
 companion.on("upgrade", proxy.upgrade);
-const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
+// Large JSON replies go gzipped here: this is the only listener whose replies go up the home connection to Cloudflare.
+const managedOrigin = PRIVATE_ORIGIN ? createServer(gzipTunnelReplies(proxy)) : null;
 managedOrigin?.on("upgrade", proxy.upgrade);
 
 const control = createControlServer({
@@ -236,6 +238,7 @@ const shutdown = async (signal: string): Promise<void> => {
   watcher.stop();
   await mdns.stop().catch(() => {});
   // close() waits for open connections, and an SSE stream never ends on its own.
+  proxy.closeViewers();
   companion.closeAllConnections?.();
   control.closeAllConnections?.();
   managedOrigin?.closeAllConnections?.();

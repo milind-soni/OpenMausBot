@@ -9,8 +9,12 @@ import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { createAcpDriver, offeredModels, type AccountErrorCode, type AcpSupport } from "./core.ts";
-import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
+import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
+import { OPENCODE_STANDALONE } from "./opencode-release.ts";
+import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
+import { acpModelOption, acpVariantOption, offeredModels } from "./config-options.ts";
+import { parseOpenCodeLogLine } from "./quiet-status.ts";
+import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli, killCliTree, spawnCli } from "../../procs.ts";
 
@@ -22,6 +26,7 @@ const freeModels = new Set<string>();
 const paidModels = new Set<string>();
 
 const DISCOVERY_TIMEOUT_MS = 20_000;
+const EFFORT_SURVEY_MS = 8_000;
 const DISCOVERY_PROBE_TTL_MS = 30_000;
 const discoveryProbeCache = new Map<string, { expiresAt: number; result: Promise<boolean> }>();
 
@@ -257,13 +262,57 @@ function discoveryDirectory(): Promise<string> {
   return discoveryFolder;
 }
 
+const UNANSWERED = Symbol("unanswered");
+
+function answerWithin(answer: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    answer.catch(() => null),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(UNANSWERED), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+export interface OpenCodeSessionProbe {
+  session: unknown;
+  /** Each surveyed model's ACP effort choices; an empty list means it has none. */
+  efforts: Map<string, ModelVariantOption[]>;
+}
+
+/** OpenCode (1.18.27, 1.19.4, 2.1.4) names a model's efforts only in the session's `effort` option once that
+ * model is selected, and OpenCode 2.1.4 answers overlapping selections with another model's options. */
+export async function surveyOpenCodeEfforts(
+  request: (method: string, params: unknown) => Promise<unknown>,
+  session: unknown,
+  budgetMs = EFFORT_SURVEY_MS,
+): Promise<Map<string, ModelVariantOption[]>> {
+  const efforts = new Map<string, ModelVariantOption[]>();
+  const sessionId = (session as { sessionId?: unknown } | null)?.sessionId;
+  if (typeof sessionId !== "string") return efforts;
+  const deadline = Date.now() + budgetMs;
+  for (const id of new Set(offeredModels(session, "model"))) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const selected = await answerWithin(
+      request("session/set_config_option", { sessionId, configId: "model", value: id }),
+      remaining,
+    );
+    if (selected === UNANSWERED) break;
+    if (acpModelOption(selected, "model")?.currentValue !== id) continue;
+    efforts.set(id, acpVariantOption(selected)?.options ?? []);
+  }
+  return efforts;
+}
+
 export async function probeOpenCodeSession(
   cli: string,
   environment: Record<string, string | undefined>,
   folder?: string,
   timeoutMs = DISCOVERY_TIMEOUT_MS,
-): Promise<unknown> {
+): Promise<OpenCodeSessionProbe> {
   const cwd = folder ?? await discoveryDirectory();
+  const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawnCli>;
     try {
@@ -273,6 +322,7 @@ export async function probeOpenCodeSession(
       return;
     }
     let settled = false;
+    let listed: OpenCodeSessionProbe | undefined;
     let buffer = "";
     let nextId = 0;
     const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
@@ -281,7 +331,7 @@ export async function probeOpenCodeSession(
         child.stdin.write(`${JSON.stringify(message)}\n`);
       } catch {}
     };
-    const finish = (error: Error | null, value?: unknown) => {
+    const finish = (error: Error | null, value?: OpenCodeSessionProbe) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -289,8 +339,11 @@ export async function probeOpenCodeSession(
         child.stdin.end();
       } catch {}
       void killCliTree(child);
-      if (error) reject(error);
-      else resolve(value);
+      for (const waiter of pending.values()) waiter.reject(new Error("OpenCode closed"));
+      pending.clear();
+      const result = value ?? listed;
+      if (result) resolve(result);
+      else reject(error ?? new Error("OpenCode did not list its models"));
     };
     const timer = setTimeout(
       () => finish(Object.assign(new Error("OpenCode did not list its models in time"), { timedOut: true })),
@@ -329,6 +382,10 @@ export async function probeOpenCodeSession(
       }
     });
     const request = (method: string, params: unknown) => new Promise<unknown>((resolveRequest, rejectRequest) => {
+      if (settled) {
+        rejectRequest(new Error("OpenCode closed"));
+        return;
+      }
       const id = ++nextId;
       pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
       write({ jsonrpc: "2.0", id, method, params });
@@ -339,9 +396,22 @@ export async function probeOpenCodeSession(
         clientInfo: { name: "openmausbot", version: "0.0.0" },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       });
-      return request("session/new", { cwd, mcpServers: [] });
+      const session = await request("session/new", { cwd, mcpServers: [] });
+      listed = { session, efforts: new Map() };
+      const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
+      return { session, efforts: await surveyOpenCodeEfforts(request, session, budget) };
     })().then((result) => finish(null, result), (error: Error) => finish(error));
   });
+}
+
+/** The session's own effort choices win over `models --verbose`: they are what set_config_option accepts. */
+function withEfforts(
+  option: ModelCatalog["options"][number],
+  efforts: ModelVariantOption[] | undefined,
+): ModelCatalog["options"][number] {
+  if (!efforts) return option;
+  const { variants: _verbose, ...rest } = option;
+  return efforts.length ? { ...rest, variants: efforts } : rest;
 }
 
 /** `models --verbose` is OpenCode 1 only (2 rejects the flag). Plain `opencode models` on 2 answers from a
@@ -361,11 +431,15 @@ export async function discoverOpenCodeModels(
   if (retry(verbose)) [verbose] = await Promise.allSettled([readMetadata()]);
   const metadata = verbose.status === "fulfilled" ? verbose.value : null;
   if (metadata) rememberPrices(metadata);
-  const live = session.status === "fulfilled" ? catalogFromOpenCodeSession(session.value) : null;
+  const probe = session.status === "fulfilled" ? session.value : null;
+  const live = probe ? catalogFromOpenCodeSession(probe.session) : null;
   let catalog: ModelCatalog | null = null;
-  if (live) {
+  if (probe && live) {
     const details = new Map((metadata?.options ?? []).map((option) => [option.id, option]));
-    const options = live.options.map((option) => ({ ...option, ...details.get(option.id), id: option.id }));
+    const options = live.options.map((option) => withEfforts(
+      { ...option, ...details.get(option.id), id: option.id },
+      probe.efforts.get(option.id),
+    ));
     catalog = { default: preferredOpenCodeModel(options.map((option) => option.id), live.current), options };
   } else if (metadata?.options.length) {
     catalog = { default: preferredOpenCodeModel(metadata.options.map((option) => option.id)), options: metadata.options };
@@ -502,6 +576,11 @@ export function ensureOpenCodeInjectModel(
   return native;
 }
 
+/** OpenCode 1.18 appends every process's log to one file under its xdg data folder. */
+export function openCodeLogPath(env: Record<string, string | undefined>): string {
+  return join(env.XDG_DATA_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".local", "share"), "opencode", "log", "opencode.log");
+}
+
 /** The CLI is xdg-flavoured on every platform (`opencode auth list` on macOS prints
  * `~/.local/share/opencode/auth.json`), so the xdg path comes first. */
 function storedAuthPaths(env: Record<string, string | undefined>): string[] {
@@ -540,6 +619,22 @@ function hasStoredOpenCodeAuth(env: Record<string, string | undefined>) {
       return false;
     }
   });
+}
+
+/** A login, a key or a provider key of the person's own: what makes OpenCode more than Zen's free models. */
+function ownOpenCodeAccess(env: Record<string, string | undefined>): boolean {
+  return Boolean(env.OPENCODE_API_KEY) || hasStoredOpenCodeAuth(env) || OPENCODE_PROVIDER_ENV.some((key) => Boolean(env[key]?.trim()));
+}
+
+/** OpenCode's own providers: Zen (some models free without a login) and Go (a subscription). */
+const OPENCODE_OWN_MODEL = /^opencode(?:-go)?\//u;
+
+/** Ready only through Zen's free no-login models: no access of the person's own and no other provider's model. A local
+ * model the app found (`custom`) is not the person signing OpenCode in to anything. An empty catalog is no fallback: it
+ * offers nothing to run. */
+export function openCodeFreeFallback(ownAccess: boolean, models: ModelCatalog): boolean {
+  return !ownAccess && models.options.length > 0
+    && models.options.every((option) => option.custom === true || OPENCODE_OWN_MODEL.test(option.id));
 }
 
 function withinFolder(path: string, folder: string): boolean {
@@ -720,7 +815,8 @@ function openCodeLoginsFingerprint(env: Record<string, string | undefined>): str
   }).join("|");
 }
 
-const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
+/** `ownAccess` hears, per instance, whether its last sign-in read found access of the person's own. */
+const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string, boolean>()): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
   models: NO_MODELS,
@@ -736,8 +832,14 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     docsUrl: "https://opencode.ai/docs/",
     signInCommand: "opencode auth login",
     needsNode: true,
+    standalone: OPENCODE_STANDALONE,
   },
   spawnArgs: () => ["acp"],
+  statusLog: { path: openCodeLogPath, parse: parseOpenCodeLogLine, shared: true },
+  // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
+  // shares: a connection check or memory upkeep would show up in their history there.
+  oneShotFolder: discoveryDirectory,
+  shareProcess: true,
   credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
   selectModel: { configId: "model" },
   fallbackModel: (sessionConfig, catalogDefault) => {
@@ -746,8 +848,14 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current) || null;
   },
   modelVariants: true,
+  ownMcpOverHttp: true,
+  // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
+  engineTools: 24,
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
-  transformEnv: withholdProviderKeysWhenManaged,
+  transformEnv: (env, config, instanceId, instanceEnvironment) => {
+    withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
+    applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
+  },
   spawnFingerprint: openCodeLoginsFingerprint,
   applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
     if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
@@ -764,11 +872,12 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   },
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: async (env, config) => (
-    Boolean(env.OPENCODE_API_KEY)
-    || hasStoredOpenCodeAuth(env)
-    || await canRunOpenCode(env, config.cli, loadCatalog)
-  ),
+  isAuthenticated: async (env, config, instanceId) => {
+    ownAccess.set(instanceId, ownOpenCodeAccess(env));
+    return Boolean(env.OPENCODE_API_KEY)
+      || hasStoredOpenCodeAuth(env)
+      || await canRunOpenCode(env, config.cli, loadCatalog);
+  },
   classifyError: classifyOpenCodeError,
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config) => mergeLocalInject(
@@ -810,8 +919,24 @@ export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undef
 
 export const classifyOpenCodeGoError = classifyOpenCodeError;
 
-export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels) {
-  return createAcpDriver(support(loadCatalog));
+/** Its status says `freeFallback` while only Zen's free no-login models make it ready (contracts.ts). */
+export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels): ProviderDriver<AcpConfig> {
+  const ownAccess = new Map<string, boolean>();
+  const driver = createAcpDriver(support(loadCatalog, ownAccess));
+  return {
+    ...driver,
+    async create(input) {
+      const instance = await driver.create(input);
+      const read = instance.snapshot.bind(instance);
+      instance.snapshot = async () => {
+        const snapshot = await read();
+        const own = ownAccess.get(input.instanceId);
+        return snapshot.state === "available" && snapshot.authenticated === true && own !== undefined
+          && openCodeFreeFallback(own, instance.models) ? { ...snapshot, freeFallback: true } : snapshot;
+      };
+      return instance;
+    },
+  };
 }
 
 export const createOpenCodeGoDriver = createOpenCodeDriver;

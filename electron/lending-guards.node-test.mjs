@@ -10,6 +10,7 @@ import { createComputerSharing, validSharedOperation } from "./computer-sharing.
 import { executeSharedOperation, LENT_SCREEN_TOOLS } from "./shared-computer-access.mjs";
 import { LENT_SCREEN_ARGUMENTS, lentScreenArguments } from "./lent-screen-tools.mjs";
 import { createLendingActivity } from "./lending-activity.mjs";
+import { helperMissing, SCREEN_LOCKED } from "./lent-screen-failures.mjs";
 
 async function scratch(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lending-guards-")));
@@ -46,11 +47,11 @@ function scriptedServer(jobs) {
   return { env, fetchImpl, done, registration: () => registration };
 }
 
-async function lend(t, dir, { jobs, folders, terminal = false, computer = false, home, cuaConnection = async () => null }) {
+async function lend(t, dir, { jobs, folders, terminal = false, computer = false, home, cuaConnection = async () => null, screenLocked }) {
   const server = scriptedServer(jobs);
   const sharing = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: server.fetchImpl, environments: () => [server.env],
-    enabled: async () => true, cuaConnection, home: home ?? path.join(dir, "no-home"),
+    enabled: async () => true, cuaConnection, home: home ?? path.join(dir, "no-home"), screenLocked,
     hostControl: async () => ({ renew: async () => {}, release: async () => {} }),
   });
   t.after(() => sharing.close());
@@ -148,7 +149,8 @@ test("a writable folder never reaches git's configuration, hooks or login items 
     ],
   });
   for (const refused of results.slice(0, 3)) { assert.equal(refused.isError, true); assert.match(text(refused), /\.git/); }
-  assert.equal(results[3].isError, true, "src/ does not exist; a missing parent is an ordinary error");
+  assert.notEqual(results[3].isError, true, "an ordinary file is written, its missing folder made");
+  assert.equal(await readFile(path.join(repo, "src", "main.js"), "utf8"), "console.log('ok')");
   assert.equal(JSON.parse(text(results[4])).content, "[core]\n\tbare = false\n");
   assert.equal(await readFile(path.join(repo, ".git", "config"), "utf8"), "[core]\n\tbare = false\n");
   await assert.rejects(stat(path.join(repo, ".git", "hooks", "pre-commit")), { code: "ENOENT" });
@@ -346,4 +348,89 @@ test("direct executor: .git components are refused for writes in any case", asyn
   await run({ action: "write_file", path: ".gitignore", content: "node_modules\n" });
   await run({ action: "write_file", path: "git.txt", content: "fine" });
   assert.equal(await readFile(path.join(dir, ".gitignore"), "utf8"), "node_modules\n");
+});
+
+/** Answers tools/call with the environment it was started with, the way a driver would see it. */
+async function environmentDriver(dir) {
+  const script = path.join(dir, "env-driver.mjs");
+  await writeFile(script, `import readline from 'node:readline';
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'get_desktop_state',inputSchema:{type:'object',properties:{}}}]}:{content:[{type:'text',text:JSON.stringify(process.env)}]};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  return { mcpCommand: process.execPath, mcpArgs: [script], mcpEnv: { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" } };
+}
+
+test("a locked screen is refused in one plain sentence before the driver is reached, and works once unlocked", async t => {
+  const dir = await scratch(t);
+  const driver = await obligingDriver(dir);
+  let locked = true;
+  const { results } = await lend(t, dir, {
+    folders: [], computer: true, cuaConnection: async () => driver.connection, screenLocked: () => locked,
+    jobs: [
+      { action: "computer_call", tool_name: "get_desktop_state", arguments: {} },
+      registration => { locked = false; return { computer_id: registration.id, action: "computer_call", tool_name: "get_desktop_state", arguments: {} }; },
+    ],
+  });
+  assert.equal(results[0].isError, true);
+  assert.equal(text(results[0]), SCREEN_LOCKED);
+  assert.equal(results[1].isError, undefined);
+  assert.deepEqual((await driver.received()).map(call => call.name), ["get_desktop_state"]);
+});
+
+test("a missing or quarantined driver says how to restore it, and names no path", async t => {
+  const dir = await scratch(t);
+  const gone = path.join(dir, "Program Files", "OpenMausBot", "resources", "cua-driver.exe");
+  const { results } = await lend(t, dir, {
+    folders: [], computer: true, cuaConnection: async () => ({ mcpCommand: gone, mcpArgs: ["mcp"], mcpEnv: {} }),
+    jobs: [{ action: "computer_call", tool_name: "get_desktop_state", arguments: {} }],
+  });
+  assert.equal(text(results[0]), helperMissing());
+  assert.ok(!text(results[0]).includes(dir));
+});
+
+test("computer control that never started gives its reason as a fix the person can make", async t => {
+  for (const [reason, expected] of [
+    ["cua-driver binary not found", helperMissing()],
+    ["embedded host failed: Packaged background CUA driver is missing; reinstall OpenMausBot", helperMissing()],
+    ["Accessibility and Screen Recording required; grant access in System Settings and restart OpenMausBot", /allow Accessibility and Screen Recording/],
+    ["no running cua-driver daemon", /Computer control is not running on this computer/],
+  ]) {
+    const dir = await scratch(t);
+    const { results } = await lend(t, dir, {
+      folders: [], computer: true, cuaConnection: async () => ({ mode: "unavailable", reason }),
+      jobs: [{ action: "computer_call", tool_name: "get_desktop_state", arguments: {} }],
+    });
+    if (typeof expected === "string") assert.equal(text(results[0]), expected, reason); else assert.match(text(results[0]), expected, reason);
+  }
+});
+
+test("the lent driver gets the host's system environment, never its credentials", async t => {
+  const dir = await scratch(t);
+  const saved = { ...process.env };
+  t.after(() => { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); });
+  // Real folders: on Windows USERPROFILE is os.homedir(), which sharing resolves to keep the home out of reach.
+  for (const name of ["profile-home", "temp", "tmp"]) await mkdir(path.join(dir, name));
+  Object.assign(process.env, { SystemRoot: "C:\\Windows", USERPROFILE: path.join(dir, "profile-home"), TEMP: path.join(dir, "temp"), TMP: path.join(dir, "tmp"), ANTHROPIC_API_KEY: "sk-ant-fixture", OMB_CONTROL_TOKEN: "fixture-token" });
+  const connection = await environmentDriver(dir);
+  const { results } = await lend(t, dir, {
+    folders: [], computer: true, cuaConnection: async () => connection,
+    jobs: [{ action: "computer_call", tool_name: "get_desktop_state", arguments: {} }],
+  });
+  const seen = JSON.parse(text(results[0]));
+  assert.equal(seen.SystemRoot, "C:\\Windows");
+  assert.equal(seen.USERPROFILE, path.join(dir, "profile-home"));
+  assert.equal(seen.TEMP, path.join(dir, "temp"));
+  assert.equal(seen.CUA_DRIVER_RS_TELEMETRY_ENABLED, "0");
+  assert.equal(seen.ANTHROPIC_API_KEY, undefined);
+  assert.equal(seen.OMB_CONTROL_TOKEN, undefined);
+});
+
+test("a Windows path in a failure collapses to its file name before it leaves this computer", async t => {
+  const dir = await scratch(t);
+  const { results } = await lend(t, dir, {
+    folders: [], computer: true,
+    cuaConnection: async () => { throw new Error("cannot open C:\\Users\\Ana Lima\\AppData\\Local\\cua\\state.json: denied"); },
+    jobs: [{ action: "computer_call", tool_name: "get_desktop_state", arguments: {} }],
+  });
+  assert.equal(text(results[0]), "cannot open state.json: denied");
 });

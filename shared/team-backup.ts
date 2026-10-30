@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { mascotFaceColorSchema } from "./bot-avatar.ts";
 
-import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "./wire.ts";
+import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
 
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
@@ -10,7 +11,7 @@ export const TEAM_BACKUP_EXCLUSIONS = "Files, images, custom avatars, account co
 const key = z.string().min(1).max(200);
 const name = z.string().trim().min(1).max(200);
 const timestamp = z.number().finite().nonnegative();
-const color = z.enum(["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"]);
+const color = z.enum(MAUS_COLOR_NAMES);
 const message = z.object({
   id: key,
   role: z.enum(["bot", "user"]),
@@ -20,6 +21,8 @@ const message = z.object({
   replyToId: key.optional(),
   from: z.object({ botId: key, name, color: z.string().max(40) }).optional(),
   peerPost: z.object({ unattended: z.boolean().optional() }).optional(),
+  /** A card the server built from records: it replays to a bot as records, never as the bot's own words. */
+  serverCard: z.literal(true).optional(),
 });
 const task = z.object({
   key,
@@ -104,6 +107,7 @@ const backupSchema = z.object({
     color,
     mascotExpression: z.string().max(80).optional(),
     mascotBody: z.string().max(40).optional(),
+    mascotFaceColor: mascotFaceColorSchema.optional(),
     chiefOfStaff: z.boolean(),
     hidden: z.boolean(),
     playbooks: z.array(playbook).max(200),
@@ -132,6 +136,9 @@ const backupSchema = z.object({
     runOn: z.enum(["maus", "cloud"]), schedule,
     durationMinutes: z.number().finite().positive(),
     timeoutMinutes: z.number().int().min(5).max(240).optional(),
+    checks: z.array(z.enum(["calendar", "mail", "runs"])).max(3).optional(),
+    access: z.literal("read-and-draft").optional(),
+    deliver: z.literal("brief").optional(),
   })).max(2_000),
 });
 
@@ -177,7 +184,7 @@ export function parseTeamBackup(input: unknown): TeamBackup {
     if (routine.target === "room-goal") {
       if (routine.runOn !== "maus") throw new Error("Invalid backup: room goals must run on this computer");
       const group = backup.groups.find((candidate) => candidate.key === routine.groupId);
-      if (!groups.has(routine.groupId ?? "") || !group || group.dm || !group.memberIds.includes(routine.botId)) {
+      if (routine.groupId !== undefined && (!groups.has(routine.groupId) || !group || group.dm || !group.memberIds.includes(routine.botId))) {
         throw new Error("Invalid backup: unknown routine room or coordinator");
       }
     }

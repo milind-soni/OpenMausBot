@@ -100,7 +100,7 @@ const noKey = { configured: false, voice: "marin", readTypedReplies: true, idleM
 const CLOUD = { cloudHome: true, tts: { configured: true, ready: true, voice: "preset" }, live: noKey } as AppState["config"];
 const SERVER = { tts: { configured: true, ready: true, voice: "preset" }, live: noKey } as AppState["config"];
 const THIS_COMPUTER = { tts: { configured: true, ready: true, voice: "voice-1" }, live: noKey } as AppState["config"];
-const KEY_FORM = "Live calls use OpenAI GPT-Live";
+const KEY_NEEDED = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
 const APP_REFUSED = "The app didn't let this page use the microphone. Open it in your web browser to make the Live call.";
 
 function Page({ config, children }: { config: AppState["config"]; children: ReactNode }) {
@@ -140,36 +140,30 @@ const press = (element: Element | null) => {
 const menuItems = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
 const text = () => container.textContent ?? "";
 
-async function firstLiveCall(savedBy: "the server" | "the app") {
+async function firstLiveCall() {
   const button = callButton();
   expect(button?.getAttribute("aria-label")).toBe("Live call with Ada");
   expect(button?.querySelector(".bg-warning")).toBeNull();
   press(button);
-  await vi.waitFor(() => expect(text()).toContain(KEY_FORM));
+  await vi.waitFor(() => expect(text()).toContain(KEY_NEEDED));
   expect(getUserMedia).toHaveBeenCalledTimes(1);
   expect(requests.map(({ path, method }) => `${method} ${path}`)).toEqual(["POST /api/live/session"]);
   expect(text()).not.toContain("Call unavailable");
-  const field = container.querySelector<HTMLInputElement>('input[aria-label="OpenAI API key for Live calls"]')!;
-  flushSync(() => {
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value")!.set!.call(field, "sk-live-test");
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  flushSync(() => field.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  await vi.waitFor(() => expect(liveKey).toBe("sk-live-test"));
-  const saves = invoked.filter(({ channel }) => channel === "credential:set");
-  if (savedBy === "the server") {
-    expect(requests).toContainEqual({ path: "/api/config", method: "PUT", body: { live: { key: "sk-live-test" } } });
-    expect(saves).toEqual([]);
-  } else {
-    expect(saves).toEqual([{ channel: "credential:set", args: ["openaiLiveKey", "sk-live-test"] }]);
-    expect(requests.filter(({ path }) => path === "/api/config")).toEqual([]);
-  }
+  expect(container.querySelector("input")).toBeNull();
+  const openApiKeys = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Open API keys");
+  press(openApiKeys ?? null);
+  expect(text()).not.toContain(KEY_NEEDED);
+
+  liveKey = "sk-live-test";
+  press(callButton());
   await vi.waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
   await vi.waitFor(() => expect(requests.filter(({ path }) => path === "/api/live/session")).toHaveLength(2));
   expect(liveMedia()).toMatchObject({ phase: "starting", botId: "ada", threadId: "thread-ada" });
   await vi.waitFor(() => expect(text()).toContain("Live with Ada"));
-  expect(text()).not.toContain(KEY_FORM);
+  expect(text()).not.toContain(KEY_NEEDED);
   expect(text()).not.toContain("Choose This computer");
+  expect(requests.filter(({ path }) => path === "/api/config")).toEqual([]);
+  expect(invoked.map(({ channel }) => channel)).not.toContain("credential:set");
 }
 
 function expectTurnsDisabled(reason: string) {
@@ -217,12 +211,8 @@ beforeEach(() => {
     const method = init.method ?? "GET";
     const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
     requests.push({ path, method, body });
-    if (path === "/api/config" && method === "PUT") {
-      liveKey = body.live.key;
-      return new Response(JSON.stringify({ ...CLOUD, live: { ...noKey, configured: true } }), { status: 200 });
-    }
     if (path === "/api/live/session" && method === "POST") {
-      if (!liveKey) return new Response(JSON.stringify({ error: "Add an OpenAI API key to use Live calls.", needsKey: true }), { status: 409 });
+      if (!liveKey) return new Response(JSON.stringify({ error: KEY_NEEDED, needsKey: true }), { status: 409 });
       return new Promise<Response>(() => {});
     }
     return new Response(JSON.stringify({ error: "not here" }), { status: 404 });
@@ -248,33 +238,33 @@ afterEach(() => {
 });
 
 describe("calling a bot off the Mac", () => {
-  it("in a browser on the person's Cloud, the first visit's call button is a Live call that asks for the key once and calls", async () => {
+  it("in a browser on the person's Cloud, the first visit's call button is a Live call that points to API keys, then calls once a key is saved", async () => {
     expect(callMode()).toBe("turns");
     chat(CLOUD);
-    await firstLiveCall("the server");
+    await firstLiveCall();
     expect(requests.filter((request) => request.method !== "GET").map(({ path, method }) => `${method} ${path}`))
-      .toEqual(["POST /api/live/session", "PUT /api/config", "POST /api/live/session"]);
+      .toEqual(["POST /api/live/session", "POST /api/live/session"]);
   });
 
   it("on My Cloud in the Mac app, the call is Live, and Take turns says it works on This computer", async () => {
     open(desktopApp("darwin", "my-cloud"));
     chat(CLOUD);
-    expectTurnsDisabled("Calls where you take turns work on This computer. They listen with your Mac's own speech recognition, which only This computer can use.");
-    await firstLiveCall("the server");
+    expectTurnsDisabled("Calls where you take turns work with bots on this Mac. They listen with your Mac's own speech recognition, which only bots on this Mac can use.");
+    await firstLiveCall();
   });
 
   it.each(["win32", "linux"] as const)("on My Cloud in the %s app, the call is Live, and Take turns says it needs the Mac app", async (platform) => {
     open(desktopApp(platform, "my-cloud"));
     chat(CLOUD);
     expectTurnsDisabled("Calls where you take turns need the Mac app");
-    await firstLiveCall("the server");
+    await firstLiveCall();
   });
 
-  it.each(["win32", "linux"] as const)("on This computer in the %s app, the call is Live and its key is saved through the app", async (platform) => {
+  it.each(["win32", "linux"] as const)("on This computer in the %s app, the call is Live and points to API keys for its key", async (platform) => {
     open(desktopApp(platform, "this-computer"));
     chat(THIS_COMPUTER);
     expectTurnsDisabled("Calls where you take turns need the Mac app");
-    await firstLiveCall("the app");
+    await firstLiveCall();
   });
 
   it.each([
@@ -290,7 +280,7 @@ describe("calling a bot off the Mac", () => {
     await vi.waitFor(() => expect(text()).toContain(APP_REFUSED));
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent?.trim())).toContain("Open in browser");
-    expect(text()).not.toContain(KEY_FORM);
+    expect(text()).not.toContain(KEY_NEEDED);
     expect(container.querySelector('input[aria-label="OpenAI API key for Live calls"]')).toBeNull();
     expect(requests.filter((request) => request.method !== "GET")).toEqual([]);
     expect(invoked.map(({ channel }) => channel)).not.toContain("credential:set");
@@ -301,9 +291,9 @@ describe("calling a bot off the Mac", () => {
     expect(globalThis.navigator.mediaDevices).toBeUndefined();
     chat(SERVER);
     press(callButton());
-    await vi.waitFor(() => expect(text()).toContain("Live calls need a microphone, and this window can't use one. Open OpenMausBot at a secure https address to make the call."));
+    await vi.waitFor(() => expect(text()).toContain("Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call."));
     expect(text()).not.toContain("WebRTC");
-    expect(text()).not.toContain(KEY_FORM);
+    expect(text()).not.toContain(KEY_NEEDED);
     expect(requests.filter((request) => request.method !== "GET")).toEqual([]);
   });
 

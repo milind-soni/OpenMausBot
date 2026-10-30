@@ -389,9 +389,15 @@ describe("finding what another AI tool already set up on this computer", () => {
     const copied = filesUnder(join(IMPORTED_SKILLS_DIR, "ops")).filter((path) => statSync(join(IMPORTED_SKILLS_DIR, "ops", path)).isFile());
     expect(copied).toEqual(["SKILL.md", ...ordinary].sort());
     expect(contentsUnder(IMPORTED_SKILLS_DIR)).not.toContain(SENTINEL);
-    // A hard link of a credential is never read, whatever it is called.
-    const credential = statSync(join(home, ".codex", "auth.json"));
-    expect(touched().filter((path) => existsSync(path) && statSync(path).ino === credential.ino && statSync(path).dev === credential.dev)).toEqual([join(home, ".claude", "skills", "ops", "notes.md")]);
+    // A hard link of a credential is never read, whatever it is called. File IDs compared exactly (bigint): Windows' 64-bit
+    // file index loses precision as a number, so a folder could seem to be the same file.
+    const credential = statSync(join(home, ".codex", "auth.json"), { bigint: true });
+    const sameFile = (path: string) => {
+      if (!existsSync(path)) return false;
+      const info = statSync(path, { bigint: true });
+      return info.isFile() && info.ino === credential.ino && info.dev === credential.dev;
+    };
+    expect(touched().filter(sameFile)).toEqual([join(home, ".claude", "skills", "ops", "notes.md")]);
   });
 
   it.skipIf(process.platform === "win32")("never waits on a FIFO in place of a config file or a SKILL.md", () => {

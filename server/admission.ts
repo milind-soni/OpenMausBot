@@ -81,6 +81,12 @@ function imagesBlockSteer(message: AdmissionMessage): boolean {
   return message.carriesImages === true && message.engineCanSteerImages !== true;
 }
 
+/** Whether a live room turn holds this work back. A person's own send (sent now, or queued earlier) waits only for a
+ * room turn on its own thread; every other kind of work waits for any room turn of the bot. */
+export function roomTurnHolds(roomTurn: { threadId: string } | null | undefined, threadId: string, personSend: boolean): boolean {
+  return Boolean(roomTurn) && (!personSend || roomTurn!.threadId === threadId);
+}
+
 export function admit(
   surface: AdmissionSurface,
   message: AdmissionMessage = {},
@@ -93,6 +99,7 @@ export function admit(
       return { action: "steer" };
     }
     case "direct": {
+      // groupTurn here is roomTurnHolds(): a room turn on another thread does not hold a person's own thread.
       if (state.atCapacity || state.threadBusy || state.groupTurn || state.parksBehindCoordination) {
         // Capacity outranks a room turn in the receipt because the person can fix it.
         const reason = state.atCapacity ? "capacity" : state.groupTurn ? "group-turn" : undefined;

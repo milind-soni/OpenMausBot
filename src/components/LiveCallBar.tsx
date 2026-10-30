@@ -11,11 +11,12 @@ import { api, liveCallFromFrame, nextLiveCallLookup, useStore, type Action, type
 import { cn } from "@/lib/cn";
 import type { LiveCallState, LiveClient } from "../../shared/wire";
 import { LiveCallSettings } from "./LiveCallSettings";
+import { OpenSystemSettings } from "./OpenSystemSettings";
 
 export type LiveCallBarView =
   | { kind: "local"; title: string; caption: string; heard: string; muted: boolean; ending: boolean; hint: string | null }
   | { kind: "remote"; title: string; callId: string }
-  | { kind: "notice"; text: string; action: LiveCallAction | null };
+  | { kind: "notice"; text: string; action: LiveCallAction | null; micSettings?: boolean };
 
 const DEVICE_KEY = {
   ios: "call.live.device.ios",
@@ -37,7 +38,7 @@ export function liveCallBarView({ bot, media, server, now }: {
 }): LiveCallBarView | null {
   const here = media.botId === bot.id && media.threadId === bot.threadId;
   if (here && (media.phase === "failed" || media.phase === "ended") && media.notice) {
-    return { kind: "notice", text: media.notice, action: media.phase === "failed" ? media.action : null };
+    return { kind: "notice", text: media.notice, action: media.phase === "failed" ? media.action : null, ...(media.micSettings ? { micSettings: true } : {}) };
   }
   if (here && isLiveCallRunning(media.phase)) {
     const when = media.startedAt !== null ? clock(now - media.startedAt) : t("call.live.connecting");
@@ -113,8 +114,8 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
   }, [settingsOpen]);
 
   if (!view) return null;
-  const button = "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium transition-colors";
-  const frame = "pointer-events-auto mx-5 mb-2 flex items-center rounded-xl border bg-panel px-3 py-2 text-[12.5px] text-ink";
+  const button = "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors";
+  const frame = "pointer-events-auto mx-5 mb-2 flex items-center rounded-xl border bg-panel px-3 py-2 text-[13px] text-ink";
 
   if (view.kind === "notice") {
     const action = view.action === "open-in-browser"
@@ -123,6 +124,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
     return (
       <div role="status" className={cn(frame, "gap-2 border-hairline/60")}>
         <span className="min-w-0 flex-1 truncate" title={view.text}>{view.text}</span>
+        {view.micSettings && <OpenSystemSettings pane="mic" />}
         {action && (
           <button type="button" aria-label={action.label} className={cn(button, "bg-raised hover:bg-raised-hover")} onClick={takeLiveCallAction}>
             <action.Icon className="size-3.5" /> <span className="hidden sm:inline">{action.label}</span>
@@ -177,7 +179,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
       >
         <bdi dir="ltr">{spoken}</bdi>
       </span>
-      {view.hint && <span role="status" className="order-last w-full min-w-0 truncate text-[11.5px] text-warning" title={view.hint}>{view.hint}</span>}
+      {view.hint && <span role="status" className="order-last w-full min-w-0 truncate text-[12px] text-warning" title={view.hint}>{view.hint}</span>}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <button
           ref={gearRef}

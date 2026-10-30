@@ -10,6 +10,8 @@ Add a Boat API key in App Settings to provision an isolated hosted Linux desktop
 
 Boat is a third-party paid service after its trial. OpenMausBot stores the configured credential locally and does not expose it to the renderer.
 
+A Boat bills while it is on, so OpenMausBot turns it on and off by itself. It goes to sleep once nothing has used it for 10 minutes: no bot turn or routine run on it, nobody watching its screen or holding its desktop, and, for a team's shared computer, nobody on that team working. A computer stays on when a routine that uses it runs within the next 30 minutes. The next time a bot needs it, or you wake or open it, it starts again in a few seconds with its files and installed apps as they were. After OpenMausBot restarts, any computer it left on gets the same 10 minutes. This works the same with your own Boat key and with the cloud computers included in a Cloud plan. A VPS is your own server and is never stopped.
+
 Every engine with computer tools (Claude, Codex, ACP, Pi, and OpenAI-compatible
 connections such as OpenRouter) uses the Boat desktop with the bot's own model
 and sign-in in direct chats, groups and cloud routines. For an API connection,
@@ -21,6 +23,12 @@ without computer tools can't use the cloud computer: choose another model, or se
 On **Auto**, a conversation works on the Boat only after the bot moves it there
 (it asks to switch with `select_computer`). Auto by itself never reads, wakes or
 creates a Boat, so it adds no cloud computer calls to an ordinary message.
+
+Browsers that run in the cloud don't open Reddit: a Boat's browser won't open a
+Reddit link a bot asks for, and a MausBot Cloud's built-in browser doesn't open
+Reddit at all. Reddit blocks bots that browse from cloud computers and can ban
+the account, so the bot is told to use the Reddit connected app or ask you to do
+it on your own computer.
 
 ## Bring your own VPS
 

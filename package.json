@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.113",
+  "version": "0.1.134",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -44,12 +44,15 @@
     "test:electron": "node --test \"electron/*.node-test.mjs\"",
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
     "bench:persistence": "node --experimental-strip-types scripts/bench-persistence.ts",
+    "bench:today": "node --experimental-strip-types scripts/bench-today.ts",
+    "bench:browser-stream": "node --experimental-strip-types scripts/bench-browser-stream.ts",
     "test:watch": "vitest",
     "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
     "check:electron": "node scripts/check-electron.mjs",
     "preview": "vite preview",
     "gen:bodies": "node --experimental-strip-types scripts/gen-mascot-bodies.ts",
+    "gen:halloween": "node --experimental-strip-types scripts/gen-halloween-bodies.ts",
     "build:server": "tsc -p tsconfig.server.build.json && node scripts/bundle-server.mjs",
     "build:companion": "tsc -p tsconfig.companion.build.json && node scripts/mark-module-scope.mjs dist-companion",
     "build:speech": "node electron/build-speech-helper.mjs",
@@ -92,6 +95,9 @@
     "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",
     "@duckdb/node-api": "1.5.6-r.1",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
     "@hpke/core": "1.9.0",
     "@lezer/highlight": "1.2.5",
     "@muse-code/sdk": "1.4.6",
@@ -106,6 +112,7 @@
     "clsx": "^2.1.1",
     "codemirror": "6.0.2",
     "croner": "10.0.1",
+    "jmespath": "0.16.0",
     "jose": "6.2.10",
     "katex": "^0.16.47",
     "lucide-react": "^0.539.0",
@@ -122,18 +129,24 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "shiki": "^4.4.3",
+    "sucrase": "3.35.1",
     "tailwind-merge": "^3.3.1",
     "tar": "7.5.22",
     "tldts": "7.4.18",
+    "undici": "8.11.2",
     "vega": "6.4.0",
     "vega-embed": "7.3.0",
+    "vega-interpreter": "2.3.2",
     "vega-lite": "6.5.0",
     "vega-themes": "3.0.0",
+    "ws": "8.22.0",
     "yaml": "^2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "2.0.3",
     "@tailwindcss/vite": "^4.1.11",
+    "@types/jmespath": "0.15.2",
     "@types/node": "^26.2.0",
     "@types/novnc__novnc": "1.6.0",
     "@types/papaparse": "^5.5.2",
@@ -153,7 +166,6 @@
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
     "vitest": "^4.1.11",
-    "wrangler": "4.123.0",
-    "ws": "8.22.0"
+    "wrangler": "4.123.0"
   }
 }

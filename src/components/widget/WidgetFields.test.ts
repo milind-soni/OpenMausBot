@@ -215,11 +215,11 @@ describe("DayPicker", () => {
 });
 
 describe("a widget table", () => {
-  it("is the app's own table: search, copy, CSV and expand, with the widget's columns and alignment", () => {
+  it("is the app's own table: copy, CSV and expand, with the widget's columns and alignment", () => {
     mount(sample("spendTable"));
     const table = find(".rich-table")!;
-    expect(table.querySelector(`input[aria-label="${t("table.search")}"]`)).not.toBeNull();
-    for (const action of ["table.wrap", "table.copy", "table.download", "table.expand"] as const) expect(table.querySelector(`button[aria-label="${t(action)}"]`)).not.toBeNull();
+    expect(table.querySelector(`input[aria-label="${t("table.search")}"]`)).toBeNull();
+    for (const action of ["table.copy", "table.download", "table.expand"] as const) expect(table.querySelector(`button[aria-label="${t(action)}"]`)).not.toBeNull();
     expect(all("thead th").map((cell) => cell.textContent)).toEqual(["Bot", "Runs", "Cost"]);
     expect(all<HTMLElement>("thead th")[2]!.style.textAlign).toBe("end");
     expect(all<HTMLElement>("tbody td").filter((_, index) => index % 3 === 2).map((cell) => cell.style.textAlign)).toEqual(["end", "end", "end", "end"]);
@@ -267,5 +267,65 @@ describe("a narrow card", () => {
   it("wraps a row of buttons rather than squeeze them past the card", () => {
     mount(sample("kitchenSink"));
     expect(button("Send feedback")!.parentElement!.className).toContain("flex-wrap");
+  });
+});
+
+describe("a radio group or a dropdown the person may answer in their own words", () => {
+  const form = (more: Record<string, unknown> = {}) => parse({ type: "Card", confirm: { label: "Save", action: { type: "save" } }, children: [
+    { type: "RadioGroup", name: "size", label: "Size", options: ["S", "M"], ...more },
+    { type: "Select", name: "length", label: "Length", options: ["15 min", "30 min"], ...more },
+  ] });
+  const other = (name: string) => find<HTMLInputElement>(`input[data-widget-other="${name}"]`);
+  const typeInto = (input: HTMLInputElement, value: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const choose = (select: HTMLSelectElement, index: number) => act(() => {
+    select.value = select.options[index]!.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const save = () => act(async () => { button("Save")!.click(); });
+  const pressed = () => JSON.parse(String(fetchMock.mock.calls.at(-1)![1]!.body)).widgetAction;
+
+  it("adds Other as the last radio, and opens a field for their words when it is chosen", async () => {
+    mount(form());
+    const radios = all<HTMLInputElement>('input[type="radio"]');
+    expect(radios.map((radio) => radio.closest("label")!.textContent)).toEqual(["S", "M", t("question.other")]);
+    expect(other("size")).toBeNull();
+    act(() => radios[2]!.click());
+    expect(radios[2]!.checked).toBe(true);
+    expect(document.activeElement).toBe(other("size"));
+    typeInto(other("size")!, "XL");
+    await save();
+    expect(pressed()).toEqual({ messageId: "w1", ref: "confirm", rev: 0, values: { size: "", length: "" }, other: { size: "XL" } });
+  });
+
+  it("adds Other as the last choice of a dropdown, and opens a field for their words when it is picked", async () => {
+    mount(form());
+    const select = field<HTMLSelectElement>("length");
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([t("widget.choose"), "15 min", "30 min", t("question.other")]);
+    choose(select, 3);
+    expect(document.activeElement).toBe(other("length"));
+    typeInto(other("length")!, "45 min");
+    await save();
+    expect(pressed().other).toEqual({ length: "45 min" });
+    expect(pressed().values).toEqual({ size: "", length: "" });
+  });
+
+  it("drops their words when an option of the dropdown is picked after all", async () => {
+    mount(form());
+    choose(field<HTMLSelectElement>("length"), 3);
+    typeInto(other("length")!, "45 min");
+    choose(field<HTMLSelectElement>("length"), 2);
+    expect(other("length")).toBeNull();
+    await save();
+    expect(pressed()).toEqual({ messageId: "w1", ref: "confirm", rev: 0, values: { size: "", length: "30 min" } });
+  });
+
+  it("offers no Other where the bot said allowOther: false", () => {
+    mount(form({ allowOther: false }));
+    expect(all('input[type="radio"]')).toHaveLength(2);
+    expect(field<HTMLSelectElement>("length").options).toHaveLength(3);
+    expect(host.textContent).not.toContain(t("question.other"));
   });
 });

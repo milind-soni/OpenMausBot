@@ -40,13 +40,13 @@ export function MacCuaRecoveryActions({ reason }: { reason: string }) {
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {permissions.map((permission) => (
         <button key={permission} type="button" onClick={() => void openSettings(permission)}
-          className="rounded-full border border-current/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15">
+          className="rounded-full border border-current/30 px-2.5 py-1 text-[13px] hover:bg-danger/15">
           {t(paneName[permission])}
         </button>
       ))}
       {typeof window.ogb.relaunch === "function" && (
         <button type="button" onClick={() => void relaunch()}
-          className="rounded-full border border-current/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15">
+          className="rounded-full border border-current/30 px-2.5 py-1 text-[13px] hover:bg-danger/15">
           {t("computer.mac.permission.relaunch")}
         </button>
       )}

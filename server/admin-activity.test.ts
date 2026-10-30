@@ -19,6 +19,7 @@ import {
   readAdminActivityRange,
   sharedSignIn,
   signInListsOf,
+  TEAM_BOT_AUDIT_FIELDS,
   type AdminActionRow,
 } from "./admin-activity.ts";
 import { bindDecisionRetention, DEFAULT_DECISION_RETENTION_DAYS, type DecisionRow } from "./decision-log.ts";
@@ -134,6 +135,23 @@ describe("what a row records", () => {
     ]);
     expect(botChangeRows({ id: "b" }, unset, off).map((row) => [row.action, row.changed, row.after])).toEqual([["bot.update", ["helperModel"], { helperModel: false }]]);
     expect(botChangeRows({ id: "b" }, off, off)).toEqual([]);
+  });
+
+  it("records that a Team bot's instructions changed without keeping their text", () => {
+    const before = botAuditSnapshot({ id: "b", soul: "Keep the vault code 4242 secret." }, TEAM_BOT_AUDIT_FIELDS);
+    const after = botAuditSnapshot({ id: "b", soul: "Be brief." }, TEAM_BOT_AUDIT_FIELDS);
+    const rows = botChangeRows({ id: "b" }, before, after, undefined, TEAM_BOT_AUDIT_FIELDS);
+    expect(rows.map((row) => row.changed)).toEqual([["soul"]]);
+    expect(JSON.stringify(rows)).not.toMatch(/4242|Be brief/);
+    expect(botChangeRows({ id: "b" }, after, botAuditSnapshot({ id: "b", soul: "Be brief." }, TEAM_BOT_AUDIT_FIELDS), undefined, TEAM_BOT_AUDIT_FIELDS)).toEqual([]);
+  });
+
+  it("records a bot moving to another VPS server, and back to the default", () => {
+    const own = botAuditSnapshot({ id: "b", cloudBackend: "vps", vpsAlias: "alpha-vps" });
+    const onDefault = botAuditSnapshot({ id: "b", cloudBackend: "vps" });
+    expect(botChangeRows({ id: "b" }, onDefault, own).map((row) => [row.changed, row.before, row.after]))
+      .toEqual([[["vpsAlias"], { vpsAlias: null }, { vpsAlias: "alpha-vps" }]]);
+    expect(botChangeRows({ id: "b" }, own, onDefault).map((row) => row.changed)).toEqual([["vpsAlias"]]);
   });
 
   it("knows when more than one person signs in", () => {

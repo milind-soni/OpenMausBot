@@ -18,6 +18,8 @@ import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
+import { sawThread } from "../thread-presence.ts";
+import { readThreadNotifications } from "./notifications.ts";
 
 export interface BotSettingsRouteDeps {
   store: Store;
@@ -43,6 +45,8 @@ export interface BotSettingsRouteDeps {
   canManageCommandAllowlist(auth: RequestAuth): boolean;
   commandAllowlistResponse(bot: BotRecord): CommandAllowlistResponse;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
+  /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
+  threadRead?(auth: RequestAuth, threadId: string): void;
 }
 
 export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandler {
@@ -157,7 +161,10 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const current = requestedTaskBot(m[1], body?.threadId);
+      sawThread(current.threadId);
+      deps.threadRead?.(auth, current.threadId);
       store.patchTask(current.id, current.threadId, { unread: false, ...readCursor(current.threadId) });
+      readThreadNotifications(current.threadId, broadcast, auth);
       const bot = store.bot(current.id)!;
       const visible = wireBot(bot);
       broadcast({ kind: "bot", bot: visible });

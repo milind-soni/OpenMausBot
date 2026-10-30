@@ -36,17 +36,17 @@ describe("Browser panel installation access", () => {
 
   it("shows the real install panel before the engine is available", () => {
     const config = { features: { browser: true }, browserEngine: missing };
-    expect(render(config)).toContain("Install the browser engine");
+    expect(render(config)).toContain("Install the browser");
     expect(browserAvailable(config)).toBe(false);
   });
 
   it("retains the global and per-bot opt-in gates", () => {
-    expect(render({ browserEngine: missing })).not.toContain("Install the browser engine");
-    expect(render({ features: { browser: true }, browserEngine: missing }, false)).not.toContain("Install the browser engine");
+    expect(render({ browserEngine: missing })).not.toContain("Install the browser");
+    expect(render({ features: { browser: true }, browserEngine: missing }, false)).not.toContain("Install the browser");
   });
 
   it("does not offer an install on unsupported hosts and still shows a ready engine", () => {
-    expect(render({ features: { browser: true }, browserEngine: { kind: "unavailable", installable: false } })).not.toContain("Browser engine not installed");
+    expect(render({ features: { browser: true }, browserEngine: { kind: "unavailable", installable: false } })).not.toContain("The browser isn't installed");
     const ready = render({ features: { browser: true }, browserEngine: { kind: "engine" } });
     expect(ready).toContain("Opening the live browser…");
     expect(ready).not.toMatch(/Loading browser…|Only admins/);
@@ -75,22 +75,22 @@ describe("Computer panel on a narrow screen", () => {
 });
 
 describe("Computer panel Works on", () => {
-  const places = (markup: string) => [...markup.matchAll(/<span>(Auto|Cloud computer|Local VM|This computer|Browser|Off)<\/span>/g)].map((match) => match[1]);
+  const places = (markup: string) => [...markup.matchAll(/<span>(Auto|Cloud desktop|Private desktop|This computer|Browser|Off)<\/span>/g)].map((match) => match[1]);
   const computerTab = (config: FeatureFlagConfig & { cloudHome?: boolean }) => {
     fixture.view.current = "computer";
     try { return render(config); } finally { fixture.view.current = "browser"; }
   };
 
-  it("lists this computer and a Local VM on a desktop or self-hosted server", () => {
+  it("lists this computer and a private desktop on a desktop or self-hosted server", () => {
     const markup = computerTab({});
-    expect(places(markup)).toEqual(["Auto", "Cloud computer", "Local VM", "This computer", "Browser", "Off"]);
-    expect(markup).toContain("Choose where this bot can use a computer.</p>");
+    expect(places(markup)).toEqual(["Auto", "Cloud desktop", "Private desktop", "This computer", "Browser", "Off"]);
+    expect(markup).toContain("Choose where this bot works.</p>");
   });
 
   it("lists neither on My Cloud, and says why", () => {
     const markup = computerTab({ cloudHome: true });
-    expect(places(markup)).toEqual(["Auto", "Cloud computer", "Browser", "Off"]);
-    expect(markup).toContain("Choose where this bot works. To let it use your computer, turn on Let My Cloud use this computer");
+    expect(places(markup)).toEqual(["Auto", "Cloud desktop", "Browser", "Off"]);
+    expect(markup).toContain("Choose where this bot works. It can also use your computer whenever MausBot is open on it.");
   });
 });
 

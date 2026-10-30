@@ -17,11 +17,20 @@ export type NotifyKind =
    * the results; both are internal, so without this the parent conversation
    * sits silent until the resume's first token. */
   | "delegation-settled"
-  /** A bot's settled room reply tagged the person (`@you` or their profile name). Rooms only. */
+  /** A bot's settled room reply tagged the person (`@you` or their profile name). Rooms only. On a Team Cloud also
+   * a teammate tagged by name, or a message a bot passed on to them, with `forPerson`. */
   | "mention"
   /** The workspace crossed its monthly spend warning or reached its cap.
    * Sent to admins only, at most once per month for each. */
-  | "spend";
+  | "spend"
+  /** The main agent's brief has something new that needs the person, or a
+   * meeting prep or reminder it posted with no AI turn. Personal installs only. */
+  | "brief"
+  /** A wait a bot set up (wait_until) fired: what it was waiting for happened. */
+  | "wait"
+  /** Something OpenMausBot changed on its own that the person hears about
+   * once: a tool turned off for the bots it doesn't start for. */
+  | "notice";
 
 export interface Notification {
   kind: NotifyKind;
@@ -37,6 +46,9 @@ export interface Notification {
    * already works off `threadId` alone; this is what lets a client say which
    * room, and stack a room's banners together instead of under the bot. */
   groupId?: string;
+  /** On a Team Cloud, the one person this is for (their person key): a teammate tagged by name, or the person a bot
+   * passed a message to. It reaches nobody else, an admin included. */
+  forPerson?: string;
 }
 
 /** A `Notification` as the feed stores it: the live `notify` frame and `GET /api/notifications` carry the same entry. */

@@ -33,6 +33,7 @@ export const LOGIN_ERRORS = {
   totp: "That 2FA key is not valid. Paste the setup key (letters A–Z and digits 2–7) or the otpauth:// address from the site's QR code.",
   bots: "Choose every bot, or bots that exist.",
   token: "Paste a 1Password service account token. It starts with ops_.",
+  notServiceAccount: "That is not a 1Password service account token: those start with ops_. Make one in 1Password under Developer → Service accounts. A Connect token, an account password or a Secret Key does not work here.",
   exactHost: "exactHost must be true or false.",
   readOnly: "This login is in 1Password. Change or remove it there.",
 } as const;
@@ -85,6 +86,7 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
       const body = await readBody(req, 16_384);
       const token = body && typeof body === "object" && typeof body.token === "string" ? body.token.trim() : "";
       if (!token || token.length > 8192 || /\s/u.test(token)) return json(res, 400, { error: LOGIN_ERRORS.token });
+      if (!token.startsWith("ops_")) return json(res, 400, { error: LOGIN_ERRORS.notServiceAccount });
       try { return json(res, 200, { onePassword: await deps.onePassword.connect(token) }); }
       catch (error) { return json(res, 400, { error: error instanceof Error && error.message ? error.message : LOGIN_ERRORS.token }); }
     }

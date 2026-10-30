@@ -13,7 +13,8 @@ import { useModalDialog } from "./use-modal-dialog";
 class FakeElement extends EventTarget {
   constructor(readonly name: string, readonly parent?: FakeElement) { super(); }
   focus() { document.activeElement = this; }
-  hasAttribute() { return false; }
+  getAttribute() { return null; }
+  closest() { return null; }
 }
 class FakeDialog extends FakeElement {
   controls: FakeElement[] = [];

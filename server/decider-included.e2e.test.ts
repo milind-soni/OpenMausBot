@@ -22,8 +22,18 @@ const KEY_CHECK = {
   state: { purpose: "OpenMausBot is checking that a decision-model key works." },
   questions: { answer: { type: "noul", instructions: "Is this a connection check?" } },
 };
+const EXTRACT_KEY_CHECK = {
+  seam: "keyCheck",
+  fields: { ok: { type: "boolean", description: "Is this a connection check?" } },
+  input: { text: "OpenMausBot is checking that an extraction-model key works." },
+};
 
-/** The relay's own check of a request body. */
+/** The relay's own check of an extraction body: the key check is the only extraction this test makes. */
+function relayExtracts(body: unknown): boolean {
+  return JSON.stringify(body) === JSON.stringify(EXTRACT_KEY_CHECK);
+}
+
+/** The relay's own check of a decision body. */
 function relayTakes(raw: string, body: any): boolean {
   if (Buffer.byteLength(raw) > 64 * 1024 || Buffer.byteLength(JSON.stringify(body.state)) > 24_000) return false;
   if (JSON.stringify({ state: body.state, questions: body.questions }) === JSON.stringify(KEY_CHECK)) return true;
@@ -65,19 +75,21 @@ beforeAll(async () => {
       const url = new URL(req.url ?? "/", "http://stub.test");
       const side = url.pathname.startsWith("/relay/") ? "relay" : url.pathname.startsWith("/jev/") ? "jev" : "";
       const body = JSON.parse(raw || "{}");
+      const extracting = url.pathname === `${RELAY_PATH}/v1/extract`;
       const question = body.questions?.answer;
       const auth = String(req.headers.authorization ?? "");
-      const refused = side === "relay" && !relayTakes(raw, body);
-      requests.push({ side, path: url.pathname, auth, type: question?.type, ...(refused ? { refused } : {}) });
+      const refused = side === "relay" && !(extracting ? relayExtracts(body) : relayTakes(raw, body));
+      requests.push({ side, path: url.pathname, auth, type: extracting ? "extract" : question?.type, ...(refused ? { refused } : {}) });
       const send = (status: number, payload: unknown) => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(payload));
       };
-      // Each side knows only its own account, and serves only its one route.
-      const route = side === "relay" ? `${RELAY_PATH}/v1/systemone` : "/jev/v1/systemone";
-      if (!side || req.method !== "POST" || url.pathname !== route) return send(404, { error: { type: "not_found" } });
+      // Each side knows only its own account and routes: the relay decides and extracts, Jev only decides.
+      const routes = side === "relay" ? [`${RELAY_PATH}/v1/systemone`, `${RELAY_PATH}/v1/extract`] : ["/jev/v1/systemone"];
+      if (!side || req.method !== "POST" || !routes.includes(url.pathname)) return send(404, { error: { type: "not_found" } });
       if (auth !== (side === "relay" ? `Bearer ${INCLUDED}` : `Bearer ${OWN}`)) return send(401, { error: { type: "invalid_api_key" } });
       if (refused) return send(400, { error: { type: "invalid_request" } });
+      if (extracting) return send(200, { values: { ok: true }, model: "clairic" });
       if (question?.type === "noul") return send(200, { answers: { answer: { type: "noul", noul: 0.97 } } });
       const other = Object.keys(question.criteria).find((key) => key !== pick)!;
       send(200, { answers: { answer: { type: "choice", choice: pick, probabilities: { [pick]: 0.95, [other]: 0.05 } } } });
@@ -183,10 +195,10 @@ describe("Cloud Pro's included decision model", { timeout: 90_000 }, () => {
     expect(routed().at(-1)).not.toHaveProperty("refused");
   });
 
-  it("Test checks the relay with one tiny call; a pasted draft is tested at Jev", async () => {
+  it("Test checks the relay with one tiny decision and one tiny extraction; a pasted draft is tested at Jev", async () => {
     const included = await api("POST", "/api/decider/test", {});
-    expect(included.body).toMatchObject({ ok: true });
-    expect(requests.at(-1)).toMatchObject({ side: "relay", type: "noul" });
+    expect(included.body).toMatchObject({ ok: true, extraction: { ok: true } });
+    expect(requests.slice(-2)).toMatchObject([{ side: "relay", type: "noul" }, { side: "relay", type: "extract", auth: `Bearer ${INCLUDED}` }]);
     const draft = await api("POST", "/api/decider/test", { key: "tsk_draft_not_known" });
     expect(draft.body).toEqual({ ok: false, reason: "rejected", status: 401 });
     expect(requests.at(-1)).toMatchObject({ side: "jev", auth: "Bearer tsk_draft_not_known" });
@@ -228,7 +240,7 @@ describe("Cloud Pro's included decision model", { timeout: 90_000 }, () => {
 
   it("never sends a credential to the other side, nor the relay a request it refuses, and never saves, logs or hands on the included token", async () => {
     expect(crossed()).toEqual([]);
-    expect(requests.filter((request) => request.side === "relay").map((request) => request.type)).toEqual(["choice", "noul", "choice"]);
+    expect(requests.filter((request) => request.side === "relay").map((request) => request.type)).toEqual(["choice", "noul", "extract", "choice"]);
     expect(requests.filter((request) => request.refused)).toEqual([]);
     expect(readFileSync(join(data, "config.json"), "utf8")).not.toContain(INCLUDED);
     const decisions = join(data, "decider-log");

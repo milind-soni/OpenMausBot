@@ -10,7 +10,7 @@ type Answer = { status: number; body: Record<string, unknown> };
 
 export interface SignInCardRouteDeps {
   settle(botId: string, threadId: string, messageId: string, outcome: SignInOutcome): Answer;
-  saveLogin(botId: string, threadId: string, messageId: string, body: Record<string, unknown>): Promise<Answer>;
+  saveLogin(botId: string, threadId: string, messageId: string, body: Record<string, unknown>, auth: RequestAuth): Promise<Answer>;
   saveTarget(botId: string, threadId: string, messageId: string): Promise<Answer>;
   /** A member reaches a card only in a thread shown to them, which in a room can be narrower than the bot. */
   threadVisible(auth: RequestAuth, threadId: string): boolean;
@@ -37,7 +37,7 @@ export function createSignInCardRoutes(deps: SignInCardRouteDeps): RouteHandler 
       const body = await readBody(req, 16_384);
       const fields = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
       const threadId = String(fields.threadId ?? "");
-      const result = deps.threadVisible(auth, threadId) ? await deps.saveLogin(m[1]!, threadId, m[2]!, fields) : HIDDEN;
+      const result = deps.threadVisible(auth, threadId) ? await deps.saveLogin(m[1]!, threadId, m[2]!, fields, auth) : HIDDEN;
       return json(res, result.status, result.body);
     }
     const body = await readBody(req);

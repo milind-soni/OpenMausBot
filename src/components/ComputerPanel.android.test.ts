@@ -123,7 +123,7 @@ describe("Computer panel Android tab", () => {
     panelViewStore.current = "android";
     await check(makeBot(), pendingCheck);
     // Discovery pending: the render falls back, but nothing persists.
-    expect(selectedTab()).toBe("Computer");
+    expect(selectedTab()).toBe("Screen");
     expect(panelViewStore.current).toBe("android");
 
     // Discovery completed with no device: the fallback persists.

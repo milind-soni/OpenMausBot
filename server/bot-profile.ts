@@ -6,10 +6,11 @@ import {
   BOT_AVATAR_CROPS,
   botAvatarCropSchema,
   botAvatarUrlSchema,
+  mascotFaceColorSchema,
 } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
 import { REPLY_STYLES } from "../shared/reply-style.ts";
-import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
+import { BOT_BODY_IDS, botBodySchema } from "../shared/bot-body.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -27,6 +28,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "avatarFocusX",
   "avatarFocusY",
   "mascotBody",
+  "mascotFaceColor",
   "voice",
   "speakReplies",
   "replyStyle",
@@ -64,7 +66,8 @@ export const profilePatchSchema = z.object({
   avatarZoom: z.number({ error: "avatarZoom must be a number from 1 to 3" }).finite().min(AVATAR_ZOOM_MIN).max(AVATAR_ZOOM_MAX).optional(),
   avatarFocusX: z.number({ error: "avatarFocusX must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
   avatarFocusY: z.number({ error: "avatarFocusY must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
-  mascotBody: mascotBodySchema.optional(),
+  mascotBody: botBodySchema.optional(),
+  mascotFaceColor: mascotFaceColorSchema.nullable().optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -89,6 +92,7 @@ export type BotProfilePatch = Partial<
     | "avatarFocusX"
     | "avatarFocusY"
     | "mascotBody"
+    | "mascotFaceColor"
     | "voice"
     | "speakReplies"
     | "replyStyle"
@@ -114,8 +118,11 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
       return { ok: false, error: `avatarCrop must be ${options}` };
     }
     if (issue?.path[0] === "mascotBody") {
-      const options = `${MASCOT_BODY_IDS.slice(0, -1).join(", ")}, or ${MASCOT_BODY_IDS.at(-1)}`;
+      const options = `${BOT_BODY_IDS.slice(0, -1).join(", ")}, or ${BOT_BODY_IDS.at(-1)}`;
       return { ok: false, error: `mascotBody must be ${options}` };
+    }
+    if (issue?.path[0] === "mascotFaceColor") {
+      return { ok: false, error: "mascotFaceColor must be white, black, or null" };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

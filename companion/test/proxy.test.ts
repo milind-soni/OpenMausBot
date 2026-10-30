@@ -2,7 +2,7 @@
 // live in the seam between them.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import { createProxyHandler } from "../src/proxy.ts";
 import { MAX_SSE_EVENT_BYTES } from "../src/wire.ts";
 import { createConnectedDeviceTracker } from "../src/connected-devices.ts";
 import type { CompanionEndpoint } from "../src/endpoints.ts";
+import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -158,16 +159,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((r) => (sidecar ? sidecar.close(() => r()) : r()));
-  harness?.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    if (!harness || harness.exitCode !== null) return resolve();
-    harness.on("close", () => resolve());
-    // Wait for `close` after SIGKILL: deleting the home directory under a
-    // live process fails on loaded runners.
-    setTimeout(() => harness.kill("SIGKILL"), 5_000).unref?.();
-    setTimeout(resolve, 10_000).unref?.();
-  });
-  rmSync(home, { recursive: true, force: true });
+  await waitForExit(harness, { signal: "SIGTERM" });
+  await removeTempDir(home);
 });
 
 describe("the sidecar in front of an unmodified harness", () => {
@@ -264,7 +257,7 @@ describe("the sidecar in front of an unmodified harness", () => {
 
     const { body } = await device("GET", "/api/bots");
     const botId = body.bots[0].id;
-    expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(403);
     expect((await device("PATCH", `/api/groups/not-a-room`, { body: { unread: false } })).status).toBe(404);
   });
 
@@ -283,6 +276,127 @@ describe("the sidecar in front of an unmodified harness", () => {
       expect(res.status, `${method} ${path} was blocked by the sidecar`).not.toBe(403);
       expect(res.status, `${method} ${path} never reached the harness`).not.toBe(404);
     }
+  });
+
+  it("saves a paired device's bot appearance and returns it to other clients", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const appearance = { color: "teal", mascotBody: "star", mascotExpression: "happy" };
+    const saved = await device("PATCH", `/api/bots/${bot.id}`, { body: appearance });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body.bot).toMatchObject(appearance);
+
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id))
+      .toMatchObject(appearance);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate: { id: string }) => candidate.id === bot.id))
+      .toMatchObject(appearance);
+  });
+
+  it("refuses unauthenticated appearance saves and protected fields without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const appearance = { color: "coral", mascotBody: "diamond", mascotExpression: "sleeping" };
+    for (const token of [null, "omb_wrong"]) {
+      expect((await device("PATCH", path, { token, body: appearance })).status).toBe(401);
+    }
+    for (const protectedPatch of [
+      { autoApprove: true },
+      { approvalMode: "full" },
+      { soul: "not permitted" },
+      { computer: "local" },
+      { modelSelection: { instanceId: "ghost", model: "other" } },
+      { unexpected: true },
+    ]) {
+      const refused = await device("PATCH", path, { body: { ...appearance, ...protectedPatch } });
+      expect(refused.status, JSON.stringify(protectedPatch)).toBe(403);
+      expect(refused.body.error).toContain(Object.keys(protectedPatch)[0]);
+      expect(refused.body.error).toContain("host computer");
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("refuses a new bot's protected settings from a paired device without making the bot", async () => {
+    const ids = async () => ((await device("GET", "/api/bots")).body.bots as Array<{ id: string }>).map((bot) => bot.id);
+    const before = await ids();
+    const settings: Array<[string, unknown]> = [
+      ["approvalMode", "full"], ["approvalMode", "ask"], ["alwaysAllow", ["Bash(*)"]], ["chiefOfStaff", true], ["computer", "local"],
+      ["cwd", "/"], ["peers", []], ["approvePeerComms", false], ["mcpServers", ["github"]], ["browserProfile", "guest"],
+      ["toolScope", { allow: ["native:*"] }], ["composio", true], ["browser", true],
+    ];
+    const fields: Array<[string, unknown]> = [
+      ["section", "Ops"], ["preset", "chief-of-staff"], ["visibility", { audience: "members" }], ["reportsTo", "someone@example.test"], ["unexpected", true],
+    ];
+    for (const [field, body] of [
+      ...settings.map(([field, value]) => [field, { name: "From the phone", settings: { [field]: value } }] as const),
+      ...fields.map(([field, value]) => [field, { name: "From the phone", [field]: value }] as const),
+    ]) {
+      const refused = await device("POST", "/api/bots", { body });
+      expect(refused.status, JSON.stringify(body)).toBe(403);
+      expect(refused.body.error).toContain(field);
+      expect(refused.body.error).toContain("host computer");
+    }
+    expect(await ids()).toEqual(before);
+
+    const made = await device("POST", "/api/bots", {
+      body: { name: "From the phone", settings: { soul: "Plans trips.", color: "teal", mascotBody: "star" } },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body.bot).toMatchObject({ name: "From the phone", color: "teal", mascotBody: "star" });
+  });
+
+  it("saves the avatar panel's reset and shape choices from a paired device", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const shape = await device("PATCH", path, { body: { color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 } });
+    expect(shape.status, JSON.stringify(shape.body)).toBe(200);
+    expect(shape.body.bot).toMatchObject({ color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 });
+
+    const reset = await device("PATCH", path, { body: { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" } });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate) => candidate.id === bot.id))
+      .toMatchObject({ avatarCrop: "mascot", color: "green", mascotBody: "cursor" });
+    expect((await device("PATCH", path, { body: { avatarUrl: "/etc/passwd" } })).status).toBe(400);
+  });
+
+  it("refuses appearance values clients cannot draw without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    for (const invalid of [
+      { color: "#168aad" },
+      { color: "<script>" },
+      { color: { nested: true } },
+      { mascotExpression: 12345 },
+      { mascotExpression: "x".repeat(81) },
+      { mascotBody: "nope" },
+      { pinned: [1, 2] },
+      { avatarCrop: "triangle" },
+      { avatarFocusX: "left" },
+    ]) {
+      const refused = await device("PATCH", `/api/bots/${bot.id}`, { body: invalid });
+      expect(refused.status, JSON.stringify(invalid)).toBe(400);
+      expect(refused.body.error).toContain(Object.keys(invalid)[0]);
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("does not let a device suppress the companion marker to change protected fields", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const refused = await device("PATCH", `/api/bots/${bot.id}`, {
+      headers: { "x-openmausbot-companion": "0" },
+      body: { color: "coral", autoApprove: true },
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toContain("autoApprove");
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
   });
 
   it("files bots through only the narrow atomic organizer route", async () => {
@@ -328,7 +442,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(after).toHaveLength(before.length + 1);
     expect(after.some((bot: { id: string }) => bot.id === id)).toBe(true);
     expect((await device("GET", "/api/bot-defaults")).status).toBe(404);
-    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(403);
   });
 
   it("only remembers an always-allow key carried by a pending card", async () => {

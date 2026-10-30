@@ -9,9 +9,11 @@ import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remo
 import type { Routine } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
+import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer-panel-focus";
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
+import { productName } from "@/lib/brand";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error("The host did not return a live desktop link");
@@ -20,7 +22,7 @@ function viewerAddress(raw: unknown): string {
 }
 
 function routineScheduleLabel(routine: Routine) {
-  if (routine.schedule.type === "cron") return scheduleLabel(routine.schedule);
+  if (routine.schedule.type === "cron" || routine.schedule.type === "limit_reset") return scheduleLabel(routine.schedule);
   if (routine.schedule.type === "once") {
     return new Date(routine.schedule.at).toLocaleString([], {
       month: "short",
@@ -62,6 +64,7 @@ function nextRunLabel(at: number | null) {
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const { padClass, dragProps } = useCaptionChrome();
+  const panelRef = useComputerPanelEntry(bot.id);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
@@ -188,7 +191,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         `${bot.name}'s live desktop`,
         bot.id,
       );
-      if (!opened) throw new Error("OpenMausBot could not open the live desktop");
+      if (!opened) throw new Error(`${productName()} could not open the live desktop`);
     } catch (cause) {
       if (tookControl) {
         await api(`/api/bots/${bot.id}/computer/control`, {
@@ -207,7 +210,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel">
+    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
       <div {...dragProps} className={cn("flex items-center justify-between border-b border-hairline px-5 py-4", padClass)}>
         <div>
           <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
@@ -232,7 +235,11 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           </div>
           <button
             type="button"
-            onClick={() => dispatch({ type: "toggleComputer", open: false })}
+            data-computer-panel-close
+            onClick={() => {
+              releaseComputerPanelFocus(panelRef.current, bot.id);
+              dispatch({ type: "toggleComputer", open: false });
+            }}
             className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             aria-label="Close computer panel"
           >
@@ -335,8 +342,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
-                    <span className="block truncate text-[10.5px] text-ink-secondary">
+                    <span className="block truncate text-[13px] font-medium text-ink">{routine.name}</span>
+                    <span className="block truncate text-[11px] text-ink-secondary">
                       {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? " · runs on VM" : ""}
                     </span>
                   </span>

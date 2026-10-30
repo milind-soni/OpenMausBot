@@ -66,6 +66,23 @@ jobs:
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
           grep -q "run \`openmausbot login\` first" tunnel.log
           kill %1; wait %1 || true
+      - name: Prove an npm install brings the Data engine's native modules
+        working-directory: /tmp/omb-pack/package
+        run: |
+          set -euo pipefail
+          npm install --omit=dev --no-audit --no-fund
+          node --input-type=module -e '
+            import { createRequire } from "node:module";
+            import { pathToFileURL } from "node:url";
+            const require = createRequire(pathToFileURL("dist-server/index.js"));
+            const { DuckDBInstance } = require("@duckdb/node-api");
+            const reader = await (await (await DuckDBInstance.create(":memory:")).connect()).runAndReadAll("select 42");
+            if (reader.getRows()[0][0] !== 42) throw new Error("DuckDB answered " + JSON.stringify(reader.getRows()));
+            const { Resvg } = require("@resvg/resvg-js");
+            const png = new Resvg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2\" height=\"2\"/>").render().asPng();
+            if (png.subarray(1, 4).toString() !== "PNG") throw new Error("resvg did not render a PNG");
+            require("@1password/sdk");
+          '
       - name: Save the proven tarball (release tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

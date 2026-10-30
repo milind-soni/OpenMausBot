@@ -31,12 +31,38 @@ function parseBase(source) {
 /** Every `[data-skin="x"] { … }` block, as id → {token: value}, over the
  * inherited base so a skin is measured as it actually renders. */
 function parseSkins(source) {
-  const base = parseBase(source);
+  const { desktop, phone } = splitPhone(source);
+  const base = parseBase(desktop);
   const skins = new Map();
-  for (const [, id, body] of source.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{([^}]*)\}/g)) {
+  for (const [, id, body] of desktop.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{([^}]*)\}/g)) {
     skins.set(id, { ...base, ...declarations(body) });
   }
+  // The phone block re-declares some tokens of a skin under a width query, so
+  // that skin is measured twice: as it renders on desktop and as "<id> (phone)".
+  for (const [, id, body] of phone.matchAll(/\[data-skin="([a-z-]+)"\]\)?\s*\{([^}]*)\}/g)) {
+    skins.set(`${id} (phone)`, { ...skins.get(id), ...declarations(body) });
+  }
   return skins;
+}
+
+/** The `@media (max-width: 767.98px) { … }` block that re-declares skin tokens,
+ * cut out of the source so its skin selectors are not mistaken for a second
+ * definition of the skin. Other blocks under the same query hold layout only. */
+function splitPhone(source) {
+  for (const { index: start } of source.matchAll(/@media \(max-width: 767\.98px\)\s*\{/g)) {
+    let depth = 0;
+    let end = source.indexOf("{", start);
+    for (let i = end; i < source.length; i++) {
+      if (source[i] === "{") depth++;
+      else if (source[i] === "}" && --depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+    const phone = source.slice(start, end);
+    if (phone.includes("[data-skin=")) return { desktop: source.slice(0, start) + source.slice(end), phone };
+  }
+  return { desktop: source, phone: "" };
 }
 
 function parseHex(value) {
@@ -167,22 +193,22 @@ for (const [id, tokens] of skins) {
     continue;
   }
   for (const { fg, bg, ratio } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
     if (floor === undefined || ratio < floor - BASELINE_DRIFT) skinFailed = true;
   }
   console.log(`${skinFailed ? "✗" : "~"} ${id}${skinFailed ? "" : " (known upstream gaps)"}`);
   for (const { fg, bg, ratio, min } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
     const baseline = floor === undefined ? "" : `; baseline ${floor.toFixed(2)}:1`;
     console.log(`    ${fg} on ${bg}: ${ratio.toFixed(2)}:1 (needs ${min}:1${baseline})`);
   }
   if (skinFailed) failed = true;
 }
 
-// The inverted bubbles (Daylight's ink-black, Meadow's green-black) have
+// The inverted bubbles (Daylight's ink-black, Pop's ink) have
 // their own inherited context: the editor, labels, quotes and file chips
 // explicitly use these tokens, not parent color.
-for (const skinId of ["daylight", "meadow"]) {
+for (const skinId of ["daylight", "pop"]) {
   const scope = css.match(new RegExp(`@scope \\(\\[data-skin="${skinId}"\\]\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*\\.bg-bubble-user\\s*\\{([^}]*)\\}`))?.[1];
   if (!scope) {
     failed = true;
@@ -215,6 +241,34 @@ for (const skinId of ["daylight", "meadow"]) {
     }
   }
   if (!bubbleFailed) console.log(`✓ ${skinId} bubble — editor, controls and paired fills above 4.5:1`);
+}
+
+// MausBot Cloud's night card paints its own sky in every skin: an indigo dusk in the light scheme, a deep night in the
+// dark one. Its text sits between the sky's first two stops; the close button's glyph also lands on the far stop.
+const night = [...css.matchAll(/:root\s*\{([^}]*)\}/g)].map(([, body]) => declarations(body)).find(tokens => tokens["--cloud-night-from"]);
+if (!night) {
+  failed = true;
+  console.log("✗ night card — no :root block defines --cloud-night-from");
+} else {
+  for (const [scheme, pick] of [["dusk", 1], ["night", 2]]) {
+    const value = (token) => /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(night[token] ?? "")?.[pick] ?? night[token] ?? "";
+    let schemeFailed = false;
+    for (const [fg, bg, min] of [
+      ["--cloud-night-ink", "--cloud-night-from", 4.5],
+      ["--cloud-night-ink", "--cloud-night-mid", 4.5],
+      ["--cloud-night-ink-quiet", "--cloud-night-from", 4.5],
+      ["--cloud-night-ink-quiet", "--cloud-night-mid", 4.5],
+      ["--cloud-night-ink-quiet", "--cloud-night-to", 3],
+    ]) {
+      const ratio = contrast(value(fg), value(bg));
+      if (ratio === null || ratio < min) {
+        failed = true;
+        schemeFailed = true;
+        console.log(`✗ night card (${scheme}) — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs ${min}:1)`);
+      }
+    }
+    if (!schemeFailed) console.log(`✓ night card (${scheme}) — its text and close button clear the sky behind them`);
+  }
 }
 
 process.exit(failed ? 1 : 0);

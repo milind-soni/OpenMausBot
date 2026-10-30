@@ -4,10 +4,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
-import { ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
+import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { wideSchema } from "../testing/oversized-tool-schema.ts";
+import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
+
+const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
+vi.mock("../procs.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../procs.ts")>();
+  return {
+    ...actual,
+    // Always runs the real kill for cleanup; the override only forces the verdict and records the budget.
+    killCliTree: (child: Parameters<typeof actual.killCliTree>[0], budget = 5_000) => {
+      killProbe.budgets.push(budget);
+      const run = actual.killCliTree(child, budget);
+      return killProbe.override ? run.then(() => killProbe.stopped) : run;
+    },
+  };
+});
 
 const dirs: string[] = [];
 const sessions: ChatToolSession[] = [];
@@ -176,6 +193,24 @@ describe("Chat MCP session", () => {
     expect(calls).toEqual([dropped ? {} : { url: " " }, { url: "https://example.com" }]);
   });
 
+  it("shows a model behind Moonshot each schema fitted to its limit, and still checks calls against the full one", async () => {
+    const full = wideSchema(110);
+    const f = fixture("", full);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const plain = await f.mount();
+      expect(plain.definitions[0]!.function.parameters).toEqual(full);
+      const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, undefined, toolSchemaProfile("moonshot"));
+      sessions.push(session);
+      const [definition] = session.definitions;
+      expect(schemaBytes(definition!.function.parameters)).toBeLessThanOrEqual(12_000);
+      expect(definition!.function.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^chat-mcp: audit: kept only the top-level fields of tool "write"'s parameters/));
+      expect(() => session.validate("audit_write", { field_000: { label: 5 } })).toThrow("input schema");
+      expect(() => session.validate("audit_write", { field_000: { label: "five" } })).not.toThrow();
+    } finally { warn.mockRestore(); }
+  });
+
   it("starts servers with the widened PATH rather than the bare one the desktop shell inherits", async () => {
     // Launched from Finder, the harness sees only the system directories.
     const widened = augmentedPath();
@@ -341,6 +376,14 @@ describe("Chat MCP session", () => {
     expect(alive(failed.read().pid)).toBe(false);
   });
 
+  it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
+    const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
+    await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
+    expect(alive(empty.read().pid)).toBe(false);
+    expect((await empty.mount(false)).definitions).toEqual([]);
+    expect((await fixture().mount(true, true, { allow: ["mcp:computer:screenshot"] })).definitions).toEqual([]);
+  });
+
   it("advertises only name, description and parameters, never outputSchema or other MCP tool fields", async () => {
     const f = fixture(`if(message.method === "tools/list") { reply(message,{tools:[{name:"write",title:"W",description:"d",inputSchema:${JSON.stringify(schema)},outputSchema:{type:"object"},annotations:{readOnlyHint:true}}]}); continue; }`);
     const session = await f.mount();
@@ -377,6 +420,73 @@ describe("Chat MCP session", () => {
     await rejected;
     expect(alive(receipt.pid)).toBe(false);
     expect(alive(receipt.helper)).toBe(false);
+  });
+});
+
+describe("Chat MCP shutdown verdict", () => {
+  afterEach(() => {
+    killProbe.override = false;
+    killProbe.stopped = false;
+    killProbe.budgets.length = 0;
+  });
+
+  it("a slow shutdown resolves close when no call was in flight", async () => {
+    const f = fixture();
+    const session = await f.mount();
+    killProbe.override = true;
+    killProbe.stopped = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(session.close()).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("chat-mcp:"));
+    } finally { warn.mockRestore(); }
+  });
+
+  it("an unconfirmed shutdown still fails close when a call was in flight", async () => {
+    const f = fixture(`if (message.method === "tools/call") return;`);
+    const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal);
+    const executing = session.execute("audit_write", { value: "in flight" }, f.controller.signal).catch(() => {});
+    await vi.waitFor(() => { expect(f.read().calls.some((call) => call.method === "tools/call")).toBe(true); });
+    killProbe.override = true;
+    killProbe.stopped = false;
+    await expect(session.close()).rejects.toThrow("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+    await executing;
+  });
+
+  it("the close budget is 15 seconds on Windows and 5 seconds elsewhere", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const [platform, budget] of [["win32", 15_000], ["linux", 5_000]] as const) {
+        const f = fixture();
+        const session = await f.mount();
+        killProbe.budgets.length = 0;
+        Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+        try { await session.close(); }
+        finally { Object.defineProperty(process, "platform", descriptor); }
+        expect(killProbe.budgets.at(-1)).toBe(budget);
+      }
+    } finally { warn.mockRestore(); }
+  });
+
+  it("the session close fails only when a server with an in-flight call could not be stopped", async () => {
+    killProbe.override = true;
+    killProbe.stopped = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const one = fixture(); const two = fixture();
+      const session = await mountChatTools({ custom: { alpha: one.server, beta: two.server } }, one.controller.signal);
+      sessions.push(session);
+      await expect(session.close()).resolves.toBeUndefined();
+
+      const busy = fixture(`if (message.method === "tools/call") return;`);
+      const risky = await mountChatTools({ custom: { busy: busy.server } }, busy.controller.signal);
+      const executing = risky.execute("busy_write", { value: "in flight" }, busy.controller.signal).catch(() => {});
+      await vi.waitFor(() => { expect(busy.read().calls.some((call) => call.method === "tools/call")).toBe(true); });
+      await expect(risky.close()).rejects.toBeInstanceOf(ChatToolSessionError);
+      await expect(risky.close()).rejects.toThrow("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+      await executing;
+    } finally { warn.mockRestore(); }
   });
 });
 
@@ -479,6 +589,90 @@ describe("Chat MCP tool directory", () => {
       expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
       expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
     } finally { await remote.close(); }
+  });
+});
+
+describe("Chat MCP tool limit", () => {
+  const CORE_COMPUTER = ["click", "double_click", "right_click", "drag", "scroll", "type_text", "press_key", "hotkey", "set_value",
+    "launch_app", "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_screen_size", "zoom", "invoke_menu"];
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    dirs.push(dir);
+    return server;
+  }
+  async function mount(integrations: NonNullable<Parameters<typeof mountChatTools>[0]>) {
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await mountChatTools(integrations, controller.signal, true);
+    sessions.push(session);
+    return { session, names: session.definitions.map((tool) => tool.function.name) };
+  }
+  const windowsTurn = (agents: number, more: Partial<NonNullable<Parameters<typeof mountChatTools>[0]>> = {}) => ({
+    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" as const },
+    browser: catalog(syntheticToolNames("agent_browser", 32)),
+    agents: catalog(syntheticToolNames("agent", agents)),
+    composio: catalog(syntheticToolNames("router", 7)),
+    data: catalog(syntheticToolNames("table", 5)),
+    ...more,
+  });
+
+  it.each([42, 47])("fits a Windows turn with %i agents tools: every agents tool, the screen tools, and one browser", async (agents) => {
+    const { session, names } = await mount(windowsTurn(agents));
+    expect(session.skipped).toEqual([]);
+    expect(session.trimmed).toEqual([]);
+    expect(names.length + 1).toBeLessThanOrEqual(128);
+    expect(names).toEqual(expect.arrayContaining(syntheticToolNames("agents_agent", agents)));
+    expect(names).toEqual(expect.arrayContaining(CORE_COMPUTER.map((tool) => `computer_${tool}`)));
+    expect(names.filter((name) => /^computer_(?:browser_|get_browser_state$|page$)/.test(name))).toEqual([]);
+    expect(names.filter((name) => /^computer_(?:start_recording|set_config|get_config|check_for_update|install_ffmpeg|set_agent_cursor_motion)$/.test(name))).toEqual([]);
+    expect(names.filter((name) => name.startsWith("browser_"))).toHaveLength(32);
+  });
+
+  it("lists the computer's own browser tools when the turn has no built-in browser", async () => {
+    const { names } = await mount({ localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" } });
+    expect(names).toEqual(expect.arrayContaining(["computer_browser_navigate", "computer_get_browser_state", "computer_click"]));
+    expect(names).not.toContain("computer_install_ffmpeg");
+  });
+
+  it("caps built-ins that still overflow instead of failing the turn, keeping the agents server whole and saying what was left out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { session, names } = await mount(windowsTurn(51, {
+        composio: catalog(syntheticToolNames("router", 14)),
+        highlevel: catalog(syntheticToolNames("crm", 20)),
+        device: catalog(syntheticToolNames("phone", 23)),
+      }));
+      expect(names).toHaveLength(127);
+      expect(names).toEqual(expect.arrayContaining(syntheticToolNames("agents_agent", 51)));
+      expect(names).toEqual(expect.arrayContaining(CORE_COMPUTER.map((tool) => `computer_${tool}`)));
+      expect(names.filter((name) => name.startsWith("data_"))).toEqual(["data_table_1", "data_table_2"]);
+      expect(session.skipped).toEqual([]);
+      expect(session.trimmed).toEqual([{ server: "data", listed: 2, of: 5 }, { server: "highlevel", listed: 0, of: 20 }, { server: "device", listed: 0, of: 23 }]);
+      expect(trimmedToolsNotice(session.trimmed)).toBe(`"data" listed 2 of 5 tools, "highlevel" listed 0 of 20 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.`);
+      expect(trimmedToolsNotice([])).toBeUndefined();
+    } finally { warn.mockRestore(); }
+  });
+
+  it("gives the agents server its whole list before a computer mounted ahead of it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { session, names } = await mount({ localComputer: catalog(syntheticToolNames("vm", 100)), agents: catalog(syntheticToolNames("agent", 51)) });
+      expect(names).toEqual([...syntheticToolNames("computer_vm", 76), ...syntheticToolNames("agents_agent", 51)]);
+      expect(session.trimmed).toEqual([{ server: "computer", listed: 76, of: 100 }]);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("still skips a configured server that does not fit beside the built-ins, leaving room for ask_user", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const fits = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 13)) } }));
+      expect(fits.names).toHaveLength(127);
+      expect(fits.session.skipped).toEqual([]);
+      const over = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }));
+      expect(over.names).toHaveLength(114);
+      expect(over.session.skipped).toEqual([{ server: "notes", reason: "MCP tool count exceeds the 128-tool limit" }]);
+      expect(over.session.trimmed).toEqual([]);
+    } finally { warn.mockRestore(); }
   });
 });
 
@@ -611,6 +805,33 @@ describe("Chat MCP schema validation", () => {
     expect(() => session.validate("audit_write", {value:[2]})).not.toThrow();
   });
 
+  it("accepts GitHub MCP's x-mcp-header annotation and still enforces the schema", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: { owner: { type: "string", "x-mcp-header": "owner" }, repo: { type: "string", "x-mcp-header": "repo" } },
+      required: ["owner", "repo"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { owner: "octo", repo: "hello" })).not.toThrow();
+    expect(() => session.validate("audit_write", { owner: "octo" })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { owner: 1, repo: "hello" })).toThrow("input schema");
+  });
+
+  it("accepts Google MCP's x-google-enum-descriptions annotation and still enforces the enum", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: {
+        value: { type: "string", enum: ["METRIC", "IMPERIAL"], "x-google-enum-descriptions": ["Metric units.", "Imperial units."] },
+      },
+      required: ["value"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { value: "METRIC" })).not.toThrow();
+    expect(() => session.validate("audit_write", { value: "KELVIN" })).toThrow("input schema");
+  });
+
   it.each([
     ["email", "user@example.com", "invalid"],
     ["uri", "https://example.com/path", "not a uri"],
@@ -626,6 +847,8 @@ describe("Chat MCP schema validation", () => {
     { type: "object", properties: {value:{type:"string",format:"unregistered-format"}} },
     { type: "object", properties: {value:{$ref:"https://example.invalid/private-schema"}} },
     { type: "object", properties: {value:{type:"string",unrecognizedAssertion: true}} },
+    { type: "object", properties: {value:{type:"string","x-mcp-header": 5}} },
+    { type: "object", properties: {value:{type:"string","x-google-enum-descriptions": "not a list"}} },
   ])("refuses schemas it cannot validate instead of silently weakening them %#", async (toolSchema) => {
     const f = fixture("", toolSchema);
     await expectSkipped(f, /schema could not be validated/);

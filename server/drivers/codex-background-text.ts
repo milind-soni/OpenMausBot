@@ -7,8 +7,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ModelCatalog, TextGenerationOptions, TextGenerationUsage } from "../contracts.ts";
+import type { ModelCatalog, SmallModelFallback, TextGenerationOptions, TextGenerationUsage } from "../contracts.ts";
 import type { killCliTree, spawnCli } from "../procs.ts";
+import { refusesModel } from "../quick-model-fallback.ts";
 import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER } from "./codex-catalog.ts";
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 
@@ -21,13 +22,39 @@ export const CODEX_BACKGROUND_MODELS = ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.4-m
 export const CODEX_BACKGROUND_EFFORT = "low";
 const SMALL_MODEL = /(?:^|[-.])(?:luna|mini|nano)(?:$|[-.])/i;
 
-export function codexBackgroundModel(catalog: ModelCatalog): string | null {
-  const listed = catalog.options.filter((option) => !option.custom);
-  const official = listed.filter((option) => decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER);
+export function codexBackgroundModel(catalog: ModelCatalog, refused: ReadonlySet<string> = new Set()): string | null {
+  const official = catalog.options.filter((option) => !option.custom && !refused.has(option.id) &&
+    decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER);
   for (const id of CODEX_BACKGROUND_MODELS) if (official.some((option) => option.id === id)) return id;
-  const small = official.find((option) => SMALL_MODEL.test(option.id));
-  if (small) return small.id;
-  return catalog.default || listed[0]?.id || catalog.options[0]?.id || null;
+  return official.find((option) => SMALL_MODEL.test(option.id))?.id ?? accountDefault(catalog);
+}
+
+function accountDefault(catalog: ModelCatalog): string | null {
+  return catalog.default || catalog.options.find((option) => !option.custom)?.id || catalog.options[0]?.id || null;
+}
+
+export interface CodexBackgroundRoute {
+  model: string;
+  /** Run once more on this when the provider refuses `model`. */
+  retry?: string;
+}
+
+/** A sign-in that cannot use small models writes on the bot's own model, or the account's default without one. */
+export function codexBackgroundRoute(catalog: ModelCatalog, smallModelsUsable: boolean, fallback?: SmallModelFallback): CodexBackgroundRoute | null {
+  const own = fallback?.model || accountDefault(catalog);
+  const model = smallModelsUsable ? codexBackgroundModel(catalog, fallback?.refused) : own;
+  if (!model) return null;
+  return own && own !== model ? { model, retry: own } : { model };
+}
+
+export async function runCodexBackgroundRoute(route: CodexBackgroundRoute, run: (model: string) => Promise<string>, options: TextGenerationOptions = {}): Promise<string> {
+  try {
+    return await run(route.model);
+  } catch (error) {
+    if (!route.retry || !refusesModel(error instanceof Error ? error.message : String(error), route.model)) throw error;
+    options.fallback?.onRefused(route.model);
+    return run(route.retry);
+  }
 }
 
 /** Features off (codex-cli 0.160.1 `codex features list`); an older Codex ignores unknown names. */

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, BookOpen, Box, Loader2, Monitor, Network, Plus, Save, Users, X } from "lucide-react";
+import { ArrowRight, BookOpen, Box, Loader2, Monitor, Plus, Save, Users, UsersRound, X } from "lucide-react";
 
 import { api, formatTime, openBot, openThread, useStore, type Bot } from "@/state/store";
 import {
@@ -16,11 +16,17 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { placeOffered } from "@/lib/place";
 import { TeamCanvas } from "./TeamCanvas";
+import { MapModeToggle, TeamOrgChart, useMapMode } from "./TeamOrgChart";
+import { useTeamPeople } from "@/state/team-people";
 import { TeamDialog } from "./TeamDialog";
 import { TeamMemoryDialog } from "./TeamMemoryDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { t } from "@/lib/i18n";
 import { CanvasComputers } from "./CanvasComputers";
+import { useMapComputers, useShowComputers } from "@/lib/map-computers";
+import { MapComposer } from "./MapComposer";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { openBotSettings } from "./bot-panel/panel-link";
 import type { TeamComputer } from "../../shared/team-computer";
 
 export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
@@ -44,10 +50,10 @@ export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
         <ArrowRight size={13} className={cn("shrink-0", live ? "text-accent" : "text-ink-secondary")} />
         <span className="truncate text-[13px] font-medium text-ink">{target.name}</span>
       </div>
-      {edge.reason && <span className="max-w-[220px] truncate text-[11.5px] text-ink-secondary">{edge.reason}</span>}
+      {edge.reason && <span className="max-w-[220px] truncate text-[12px] text-ink-secondary">{edge.reason}</span>}
       <span
         className={cn(
-          "rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+          "rounded-full px-2 py-0.5 text-[11px] font-medium",
           edge.state === "running"
             ? "bg-success/15 text-success"
             : edge.state === "queued"
@@ -55,7 +61,7 @@ export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
               : "bg-control text-ink-secondary",
         )}
       >
-        {edge.state === "running" ? "Running" : edge.state === "queued" ? "Queued" : edge.lastAt ? formatTime(edge.lastAt) : "Connected"}
+      {edge.state === "running" ? t("canvas.edge.running") : edge.state === "queued" ? t("canvas.edge.queued") : edge.lastAt ? formatTime(edge.lastAt) : t("canvas.edge.connected")}
       </span>
     </button>
   );
@@ -186,7 +192,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
         aria-modal="true"
         aria-labelledby="section-context-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[680px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>
@@ -196,7 +202,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 {t("team.instructionsTitle", { name: label })}
               </h2>
             </div>
-            <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-secondary">
+            <p className="mt-1.5 max-w-[520px] text-[13px] leading-relaxed text-ink-secondary">
               {t("team.instructionsHint")}
             </p>
           </div>
@@ -221,14 +227,13 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 ref={textareaRef}
                 value={text}
                 onChange={(event) => setText(event.target.value)}
-                placeholder={"Goals\n- Ship the Windows onboarding refresh\n\nDecisions\n- Keep customer data local\n\nPreferences\n- Use concise weekly updates"}
+                placeholder={t("team.instructionsPlaceholder")}
                 aria-label={t("team.instructionsTitle", { name: label })}
-                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/50"
+                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/50"
               />
-              <div className="mt-2 flex items-start justify-between gap-4 text-[11.5px] text-ink-secondary">
+              <div className="mt-2 flex items-start justify-between gap-4 text-[12px] text-ink-secondary">
                 <span>
-                  Keep durable team facts here. Private notes stay in each bot's own Memory.
-                  {updatedAt ? ` Last saved ${new Date(updatedAt).toLocaleString()}.` : ""}
+                  {t("team.instructionsFactHint")} {updatedAt ? ` ${t("team.instructionsLastSaved", { time: new Date(updatedAt).toLocaleString() })}` : ""}
                 </span>
                 <span className={cn("shrink-0 tabular-nums", bytes > maxBytes && "text-danger")}>
                   {bytes.toLocaleString()} / {maxBytes.toLocaleString()} bytes
@@ -241,7 +246,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
         <footer className="flex items-center justify-end gap-2 border-t border-hairline/40 px-6 py-4 sm:px-8">
           <button onClick={requestClose} disabled={saving} className="rounded-lg px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             onClick={() => void save()}
@@ -258,10 +263,16 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   );
 }
 
+/** How long a card acknowledges a message sent from the map; its border fades within this. */
+const SENT_HIGHLIGHT_MS = 1_400;
+
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  const teamPeople = useTeamPeople();
+  const admin = useOwnerOrAdmin();
+  const reportsChart = useMapMode() === "people" && teamPeople !== null;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [error, setError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -285,10 +296,24 @@ export function TeamMapPage() {
     return buildTeamMapSections(bots, names).sort((a, b) => order(a.key) - order(b.key));
   }, [bots, state.sections, state.groups]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
+  const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
+  const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
+  const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
+  const [taggedBotIds, setTaggedBotIds] = useState<string[]>([]);
+  const [sent, setSent] = useState<{ botIds: string[]; key: number } | null>(null);
+  const sentTimer = useRef<number | undefined>(undefined);
+  const acknowledgeSent = useCallback((botIds: string[]) => {
+    window.clearTimeout(sentTimer.current);
+    setSent((previous) => ({ botIds, key: (previous?.key ?? 0) + 1 }));
+    sentTimer.current = window.setTimeout(() => setSent(null), SENT_HIGHLIGHT_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(sentTimer.current), []);
+  const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: section.chiefs.length + section.members.length })), [sections]);
 
-  const refresh = useCallback(async () => {
+  // `background`: the 3-second poll, which never wakes a Cloud home that went to sleep.
+  const refresh = useCallback(async (background = false) => {
     try {
-      setSnapshot(await api("/api/team-map"));
+      setSnapshot(await api("/api/team-map", background ? { background } : undefined));
       setRefreshError(null);
     } catch (requestError) {
       setRefreshError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -298,7 +323,7 @@ export function TeamMapPage() {
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void refresh(true);
     }, 3_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
@@ -331,26 +356,34 @@ export function TeamMapPage() {
       <header {...dragProps} className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
         <div>
           <div className="flex items-center gap-2.5">
-            <Network size={18} className="text-ink-secondary" />
-            <h1 className="text-[17px] font-semibold">Team map</h1>
+            <UsersRound size={18} className="text-ink-secondary" />
+            <h1 className="text-[17px] font-semibold">{t("canvas.title")}</h1>
             <span className="ml-1 text-[11px] text-ink-secondary">{teamMapBotCount(bots.length)}</span>
           </div>
           <p className="mt-1 text-[12px] text-ink-secondary">{t("canvas.description")}</p>
         </div>
+        {teamPeople && <MapModeToggle />}
         {!remoteClient && <div className="flex items-center gap-2">
-          <button onClick={() => setComputersOpen((value) => !value)} aria-label="Computers" aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary hover:bg-control hover:text-ink"><Monitor size={17} /></button>
-          <details className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute("open"); }} onKeyDown={(event) => {
+          <button onClick={() => setShowComputers(!showComputers)} aria-pressed={showComputers} title={t("canvas.showComputersHint")}
+            className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-medium transition-colors", showComputers ? "border-accent/40 bg-accent/10 text-ink" : "border-hairline/60 bg-panel text-ink-secondary hover:bg-control hover:text-ink")}>
+            <span aria-hidden className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors", showComputers ? "bg-accent" : "bg-control")}>
+              <span className={cn("absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-[left]", showComputers ? "left-3.5" : "left-0.5")} />
+            </span>
+            {t("canvas.showComputers")}
+          </button>
+          <button onClick={() => setComputersOpen((value) => !value)} aria-label={t("canvas.computers")} aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary hover:bg-control hover:text-ink"><Monitor size={17} /></button>
+          {admin !== false && <details className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute("open"); }} onKeyDown={(event) => {
             if (event.key === "Escape") { event.currentTarget.removeAttribute("open"); event.currentTarget.querySelector("summary")?.focus(); }
           }}>
-            <summary aria-label="Add to team map" className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium hover:bg-control [&::-webkit-details-marker]:hidden"><Plus size={14} /> Add</summary>
+            <summary aria-label={t("canvas.addToMap")} className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium hover:bg-control [&::-webkit-details-marker]:hidden"><Plus size={14} /> {t("common.add")}</summary>
             <div className="absolute right-0 top-full z-40 mt-2 w-52 rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl" onClick={(event) => {
               const details = event.currentTarget.closest("details"); details?.querySelector("summary")?.focus(); details?.removeAttribute("open");
             }}>
               <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => setTeamEditor({})}><Users size={14} />{t("team.create")}</button>
-              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />Cloud computer</button>
-              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />Local VM…</button>}
+              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />{t("canvas.cloudComputer")}</button>
+              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />{t("canvas.localVm")}</button>}
             </div>
-          </details>
+          </details>}
         </div>}
       </header>
       {(error || refreshError) && <div role="alert" className="flex shrink-0 items-center justify-between gap-3 border-b border-danger/20 bg-danger/10 px-6 py-2 text-[12px] text-danger">
@@ -358,9 +391,12 @@ export function TeamMapPage() {
         <button aria-label={t("common.close")} className="rounded p-1 hover:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
       </div>}
       <div className="relative flex min-h-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+      {reportsChart ? <TeamOrgChart bots={bots} /> : <TeamCanvas sections={sections} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
-        onComputer={(bot) => dispatch({ type: "toggleSettings", botId: bot.id, section: "access", open: true })}
+        onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
+        computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
+        onOpenComputer={(computer) => computer.kind === "team" ? setComputersOpen(true) : dispatch({ type: "toggleComputer", open: true, botId: computer.id })}
         teamComputers={Object.fromEntries(computers.filter((computer) => computer.section !== null).map((computer) => [computer.section!, { name: computer.name, state: computer.state }]))}
         onTeamComputer={() => setComputersOpen(true)}
         onComputerDrop={(id, section) => { if (!remoteClient) { setComputersOpen(true); setComputerDrop({ id, section }); } }}
@@ -368,7 +404,9 @@ export function TeamMapPage() {
         onMemory={(section, label) => setMemoryEditor({ section, label })}
         onEditTeam={(section, rename) => setTeamEditor({ section, rename })}
         onDeleteTeam={setDeletingTeam}
-        isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />
+        isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />}
+      {bots.length > 0 && <MapComposer bots={bots} teams={composerTeams} onTagged={setTaggedBotIds} onSent={acknowledgeSent} />}
+      </div>
       {!remoteClient && <CanvasComputers open={computersOpen} createRequest={createComputerRequest} drop={computerDrop} sections={sections}
         onClose={() => setComputersOpen(false)} onDropHandled={clearComputerDrop} onChange={setComputers} />}
       </div>
@@ -385,9 +423,9 @@ export function TeamMapPage() {
       )}
       {teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}
       {memoryEditor && <TeamMemoryDialog key={memoryEditor.section} {...memoryEditor} onClose={() => setMemoryEditor(null)} />}
-      <ConfirmDialog open={pendingMove !== null} tone="neutral" title={`Move ${pendingMove?.bot.name ?? "bot"} to ${pendingMove?.destination || "General"}?`}
-        body="This changes the bot's home team and shared instructions, not just its position. Its conversations and model stay with it. To arrange visually, drag within the same team."
-        confirmLabel="Move bot" onCancel={cancelMove} onConfirm={() => {
+      <ConfirmDialog open={pendingMove !== null} tone="neutral" title={t("canvas.moveConfirmTitle", { name: pendingMove?.bot.name ?? t("canvas.bot"), team: pendingMove?.destination || t("settings.section.general") })}
+        body={t("canvas.moveConfirmBody")}
+        confirmLabel={t("canvas.moveConfirm") } onCancel={cancelMove} onConfirm={() => {
           const move = pendingMoveRef.current;
           if (!move) return;
           setPendingMove(null);

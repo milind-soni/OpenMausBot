@@ -27,7 +27,7 @@ const createRoutineOperation = {
 };
 
 describe("ApprovalCard decided by voice", () => {
-  const bash = (answered: string, via?: "call"): Message => ({
+  const bash = (answered: string, via?: "call" | "reaction"): Message => ({
     id: "bash-card",
     role: "bot",
     kind: "options",
@@ -48,13 +48,21 @@ describe("ApprovalCard decided by voice", () => {
     expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("deny", "call") }))).toMatch(/Denied.*by voice/);
   });
 
+  it("says a card was decided by a 👍 or 👎 on it", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow", "reaction") }))).toMatch(/Allowed.*by reaction/);
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("deny", "reaction") }))).toMatch(/Denied.*by reaction/);
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow", "reaction") }))).not.toContain("by voice");
+  });
+
   it("says nothing extra for a tap", () => {
-    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow") }))).not.toContain("by voice");
+    const tapped = renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow") }));
+    expect(tapped).not.toContain("by voice");
+    expect(tapped).not.toContain("by reaction");
   });
 });
 
 describe("ApprovalCard routine proposals", () => {
-  it("describes a chat-created routine as scheduling rather than a raw tool call", () => {
+  it("shows a routine card left open from before Triggers v2 as expired, with nothing to confirm", () => {
     const message: Message = {
       id: "routine-card",
       role: "bot",
@@ -71,8 +79,10 @@ describe("ApprovalCard routine proposals", () => {
     };
 
     const markup = renderToStaticMarkup(createElement(ApprovalCard, { message }));
-    expect(markup).toContain("Wants to schedule a routine");
     expect(markup).toContain("Weekdays at 09:00");
+    expect(markup).toContain("Expired");
+    expect(markup).not.toContain("Waiting for your confirmation");
+    expect(pendingApprovals([message])).toEqual([]);
   });
 
   it("records the exact routine action after confirmation", () => {
@@ -123,36 +133,6 @@ describe("ApprovalCard routine proposals", () => {
     const markup = renderToStaticMarkup(createElement(ApprovalCard, { message }));
     expect(markup).toContain("Routine run queued");
     expect(markup).not.toContain("Routine started");
-  });
-
-  it("speaks a routine's concise title instead of narrating all instructions", () => {
-    const instructions = "Review every item in the backlog. ".repeat(500);
-    const message: Message = {
-      id: "routine-voice-card",
-      role: "bot",
-      kind: "options",
-      at: 1,
-      card: {
-        title: "Schedule routine “Backlog review”?",
-        subtitle: `Action: Create routine\n\nInstructions:\n${instructions}`,
-        options: ["Confirm", "Cancel"],
-        requestId: "routine-request",
-        tool: "schedule_routine",
-        routineRequest: { ...routineRequest, operation: createRoutineOperation },
-      },
-    };
-    const pending: Pending = {
-      message,
-      requestId: "routine-request",
-      tool: "schedule_routine",
-      detail: message.card!.subtitle,
-    };
-
-    const spoken = spokenApprovalPrompt(pending, "Mochi");
-    expect(spoken).toContain("Schedule routine “Backlog review”?");
-    expect(spoken).toContain("Review the schedule and instructions on screen");
-    expect(spoken).not.toContain("Review every item in the backlog");
-    expect(spoken.length).toBeLessThan(200);
   });
 });
 
@@ -286,7 +266,7 @@ describe("ApprovalCard learned skills", () => {
     expect(markup).toContain("shared with Colorist");
     expect(markup).not.toContain("shared with Cutter");
     expect(markup).toContain("not shared with Sound");
-    expect(markup).not.toContain("Share with team");
+    expect(markup).not.toContain("Share with department");
   });
 
   it("maps create and update choices to approval while keeping refusals denied", () => {
@@ -505,7 +485,7 @@ describe("ApprovalCard expired proposals", () => {
 
   it("marks a dead proposal as expired instead of waiting for an answer", () => {
     const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: expiredMessage() }));
-    expect(html).toContain("Expired — ask for a fresh proposal");
+    expect(html).toContain("Expired. Ask for a fresh proposal.");
     expect(html).not.toContain("Waiting for your confirmation below");
     expect(html).not.toContain("data-tour=\"approval\"");
   });
@@ -621,11 +601,15 @@ describe("ApprovalCard for a change that applied on its own", () => {
   });
   const render = (message: Message) => renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Scout" }, message, threadId: "thread-1" }));
 
+  // A create renders the live trigger card (TriggerCard.test.ts); every later change is this one line.
+  const update = { action: "update" as const, routineId: "routine-1", expectedUpdatedAt: 1, changes: { name: "Renamed" } };
+  const before = { ...createRoutineOperation.routine, enabled: true };
+
   it("reads as one plain line with Undo instead of the approval box", () => {
     const at = new Date();
     at.setHours(14, 30, 0, 0);
-    const markup = render(routineCard(createRoutineOperation, { name: "Check before dentist", schedule: { type: "once", at: at.getTime() } }));
-    expect(markup).toMatch(/Scout scheduled a routine: Check before dentist, today 2:30/);
+    const markup = render(routineCard(update, { name: "Check before dentist", schedule: { type: "once", at: at.getTime() }, appliedUpdatedAt: 2, before }));
+    expect(markup).toMatch(/Scout changed an automation: Check before dentist, today 2:30/);
     expect(markup).toContain(">Undo<");
     expect(markup).toContain(">Details<");
     expect(markup).not.toContain("30 14 * * 3");
@@ -635,22 +619,22 @@ describe("ApprovalCard for a change that applied on its own", () => {
 
   it("never shows a cron expression that has no plain name", () => {
     const markup = render(routineCard(
-      { ...createRoutineOperation, routine: { ...createRoutineOperation.routine, schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } } },
+      { ...update, changes: { schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } } },
       { name: "Odd hours", schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } },
     ));
-    expect(markup).toContain("Scout scheduled a routine: Odd hours");
+    expect(markup).toContain("Scout changed an automation: Odd hours");
     expect(markup).not.toContain("*/7");
   });
 
   it("says Undone after Undo, and offers no Undo for a run", () => {
-    const undone = { ...routineCard(createRoutineOperation, { name: "Backlog review" }) };
+    const undone = { ...routineCard(update, { name: "Backlog review", appliedUpdatedAt: 2, before }) };
     undone.card = { ...undone.card!, undone: true };
     const markup = render(undone);
-    expect(markup).toContain("Scout scheduled a routine: Backlog review");
+    expect(markup).toContain("Scout changed an automation: Backlog review");
     expect(markup).toContain(" · Undone");
     expect(markup).not.toContain(">Undo<");
     const run = render(routineCard({ action: "run_now", routineId: "routine-1", expectedUpdatedAt: 1 }, { name: "Backlog review" }));
-    expect(run).toContain("Scout started a routine: Backlog review");
+    expect(run).toContain("Scout ran an automation: Backlog review");
     expect(run).not.toContain(">Undo<");
   });
 
@@ -681,6 +665,24 @@ describe("ApprovalCard for a change that applied on its own", () => {
       },
     }));
     expect(skill).toContain("Scout added a skill: file-expense");
+  });
+
+  it("reads team setup and team memory as one line, with Undo except for a deletion", () => {
+    const setup = { version: 1 as const, requestId: "t", botId: "bot-1", threadId: "thread-1", reason: "asked", createdAt: 1, requesterRevision: "r", newTeams: [] };
+    const team = render(applied({ tool: "set_up_team", teamSetupRequest: { ...setup, operations: [], resumed: true,
+      result: { state: "applied", newTeams: [], bots: [{ id: "b2", name: "Mira", action: "created" }, { id: "b3", name: "Ada", action: "updated" }] },
+      undo: { created: ["b2"], before: [], revisions: {} } } }));
+    expect(team).toContain("Scout set up the team: added @Mira; updated @Ada");
+    expect(team).toContain(">Undo<");
+    const deleted = render(applied({ tool: "delete_bot", teamSetupRequest: { ...setup, operations: [], deletion: { botId: "b3", name: "Ada", expectedRevision: "r" },
+      result: { state: "applied", newTeams: [], bots: [{ id: "b3", name: "Ada", action: "deleted" }] } } }));
+    expect(deleted).toContain("Scout deleted @Ada");
+    expect(deleted).not.toContain(">Undo<");
+    const memory = render(applied({ tool: "propose_team_memory", subtitle: "Person: Ada Lovelace — Runs the payroll review.",
+      teamMemoryRequest: { section: "", entryId: "e", kind: "person", revision: "v1" } }));
+    expect(memory).toContain("Scout saved to department memory: Person: Ada Lovelace");
+    expect(memory).toContain(">Undo<");
+    expect(memory).not.toContain("Remember");
   });
 
   it("keeps the approval box for a card a person confirmed", () => {
@@ -735,10 +737,10 @@ describe("one approval, one card", () => {
     expect(line).not.toContain("<button");
 
     const [pending] = pendingApprovals([command()]);
-    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev" }));
+    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev", more: "Cancel turn" }));
     const row = visibleRow(panel);
-    expect(row).toContain("Dev wants to run");
-    expect(row).toMatch(/<code[^>]*><span class="truncate">git status<\/span><\/code>/);
+    expect(row).toContain("Dev wants to run a command");
+    expect(row).toMatch(/font-mono[^"]*"[^>]*>git status<\/div>/);
     expect(panel).toContain('aria-label="Pending approval"');
     expect(panel).not.toContain("Command approval requested");
     expect(row).not.toContain("<pre");
@@ -773,7 +775,7 @@ describe("one approval, one card", () => {
     expect(row).toContain("Run code on Composio?");
     expect(row).not.toContain("code_to_execute");
     expect(row).toContain('aria-label="Details"');
-    expect(row).toContain(">May send</span>");
+    expect(row).toMatch(/>May send<\/span>/);
     expect(row).toContain('title="This runs code that could send or change things in your apps, so it always asks first."');
     expect(panel).not.toContain("This sends something");
     expect(panel.slice(panel.indexOf('id="approval-details-'))).toContain("code_to_execute");
@@ -786,5 +788,27 @@ describe("one approval, one card", () => {
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0 }));
     expect(panel).toContain("Send to Slack?");
     expect(panel).toContain("{&quot;text&quot;:&quot;hi&quot;}");
+  });
+
+  it("shows a wait with a follow-up as one line with Cancel, and says how it ended with no Cancel and no Undone after", () => {
+    const message = (settled?: "fired" | "expired" | "cancelled"): Message => ({
+      id: "m1", at: 1, role: "bot", kind: "options",
+      card: {
+        title: "Waiting: the build", subtitle: "Then Pepper will: Deploy it.",
+        options: [], answered: "allow", dismissed: true, autoApplied: true, requestId: "w1", tool: "wait_until",
+        ...(settled === "cancelled" ? { undone: true } : {}),
+        waitRequest: { waitId: "w1", label: "the build", followUp: "Deploy it.", ...(settled ? { settled } : {}) },
+      },
+    });
+    const render = (settled?: "fired" | "expired" | "cancelled") =>
+      renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Pepper" }, message: message(settled), threadId: "t1" })).replace(/&#x27;/g, "'");
+    const open = render();
+    expect(open).toContain("Pepper is waiting for the build");
+    expect(open).toContain(">Cancel<");
+    for (const [settled, line] of [["fired", "Pepper finished waiting for the build"], ["expired", "Pepper stopped waiting for the build"], ["cancelled", "Pepper's wait for the build was cancelled"]] as const) {
+      const ended = render(settled);
+      expect(ended, settled).toContain(line);
+      expect(ended, settled).not.toMatch(/>Cancel<|is waiting for|Undone/);
+    }
   });
 });

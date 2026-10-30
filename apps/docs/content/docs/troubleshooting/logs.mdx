@@ -1,0 +1,47 @@
+---
+title: Where are my logs?
+description: Where OpenMausBot writes its logs on Windows, macOS and Linux, what each file holds, and how to share them safely.
+---
+
+The quickest way: **Settings → General → Diagnostics → Open logs folder**. It opens
+the folder in Explorer or Finder and shows its path.
+
+## On this computer
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| **App logs** | `%APPDATA%\OpenMausBot\logs` (that is `C:\Users\<you>\AppData\Roaming\OpenMausBot\logs`) | `~/Library/Logs/OpenMausBot` | `~/.config/OpenMausBot/logs` |
+| **Bots, chats and their history** | `%USERPROFILE%\.openmausbot` (`C:\Users\<you>\.openmausbot`) | `~/.openmausbot` | `~/.openmausbot` |
+
+In the app logs folder:
+
+- **`server.log`**: the app's own messages and everything OpenMausBot's local server
+  prints: engines starting and stopping, sign-in problems, errors. This is the one
+  support asks for.
+- **`desktop-crashes.log`**: crashes of the app itself. It is emptied when it reaches
+  512 KB.
+- **`updater.log`**: what the updater checked, downloaded and installed.
+
+`%APPDATA%` is a hidden folder: paste the path into the address bar of File
+Explorer, or press <kbd>Win</kbd>+<kbd>R</kbd> and type `%APPDATA%\OpenMausBot\logs`.
+
+The data folder holds your bots and conversations, including each conversation's
+event history in `events\`. It is not a log to share: it contains what you and your
+bots wrote.
+
+## Sharing them with support
+
+**Settings → General → Diagnostics → Export Diagnostics…** saves one text file with
+the app's version, which features are on, and the most recent part of `server.log`,
+`desktop-crashes.log` and `updater.log`. API keys, passwords, tokens, the parameters
+of every web address (where sign-in codes travel), cookies and private keys are
+replaced with `«redacted …»` in every line. Read the file before you send it.
+
+Avoid sending the raw log files or anything from the data folder unless support asks
+for a specific one.
+
+## My Cloud
+
+My Cloud keeps its own logs on the Cloud machine, and nothing on your computer holds
+them. MausBot Cloud support can read them for My Cloud: tell them what went wrong
+and roughly when.

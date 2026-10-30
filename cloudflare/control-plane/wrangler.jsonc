@@ -30,10 +30,10 @@
     // is listed in secrets.required below (as is this JSON when it is a
     // secret) so every deploy keeps it. To stop new endpoints going to an
     // account and keep its own, set its "newEndpoints": false.
-    // Supamaus account, zone mausbot.si. dnsRecordLimit 200 is the Free
-    // plan's record quota for a zone added after Sep 2024; on Pro it is 3,500,
-    // and the tunnel quota (1,000) binds first. Desktop apps accept mausbot.si
-    // hostnames from 0.1.104 (#2582).
+    // Supamaus account, zone mausbot.si. dnsRecordLimit 3500 is the Pro (upgraded Oct 21; was 200 on Free)
+    // plan's record quota for a zone added after Sep 2024; on Pro it is 3,500
+    // (set it here once the zone is on Pro), and the tunnel quota (1,000)
+    // binds first. Desktop apps accept mausbot.si hostnames from 0.1.104 (#2582).
     "CLOUDFLARE_ENDPOINT_ACCOUNTS": [
       {
         "accountId": "bbb5305f06e28a6f2abaac299f3b09dc",
@@ -41,7 +41,7 @@
         "companionHostSuffix": "mausbot.si",
         "apiTokenSecret": "CLOUDFLARE_API_TOKEN_MAUSBOT_SI",
         "tunnelLimit": 1000,
-        "dnsRecordLimit": 200,
+        "dnsRecordLimit": 3500,
         "minAppVersion": "0.1.104"
       }
     ],
@@ -50,9 +50,10 @@
     // quota. They drive the 90% usage alert and /healthz, rank accounts for
     // new endpoints, and tell a tunnel-quota 429 from a rate limit, so keep
     // them equal to Cloudflare's real quotas. They never refuse an
-    // allocation on their own.
+    // allocation on their own. The openmausbot.com zone is on Pro: 3,500
+    // DNS records.
     "OMB_TUNNEL_LIMIT": "1000",
-    "OMB_DNS_RECORD_LIMIT": "1000",
+    "OMB_DNS_RECORD_LIMIT": "3500",
     // "on" marks idle tunnels for cleanup; "observe" only logs candidates.
     "OMB_TUNNEL_RECLAIM": "on",
     // Days a tunnel must have been offline (and its installation quiet)

@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { settleCloudOwnership, type CloudOwnershipOptions } from "./cloud-owner.ts";
+import { recordCloudSharing, settleCloudOwnership, type CloudOwnershipOptions } from "./cloud-owner.ts";
 import { ThreadStarters } from "./thread-starters.ts";
 
 const key = (name: string) => `p_${name.padEnd(22, "x")}`;
@@ -250,5 +250,33 @@ describe("a Cloud home is personal: settling who its owner was (server/cloud-own
     w.writers = { moved: NOBODY };
     settleCloudOwnership(options(w, undefined, { lastRestore: "restore-2" }));
     expect(w.writers).toEqual({ moved: NOBODY });
+  });
+
+  it("remembers that only the owner was found, and that someone else was, which nothing ever clears", () => {
+    const w = world();
+    w.sessions = [{ id: "desktop", scopes: ["admin", "client"] }];
+    const outsideKey = key("outside");
+    writeFileSync(join(w.dir, "thread-starters.json"), JSON.stringify({ desk: key("desktop"), hook: outsideKey }));
+    w.senders = [key("desktop")];
+    w.answerers = [];
+    const first = settleCloudOwnership(options(w, undefined, { outsideKey }));
+    expect(first).toMatchObject({ soloBefore: false, unreadable: false, restoring: false });
+    expect(first.revoked.size).toBe(0);
+    expect(first.adopted.has(outsideKey)).toBe(false);
+    const file = { file: join(w.dir, "cloud-owner.json"), machineId: MACHINE, log: () => {} };
+    expect(recordCloudSharing(file, { peopleChecked: true })).toBe(true);
+    expect(settleCloudOwnership(options(w, undefined, { outsideKey }))).toMatchObject({ soloBefore: true });
+    expect(recordCloudSharing(file, { sharedSince: 1_000 })).toBe(true);
+    expect(recordCloudSharing(file, { sharedSince: 2_000 })).toBe(true);
+    expect(recordCloudSharing(file, { peopleChecked: true })).toBe(true);
+    const later = settleCloudOwnership(options(w, undefined, { outsideKey }));
+    expect(later).toMatchObject({ soloBefore: false, sharedSince: 1_000 });
+    expect(JSON.parse(readFileSync(file.file, "utf8"))).toMatchObject({ sharedSince: 1_000 });
+  });
+
+  it("an unreadable record says so, so nothing can show the Cloud was only ever the owner's", () => {
+    const w = world();
+    writeFileSync(join(w.dir, "cloud-owner.json"), "{ not json");
+    expect(settleCloudOwnership(options(w))).toMatchObject({ unreadable: true, soloBefore: false });
   });
 });

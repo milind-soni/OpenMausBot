@@ -90,7 +90,7 @@ export function SignInAccessCard() {
   return (
     <Card title={t("remote.signInAccess.title")} subtitle={t("remote.signInAccess.subtitle")}>
       {publicUrl ? (
-        <p className="mt-2 text-[12.5px] text-ink-secondary">
+        <p className="mt-2 text-[13px] text-ink-secondary">
           {t("remote.signInAccess.link")} <code className="select-all text-ink">{publicUrl}/pair</code>
         </p>
       ) : null}
@@ -123,7 +123,7 @@ export function SignInAccessCard() {
         </button>
       </form>
       {rows.length === 0 ? (
-        <p className="mt-3 text-[12.5px] text-ink-secondary">{t("remote.signInAccess.empty")}</p>
+        <p className="mt-3 text-[13px] text-ink-secondary">{t("remote.signInAccess.empty")}</p>
       ) : (
         <ul className="mt-3 divide-y divide-hairline/40">
           {rows.map(({ entry, role: entryRole }) => (
@@ -139,7 +139,7 @@ export function SignInAccessCard() {
           ))}
         </ul>
       )}
-      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("remote.signInAccess.note")}</p>
+      <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("remote.signInAccess.note")}</p>
       {error ? <p className="mt-2 text-[13px] text-danger">{error}</p> : null}
     </Card>
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { customServerGate, gateServer, hasOwnResultBudget, mcpStdioServer, resultBudget, serverResultBudget } from "./mcp-gate-config.ts";
+import { customServerGate, gateQueryTools, gateServer, hasOwnResultBudget, mcpStdioServer, resultBudget, serverResultBudget } from "./mcp-gate-config.ts";
 import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
 
 const server = { command: "example-mcp", args: ["--stdio"], env: { TOKEN: "disposable-test-token" } };
@@ -149,5 +149,21 @@ describe("tool directory configuration", () => {
     expect(customServerGate("whop", true, { whop: 0 }, env)).toEqual({ budget: 0, gateRemote: false });
     expect(customServerGate("notes", true, { whop: 40_000 }, env)).toEqual({ budget: 12_000, gateRemote: false });
     expect(customServerGate("whop", false, { whop: 40_000 }, env)).toEqual({ budget: 0, gateRemote: false });
+  });
+});
+
+describe("the gate's own query tool", () => {
+  const server = { command: "npx", args: ["shop"] };
+  const configEnvName = `OMB_GATE_CONFIG_${"a".repeat(64)}`;
+
+  it("is named for each mount that is a trimming gate, whatever carries its configuration", () => {
+    const trimming = gateServer({ name: "shop", server, threadId: "t", budget: 8_000 })!;
+    const scopedOnly = gateServer({ name: "notes", server, threadId: "t", budget: 0, toolScope: { allow: ["mcp:notes:*"] } })!;
+    const private_ = gateServer({ name: "files", server, threadId: "t", budget: 0, toolScope: { allow: ["mcp:files:*"] }, configEnvName })!;
+    const privateTrimming = { ...private_, env: { [configEnvName]: JSON.stringify({ ...JSON.parse(private_.env[configEnvName]!), OMB_GATE_BUDGET: "500" }) } };
+    expect(gateQueryTools({ shop: trimming, notes: scopedOnly, files: private_, docs: server, ogb: { command: "node", args: ["perm-proxy.js"] },
+      lookalike: { ...server, env: { OMB_GATE_BUDGET: "8000" } } }))
+      .toEqual(["mcp__shop__query_result"]);
+    expect(gateQueryTools({ files: privateTrimming, broken: { args: trimming.args, env: {} } })).toEqual(["mcp__files__query_result"]);
   });
 });

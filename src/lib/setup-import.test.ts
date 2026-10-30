@@ -109,7 +109,7 @@ describe("what the step says", () => {
         "Large or non-text files in skill folders were left out.",
         "e and f didn't fit: your list of MCP servers is full.",
         "Your organization doesn't allow g.",
-        "Your MCP servers were being changed. Add h later in Plugins → MCP servers.",
+        "Your MCP servers were being changed. Add h later in Apps → MCP servers.",
       ],
     });
   });

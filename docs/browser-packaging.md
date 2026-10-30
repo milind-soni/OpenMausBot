@@ -84,9 +84,15 @@ or a bot's Browser panel) with Sign out per site and Sign out of all. It works
 the same on desktop, a server and Cloud, for an open or a closed browser. A
 shared profile can instead use **My Chrome**, the person's own running Chrome,
 for sites that refuse the automated one, such as Google sign-in. That needs
-the desktop app and Chrome 144+ with remote debugging on at
-`chrome://inspect/#remote-debugging`; on Cloud and servers profiles stay
-built-in. Details: [the browser engine plan, step 5](plans/browser-engine.md).
+Chrome 144+ with remote debugging on at `chrome://inspect/#remote-debugging`,
+and either the desktop app or My Cloud with a Mac or PC that lends its Chrome.
+That computer lends Chrome only by its own **Your Chrome** switch, off by
+default and dropped when lending is turned off; Chrome then travels over the
+device link, to the DevTools port the computer finds itself, and only the
+person's own conversations and routines use it. My Chrome works only on a
+personal Cloud home: on a Team Cloud and on self-hosted servers profiles stay
+built-in. Details: [the browser engine plan, step 5](plans/browser-engine.md)
+and [MausBot Cloud](cloud-pro.md#your-chrome).
 
 ## What a bot's browser can reach
 
@@ -170,11 +176,16 @@ same rules hold on the desktop, a server and Cloud:
   read from `/proc`, so an image without `ps` works the same.
 - **Unused browsers close.** A browser nothing has used for
   `browserEngine.idleTimeoutMinutes` in `config.json` (1 to 60; 10 when
-  unset) is closed: no bot call (a tool listing counts, and so do a call
+  unset, 3 on a MausBot Cloud home, whose 4 GB fits few browsers) is closed: no bot call (a tool listing counts, and so do a call
   waiting behind another, its page-health reads and recorded step, and
   fill_login's typing; a preview frame only holds off a close while it is
-  taken), no turn that has used it and is still running, no person holding
-  it, no open Browser panel.
+  taken), no turn that has used it and is still running, and no person
+  holding it or using it through a Browser panel (opening the panel, a
+  click, a key, an address, taking or handing back control). A panel that
+  only watches does not keep it open: the panel says the browser closed
+  after it sat unused and offers to open it again, and on the new engine
+  it shows the browser again by itself once the bot's next call starts it.
+  It never reconnects on its own, which would start the browser again.
   Saved sign-ins stay, and the bot's next browser call opens it again and is
   told its pages are gone. A temporary browser saves nothing, so it starts
   fresh, and the bot is told its sign-ins went too. A profile set to My
@@ -182,7 +193,14 @@ same rules hold on the desktop, a server and Cloud:
 - **Leftovers are swept.** A crash or a kill closes nothing, so the server
   sweeps when it starts, every minute, and at shutdown. It closes only this
   data dir's browsers: each bot's own, each built-in profile's, and its
-  temporary browsers, whose names carry a tag of the data dir. A Chrome whose
+  temporary browsers, whose names carry a tag of the data dir. On a MausBot
+  Cloud home, whose HOME is the server's alone, it also closes the browser
+  of any bot that no longer exists (a `bot-` session), within a minute.
+  Deleting a bot or profile closes its browser and erases its saved
+  sign-ins with the agent-browser OpenMausBot installed, or on a Cloud home
+  the image's own; an agent-browser found only on PATH elsewhere just has
+  the running browser closed, since a wrapper there could fail the erase
+  for good. A Chrome whose
   daemon was killed under it (by the OOM killer, by hand) can never be used
   again: it is found by the session its environment names and stopped, and
   its profile folder removed. Anything else under the same HOME, such as a

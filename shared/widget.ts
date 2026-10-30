@@ -46,6 +46,25 @@ export interface WidgetAction {
   payload?: JsonValue;
 }
 
+/** The shape of a thread id a widget action may name. */
+export const THREAD_ID = /^[\w-]{1,128}$/;
+
+/** `open_thread` is handled on the device. The ids are written by a bot: untrusted, and only their shape is checked here. */
+export function threadActionTarget(action: WidgetAction): { botId?: string; groupId?: string; threadId: string } | undefined {
+  if (action.type !== "open_thread" || !isRecord(action.payload)) return undefined;
+  const { botId, groupId, threadId } = action.payload;
+  if (typeof threadId !== "string" || !THREAD_ID.test(threadId)) return undefined;
+  if (typeof botId === "string" && THREAD_ID.test(botId) && groupId === undefined) return { botId, threadId };
+  if (typeof groupId === "string" && THREAD_ID.test(groupId) && botId === undefined) return { groupId, threadId };
+  return undefined;
+}
+
+export const isThreadAction = (action: WidgetAction): boolean => threadActionTarget(action) !== undefined;
+
+/** `open_phone_pairing` opens the app's own phone pairing (the QR code and link) on the device. */
+export const PHONE_PAIRING_ACTION = "open_phone_pairing";
+const CLIENT_ACTION = (action: WidgetAction): boolean => action.type === "open_url" || action.type === "open_thread" || action.type === PHONE_PAIRING_ACTION;
+
 /** `confirm` and `cancel` on a root: the buttons under the card. */
 export interface WidgetButtonSpec {
   label: string;
@@ -73,6 +92,8 @@ export interface WidgetSettled {
   sendId?: string;
   /** The field values that went with the press, for the read-only Details view. */
   values?: WidgetValues;
+  /** The person's own words for a choice they answered with Other, by field name. */
+  other?: WidgetOther;
   /** Set while the press waits in the steer queue behind a running turn:
    * cancelling that queued message reopens the widget. */
   queueId?: string;
@@ -81,7 +102,7 @@ export interface WidgetSettled {
 export interface WidgetPayload {
   v: 1;
   root: WidgetRoot;
-  /** How many times update_widget has replaced the tree (absent: never). An
+  /** How many times show_widget has replaced the tree (absent: never). An
    * update renumbers node ids, so a press names the revision it was made on
    * and one made on an older tree is refused instead of landing on whatever
    * now holds that id. */
@@ -90,6 +111,10 @@ export interface WidgetPayload {
 }
 
 export type WidgetValues = Record<string, string | boolean>;
+
+/** A press's answers in the person's own words, by field name: only for a field where
+ * `widgetTakesOther` holds, and that field's own value is then "". */
+export type WidgetOther = Record<string, string>;
 
 export type ParsedWidgetInput = { ok: true; value: WidgetRoot } | { ok: false; error: string };
 
@@ -292,11 +317,17 @@ const action: Reader = (raw, path) => {
   if (out.type === "open_url" && !isWebUrl(isRecord(out.payload) ? out.payload.url : undefined, ["http:", "https:"])) {
     return fail(`${path}.payload.url`, "open_url needs an http or https url");
   }
+  if (out.type === "open_thread" && !threadActionTarget(out)) {
+    return fail(`${path}.payload`, "open_thread needs {botId, threadId} or {groupId, threadId}");
+  }
   return out;
 };
 
+/** The longest url a widget action or image may carry. */
+export const WEB_URL_MAX = 2_000;
+
 function isWebUrl(value: unknown, protocols: string[]): value is string {
-  if (typeof value !== "string" || value.length > 2_000) return false;
+  if (typeof value !== "string" || value.length > WEB_URL_MAX) return false;
   try {
     return protocols.includes(new URL(value).protocol);
   } catch {
@@ -531,6 +562,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
     }
     const chosen = node.defaultValue;
     if ((type === "Select" || type === "RadioGroup") && chosen !== undefined && !(node.options as Array<{ value: string }>).some((option) => option.value === chosen)) delete node.defaultValue;
+    if (type === "Select" || type === "RadioGroup") node.allowOther = raw.allowOther !== false;
   }
 
   if (spec.children) {
@@ -576,7 +608,14 @@ function selectable(list: WidgetNode, raw: Record<string, unknown>, path: string
     row.value = value;
   });
   if (raw.required !== false) list.required = true;
+  list.allowOther = raw.allowOther !== false;
   if (typeof list.defaultValue === "string" && !seen.has(list.defaultValue)) delete list.defaultValue;
+}
+
+/** Whether a field offers Other: the person may answer in their own words instead of an option. A tree stored
+ * before this existed has no `allowOther`, so it offers only its options. */
+export function widgetTakesOther(node: WidgetNode): boolean {
+  return node.allowOther === true && (node.type === "Select" || node.type === "RadioGroup" || (node.type === "ListView" && typeof node.name === "string"));
 }
 
 /** Normalise untrusted model input into a canonical tree, or say what is
@@ -656,7 +695,7 @@ export interface WidgetActionEntry {
   action: WidgetAction;
   /** Present when the press settles the widget. */
   tone?: "confirm" | "cancel" | "submit";
-  /** Handled on the device and never sent (open_url). */
+  /** Handled on the device and never sent (open_url, open_thread, open_phone_pairing). */
   client?: true;
   kind: "button" | "item" | "confirm" | "cancel";
 }
@@ -689,7 +728,7 @@ function collectActions(root: WidgetRoot, strict: boolean): WidgetActionEntry[] 
   for (const entry of found) counts.set(entry.label, (counts.get(entry.label) ?? 0) + 1);
   return found.map(({ row, ...entry }) => ({
     ...entry,
-    ...(entry.action.type === "open_url" ? { client: true as const } : {}),
+    ...(CLIENT_ACTION(entry.action) ? { client: true as const } : {}),
     label: row && entry.label && (counts.get(entry.label) ?? 0) > 1 ? `${entry.label}: ${row}`.slice(0, WIDGET_LIMITS.label * 2) : entry.label,
   }));
 }
@@ -761,35 +800,55 @@ export function widgetInitialValues(scope: WidgetNode): WidgetValues {
 }
 
 export type ResolvedWidgetAction =
-  | { ok: true; ref: string; label: string; action: WidgetAction; values: WidgetValues; text: string; tone?: "confirm" | "cancel" | "submit" }
+  | { ok: true; ref: string; label: string; action: WidgetAction; values: WidgetValues; other?: WidgetOther; text: string; tone?: "confirm" | "cancel" | "submit" }
   | { ok: false; status: 400 | 404 | 409; error: string };
 
 /** Check one press against the stored widget. `text` is the user message it
- * becomes: the label, then one "Field: value" line per filled field. */
-export function resolveWidgetAction(payload: WidgetPayload, ref: string, values: unknown): ResolvedWidgetAction {
+ * becomes: the label, then one "Field: value" line per filled field. `other`
+ * holds answers in the person's own words (see `WidgetOther`). */
+export function resolveWidgetAction(payload: WidgetPayload, ref: string, values: unknown, other?: unknown): ResolvedWidgetAction {
   if (payload.settled) return { ok: false, status: 409, error: "This was already answered." };
   const entry = widgetActions(payload.root).find((candidate) => candidate.ref === ref);
   if (!entry) return { ok: false, status: 404, error: "That button is no longer on this widget." };
   if (entry.client) return { ok: false, status: 400, error: "That action opens on the device and is not sent." };
-  const done = (clean: WidgetValues, lines: string[]): ResolvedWidgetAction => ({
-    ok: true, ref, label: entry.label, action: entry.action, values: clean, text: [entry.label, ...lines].join("\n"), ...(entry.tone ? { tone: entry.tone } : {}),
+  const done = (clean: WidgetValues, own: WidgetOther, lines: string[]): ResolvedWidgetAction => ({
+    ok: true, ref, label: entry.label, action: entry.action, values: clean, ...(Object.keys(own).length ? { other: own } : {}),
+    text: [entry.label, ...lines].join("\n"), ...(entry.tone ? { tone: entry.tone } : {}),
   });
-  if (entry.tone === "cancel") return done({}, []);
+  if (entry.tone === "cancel") return done({}, {}, []);
 
   const scope = widgetScope(payload.root, ref);
   const fields = widgetFields(scope, payload.root);
   const given = values === undefined || values === null ? {} : values;
   if (!isRecord(given)) return { ok: false, status: 400, error: "values must be an object of field names." };
+  const typed = other === undefined || other === null ? {} : other;
+  if (!isRecord(typed)) return { ok: false, status: 400, error: "other must be an object of field names." };
   const known = new Set(fields.map((field) => field.name));
-  for (const key of Object.keys(given)) if (!known.has(key)) return { ok: false, status: 400, error: `There is no field named ${JSON.stringify(key)} here.` };
+  for (const key of [...Object.keys(given), ...Object.keys(typed)]) if (!known.has(key)) return { ok: false, status: 400, error: `There is no field named ${JSON.stringify(key)} here.` };
 
   const initial = widgetInitialValues(scope);
   const clean: WidgetValues = {};
+  const own: WidgetOther = {};
   const lines: string[] = [];
   const mustFill = entry.tone === "confirm" || entry.tone === "submit";
   for (const field of fields) {
+    const words = Object.hasOwn(typed, field.name) ? typed[field.name] : undefined;
+    if (words !== undefined && (field.node.disabled === true || !widgetTakesOther(field.node))) {
+      return { ok: false, status: 400, error: `${field.label} takes only the offered options.` };
+    }
+    if (words !== undefined && typeof words !== "string") return { ok: false, status: 400, error: `${field.label} must be text.` };
+    const answer = typeof words === "string" ? words.trim().replace(/\s+/g, " ") : "";
+    if (answer.length > WIDGET_LIMITS.fieldValue) return { ok: false, status: 400, error: `${field.label} must be at most ${WIDGET_LIMITS.fieldValue} characters.` };
     // a field the person could not change keeps what it was drawn with
     const raw = Object.hasOwn(given, field.name) && field.node.disabled !== true ? given[field.name] : initial[field.name];
+    if (answer) {
+      if (typeof raw !== "string") return { ok: false, status: 400, error: `${field.label} must be text.` };
+      if (raw.trim()) return { ok: false, status: 400, error: `${field.label} is one of the options or their own answer, not both.` };
+      clean[field.name] = "";
+      own[field.name] = answer;
+      lines.push(`${field.label}: ${answer}`);
+      continue;
+    }
     if (field.type === "Checkbox") {
       if (typeof raw !== "boolean") return { ok: false, status: 400, error: `${field.label} must be on or off.` };
       if (mustFill && field.node.required === true && !raw) return { ok: false, status: 400, error: `${field.label} is required.` };
@@ -832,30 +891,30 @@ export function resolveWidgetAction(payload: WidgetPayload, ref: string, values:
     // whole: this line is all the bot reads of what the person typed
     if (value) lines.push(`${field.label}: ${shown}`);
   }
-  return done(clean, lines);
+  return done(clean, own, lines);
 }
 
 /** A word to the bot about a widget that parses but does not do what it
- * looks like it is for: rows to choose between and no way to choose, or a
- * time, date or days the person is asked to type. Undefined when there is
- * nothing to say. */
+ * looks like it is for: rows to choose between and no way to choose, or one
+ * time, date or set of days typed in a one-line field (a Textarea may list
+ * several). Undefined when there is nothing to say. */
 export function widgetAdvice(root: WidgetRoot): string | undefined {
   const notes: string[] = [];
   const rows = Array.isArray(root.children) ? root.children.length : 0;
   if (root.type === "ListView" && rows >= 2 && buttonSpecOf(root, "confirm") && widgetFields(root).length === 0
     && !widgetActions(root).some((entry) => entry.kind === "item" || entry.kind === "button")) {
-    notes.push("No row of this list can be chosen: the person can only confirm or cancel it as a whole. If they are meant to pick one row, call update_widget and give the ListView a name (and each row a value), so the rows become selectable and confirm sends the pick.");
+    notes.push("No row of this list can be chosen: the person can only confirm or cancel it as a whole. If they are meant to pick one row, show it again with its widget_id and give the ListView a name (and each row a value), so the rows become selectable and confirm sends the pick.");
   }
   const fields = widgetFields(root);
   const sending = widgetActions(root).filter((entry) => !entry.client && entry.tone !== "cancel");
   if (fields.length > 0 && !sending.length) {
-    notes.push("Nothing in this widget sends what the person fills in. Call update_widget with confirm: {label, action} (and cancel if they may decline) so they can send it.");
+    notes.push("Nothing in this widget sends what the person fills in. Show it again with its widget_id and confirm: {label, action} (and cancel if they may decline) so they can send it.");
   } else if (fields.length > 0) {
     const sent = new Set(sending.flatMap((entry) => widgetFields(widgetScope(root, entry.ref), root).map((field) => field.name)));
     const unsent = fields.filter((field) => !sent.has(field.name)).map((field) => JSON.stringify(field.label));
-    if (unsent.length) notes.push(`${unsent.join(", ")} sits outside the Form whose button is the only way to send, so it is never sent. Call update_widget with it inside that Form, or with confirm on the Card.`);
+    if (unsent.length) notes.push(`${unsent.join(", ")} sits outside the Form whose button is the only way to send, so it is never sent. Show it again with its widget_id, with it inside that Form or with confirm on the Card.`);
   }
-  const typed = fields.filter((field) => field.type === "Input" || field.type === "Textarea");
+  const typed = fields.filter((field) => field.type === "Input");
   // "each time", "every time" and "how many times" are not a time of day
   const phrase = (field: WidgetField) => `${field.name} ${field.label} ${widgetString(field.node, "placeholder") ?? ""}`
     .replace(/\b(each|every|this|next|first|last|any|some|one|other|same|spare|free|full|part|lead|over|down)[\s-]+times?\b/gi, " ")
@@ -870,7 +929,7 @@ export function widgetAdvice(root: WidgetRoot): string | undefined {
   for (const [pattern, picker] of pickers) {
     const labels = asks(pattern).filter((label) => !seen.has(label));
     labels.forEach((label) => seen.add(label));
-    if (labels.length) notes.push(`${labels.map((label) => JSON.stringify(label)).join(", ")} asks the person to type what a ${picker} lets them pick. Call update_widget with a ${picker} in its place.`);
+    if (labels.length) notes.push(`${labels.map((label) => JSON.stringify(label)).join(", ")} asks the person to type what a ${picker} lets them pick. Show it again with its widget_id and a ${picker} in its place.`);
   }
   return notes.length ? notes.join(" ") : undefined;
 }

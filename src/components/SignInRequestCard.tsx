@@ -7,8 +7,8 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { cardSaveTarget, saveLoginFromCard } from "@/lib/logins";
 import { answerSignIn, signInHostIsHere } from "@/lib/sign-in";
-import { useStore, type Message } from "@/state/store";
-import { ASK_CHIP, ASK_CHIP_IDLE, ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { useStore, type Bot, type Message } from "@/state/store";
+import { ASK_CHIP, ASK_CHIP_IDLE, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
 import { LoginForm } from "./LoginForm";
 
 // Security: a saved login is encrypted on the server and filled by fill_login; neither the bot nor any screen ever gets
@@ -25,11 +25,13 @@ const WHERE = {
 export function SignInRequestCard({
   botId,
   botName,
+  color,
   threadId,
   message,
 }: {
   botId: string;
   botName: string;
+  color?: Bot["color"];
   threadId: string;
   message: Message;
 }) {
@@ -69,6 +71,15 @@ export function SignInRequestCard({
   };
 
   const stopped = card.stopped === true;
+
+  if (card.answeredInChat) {
+    return (
+      <AskSettledLine ariaLabel={t("signIn.title")}>
+        <span className="text-ink-secondary">{card.site}</span>
+        <span> · {t("signIn.answeredInChat")}</span>
+      </AskSettledLine>
+    );
+  }
 
   if (card.superseded || (stopped && !outcome)) {
     return (
@@ -131,7 +142,7 @@ export function SignInRequestCard({
             {t("signIn.saveLogin")}
           </button>
         )}
-        <button type="button" onClick={() => void answer("done")} disabled={pending !== null} className={ASK_PRIMARY_BUTTON}>
+        <button type="button" onClick={() => void answer("done")} disabled={pending !== null} {...askPrimary(color)}>
           {pending === "done" ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           {t("signIn.done")}
         </button>
@@ -145,7 +156,7 @@ export function SignInRequestCard({
       )}
       {saving ? (
         <div className="mt-2.5" data-testid="sign-in-save">
-          <p className="mb-2 text-[12.5px] leading-snug text-ink-secondary">{t("signIn.save.note", { name: botName, site: target?.site ?? pageHost })}</p>
+          <p className="mb-2 text-[13px] leading-snug text-ink-secondary">{t("signIn.save.note", { name: botName, site: target?.site ?? pageHost })}</p>
           <LoginForm submitLabel={t("signIn.save.submit")} autoFocus onCancel={() => setSaving(false)}
             onSubmit={async (fields) => {
               await saveLoginFromCard({ botId, threadId, messageId: message.id }, fields, alsoThere ? target?.signInHost : undefined);
@@ -153,19 +164,19 @@ export function SignInRequestCard({
               returnFocusToComposer();
             }}>
             {target?.signInHost && (
-              <label className="flex items-start gap-2 text-[12.5px] leading-snug text-ink" data-testid="sign-in-save-elsewhere">
+              <label className="flex items-start gap-2 text-[13px] leading-snug text-ink" data-testid="sign-in-save-elsewhere">
                 <input type="checkbox" name="signInHost" className="mt-[2px]" checked={alsoThere} onChange={(event) => setAlsoThere(event.target.checked)} />
                 <span dir="auto">{t("signIn.save.elsewhere", { host: target.signInHost })}</span>
               </label>
             )}
           </LoginForm>
         </div>
-      ) : <p className="mt-2 text-[12.5px] leading-snug text-ink-secondary">{t(where, { name: botName })}</p>}
+      ) : <p className="mt-2 text-[13px] leading-snug text-ink-secondary">{t(where, { name: botName })}</p>}
       {explained && (
-        <p role="note" className="mt-1.5 text-[12.5px] leading-snug text-ink">{t(here ? "signIn.local.explain" : "signIn.local.explainHost", { name: botName })}</p>
+        <p role="note" className="mt-1.5 text-[13px] leading-snug text-ink">{t(here ? "signIn.local.explain" : "signIn.local.explainHost", { name: botName })}</p>
       )}
       {!saving && (
-        <p className="mt-2 flex items-center gap-1 text-[11.5px] text-ink-tertiary">
+        <p className="mt-2 flex items-center gap-1 text-[12px] text-ink-tertiary">
           <LockKeyhole size={11} aria-hidden="true" /> {t("signIn.private")}
         </p>
       )}

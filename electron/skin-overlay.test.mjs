@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin } = require("./skin-overlay.cjs");
+const { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin, skinIsLight } = require("./skin-overlay.cjs");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "../src/styles.css"), "utf8");
@@ -31,6 +31,13 @@ describe("skin overlay chrome", () => {
     }
   });
 
+  it("tells light skins from dark ones as the renderer's --code-color-scheme does", () => {
+    for (const skin of Object.keys(SKIN_CHROME)) {
+      const scheme = css.match(new RegExp(`\\[data-skin="${skin}"\\]\\s*\\{[^}]*--code-color-scheme:\\s*(light|dark)`))?.[1];
+      expect(skinIsLight(skin) ? "light" : "dark", skin).toBe(scheme);
+    }
+  });
+
   it("uses opaque symbol colours the overlay can accept", () => {
     // The Windows overlay rejects alpha, so every symbolColor is plain 6-digit hex.
     for (const chrome of Object.values(SKIN_CHROME)) {
@@ -50,5 +57,15 @@ describe("skin overlay chrome", () => {
   it("paints Meadow's white page behind the caption buttons", () => {
     expect(skinChrome("meadow")).toEqual({ color: "#ffffff", symbolColor: "#4d5a52" });
     expect(isKnownSkin("meadow")).toBe(true);
+  });
+
+  it("paints Pop's cream page behind the caption buttons", () => {
+    expect(skinChrome("pop")).toEqual({ color: "#fdf5ea", symbolColor: "#3a322d" });
+    expect(isKnownSkin("pop")).toBe(true);
+  });
+
+  it("paints Halloween's plum ground behind the caption buttons", () => {
+    expect(skinChrome("halloween")).toEqual({ color: "#110d16", symbolColor: "#c2b3cc" });
+    expect(isKnownSkin("halloween")).toBe(true);
   });
 });

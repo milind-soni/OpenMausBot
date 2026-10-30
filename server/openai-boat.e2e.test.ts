@@ -152,13 +152,16 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     expect(requests).toHaveLength(beforeCancel);
     const cancelledMessages = await api("GET", `/api/threads/${cancelledThread}/messages?limit=30`);
     expect(cancelledMessages.messages.some((message: any) => message.card?.requestId)).toBe(false);
-    const expectBlockedRun = async (reason: RegExp) => {
+    const expectBlockedRun = async (reason: RegExp, retried?: "provider") => {
       const before = requests.length;
       const { run: blocked } = await api("POST", `/api/routines/${routine.id}/run`, {});
+      const latest = async () => (await api("GET", "/api/routines")).runs.find((entry: any) => entry.id === blocked.id);
+      // A passing failure starts the run once more after a short wait, and the second failure keeps the same reason.
+      if (retried) await expect.poll(latest, { timeout: 15_000 }).toMatchObject({ status: "queued", retried, attention: expect.stringMatching(reason) });
       await expect.poll(async () => {
-        const latest = (await api("GET", "/api/routines")).runs.find((entry: any) => entry.id === blocked.id);
-        return latest?.status === "failed" ? latest.error : "";
-      }, { timeout: 15_000 }).toMatch(reason);
+        const run = await latest();
+        return run?.status === "failed" ? run.error : "";
+      }, { timeout: retried ? 45_000 : 15_000 }).toMatch(retried ? new RegExp(`^Failed after one automatic retry: .*${reason.source}`, reason.flags) : reason);
       expect(requests).toHaveLength(before);
       expect(nativePrompts).toBe(0);
     };
@@ -166,7 +169,8 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     await expectBlockedRun(/target bot's model is not ready/i);
     await api("PATCH", "/api/config", { openaiCompat: { key: "synthetic-model-key", url: origin + "/v1", model: "other-default" } });
     boatOffline = true;
-    await expectBlockedRun(/cloud computer could not be checked/i);
+    // A Boat that answers 503 is a temporary outage, not something only the owner can fix.
+    await expectBlockedRun(/cloud computer could not be checked/i, "provider");
   } finally {
     boatReadsGate?.release();
     await fixture.close(); upstream.closeAllConnections();

@@ -16,7 +16,7 @@ import { HighLevelCard } from "./HighLevelCard";
 import { forgetHighLevelStatus, preloadHighLevelStatus } from "@/lib/highlevel-status";
 
 const flow = { flowId: "flow-1", authorizationUrl: "https://marketplace.leadconnectorhq.com/v2/oauth/chooselocation?state=abc", expiresAt: "2026-10-15T12:10:00Z" };
-const connectedStatus: HighLevelStatus = { state: "connected", kind: "oauth", location: { id: "loc_1", name: "Precision Profiles" } };
+const connectedStatus: HighLevelStatus = { state: "connected", kind: "oauth", location: { id: "loc_1", name: "Example Profiles" } };
 
 interface Server {
   status: HighLevelStatus;
@@ -100,7 +100,7 @@ describe("HighLevel card states", () => {
 
   it("shows the location's name once connected, with a menu instead of a Connect button", async () => {
     await mount(connectedStatus);
-    expect(text()).toContain("Connected · Precision Profiles");
+    expect(text()).toContain("Connected · Example Profiles");
     expect(button("Connect HighLevel")).toBeUndefined();
     expect(button("HighLevel options")).toBeTruthy();
     expect(host.querySelector('[aria-label="Connected"]')).toBeTruthy();
@@ -108,7 +108,7 @@ describe("HighLevel card states", () => {
   });
 
   it("says it is signed out and offers Reconnect when the server lost the connection", async () => {
-    await mount({ state: "needs-sign-in", location: { id: "loc_1", name: "Precision Profiles" } });
+    await mount({ state: "needs-sign-in", location: { id: "loc_1", name: "Example Profiles" } });
     expect(text()).toContain("Signed out. Reconnect to keep using it.");
     expect(button("Reconnect HighLevel")?.textContent).toBe("Reconnect");
     expect(button("HighLevel options")).toBeTruthy();
@@ -122,7 +122,7 @@ describe("HighLevel card states", () => {
     expect(openExternal).not.toHaveBeenCalled();
     server.polls.push({ phase: "connected" });
     await poll();
-    expect(text()).toContain("Connected · Precision Profiles");
+    expect(text()).toContain("Connected · Example Profiles");
   });
 
   it("draws nothing when the server has no relay", async () => {
@@ -149,7 +149,7 @@ describe("Connecting HighLevel", () => {
 
     server.polls.push({ phase: "connected" });
     await poll();
-    expect(text()).toContain("Connected · Precision Profiles");
+    expect(text()).toContain("Connected · Example Profiles");
     expect(button("Cancel")).toBeUndefined();
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(onConnection).toHaveBeenLastCalledWith(true);
@@ -181,14 +181,14 @@ describe("Connecting HighLevel", () => {
   });
 
   it("reconnects through the same flow from the signed-out state", async () => {
-    await mount({ state: "needs-sign-in", location: { id: "loc_1", name: "Precision Profiles" } });
+    await mount({ state: "needs-sign-in", location: { id: "loc_1", name: "Example Profiles" } });
     await act(async () => button("Reconnect HighLevel")!.click());
     await settle();
     expect(server.calls).toContainEqual(["POST", "/api/highlevel/sign-in", undefined]);
     expect(openExternal).toHaveBeenCalledWith(flow.authorizationUrl);
     server.polls.push({ phase: "connected" });
     await poll();
-    expect(text()).toContain("Connected · Precision Profiles");
+    expect(text()).toContain("Connected · Example Profiles");
   });
 });
 
@@ -200,7 +200,9 @@ describe("Private Integration token", () => {
     const tokenField = host.querySelector<HTMLInputElement>('input[aria-label="Private Integration token"]')!;
     const locationField = host.querySelector<HTMLInputElement>('input[aria-label="Location ID"]')!;
     expect(tokenField.type).toBe("password");
-    expect(text()).toContain("open Settings → Private Integrations");
+    expect(text()).toContain("go to Settings → Private Integrations");
+    // The one permission the token check itself needs, and the one contact reads use to name custom fields.
+    expect(text()).toMatch(/permissions: View Locations, View Contacts, Edit Contacts, View Opportunities, Edit Opportunities and View Custom Fields/u);
 
     await act(async () => host.querySelector<HTMLButtonElement>('form[data-highlevel-token-form] button[type="submit"]')!.click());
     await settle();
@@ -217,7 +219,7 @@ describe("Private Integration token", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('form[data-highlevel-token-form] button[type="submit"]')!.click());
     await settle();
     expect(server.calls).toContainEqual(["POST", "/api/highlevel/token", { token: "pit-abc", locationId: "loc_1" }]);
-    expect(text()).toContain("Connected · Precision Profiles");
+    expect(text()).toContain("Connected · Example Profiles");
     expect(host.querySelector("input")).toBeNull();
   });
 
@@ -233,10 +235,11 @@ describe("Private Integration token", () => {
       setter.call(locationField, "loc_x");
       locationField!.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    fixture.api.mockImplementationOnce(async () => { throw new Error("HighLevel refused this token (401)."); });
+    const refusal = "This token does not belong to that location (403): it was created in another sub-account or at the agency level. Create the Private Integration inside the sub-account whose location ID you entered.";
+    fixture.api.mockImplementationOnce(async () => { throw new Error(refusal); });
     await act(async () => host.querySelector<HTMLButtonElement>('form[data-highlevel-token-form] button[type="submit"]')!.click());
     await settle();
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe("HighLevel refused this token (401).");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(refusal);
     // The field keeps what was typed so it can be corrected, masked; nothing else in the card repeats it.
     expect(tokenField!.type).toBe("password");
     expect(text()).not.toContain("pit-secret");
@@ -267,6 +270,6 @@ describe("Disconnecting HighLevel", () => {
     await act(async () => document.querySelector<HTMLButtonElement>('[role="menuitem"][data-menu-key="disconnect"]')!.click());
     await settle();
     expect(server.calls.some(([method, path]) => method === "DELETE" && path === "/api/highlevel")).toBe(false);
-    expect(text()).toContain("Connected · Precision Profiles");
+    expect(text()).toContain("Connected · Example Profiles");
   });
 });

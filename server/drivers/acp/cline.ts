@@ -118,7 +118,7 @@ export const ClineAgentDriver = {
         ...SUPPORT,
         applyTurnEnv(env, { threadId, mcpServers }) {
           const path = join(directory, `${createHash("sha256").update(threadId).digest("hex")}.json`);
-          const mcp = Object.fromEntries(mcpServers.map(({ name, command, args, env: serverEnv }) => [name, {
+          const mcp = Object.fromEntries(mcpServers.flatMap((server) => "command" in server ? [server] : []).map(({ name, command, args, env: serverEnv }) => [name, {
             transport: { type: "stdio", command, args, env: Object.fromEntries(serverEnv.map(({ name, value }) => [name, value])) },
           }]));
           const text = JSON.stringify({ mcpServers: mcp });

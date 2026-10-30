@@ -11,17 +11,33 @@ import {
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
+import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
 
+export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** Below Cloudflare's transport ceiling; a local inbox, not unbounded storage. */
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+export const DEFAULT_ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+/** A person's own Cloud is the only home of everything their computers held, on a volume a move grows to fit. */
+export const CLOUD_HOME_ATTACHMENTS_MAX_BYTES = 8 * 1024 * 1024 * 1024;
+
+/** A team server can raise the ceiling with OMB_ATTACHMENTS_MAX_BYTES; a missing or invalid value keeps 512 MB, or 8 GB on a Cloud home. */
+export function attachmentsMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OMB_ATTACHMENTS_MAX_BYTES?.trim();
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  return env.OMB_CLOUD_ROLE === "home" || env.OMB_CLOUD_ROLE === "team" ? CLOUD_HOME_ATTACHMENTS_MAX_BYTES : DEFAULT_ATTACHMENTS_MAX_BYTES;
+}
 
 /** Never evict: prompts refer to attachment paths, so at this ceiling a new upload gets an explicit 507. */
-export const ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+export const ATTACHMENTS_MAX_BYTES = attachmentsMaxBytes();
+
+function formatStoreLimit(bytes: number): string {
+  const mb = Math.round(bytes / (1024 * 1024));
+  return mb >= 1 ? `${mb} MB` : `${bytes} bytes`;
+}
 
 /** Cleanup removes only our stale partial files, never a committed attachment a transcript may reference. */
 export const ATTACHMENT_PARTIAL_MAX_AGE_MS = 60 * 60 * 1000;
@@ -198,12 +214,16 @@ class AttachmentReservation {
   }
 
   private reserveAtLeast(required: number, preferred: number): void {
-    const used = committedBytes();
-    const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
+    let available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+    if (available < required) {
+      // People free space by deleting attachments outside the app, which the cache never sees.
+      invalidateAttachmentAccounting();
+      available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+    }
     if (available < required) {
       throw statusError(
         507,
-        `attachments storage is full (limit ${ATTACHMENTS_MAX_BYTES} bytes)`,
+        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)`,
       );
     }
     const granted = Math.min(preferred, available);
@@ -436,6 +456,48 @@ export async function saveFile(
       reservation.release();
     }
   });
+}
+
+/** An attachment another computer's chats name, kept under that name: counted against the store's limit like any
+ * upload (507 when it is full), written under a partial name cleanup knows, never over a file already here, and never
+ * leaving a partial file behind. `stored`: false when the same file was here already. */
+export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Uint8Array>, expectedBytes?: number): Promise<{ stored: boolean }> {
+  if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+  ensureAttachmentsDir();
+  const path = join(ATTACHMENTS_DIR, name);
+  const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${randomUUID()}-${randomUUID()}.partial`);
+  const reservation = new AttachmentReservation();
+  activePartials.add(partialPath);
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  let partialCleanupFailed = false;
+  try {
+    if (expectedBytes) reservation.reserve(expectedBytes);
+    file = await open(partialPath, "wx", 0o600);
+    let bytes = 0;
+    for await (const value of chunks) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      if (bytes + chunk.byteLength > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+      reservation.ensure(bytes + chunk.byteLength);
+      await file.write(chunk);
+      bytes += chunk.byteLength;
+    }
+    await file.close();
+    file = undefined;
+    const accountingVersion = attachmentAccountingVersion;
+    try { await link(partialPath, path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return { stored: false };
+      throw error;
+    }
+    addCommittedBytes(bytes, accountingVersion);
+    return { stored: true };
+  } finally {
+    if (file) await file.close().catch(() => undefined);
+    await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
+    activePartials.delete(partialPath);
+    if (partialCleanupFailed) invalidateAttachmentAccounting();
+    reservation.release();
+  }
 }
 
 /** The UUID filename is never attacker-controlled and never collides. */

@@ -36,7 +36,7 @@ describe("endpoint account configuration", () => {
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: env.CLOUDFLARE_API_TOKEN,
       companionHostSuffix: env.COMPANION_HOST_SUFFIX,
-      dnsRecordLimit: 1000,
+      dnsRecordLimit: 3500,
       minAppVersion: null,
       newEndpoints: true,
       tunnelLimit: 1000,
@@ -56,7 +56,7 @@ describe("endpoint account configuration", () => {
     expect(configured.endpointAccounts.slice(1).map(({ apiToken: _token, ...account }) => account)).toEqual([{
       accountId: "bbb5305f06e28a6f2abaac299f3b09dc",
       companionHostSuffix: "mausbot.si",
-      dnsRecordLimit: 200,
+      dnsRecordLimit: 3500,
       minAppVersion: "0.1.104",
       newEndpoints: true,
       tunnelLimit: 1000,
@@ -66,6 +66,19 @@ describe("endpoint account configuration", () => {
     const unsaved = readConfig(withAccounts(production, {}));
     expect(unsaved.endpointAccounts).toEqual([unsaved.cloudflare]);
     expect(unsaved.endpointAccountIssues).toEqual(["entry_1_token"]);
+  });
+
+  it("deploys every account's limits at its real Cloudflare quotas", () => {
+    // openmausbot.com and mausbot.si are both Pro zones (3,500 DNS records;
+    // mausbot.si was Free, 200, until Oct 21). Both accounts allow 1,000 tunnels.
+    const production = JSON.parse(env.TEST_PRODUCTION_ENDPOINT_ACCOUNTS) as unknown[];
+    const deployed = readConfig(withAccounts(production)).endpointAccounts;
+    expect(deployed.map(({ companionHostSuffix, dnsRecordLimit, tunnelLimit }) => (
+      { companionHostSuffix, dnsRecordLimit, tunnelLimit }
+    ))).toEqual([
+      { companionHostSuffix: "openmausbot.com", dnsRecordLimit: 3500, tunnelLimit: 1000 },
+      { companionHostSuffix: "mausbot.si", dnsRecordLimit: 3500, tunnelLimit: 1000 },
+    ]);
   });
 
   it("reads extra accounts from a JSON var, or the same JSON as a string or secret", () => {
@@ -179,24 +192,56 @@ describe("endpoint account rules", () => {
     expect(appVersionAtLeast("0.10.0", "0.9.1")).toBe(true);
   });
 
-  it("chooses the account with the most room after its dormant endpoints, and never refuses", () => {
+  it("chooses the account with the most free room, which dormant endpoints never reduce", () => {
     const config = accounts(PRIMARY, SECOND);
-    // 5 tunnels free but 20 owed to dormant endpoints, against 100 free.
-    const owed = new Map([scanned(PRIMARY, { dormant_endpoints: 20, tunnel_count: 995 }), scanned(SECOND, { tunnel_count: 900 })]);
-    expect(accountRoom(PRIMARY, owed.get(PRIMARY.accountId))).toBe(-15);
-    expect(chooseNewEndpointAccount(config, owed, null, NOW)).toBe(SECOND);
+    // Dormant endpoints hold no tunnel or record: 5 tunnels free is 5.
+    const dormant = new Map([
+      scanned(PRIMARY, { dormant_endpoints: 20, tunnel_count: 995 }),
+      scanned(SECOND, { tunnel_count: 997 }),
+    ]);
+    expect(accountRoom(PRIMARY, dormant.get(PRIMARY.accountId))).toBe(5);
+    expect(chooseNewEndpointAccount(config, dormant, null, NOW)).toBe(PRIMARY);
     // The zone's DNS quota counts when it is known: 200 - 150 records.
     const dns = new Map([scanned(PRIMARY, { tunnel_count: 900 }), scanned(SECOND, { dns_record_count: 150, tunnel_count: 0 })]);
     expect(accountRoom(SECOND, dns.get(SECOND.accountId))).toBe(50);
     expect(chooseNewEndpointAccount(config, dns, null, NOW)).toBe(PRIMARY);
-    // Ties keep config order; an unknown tunnel count ranks last.
+    // Ties keep config order; an unknown tunnel count ranks after any known room.
     const tie = new Map([scanned(PRIMARY, { tunnel_count: 900 }), scanned(SECOND, { tunnel_count: 900 })]);
     expect(chooseNewEndpointAccount(config, tie, null, NOW)).toBe(PRIMARY);
     const unknown = new Map([scanned(PRIMARY, { tunnel_count: null }), scanned(SECOND, { tunnel_count: 999 })]);
+    expect(accountRoom(PRIMARY, unknown.get(PRIMARY.accountId))).toBeNull();
     expect(chooseNewEndpointAccount(config, unknown, null, NOW)).toBe(SECOND);
-    // Room only ranks: with none anywhere the better account is still tried.
-    const full = new Map([scanned(PRIMARY, { tunnel_count: 1002 }), scanned(SECOND, { tunnel_count: 1001 })]);
-    expect(chooseNewEndpointAccount(config, full, null, NOW)).toBe(SECOND);
+  });
+
+  it("never chooses an account with no free tunnel or DNS record while another has both", () => {
+    // Production on 2026-10-20: openmausbot.com (a Pro zone) had 26 tunnels
+    // free and 1,878 dormant endpoints; mausbot.si (a Free zone) 770 tunnels
+    // free, all 200 DNS records used, and 207 dormant endpoints.
+    const primary = { ...PRIMARY, dnsRecordLimit: 3500 };
+    const config = accounts(primary, SECOND);
+    const production = new Map([
+      scanned(primary, { dns_record_count: 995, dormant_endpoints: 1878, tunnel_count: 974 }),
+      scanned(SECOND, { dns_record_count: 200, dormant_endpoints: 207, tunnel_count: 230 }),
+    ]);
+    expect(accountRoom(primary, production.get(primary.accountId))).toBe(26);
+    expect(accountRoom(SECOND, production.get(SECOND.accountId))).toBe(0);
+    expect(chooseNewEndpointAccount(config, production, "0.1.120", NOW)).toBe(primary);
+    expect(relocationTarget(config, production, "0.1.120", primary, NOW)).toBeNull();
+    expect(relocationTarget(config, production, "0.1.120", SECOND, NOW)).toBe(primary);
+    // A count over the configured limit is no room, never negative room.
+    expect(accountRoom(primary, scanned(primary, { tunnel_count: 1002 })[1])).toBe(0);
+    // A full account loses even to one whose room is not known.
+    const fullOrUnknown = new Map([scanned(primary, { tunnel_count: 1000 }), scanned(SECOND, { tunnel_count: null })]);
+    expect(chooseNewEndpointAccount(config, fullOrUnknown, null, NOW)).toBe(SECOND);
+    // A full zone is full even when the tunnel count is not known.
+    const zoneFull = new Map([scanned(primary, { tunnel_count: 1000 }), scanned(SECOND, { dns_record_count: 200, tunnel_count: null })]);
+    expect(accountRoom(SECOND, zoneFull.get(SECOND.accountId))).toBe(0);
+    expect(chooseNewEndpointAccount(config, zoneFull, null, NOW)).toBe(primary);
+    // With no room anywhere the primary is tried, as with one account, and
+    // only Cloudflare's refusal answers.
+    const full = new Map([scanned(primary, { tunnel_count: 1001 }), scanned(SECOND, { tunnel_count: 1000 })]);
+    expect(chooseNewEndpointAccount(config, full, null, NOW)).toBe(primary);
+    expect(relocationTarget(config, full, null, primary, NOW)).toBeNull();
   });
 
   it("offers only scanned accounts that are not refusing and allow the app's version", () => {

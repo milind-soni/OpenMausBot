@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { collisionFreeDownloadPath, defaultSaveName, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, openLogsFolder, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 
 // Creating a symlink on Windows needs elevation or developer mode.
 const canSymlink = (() => {
@@ -149,7 +149,7 @@ describe("attachment download destination", () => {
     assert.notEqual(handler, -1);
     assert.match(main.slice(handler), /item\.setSavePath\(collisionFreeDownloadPath\(/);
     assert.match(main.slice(handler), /revealDownloadWhenDone\(item, /);
-    assert.ok(handler < main.indexOf("createWindow();"));
+    assert.ok(handler < main.indexOf("!deliveredCloudEntry) await showHome();"));
   });
 
   it("reveals only a completed download at its actual save path", () => {
@@ -264,5 +264,29 @@ describe("Show in folder for a file outside the workspace", () => {
     const rawPath = "C:\\Users\\Maus\\_draft\\..\\_draft\\ollama-gen.js";
     assert.equal(await revealInFolder(rawPath, { reveal, fsp, pathApi: path.win32 }), "shown");
     assert.deepEqual(shown, ["C:\\Users\\Maus\\_draft\\ollama-gen.js"]);
+  });
+});
+
+describe("openLogsFolder", () => {
+  it("opens exactly main's own logs folder, making it first, and says where it is when the system cannot open it", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omb-logs-folder-"));
+    try {
+      const folder = path.join(root, "OpenMausBot", "logs");
+      const opened = [];
+      assert.deepEqual(await openLogsFolder(folder, { open: async (target) => { opened.push(target); return ""; } }), { folder, opened: true });
+      assert.deepEqual(opened, [folder]);
+      assert.equal(fs.statSync(folder).isDirectory(), true);
+      assert.deepEqual(await openLogsFolder(folder, { open: async () => "Failed to open path" }), { folder, opened: false, error: "Failed to open path" });
+      assert.deepEqual(await openLogsFolder(folder, { open: async () => { throw new Error("no file manager"); } }), { folder, opened: false, error: "no file manager" });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // The folder comes from main (app.getPath("logs")); the page asks with no path at all.
+  it("is wired in main to its own logs folder, for this computer's page and My Cloud's once it is home", () => {
+    const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+    assert.match(main, /ipcMain\.handle\("desktop:open-logs", localOrHome\("desktop:open-logs", \(\) => openLogsFolder\(LOG_DIR, \{ open: \(folder\) => shell\.openPath\(folder\) \}\)\)\);/);
+    assert.match(main, /const LOG_DIR = app\.getPath\("logs"\);/);
   });
 });

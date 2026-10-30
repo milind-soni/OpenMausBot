@@ -4,8 +4,10 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ProviderInstance, TextGenerationUsage } from "../contracts.ts";
+import type { ProviderInstance, SmallModelFallback, TextGenerationUsage } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { QuickModelFallback } from "../quick-model-fallback.ts";
+import { createSideJobs } from "../side-jobs.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { CodexDriver } from "./codex.ts";
 import {
@@ -13,6 +15,7 @@ import {
   CODEX_BACKGROUND_TIMEOUT_MS,
   codexBackgroundArgs,
   codexBackgroundModel,
+  codexBackgroundRoute,
   runCodexOneShot,
 } from "./codex-background-text.ts";
 
@@ -38,6 +41,31 @@ describe("codexBackgroundModel", () => {
     expect(codexBackgroundModel({ default: "gpt-6-astra", options: [row("gpt-6-astra"), row("omlx::gpt-6-luna", true), row("omlx::tiny-mini", true)] })).toBe("gpt-6-astra");
     expect(codexBackgroundModel({ default: "company-large", options: [row("company-large"), row("company-small")] })).toBe("company-large");
     expect(codexBackgroundModel({ default: "", options: [] })).toBeNull();
+  });
+
+  it("never picks a small model this instance refused before", () => {
+    const catalog = { default: "gpt-6-astra", options: [row("gpt-6-astra"), row("gpt-6-luna"), row("gpt-5.6-luna"), row("gpt-5.4-mini")] };
+    expect(codexBackgroundModel(catalog, new Set(["gpt-6-luna"]))).toBe("gpt-5.6-luna");
+    expect(codexBackgroundModel(catalog, new Set(["gpt-6-luna", "gpt-5.6-luna", "gpt-5.4-mini"]))).toBe("gpt-6-astra");
+  });
+});
+
+describe("codexBackgroundRoute", () => {
+  const row = (id: string) => ({ id, label: id });
+  const catalog = { default: "gpt-6-astra", options: [row("gpt-6-astra"), row("gpt-6-sol"), row("gpt-5.4-mini")] };
+  const fallback = (model?: string, refused: string[] = []): SmallModelFallback => ({ ...(model ? { model } : {}), refused: new Set(refused), onRefused: () => {} });
+
+  it("writes on the bot's own model, or the account's default, for a sign-in that cannot use small models", () => {
+    expect(codexBackgroundRoute(catalog, false, fallback("gpt-6-sol"))).toEqual({ model: "gpt-6-sol" });
+    expect(codexBackgroundRoute(catalog, false)).toEqual({ model: "gpt-6-astra" });
+    expect(codexBackgroundRoute({ default: "", options: [] }, false)).toBeNull();
+  });
+
+  it("keeps the small model otherwise, with the bot's own model to run once more on", () => {
+    expect(codexBackgroundRoute(catalog, true, fallback("gpt-6-sol"))).toEqual({ model: "gpt-5.4-mini", retry: "gpt-6-sol" });
+    expect(codexBackgroundRoute(catalog, true)).toEqual({ model: "gpt-5.4-mini", retry: "gpt-6-astra" });
+    expect(codexBackgroundRoute(catalog, true, fallback("gpt-6-sol", ["gpt-5.4-mini"]))).toEqual({ model: "gpt-6-astra", retry: "gpt-6-sol" });
+    expect(codexBackgroundRoute(catalog, true, fallback("gpt-6-astra", ["gpt-5.4-mini"]))).toEqual({ model: "gpt-6-astra" });
   });
 });
 
@@ -70,6 +98,15 @@ describe("Codex generateMemoryText (fake CLI)", () => {
   const calls = (): ExecCall[] => existsSync(log)
     ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as ExecCall)
     : [];
+
+  const signIn = (auth: object) => writeFileSync(join(scratch, ".codex", "auth.json"), JSON.stringify(auth));
+  const chatgptLogin = () => signIn({ tokens: { refresh_token: "chatgpt-fixture" } });
+  const apiKeyLogin = () => signIn({ auth_mode: "apikey", OPENAI_API_KEY: "sk-fixture", tokens: null });
+  const modelsRun = () => calls().map((call) => call.argv[call.argv.indexOf("--model") + 1]);
+  const ownModel = (model?: string, refused: string[] = []) => {
+    const onRefused = vi.fn<(model: string) => void>();
+    return { onRefused, fallback: { ...(model ? { model } : {}), refused: new Set(refused), onRefused } satisfies SmallModelFallback };
+  };
 
   const create = async (environment: Record<string, string> = {}, managed = false) => {
     instance = await CodexDriver.create({
@@ -156,6 +193,79 @@ describe("Codex generateMemoryText (fake CLI)", () => {
     await codex.dispose();
     const keyless = await create({ OPENMAUSBOT_COMPANY_API_KEY: "" }, true);
     await expect(keyless.generateMemoryText!("hello")).rejects.toThrow(/Company model access is unavailable/);
+  });
+
+  it("writes on the bot's own model for a ChatGPT sign-in, which refuses the small models its catalog lists", async () => {
+    chatgptLogin();
+    const codex = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_ASTRA: "1", FAKE_CODEX_TEXT_REFUSE: "gpt-6-luna,gpt-5.4-mini" });
+    const usage: TextGenerationUsage[] = [];
+    await expect(codex.generateMemoryText!("hello", { fallback: ownModel("gpt-fake-default").fallback, onUsage: (entry) => usage.push(entry) })).resolves.toBe("fake background answer");
+    await expect(codex.generateMemoryText!("hello")).resolves.toBe("fake background answer");
+    expect(modelsRun()).toEqual(["gpt-fake-default", "gpt-6-astra"]);
+    expect(usage).toEqual([expect.objectContaining({ model: "gpt-fake-default" })]);
+  });
+
+  it("keeps the small model for an API-key sign-in", async () => {
+    apiKeyLogin();
+    const codex = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_ASTRA: "1" });
+    const { fallback, onRefused } = ownModel("gpt-6-astra");
+    await codex.generateMemoryText!("hello", { fallback });
+    expect(modelsRun()).toEqual(["gpt-6-luna"]);
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it("never picks a small model this instance already refused", async () => {
+    apiKeyLogin();
+    const codex = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_ASTRA: "1", FAKE_CODEX_TEXT_REFUSE: "gpt-6-luna" });
+    const { fallback, onRefused } = ownModel("gpt-fake-default", ["gpt-6-luna"]);
+    await codex.generateMemoryText!("hello", { fallback });
+    expect(modelsRun()).toEqual(["gpt-6-astra"]);
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it("runs once more on the bot's own model when the provider refuses the small one, and reports the refusal", async () => {
+    apiKeyLogin();
+    const codex = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_ASTRA: "1", FAKE_CODEX_TEXT_REFUSE: "gpt-6-luna" });
+    const { fallback, onRefused } = ownModel("gpt-fake-default");
+    const usage: TextGenerationUsage[] = [];
+    await expect(codex.generateMemoryText!("hello", { fallback, onUsage: (entry) => usage.push(entry) })).resolves.toBe("fake background answer");
+    expect(modelsRun()).toEqual(["gpt-6-luna", "gpt-fake-default"]);
+    expect(onRefused.mock.calls).toEqual([["gpt-6-luna"]]);
+    expect(usage).toEqual([expect.objectContaining({ model: "gpt-fake-default" })]);
+  });
+
+  it("runs only once when the bot's own model is refused, or the call failed for another reason", async () => {
+    chatgptLogin();
+    const refusing = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_TEXT_REFUSE: "gpt-fake-default" });
+    const { fallback, onRefused } = ownModel("gpt-fake-default");
+    await expect(refusing.generateMemoryText!("hello", { fallback })).rejects.toThrow(/'gpt-fake-default' model is not supported/);
+    await refusing.dispose();
+    apiKeyLogin();
+    const failing = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_TEXT_MODE: "fail" });
+    await expect(failing.generateMemoryText!("hello", { fallback })).rejects.toThrow(/401/);
+    expect(modelsRun()).toEqual(["gpt-fake-default", "gpt-6-luna"]);
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it("remembers a refused small model across the bot's background jobs and restarts", async () => {
+    apiKeyLogin();
+    const codex = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_ASTRA: "1", FAKE_CODEX_TEXT_REFUSE: "gpt-6-luna" });
+    const file = join(scratch, "refused-quick-models.json");
+    const jobs = (smallModels: QuickModelFallback) => createSideJobs({
+      bot: () => ({ id: "b1", name: "Bot", threadId: "main-b1", modelSelection: { instanceId: codex.instanceId, model: "gpt-fake-default" } }),
+      instance: () => codex,
+      refusal: () => undefined,
+      helper: () => null,
+      smallModels,
+      assertWithinBudget: () => {},
+      book: () => {},
+    });
+    const memory = jobs(new QuickModelFallback({ file, publish: () => {}, stopped: () => false })).text("memory", "b1")!;
+    await memory.generateText("first");
+    await memory.generateText("second");
+    await jobs(new QuickModelFallback({ file, publish: () => {}, stopped: () => false })).text("skill-review", "b1")!.generateText("after a restart");
+    expect(modelsRun()).toEqual(["gpt-6-luna", "gpt-fake-default", "gpt-6-astra", "gpt-6-astra"]);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ [codex.instanceId]: ["gpt-6-luna"] });
   });
 
   it("reads past Codex's banners, notices and reasoning to the answer", async () => {

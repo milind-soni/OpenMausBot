@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight, Clipboard, Keyboard, Maximize, Minimize, Monitor, RefreshCw, Send, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
-import RFB from "@novnc/novnc";
+import type RFB from "@novnc/novnc";
+import { connectDesktop, DesktopUnreachable, typeOnDesktop } from "@/lib/desktop-connection";
 import { t } from "@/lib/i18n";
 import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
 
@@ -11,7 +12,6 @@ function subscribeLocation(listener: () => void) {
 }
 const locationHash = () => location.hash;
 
-/** Security: only desktop pixels and input cross the VM boundary; the VM never supplies this page's code. */
 export function DesktopViewer() {
   const screen = useRef<HTMLDivElement>(null);
   const rfb = useRef<RFB | null>(null);
@@ -44,62 +44,23 @@ export function DesktopViewer() {
   useEffect(() => {
     const controller = new AbortController();
     let client: RFB | undefined;
-    let deadline: ReturnType<typeof setTimeout> | undefined;
     const oldTitle = document.title;
     document.title = t("desktopViewer.title");
     setConnection("connecting");
-    const connect = async () => {
-      try {
-        if (!target || !/^(local\/(shared|bot-[a-f0-9]{64}|pool-\d+)|vps\/[\w-]+)$/.test(target)) return setConnection("invalid");
-        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
-        if (target.startsWith("vps/")) {
-          const query = threadId ? `?${new URLSearchParams({ threadId })}` : "";
-          const joined = await fetch(`/api/bots/${target.slice(4)}/computer/join${query}`, {
-            method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal,
-          });
-          if (!joined.ok) throw new Error("join failed");
-          if (controller.signal.aborted) return;
-        }
-        const path = `/api/desktop-viewer/${target}`;
-        const response = await fetch(path, {
-          signal,
-          credentials: "same-origin", cache: "no-store",
-        });
-        if (!response.ok) throw new Error("viewer unavailable");
-        const config = await response.json();
-        if (controller.signal.aborted) return;
-        const websocket = new URL(`${path}/websockify`, location.href);
-        websocket.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-        client = new RFB(screen.current!, websocket.href, {
-          credentials: { password: config.password ?? "", username: "", target: "" },
-        });
-        rfb.current = client;
-        client.scaleViewport = true;
-        client.background = "var(--color-inset)";
-        client.focusOnClick = panelRef.current === null;
-        client.addEventListener("clipboard", event => { if (!controller.signal.aborted) setClipboard(event.detail.text); });
-        deadline = setTimeout(() => {
-          client?.disconnect();
-          setConnection("disconnected");
-        }, 15_000);
-        client.addEventListener("connect", () => {
-          if (controller.signal.aborted) return;
-          clearTimeout(deadline);
-          setConnection("connected");
-        });
-        client.addEventListener("disconnect", () => {
-          if (controller.signal.aborted) return;
-          clearTimeout(deadline);
-          setConnection("disconnected");
-        });
-      } catch {
-        if (!controller.signal.aborted) setConnection("disconnected");
-      }
-    };
-    void connect();
+    void connectDesktop(screen.current!, target ?? "", {
+      threadId,
+      signal: controller.signal,
+      events: { connected: () => setConnection("connected"), disconnected: () => setConnection("disconnected"), clipboard: setClipboard },
+    }).then((connected) => {
+      if (controller.signal.aborted) return connected.disconnect();
+      client = connected;
+      rfb.current = connected;
+      connected.focusOnClick = panelRef.current === null;
+    }, (error: unknown) => {
+      if (!controller.signal.aborted) setConnection(error instanceof DesktopUnreachable && error.invalid ? "invalid" : "disconnected");
+    });
     const disconnect = () => {
       controller.abort();
-      clearTimeout(deadline);
       client?.disconnect();
     };
     const restore = (event: PageTransitionEvent) => { if (event.persisted) setAttempt(value => value + 1); };
@@ -188,12 +149,7 @@ export function DesktopViewer() {
         <form onSubmit={event => {
           event.preventDefault();
           if (!rfb.current || !connected || !keyboardPanel) return;
-          // Explicit text entry works with phone keyboards without reading the clipboard; non-Latin text uses Unicode
-          // VNC keysyms.
-          for (const char of text) {
-            const code = char.codePointAt(0)!;
-            rfb.current.sendKey(code === 10 ? 0xff0d : code === 9 ? 0xff09 : code <= 255 ? code : 0x01000000 | code, null);
-          }
+          typeOnDesktop(rfb.current, text);
           setText("");
         }}>
           <label className="mb-2 block text-xs leading-relaxed text-ink-secondary" htmlFor={keyboardPanel ? "text" : "clipboard-text"}>{t(keyboardPanel ? "desktopViewer.text" : "desktopViewer.clipboardHint")}</label>

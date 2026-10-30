@@ -278,7 +278,7 @@ describe("control-plane migrations and health", () => {
         status: "unknown",
         checkedAt: null,
         tunnels: { used: null, limit: 1000 },
-        dnsRecords: { used: null, limit: 1000 },
+        dnsRecords: { used: null, limit: 3500 },
         providerRejectedAt: null,
         reclaim: { mode: "on", pending: 0 },
       },

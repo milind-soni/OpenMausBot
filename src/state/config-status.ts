@@ -3,18 +3,33 @@ import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
 
+/** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
+export interface SavedKey { configured: boolean; last4?: string }
+
+export type NestedKeyName = "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey";
+
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
-  xai?: { configured: boolean };
-  mistral?: { configured: boolean };
-  cerebras?: { configured: boolean };
-  groq?: { configured: boolean };
-  meta?: { configured: boolean };
+  /** The workspace's banner picture (GET /api/workspace/banner), by a version that changes with it; null without one. */
+  workspaceBanner?: import("@/lib/place-banner").BannerSummary | null;
+  xai?: SavedKey;
+  mistral?: SavedKey;
+  cerebras?: SavedKey;
+  groq?: SavedKey;
+  deepseek?: SavedKey;
+  meta?: SavedKey;
+  /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
+   * `unavailable` when the Admin said no to this desktop's paid sign-in. */
+  xResearch?: { included: boolean; unavailable?: boolean };
+  /** The person's own treg key for research: configured or not, never the key. */
+  treg?: SavedKey;
+  /** The Postiz organisation API key, and the Postiz server it belongs to when it is not Postiz Cloud. */
+  postiz?: SavedKey & { url?: string };
   /** `everyClaudeBot`: the key runs every Claude bot, not only "Claude (API key)". */
-  anthropic?: { configured: boolean; everyClaudeBot?: boolean };
-  openai?: { configured: boolean };
-  openrouter?: { configured: boolean };
-  openaiCompat?: { configured: boolean; url?: string };
+  anthropic?: SavedKey & { everyClaudeBot?: boolean };
+  openai?: SavedKey;
+  openrouter?: SavedKey;
+  openaiCompat?: SavedKey & { url?: string };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */
@@ -27,9 +42,9 @@ export interface ConfigStatus {
   fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
-  composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
+  composio: SavedKey & { mode?: "managed" | "self-hosted" | "unavailable" };
   /** `included`: cloud computers come with Cloud Pro, no key is saved. */
-  box: { configured: boolean; included?: boolean };
+  box: SavedKey & { included?: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
@@ -41,10 +56,10 @@ export interface ConfigStatus {
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
   cacheKeepWarm?: { enabled: boolean; windowMinutes: number };
-  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
+  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
   /** `providerKeys`: names of the keys saved for OpenCode's other
    * providers, never the keys. */
-  opencodeGo?: { configured: boolean; providerKeys?: string[] };
+  opencodeGo?: SavedKey & { providerKeys?: string[] };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;
@@ -64,18 +79,30 @@ export interface ConfigStatus {
   /** The decision model: switches and whether a key is on file. The key
    * itself never comes back. `enabled` is the switch as it takes effect
    * (off while no key is saved). `included`: Cloud Pro's decisions, no key
-   * saved. */
+   * saved. OpenRouter only: `keySource` says which key is in use (its own, or
+   * the one under Settings → API keys); `sharedKey`: that one is on file. */
   decider?: {
-    provider: "jev" | "openrouter";
+    provider: "jev" | "workersai" | "openrouter";
     /** The OpenRouter model in use; present only while OpenRouter is the provider. */
     model?: string;
     configured: boolean;
+    keySource?: "own" | "shared";
+    sharedKey?: boolean;
     included?: boolean;
     enabled: boolean;
     jobs: { roomRouting: boolean };
   };
+  /** The decision and extraction models' keys: which of the person's own are on file, never a key. */
+  helpers?: {
+    own: { jev: boolean; workersAi: boolean; openrouter: boolean };
+    sharedKey?: boolean;
+    workersAiAccountId?: string;
+    extraction: { provider?: "jev" | "workersai" | "openrouter"; included?: boolean; ready: boolean };
+  };
   /** Live calls (OpenAI GPT-Live): configured-or-not, never the key. */
   live?: LiveSettings;
+  /** Keys kept inside another setting (voice, decisions, pictures, live calls), by their desktop credential name. */
+  savedKeys?: Partial<Record<NestedKeyName, SavedKey>>;
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
     configured: boolean;
@@ -88,11 +115,11 @@ export interface ConfigStatus {
     customKeyConfigured?: boolean;
   };
   /** who's using the app — collected in onboarding, shown in the sidebar */
-  profile?: { name: string; email: string; aboutMe?: string };
+  profile?: { name: string; email: string; aboutMe?: string; avatarUrl?: string };
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean };
+  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -107,6 +134,9 @@ export interface ConfigStatus {
   /** This server is an OMB Cloud home: it offers no "this computer" and no
    * Local VM (server/cloud-home.ts). Absent everywhere else. */
   cloudHome?: boolean;
+  /** A Team Cloud: the team this server is the home of, and the Plan page (MausBot Cloud) where its people and plan
+   * are managed. Absent everywhere else. */
+  team?: { id: string; name: string; cloudPage?: string };
 }
 
 export interface ManagedPolicySummary {
@@ -132,6 +162,10 @@ export interface BrowserEngineSummary {
   /** Whether a browser profile can use "My Chrome", the person's own running
    * Chrome: only where the bots run on their computer (the desktop app). */
   myChrome?: boolean;
+  /** On My Cloud, the computer that lends its Chrome. */
+  myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean };
+  /** On My Cloud with no computer lending Chrome: it can be lent from the desktop app. */
+  myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
 }

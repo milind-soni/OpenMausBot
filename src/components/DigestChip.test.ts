@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/state/store";
+import { EXCERPT_SUMMARY_HEADER } from "../../shared/wire";
 import { CompactionChip, DigestChip } from "./DigestChip";
 
 const message: Message = {
@@ -15,13 +16,14 @@ const message: Message = {
 };
 
 describe("DigestChip", () => {
-  it("does not draw a receipt for a reply with no recorded work", () => {
+  it("draws only how long a reply with no recorded work took, with its trace beside it", () => {
     for (const files of [undefined, { changed: [], added: [], deleted: [] }]) {
-      const html = renderToStaticMarkup(createElement(DigestChip, { message: {
-        ...message, digest: { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 0,
-          files, memory: [], memoryDropped: 0 },
-      } }));
-      expect(html).toBe("");
+      const quiet = { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 0, files, memory: [], memoryDropped: 0 };
+      const html = renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: { ...quiet, durationMs: 72_000 } } }));
+      expect(html).toContain("Worked for 1m 12s");
+      expect(html).toContain("View trace");
+      expect(html).not.toContain("tool calls");
+      expect(renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: { ...quiet, durationMs: 0 } } }))).toBe("");
     }
   });
 
@@ -50,9 +52,22 @@ describe("DigestChip", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
   });
+
+  it("does not call an excerpt-only fallback a summary", () => {
+    const chip = (summary: string) => renderToStaticMarkup(createElement(CompactionChip, { message: {
+      id: "context", role: "bot", kind: "compaction", at: 1,
+      compaction: { summary, firstKeptId: "", foldedThroughId: "old", tokensBefore: 1, by: "person" },
+    } }));
+    const excerpts = chip(`${EXCERPT_SUMMARY_HEADER}\nUser message: "hi"`);
+    expect(excerpts).toContain("Earlier context shortened to recent excerpts");
+    expect(excerpts).toContain("Older details may be missing");
+    expect(excerpts).not.toContain("Earlier context summarized");
+    const model = chip(`Model-written historical summary (may be incomplete):\nThe user wants X.\n\n${EXCERPT_SUMMARY_HEADER}`);
+    expect(model).toContain("Earlier context summarized");
+  });
   it("shows total counts rather than only the truncated sample", () => {
     const html = renderToStaticMarkup(createElement(DigestChip, { message }));
-    expect(html).toContain("Did 19 tool calls · 5 files changed");
+    expect(html).toContain("Worked for 100ms · Did 19 tool calls · 5 files changed");
     expect(html).toContain('title="Observed work, not a completion verdict"');
   });
 

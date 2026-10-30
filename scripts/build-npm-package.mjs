@@ -49,9 +49,15 @@ writeFileSync(
       license: "Apache-2.0",
       type: "module",
       bin: { openmausbot: "cli.js" },
-      // Never bundled: plain JS with a WebAssembly core, the same on every
-      // platform, so npm installs it beside the server.
-      dependencies: { "@1password/sdk": app.dependencies["@1password/sdk"] },
+      // Never bundled, so npm installs them beside the server: DuckDB and
+      // resvg are native addons that npm picks per platform from their
+      // optional packages, and the 1Password SDK reads its WebAssembly core
+      // from beside itself.
+      dependencies: {
+        "@1password/sdk": app.dependencies["@1password/sdk"],
+        "@duckdb/node-api": app.dependencies["@duckdb/node-api"],
+        "@resvg/resvg-js": app.dependencies["@resvg/resvg-js"],
+      },
       files: ["cli.js", "dist-server", "dist", "skills", "enterprise", "LICENSE", "README.md"],
       engines: { node: ">=24" },
       repository: { type: "git", url: "https://github.com/milind-soni/OpenMausBot.git" },

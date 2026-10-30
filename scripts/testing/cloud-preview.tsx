@@ -5,6 +5,7 @@ import { ComputerPanel } from "../../src/components/ComputerPanel";
 import { BotSettingsDialog } from "../../src/components/BotSettingsDialog";
 import { RemoteDesktopPanel } from "../../src/components/remote-desktop-panel";
 import { StoreProvider, useStore, type Bot } from "../../src/state/store";
+import { rememberComputerPanelOpen } from "../../src/lib/computer-panel-focus";
 import { applySkin, readSkin } from "../../src/lib/skins";
 import { publishLiveFrame } from "../../src/lib/live-events";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
@@ -191,6 +192,11 @@ function Fixture() {
       <label>Panel<select aria-label="Panel" value={panel} onChange={(event) => setPanel(event.target.value)}>
         <option value="computer">Computer</option><option value="remote">Remote desktop</option><option value="settings">VM settings</option>
       </select></label>
+      {/* Stays mounted while the panel is up, like the chat header's own button. */}
+      <button onClick={(event) => {
+        if (fixtureBot) rememberComputerPanelOpen({ botId: fixtureBot.id, opener: event.currentTarget, tabs: event.detail === 0 });
+        dispatch({ type: "toggleComputer", open: true });
+      }}>Open computer panel</button>
       <label>Conversation<select aria-label="Conversation surface" value={scenario} onChange={(event) => {
         const previousScenario = surfaceScenario;
         surfaceScenario = event.target.value; vmRunning = false; vmDesktopReady = false;
@@ -212,11 +218,10 @@ function Fixture() {
       })}>Publish live frame</button>
     </div>
     {state.settingsOpen && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
-    {state.computerOpen && fixtureBot ? panel === "computer"
+    {state.computerOpen && fixtureBot && (panel === "computer"
       ? <ComputerPanel key={generation} bot={fixtureBot} />
       : panel === "settings" ? <div className="w-[720px] overflow-y-auto"><LocalComputerSection /></div>
-      : <RemoteDesktopPanel key={generation} bot={fixtureBot} />
-      : !state.settingsOpen && <button onClick={() => dispatch({ type: "toggleComputer", open: true })}>Open computer panel</button>}
+      : <RemoteDesktopPanel key={generation} bot={fixtureBot} />)}
   </div>;
 }
 applySkin(readSkin());

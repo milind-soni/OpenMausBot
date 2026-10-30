@@ -65,7 +65,7 @@ describe("browser installation opt-in", () => {
     const toggle = switchTag(settings(), "Enable the built-in browser");
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain("disabled=");
-    expect(panel(false)).not.toContain("Install the browser engine");
+    expect(panel(false)).not.toContain("Install the browser");
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
@@ -77,8 +77,8 @@ describe("browser installation opt-in", () => {
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain("disabled=");
     expect(markup.match(/<button[^>]*>Browser<\/button>/)).toBeNull();
-    expect(panel(false)).not.toContain("Install the browser engine");
-    expect(panel(true)).toContain("Install the browser engine");
+    expect(panel(false)).not.toContain("Install the browser");
+    expect(panel(true)).toContain("Install the browser");
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
@@ -87,7 +87,7 @@ describe("browser installation opt-in", () => {
     expect(switchTag(settings(), "Enable the built-in browser")).toContain("disabled=");
     fixture.config.features = { browser: true };
     expect(switchTag(access(), "Give this bot a built-in browser")).toContain("disabled=");
-    expect(panel(true)).not.toContain("Install the browser engine");
+    expect(panel(true)).not.toContain("Install the browser");
   });
 
   it("preserves the per-bot provider capability gate", () => {

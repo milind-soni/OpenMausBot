@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { credentialStoreFlags } from "./browser/egress/gate.ts";
+import { browserRoot } from "./browser/chrome/profile.ts";
+import { strays } from "./browser/chrome/processes.ts";
 import {
+  agentBrowserDevToolsPorts,
   agentBrowserIntegration,
+  browserProfileDirectory,
+  browserProfilesRoot,
   browserEngineEncryptionKey,
   cachedAgentBrowserVersion,
   pendingAgentBrowserVersionProbe,
@@ -140,8 +145,26 @@ describe("deleting one browser session's saved logins", () => {
     mkdirSync(join(directory, ".tmp"), { recursive: true });
     const running = new Set(["work"]);
     vi.mocked(spawn).mockImplementation(runningDaemons(running, { code: closeCode }));
-    return { home, directory, running, options: { env: { HOME: home, USERPROFILE: home, PATH: "" } } };
+    return { home, directory, running, options: { env: { HOME: home, USERPROFILE: home, PATH: "" }, dataDir: home } };
   }
+
+  it("deletes the session's kept profile with its saved state, and no other profile", async () => {
+    const { home, options } = fixture();
+    for (const session of ["work", "work-client"]) {
+      mkdirSync(join(browserProfileDirectory(session, home), "Default"), { recursive: true });
+      writeFileSync(join(browserProfileDirectory(session, home), "Default", "Cookies"), "signed in");
+    }
+    expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(true);
+    expect(existsSync(browserProfileDirectory("work", home))).toBe(false);
+    expect(readFileSync(join(browserProfileDirectory("work-client", home), "Default", "Cookies"), "utf8")).toBe("signed in");
+  });
+
+  it("keeps the kept profile when the browser would not close", async () => {
+    const { home, options } = fixture(1);
+    mkdirSync(browserProfileDirectory("work", home), { recursive: true });
+    expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(false);
+    expect(existsSync(browserProfileDirectory("work", home))).toBe(true);
+  });
 
   it("removes only exact state/backup/candidate files and never calls state clear", async () => {
     const { directory, options } = fixture();
@@ -479,6 +502,16 @@ describe("restoring exactly one browser profile", () => {
     expect(vi.mocked(spawn).mock.calls[0][2]?.env?.AGENT_BROWSER_RESTORE).toBe("work");
   });
 
+  it.skipIf(!posix)("frees a kept profile a lock from another computer holds before the browser starts on it", async () => {
+    const { directory, options } = fixture();
+    const kept = join(directory, "..", "kept-profile");
+    mkdirSync(kept, { recursive: true });
+    symlinkSync("another-host.example-12345", join(kept, "SingletonLock"));
+    await prepareBrowserSessionState("fixture-browser", "work", { env: { ...options.env, AGENT_BROWSER_PROFILE: kept } });
+    expect(() => lstatSync(join(kept, "SingletonLock"))).toThrow();
+    expect(existsSync(kept)).toBe(true);
+  });
+
   it("never imports a prefix match when the exact legacy profile is absent", async () => {
     const { directory, options } = fixture();
     writeFileSync(join(directory, "work-client-work-client.json.enc"), "client login");
@@ -808,15 +841,52 @@ describe("installing the browser engine", () => {
 
 describe("what a bot gets", () => {
   // Without a gate the browser connects nowhere: Chrome fails every connection through port 0.
-  const noGate = {
+  const gateArgs = ["--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", ...credentialStoreFlags()];
+  const cacheArg = `--disk-cache-size=${64 * 1024 * 1024}`;
+  /** A saved session's browser: its own kept profile, behind no gate. */
+  const keptNoGate = (session: string) => ({
     AGENT_BROWSER_PROXY: "socks5://127.0.0.1:0", AGENT_BROWSER_PROXY_BYPASS: "<-loopback>",
-    AGENT_BROWSER_ARGS: ["--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", ...credentialStoreFlags()].join("\n"),
-  };
+    AGENT_BROWSER_PROFILE: browserProfileDirectory(session), AGENT_BROWSER_ARGS: [cacheArg, ...gateArgs].join("\n"),
+  });
+
+  it("gives each saved session a profile of its own that outlives Chrome, and a temporary or My Chrome browser none", () => {
+    const dataDir = join(tmpdir(), "omb-profile-fixture");
+    const kept = (session: string, extra: Partial<Parameters<typeof agentBrowserIntegration>[0]> = {}) =>
+      agentBrowserIntegration({ binaryPath: "/x", session, encryptionKey: "k", env: {}, dataDir, ...extra }).env;
+    const work = kept("bot-1").AGENT_BROWSER_PROFILE!;
+    expect(work).toBe(browserProfileDirectory("bot-1", dataDir));
+    expect(resolve(work, "..")).toBe(browserProfilesRoot(dataDir));
+    expect(kept("bot-1").AGENT_BROWSER_PROFILE).toBe(work);
+    expect(kept("bot-2").AGENT_BROWSER_PROFILE).not.toBe(work);
+    expect(kept("bot-1").AGENT_BROWSER_ARGS!.split("\n")).toContain(cacheArg);
+    for (const env of [kept("guest-1", { persistent: false }), kept("work", { attach: {} })]) {
+      expect(env).not.toHaveProperty("AGENT_BROWSER_PROFILE");
+      expect(env.AGENT_BROWSER_ARGS ?? "").not.toContain(cacheArg);
+    }
+    expect(() => browserProfileDirectory("../escape", dataDir)).toThrow();
+  });
+
+  it("keeps a saved session's profile out of the new engine's folder, whose sweep stops every Chrome there it did not start", () => {
+    const dataDir = join(tmpdir(), "omb-profile-fixture");
+    const chrome = { pid: 4242, ppid: 4241, startTime: null, args: `/opt/chrome --remote-debugging-port=0 --user-data-dir=${browserProfileDirectory("bot-1", dataDir)} about:blank` };
+    expect(strays({ processes: [chrome], registered: [], root: browserRoot(dataDir), alive: () => true })).toEqual([]);
+  });
+
+  it("counts a saved session's own Chrome among the DevTools ports no page may reach", () => {
+    const temp = mkdtempSync(join(tmpdir(), "omb-devtools-"));
+    scratch.push(temp);
+    const profiles = join(temp, "profiles");
+    mkdirSync(join(temp, "agent-browser-chrome-1"), { recursive: true });
+    writeFileSync(join(temp, "agent-browser-chrome-1", "DevToolsActivePort"), "41001\n/devtools/browser/a");
+    mkdirSync(join(profiles, "0123abcd"), { recursive: true });
+    writeFileSync(join(profiles, "0123abcd", "DevToolsActivePort"), "41002\n/devtools/browser/b");
+    expect(agentBrowserDevToolsPorts(temp, profiles).sort()).toEqual([41001, 41002]);
+  });
 
   it("launches Chrome only behind its egress gate, off the person's keychain, and never for the person's own Chrome", () => {
     const gated = agentBrowserIntegration({ binaryPath: "/x/agent-browser", session: "bot-1", encryptionKey: "k", env: { PATH: "/usr/bin" }, egressPort: 45123, platform: "darwin" });
     expect(gated.env).toMatchObject({ AGENT_BROWSER_PROXY: "socks5://127.0.0.1:45123", AGENT_BROWSER_PROXY_BYPASS: "<-loopback>" });
-    expect(gated.env.AGENT_BROWSER_ARGS!.split("\n")).toEqual(["--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--use-mock-keychain"]);
+    expect(gated.env.AGENT_BROWSER_ARGS!.split("\n")).toEqual([cacheArg, "--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--use-mock-keychain"]);
     expect(agentBrowserIntegration({ binaryPath: "/x", session: "bot-1", encryptionKey: "k", env: {}, egressPort: 45123, platform: "linux" }).env.AGENT_BROWSER_ARGS).toContain("--password-store=basic");
     expect(agentBrowserIntegration({ binaryPath: "/x", session: "bot-1", encryptionKey: "k", env: {} }).env.AGENT_BROWSER_PROXY).toBe("socks5://127.0.0.1:0");
     const mine = agentBrowserIntegration({ binaryPath: "/x", session: "work", encryptionKey: "k", env: {}, attach: {}, egressPort: 45123 });
@@ -833,7 +903,7 @@ describe("what a bot gets", () => {
       launcher: { ...launcher, AGENT_BROWSER_PROXY: "direct://", AGENT_BROWSER_PROXY_BYPASS: "*", AGENT_BROWSER_ARGS: "--lang=en-IN" },
     });
     expect(pushy.env).toMatchObject({ AGENT_BROWSER_EXECUTABLE_PATH: "/d/chrome-launcher.sh", ...gate });
-    expect(pushy.env.AGENT_BROWSER_ARGS!.split("\n")).toEqual(["--lang=en-IN", "--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--use-mock-keychain"]);
+    expect(pushy.env.AGENT_BROWSER_ARGS!.split("\n")).toEqual(["--lang=en-IN", cacheArg, "--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--use-mock-keychain"]);
   });
 
   it("forwards the explicit Chrome path without copying arbitrary environment or overriding session isolation", () => {
@@ -853,7 +923,7 @@ describe("what a bot gets", () => {
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
       AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin",
-      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome", ...noGate,
+      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome", ...keptNoGate("bot-1"),
     });
   });
 
@@ -867,7 +937,7 @@ describe("what a bot gets", () => {
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
       AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin",
-      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome", ...noGate,
+      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome", ...keptNoGate("bot-1"),
     });
     for (const env of [{}, { AGENT_BROWSER_EXECUTABLE_PATH: "" }]) {
       const explicit = agentBrowserIntegration({ binaryPath: "/x", session: "s", encryptionKey: "k", env });

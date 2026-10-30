@@ -44,9 +44,29 @@ describe("the fixture's Live call environment", () => {
     }
     expect(childEnv({ OMB_OPENAI_LIVE_KEY: "sk-real" })).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
   });
+});
 
-  it("lets the Pro answer cross only as OMB_PRO_PLAN=1", () => {
-    expect(childEnv({ OMB_PRO_PLAN: "1" })).toMatchObject({ OMB_PRO_PLAN: "1" });
-    for (const value of [undefined, "", "0", "true", "yes"]) expect(childEnv({ OMB_PRO_PLAN: value }), String(value)).not.toHaveProperty("OMB_PRO_PLAN");
+describe("the fixture's X research relay", () => {
+  it("passes a loopback relay stub and its token through, the token only with the stub", () => {
+    expect(childEnv({ OMB_CLOUD_X_URL: " http://127.0.0.1:4200/api/cloud/services/x ", OMB_CLOUD_X_TOKEN: "omb_x_fixture" }))
+      .toMatchObject({ OMB_CLOUD_X_URL: "http://127.0.0.1:4200/api/cloud/services/x", OMB_CLOUD_X_TOKEN: "omb_x_fixture" });
+    for (const url of ["https://cloud.openmausbot.com/api/cloud/services/x", "http://localhost:4200/api/cloud/services/x", "http://192.0.2.1:4200", "http://127.0.0.1:4200/../x?y", ""]) {
+      const env = childEnv({ OMB_CLOUD_X_URL: url, OMB_CLOUD_X_TOKEN: "omb_x_real" });
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_X_URL");
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_X_TOKEN");
+    }
+    expect(childEnv({ OMB_TREG_URL: " http://127.0.0.1:4300 " })).toMatchObject({ OMB_TREG_URL: "http://127.0.0.1:4300" });
+    for (const url of ["https://treg.to", "http://localhost:4300", "http://127.0.0.1:4300/x", ""]) expect(childEnv({ OMB_TREG_URL: url }), url).not.toHaveProperty("OMB_TREG_URL");
+  });
+});
+
+describe("the fixture's @devs reports", () => {
+  it("go to a loopback fake endpoint, else to a closed port: never to the MausBot team", () => {
+    const closed = "http://127.0.0.1:9/api/bug-reports";
+    expect(childEnv({ OMB_BUG_REPORT_URL: " http://127.0.0.1:4400/api/bug-reports " }).OMB_BUG_REPORT_URL).toBe("http://127.0.0.1:4400/api/bug-reports");
+    for (const url of ["https://cloud.openmausbot.com/api/bug-reports", "http://localhost:4400/api/bug-reports", "http://192.0.2.1:4400/x", "http://127.0.0.1:4400/../x?y", ""]) {
+      expect(childEnv({ OMB_BUG_REPORT_URL: url }).OMB_BUG_REPORT_URL, url).toBe(closed);
+    }
+    expect(childEnv({}).OMB_BUG_REPORT_URL).toBe(closed);
   });
 });

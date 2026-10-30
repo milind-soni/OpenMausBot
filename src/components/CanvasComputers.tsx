@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { Box, ExternalLink, Loader2, Monitor, Plus, RefreshCw, X } from "lucide-react";
+import { ArrowUpRight, Box, ExternalLink, Loader2, Monitor, Plus, RefreshCw, X } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import type { TeamComputer } from "../../shared/team-computer";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
 const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
 type Inventory = { computers: TeamComputer[]; configured: boolean; problem?: string };
+
+function computerStateLabel(state: string, updating: boolean): string {
+  if (updating) return t("canvasComputers.updating");
+  const key = ({ idle: "idle", ready: "ready", running: "running", init: "starting", provisioning: "provisioning", provisioned: "starting", cloning: "starting", starting: "starting", sleeping: "sleeping" } as Record<string, string>)[state];
+  return key ? t(`canvasComputers.state.${key}` as LocaleKey) : state;
+}
 
 /**
  * Owner control: the list is read-only, and every paid lifecycle action is a deliberate button press, never a render
@@ -76,7 +84,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   const requestAssignment = useCallback((computer: TeamComputer, section: string | null) => {
     if (pending.current || computer.section === section) return;
     if (computer.section !== null && section !== null) {
-      setError(`Unassign ${computer.name} from ${computer.section || "General"} before moving it to another team. Its files and signed-in accounts stay on the computer.`);
+       setError(t("canvasComputers.unassignBeforeMove", { computer: computer.name, team: computer.section || t("settings.section.general") }));
       return;
     }
     setError("");
@@ -103,7 +111,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
     const team = target ? sections.find((section) => section.key === target.dataset.teamKey) : null;
     setDragging({ name: active.computer.name, x: event.clientX, y: event.clientY,
       hint: team ? active.computer.section !== null && active.computer.section !== team.key
-        ? "Unassign before moving to another team" : `Assign to ${team.name}` : "Drop onto a team" });
+        ? t("canvasComputers.unassignBeforeMoving") : t("canvasComputers.assignTo", { team: team.name }) : t("canvasComputers.dropOntoTeam") });
   };
   const dragEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     const active = pointer.current;
@@ -113,13 +121,14 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
     if (section !== undefined) requestAssignment(active.computer, section);
   };
 
-  const refresh = useCallback(async () => {
+  // `background`: the 20-second poll, which never wakes a Cloud home that went to sleep.
+  const refresh = useCallback(async (background = false) => {
     read.current?.abort();
     const controller = new AbortController();
     read.current = controller;
     setLoading(true);
     try {
-      const value: Inventory = await api("/api/team-computers", { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
+      const value: Inventory = await api("/api/team-computers", { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), background });
       if (controller.signal.aborted || !mounted.current) return;
       setInventory(value);
       setReadError("");
@@ -138,7 +147,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   useEffect(() => {
     if (!open) return;
     void refresh();
-    const timer = window.setInterval(() => { if (!pending.current && document.visibilityState === "visible") void refresh(); }, 20_000);
+    const timer = window.setInterval(() => { if (!pending.current && document.visibilityState === "visible") void refresh(true); }, 20_000);
     return () => window.clearInterval(timer);
   }, [open, refresh]);
   useEffect(() => { if (createRequest > 0) setCreating(true); }, [createRequest]);
@@ -180,18 +189,18 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   const settings = () => { onClose(); dispatch({ type: "toggleAppSettings", open: true, section: "computer" }); };
 
   return <>
-    {open && <aside ref={shelf} aria-label="Team computers" onKeyDown={(event) => { if (event.key === "Escape" && !assignment) { event.stopPropagation(); if (pointer.current) clearDrag(); else onClose(); } }} className="flex w-[300px] max-w-[90vw] shrink-0 flex-col border-l border-hairline/50 bg-panel max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-30 max-sm:shadow-xl">
+    {open && <aside ref={shelf} aria-label={t("canvasComputers.title")} onKeyDown={(event) => { if (event.key === "Escape" && !assignment) { event.stopPropagation(); if (pointer.current) clearDrag(); else onClose(); } }} className="flex w-[300px] max-w-[90vw] shrink-0 flex-col border-l border-hairline/50 bg-panel max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-30 max-sm:shadow-xl">
       <header className="flex items-center gap-2 border-b border-hairline/40 px-4 py-3">
-        <Monitor size={16} className="text-ink-secondary" /><h2 className="flex-1 text-[13px] font-semibold">Computers</h2>
-        <button aria-label="Refresh computers" className={control} disabled={loading || busy !== null} onClick={() => { setError(""); void refresh(); }}><RefreshCw size={14} className={loading ? "animate-spin" : ""} /></button>
-        <button ref={closeButton} aria-label="Close computers" className={control} onClick={onClose}><X size={15} /></button>
+        <Monitor size={16} className="text-ink-secondary" /><h2 className="flex-1 text-[13px] font-semibold">{t("canvasComputers.title")}</h2>
+        <button aria-label={t("canvasComputers.refresh")} className={control} disabled={loading || busy !== null} onClick={() => { setError(""); void refresh(); }}><RefreshCw size={14} className={loading ? "animate-spin" : ""} /></button>
+        <button ref={closeButton} aria-label={t("canvasComputers.close")} className={control} onClick={onClose}><X size={15} /></button>
       </header>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-        <p className="text-[12px] leading-relaxed text-ink-secondary">Drag a computer onto a team, or choose its team below. Bots on Auto will use it.</p>
+        <p className="text-[12px] leading-relaxed text-ink-secondary">{t("canvasComputers.hint")}</p>
         {(error || readError || inventory?.problem) && <p role="alert" className="rounded-lg bg-danger/10 p-3 text-[12px] text-danger">{error || readError || inventory?.problem}</p>}
         {inventory && !inventory.configured && <div className="rounded-xl border border-hairline/50 p-3 text-[12px]">
-          <p className="text-ink-secondary">Connect your Boat account before creating a cloud computer.</p>
-          <button className={`${control} mt-2 border border-hairline/50`} onClick={settings}>Connect Boat</button>
+          <p className="text-ink-secondary">{t("canvasComputers.connectBoatHint")}</p>
+          <button className={`${control} mt-2 border border-hairline/50`} onClick={settings}>{t("canvasComputers.connectBoat")}</button>
         </div>}
         {creating ? <form className="space-y-3 rounded-xl border border-hairline/60 bg-card p-3" onSubmit={(event) => {
           event.preventDefault();
@@ -204,23 +213,23 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
             submittedName.current = null;
           });
         }}>
-          <label className="block text-[12px] font-medium" htmlFor="canvas-computer-name">New cloud computer</label>
-          <input ref={nameInput} id="canvas-computer-name" className={field} value={name} maxLength={60} placeholder="e.g. Engineering desktop" disabled={busy !== null || submittedName.current !== null} onChange={(event) => setName(event.target.value)} />
-          <p className="text-[11px] leading-relaxed text-ink-secondary">Creates a cloud computer in your connected boat.dev account. Your Boat plan and usage charges apply. It stays unassigned until you choose a team.</p>
+          <label className="block text-[12px] font-medium" htmlFor="canvas-computer-name">{t("canvasComputers.newCloud")}</label>
+          <input ref={nameInput} id="canvas-computer-name" className={field} value={name} maxLength={60} placeholder={t("canvasComputers.namePlaceholder")} disabled={busy !== null || submittedName.current !== null} onChange={(event) => setName(event.target.value)} />
+          <p className="text-[11px] leading-relaxed text-ink-secondary">{t("canvasComputers.createHint")}</p>
           <div className="flex justify-end gap-1">
-            <button type="button" className={control} disabled={busy !== null} onClick={() => setCreating(false)}>Cancel</button>
+            <button type="button" className={control} disabled={busy !== null} onClick={() => setCreating(false)}>{t("common.cancel")}</button>
             <button type="submit" className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white disabled:opacity-40" disabled={!inventory?.configured || !name.trim() || busy !== null}>
-              {busy === "create" && <Loader2 size={13} className="animate-spin" />}Create cloud computer
+              {busy === "create" && <Loader2 size={13} className="animate-spin" />}{t("canvasComputers.create")}
             </button>
           </div>
-        </form> : <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-hairline/60 px-3 py-3 text-[12px] text-ink-secondary hover:bg-control hover:text-ink" disabled={busy !== null} onClick={() => setCreating(true)}><Plus size={14} /> New cloud computer</button>}
+        </form> : <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-hairline/60 px-3 py-3 text-[12px] text-ink-secondary hover:bg-control hover:text-ink" disabled={busy !== null} onClick={() => setCreating(true)}><Plus size={14} /> {t("canvasComputers.newCloud")}</button>}
         {inventory?.computers.map((computer) => {
           const ready = ["idle", "ready", "running"].includes(computer.state);
           const starting = ["init", "provisioning", "provisioned", "cloning", "starting"].includes(computer.state);
           const heldHereNow = heldHere === computer.id;
           const held = computer.held || heldHereNow;
           return <article key={computer.id} data-computer-id={computer.id} className="rounded-xl border border-hairline/60 bg-card p-3">
-          <div data-computer-drag-id={computer.id} role="group" tabIndex={-1} aria-label={`Drag ${computer.name} to a team`}
+          <div data-computer-drag-id={computer.id} role="group" tabIndex={-1} aria-label={t("canvasComputers.dragToTeam", { name: computer.name })}
             onPointerDown={(event) => {
               if (pending.current || pointer.current || event.button !== 0 || !event.isPrimary) return;
               event.currentTarget.focus({ preventScroll: true });
@@ -230,20 +239,20 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
             onLostPointerCapture={() => { if (pointer.current) clearDrag(); }}
             className="flex touch-none select-none cursor-grab items-center gap-2.5 rounded-lg py-1 outline-none active:cursor-grabbing">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-control text-ink-secondary"><Box size={18} /></span>
-            <span className="min-w-0"><span className="block truncate text-[13px] font-medium">{computer.name}</span><span className="block text-[11px] text-ink-secondary">Cloud computer · {busy === computer.id ? "Updating…" : computer.state}</span></span>
+            <span className="min-w-0"><span className="block truncate text-[13px] font-medium">{computer.name}</span><span className="block text-[11px] text-ink-secondary">{t("canvasComputers.cloudComputer")} · {computerStateLabel(computer.state, busy === computer.id)}</span></span>
           </div>
           {computer.problem && <p className="mt-2 text-[11px] text-danger">{computer.problem}</p>}
-          <label className="sr-only" htmlFor={`computer-team-${computer.id}`}>Team for {computer.name}</label>
+          <label className="sr-only" htmlFor={`computer-team-${computer.id}`}>{t("canvasComputers.teamFor", { name: computer.name })}</label>
           <Select id={`computer-team-${computer.id}`} className="mt-3 w-full" disabled={busy !== null} value={computer.section === null ? "unassigned" : `team:${computer.section}`}
             onChange={(event) => requestAssignment(computer, event.target.value === "unassigned" ? null : event.target.value.slice(5))}>
-            <option value="unassigned">Not assigned</option>
+            <option value="unassigned">{t("canvasComputers.unassigned")}</option>
             {sections.filter((section) => computer.section === null || section.key === computer.section).map((section) => <option key={section.key} value={`team:${section.key}`}>{section.name}</option>)}
           </Select>
-          {computer.section !== null && <p className="mt-1.5 text-[10px] text-ink-secondary">Unassign to move to another team.</p>}
+          {computer.section !== null && <p className="mt-1.5 text-[10px] text-ink-secondary">{t("canvasComputers.unassignHint")}</p>}
           <div className="mt-2 flex flex-wrap gap-1">
-            {!ready && !starting && <button className={control} title="Starts this cloud computer; your provider's usage charges apply" disabled={busy !== null || held} onClick={() => void mutate(computer.id, () => post(computer.id, "provision", { acknowledgeCost: true }))}>Start / retry</button>}
-            {ready && !held && <button className={control} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "sleep"))}>Sleep</button>}
-            {ready && <button className={`${control} flex items-center gap-1.5`} title="Pauses bot control while you use the desktop" disabled={busy !== null} onClick={() => void mutate(computer.id, async () => {
+            {!ready && !starting && <button className={control} title={t("canvasComputers.startTitle")} disabled={busy !== null || held} onClick={() => void mutate(computer.id, () => post(computer.id, "provision", { acknowledgeCost: true }))}>{t("canvasComputers.startRetry")}</button>}
+            {ready && !held && <button className={control} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "sleep"))}>{t("canvasComputers.sleep")}</button>}
+            {ready && <button className={`${control} flex items-center gap-1.5`} title={t("canvasComputers.openTitle")} disabled={busy !== null} onClick={() => void mutate(computer.id, async () => {
               await post(computer.id, "control", { action: "take", controlLeaseId: controlLeaseId.current });
               setHeldHere(computer.id);
               return post(computer.id, "join");
@@ -251,24 +260,24 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
               // Security: only a deliberate https link; a blocked popup must not trigger another lifecycle request, and
               // provider URLs are never iframes.
               if (typeof value.joinUrl === "string" && value.joinUrl.startsWith("https://")) setViewer({ id: computer.id, url: value.joinUrl });
-            })}>Open desktop <ExternalLink size={11} /></button>}
-            {heldHereNow && <button className={`${control} text-accent`} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "control", { action: "release", controlLeaseId: controlLeaseId.current }), () => { setHeldHere(null); setViewer(null); })}>Return to bots</button>}
-            {computer.held && !heldHereNow && <button className={control} disabled title="Another viewer has paused bot control on this desktop">In use</button>}
+            })}>{t("canvasComputers.openDesktop")} <ExternalLink size={11} /></button>}
+            {heldHereNow && <button className={`${control} text-accent`} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "control", { action: "release", controlLeaseId: controlLeaseId.current }), () => { setHeldHere(null); setViewer(null); })}>{t("canvasComputers.returnToBots")}</button>}
+            {computer.held && !heldHereNow && <button className={control} disabled title={t("canvasComputers.inUseTitle")}>{t("canvasComputers.inUse")}</button>}
           </div>
-          {viewer?.id === computer.id && <a href={viewer.url} target="_blank" rel="noopener noreferrer" className="mt-2 block rounded-lg px-3 py-2 text-[12px] text-accent hover:bg-control">Open secure desktop ↗</a>}
+          {viewer?.id === computer.id && <a href={viewer.url} target="_blank" rel="noopener noreferrer" className="mt-2 block rounded-lg px-3 py-2 text-[12px] text-accent hover:bg-control">{t("canvasComputers.openSecure")} <ArrowUpRight size={14} aria-hidden="true" className="inline align-[-2px]" /></a>}
         </article>; })}
       </div>
-      <footer className="border-t border-hairline/40 p-3"><button className={`${control} w-full text-left`} onClick={settings}>Local VM and other computers…</button></footer>
+      <footer className="border-t border-hairline/40 p-3"><button className={`${control} w-full text-left`} onClick={settings}>{t("canvasComputers.moreSettings")}</button></footer>
     </aside>}
     {dragging && createPortal(<div role="status" className="pointer-events-none fixed z-[70] rounded-xl border border-accent/40 bg-card px-4 py-3 text-[12px] text-ink shadow-xl" style={{ left: dragging.x + 14, top: dragging.y + 14 }}>
       <span className="flex items-center gap-2"><Box size={15} />{dragging.name}</span>
       <p className="mt-1 text-[10px] text-ink-secondary">{dragging.hint}</p>
     </div>, document.body)}
-    <ConfirmDialog open={assignment !== null} tone="neutral" title={assignment?.section === null ? `Unassign ${assignment?.computer.name ?? "computer"}?` : `Assign ${assignment?.computer.name ?? "computer"} to ${assignment?.section || "General"}?`}
+    <ConfirmDialog open={assignment !== null} tone="neutral" title={assignment?.section === null ? t("canvasComputers.unassignTitle", { name: assignment?.computer.name ?? t("canvasComputers.computer") }) : t("canvasComputers.assignTitle", { name: assignment?.computer.name ?? t("canvasComputers.computer"), team: assignment?.section || t("settings.section.general") })}
       body={assignment?.section === null
-        ? "This removes the team default. It does not stop or delete the machine, its files, or its logins. Review the bots' Auto routing before their next task."
-        : "Bots on Auto in this team will share this computer's files and signed-in accounts. Explicit bot computer settings stay unchanged. Only one bot can use the desktop at a time. This does not move the OpenMausBot server or enable 24/7 hosting."}
-      confirmLabel={assignment?.section === null ? "Unassign computer" : "Assign computer"} onCancel={cancelAssignment} onConfirm={() => {
+        ? t("canvasComputers.unassignBody")
+        : t("canvasComputers.assignBody")}
+      confirmLabel={assignment?.section === null ? t("canvasComputers.unassign") : t("canvasComputers.assign")} onCancel={cancelAssignment} onConfirm={() => {
         const target = assignment;
         if (!target) return;
         setAssignment(null);

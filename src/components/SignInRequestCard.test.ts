@@ -74,13 +74,13 @@ describe("SignInRequestCard while it waits", () => {
     expect(html).toContain("— Pepper");
     expect(html).toContain("Pepper’s built-in browser");
     for (const label of ["Open", "Done", "Cancel"]) expect(html).toContain(label);
-    expect(html).toContain("OpenMausBot never sees it.");
+    expect(html).toContain("MausBot never sees it.");
     expect(html).not.toContain("<input");
   });
 
   it.each([
-    ["vm", "the Local VM Pepper works on"],
-    ["cloud", "the cloud computer Pepper works on"],
+    ["vm", "the private desktop Pepper works on"],
+    ["cloud", "the cloud desktop Pepper works on"],
     ["local", "on this computer, in the browser Pepper is using"],
   ])("names the place for %s", (place, words) => {
     expect(view({ place })).toContain(words);
@@ -88,7 +88,7 @@ describe("SignInRequestCard while it waits", () => {
 
   it("says the host computer, not this one, where this computer is somewhere else", () => {
     here.value = false;
-    expect(view({ place: "local" })).toContain("the computer OpenMausBot runs on");
+    expect(view({ place: "local" })).toContain("the computer MausBot runs on");
   });
 
   it("Open goes to the place the bot works", () => {

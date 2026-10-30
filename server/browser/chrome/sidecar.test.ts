@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Cdp, CdpListeners } from "../../browser-sites.ts";
+import { NO_PASSKEY_AUTHENTICATOR } from "../cdp/passkeys.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { IdentitySidecars, startIdentitySidecar } from "./sidecar.ts";
 
@@ -50,6 +51,24 @@ describe("the identity sidecar", () => {
     expect(browser.sent.find((message) => message.sessionId === "page-1" && message.method === "Target.setAutoAttach")?.params).toEqual({ autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   });
 
+  it("gives a headless browser's pages an authenticator with no passkey before they run, so a passkey request ends at once", async () => {
+    const headless = fakeBrowser();
+    await startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, headless.connect, { noPasskeys: true });
+    headless.attach("page-1", "page");
+    headless.attach("frame-1", "iframe", "page-1");
+    await headless.settle();
+    expect(headless.on("page-1")).toEqual(["WebAuthn.enable", "WebAuthn.addVirtualAuthenticator", "Emulation.setUserAgentOverride", "Target.setAutoAttach", "Runtime.runIfWaitingForDebugger"]);
+    expect(headless.sent.find((message) => message.method === "WebAuthn.enable")?.params).toEqual({ enableUI: false });
+    expect(headless.sent.find((message) => message.method === "WebAuthn.addVirtualAuthenticator")?.params).toEqual({ options: NO_PASSKEY_AUTHENTICATOR });
+    expect(NO_PASSKEY_AUTHENTICATOR).toMatchObject({ isUserVerified: false, automaticPresenceSimulation: true });
+    expect(headless.on("frame-1")).not.toContain("WebAuthn.enable");
+    const headed = fakeBrowser();
+    await startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, headed.connect);
+    headed.attach("page-1", "page");
+    await headed.settle();
+    expect(headed.on("page-1")).not.toContain("WebAuthn.enable");
+  });
+
   it("never sends the calls sites detect, whatever attaches", async () => {
     const browser = fakeBrowser();
     await startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect);
@@ -81,6 +100,14 @@ describe("one sidecar per browser session", () => {
     expect(browsers[1]!.connect).toHaveBeenCalledOnce();
     sidecars.forget("bot-1");
     expect(sidecars.attached("bot-1")).toBe(false);
+  });
+
+  it("turns passkeys down in a headless session's browser only", async () => {
+    const start = vi.fn(async () => ({ closed: new Promise<void>(() => {}), close: () => {} }));
+    const sidecars = new IdentitySidecars({ cdpUrl: async () => "ws://127.0.0.1:9/devtools/browser/x", start });
+    await sidecars.ensure("bot-1", spec, IDENTITY);
+    await sidecars.ensure("bot-2", { ...spec, env: {} }, IDENTITY);
+    expect(start.mock.calls.map((call) => (call as unknown[])[3])).toEqual([{ noPasskeys: true }, { noPasskeys: false }]);
   });
 
   it("does nothing when the session has no browser to reach", async () => {

@@ -1,10 +1,11 @@
 // Kept outside the workspace on purpose: an audit trail the audited bot can rewrite is not an audit trail.
 // A journal write must never fail the change it records.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import {
   MEMORY_INDEX,
@@ -55,10 +56,15 @@ export function journalFile(botId: string): string {
 
 type Op = { tag: " " | "-" | "+"; line: string };
 
-function editScript(a: string[], b: string[]): Op[] {
-  if (a.length * b.length > LCS_CELL_CAP) {
-    return [...a.map((line) => ({ tag: "-" as const, line })), ...b.map((line) => ({ tag: "+" as const, line }))];
+function editScript(fullA: string[], fullB: string[]): Op[] {
+  if (fullA.length * fullB.length > LCS_CELL_CAP) {
+    return [...fullA.map((line) => ({ tag: "-" as const, line })), ...fullB.map((line) => ({ tag: "+" as const, line }))];
   }
+  let shared = 0;
+  while (shared < fullA.length && shared < fullB.length && fullA[shared] === fullB[shared]) shared++;
+  const ops: Op[] = fullA.slice(0, shared).map((line) => ({ tag: " ", line }));
+  const a = fullA.slice(shared);
+  const b = fullB.slice(shared);
   const rows = a.length + 1;
   const cols = b.length + 1;
   const table = new Uint32Array(rows * cols);
@@ -69,7 +75,6 @@ function editScript(a: string[], b: string[]): Op[] {
         : Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
     }
   }
-  const ops: Op[] = [];
   let i = 0;
   let j = 0;
   while (i < a.length && j < b.length) {
@@ -185,6 +190,24 @@ function isEntry(value: unknown): value is MemoryJournalEntry {
   // SAFETY: shape probe on a parsed JSON line; the fields the panel keys on are checked below
   const row = value as Record<string, unknown>;
   return typeof row.id === "string" && typeof row.at === "number" && typeof row.path === "string" && typeof row.kind === "string";
+}
+
+/** Another server's changes to this bot's memory, by id, in time order among this server's own: they describe that
+ * server's files, so none of them can be reverted here. How many were added. */
+export async function adoptMemoryJournal(botId: string, entries: readonly MemoryJournalEntry[]): Promise<number> {
+  await flushMemoryJournal(botId);
+  const held = readMemoryJournal(botId, MAX_ROWS);
+  const ids = new Set(held.map((entry) => entry.id));
+  const added = entries.filter((entry) => isEntry(entry) && !ids.has(entry.id)).map((entry): MemoryJournalEntry => ({ ...entry, botId, before: null, canRevert: false,
+    revertUnavailableReason: "This change was made on another computer, so it cannot be reverted here." }));
+  if (!added.length) return 0;
+  let kept = "";
+  try { kept = readFileSync(journalFile(botId), "utf8"); } catch {}
+  const rows = [...kept.split("\n").filter(Boolean), ...added.map((entry) => JSON.stringify(entry))];
+  const at = (line: string) => { try { return Number((JSON.parse(line) as { at?: unknown }).at) || 0; } catch { return 0; } };
+  mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
+  writeFileAtomic(journalFile(botId), `${rows.map((line, index) => ({ line, index, at: at(line) })).sort((a, b) => a.at - b.at || a.index - b.index).map((row) => row.line).join("\n")}\n`, { mode: 0o600 });
+  return added.length;
 }
 
 export function readMemoryJournal(botId: string, limit = 50): MemoryJournalEntry[] {

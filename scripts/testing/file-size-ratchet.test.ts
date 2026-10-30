@@ -1,7 +1,8 @@
 // Every source file over 1,000 lines is listed here with its line count, and
 // a count may only go down: a PR that grows one of these files, or adds a new
-// file over 1,000 lines, fails here. Lower a number when you shrink the file;
-// remove the line when it drops under 1,000. The split program
+// file over 1,000 lines, fails here. A PR that shrinks a file leaves its number
+// alone: scripts/tighten-ratchets.mjs lowers the numbers (and drops files under
+// 1,000 lines) at each release, so two such PRs never conflict here. The split program
 // (server/host/README.md) moves server/index.ts into modules of under 1,500
 // lines; nothing new may exceed HARD_CAP, and the files listed above the cap
 // are the ones that program takes apart. Tests, fixtures, goldens and
@@ -15,40 +16,36 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 17577,
-  "src/state/store.tsx": 3617,
-  "electron/main.mjs": 3476,
-  "server/store.ts": 2478,
-  "src/components/Sidebar.tsx": 2614,
-  "server/drivers/claude.ts": 2168,
-  "server/drivers/acp/core.ts": 2016,
-  "server/drivers/codex.ts": 1872,
-  "server/routines.ts": 1879,
-  "src/components/ComputerPanel.tsx": 1918,
-  "src/components/RoutineCalendarPage.tsx": 2099,
-  "server/config.ts": 1456,
-  "src/components/ChatView.tsx": 1598,
-  "server/routine-requests.ts": 1680,
-  "src/components/GroupView.tsx": 1616,
-  "src/components/LocalComputerSection.tsx": 1605,
-  "src/components/CursorAvatar.tsx": 1441,
-  "server/skills.ts": 1391,
-  "server/composio.ts": 1345,
+  "server/index.ts": 15818,
+  "src/state/store.tsx": 3388,
+  "electron/main.mjs": 3247,
+  "server/store.ts": 2323,
+  "src/components/Sidebar.tsx": 1917,
+  "server/drivers/claude.ts": 2137,
+  "server/drivers/acp/core.ts": 1755,
+  "server/drivers/codex.ts": 1813,
+  "server/routines.ts": 1575,
+  "src/components/ComputerPanel.tsx": 1821,
+  "src/components/RoutineCalendarPage.tsx": 1623,
+  "server/config.ts": 1285,
+  "src/components/ChatView.tsx": 1313,
+  "server/routine-requests.ts": 1484,
+  "src/components/GroupView.tsx": 1225,
+  "src/components/LocalComputerSection.tsx": 1475,
+  "src/components/CursorAvatar.tsx": 1324,
+  "server/skills.ts": 1390,
+  "server/composio.ts": 1091,
   "server/vps-computer.ts": 1369,
-  "scripts/mcp-server.ts": 1487,
+  "scripts/mcp-server.ts": 1414,
   "server/boat.ts": 1258,
-  "server/drivers/pi.ts": 1150,
-  "server/container-computer.ts": 1249,
-  "src/components/Composer.tsx": 1160,
-  "src/components/ModelPicker.tsx": 1204,
-  "src/components/PhoneSetupFlow.tsx": 1283,
+  "server/drivers/pi.ts": 1047,
+  "server/container-computer.ts": 1225,
+  "src/components/Composer.tsx": 1020,
+  "src/components/ModelPicker.tsx": 1133,
+  "src/components/PhoneSetupFlow.tsx": 1147,
   "server/cli.ts": 1080,
-  "src/components/SettingsModal.tsx": 1101,
-  "server/drivers/agents-call.ts": 1138,
-  "src/components/ChatMarkdown.tsx": 1039,
-  "src/components/PluginsPanel.tsx": 1115,
+  "src/components/PluginsPanel.tsx": 1028,
   "server/org-library.ts": 1003,
-  "src/components/TeamLibraryPanel.tsx": 1120,
   "src/components/AttachmentPreview.tsx": 1044,
 };
 
@@ -61,7 +58,7 @@ function sourceFiles(): string[] {
 const count = (file: string) => readFileSync(new URL(file, ROOT), "utf8").split("\n").length - 1;
 
 describe("source files stay a readable size", () => {
-  it("no listed file grows, and no file over 1,000 lines goes unlisted", () => {
+  it("no listed file grows, and no new file over 1,000 lines goes unlisted", () => {
     const problems: string[] = [];
     const seen = new Set<string>();
     for (const file of sourceFiles()) {
@@ -70,15 +67,12 @@ describe("source files stay a readable size", () => {
       if (pinned !== undefined) {
         seen.add(file);
         if (lines > pinned) problems.push(`${file} grew to ${lines} lines (listed at ${pinned}): move code out, do not add here`);
-        if (lines < LISTED_FROM) problems.push(`${file} is ${lines} lines: remove its line from LINES`);
-        else if (lines < pinned) problems.push(`${file} is ${lines} lines: lower its number to ${lines}`);
       } else if (lines > LISTED_FROM) {
         problems.push(lines > HARD_CAP
           ? `${file} is ${lines} lines, over the ${HARD_CAP}-line cap: split it`
           : `${file} is ${lines} lines: a new file over ${LISTED_FROM} lines needs a line here and a reason in the PR`);
       }
     }
-    for (const file of Object.keys(LINES)) if (!seen.has(file)) problems.push(`${file} is gone: remove its line from LINES`);
     expect(problems, "See server/host/README.md").toEqual([]);
   });
 });

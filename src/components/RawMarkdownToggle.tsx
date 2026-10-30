@@ -44,7 +44,7 @@ export function RawMarkdownView({ text, className }: RawMarkdownViewProps) {
       data-testid="raw-markdown-view"
       tabIndex={0}
       className={cn(
-        "max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-hairline/30 bg-inset/50 p-3 font-mono text-[12.5px] leading-relaxed text-ink select-text",
+        "max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-hairline/30 bg-inset/50 p-3 font-mono text-[13px] leading-relaxed text-ink select-text",
         className,
       )}
     >

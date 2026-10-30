@@ -1,4 +1,6 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,7 +61,7 @@ describe("custom MCP probe", () => {
       args: ["--experimental-strip-types", fakeServer],
       env: { FAKE_MCP_MODE: "silent" },
       enabled: false,
-    }, 100)).resolves.toEqual({ ok: false, error: "The server did not answer in time." });
+    }, 100)).resolves.toEqual({ ok: false, error: "The server did not answer in time.", reason: "timeout" });
   });
 
   it("lists a command's Whop-sized catalog and says how many tools it has", async () => {
@@ -87,7 +89,7 @@ describe("custom MCP probe", () => {
     expect(probe.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await untilReal(() => probe.done);
-    expect(probe.value).toEqual({ ok: false, error: "The server did not answer in time." });
+    expect(probe.value).toEqual({ ok: false, error: "The server did not answer in time.", reason: "timeout" });
   });
 
   it("stops a probe when its caller disconnects", async () => {
@@ -163,14 +165,37 @@ describe("remote MCP probe", () => {
     }
   });
 
-  it("reports the status of a refusal without echoing the header value", async () => {
+  it("says the keys were refused, with the status, on a 401 or 403 that offers no sign-in, never echoing a value", async () => {
     const fake = await startFakeHttpMcp({ requireHeader: { name: "Authorization", value: "Bearer right" } });
+    const gateway = await startFakeHttpMcp({ requireHeaders: { "CF-Access-Client-Id": "id", "CF-Access-Client-Secret": "right" } });
     try {
       const result = await probeMcpServer({ type: "http", url: fake.url, headers: { Authorization: "Bearer wrong-token" }, enabled: false }, 2_000);
-      expect(result).toEqual({ ok: false, error: "The server answered HTTP 401. Check the address and headers." });
+      expect(result).toEqual({ ok: false, error: "The server didn't accept the keys (HTTP 401). Check the header values.", reason: "keys", status: 401 });
       expect(JSON.stringify(result)).not.toContain("wrong-token");
+      const gated = await probeMcpServer({ type: "http", url: gateway.url, headers: { "CF-Access-Client-Id": "id", "CF-Access-Client-Secret": "wrong-secret" }, enabled: false }, 2_000);
+      expect(gated).toEqual({ ok: false, error: "The server didn't accept the keys (HTTP 403). Check the header values.", reason: "keys", status: 403 });
+      expect(JSON.stringify(gated)).not.toContain("wrong-secret");
     } finally {
       await fake.close();
+      await gateway.close();
+    }
+  });
+
+  it("says the keys were refused when a server answers an MCP unauthorized error with HTTP 200", async () => {
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; }).on("end", () => {
+        const id = (JSON.parse(body) as { id?: unknown }).id;
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32001, message: "Unauthorized: invalid API key" } }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
+      await expect(probeMcpServer({ type: "http", url, headers: { "X-Api-Key": "k" }, enabled: false }, 2_000))
+        .resolves.toEqual({ ok: false, error: "The server didn't accept the keys. Check the header values.", reason: "keys" });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
     }
   });
 
@@ -192,7 +217,7 @@ describe("remote MCP probe", () => {
     const fake = await startFakeHttpMcp({ silentTools: true });
     try {
       await expect(probeMcpServer({ type: "http", url: fake.url, headers: {}, enabled: false }, 300))
-        .resolves.toEqual({ ok: false, error: "The server did not answer in time." });
+        .resolves.toEqual({ ok: false, error: "The server did not answer in time.", reason: "timeout" });
     } finally {
       await fake.close();
     }
@@ -223,7 +248,7 @@ describe("remote MCP probe", () => {
       expect(probe.done).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       await untilReal(() => probe.done);
-      expect(probe.value).toEqual({ ok: false, error: "The server did not answer in time." });
+      expect(probe.value).toEqual({ ok: false, error: "The server did not answer in time.", reason: "timeout" });
     } finally {
       await fake.close();
     }
@@ -266,7 +291,7 @@ describe("remote MCP probe", () => {
 
   it("says when the address cannot be reached", async () => {
     await expect(probeMcpServer({ type: "http", url: "http://127.0.0.1:9/mcp", headers: {}, enabled: false }, 2_000))
-      .resolves.toEqual({ ok: false, error: "Could not reach this address. Check the URL and your network." });
+      .resolves.toEqual({ ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" });
   });
 
   it("redacts a header value a server echoes in tool metadata", async () => {

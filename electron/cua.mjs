@@ -11,6 +11,7 @@ import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
+import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 
 const { localOnly } = localOriginModule;
 
@@ -53,6 +54,10 @@ let stateListener = () => {};
 const connectionStore = createCuaConnectionStore({
   getUserData: () => app.getPath("userData"),
 });
+const localComputerGrant = createLocalComputerGrant({
+  connection: () => connectionStore.get(),
+  log: (line) => console.error(`[cua] ${line}`),
+});
 
 function ensureLinuxRuntime() {
   if (!linuxRuntime) {
@@ -66,7 +71,7 @@ function ensureLinuxRuntime() {
         clearPreference: true,
         reasonCode: support.reasonCode,
         message: support.message,
-        onChange: (connection) => stateListener(connection),
+        onChange: (connection) => notifyState(connection),
       });
       return linuxRuntime;
     }
@@ -85,17 +90,27 @@ function ensureLinuxRuntime() {
         getUserData: () => app.getPath("userData"),
         connectionStore,
         bundledDriverPath,
-        onChange: (connection) => stateListener(connection),
+        onChange: (connection) => notifyState(connection),
       });
     } catch (error) {
       console.error("[cua] Bundled Linux driver failed integrity validation:", error);
       linuxRuntime = createUnavailableLinuxRuntime({
         connectionStore,
-        onChange: (connection) => stateListener(connection),
+        onChange: (connection) => notifyState(connection),
       });
     }
   }
   return linuxRuntime;
+}
+
+/** The app's own server child gets the driver connection, and every change to it, over its private port. */
+export function grantLocalComputer(proc, isCurrent) {
+  localComputerGrant.attach(proc, isCurrent);
+}
+
+function notifyState(connection) {
+  localComputerGrant.changed();
+  stateListener(connection);
 }
 
 export function setCuaStateListener(listener) {
@@ -104,7 +119,7 @@ export function setCuaStateListener(listener) {
 
 function persistAndNotify(next) {
   const connection = connectionStore.persist(next);
-  stateListener(connection);
+  notifyState(connection);
   return connection;
 }
 
@@ -347,6 +362,50 @@ export async function stopCua() {
   }
 }
 
+/** Starts computer control again on macOS and Windows; on macOS that asks for the permissions it lacks. One restart at a
+ * time; a later explicit Stop (or quit) cancels it. */
+function restartCua() {
+  const platformLabel = process.platform === "darwin" ? "macOS" : "Windows";
+  macRetry ??= (async () => {
+    try {
+      const stopping = stopCua();
+      const generation = lifecycleGeneration;
+      await stopping;
+      if (generation !== lifecycleGeneration) throw new Error("Computer use restart cancelled");
+      const connection = await startCua();
+      const ready = connection?.mode === "embedded" || connection?.mode === "standalone";
+      return {
+        enabled: ready,
+        status: ready ? "ready" : "error",
+        reasonCode: ready ? undefined : "permissions-required",
+        message: connection?.reason,
+      };
+    } catch (error) {
+      console.error(`[cua] ${platformLabel} retry failed:`, error);
+      return {
+        enabled: false,
+        status: "error",
+        reasonCode: "permissions-required",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })().finally(() => { macRetry = null; });
+  return macRetry;
+}
+
+/** The person asked for computer control: started again on macOS and Windows (the Retry button's path), turned on on
+ * Linux (its Enable button's). */
+export async function requestComputerUse() {
+  if (process.platform === "darwin" || process.platform === "win32") return restartCua();
+  if (process.platform !== "linux") return null;
+  try {
+    await ensureLinuxRuntime().enable();
+  } catch (error) {
+    console.error("[cua] Linux enable failed:", error);
+  }
+  return ensureLinuxRuntime().getStatus();
+}
+
 export function registerCuaIpc() {
   ipcMain.handle("cua:connection", localOnly("cua:connection", () => connectionStore.get()));
   ipcMain.handle("cua:permissions", localOnly("cua:permissions", () => cuaPermissionsStatus()));
@@ -378,35 +437,7 @@ export function registerCuaIpc() {
     return ensureLinuxRuntime().getStatus();
   }));
   ipcMain.handle("cua:linux-retry", localOnly("cua:linux-retry", async () => {
-    if (process.platform === "darwin" || process.platform === "win32") {
-      // Concurrent requests share one stop/start sequence; a later explicit Stop (or quit) cancels its delayed restart.
-      const platformLabel = process.platform === "darwin" ? "macOS" : "Windows";
-      macRetry ??= (async () => {
-        try {
-          const stopping = stopCua();
-          const generation = lifecycleGeneration;
-          await stopping;
-          if (generation !== lifecycleGeneration) throw new Error("Computer use restart cancelled");
-          const connection = await startCua();
-          const ready = connection?.mode === "embedded" || connection?.mode === "standalone";
-          return {
-            enabled: ready,
-            status: ready ? "ready" : "error",
-            reasonCode: ready ? undefined : "permissions-required",
-            message: connection?.reason,
-          };
-        } catch (error) {
-          console.error(`[cua] ${platformLabel} retry failed:`, error);
-          return {
-            enabled: false,
-            status: "error",
-            reasonCode: "permissions-required",
-            message: error instanceof Error ? error.message : String(error),
-          };
-        }
-      })().finally(() => { macRetry = null; });
-      return macRetry;
-    }
+    if (process.platform === "darwin" || process.platform === "win32") return restartCua();
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }

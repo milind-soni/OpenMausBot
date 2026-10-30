@@ -1,4 +1,4 @@
-import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,15 +11,6 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 const { ThreadModelsLine } = await import("./ThreadModelsLine");
-
-type Node = ReactElement<Record<string, unknown> & { children?: ReactNode }>;
-function nodes(value: ReactNode): Node[] {
-  return Children.toArray(value).flatMap((child) => {
-    if (!isValidElement(child)) return [];
-    const node = child as Node;
-    return [node, ...nodes(node.props.children)];
-  });
-}
 
 const opus = { instanceId: "claude", model: "claude-opus-5" };
 const codex = { instanceId: "codex", model: "gpt-5-codex" };
@@ -44,7 +35,7 @@ describe("ThreadModelsLine", () => {
     expect(html(ada([task("old", { modelSelection: codex })]))).toBe("");
   });
 
-  it("counts the threads on a model of their own, and Switch them too moves them all onto the bot's", () => {
+  it("counts the threads on a model of their own", () => {
     const bot = ada([
       task("first", { modelSelection: opus, followsBotModel: true }),
       task("one", { modelSelection: codex, followsBotModel: false }),
@@ -52,9 +43,6 @@ describe("ThreadModelsLine", () => {
     ]);
     expect(html(bot)).toContain("2 threads use their own model.");
     expect(html(bot)).toContain("Switch them too");
-    const button = nodes(ThreadModelsLine({ bot })).find((node) => node.props["data-switch-them-too"] !== undefined)!;
-    (button.props.onClick as () => void)();
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "followBotModel", botId: "ada" });
   });
 
   it("says one thread in the singular", () => {

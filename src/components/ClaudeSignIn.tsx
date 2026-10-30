@@ -151,9 +151,9 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone }: {
               spellCheck={false}
               autoFocus
               placeholder={t("accounts.claude.codePlaceholder")}
-              className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink outline-none focus:border-accent-border"
+              className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink outline-none focus:border-accent-border"
             />
-            <button type="submit" disabled={busy !== null || code.trim().length < 8} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-50">
+            <button type="submit" disabled={busy !== null || code.trim().length < 8} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-50">
               {busy === "finish" && <Loader2 size={13} className="animate-spin" />}
               {busy === "finish" ? t("engineSetup.claude.finishing") : t("accounts.claude.finish")}
             </button>
@@ -180,7 +180,7 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone }: {
           type="button"
           disabled={busy !== null}
           onClick={() => void start()}
-          className="flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          className="flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
         >
           {busy === "start" ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
           {busy === "start" ? t("engineSetup.claude.starting") : auth || error ? t("engineSetup.device.tryAgain") : t("engineSetup.claude.start")}

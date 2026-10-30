@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-
+import { setLocale } from "@/lib/i18n";
 import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import {
   askText,
@@ -184,15 +184,15 @@ describe("runSteps", () => {
       ["pnpm typecheck", "passed", false],
       ["doctor", "passed", true],
       ["send", "failed", true],
-      ["press", "running", true],
+      ["press", "unverified", true],
       ["git push", "passed", false],
     ]);
     expect(steps.map((s) => s.command)).toEqual(["pnpm typecheck", DOCTOR, SEND, PRESS, PUSH]);
   });
 
-  it("maps ok undefined / true / false to running / passed / failed", () => {
+  it("maps unrecorded / true / false to unverified / passed / failed", () => {
     expect(runSteps([claude(DOCTOR), claude(DOCTOR, true), claude(DOCTOR, false)]).map((s) => s.status))
-      .toEqual(["running", "passed", "failed"]);
+      .toEqual(["unverified", "passed", "failed"]);
   });
 
   it("starts at the person's last message, so a previous ask's steps drop off", () => {
@@ -241,7 +241,7 @@ describe("runSummary", () => {
   it("counts the steps first, then only the non-zero verified, failed and running counts", () => {
     const steps = runSteps([claude(DOCTOR, true), claude(DOCTOR, true), codex(SEND, false), acp(PRESS), claude(PUSH, true)]);
     expect(runSummary(steps)).toEqual({
-      total: 5, verified: 4, passed: 3, failed: 1, running: 1, dryRuns: 0, label: "5 steps · 4 verified · 1 failed · 1 running",
+      total: 5, verified: 4, passed: 3, failed: 1, running: 0, unverified: 1, dryRuns: 0, label: "5 steps · 4 verified · 1 failed · 1 with no result",
     });
     expect(runSummary(steps.slice(0, 1)).label).toBe("1 step · 1 verified");
     expect(runSummary(steps.slice(4)).label).toBe("1 step");
@@ -251,9 +251,20 @@ describe("runSummary", () => {
   it("counts a settled dry run as neither passed nor failed", () => {
     const steps = runSteps([claude(`${DOCTOR} --dry-run`, true), claude(`${SEND} --dry-run`, false), claude(`${PRESS} --dry-run`)]);
     expect(runSummary(steps)).toEqual({
-      total: 3, verified: 3, passed: 0, failed: 0, running: 1, dryRuns: 2, label: "3 steps · 3 verified · 1 running · 2 dry runs",
+      total: 3, verified: 3, passed: 0, failed: 0, running: 0, unverified: 1, dryRuns: 2, label: "3 steps · 3 verified · 1 with no result · 2 dry runs",
     });
     expect(runSummary(steps.slice(0, 1)).label).toBe("1 step · 1 verified · 1 dry run");
+  });
+  it("translates unverified and status labels using the active locale", () => {
+    const steps = runSteps([claude(DOCTOR, true), acp(PRESS)]);
+    try {
+      setLocale("es");
+      expect(runSummary(steps).label).toBe("2 pasos · 2 verificados · 1 sin resultado");
+      setLocale("ja");
+      expect(runSummary(steps).label).toBe("2 ステップ · 2 件検証済み · 1 件結果なし");
+    } finally {
+      setLocale("en");
+    }
   });
 });
 
@@ -304,7 +315,7 @@ describe("skillPrompt", () => {
     it("lists every step with its marker, the verified ones tagged — a dry run never as passing", () => {
       expect(prompt).toContain(`✓ doctor — ${DOCTOR} (verified)\n`);
       expect(prompt).toContain(`✗ send — ${SEND} (verified)\n`);
-      expect(prompt).toContain(`… press — ${PRESS} (verified)\n`);
+      expect(prompt).toContain(`? press — ${PRESS} (verified)\n`);
       expect(prompt).toContain(`[dry run] doctor — ${DOCTOR} --dry-run (verified)\n`);
       expect(prompt).toContain(`✓ git push — ${PUSH}\n`);
       expect(prompt).not.toContain(`${PUSH} (verified)`);
@@ -338,9 +349,14 @@ describe("skillPrompt", () => {
     it("lists the steps untagged and ends with a blank line", () => {
       expect(prompt).toContain(`✓ git push — ${PUSH}\n`);
       expect(prompt).toContain("✗ npm publish — npm publish\n");
-      expect(prompt).toContain("… gh release — gh release create v1\n");
+      expect(prompt).toContain("? gh release — gh release create v1\n");
       expect(prompt).not.toContain("(verified)");
-      expect(prompt.endsWith("… gh release — gh release create v1\n\n")).toBe(true);
+      expect(prompt.endsWith("? gh release — gh release create v1\n\n")).toBe(true);
     });
   });
+});
+
+it("retains running only for explicitly live command identities", () => {
+  const messages = [claude(DOCTOR), claude(PUSH)];
+  expect(runSteps(messages, new Set([messages[1].id])).map((s) => s.status)).toEqual(["unverified", "running"]);
 });

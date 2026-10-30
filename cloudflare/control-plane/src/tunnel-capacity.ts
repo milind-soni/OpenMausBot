@@ -195,12 +195,14 @@ export async function releaseCleanedCapacity(
 // decides both the observe-mode count and the real mark, and a concurrent
 // reconcile, revocation, or installation check-in that lands between the
 // provider read and the write always wins. A row is only ever matched to a
-// tunnel listed in its own account.
+// tunnel listed in its own account. A 'provisioning' row qualifies only once
+// its request's lease has expired and nothing has touched the row for the
+// whole quiet period, so a provisioning still under way is never cut.
 const RECLAIM_GUARD_SQL = `installation_id = ?
         AND provider_account = ?
         AND tunnel_name = ?
         AND (tunnel_id IS NULL OR tunnel_id = ?)
-        AND status IN ('ready', 'error')
+        AND status IN ('ready', 'error', 'provisioning')
         AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
         AND updated_at <= ?
         AND COALESCE(last_reconciled_at, 0) <= ?

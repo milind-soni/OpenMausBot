@@ -198,7 +198,7 @@ describe("the call mode menu", () => {
     const props = { id: "m", mode: "live" as const, onChoose: vi.fn(), onClose: vi.fn() };
     expect(renderToStaticMarkup(createElement(CallModeMenu, props))).toContain("The OpenAI key stays on your computer.");
     const cloud = renderToStaticMarkup(createElement(CallModeMenu, { ...props, cloudHome: true }));
-    expect(cloud).toContain("The OpenAI key stays on My Cloud.");
+    expect(cloud).toContain("The OpenAI key stays in the Cloud.");
     expect(cloud).not.toContain("stays on your computer");
   });
 

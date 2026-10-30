@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SKINS, SKIN_IDS, DEFAULT_SKIN } from "./skins";
+import { SKINS, SKIN_IDS, DEFAULT_SKIN_CHOICE, PRIOR_INSTALL_SKIN, THEME_SKINS, resolveSkin } from "./skins";
 
 const css = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
@@ -27,7 +27,7 @@ describe("skins", () => {
       const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
       return new Set([...body.matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name));
     };
-    const reference = tokensOf(DEFAULT_SKIN);
+    const reference = tokensOf(PRIOR_INSTALL_SKIN);
     expect(reference.size).toBeGreaterThan(15);
     expect(reference).toContain("--color-composer-ring");
     for (const id of SKIN_IDS) {
@@ -35,10 +35,21 @@ describe("skins", () => {
     }
   });
 
+  it("tints a hovered menu row with ink at 6% in Midnight and Daylight, and with raised at 70% in every other skin", () => {
+    for (const id of SKIN_IDS) {
+      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+      const token = (name: string) => body.match(new RegExp(`(?:^|\\s)${name}:\\s*([^;]+);`))?.[1]?.trim();
+      const expected = id === "midnight" || id === "daylight"
+        ? `${token("--color-ink")}0f`
+        : "color-mix(in srgb, var(--color-raised) 70%, transparent)";
+      expect(token("--color-menu-hover"), id).toBe(expected);
+    }
+  });
+
   it("selects a code-only light or dark palette in every nearest skin", () => {
     for (const id of SKIN_IDS) {
       const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-      const scheme = ["atelier", "lagoon", "linen", "daylight", "meadow"].includes(id) ? "light" : "dark";
+      const scheme = ["atelier", "lagoon", "linen", "daylight", "meadow", "pop"].includes(id) ? "light" : "dark";
       expect(body).toContain(`--code-color-scheme: ${scheme};`);
     }
     expect(css).toMatch(/\.chat-md \.shiki\s*\{\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}/);
@@ -49,11 +60,36 @@ describe("skins", () => {
     expect(SKIN_IDS.slice(0, 8)).toEqual([
       "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "daylight",
     ]);
-    expect(DEFAULT_SKIN).toBe("midnight");
+    expect(PRIOR_INSTALL_SKIN).toBe("midnight");
   });
 
-  it("gives Meadow's dark bubble its own inverted context", () => {
-    expect(css).toMatch(/@scope \(\[data-skin="meadow"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{/);
+  it("follows the computer between Daylight and Midnight by default", () => {
+    expect(DEFAULT_SKIN_CHOICE).toBe("system");
+    expect(THEME_SKINS).toEqual({ light: "daylight", dark: "midnight" });
+    expect(resolveSkin("system", false)).toBe("daylight");
+    expect(resolveSkin("system", true)).toBe("midnight");
+    expect(resolveSkin("meadow", true)).toBe("meadow");
+  });
+
+  it("keeps Meadow's own bubble light, in the page's ink", () => {
+    expect(css).not.toMatch(/@scope \(\[data-skin="meadow"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{/);
+    expect(css).toMatch(/\[data-skin="meadow"\] \{[^}]*--color-bubble-user-ink: #0f1a13;/);
+  });
+
+  it("adds Pop after Meadow with its own inverted bubble and sticker scope", () => {
+    expect(SKIN_IDS.slice(0, 9)).toEqual([
+      "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "daylight", "meadow",
+    ]);
+    expect(SKIN_IDS[9]).toBe("pop");
+    expect(css).toMatch(/@scope \(\[data-skin="pop"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{/);
+    expect(css).toMatch(/@scope \(\[data-skin="pop"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)/);
+  });
+
+  it("adds Halloween last, dark, with its atmosphere kept off the picker miniature", () => {
+    expect(SKIN_IDS.at(-1)).toBe("halloween");
+    expect(SKINS.find((s) => s.id === "halloween")?.name).toBe("Halloween");
+    expect(css).toMatch(/@scope \(\[data-skin="halloween"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)\s*\{\s*main\.bg-app\s*\{/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\[data-skin="halloween"\] main\.bg-app::before/);
   });
 
   it("describes each skin exactly once", () => {

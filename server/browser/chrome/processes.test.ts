@@ -1,9 +1,10 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { launchChrome } from "./launch.ts";
 import { ProcessRegistry, staleSingletonLock, strays, sweep, userDataDirOf, type ListedProcess } from "./processes.ts";
 
 const dirs: string[] = [];
@@ -78,5 +79,47 @@ describe("the process sweep", () => {
       expect(lstatSync(join(busy, "SingletonLock"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
       expect(lstatSync(join(stale, "SingletonLock"), { throwIfNoEntry: false })).toBeUndefined();
     }
+  });
+
+  it.skipIf(process.platform === "win32")("leaves a Chrome that has not answered its pipe yet, and forgets it once it exits", async () => {
+    const root = scratch();
+    const executablePath = join(root, "chrome");
+    writeFileSync(executablePath, '#!/bin/sh\n[ "$1" = --version ] && exit 0\nexec sleep 30\n', { mode: 0o755 });
+    const userDataDir = join(root, "temp", "starting");
+    mkdirSync(userDataDir, { recursive: true });
+    const registry = new ProcessRegistry(root);
+    const launching = launchChrome({ executablePath, userDataDir, mode: "headless", host: "desktop", env: { PATH: "/usr/bin:/bin" }, registry, handshakeTimeoutMs: 1_000 });
+    const failed = launching.catch((error: Error) => error);
+    const [entry] = registry.list();
+    expect(entry).toMatchObject({ userDataDir, ownerPid: process.pid });
+    const killed: number[] = [];
+    const report = await sweep({ root, registry, list: async () => [chrome(entry!.pid, userDataDir)], kill: async (pid) => { killed.push(pid); } });
+    expect(killed).toEqual([]);
+    expect(report.temporaryRemoved).toEqual([]);
+    expect(await failed).toBeInstanceOf(Error);
+    await expect.poll(() => registry.list()).toEqual([]);
+  });
+
+  it("leaves a profile folder a launch is preparing until the launch lets it go", async () => {
+    const root = scratch();
+    const temporary = join(root, "temp", "preparing");
+    mkdirSync(temporary, { recursive: true });
+    const registry = new ProcessRegistry(root);
+    const release = registry.reserve(temporary);
+    expect((await sweep({ root, registry, list: async () => [] })).temporaryRemoved).toEqual([]);
+    release();
+    release();
+    expect((await sweep({ root, registry, list: async () => [] })).temporaryRemoved).toEqual([temporary]);
+  });
+
+  it("leaves the folder of a registered Chrome that started after the process list was read", async () => {
+    const root = scratch();
+    const temporary = join(root, "temp", "just-started");
+    mkdirSync(temporary, { recursive: true });
+    const registry = new ProcessRegistry(root);
+    registry.add({ pid: 4242, startTime: null, userDataDir: temporary, ownerPid: process.pid, launchedAt: new Date().toISOString() });
+    const report = await sweep({ root, registry, list: async () => [], alive: () => true });
+    expect(report.temporaryRemoved).toEqual([]);
+    expect(existsSync(temporary)).toBe(true);
   });
 });

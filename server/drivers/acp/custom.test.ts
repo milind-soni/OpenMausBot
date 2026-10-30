@@ -41,7 +41,7 @@ describe("CustomAcpDriver config", () => {
     });
     expect(CustomAcpDriver.models).toEqual({
       default: "agent-default",
-      options: [{ id: "agent-default", label: "Agent default" }],
+      options: [{ id: "agent-default", label: "Agent default", custom: true }],
     });
     expect(CustomAcpDriver.install).toBeUndefined();
   });
@@ -98,6 +98,14 @@ describe("CustomAcpDriver turns (fake CLI)", () => {
     const text = recorder.events.find((e) => e.type === "item.completed" && (e as { itemType?: string }).itemType === "assistant_text")!;
     expect((text as { text?: string }).text).toBe("hello from fake acp");
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  });
+
+  it("names the person's own agent in what it tells them, never \"Custom (ACP)\"", async () => {
+    process.env.FAKE_ACP_MODE = "empty-reply";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-custom-name", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({ message: "Custom Test finished without replying." });
   });
 
   it("passes instance env to the child but strips foreign provider keys", async () => {

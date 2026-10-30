@@ -28,6 +28,16 @@ const store: RecentWorkStore = {
 const me = { id: "me", threadId: "main", tasks: [task("t-inv", "Invoice reconciliation"), task("t-inv", "duplicate id")] };
 
 describe("botThreads", () => {
+  it("leaves out an automation run's own conversation: its result already sits in the chat it reported to", () => {
+    const withRun = { ...me, tasks: [...me.tasks, { ...task("run-1", "Inbox brief · Oct 21"), routineRunId: "run-1" }] };
+    expect(botThreads(store, withRun, "Milind").map((thread) => thread.threadId)).not.toContain("run-1");
+  });
+
+  it("on a Team Cloud calls only a chat private to one person private, never the bot's shared main chat", () => {
+    const threads = botThreads(store, me, "Milind", (threadId) => threadId === "t-inv");
+    expect(threads.filter((thread) => thread.private).map((thread) => thread.threadId)).toEqual(["t-inv", "dm-them"]);
+  });
+
   it("lists the main chat, tasks, and the rooms the bot belongs to, each named for the bot", () => {
     expect(botThreads(store, me, "Milind")).toEqual([
       { threadId: "main", where: "1:1 with Milind", title: "Getting started", private: true },

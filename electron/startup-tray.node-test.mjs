@@ -178,3 +178,18 @@ test("without a Windows tray or on another platform splash close quits", async (
     assert.deepEqual(calls, ["quit"]); splash.dispose();
   }
 });
+
+test("the loading screen says what the app waits on, before its page has loaded and after", async () => {
+  const ran = [];
+  class Said extends Window {
+    constructor(options) { super(options); this.webContents.executeJavaScript = async (code) => { ran.push(code); }; }
+  }
+  const { splash } = fixture({ BrowserWindow: Said });
+  splash.status("Waking My Cloud…");
+  splash.window.webContents.emit("did-finish-load");
+  assert.equal(ran.length, 2);
+  for (const code of ran) { assert.match(code, /document\.querySelector\('\.status'\)/); assert.ok(code.includes(JSON.stringify("Waking My Cloud…"))); }
+  splash.dispose();
+  splash.status("Opening My Cloud…");
+  assert.equal(ran.length, 2, "nothing after it is gone");
+});

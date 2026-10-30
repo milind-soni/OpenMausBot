@@ -27,8 +27,9 @@ describe("Chrome's command line", () => {
     expect(headless).toContain("--screen-info={3024x1964 devicePixelRatio=2 colorDepth=30}");
     expect(headless).toContain("--headless=new");
     expect(headless).toContain("--mute-audio");
+    expect(headless.filter((arg) => arg.startsWith("--disable-features="))).toEqual(["--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton"]);
     const window = chromeArgs({ userDataDir: "/p", mode: "window", host: "desktop", platform: "darwin", userAgent: UA });
-    expect(window.some((arg) => /^--(headless|user-agent|screen-info|mute-audio)/.test(arg))).toBe(false);
+    expect(window.some((arg) => /^--(headless|user-agent|screen-info|mute-audio|disable-features)/.test(arg))).toBe(false);
     expect(window).toContain("--window-size=1280,863");
   });
 

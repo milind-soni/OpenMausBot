@@ -66,6 +66,12 @@ export function createStartupScreen({
   splash.once("closed", resolveReady);
   // The splash stays until the main window replaces it: as the only window, destroying it would quit the app.
   splash.webContents.once("render-process-gone", resolveReady);
+  let said = null;
+  const say = () => {
+    if (said === null || disposed || splash.isDestroyed()) return;
+    void splash.webContents.executeJavaScript(`(() => { const line = document.querySelector('.status'); if (line?.lastChild) line.lastChild.textContent = ${JSON.stringify(said)}; })()`).catch(() => {});
+  };
+  splash.webContents.on("did-finish-load", say);
   const startupFallback = setTimeout(resolveReady, 10_000);
   startupFallback.unref?.();
   void splash.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(startupScreenHtml(iconPath)))
@@ -103,5 +109,7 @@ export function createStartupScreen({
     fallback = setTimeout(reveal, 10_000);
     fallback.unref?.();
   };
-  return { ready, attach, dispose, window: splash };
+  /** The line under the name, in place of "Opening your workspace…". */
+  const status = (text) => { said = String(text); say(); };
+  return { ready, attach, dispose, status, window: splash };
 }

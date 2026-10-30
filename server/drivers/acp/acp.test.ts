@@ -11,7 +11,8 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
-import { createAcpDriver, DEFAULT_ACP_PROMPT_IDLE_MS, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
+import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
+import { DEFAULT_ACP_PROMPT_IDLE_MS } from "./quiet-status.ts";
 import { GrokAgentDriver, grokAcceptsUnadvertisedImages } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
@@ -19,7 +20,9 @@ import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { TurnWatchdog } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
+import { wideSchema } from "../../testing/oversized-tool-schema.ts";
 import * as procs from "../../procs.ts";
 import * as quietStatus from "./quiet-status.ts";
 
@@ -61,6 +64,13 @@ const AsyncAuthDriver = createAcpDriver({
   driverKind: "asyncAuthTest",
   selectModel: undefined,
   isAuthenticated: async () => true,
+});
+
+const ReasoningReplayDriver = createAcpDriver({
+  ...SELECT_MODEL_SUPPORT,
+  driverKind: "reasoningReplayTest",
+  selectModel: undefined,
+  resendsReasoningReply: true,
 });
 
 const ClassifiedErrorDriver = createAcpDriver({
@@ -217,6 +227,7 @@ describe("ACP turns (fake CLI)", () => {
 
   afterEach(async () => {
     delete process.env.FAKE_ACP_MODE;
+    delete process.env.FAKE_ACP_AUTH_METHOD;
     delete process.env.FAKE_ACP_DUMP;
     delete process.env.FAKE_ACP_RPC_DUMP;
     delete process.env.FAKE_ACP_RPC_APPEND_FILE;
@@ -235,6 +246,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_ASK_ANSWER;
     delete process.env.FAKE_ACP_ASK_TIMING;
     delete process.env.FAKE_ACP_HOLD_ON_CANCELLED;
+    delete process.env.FAKE_ACP_CANCEL_STOP_REASON;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CLINE_API_KEY;
@@ -305,6 +317,46 @@ describe("ACP turns (fake CLI)", () => {
     expect(typeof started?.itemId).toBe("string");
     expect(started?.itemId).toBeTruthy();
     expect(completed?.itemId).toBe(started?.itemId);
+  });
+
+  it("ends a tool call that arrives already finished, so nothing counts it as running", async () => {
+    await create(GrokAgentDriver, "finished-tools");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-finished-tools", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const started = recorder.events.flatMap((e) => e.type === "item.started" && e.itemType === "tool" ? [e.itemId] : []);
+    const completed = new Map(recorder.events.flatMap((e) =>
+      e.type === "item.completed" && e.itemType === "tool" ? [[e.itemId, e] as const] : []));
+    expect(started).toHaveLength(5);
+    expect(new Set(started).size).toBe(5);
+    expect([...completed.keys()].sort()).toEqual([...started].sort());
+    expect(completed.get("tc-done")).toMatchObject({ ok: true, output: expect.stringContaining("ok") });
+    expect(completed.get("tc-denied")).toMatchObject({ ok: false, output: expect.stringContaining("Permission denied") });
+    expect(completed.get(started[0])).toMatchObject({ ok: true, output: expect.stringContaining("built") });
+    expect(completed.get(started[3])).toMatchObject({ ok: true, output: expect.stringContaining("unkeyed") });
+    expect(started[4]).toMatch(/^acp-tool-unkeyed-/);
+    expect(completed.get(started[4])).toMatchObject({ ok: false });
+    const failedEnd = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "tool" && e.itemId === started[4]);
+    const image = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "assistant_image");
+    expect(image).toBe(failedEnd + 1);
+    // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
+    let now = 0;
+    const limits: number[] = [];
+    const dog = new TurnWatchdog({ stallMs: 10, toolStallMs: 1_000, checkMs: 60_000, now: () => now, onStall: (_turn, silentMs) => limits.push(silentMs) });
+    dog.watch("t-finished-tools", "bot");
+    for (const event of recorder.events) dog.observe(event);
+    now = 10;
+    dog.sweep();
+    expect(limits).toEqual([10]);
+  });
+
+  it("completes a finished tool call once, though a later terminal update names it again", async () => {
+    await create(GrokAgentDriver, "finished-tools");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-finished-twice", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const ends = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "tool" && e.itemId === "tc-done");
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toMatchObject({ ok: true, output: expect.stringContaining("ok") });
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_image")).toHaveLength(1);
   });
 
   it("normalizes a full turn into the canonical event sequence", async () => {
@@ -528,14 +580,14 @@ describe("ACP turns (fake CLI)", () => {
     expect(await send("turn 2")).toBe("turn 2");
   });
 
-  const reportingThread = async (name: string) => {
+  const reportingThread = async (name: string, driver?: typeof GrokAgentDriver) => {
     const dump = join(scratch, `acp-${name}.json`);
     const updatesFile = join(scratch, `acp-${name}-updates.json`);
     process.env.FAKE_ACP_DUMP = dump;
     process.env.FAKE_ACP_DUMP_PROMPT = "1";
     process.env.FAKE_ACP_UPDATES_FILE = updatesFile;
     writeFileSync(updatesFile, "[]");
-    await create();
+    await create(driver);
     const threadId = `t-acp-${name}-` + randomUUID();
     let lastTurnId = "";
     /** Whole session/update params, for a `_meta` beside the update. */
@@ -695,6 +747,41 @@ describe("ACP turns (fake CLI)", () => {
     expect(lastTurn().filter((event) => event.type === "runtime.error" || event.type === "runtime.notice")).toEqual([]);
     report();
     expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  describe("a reply re-sent with its reasoning under the streamed messageId", () => {
+    const messageId = randomUUID();
+    const chunk = (sessionUpdate: string, text: string) => ({ sessionUpdate, messageId, content: { type: "text", text } });
+    const say = (...texts: string[]) => texts.map((text) => chunk("agent_message_chunk", text));
+    const reasoned = "💭 **Reasoning:**\n```\nSix times seven.\n```\n\nThe answer is 42.";
+    /** Each turn's replies after the fake's own "hello from fake acp". */
+    const replyingThread = async (name: string, driver?: typeof GrokAgentDriver) => {
+      const { report, send, lastTurn } = await reportingThread(name, driver);
+      return async (...updates: object[]) => {
+        report(...updates);
+        await send("turn");
+        return lastTurn().flatMap((event) =>
+          event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).slice(1);
+      };
+    };
+
+    it("shows once from an engine that re-sends it", async () => {
+      const repliesTo = await replyingThread("reasoning-replay", ReasoningReplayDriver);
+      expect(await repliesTo(chunk("agent_thought_chunk", "Six times seven."), ...say("The answer", " is 42.", reasoned)))
+        .toEqual(["The answer is 42."]);
+      // hermes-agent 0.22.4 sends the re-sent reply after a blank line
+      expect(await repliesTo(...say("The answer", " is 42.", `\n\n${reasoned}`))).toEqual(["The answer is 42."]);
+      expect(await repliesTo(...say("    indented", "> 💭 **Reasoning:**\n> Six times seven.\n\n    indented")))
+        .toEqual(["indented"]);
+      // chunks that only end with the text so far are deltas
+      expect(await repliesTo(...say("a", "ba"))).toEqual(["aba"]);
+      expect(await repliesTo(...say("42.", "Explanation:\n\n42."))).toEqual(["42.Explanation:\n\n42."]);
+    });
+
+    it("is appended for any other engine", async () => {
+      const repliesTo = await replyingThread("reasoning-append");
+      expect(await repliesTo(...say("The answer is 42.", reasoned))).toEqual([`The answer is 42.${reasoned}`]);
+    });
   });
 
   const plan = (...entries: Array<[status: string, content: string]>) => ({
@@ -898,26 +985,21 @@ describe("ACP turns (fake CLI)", () => {
     expect(usage).toMatchObject({ input: 10, output: 5 });
   });
 
-  /** The fake hardcodes its usage, so these tests splice the wanted usage into the session/prompt result
-   *  in flight, at the root or under _meta. */
-  const stubPromptResultUsage = (usage: Record<string, unknown>, at: "root" | "meta") => {
+  /** The fake hardcodes its prompt result, so these tests rewrite the session/prompt result in flight. */
+  const splicePromptResult = (rewrite: (result: Record<string, unknown>) => Record<string, unknown>) => {
     const spawn = procs.spawnCli;
     vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
       const child = spawn(...args);
       const stdout = child.stdout;
-      const spliceUsage = (message: any) => {
-        if (message?.result && typeof message.result === "object" && "stopReason" in message.result) {
-          message.result = at === "root"
-            ? { ...message.result, usage: { ...usage }, _meta: {} }
-            : { ...message.result, _meta: { ...message.result._meta, ...usage } };
-        }
+      const splice = (message: any) => {
+        if (message?.result && typeof message.result === "object" && "stopReason" in message.result) message.result = rewrite(message.result);
         return message;
       };
       const rewriteChunk = (chunk: string) =>
         chunk.split("\n").map((line) => {
           if (!line.includes("stopReason")) return line;
           try {
-            return JSON.stringify(spliceUsage(JSON.parse(line)));
+            return JSON.stringify(splice(JSON.parse(line)));
           } catch {
             return line; // not a complete wire message: pass it through untouched
           }
@@ -928,6 +1010,30 @@ describe("ACP turns (fake CLI)", () => {
       return child;
     });
   };
+
+  /** The usage at the root of the result or under _meta. */
+  const stubPromptResultUsage = (usage: Record<string, unknown>, at: "root" | "meta") =>
+    splicePromptResult((result) => at === "root"
+      ? { ...result, usage: { ...usage }, _meta: {} }
+      : { ...result, _meta: { ...(result._meta as Record<string, unknown> | undefined), ...usage } });
+
+  it("fails a refused turn in plain words that keep ACP's stop reason", async () => {
+    splicePromptResult((result) => ({ ...result, stopReason: "refusal" }));
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-refusal", text: "go" });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "refusal" });
+    const error = recorder.events.find((e) => e.type === "runtime.error") as { message: string } | undefined;
+    expect(error?.message).toContain("Grok refused to go on with this request (stop reason: refusal).");
+  });
+
+  it("fails a max_tokens turn in plain words that advise continuing", async () => {
+    splicePromptResult((result) => ({ ...result, stopReason: "max_tokens" }));
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-max-tokens", text: "go" });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "max_tokens" });
+    const error = recorder.events.find((e) => e.type === "runtime.error") as { message: string } | undefined;
+    expect(error?.message).toContain("Grok's reply reached its maximum length before it finished (stop reason: max_tokens). Ask it to continue, or ask for a shorter answer.");
+  });
 
   it("folds opencode cache reads into input and names them", async () => {
     stubPromptResultUsage(
@@ -1032,6 +1138,25 @@ describe("ACP turns (fake CLI)", () => {
       args: ["/tmp/connector-proxy.js"],
       env: [{ name: "OMB_CONNECTOR_UPSTREAM_URL", value: "http://127.0.0.1:8799/api/internal/connectors/mcp" }],
     });
+  });
+
+  it("hands an agent that reaches MCP servers by URL OpenMausBot's own servers as endpoints of this server, no proxy process", async () => {
+    await create(createAcpDriver({ ...SELECT_MODEL_SUPPORT, driverKind: "httpMcpTest", selectModel: undefined, ownMcpOverHttp: true }));
+    const dump = join(scratch, "own-http.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    const harness = "http://127.0.0.1:8799";
+    await instance.adapter.sendTurn({
+      threadId: "t-own-http", text: "go",
+      integrations: {
+        browser: { command: process.execPath, args: ["/app/dist-server/harness-mcp-proxy.js", "browser"], env: { OMB_HARNESS_URL: harness, OMB_MCP_TOKEN_BROWSER: "synthetic-browser-capability" } },
+        custom: { notes: { command: process.execPath, args: ["/tmp/notes-mcp.js"], env: {} } },
+      },
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toEqual([
+      { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] },
+      { name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] },
+    ]);
   });
 
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
@@ -1231,6 +1356,51 @@ describe("ACP turns (fake CLI)", () => {
       delete process.env.FAKE_ACP_MCP_TRANSPORTS;
       await strict.close();
     }
+  });
+
+  it.each([
+    { engine: "Kimi", driver: KimiAgentDriver, outcome: "fitted to Moonshot's per-tool limit" },
+    { engine: "Grok", driver: GrokAgentDriver, outcome: "as the server sent them" },
+  ])("hands $engine a person's stdio MCP tools $outcome", async ({ driver }) => {
+    const script = join(scratch, "wide-mcp.mjs");
+    const tools = [{ name: "small", inputSchema: { type: "object", properties: { q: { type: "string" } } } }, { name: "configure", inputSchema: wideSchema(110) }];
+    writeFileSync(script, `
+      import { createInterface } from "node:readline";
+      createInterface({ input: process.stdin }).on("line", (line) => {
+        const frame = JSON.parse(line);
+        if (frame.id === undefined) return;
+        const result = frame.method === "tools/list" ? { tools: ${JSON.stringify(tools)} } : { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "wide", version: "1" } };
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }) + "\\n");
+      });`);
+    process.env.FAKE_ACP_MCP_SCHEMA_BYTES = "1";
+    try {
+      await create(driver, "mcp-tools");
+      await instance.adapter.sendTurn({ threadId: `t-wide-${driver.driverKind}`, text: "go", integrations: { custom: { wide: { command: process.execPath, args: [script], env: {} } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const text = (recorder.events.find((event) => event.type === "item.completed" && (event as { itemType?: string }).itemType === "assistant_text") as { text?: string } | undefined)?.text;
+      const sizes = Object.fromEntries(text!.replace(/^wide: /, "").split(",").map((entry) => entry.split("=")).map(([name, bytes]) => [name, Number(bytes)]));
+      const raw = JSON.stringify(tools[1]!.inputSchema).length;
+      expect(raw).toBeGreaterThan(12_000);
+      expect(sizes.small).toBe(JSON.stringify(tools[0]!.inputSchema).length);
+      if (driver === KimiAgentDriver) expect(sizes.configure).toBeLessThanOrEqual(12_000);
+      else expect(sizes.configure).toBe(raw);
+    } finally {
+      delete process.env.FAKE_ACP_MCP_SCHEMA_BYTES;
+    }
+  });
+
+  it("tells the person in plain words when Kimi still refuses a tool's schema", async () => {
+    const failureFile = join(scratch, "schema-refusal.json");
+    process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error",
+      data: { details: "400 tools.function.parameters is not a valid moonshot flavored json schema, details: <At path 'root': schema exceeds maximum allowed size>" } }));
+    await create(KimiAgentDriver);
+    await instance.adapter.sendTurn({ threadId: "t-schema-refusal", text: "go" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+    expect(recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({
+      message: "Kimi refused this turn as an invalid request because the input schema of one of this bot's tools is too large, so nothing ran. "
+        + "Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.",
+    });
   });
 
   it("keeps a tool selection's gate in front of the connector", async () => {
@@ -1683,6 +1853,29 @@ describe("ACP turns (fake CLI)", () => {
     },
   );
 
+  it("sends Grok session/set_model only when the session runs another model", async () => {
+    await create(GrokAgentDriver);
+    process.env.FAKE_ACP_SESSION_MODELS = "grok-4.7|Grok 4.7,grok-4.6|Grok 4.6";
+    try {
+      const configCalls = async (threadId: string, model: string) => {
+        const dump = join(scratch, `${threadId}.json`);
+        process.env.FAKE_ACP_DUMP = dump;
+        const { turnId } = await instance.adapter.sendTurn({
+          threadId, text: "use a skill", model, approvalMode: "auto",
+          integrations: { agents: { command: "node", args: ["/fixture/agents-proxy.mjs"], env: {} } },
+        });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        return existsSync(`${dump}.config.json`) ? JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) : [];
+      };
+      expect(await configCalls("t-grok-same-model", "grok-4.7")).toEqual([]);
+      expect(await configCalls("t-grok-other-model", "grok-4.6")).toEqual([
+        { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "grok-4.6" } },
+      ]);
+    } finally {
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
   it.each([
     ["ask", true, "default"],
     ["full", true, "bypassPermissions"],
@@ -1729,7 +1922,14 @@ describe("ACP turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
-  it("grok fails closed when the CLI advertises no cached_token (needs login)", async () => {
+  it("grok accepts the grok.com authentication method offered by current CLI versions", async () => {
+    process.env.FAKE_ACP_AUTH_METHOD = "grok.com";
+    await create(GrokAgentDriver);
+    await instance.adapter.sendTurn({ threadId: "t-grok-current-auth", text: "go" });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("grok fails closed when the CLI advertises no supported authentication method", async () => {
     await create(GrokAgentDriver, "no-auth");
     await instance.adapter.sendTurn({ threadId: "t-auth", text: "go" });
     const done = await recorder.until((e) => e.type === "turn.completed");
@@ -1797,6 +1997,30 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ type: "turn.completed" });
   });
 
+  it("a Stop the agent answers with end_turn is the person's stop, never a lost turn", async () => {
+    // OpenCode answers session/cancel by ending the prompt with end_turn, not cancelled.
+    process.env.FAKE_ACP_CANCEL_STOP_REASON = "end_turn";
+    const rpc = join(scratch, "rpc.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpc;
+    await create(GrokAgentDriver, "hang");
+    await instance.adapter.sendTurn({ threadId: "t-stop-end-turn", text: "go" });
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(rpc, "utf8"))).toContain("session/prompt"));
+    await instance.adapter.interruptTurn("t-stop-end-turn");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+  });
+
+  it("a Stop before the prompt is sent ends quietly, with no error", async () => {
+    await create(GrokAgentDriver, "hang-initialize");
+    await instance.adapter.sendTurn({ threadId: "t-stop-startup", text: "go" });
+    await recorder.until((e) => e.type === "turn.started");
+    await instance.adapter.interruptTurn("t-stop-startup");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+  });
+
   it("an exit before result becomes runtime.error + failed turn", async () => {
     await create(GrokAgentDriver, "exit-early");
     await instance.adapter.sendTurn({ threadId: "t-crash", text: "go" });
@@ -1828,6 +2052,37 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.find(e => e.type === "item.completed" && e.itemType === "tool")).toMatchObject({ ok: true });
   });
 
+  it("reports a running tool's kind for the chat's status line while it runs silently", async () => {
+    process.env.FAKE_ACP_TOOL_MS = "300";
+    await create(QwenAgentDriver, "slow-tool");
+    await instance.adapter.sendTurn({ threadId: "t-slow-kind", text: "go" });
+    await recorder.until(e => e.type === "turn.completed");
+    const types = recorder.events.map(e => e.type);
+    const progress = recorder.events.filter(e => e.type === "turn.progress");
+    expect(progress[0]).toMatchObject({ activity: "command", itemId: "tc-slow" });
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
+    expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.completed"));
+  });
+
+  it("shows a running tool's output and names the agent process while the tool runs", async () => {
+    const gate = join(scratch, "slow-tool-done");
+    Object.assign(process.env, { FAKE_ACP_TOOL_GATE: gate, FAKE_ACP_TOOL_OUTPUT: "Collecting 12 items\npage 3 of 40" });
+    try {
+      await create(QwenAgentDriver, "slow-tool");
+      await instance.adapter.sendTurn({ threadId: "t-slow-output", text: "go" });
+      expect(await recorder.until(e => e.type === "item.output")).toMatchObject({ itemId: "tc-slow", text: "Collecting 12 items\npage 3 of 40", whole: true });
+      const pid = instance.adapter.enginePid?.("t-slow-output");
+      expect(pid).toEqual(expect.any(Number));
+      expect(() => process.kill(pid!, 0)).not.toThrow();
+      writeFileSync(gate, "done");
+      await recorder.until(e => e.type === "turn.completed");
+      expect(instance.adapter.enginePid?.("t-slow-output")).toBeUndefined();
+    } finally {
+      delete process.env.FAKE_ACP_TOOL_GATE;
+      delete process.env.FAKE_ACP_TOOL_OUTPUT;
+    }
+  });
+
   it.each([GrokAgentDriver, QwenAgentDriver])("still fails $driverKind when it goes silent once its tool has finished", async (driver) => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(driver, "stall-after-tool");
@@ -1852,6 +2107,21 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
   });
 
+  it("does not count idle time before a new prompt toward the quiet notice", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 1 });
+    process.env.OMB_ACP_QUIET_NOTICE_MS = "400";
+    process.env.OMB_ACP_QUIET_TICK_MS = "50";
+    process.env.FAKE_ACP_QUIET_MS = "200";
+    await create(GrokAgentDriver, "quiet-then-answer");
+    await instance.adapter.sendTurn({ threadId: "t-quiet-idle", text: "one" });
+    await recorder.until(e => e.type === "turn.completed");
+    await new Promise(r => setTimeout(r, 800));
+    const before = recorder.events.length;
+    await instance.adapter.sendTurn({ threadId: "t-quiet-idle", text: "two" });
+    await recorder.until(e => e.type === "turn.completed" && recorder.events.indexOf(e) >= before);
+    expect(recorder.events.filter(e => e.type === "runtime.notice")).toEqual([]);
+  });
+
   it("reads Qwen's debug log: a logged rate-limit retry is reported and keeps the turn alive", async () => {
     vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 1 });
     process.env.QWEN_HOME = scratch;
@@ -1872,6 +2142,59 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
   });
 
+  it("preserves a streamed partial reply before disposal removes its listeners", async () => {
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-dispose-partial", text: "go" });
+    await recorder.until((event) => event.type === "content.delta" && event.streamKind === "assistant_text");
+
+    await instance.dispose();
+
+    expect(recorder.events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_text"))
+      .toEqual([expect.objectContaining({ text: "half an answer, then silence" })]);
+    expect(recorder.events.filter((event) => event.type === "turn.completed"))
+      .toEqual([expect.objectContaining({ threadId: "t-dispose-partial", stopReason: "cancelled" })]);
+  });
+
+  it("rejects turns started by completion listeners during disposal", async () => {
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-dispose-listener", text: "go" });
+    await recorder.until((event) => event.type === "content.delta" && event.streamKind === "assistant_text");
+    let followup: Promise<unknown> | undefined;
+    instance.adapter.onEvent((event) => {
+      if (event.type === "turn.completed" && event.threadId === "t-dispose-listener") {
+        followup = instance.adapter.sendTurn({ threadId: "t-dispose-followup", text: "next" });
+        void followup.catch(() => {});
+      }
+    });
+
+    await instance.dispose();
+
+    expect(followup).toBeDefined();
+    await expect(followup).rejects.toThrow(/shutting down/);
+    expect(instance.adapter.hasSession("t-dispose-followup")).toBe(false);
+    await expect(instance.adapter.sendTurn({ threadId: "t-after-dispose", text: "late" })).rejects.toThrow(/shutting down/);
+  });
+
+  it("rejects a turn whose command resolution finishes after disposal", async () => {
+    let markResolving!: () => void;
+    const resolving = new Promise<void>((resolve) => { markResolving = resolve; });
+    let finishCommand!: (command: { command: string }) => void;
+    const command = new Promise<{ command: string }>((resolve) => { finishCommand = resolve; });
+    await create(createAcpDriver({
+      ...SELECT_MODEL_SUPPORT,
+      resolveCommand: () => { markResolving(); return command; },
+    }));
+    const sending = instance.adapter.sendTurn({ threadId: "t-dispose-resolving", text: "go" });
+    void sending.catch(() => {});
+    await resolving;
+    await instance.dispose();
+    finishCommand({ command: FAKE_CLI });
+
+    await expect(sending).rejects.toThrow(/shutting down/);
+    expect(instance.adapter.hasSession("t-dispose-resolving")).toBe(false);
+    expect(recorder.events).toEqual([]);
+  });
+
   it("defaults the prompt idle guard above an agent's longest normal silence", () => {
     expect(DEFAULT_ACP_PROMPT_IDLE_MS).toBeGreaterThan(600_000);
   });
@@ -1885,7 +2208,10 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "rpc_error" });
     const err = recorder.events.find((e) => e.type === "runtime.error");
     expect(err?.message).toMatch(/no tool running/i);
-    expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    // Plain words for the person: no setting names.
+    expect(err?.message).toMatch(/Send the message again to retry\.$/);
+    expect(err?.message).not.toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    expect(err).toMatchObject({ stalled: true });
     expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);
     expect(instance.adapter.hasSession("t-stall")).toBe(false);
   });
@@ -1895,8 +2221,19 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-empty", text: "go" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
-    expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
-      .toMatch(/no reply, image, or tool result/);
+    const message = recorder.events.find((e) => e.type === "runtime.error")?.message;
+    // The person reads the AI's name in plain words, never the internal id.
+    expect(message).toBe("Grok finished without replying.");
+    expect(message).not.toContain("grokAgent");
+  });
+
+  it("names the AI, never its internal id, when it exits before answering", async () => {
+    await create(GrokAgentDriver, "exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-exit-name", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const errors = recorder.events.filter((e) => e.type === "runtime.error").map((e) => (e as { message: string }).message);
+    expect(errors.length).toBeGreaterThan(0);
+    for (const message of errors) expect(message).not.toContain("grokAgent");
   });
 
   it("reasoning with no answer is a lost turn, not a success", async () => {
@@ -1907,7 +2244,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "content.delta" && (e as any).streamKind === "reasoning_text")).toBe(true);
     expect(recorder.events.some((e) => e.type === "item.completed")).toBe(false);
     expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
-      .toMatch(/no reply, image, or tool result/);
+      .toBe("Grok finished without replying.");
   });
 
   it("preserves ACP error codes for provider setup classification", async () => {
@@ -2285,6 +2622,60 @@ describe("ACP turns (fake CLI)", () => {
     });
   });
 
+  describe("an engine's account and HTTP failures", () => {
+    /** The provider's refusal as the CLI answers session/prompt: JSON-RPC's internal error around its own line. */
+    const refuse = (details: string) => {
+      const failureFile = join(scratch, "prompt-failure.json");
+      process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+      writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: { details, service: "session", errorName: "APIError" } }));
+    };
+    const failed = async (threadId: string) => {
+      const ack = await instance.adapter.sendTurn({ threadId, text: "Run the morning report" });
+      const completed = await recorder.until((e) => e.type === "turn.completed" && e.turnId === ack.turnId);
+      const errors = recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === ack.turnId);
+      return { completed, errors };
+    };
+
+    it("names a Grok account out of credits, with Grok's own reason, as the account failure it is", async () => {
+      // what Cloud routine runs recorded, as far as the aggregate kept it
+      refuse("API error (status 402 Payment Required): Grok Build us…");
+      await create(GrokAgentDriver);
+      const { completed, errors } = await failed("t-grok-402");
+      expect(errors).toEqual([expect.objectContaining({
+        message: 'Your Grok account is out of credits (Grok says: "Grok Build us…"). Add credits with Grok, then run it again.',
+        setup: true,
+      })]);
+      expect(completed).toMatchObject({ ok: false, stopReason: "auth_required" });
+    });
+
+    it("names any other ACP engine out of credits the same way", async () => {
+      refuse("API error (status 402 Payment Required): Your plan has no credits left. Ask an admin to add more.");
+      await create(GeminiAgentDriver);
+      const { errors } = await failed("t-gemini-402");
+      expect(errors).toEqual([expect.objectContaining({
+        message: 'Your Gemini account is out of credits (Gemini says: "Your plan has no credits left"). Add credits with Gemini, then run it again.',
+      })]);
+    });
+
+    it("puts another HTTP failure in plain words that keep its class, and leaves an unknown one as it was", async () => {
+      refuse("API error (status 503 Service Unavailable): upstream connect error");
+      await create(GrokAgentDriver);
+      const outage = await failed("t-grok-503");
+      expect(outage.errors).toEqual([expect.objectContaining({
+        message: 'Grok had a temporary server problem (HTTP 503; Grok says: "upstream connect error"). Try again in a few minutes.',
+      })]);
+      expect(outage.errors[0]).not.toHaveProperty("setup");
+      expect(outage.completed).toMatchObject({ ok: false, stopReason: "rpc_error" });
+
+      refuse("Grok could not finish the session");
+      await create(GrokAgentDriver);
+      const unknown = await failed("t-grok-unknown");
+      expect(unknown.errors).toEqual([expect.objectContaining({
+        message: "Internal error: Grok could not finish the session (session/prompt, service: session, APIError)",
+      })]);
+    });
+  });
+
   describe("ACP session pool (persistent child)", () => {
     let countFile: string;
     let rpcFile: string;
@@ -2547,7 +2938,9 @@ describe("ACP turns (fake CLI)", () => {
         await stopping;
         await instance.adapter.interruptTurn("qwen-stop");
         release();
-        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: false });
+        // The person's Stop ends the turn as a stop, never as an error.
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true, stopReason: "cancelled" });
+        expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === second.turnId)).toEqual([]);
         const calls = readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
         expect(calls.filter((method) => method === "initialize")).toHaveLength(1);
         expect(calls.filter((method) => method === "session/load")).toHaveLength(0);
@@ -2604,7 +2997,8 @@ describe("ACP turns (fake CLI)", () => {
           await startedStopping;
           if (reason === "Stop") await instance.adapter.interruptTurn("qwen-retry");
           else release();
-          expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: false });
+          expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId))
+            .toMatchObject(reason === "Stop" ? { ok: true, stopReason: "cancelled" } : { ok: false });
           if (rejectCleanup) {
             expect(recorder.events.find((e) => e.type === "runtime.error" && e.turnId === second.turnId))
               .toMatchObject({ message: expect.stringMatching(/could not close its previous tool session/) });

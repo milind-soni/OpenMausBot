@@ -12,6 +12,7 @@ import {
   SIDEBAR_TOOLS_LAYOUT_KEY,
   SIDEBAR_WIDTH_KEY,
   SIDEBAR_SECTION_ORDER_KEY,
+  SIMPLE_SIDEBAR_WIDTH_KEY,
   clampSidebarWidth,
   loadPinnedCircles,
   loadPinnedCircleOrder,
@@ -78,6 +79,17 @@ describe("sidebar width preference", () => {
     expect(setItem).toHaveBeenCalledWith(SIDEBAR_WIDTH_KEY, "360");
     expect(loadSidebarWidth({ getItem: () => { throw new Error("blocked"); } })).toBeNull();
     expect(() => saveSidebarWidth(360, { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
+  });
+
+  it("keeps Simple mode's width under its own key, so resizing one mode leaves the other alone", () => {
+    const setItem = vi.fn();
+    saveSidebarWidth(300, { setItem }, SIMPLE_SIDEBAR_WIDTH_KEY);
+    expect(setItem).toHaveBeenCalledExactlyOnceWith(SIMPLE_SIDEBAR_WIDTH_KEY, "300");
+    const saved: Record<string, string> = { [SIDEBAR_WIDTH_KEY]: "360", [SIMPLE_SIDEBAR_WIDTH_KEY]: "300" };
+    const storage = { getItem: (key: string) => saved[key] ?? null };
+    expect(loadSidebarWidth(storage)).toBe(360);
+    expect(loadSidebarWidth(storage, SIMPLE_SIDEBAR_WIDTH_KEY)).toBe(300);
+    expect(loadSidebarWidth({ getItem: (key) => key === SIDEBAR_WIDTH_KEY ? "360" : null }, SIMPLE_SIDEBAR_WIDTH_KEY)).toBeNull();
   });
 });
 

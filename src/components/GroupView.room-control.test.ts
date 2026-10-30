@@ -20,7 +20,8 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { RoomHoldsBanner, Transcript } = await import("./GroupView");
+const { Transcript } = await import("./GroupView");
+const { RoomHoldsBanner } = await import("./RoomHoldsBanner");
 
 const room: Group = {
   id: "room", threadId: "room-thread", name: "Launch", memberIds: ["lead", "bee"],

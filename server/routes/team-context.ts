@@ -19,7 +19,7 @@ export function createTeamContextRoutes(deps: TeamContextRouteDeps): RouteHandle
     if (path === "/api/team-memory" && (method === "GET" || method === "POST")) {
       if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });
       const section = sectionContextKey(url.searchParams.get("section") ?? "");
-      if (section && !store.sections.includes(section)) return json(res, 404, { error: "No such team" });
+      if (section && !store.sections.includes(section)) return json(res, 404, { error: "No such department" });
       if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       if (method === "GET") {
         return json(res, 200, { section, label: sectionContextLabel(section), entries: teamMemory.list(section), loadedIds: teamMemory.promptSelection(section).loadedIds });
@@ -75,7 +75,7 @@ export function createTeamContextRoutes(deps: TeamContextRouteDeps): RouteHandle
         store.sections.includes(section) ||
         store.bots.some((bot) => !bot.hidden && sectionKey(bot.section) === section) ||
         store.groups.some((group) => sectionKey(group.section) === section);
-      if (!exists) return json(res, 404, { error: "no such team" });
+      if (!exists) return json(res, 404, { error: "no such department" });
 
       if (method === "GET") {
         const context = readSectionContext(section);

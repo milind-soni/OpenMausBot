@@ -48,7 +48,7 @@ test("consuming a launch action prevents it replaying on a later restart without
 
 test("desktop relaunch accepts every platform once, guards its sender, and preserves consumed arguments and normal shutdown", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
-  const source = main.slice(main.indexOf('ipcMain.handle("desktop:relaunch"'), main.indexOf('ipcMain.handle("speech:start"'))
+  const source = main.slice(main.indexOf('ipcMain.handle("desktop:relaunch"'), main.indexOf("const talk = installTalk("))
     + main.slice(main.indexOf("function requireMainWindowSender("), main.indexOf('ipcMain.handle("desktop-remote:state"'));
   const argv = ["/fixture/OpenMausBot", "--fixture", "openmausbot://organization", "openmausbot://organization?ignored"];
   takeOrganizationDeepLink(argv);
@@ -214,8 +214,9 @@ test("native entry checks owned server readiness before creating, sending to, or
 test("startup delivers a pending organisation action before default navigation and falls back after cancellation", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   const startup = main.slice(main.indexOf("  let restoredOrganizationEntry = false;"), main.indexOf("  // Reconcile incomplete setup"));
-  assert.ok(startup.indexOf("await deliverOrganizationEntry()") < startup.indexOf("createWindow()"));
-  assert.match(startup, /if \(!restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry && \(!mainWindow \|\| mainWindow.isDestroyed\(\)\)\) createWindow\(\)/);
+  assert.ok(startup.indexOf("await deliverOrganizationEntry()") < startup.indexOf("await showHome()"));
+  // A launch from the login item lending added opens no window: lending runs out of sight until the person opens it.
+  assert.match(startup, /if \(!hiddenStart && !restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry\) await showHome\(\);/);
 });
 
 test("concurrent links share one confirmation and stale confirmations cannot change a new selection", async () => {

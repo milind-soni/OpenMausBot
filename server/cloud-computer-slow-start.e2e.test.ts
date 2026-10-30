@@ -233,7 +233,7 @@ describe("a slow cloud computer start", () => {
       expect(await screenshot(sent)).toEqual({ isError: true, content: [{ type: "text", text: STILL_STARTING }] });
       const [row] = await until(() => failedRows(bot.id), found => found.length > 0, START_BUDGET_MS + 15_000);
       expect(Date.now() - started).toBeGreaterThanOrEqual(START_BUDGET_MS - CALL_WAIT_MS - 1_000);
-      expect(row.tool.name).toBe("error: Stuck starter's cloud computer didn't start. Try again.");
+      expect(row.tool.name).toBe("error: Stuck starter's cloud desktop didn't start. Try again.");
       expect(row.tool.place).toEqual({ state: "cc-no-start", params: { bot: "Stuck starter" }, source: "works-on" });
       await until(() => task(bot.id), current => current?.busy === false, 20_000);
       expect(await failedRows(bot.id)).toHaveLength(1);

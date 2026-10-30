@@ -7,9 +7,13 @@ import os from "node:os";
 import path from "node:path";
 import { foldKey, safeFolderName, skipped } from "./cloud-sync-rules.mjs";
 import { SyncAuthError, createSyncClient } from "./cloud-sync-client.mjs";
+import { CloudAsleepError, createCloudPowerGate } from "./cloud-power.mjs";
 import { fetchOutputs, newReport, passStopper, shareFolder } from "./cloud-sync-engine.mjs";
 import { openSyncState } from "./cloud-sync-state.mjs";
 import { watchFolder } from "./cloud-sync-scan.mjs";
+import { RECHECK_MS, copiedLent, folderKey as pathKey, lentReport, planLentCopies, reconcileLent, sameFolderOn } from "./lent-folders.mjs";
+import { applyStaged } from "./lent-staged.mjs";
+import { lentGit } from "./lent-git.mjs";
 
 const FULL_PASS_MS = 5 * 60_000;
 const LONG_POLL_MS = 60_000;
@@ -19,10 +23,6 @@ const CHECK_FILES_MAX = 100_000, CHECK_MS = 3_000;
 // Folders that hold keys or sign-ins, including the AI CLIs' own homes (their login files live there).
 const PRIVATE = [".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config", ".local", ".npm", "Library", "AppData", ".openmausbot", ".claude", ".codex", ".gemini", ".grok"];
 
-const pathKey = (value, platform) => {
-  const slashed = value.replaceAll("\\", "/").replace(/\/+$/, "");
-  return platform === "win32" || platform === "darwin" ? slashed.toLowerCase() : slashed;
-};
 const within = (child, parent, platform) => pathKey(child, platform) === pathKey(parent, platform) || pathKey(child, platform).startsWith(`${pathKey(parent, platform)}/`);
 
 function readSettings(file) {
@@ -40,6 +40,15 @@ function writeSettings(file, value) {
   fs.renameSync(temporary, file);
 }
 
+/** A My Cloud from before lent folders' copies answers their calls 404 (no route): lending still works there, live only. */
+const older = (error) => error?.status === 404;
+/** A lent folder's bookkeeping that failed is this pass's note, never what stops Files. */
+const noted = (what) => (error) => {
+  if (passStopper(error)) throw error;
+  if (!older(error)) console.error(`[files] ${what}: ${error?.message ?? error}`);
+};
+const KEPT_MAX = 5;
+
 const sleep = (ms, signal) => new Promise((resolve) => {
   const timer = setTimeout(resolve, ms);
   timer.unref?.();
@@ -49,7 +58,8 @@ const sleep = (ms, signal) => new Promise((resolve) => {
 export function createCloudFilesService({
   settingsFile, stateFile, documentsDir, localDataDir, homeDir = os.homedir(), platform = process.platform, hostname = os.hostname(),
   cloudOrigin, fetch: fetchImpl, trashItem, markDownloaded, openDashboard = async () => {},
-  createClient = createSyncClient, watch = watchFolder, freeBytes, now = Date.now, onChange = () => {},
+  createClient = createSyncClient, watch = watchFolder, freeBytes, now = Date.now, onChange = () => {}, power = createCloudPowerGate(),
+  lending = null, planDisk = () => null,
 }) {
   let settings = readSettings(settingsFile);
   const state = openSyncState(stateFile);
@@ -58,19 +68,21 @@ export function createCloudFilesService({
   let status = { phase: "unavailable", lastSyncedAt: null, disk: null, shared: [], outputs: { enabled: true, dir: outputsDir, folders: 0, problem: null } };
   const results = new Map();
   const watchers = new Map();
+  /** Lent folders without a copy, as last counted: { at, path, check }. */
+  const lentChecks = new Map();
 
   const save = (next) => { settings = next; writeSettings(settingsFile, next); };
   if (!settings.computerId || !settings.outputs) save({ ...settings, computerId: settings.computerId ?? randomUUID(), outputs: settings.outputs ?? { enabled: true, since: now() } });
   const view = () => ({
     ...status,
-    shared: settings.shared.map((folder) => ({ id: folder.id ?? folder.key, name: folder.name, pcPath: folder.pcPath,
+    shared: settings.shared.map((folder) => ({ id: folder.id ?? folder.key, name: folder.name, pcPath: folder.pcPath, lent: Boolean(folder.lentId), kept: folder.kept ?? [],
       ...(results.get(folder.key) ?? { status: "copying", files: 0, done: 0, waitingBytes: 0, pendingDeletes: 0, problem: null }) })),
     outputs: { ...status.outputs, enabled: settings.outputs.enabled === true, dir: outputsDir },
   });
   const publish = (next) => { status = { ...status, ...next }; onChange(view()); };
   const client = () => {
     const origin = cloudOrigin();
-    return origin ? createClient({ origin, fetch: fetchImpl }) : null;
+    return origin ? createClient({ origin, fetch: fetchImpl, power }) : null;
   };
   const sharedBy = (idOrKey) => settings.shared.find((folder) => folder.key === idOrKey || folder.id === idOrKey);
   const update = (key, patch) => save({ ...settings, shared: settings.shared.map((folder) => (folder.key === key ? { ...folder, ...patch } : folder)) });
@@ -171,37 +183,58 @@ export function createCloudFilesService({
     if (closed) return;
     const origin = cloudOrigin();
     if (!origin) { publish({ phase: "unavailable", disk: null }); return; }
+    if (power.asleep()) { publish({ phase: "asleep" }); return; }
     // Another My Cloud (another account): nothing recorded applies; the shared folders are registered there afresh.
     if (settings.origin !== origin) {
       state.reset();
       results.clear();
       save({ ...settings, origin, unregister: [], shared: settings.shared.map((folder) => ({ ...folder, id: null, deletes: null })) });
     }
-    const cloud = createClient({ origin, fetch: fetchImpl });
+    const cloud = createClient({ origin, fetch: fetchImpl, power });
     const report = newReport();
     try {
       publish({ phase: "syncing" });
-      for (const id of settings.unregister ?? []) {
-        await cloud.unregister(id, false).catch((error) => { if (passStopper(error) || error?.status !== 404) throw error; });
-        save({ ...settings, unregister: (settings.unregister ?? []).filter((other) => other !== id) });
-      }
+      await unregisterDropped(cloud);
       const summary = await cloud.summary();
+      const lent = await reconcileLending(cloud, summary);
       const listed = new Set(summary.folders.map((folder) => folder.id));
+      const cloning = new Set();
       for (const folder of settings.shared) {
         if (only && folder.id && !only.has(folder.id)) continue;
         try {
           if (!folder.id || !listed.has(folder.id)) {
-            const registered = await cloud.register({ computerId: settings.computerId, computerName: hostname, pcPath: folder.pcPath, name: folder.name });
+            const git = folder.lentId ? lent?.git.get(folder.lentId) : null;
+            const registered = await cloud.register({ computerId: settings.computerId, computerName: hostname, pcPath: folder.pcPath, name: folder.name, ...(folder.lentId ? { lent: true } : {}), ...(git ? { git } : {}) });
             if (registered.id !== folder.id) state.dropFolder(folder.id ?? folder.key);
             update(folder.key, { id: registered.id });
+            if (registered.cloning) cloning.add(registered.id);
           }
           const current = sharedBy(folder.key);
           if (!current) continue;
+          // A GitHub repository's copy starts as My Cloud's own clone: Files sends only what differs, once it is there.
+          if (cloning.has(current.id) || summary.folders.find((entry) => entry.id === current.id)?.cloning) {
+            results.set(folder.key, { status: "copying", files: 0, done: 0, waitingBytes: 0, pendingDeletes: 0, problem: null });
+            continue;
+          }
           const approveDeletes = current.deletes === "remove" ? true : current.deletes === "keep" ? false : null;
+          // Bots' changes from while this computer was away land first, so this pass carries them up to the copy; while
+          // lending is paused they wait on My Cloud, as they do while this computer is away.
+          const lentFolder = current.lentId && !lent?.paused ? lent?.folders.find((entry) => entry.id === current.lentId) : null;
+          const waiting = summary.folders.find((entry) => entry.id === current.id)?.staged ?? 0;
+          const landed = lentFolder && waiting > 0 ? await applyStaged({ client: cloud, folderId: current.id, folder: lentFolder, protectedPaths: lent.protectedPaths,
+            now, trashItem, markDownloaded, platform, stopper: passStopper }) : null;
+          if (landed?.kept.length) update(folder.key, { kept: [...landed.kept, ...(current.kept ?? [])].slice(0, KEPT_MAX) });
           const result = await shareFolder({ client: cloud, state, folder: { id: current.id }, local: current.pcPath, now, approveDeletes, report });
           if (!sharedBy(folder.key)) continue;
+          const inStep = result.status === "synced";
+          // A bot's change that can't land here (a name this computer can't hold, a protected place) shows on the folder.
+          if (landed?.problem) {
+            result.problem ??= landed.problem;
+            if (inStep) result.status = "problem";
+          }
           results.set(folder.key, result);
           if (current.deletes) update(folder.key, { deletes: null });
+          if (current.lentId && inStep) await cloud.synced(current.id).catch(noted("saying the copy is in step"));
         } catch (error) {
           if (passStopper(error)) throw error;
           if (!sharedBy(folder.key)) continue;
@@ -228,6 +261,8 @@ export function createCloudFilesService({
           outputsProblem = String(error?.message ?? error);
         }
       }
+      if (lent) await cloud.lent(lentReport({ computerId: settings.computerId, lendingId: lent.lendingId, name: hostname, platform, folders: lent.folders, plan: lent.plan, shared: settings.shared, git: lent.git }))
+        .catch(noted("saying what is lent"));
       watchShared();
       const disk = summary.disk;
       const usedBytes = disk.totalBytes - disk.freeBytes;
@@ -237,18 +272,73 @@ export function createCloudFilesService({
         outputs: { ...status.outputs, folders: outputFolders, problem: outputsProblem },
       });
     } catch (error) {
-      publish({ phase: error instanceof SyncAuthError ? "signed-out" : "offline" });
-      if (!passStopper(error) && !(error instanceof SyncAuthError)) console.error(`[files] pass stopped: ${error?.message ?? error}`);
+      publish({ phase: error instanceof SyncAuthError ? "signed-out" : error instanceof CloudAsleepError ? "asleep" : "offline" });
+      if (!passStopper(error)) console.error(`[files] pass stopped: ${error?.message ?? error}`);
     }
+  }
+
+  /** Copies My Cloud no longer keeps (sharing stopped, or the folder no longer lent) go to its trash. */
+  async function unregisterDropped(cloud) {
+    for (const id of settings.unregister ?? []) {
+      await cloud.unregister(id, false).catch((error) => { if (passStopper(error) || error?.status !== 404) throw error; });
+      save({ ...settings, unregister: (settings.unregister ?? []).filter((other) => other !== id) });
+    }
+  }
+
+  /** Lent folders (lent-folders.mjs): Files' list follows what is lent to My Cloud, folders the Files page shared before
+   * lending took them become lent folders, and each lent folder that fits gets a copy. Null while lending is unknown. */
+  async function reconcileLending(cloud, summary) {
+    // A Cloud from before lent copies would keep them where every bot reads them: lending stays live only there.
+    const lendingNow = summary.lentCopies === true ? lending?.now() ?? null : null;
+    if (!lendingNow) return null;
+    // A folder the Files page shared while lending was off joins what is lent, read only, once lending is on.
+    if (!lendingNow.off && settings.shared.some((entry) => !entry.lentId && !entry.lendTried)) {
+      for (const entry of settings.shared.filter((candidate) => !candidate.lentId && !candidate.lendTried)) {
+        await lending.lend(entry.pcPath).catch(() => null);
+        update(entry.key, { lendTried: true });
+      }
+      return reconcileLending(cloud, summary);
+    }
+    const folders = lendingNow.off ? [] : lendingNow.folders;
+    const same = sameFolderOn(platform);
+    const copied = copiedLent(settings.shared, folders, same);
+    const checks = new Map();
+    for (const folder of folders) {
+      if (copied.has(folder.id)) continue;
+      const known = lentChecks.get(folder.id);
+      if (known && known.path === folder.path && now() - known.at < RECHECK_MS) { checks.set(folder.id, known.check); continue; }
+      const checked = await check(folder.path);
+      lentChecks.set(folder.id, { at: now(), path: folder.path, check: checked });
+      checks.set(folder.id, checked);
+    }
+    const plan = planLentCopies({ folders, checks, copied, disk: summary.disk, planDisk: planDisk() });
+    const { shared, dropped } = reconcileLent({ shared: settings.shared, folders, plan, sameFolder: same, now: now() });
+    for (const entry of dropped) {
+      watchers.get(entry.key)?.();
+      watchers.delete(entry.key);
+      results.delete(entry.key);
+      if (entry.id) state.dropFolder(entry.id);
+    }
+    save({ ...settings, shared, unregister: [...(settings.unregister ?? []), ...dropped.filter((entry) => entry.id).map((entry) => entry.id)] });
+    if (dropped.length) await unregisterDropped(cloud);
+    // GitHub repositories among the copied ones: My Cloud clones them, and bots return code work as pull requests.
+    const git = new Map(folders.filter((folder) => plan.get(folder.id)?.copy).map((folder) => [folder.id, lentGit(folder.path)]).filter(([, found]) => found));
+    return { ...lendingNow, folders, plan, git };
   }
 
   async function pollLoop(signal) {
     let attempt = 0;
     while (!signal.aborted) {
+      if (power.asleep()) {
+        if (cloudOrigin()) publish({ phase: "asleep" });
+        await power.wait(signal);
+        if (!signal.aborted) void pass();
+        continue;
+      }
       try {
         const cloud = client();
         if (!cloud) { await sleep(30_000, signal); continue; }
-        const result = await cloud.changes(cursor, LONG_POLL_MS, signal);
+        const result = await cloud.changes(cursor, LONG_POLL_MS, AbortSignal.any([signal, power.signal()]));
         const recovered = attempt > 0, known = cursor !== 0;
         attempt = 0;
         cursor = result.cursor;
@@ -257,6 +347,7 @@ export function createCloudFilesService({
         else if (known && result.folderIds.length) void pass(new Set(result.folderIds));
       } catch {
         if (signal.aborted) return;
+        if (power.asleep()) continue;
         await sleep(BACKOFF_MS[Math.min(attempt++, BACKOFF_MS.length - 1)], signal);
       }
     }
@@ -274,6 +365,8 @@ export function createCloudFilesService({
   const api = {
     start,
     pass,
+    /** Started, so it calls My Cloud whenever there is one. */
+    running: () => Boolean(interval) && !closed,
     state: () => view(),
     check: (pcPath) => check(pcPath),
     async share(pcPath) {
@@ -286,6 +379,17 @@ export function createCloudFilesService({
       await pass();
       return view();
     },
+    /** A folder the Files page just lent: its entry now, so its copy starts at once (lent-folders.mjs). */
+    async adopt(folder) {
+      if (!settings.shared.some((entry) => entry.lentId === folder.id)) {
+        save({ ...settings, shared: [...settings.shared, { key: randomUUID(), id: null, pcPath: folder.path, name: folder.name, lentId: folder.id, write: folder.write === true, deletes: null, addedAt: now() }] });
+      }
+      onChange(view());
+      await pass();
+      return view();
+    },
+    /** The lent folder behind a Files entry, or null for one the Files page shared on its own. */
+    lentOf: (idOrKey) => sharedBy(idOrKey)?.lentId ?? null,
     async stopSharing(idOrKey) {
       const folder = sharedBy(idOrKey);
       if (!folder) return view();

@@ -152,7 +152,7 @@ describe("control-omb ui drives the real renderer", () => {
     expect(launched.child.exitCode).toBe(0);
   }, LAUNCH_TIMEOUT_MS + 90_000);
 
-  run("saves a key on Enter, checks it once saved, and keeps a refused or failed draft", async () => {
+  run("saves a key on Enter, checks it once saved, shows it masked, and keeps a refused or failed draft", async () => {
     launched = await launch([]);
     const { info } = launched;
     await fixtureApi(info.url)("PUT", "/api/config", {
@@ -160,10 +160,12 @@ describe("control-omb ui drives the real renderer", () => {
     });
     const evaluate = async (js: string) => (await ui("eval", info.ui, "--js", js)).result;
     const click = (name: string) => ui("click", info.ui, "--name", name);
-    const input = `document.querySelector('input[aria-label="OpenAI-compatible API key"]')`;
-    const testButton = `[...${input}.closest('[data-api-key-row]').querySelectorAll('button')].find(b => b.textContent === 'Test')`;
-    const verdict = () => evaluate(`${input}.closest('[data-api-key-row]').querySelector('[role="status"]')?.textContent`);
-    const rowText = () => evaluate(`${input}.closest('[data-api-key-row]').textContent`);
+    const row = `document.querySelector('[data-api-key-row="openaiCompat"]')`;
+    const input = `${row}?.querySelector('[data-key-input]')`;
+    const verdict = () => evaluate(`${row}.querySelector('[role="status"]')?.textContent`);
+    const rowText = () => evaluate(`${row}.textContent`);
+    const masked = () => evaluate(`${row}.querySelector('[data-key-masked]')?.textContent ?? null`);
+    const replace = () => evaluate(`${row}.querySelector('[data-key-replace]').click(); true`);
     const type = async (text: string) => {
       await click("OpenAI-compatible API key");
       await evaluate(`${input}.select(); true`);
@@ -197,21 +199,23 @@ describe("control-omb ui drives the real renderer", () => {
       tab?.click();
       return Boolean(tab);
     })()`), { timeout: 10_000 }).toBe(true);
-    // The shared OpenAI-compatible key lives under "Other", open once a key is saved.
-    await expect.poll(() => evaluate(`document.querySelector('[data-api-key-row="openaiCompat"]') !== null`), { timeout: 10_000 }).toBe(true);
-    await evaluate(`document.querySelector('[data-api-keys-other]').open = true; true`);
+    // The servers section opens on its own, because a key is saved there.
+    await expect.poll(masked, { timeout: 10_000 }).toContain("••••••••-key");
 
-    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(false);
-    await click("Test");
+    await expect.poll(() => evaluate(`${row}.querySelector('[data-key-check]')?.disabled ?? null`), { timeout: 10_000 }).toBe(false);
+    await evaluate(`${row}.querySelector('[data-key-check]').click(); true`);
     await expect.poll(() => evaluate("window.keyTests")).toEqual([{ provider: "openaiCompat" }]);
     await expect.poll(verdict).toBe("Saved key: Model catalog reachable: fixture-model. Authentication and chat not verified.");
 
+    await replace();
     await type("  fixture-draft-key  ");
     await enter();
-    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("");
+    await expect.poll(() => evaluate(`${input} ?? null`), { timeout: 10_000 }).toBe(null);
+    await expect.poll(masked, { timeout: 10_000 }).toContain("••••••••-key");
     await expect.poll(() => evaluate("window.keyTests")).toEqual([{ provider: "openaiCompat" }, { provider: "openaiCompat" }]);
     expect(await evaluate("window.keySaves")).toBe(1);
 
+    await replace();
     await type("not a key at all");
     await enter();
     await expect.poll(rowText, { timeout: 10_000 }).toContain("That doesn't look like an API key");
@@ -222,12 +226,12 @@ describe("control-omb ui drives the real renderer", () => {
     await type("fixture-replacement-key");
     await evaluate("window.rejectKeySave = true");
     await enter();
-    await expect.poll(rowText, { timeout: 10_000 }).toContain("Fixture save rejected");
+    await expect.poll(rowText, { timeout: 10_000 }).toContain("Didn't work: Fixture save rejected");
     await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("fixture-replacement-key");
     await evaluate("window.rejectKeySave = false");
     await click("OpenAI-compatible API key");
     await enter();
-    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("");
+    await expect.poll(() => evaluate(`${input} ?? null`), { timeout: 10_000 }).toBe(null);
     await expect.poll(() => evaluate("window.keyTests.length")).toBe(3);
     await expect.poll(verdict).toBe("Saved key: Model catalog reachable: fixture-model. Authentication and chat not verified.");
     await waitForExit(launched.child, { signal: "SIGINT", graceMs: 30_000 });

@@ -1,5 +1,5 @@
 import { api } from "@/state/store";
-import type { WidgetValues } from "../../../shared/widget";
+import type { WidgetOther, WidgetValues } from "../../../shared/widget";
 
 export interface WidgetPress {
   botId: string;
@@ -8,6 +8,7 @@ export interface WidgetPress {
   ref: string;
   rev: number;
   values?: WidgetValues;
+  other?: WidgetOther;
   sendId: string;
 }
 
@@ -25,7 +26,7 @@ export async function sendWidgetAction(press: WidgetPress): Promise<WidgetSendRe
       body: JSON.stringify({
         threadId: press.threadId,
         sendId: press.sendId,
-        widgetAction: { messageId: press.messageId, ref: press.ref, rev: press.rev, ...(press.values ? { values: press.values } : {}) },
+        widgetAction: { messageId: press.messageId, ref: press.ref, rev: press.rev, ...(press.values ? { values: press.values } : {}), ...(press.other ? { other: press.other } : {}) },
       }),
     });
     return { ok: true };

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
-import { buildMcpServers } from "./pi.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
 import { mcpStdioServer } from "../mcp-gate-config.ts";
 
 import extension, {

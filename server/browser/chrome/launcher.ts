@@ -13,9 +13,9 @@ import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
 import { chromeHost, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
-import { browserLanguage, browserTimeZone, launcherPath, primaryScreen, writeLauncher, type Screen } from "./wrapper.ts";
+import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
 
-type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string };
+type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string; launcher?: LauncherSettings };
 type State =
   | { kind: "idle" }
   | { kind: "preparing" }
@@ -38,10 +38,15 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 export { chromeFingerprint };
 
 /** A data dir on a volume mounted noexec cannot run the launcher; finding that out before the engine needs it keeps the
- * engine's own browser instead of a browser that never starts. */
-function runsLauncher(path: string, env: NodeJS.ProcessEnv): Promise<void> {
+ * engine's own browser instead of a browser that never starts. A check that only ran out of time still ran: a noexec
+ * volume refuses the launcher at once. That happens on a Cloud machine in its first seconds after a restart, starved of
+ * CPU, and must not cost it this launcher until the next restart. */
+export function runsLauncher(path: string, env: NodeJS.ProcessEnv, timeoutMs = 10_000): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(path, ["--version"], { env, timeout: 10_000, windowsHide: true }, (error) => error ? reject(new Error(`the browser launcher does not run here: ${error.message}`)) : resolve());
+    execFile(path, ["--version"], { env, timeout: timeoutMs, windowsHide: true }, (error) => {
+      if (!error || error.killed) return resolve();
+      reject(new Error(`the browser launcher does not run here: ${error.message}`));
+    });
   });
 }
 
@@ -74,6 +79,7 @@ export class ChromeLauncher implements BrowserLaunch {
   private readonly options: Required<Pick<ChromeLauncherOptions, "dataDir" | "env" | "platform" | "readyWaitMs">> & ChromeLauncherOptions;
   private readonly host: ChromeHost;
   private readonly sidecars: IdentitySidecars;
+  private box: (() => LauncherBox | null) | null = null;
 
   constructor(options: ChromeLauncherOptions) {
     const env = options.env ?? process.env;
@@ -84,6 +90,21 @@ export class ChromeLauncher implements BrowserLaunch {
     this.path = launcherPath(options.dataDir, platform);
   }
 
+  /** Every Chrome started from now on runs in the box this returns (a Team Cloud's); the launcher is written again. */
+  boxWith(box: () => LauncherBox | null): void {
+    this.box = box;
+    if (this.state.kind === "ready" && this.state.launcher) {
+      const launcher = { ...this.state.launcher, ...this.boxed() };
+      writeLauncher(this.path, launcher, this.options.platform);
+      this.state = { ...this.state, launcher };
+    }
+  }
+
+  private boxed(): { box?: LauncherBox } {
+    const box = this.box?.() ?? null;
+    return box ? { box } : {};
+  }
+
   plan(): ChromePlan {
     return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine());
   }
@@ -92,7 +113,25 @@ export class ChromeLauncher implements BrowserLaunch {
   env(): Record<string, string> {
     if (this.state.kind === "failed" || this.plan().kind === "legacy") return {};
     void this.prepare();
+    this.followTimeZone();
     return { AGENT_BROWSER_EXECUTABLE_PATH: this.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+  }
+
+  /** The owner's app can give a Cloud its time zone at any time (server/time-zone.ts): the next Chrome this starts tells
+   * time in it too, rather than the zone the server had when the launcher was written. */
+  private followTimeZone(): void {
+    const state = this.state;
+    if (state.kind !== "ready" || !state.launcher) return;
+    const timeZone = browserTimeZone(this.options.env, this.options.platform);
+    if (timeZone === state.launcher.timeZone) return;
+    const launcher = { ...state.launcher, timeZone };
+    try {
+      writeLauncher(this.path, launcher, this.options.platform);
+      this.state = { ...state, launcher };
+      this.log(`browser: the next browser started tells time in ${timeZone ?? "the system's zone"}`);
+    } catch (error) {
+      this.log(`browser: could not move the browser to ${timeZone ?? "the system's zone"} (${message(error)})`);
+    }
   }
 
   start(): void {
@@ -136,7 +175,7 @@ export class ChromeLauncher implements BrowserLaunch {
 
   async started(session: string, spec: LaunchSpec): Promise<void> {
     if (this.state.kind !== "ready" || !this.uses(spec) || !ownsBrowserViewport(spec.env ?? {})) return;
-    await this.sidecars.ensure(session, spec, this.state.identity);
+    await this.sidecars.ensure(session, spec, { ...this.state.identity, acceptLanguage: languageList(browserLanguage(this.options.env)) });
   }
 
   stopped(session: string): void {
@@ -185,16 +224,19 @@ export class ChromeLauncher implements BrowserLaunch {
       identity = await this.identityOf(chrome);
     }
     const { env, platform } = this.options;
+    let launcher: LauncherSettings | undefined;
     if (this.options.wrapper !== false) {
       this.screen ??= this.options.screen ? this.options.screen() : primaryScreen(platform, env);
-      writeLauncher(this.path, {
+      launcher = {
         chrome: chrome.path, userAgent: identity.userAgent, screen: await this.screen,
         language: browserLanguage(env), timeZone: browserTimeZone(env, platform),
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
-      }, platform);
+        ...this.boxed(),
+      };
+      writeLauncher(this.path, launcher, platform);
       if (platform !== "win32") await (this.options.checkLauncher ?? runsLauncher)(this.path, this.chromeEnv());
     }
-    return { kind: "ready", chrome, identity: { userAgent: identity.userAgent, userAgentMetadata: identity.userAgentMetadata }, product: identity.product, fingerprint: chromeFingerprint(chrome.path) };
+    return { kind: "ready", chrome, identity: { userAgent: identity.userAgent, userAgentMetadata: identity.userAgentMetadata }, product: identity.product, fingerprint: chromeFingerprint(chrome.path), ...(launcher ? { launcher } : {}) };
   }
 
   private async download(pin: ChromeForTestingPin): Promise<FoundChrome> {

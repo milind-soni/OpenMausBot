@@ -1,10 +1,9 @@
-// The OpenAI key is never read or written here. A phone's call needs an active Pro plan (402 `needsPro`, checked
-// before the key's 409 `needsKey`); a phone can never send device-revoked.
+// The OpenAI key is never read or written here; without one a start answers 409 `needsKey`. A phone can never send device-revoked.
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { LiveSettings } from "../../shared/wire.ts";
 import { LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
-import { LiveCallBusyError, LiveCallNeedsProError, type LiveCallController } from "../live-call-controller.ts";
+import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export interface LiveRouteDeps {
@@ -62,7 +61,6 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
         return json(res, 201, { call, transport: { type: "webrtc", sdp } });
       } catch (error) {
         if (error instanceof LiveCallBusyError) return json(res, 409, { error: error.message, activeCall: error.call });
-        if (error instanceof LiveCallNeedsProError) return json(res, 402, { error: error.message, needsPro: true });
         if (error instanceof LiveSessionError) {
           return json(res, error.status, error.status === 409 ? { error: error.message, needsKey: true } : { error: error.message });
         }

@@ -69,6 +69,12 @@ describe("ChatNotice", () => {
     expect(text).toContain('role="status"');
   });
 
+  it("shows the server's own words when a deletion went through with something left to tidy", () => {
+    const text = markup({ kind: "note", botName: null, text: "Deleted. gone-vps could not be reached, so the bot's computer there was left as it was." });
+    expect(text).toContain("Deleted. gone-vps could not be reached, so the bot&#x27;s computer there was left as it was.");
+    expect(text).toContain('role="status"');
+  });
+
   it("shows in the room as well as the chat", () => {
     for (const file of ["components/ChatView.tsx", "components/GroupView.tsx"]) {
       expect(source(file)).toContain("<ChatNotice notice={state.notice} />");

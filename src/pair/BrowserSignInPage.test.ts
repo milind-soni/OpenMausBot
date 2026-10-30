@@ -9,7 +9,7 @@ const credential = `omb_pair_${"c".repeat(43)}`;
 it("says whose Cloud a browser sign-in is for, with one Continue and no second step, and never shows the credential", () => {
   const html = renderToStaticMarkup(createElement(BrowserSignInPage, { credential, owner: "ada@example.test" }));
   expect(html).toContain("Signing in to ada@example.test’s Cloud");
-  expect(html).toContain('<p class="mt-1.5 text-[13.5px] text-ink-secondary">Not your email? Close this tab.</p>');
+  expect(html).toContain('<p class="mt-1.5 text-[14px] text-ink-secondary">Not your email? Close this tab.</p>');
   expect(html.match(/<button/g)).toHaveLength(1);
   expect(html).toContain(">Continue</button>");
   expect(html).not.toContain(credential);

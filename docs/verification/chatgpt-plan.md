@@ -19,7 +19,7 @@ native turn counts as success.
 
 Credentials live in private `providers/chatgpt-plan/<account-hash>/` directories
 under the app data directory, with atomic owner-only files. Portable backups and
-Copy this computer here exclude these provider homes. No Codex credentials or personal
+the move to My Cloud exclude these provider homes. No Codex credentials or personal
 configuration are read or overwritten. A cross-process lock prevents concurrent
 refresh-token reuse. If a process dies while holding that lock, the safe recovery
 is to stop the old process, confirm it has exited, and remove only that account's

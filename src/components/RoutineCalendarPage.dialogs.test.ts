@@ -90,6 +90,19 @@ describe("calendar event details drawer", () => {
     expect(fixture.calls).toHaveLength(0);
   });
 
+  it("shows a goal with no group as the bot's own, with no group to open", () => {
+    const ownGoal: Routine = { ...routine, target: "room-goal" };
+    const html = renderToStaticMarkup(createElement(() => EventDetails({
+      item: { kind: "routine", id: ownGoal.id, at: 1, durationMinutes: 30, routine: ownGoal, run: null },
+      bots: [bot], onClose: vi.fn(), onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
+    })));
+    expect(html).toContain(t("routines.drawer.lead"));
+    expect(html).toContain("Runner");
+    expect(html).not.toContain(">Group<");
+    expect(html).not.toContain("Group unavailable");
+    expect(html).not.toContain("Open group");
+  });
+
   it("names its close button", () => {
     const onClose = vi.fn();
     const close = render(() => drawer(onClose)).find((node) => node.type === "button" && node.props["aria-label"] === t("routines.drawer.close"));

@@ -1,1 +1,1 @@
-export { RoutineEditor, RoutinesPage } from "./RoutineCalendarPage";
+export { RoutineEditor } from "./RoutineCalendarPage";

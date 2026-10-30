@@ -18,8 +18,46 @@ export function codexNotSignedIn(): string {
 export function codexLimitMessage(said: string, timeZone = hostTimeZone()): string {
   const resets = /\btry again at ([^.]+)/i.exec(said)?.[1]?.trim();
   return `${CODEX_USAGE_LIMIT_REACHED} This is OpenAI's limit, not your MausBot plan. ${resets
-    ? `It resets at ${resets} (${timeZone}). Until then, manage your Codex usage in ChatGPT or switch this bot to another engine.`
-    : "Manage your Codex usage in ChatGPT, or switch this bot to another engine until it resets."}`;
+    ? `It resets at ${resets} (${timeZone}). Until then, manage your Codex usage in ChatGPT or switch this bot to another AI.`
+    : "Manage your Codex usage in ChatGPT, or switch this bot to another AI until it resets."}`;
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+function clockHours(hour: string, meridiem: string): number {
+  return (Number(hour) % 12) + (meridiem.toUpperCase() === "PM" ? 12 : 0);
+}
+
+/** When Codex says its usage limit resets, from its words "try again at 5:23 PM" (today) or "try again at
+ * Oct 17th, 2026 5:23 PM", in this computer's local time; undefined when it names no time. */
+export function codexLimitResetsAt(said: string, now = Date.now()): number | undefined {
+  if (!USAGE_LIMIT.test(said)) return undefined;
+  const when = /\btry again at ([^.]+)/i.exec(said)?.[1]?.trim() ?? "";
+  const time = /^(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(when);
+  if (time) {
+    // codex-rs/protocol/src/error.rs format_retry_timestamp prints only the time, without seconds, when the reset is on
+    // its own local date. A minute already begun is the reset arriving within it or just past, so it ends with the minute.
+    const hour = clockHours(time[1]!, time[3]!);
+    const minute = Number(time[2]);
+    let at = new Date(now).setHours(hour, minute, 0, 0);
+    // When a DST change repeats this hour, setHours gives the first of the two; once that has passed, Codex meant the second.
+    const later = at + (new Date(at + 3 * 3_600_000).getTimezoneOffset() - new Date(at).getTimezoneOffset()) * 60_000;
+    if (later > at && at + 59_999 < now && new Date(later).getHours() === hour && new Date(later).getMinutes() === minute) at = later;
+    return at <= now ? at + 59_999 : at;
+  }
+  const dated = /^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}),?\s+(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(when);
+  const month = dated ? MONTHS.indexOf(dated[1]!.toLowerCase()) : -1;
+  if (!dated || month < 0) return undefined;
+  const at = new Date(Number(dated[3]), month, Number(dated[2]), clockHours(dated[4]!, dated[6]!), Number(dated[5]), 0, 0).getTime();
+  return Number.isFinite(at) ? at : undefined;
+}
+
+/** The runtime.error fields a Codex usage-limit refusal adds: that it is one, for the whole account or for one model
+ * ("You've hit your usage limit for gpt-6.1-sol. Switch to another model now…"), and when it resets, if Codex said. */
+export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?: unknown): { limit?: "engine" | "model"; limitResetsAt?: number } {
+  if (codexErrorInfo !== "usageLimitExceeded" && !USAGE_LIMIT.test(raw) && !raw.includes("subscription_sharing_usage_limit_exceeded")) return {};
+  const at = route === "own" ? codexLimitResetsAt(raw) : undefined;
+  return { limit: /\busage limit for \S+?\.(?:\s|$)/i.test(raw) ? "model" : "engine", ...(at === undefined ? {} : { limitResetsAt: at }) };
 }
 
 export function codexUserError(value: string, route: CodexRoute, codexErrorInfo?: unknown): string {
@@ -55,3 +93,22 @@ export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign 
 export function codexSignInExpired(raw: string): string {
   return `${CODEX_SIGN_IN_EXPIRED} Codex said: ${raw.slice(0, 300)}`;
 }
+
+export class CodexRpcError extends Error {
+  code: unknown;
+
+  constructor(error: { code?: unknown; message?: string }) {
+    super(error.message ?? JSON.stringify(error));
+    this.code = error.code;
+  }
+}
+
+export function missingNativeCodexThread(error: unknown, cursor: string): boolean {
+  // Codex's local thread/resume rejection, verified with an empty native home; unknown versions fail closed.
+  return error instanceof CodexRpcError && error.code === -32600 &&
+    error.message === `no rollout found for thread id ${cursor}`;
+}
+
+/** Codex refuses to resume an archived session: "session <id> is archived. Run `codex unarchive <id>` to unarchive it first." */
+export const archivedNativeCodexThread = (error: unknown, cursor: string): boolean =>
+  error instanceof CodexRpcError && error.message.includes(cursor) && /\bis archived\b/.test(error.message);

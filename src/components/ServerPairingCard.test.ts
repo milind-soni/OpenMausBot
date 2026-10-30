@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { canPairDevices, lastSeen, minutesLeft, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
+import { lastSeen, minutesLeft } from "../lib/pairing-time";
+import { canPairDevices, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
 
 describe("pairing devices from a hosted server's settings", () => {
   it("is offered to the owner on the box and to admin sessions, never to chat-only sessions", () => {
@@ -26,6 +27,19 @@ describe("pairing devices from a hosted server's settings", () => {
 
   it("renders nothing until it knows who is asking", () => {
     expect(renderToStaticMarkup(createElement(ServerPairingCard))).toBe("");
+  });
+
+  it("offers every member of a Team Cloud a code for their own phone, never the admins' pairing", () => {
+    const member = { kind: "session" as const, id: "s", label: "Desktop", scopes: ["client"], expiresAt: 1, team: { id: "team-acme-1", name: "Acme", role: "member" } };
+    const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: member, cloudHome: true, team: "Acme" }));
+    expect(html).toContain("Open on your phone");
+    expect(html).toContain("Your phone opens Acme as you");
+    expect(html).toContain("data-phone-pairing-action");
+    expect(html).not.toContain("data-server-pairing-chat-only");
+    expect(html).not.toContain("server-pairing-scope");
+    const admin = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: { ...member, scopes: ["admin", "client"], team: { ...member.team, role: "admin" } }, cloudHome: true, team: "Acme" }));
+    expect(admin).toContain("Open on your phone");
+    expect(admin).not.toContain("Pair a phone or another computer");
   });
 
   it("explains a chat-only connection instead of showing nothing", () => {
@@ -67,7 +81,7 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(cloud).toContain("Create pairing code");
     expect(cloud).not.toContain("Chat and approvals only");
     expect(cloud).toContain("data-server-pairing-personal");
-    expect(cloud).toContain("My Cloud is personal: only your own devices can connect");
+    expect(cloud).toContain("The Cloud is personal: only your own devices can connect");
     const elsewhere = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin }));
     expect(elsewhere).toContain("Chat and approvals only");
     expect(elsewhere).not.toContain("data-server-pairing-personal");

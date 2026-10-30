@@ -100,7 +100,7 @@ posixOnly("routine failure notification wiring", () => {
   });
 
   it(
-    "emits one routine-failed notification linking the results card and no generic done notification",
+    "emits one routine-failed notification linking the chat that says the run failed, and no generic done notification",
     async () => {
       const listed = await api("GET", "/api/bots");
       const bot = listed.body.bots[0];
@@ -154,8 +154,9 @@ posixOnly("routine failure notification wiring", () => {
         expect(receipt.threadId).not.toBe(frame.notification.threadId);
         const report = await api("GET", `/api/threads/${frame.notification.threadId}/messages?limit=20`);
         expect(report.status).toBe(200);
-        expect(report.body.messages.find((message: any) => message.routineRun?.runId === receipt.id)?.routineRun)
-          .toMatchObject({ status: "failed", executionThreadId: receipt.threadId });
+        expect(report.body.messages.find((message: any) => message.automation?.runId === receipt.id)).toMatchObject({
+          kind: "text", text: expect.stringMatching(/^This run didn't finish: /), automation: { failed: true, executionThreadId: receipt.threadId },
+        });
         const currentBot = (await api("GET", "/api/bots")).body.bots.find((candidate: any) => candidate.id === bot.id);
         expect(currentBot.tasks.find((task: any) => task.threadId === receipt.resultsThreadId).routineRunId).toBeUndefined();
         expect(currentBot.tasks.find((task: any) => task.threadId === receipt.threadId))

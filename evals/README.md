@@ -59,6 +59,10 @@ Live-model runs never execute by default: `pnpm eval --live` prints one skip lin
 
 The instance file (or inline `OMB_EVAL_LIVE_INSTANCE` JSON) uses the product's own instance shape — `instanceId`, `driver`, `model`, optional `config` and `environmentFrom` — so credential variables are copied from the launching shell (`OMB_EVAL_LIVE_PASS_ENV` lists names to forward) and never inlined. Thresholds live in the committed `evals/live/config.json`: minimum suite score, maximum drift from the last recorded baseline, and turn and judge timeouts. Scenarios run cheap real models with state-based waits, deterministic checks (`botReplied`, tool traces), and a versioned judge whose prompt files are pinned by sha256 in a manifest; drift against the gitignored `evals/live/baselines/` baseline fails the suite.
 
+The `live-reply-*` scenarios grade how a bot talks (answer first, one question at most, no machinery named, plain time zones, remember and forget confirmed) with the `reply-habits-v1` judge. For a before/after of a prompt change, run them on a worktree of the base commit with these scenario and judge files copied in and `--update-baseline`, then on the change without it; the drift line compares the two.
+
+    OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_CONFIG=/path/to/instance.json pnpm eval --live --scenario live-reply-research --scenario live-reply-plan-week --scenario live-reply-remember --scenario live-reply-routine --scenario live-reply-dead-link
+
 ## Skill bench (alpha)
 
 The skill bench measures one fixture skill against its own prompts through the same scripted machinery as tier 1. Each prompt runs twice — with the skill installed as a user skill under the booted server's data dir and without it — so the contrast covers the real seams: trigger-term selection, the `<openmaus-skill>` block riding the system prompt, and the scripted follower's behavior against a no-skill baseline. It evaluates the harness, never a model.

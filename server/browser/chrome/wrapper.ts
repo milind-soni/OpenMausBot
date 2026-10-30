@@ -19,7 +19,20 @@ export interface LauncherSettings {
   timeZone?: string;
   /** macOS: Chrome with any HOME but the person's own asks, in a dialog on their screen, for a keychain it cannot find. */
   home?: string;
+  /** Every Chrome this launcher starts runs in this box (a Team Cloud's), with only the profile it was started on. */
+  box?: LauncherBox;
 }
+
+/** bubblewrap's options for a browser's box, before `--` and without the profile, which the launcher binds per start. */
+export interface LauncherBox {
+  bwrap: string;
+  options: string[];
+  /** The seccomp filter, read on LAUNCHER_SECCOMP_FD; bubblewrap closes that descriptor before Chrome runs. */
+  seccomp: string | null;
+}
+
+/** agent-browser hands Chrome only stdio (it speaks to it over a port), so 9 is free for the filter. */
+export const LAUNCHER_SECCOMP_FD = 9;
 
 /** Last on the command line, so they win over any switch of the same name: Chrome keeps the last value of a switch. A bot's
  * Chrome never touches the person's keychain or keyring (agent-browser 0.37 passes these too). */
@@ -53,13 +66,34 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
   if (platform === "win32") {
     return ["@echo off", `${batchQuote(settings.chrome)} %* ${flags.map(batchQuote).join(" ")}`, ""].join("\r\n");
   }
+  const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")}`;
   return [
     "#!/bin/sh",
     ...(settings.home ? [`HOME=${shellQuote(settings.home)}`, "export HOME"] : []),
     ...(settings.timeZone ? [`TZ=${shellQuote(settings.timeZone)}`, "export TZ"] : []),
-    `exec ${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")}`,
+    ...(settings.box ? boxedLaunch(settings.box, chrome) : [`exec ${chrome}`]),
     "",
   ].join("\n");
+}
+
+/** Chrome in its box: its profile (agent-browser's --user-data-dir=) bound back read-write, and nothing else of the home
+ * or the data folder; HOME is the box's private /tmp. Without a profile it still runs boxed, on a throwaway one. The shell
+ * stays bubblewrap's parent rather than exec'ing it: --die-with-parent ends the box with the thread that started it, and
+ * agent-browser 0.37 starts Chrome from a worker thread that ends right after. */
+function boxedLaunch(box: LauncherBox, chrome: string): string[] {
+  return [
+    "profile=",
+    'for arg in "$@"; do case "$arg" in --user-data-dir=*) profile=${arg#--user-data-dir=} ;; esac; done',
+    ...(box.seccomp ? [`exec ${LAUNCHER_SECCOMP_FD}<${shellQuote(box.seccomp)} || exit 70`] : []),
+    'if [ -n "$profile" ]; then',
+    '  mkdir -p "$profile" || exit 70',
+    `  set -- --bind "$profile" "$profile" --setenv HOME /tmp -- ${chrome}`,
+    "else",
+    `  set -- --setenv HOME /tmp -- ${chrome}`,
+    "fi",
+    `${shellQuote(box.bwrap)} ${box.options.map(shellQuote).join(" ")} "$@"`,
+    "exit $?",
+  ];
 }
 
 export function writeLauncher(path: string, settings: LauncherSettings, platform: NodeJS.Platform = process.platform): void {
@@ -106,6 +140,16 @@ export function browserLanguage(env: NodeJS.ProcessEnv): string | undefined {
   const locale = env.LC_ALL?.trim() || env.LC_MESSAGES?.trim() || env.LANG?.trim() || "";
   const match = /^([a-z]{2,3})(?:_([A-Z]{2}))?(?:[.@]|$)/u.exec(locale);
   return match ? (match[2] ? `${match[1]}-${match[2]}` : match[1]) : undefined;
+}
+
+/** The languages pages are told, best first, for the person's language: "pt-BR" gives "pt-BR,pt,en-US,en", none "en-US,en".
+ * As a list, never with q-values: Chrome adds those to the Accept-Language header itself, and navigator.languages would
+ * otherwise list "en;q=0.9" as a language. A headless Chrome on Linux tells pages only its first language (Chrome 155),
+ * so the bots' browsers are given the whole list. */
+export function languageList(language: string | undefined): string {
+  const first = language ?? "en-US";
+  const base = first.split("-")[0]!;
+  return [first, ...(base !== first ? [base] : []), ...(base === "en" ? [] : ["en-US", "en"])].join(",");
 }
 
 /** The zone the server runs in, which is also the one each turn's clock shows; Windows Chrome ignores TZ. */

@@ -27,11 +27,12 @@ describe("chat width", () => {
     expect(readChatWidth()).toBe("standard");
   });
 
-  it("keeps the standard width at the original bubble cap", () => {
+  it("sizes the standard width like Grok Bot: a 960px column and bubbles of min(80%, 560px)", () => {
     const body = css.match(/:root\s*\{\s*(--chat-bubble-max[^}]*)\}/)?.[1] ?? "";
-    expect(body).toMatch(/--chat-bubble-max:\s*42rem/);
-    expect(body).toMatch(/--chat-bubble-pct:\s*78%/);
+    expect(body).toMatch(/--chat-bubble-max:\s*35rem/);
+    expect(body).toMatch(/--chat-bubble-pct:\s*80%/);
     expect(body).toMatch(/--chat-card-pct:\s*88%/);
+    expect(body).toMatch(/--chat-column-max:\s*60rem/);
   });
 
   it("gives every non-default width a stylesheet block that sets the bubble variables", () => {
@@ -41,6 +42,29 @@ describe("chat width", () => {
       expect(body).toMatch(/--chat-bubble-max\s*:/);
       expect(body).toMatch(/--chat-bubble-pct\s*:/);
       expect(body).toMatch(/--chat-card-pct\s*:/);
+    }
+  });
+
+  it.each(CHAT_WIDTH_IDS)("sizes the %s column so its bubbles still reach their cap", (id) => {
+    const selector = id === DEFAULT_CHAT_WIDTH ? ":root" : `:root\\[data-chat-width="${id}"\\]`;
+    const body = css.match(new RegExp(`${selector}\\s*\\{\\s*(--chat-bubble-max[^}]*)\\}`))?.[1] ?? "";
+    const token = (name: string) => body.match(new RegExp(`--${name}:\\s*([\\d.]+)(rem|%)?`))?.slice(1) ?? [];
+    const [column, columnUnit] = token("chat-column-max");
+    const [bubble, bubbleUnit] = token("chat-bubble-max");
+    const [pct] = token("chat-bubble-pct");
+    expect(column, `${id} sets --chat-column-max`).toBeDefined();
+    if (columnUnit === "rem" && bubbleUnit === "rem") {
+      expect(Number(column) * Number(pct) / 100).toBeGreaterThanOrEqual(Number(bubble));
+    }
+  });
+
+  it("centers the transcript and the composer in one column, in a chat and in a room", () => {
+    expect(css).toMatch(/\.chat-column \{[^}]*margin-inline: auto;[^}]*max-width: var\(--chat-column-max\);/);
+    expect(css).toMatch(/\.chat-column-dock \{[^}]*margin-inline: auto;[^}]*max-width: calc\(var\(--chat-column-max\) \+ 2\.5rem\);/);
+    for (const f of ["ChatView", "GroupView"]) {
+      const source = readFileSync(join(root, "components", `${f}.tsx`), "utf8");
+      expect(source, f).toMatch(/className="glass-scroller-content chat-column /);
+      expect(source, f).toMatch(/ref=\{composerDockRef\} className="[^"]* chat-column-dock"/);
     }
   });
 

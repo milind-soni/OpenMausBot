@@ -54,7 +54,7 @@ beforeEach(() => {
 describe("J11: a failed place's row", () => {
   it("says no hours are left in one line, with one button: See your plan", () => {
     const { html, buttons } = show(stored(hours), vi.fn());
-    expect(html).toContain("This month&#x27;s 50 cloud computer hours are used up. They come back on 1 November.");
+    expect(html).toContain("This month&#x27;s 50 cloud desktop hours are used up. They come back on 1 November.");
     expect(buttons).toHaveLength(1);
     expect(buttons[0]).toContain("See your plan");
     expect(html).not.toContain("Retry");
@@ -70,7 +70,7 @@ describe("J11: a failed place's row", () => {
 
   it("leads a person's pin back to the grid's choice in Simple, and to the composer's in Advanced", () => {
     const pinned = stored({ state: "cc-no-start", params: { bot: "Scout" }, source: "pin" });
-    expect(show(pinned).buttons[0]).toContain("Use Cloud computer");
+    expect(show(pinned).buttons[0]).toContain("Use Cloud desktop");
     fixture.advanced = true;
     expect(show(pinned).buttons[0]).toContain("Clear this conversation&#x27;s place");
   });
@@ -82,12 +82,12 @@ describe("J11: a failed place's row", () => {
     expect(buttons).toHaveLength(0);
   });
 
-  it("reads Needs a Boat key as My Cloud's on a desktop with a paid plan", () => {
+  it("reads the Boat sign-up as My Cloud's on a desktop with a paid plan", () => {
     const needsKey: PlaceRow = { state: "cc-needs-key", params: { bot: "Scout" }, source: "works-on" };
-    expect(show(stored(needsKey)).html).toContain("A cloud computer here needs your own Boat key, a paid service.");
+    expect(show(stored(needsKey)).html).toContain("Bots here can get their own cloud desktops from Boat, a paid service.");
     const seat = { server: "mac", plan: true, role: "admin", mode: "simple" } as const;
     expect(placeRowViewFor(needsKey, seat)).toMatchObject({
-      state: "cc-on-my-cloud", line: "Cloud computers from your plan work for bots on My Cloud for now.", action: { id: "open-my-cloud" },
+      state: "cc-on-my-cloud", line: "Cloud desktops from your plan work for Cloud bots for now.", action: { id: "open-my-cloud" },
     });
     expect(placeRowViewFor(needsKey, { ...seat, server: "my-cloud" }).state).toBe("cc-needs-key");
   });
@@ -100,13 +100,13 @@ describe("the phone row", () => {
 
   it("carries the line and its action in words, whole, for every source", () => {
     const rows: Array<[PlaceRow, string]> = [
-      [hours, "This month's 50 cloud computer hours are used up. They come back on 1 November. See your plan on the Plan page."],
+      [hours, "This month's 50 cloud desktop hours are used up. They come back on 1 November. See your plan on the Plan page."],
       [{ state: "cc-unavailable", params: { bot: "Scout" }, source: "auto-pin" },
-        "Cloud computers can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again."],
+        "Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again."],
       [{ state: "cc-unavailable", params: { bot: "Scout" }, source: "routine" },
-        "Cloud computers can't start right now. It isn't anything you did. Change where this routine runs."],
+        "Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs."],
       [{ state: "cc-at-once", params: { bot: "Bo", plan: "Personal", max: 1, holders: ["Ada"] }, source: "works-on" },
-        "Your Personal plan includes 1 cloud computer, and Ada has it. Manage your cloud computers in Settings → Local VM."],
+        "Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Bot desktops."],
     ];
     for (const [place, words] of rows) {
       const tool = stored(place);

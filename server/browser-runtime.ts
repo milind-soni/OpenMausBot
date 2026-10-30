@@ -2,6 +2,7 @@ import { killCliTree, spawnCli } from "./procs.ts";
 import { scrubHeldSecrets } from "../shared/redact.ts";
 import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
 import { BrowserLanes } from "./browser-lane.ts";
+import { PageSizes, type PageSize } from "./browser-page-size.ts";
 import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-hold.ts";
 import type { BrowserSteps, StepCall, StepContext } from "./browser-steps.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
@@ -16,7 +17,7 @@ export const BROWSER_CONTROL_REFUSAL = "Browser tools are paused while a person 
 export const BROWSER_RESTART_TOOL = "restart_browser";
 const BROWSER_RESTART_TOOL_SPEC = {
   name: BROWSER_RESTART_TOOL,
-  description: "Close and restart your browser. Use this only when a browser tool says the browser must be restarted, or it stays busy after a call that did not answer. Every open tab is closed and page state such as form input and sign-ins is lost; afterwards open the page you need again and check whether the interrupted action already happened before repeating it.",
+  description: "Close and restart your browser. Use this only when a browser tool says the browser must be restarted, or it stays busy after a call that did not answer. Every open tab is closed and unsaved page state such as form input is lost; sign-ins stay unless it is a temporary browser. Afterwards open the page you need again and check whether the interrupted action already happened before repeating it.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 };
 export const BROWSER_UPLOAD_TOOL = "agent_browser_upload";
@@ -51,7 +52,7 @@ const PERSON_RESTARTED = "The person restarted your browser from the Browser pan
 const LANE_BUSY = "Your previous browser call is still running; wait for it to finish, then call again.";
 /** One bot call, lane wait included, answers within `callBudgetMs`; the engine's action keeps `followUpReserveMs` of it for the reads after. */
 export const BROWSER_CALL_DEFAULTS = { requestTimeoutMs: 120_000, laneWaitMs: 30_000, callBudgetMs: HARNESS_CALL_BUDGET_MS, followUpReserveMs: 15_000 } as const;
-const RESTART_COST = "a restart closes every tab and loses page state such as form input and sign-ins";
+const RESTART_COST = "a restart closes every tab and loses page state such as form input";
 const LATE = Symbol("late");
 const PAGE_ACTIONS: ReadonlySet<string> = new Set([
   "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press",
@@ -67,11 +68,6 @@ export function browserRuntimeEnv(overrides: Record<string, string | undefined>)
   const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   return { ...env, ...overrides };
 }
-
-/** Page size in CSS pixels. agent-browser sizes the Chrome window, and headless full Chrome (Chrome for Testing) takes its
- * emulated UI out of it (page 1280×577, screencast 1280×720); `set viewport` is agent-browser's only page-size control. */
-export const BROWSER_VIEWPORT = { width: 1280, height: 720 } as const;
-export const BROWSER_VIEWPORT_ARGS = ["set", "viewport", String(BROWSER_VIEWPORT.width), String(BROWSER_VIEWPORT.height)] as const;
 
 export function attachesToChrome(env: NodeJS.ProcessEnv): boolean {
   return Boolean(env.AGENT_BROWSER_CDP || env.AGENT_BROWSER_AUTO_CONNECT);
@@ -287,7 +283,7 @@ class BrowserClient {
   }
 }
 
-export type ApplyViewport = (spec: BrowserSpawnSpec) => Promise<unknown>;
+export type ApplyViewport = (spec: BrowserSpawnSpec, size: PageSize) => Promise<unknown>;
 
 type LaunchSpec = { command: string; env?: Record<string, string | undefined> };
 /** The browser the engine starts, prepared by OMB. */
@@ -323,7 +319,7 @@ interface Gate {
   reopened: "idle" | "restart" | null;
 }
 
-type ClientEntry = { key: string; client: BrowserClient; viewport?: Promise<unknown> };
+type ClientEntry = { key: string; client: BrowserClient };
 
 /** Closes one session's native browser daemon; true only when it is gone. */
 export type CloseBrowser = (session: string, spec: BrowserSpawnSpec) => Promise<boolean>;
@@ -336,6 +332,7 @@ export class BrowserRuntime {
   private clients = new Map<string, ClientEntry>();
   private recoveries = new Map<string, Promise<string | null>>();
   private toolLists = new Map<string, unknown>();
+  private idleCloseListeners = new Set<(session: string) => void>();
   private options: { requestTimeoutMs: number; takeoverTimeoutMs: number; idleMs: number; maxPending: number; resultBudget: number; recoveryCheckMs: number; laneWaitMs: number; callBudgetMs: number; followUpReserveMs: number };
   private closeBrowser: CloseBrowser;
   private applyViewport?: ApplyViewport;
@@ -343,6 +340,12 @@ export class BrowserRuntime {
   private relayCommand?: RelayCommand;
   private steps?: Pick<BrowserSteps, "before" | "after" | "signIn" | "note" | "forget" | "recentFrame" | "personTook">;
   private lanes = new BrowserLanes();
+  /** The page size people's views want; the agent-browser live view sets it, and every bot call applies it first. */
+  readonly pageSizes = new PageSizes({
+    apply: (session, size) => { const spec = this.gates.get(session)?.spec; return spec && this.applyViewport ? this.applyViewport(spec, size) : Promise.resolve(); },
+    lane: (session, work) => this.lanes.run(session, work, this.options.laneWaitMs),
+    watched: (session) => { const gate = this.gates.get(session); return Boolean(gate && gate.watchers > 0 && !gate.closing); },
+  });
   private holds = new SecretHolds((session, clear) => this.lanes.run(session, () => this.agentAction(session, clear, false), this.options.laneWaitMs).then((ran) => ran !== null));
   /** Strips held secrets (a filled password, a one-time code) from every tool result before the bot reads it. */
   private scrub: (text: string) => string;
@@ -513,9 +516,7 @@ export class BrowserRuntime {
       await entry.client.ready;
       beforeDispatch?.();
       if (method === "tools/call" && this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
-      if (method === "tools/call" && this.applyViewport) {
-        entry.viewport ??= this.applyViewport(spec).catch(() => undefined);
-        await entry.viewport;
+      if (method === "tools/call" && await this.pageSizes.beforeCall(session)) {
         beforeDispatch?.();
         if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
       }
@@ -530,13 +531,13 @@ export class BrowserRuntime {
           .then((result) => firstText(result).trim(), (error: unknown) => { if (error instanceof TransportError) throw error; return ""; });
         if (toolName === "agent_browser_eval" && await this.holds.refuses(session, pageUrl)) return { isError: true, content: [{ type: "text", text: SECRET_ON_PAGE }] };
         // Launch and session parameters OMB owns never reach the engine from a call.
-        const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
+        const request = method === "tools/call" ? this.pageSizes.callArguments(session, stripHarnessOwnedArguments(params)) : params;
         const args = (request as { arguments?: unknown } | null)?.arguments;
         const call: StepCall | null = this.steps && method === "tools/call" && toolName !== undefined ? {
           session, spec, tool: toolName, args: args && typeof args === "object" ? args as Record<string, unknown> : {}, ctx,
           stopped: () => gate.owner !== null || gate.uncertain || gate.closing,
           alive: () => { try { beforeDispatch?.(); return true; } catch { return false; } },
-          resize: async () => { if (this.applyViewport) await (entry.viewport = this.applyViewport(spec).catch(() => undefined)); },
+          resize: () => this.pageSizes.again(session),
         } : null;
         const stepsStarted = performance.now();
         const stepState = call ? await this.steps!.before(call) : null;
@@ -675,6 +676,7 @@ export class BrowserRuntime {
     }, (params) => this.latchLostCall(session, toolNameOf(params) ?? "browser"));
     const entry: ClientEntry = { key, client };
     this.clients.set(session, entry);
+    this.pageSizes.forget(session);
     return entry;
   }
 
@@ -804,21 +806,30 @@ export class BrowserRuntime {
     finally { gate.humans--; gate.lastUsed = Date.now(); this.changed(gate); }
   }
 
-  /** Keeps the browser open while watched; call the returned function when the view closes. */
+  /** A person opened a view, which counts as use; call the returned function when it closes. */
   watch(session: string, spec: { command: string; args?: readonly string[]; env?: Record<string, string | undefined> }): () => void {
     const gate = this.gate(session);
     gate.watchers++;
+    gate.lastUsed = Date.now();
     gate.spec = { command: spec.command, args: [...spec.args ?? []], env: { ...spec.env } };
     let watching = true;
     return () => {
       if (!watching) return;
       watching = false;
       gate.watchers--;
-      gate.lastUsed = Date.now();
     };
   }
 
   async settled(session: string): Promise<void> { await this.gates.get(session)?.idleClose; }
+
+  /** A bot call, a person's action or hold, or a close is under way in this session's browser. */
+  working(session: string): boolean {
+    const gate = this.gates.get(session);
+    return Boolean(gate && (gate.calls || gate.agents || gate.humans || gate.owner !== null || gate.closing || gate.releasing || this.lanes.held(session)));
+  }
+
+  /** Told just before an idle close stops a session's browser. */
+  onIdleClose(listener: (session: string) => void): void { this.idleCloseListeners.add(listener); }
 
   launchReady(spec: LaunchSpec): Promise<void> { return this.launch?.ready(spec) ?? Promise.resolve(); }
 
@@ -831,13 +842,14 @@ export class BrowserRuntime {
     if (gate && !gate.spec && spec) gate.spec = { command: spec.command, args: [...spec.args ?? []], env: { ...spec.env } };
     const launch = gate?.spec;
     if (!gate || !launch || attachesToChrome(launch.env) || !(idleMs > 0) || Date.now() - gate.lastUsed < idleMs) return false;
-    if (gate.calls || gate.agents || gate.humans || gate.owner !== null || gate.closing || gate.releasing || gate.watchers || this.lanes.held(session)) return false;
+    if (this.working(session)) return false;
     gate.closing = true;
     gate.ready = false;
     let finished!: () => void;
     gate.idleClose = new Promise((resolve) => { finished = resolve; });
     this.changed(gate);
     try {
+      for (const listener of this.idleCloseListeners) listener(session);
       if (!await this.closeBrowser(session, launch)) return false;
       this.steps?.forget(session);
       this.launch?.stopped(session);

@@ -49,10 +49,10 @@ Expect: A list to pick from. Choosing one and confirming sends it, on the Mac an
 ### 6. Confirm a draft
 
 ```text
-Draft a two-line note to my team saying the release moved to Friday. Don't send it yet.
+Draft a two-line note to my team saying the release moved to Friday, and check with me before you send it.
 ```
 
-Expect: A card with the draft and two buttons under it. Pressing one folds the card to a tick line.
+Expect: The draft and one short question such as "Shall I send it?", with no widget: a yes or no is answered in a word or with a 👍 or 👎 on that message ([Reactions](reactions.md)). After a 👍 the bot goes on by itself.
 
 ### 7. Table
 

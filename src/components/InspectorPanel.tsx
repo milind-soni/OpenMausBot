@@ -17,7 +17,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const { padClass, dragProps } = useCaptionChrome();
   const threadId = bot.threadId;
   const [lens, setLens] = useState<Lens>("run");
-  const activity = useMemo(() => timelineEvents(visibleMessages(bot)), [bot]);
+  const activity = useMemo(() => timelineEvents(visibleMessages(bot), bot), [bot]);
   const [page, setPage] = useState<InspectorPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -198,7 +198,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       </div>
 
       <div role="tabpanel" id={`inspector-panel-${lens}`} aria-labelledby={`inspector-tab-${lens}`} tabIndex={0} className="flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60">
-      {lens === "run" ? <RunLog key={threadId} events={activity} /> : <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11.5px]">
+      {lens === "run" ? <RunLog key={threadId} events={activity} /> : <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[12px]">
         {error && <div className="px-4 py-3 text-danger">couldn't load: {error}</div>}
         {page && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-ink-secondary">
@@ -228,7 +228,7 @@ function Row({ row, open, onToggle }: { row: InspectorRow; open: boolean; onTogg
         <span className="shrink-0 tabular-nums text-ink-secondary">{formatTime(row.at)}</span>
         <span
           className={cn(
-            "shrink-0 rounded px-1 text-[10.5px]",
+            "shrink-0 rounded px-1 text-[11px]",
             row.kind === "native" ? "bg-accent/15 text-accent" : row.tone === "error" ? "bg-danger/20 text-danger" : "bg-inset text-ink-secondary",
           )}
         >

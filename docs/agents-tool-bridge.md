@@ -158,7 +158,7 @@ the tool it ran.
 ## What changes for the person
 
 Tool rows in a conversation, work summaries and the daily log name a bridged
-call by the tool it ran (`mcp__agents__list_routines`, not
+call by the tool it ran (`mcp__agents__list_triggers`, not
 `mcp__agents__use_tool`). A `use_tool` call that named no tool, or none that
 exists, keeps its own name.
 

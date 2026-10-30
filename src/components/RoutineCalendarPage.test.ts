@@ -1,4 +1,4 @@
-import { Children, createElement, isValidElement, type ReactNode } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot } from "@/state/store";
@@ -21,7 +21,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { initialState } = await import("@/state/store");
-const { RoutinesPage } = await import("./RoutineCalendarPage");
+const { TriggersPage: RoutinesPage } = await import("./TriggersPage");
 
 const bot: Bot = {
   id: "runner", threadId: "execution", name: "Runner", title: "", description: "", color: "green",
@@ -35,31 +35,6 @@ const failed: RoutineRun = {
 const missed: RoutineRun = { ...failed, id: "missed-run", routineId: "stale", routineName: "Stale digest", status: "missed" };
 const completed: RoutineRun = { ...failed, id: "fine-run", routineId: "fine", routineName: "Fine brief", status: "completed" };
 
-type Button = { "aria-label"?: string; title?: string; children?: ReactNode; onClick?: () => void };
-function textOf(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  return Children.toArray(node).map((child) => isValidElement<{ children?: ReactNode }>(child) ? textOf(child.props.children) : textOf(child)).join("");
-}
-
-/** Capture the real page's returned controls under React's hook dispatcher. */
-function buttonsFrom(render: () => ReactNode): Map<string, Button> {
-  const buttons = new Map<string, Button>();
-  function visit(node: ReactNode) {
-    Children.forEach(node, (child) => {
-      if (!isValidElement<Button>(child)) return;
-      if (child.type === "button") buttons.set(child.props["aria-label"] ?? child.props.title ?? textOf(child.props.children), child.props);
-      visit(child.props.children);
-    });
-  }
-  function Capture() { visit(render()); return null; }
-  renderToStaticMarkup(createElement(Capture));
-  return buttons;
-}
-
-function page() {
-  return buttonsFrom(() => RoutinesPage({ onBack: vi.fn(), onOpenRoom: vi.fn() }));
-}
-
 function markupOf() {
   function Capture() { return RoutinesPage({ onBack: vi.fn(), onOpenRoom: vi.fn() }); }
   return renderToStaticMarkup(createElement(Capture));
@@ -71,37 +46,35 @@ beforeEach(() => {
 });
 afterAll(() => vi.unstubAllGlobals());
 
-describe("routine failure indicators", () => {
-  it("shows the errors pill and mark-all control only while failures are unread", () => {
-    const buttons = page();
-    expect(textOf(buttons.get("Open problem run logs")!.children)).toBe("2");
-    expect(buttons.has("Mark all as read")).toBe(true);
+describe("failures on the Automations page", () => {
+  const routine = (id: string, name: string) => ({
+    id, name, prompt: `Write the ${name.toLowerCase()}.`, target: "bot" as const, botId: bot.id, runOn: "maus" as const, enabled: true,
+    schedule: { type: "daily" as const, time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, nextRunAt: Date.now() + 3_600_000, createdAt: 0, updatedAt: 0,
+  });
 
-    fixture.state = { ...initialState, bots: [bot], routineRuns: [
-      { ...failed, seenAt: 1 }, { ...missed, seenAt: 1 }, completed,
+  it("shows a schedule that failed twice running as Needs you, first, with Run now to fix it", () => {
+    fixture.state = { ...initialState, bots: [bot], routines: [routine("fine", "Fine brief"), routine("broken", "Broken report")], routineRuns: [
+      { ...failed, id: "f1", scheduledFor: 200, createdAt: 200 }, { ...failed, id: "f2", scheduledFor: 100, createdAt: 100 }, completed,
     ] };
-    const read = markupOf();
-    expect(read).not.toContain('aria-label="Open problem run logs"');
-    expect(read).not.toContain('aria-label="Mark all as read"');
-  });
-
-  it("clears every failure indicator in one action from the header", () => {
-    page().get("Mark all as read")!.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "markAllRoutineRunsSeen" });
-  });
-
-  it("opens the logs on the shared problems set from the errors pill", () => {
-    page().get("Open problem run logs")!.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "showRoutines", section: "logs", runStatus: "problems" });
-  });
-
-  it("lands the focused problems filter on the logs instead of every status", () => {
-    fixture.state = { ...initialState, bots: [bot], routineRuns: [failed, missed, completed],
-      routinesFocus: { section: "logs", runStatus: "problems", nonce: 1 } };
     const markup = markupOf();
-    expect(markup).toContain("Broken report");
-    expect(markup).toContain("Stale digest");
-    expect(markup).not.toContain("Fine brief");
-    expect(markup).toContain('<option value="problems" selected="">Problems</option>');
+    expect(markup.indexOf("writes the broken report")).toBeGreaterThan(-1);
+    expect(markup.indexOf("writes the broken report")).toBeLessThan(markup.indexOf("writes the fine brief"));
+    expect(markup).toContain("Needs you: It didn&#x27;t finish the last 2 times.");
+    expect(markup).toContain("Run now</button>");
+  });
+
+  it("keeps a schedule Working after one failure it recovered from, with no problem pill or run logs", () => {
+    fixture.state = { ...initialState, bots: [bot], routines: [routine("fine", "Fine brief")], routineRuns: [
+      { ...completed, scheduledFor: 300, createdAt: 300 }, { ...failed, id: "old", routineId: "fine", scheduledFor: 100, createdAt: 100 },
+    ] };
+    const markup = markupOf();
+    expect(markup).not.toContain("Needs you");
+    expect(markup).not.toMatch(/Open problem run logs|Mark all as read|Run logs/);
+  });
+
+  it("lands a 'problems' link from a chat or notice on the list, needs-you first, instead of a separate log", () => {
+    fixture.state = { ...initialState, bots: [bot], routines: [routine("broken", "Broken report")], routineRuns: [failed, { ...failed, id: "f0", scheduledFor: 50, createdAt: 50 }],
+      routinesFocus: { section: "logs", runStatus: "problems", nonce: 1 } };
+    expect(markupOf()).toContain("Needs you: It didn&#x27;t finish the last 2 times.");
   });
 });

@@ -40,6 +40,26 @@ export function hasNativeAutoReview(driverKind: string | undefined): boolean {
   return ["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent"].includes(driverKind ?? "");
 }
 
+const APPROVAL_RANK: Record<ApprovalMode, number> = { ask: 0, edits: 1, auto: 2, full: 3, custom: 4 };
+
+export interface ApprovalFields {
+  approvalMode?: ApprovalMode;
+  autoApprove?: boolean;
+  alwaysAllow?: string[];
+}
+
+export function threadApproval(thread: ApprovalFields, bot: ApprovalFields): ApprovalFields {
+  return {
+    approvalMode: thread.approvalMode ?? (thread.autoApprove === undefined ? bot.approvalMode : undefined),
+    autoApprove: thread.autoApprove ?? bot.autoApprove,
+    alwaysAllow: structuredClone(thread.alwaysAllow ?? bot.alwaysAllow),
+  };
+}
+
+export function approvalModeWidens(from: ApprovalMode, to: ApprovalMode): boolean {
+  return APPROVAL_RANK[to] > APPROVAL_RANK[from];
+}
+
 export function isApprovalMode(value: unknown): value is ApprovalMode {
   return typeof value === "string" && (APPROVAL_MODES as readonly string[]).includes(value);
 }
@@ -78,8 +98,8 @@ export function approvalModeFor(bot: {
 }
 
 /** A private late-grant recovery may revoke an elevated mode even after a
- * turn began. It can only move to the fail-closed Ask mode; ordinary changes
- * remain blocked while the bot is working. */
+ * turn began. It can only move to the fail-closed Ask mode, and it also stops
+ * the running turn, which a native engine would otherwise finish elevated. */
 export function isEmergencyApprovalDowngrade(
   current: ApprovalMode,
   next: ApprovalMode,

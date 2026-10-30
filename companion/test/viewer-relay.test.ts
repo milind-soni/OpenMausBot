@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
@@ -18,6 +19,60 @@ afterEach(async () => {
     server.close(() => resolve());
   })));
 });
+
+const viewerFixture = async () => {
+  let resolveUpstream: (socket: Duplex) => void = () => {};
+  const upstream = new Promise<Duplex>((resolve) => {
+    resolveUpstream = resolve;
+  });
+  const viewer = createServer();
+  viewer.on("upgrade", (_req, socket) => {
+    sockets.push(socket);
+    socket.on("error", () => {});
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\nviewer-ready",
+    );
+    resolveUpstream(socket);
+  });
+  servers.push(viewer);
+  const viewerPort = await listen(viewer);
+  const relay = new CompanionViewerRelay();
+  const rewritten = relay.rewriteJoinResponse(
+    "/api/bots/bot-1/computer/join",
+    { joinUrl: `http://127.0.0.1:${viewerPort}/vnc.html` },
+    "device-1",
+  ) as { joinUrl: string };
+  const sessionPath = rewritten.joinUrl.split("#")[0].replace(/\/vnc\.html$/, "");
+  const device = { id: "device-1", cloudDesktopAccess: true };
+  const sidecar = createServer();
+  sidecar.on("upgrade", (req, socket, head) => relay.handleUpgrade(req, socket, head, device));
+  servers.push(sidecar);
+  const sidecarPort = await listen(sidecar);
+  return { relay, sessionPath, sidecar, sidecarPort, upstream };
+};
+
+const openViewer = (port: number, path: string, until?: string) =>
+  new Promise<{ client: Socket; response: string }>((resolve, reject) => {
+    const client = createConnection({ host: "127.0.0.1", port });
+    sockets.push(client);
+    let response = "";
+    client.setEncoding("utf8");
+    client.on("error", () => {});
+    client.on("data", (chunk) => {
+      response += chunk;
+      if (until && response.includes(until)) resolve({ client, response });
+    });
+    client.once("close", () => resolve({ client, response }));
+    client.once("connect", () => client.write(
+      `GET ${path} HTTP/1.1\r\n`
+        + `Host: 127.0.0.1:${port}\r\n`
+        + "Connection: Upgrade\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Sec-WebSocket-Key: dGVzdA==\r\n"
+        + "Sec-WebSocket-Version: 13\r\n\r\n",
+    ));
+    client.setTimeout(2_000, () => reject(new Error("viewer WebSocket timed out")));
+  });
 
 describe("VPS companion viewer relay", () => {
   it("rewrites only a generated loopback noVNC URL and keeps its password in the fragment", () => {
@@ -167,6 +222,68 @@ describe("VPS companion viewer relay", () => {
       closed,
       new Promise((_, reject) => setTimeout(() => reject(new Error("viewer WebSocket stayed open")), 2_000)),
     ])).resolves.toBeUndefined();
+  });
+
+  it("refuses viewer request targets that are not URLs", async () => {
+    const relay = new CompanionViewerRelay();
+    const rewritten = relay.rewriteJoinResponse(
+      "/api/bots/bot-1/computer/join",
+      { joinUrl: "http://127.0.0.1:45678/vnc.html" },
+      "device-1",
+    ) as { joinUrl: string };
+    const sessionPath = rewritten.joinUrl.split("#")[0].replace(/\/vnc\.html$/, "");
+    const device = { id: "device-1", cloudDesktopAccess: true };
+    expect(relay.isViewerPath("//[")).toBe(false);
+
+    const sidecar = createServer((req, res) => relay.handleHttp(req, res, device));
+    sidecar.on("upgrade", (req, socket, head) => relay.handleUpgrade(req, socket, head, device));
+    servers.push(sidecar);
+    const sidecarPort = await listen(sidecar);
+    expect((await fetch(`http://127.0.0.1:${sidecarPort}${sessionPath}//[`)).status).toBe(404);
+
+    const { response } = await openViewer(sidecarPort, `${sessionPath}//[`);
+    expect(response).toMatch(/^HTTP\/1\.1 404 /);
+  });
+
+  it("survives a reset on either end of a viewer WebSocket and closes the other end", async () => {
+    for (const reset of ["phone", "viewer"] as const) {
+      const { relay, sessionPath, sidecarPort, upstream } = await viewerFixture();
+      const { client } = await openViewer(sidecarPort, `${sessionPath}/websockify`, "viewer-ready");
+      const viewerSocket = await upstream;
+      const survivor = reset === "phone" ? viewerSocket : client;
+      // The viewer's server socket is half-open by default: its peer going away shows as `end`.
+      const closed = Promise.race([once(survivor, "end"), once(survivor, "close")]);
+      (reset === "phone" ? client : viewerSocket as Socket).resetAndDestroy();
+      await expect(Promise.race([
+        closed,
+        new Promise((_, fail) => setTimeout(() => fail(new Error(`${reset} reset left the other end open`)), 2_000)),
+      ])).resolves.toBeDefined();
+      relay.closeAll();
+    }
+  });
+
+  it("closes every viewer WebSocket at shutdown so the listener can close", async () => {
+    const { relay, sessionPath, sidecar, sidecarPort } = await viewerFixture();
+    const { client } = await openViewer(sidecarPort, `${sessionPath}/websockify`, "viewer-ready");
+    const pending = createConnection({ host: "127.0.0.1", port: sidecarPort });
+    sockets.push(pending);
+    pending.on("error", () => {});
+    pending.write(
+      "GET /vps-viewer/abcdefghijklmnopqrstuvwxyz012345/websockify HTTP/1.1\r\n"
+        + "Host: 127.0.0.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    );
+    await once(pending, "data");
+    const clientClosed = once(client, "close");
+    const listenerClosed = new Promise<void>((resolve) => {
+      sidecar.closeAllConnections();
+      relay.closeAll();
+      sidecar.close(() => resolve());
+    });
+    servers.splice(servers.indexOf(sidecar), 1);
+    await expect(Promise.race([
+      Promise.all([listenerClosed, clientClosed]),
+      new Promise((_, fail) => setTimeout(() => fail(new Error("a viewer WebSocket kept the listener open")), 2_000)),
+    ])).resolves.toBeDefined();
   });
 
   it("closes a viewer removed while its upstream WebSocket handshake is pending", async () => {

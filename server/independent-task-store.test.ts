@@ -563,9 +563,9 @@ describe("independent bot task state", () => {
     expect("pinned" in savedBots().find((entry) => entry.id === bot.id)!.tasks!.find((entry) => entry.threadId === task.threadId)!).toBe(false);
     const group = store.createGroup("Channel", [bot.id], false);
     const channel = store.createGroupTask(group.id, "Side")!;
-    expect(store.setGroupTaskPinned(group.id, channel.threadId, true)?.pinned).toBe(true);
+    expect(store.patchGroupTask(group.id, channel.threadId, { pinned: true })?.pinned).toBe(true);
     expect(savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!.pinned).toBe(true);
-    store.setGroupTaskPinned(group.id, channel.threadId, false);
+    store.patchGroupTask(group.id, channel.threadId, { pinned: false });
     expect("pinned" in savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!).toBe(false);
     const restarted = new Store(selection);
     expect(restarted.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);

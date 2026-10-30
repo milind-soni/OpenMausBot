@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { linuxDisablesGpu } from "../electron/linux-gpu.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wayland = process.env.OMB_SMOKE_WAYLAND === "1";
@@ -285,7 +286,7 @@ try {
   if (health?.app !== "openmausbot" || health.static !== true) {
     throw new Error(`unexpected embedded health response: ${JSON.stringify(health)}`);
   }
-  if (!String(title).includes("OpenMausBot")) throw new Error(`unexpected renderer title: ${title}`);
+  if (!/\bMausBot\b/.test(String(title))) throw new Error(`unexpected renderer title: ${title}`);
   if (capabilities.host.platform !== "linux") throw new Error("renderer did not report Linux");
   if (capabilities.host.session !== (wayland ? "wayland" : "x11")) {
     throw new Error(`renderer did not report the ${wayland ? "Wayland" : "X11"} contract`);
@@ -327,8 +328,8 @@ try {
       }
     }
   }
-  if (result.hardwareAccelerationEnabled !== false) {
-    throw new Error("Linux package did not disable hardware acceleration before startup");
+  if (result.hardwareAccelerationEnabled !== !linuxDisablesGpu({ env: desktopEnv })) {
+    throw new Error("Linux package did not apply the GPU rule (off on NVIDIA or OMB_LINUX_GPU=off) before startup");
   }
   if (displayMediaRequests !== 0) throw new Error("launch triggered display capture without user intent");
   await until(async () => brokerRequests > 0, "the optional slow-broker request");

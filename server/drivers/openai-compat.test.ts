@@ -34,6 +34,42 @@ describe("OpenAICompatDriver", () => {
     expect(cfg.apiKeyEnv).toBe("OPENAI_COMPAT_API_KEY");
   });
 
+  it.each([
+    ["I'll open the browser first.", {}, 2],
+    ["I'm working in the Cua Local VM and will launch XFCE Terminal first.", {}, 2],
+    ["The terminal is open and the task is complete.", {}, 1],
+    ["Should I open the terminal?", {}, 1],
+    ["I'll open the browser first.", { tools: false }, 1],
+  ] as const)("bounds OpenRouter announcement nudges: %s %j", async (text, config, count) => {
+    const bodies: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [] });
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+        { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "openrouter-nudge", displayName: "OpenRouter", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ model: "qwen/qwen3.5-35b-a3b", ...config }),
+      environment: { OPENAI_COMPAT_API_KEY: "synthetic-fixture-key" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "nudge", text: "Open the terminal." });
+      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: count !== 2 });
+      expect(bodies).toHaveLength(count);
+      expect(bodies[0]!.model).toBe("qwen/qwen3.5-35b-a3b");
+      if (count === 2) {
+        expect(bodies[1]!.messages.slice(0, -2)).toEqual(bodies[0]!.messages);
+        expect(bodies[1]!.messages.at(-2)).toEqual({ role: "assistant", content: text });
+        expect(bodies[1]!.messages.at(-1)).toMatchObject({ role: "user", content: expect.stringContaining("called no tool") });
+      }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
   it("honours an explicit url and apiKeyEnv override", () => {
     const cfg = OpenAICompatDriver.decodeConfig({
       url: "https://api.groq.com/openai/v1/",
@@ -227,6 +263,123 @@ describe("OpenAICompatDriver", () => {
         { id: "vendor/model-b", label: "vendor/model-b", custom: true },
       ],
     });
+    await inst.dispose();
+  });
+
+  it("lists LM Studio chat keys from the native catalog and skips the OpenAI variant id", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/models")) {
+        return Response.json({
+          models: [
+            { type: "llm", key: "google/gemma-4-26b-a4b" },
+            { type: "embedding", key: "acme/vector-model" },
+            { type: "decision", key: "acme/router" },
+          ],
+        });
+      }
+      if (url.endsWith("/v1/models")) return Response.json({ data: [{ id: "google/gemma-4-26b-a4b@q4_k_m" }] });
+      return new Response("no", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "lm-studio",
+      displayName: "LM Studio",
+      enabled: true,
+      config: { url: "http://127.0.0.1:1234/v1", key: "lm-studio", apiKeyEnv: "OPENAI_COMPAT_API_KEY", catalog: "lmstudio" },
+      environment: {},
+    });
+    await inst.refreshModels?.();
+    expect(inst.models.options.map((option) => option.id)).toEqual(["google/gemma-4-26b-a4b"]);
+    expect(fetchMock.mock.calls.some((call) => {
+      const url = String(call[0]);
+      return url.endsWith("/v1/models") && !url.includes("/api/v1/");
+    })).toBe(false);
+    await inst.dispose();
+  });
+
+  it("keeps a configured LM Studio model when the native catalog omits it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/models")) {
+        return Response.json({ models: [{ type: "llm", key: "other/model" }] });
+      }
+      return new Response("no", { status: 500 });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "lm-studio",
+      displayName: "LM Studio",
+      enabled: true,
+      config: {
+        url: "http://127.0.0.1:1234/v1",
+        key: "lm-studio",
+        apiKeyEnv: "OPENAI_COMPAT_API_KEY",
+        model: "my-loaded-instance",
+        catalog: "lmstudio",
+      },
+      environment: {},
+    });
+    await inst.refreshModels?.();
+    expect(inst.models.default).toBe("my-loaded-instance");
+    expect(inst.models.options.map((option) => option.id)).toEqual(["my-loaded-instance", "other/model"]);
+    await inst.dispose();
+  });
+
+  it("asks only a server added as LM Studio for LM Studio's own catalog", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => Response.json({ data: [{ id: "local/model" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "local-server",
+      displayName: "llama.cpp",
+      enabled: true,
+      config: { url: "http://127.0.0.1:8080/v1", key: "local", apiKeyEnv: "OPENAI_COMPAT_API_KEY" },
+      environment: {},
+    });
+    await inst.refreshModels?.();
+    const asked = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(asked).toContain("http://127.0.0.1:8080/v1/models");
+    expect(asked.filter((url) => url.includes("/api/v1/models"))).toEqual([]);
+    expect(inst.models.options.map((option) => option.id)).toContain("local/model");
+    await inst.dispose();
+  });
+
+  it("falls back to OpenAI-compatible models when the native LM Studio catalog request fails", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/models")) throw new Error("native offline");
+      if (url.endsWith("/v1/models")) return Response.json({ data: [{ id: "local-chat" }] });
+      return new Response("no", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "lm-studio",
+      displayName: "LM Studio",
+      enabled: true,
+      config: { url: "http://127.0.0.1:1234/v1", key: "lm-studio", apiKeyEnv: "OPENAI_COMPAT_API_KEY", catalog: "lmstudio" },
+      environment: {},
+    });
+    await inst.refreshModels?.();
+    expect(inst.models.options.map((option) => option.id)).toEqual(["local-chat"]);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/v1/models"))).toBe(true);
+    await inst.dispose();
+  });
+
+  it("uses the OpenAI model list when the LM Studio catalog is not JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/models")) return new Response("not-json", { status: 200, headers: { "content-type": "text/plain" } });
+      if (url.endsWith("/v1/models")) return Response.json({ data: [{ id: "local-chat" }] });
+      return new Response("no", { status: 500 });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "lm-studio",
+      displayName: "LM Studio",
+      enabled: true,
+      config: { url: "http://127.0.0.1:1234/v1", key: "lm-studio", apiKeyEnv: "OPENAI_COMPAT_API_KEY", catalog: "lmstudio" },
+      environment: {},
+    });
+    await inst.refreshModels?.();
+    expect(inst.models.options.map((option) => option.id)).toEqual(["local-chat"]);
     await inst.dispose();
   });
 
@@ -1017,3 +1170,14 @@ it("openai-compat preserves an explicit tools-off connection and rejects ambiguo
   expect(OpenAICompatDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
   expect(() => OpenAICompatDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
 });
+
+describe("how long a turn waits for a reply", () => {
+  it("accepts 1 to 60 whole minutes and refuses anything else", () => {
+    expect(OpenAICompatDriver.decodeConfig({ url: "http://127.0.0.1:11434/v1", replyWaitMinutes: 20 })).toMatchObject({ replyWaitMinutes: 20 });
+    expect(OpenAICompatDriver.decodeConfig({ url: "http://127.0.0.1:11434/v1" })).not.toHaveProperty("replyWaitMinutes");
+    for (const bad of [0, 61, 2.5, "10", null]) {
+      expect(() => OpenAICompatDriver.decodeConfig({ url: "http://127.0.0.1:11434/v1", replyWaitMinutes: bad })).toThrow(/replyWaitMinutes/);
+    }
+  });
+});
+

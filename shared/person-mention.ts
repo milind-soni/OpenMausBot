@@ -56,11 +56,18 @@ function maskFences(text: string): string {
   }).join("\n");
 }
 
+/** The text with every code block and code span blanked, offsets kept. CommonMark code spans close on a backtick run
+ * of the opening length and may cross line endings. */
+export function proseOnly(text: string): string {
+  return maskFences(text).replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, (code) => code.replace(/[^\n]/g, " "));
+}
+
 export function personMentionExcerpt(text: string, options: PersonTagOptions = {}): string | null {
-  // CommonMark code spans close on a backtick run of the opening length and may cross line endings.
-  const prose = maskFences(text).replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, (code) => code.replace(/[^\n]/g, " "));
-  const hit = personMentionRanges(prose, options)[0];
-  if (!hit) return null;
+  const hit = personMentionRanges(proseOnly(text), options)[0];
+  return hit ? excerptAround(text, hit) : null;
+}
+
+function excerptAround(text: string, hit: { start: number; end: number }): string {
   const lineStart = text.lastIndexOf("\n", hit.start) + 1;
   const lineEnd = text.indexOf("\n", hit.end);
   const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd).trim();
@@ -70,4 +77,46 @@ export function personMentionExcerpt(text: string, options: PersonTagOptions = {
   const paraStart = before === -1 ? 0 : before;
   const after = text.slice(hit.end).search(/\n\s*\n/);
   return text.slice(paraStart, after === -1 ? undefined : hit.end + after).trim();
+}
+
+/** A teammate on a Team Cloud as a tag can name them: `key` is their person key. */
+export interface MentionablePerson { key: string; names: readonly string[] }
+
+/** Each teammate's tags: their whole name, and their first name too when no other teammate shares it. */
+export function mentionablePeople(people: ReadonlyArray<{ key: string; name: string }>): MentionablePerson[] {
+  const clean = (name: string) => name.replace(/^@+/, "").replace(/\s+/g, " ").trim();
+  const usable = (name: string) => name.length > 0 && name.toLowerCase() !== PERSON_TAG && !RESERVED.has(name.toLowerCase());
+  const first = (name: string) => clean(name).split(" ")[0] ?? "";
+  const sharing = new Map<string, number>();
+  for (const person of people) {
+    const short = first(person.name).toLowerCase();
+    sharing.set(short, (sharing.get(short) ?? 0) + 1);
+  }
+  return people.map((person) => {
+    const whole = clean(person.name);
+    const short = first(person.name);
+    const names = [whole, ...(short !== whole && sharing.get(short.toLowerCase()) === 1 ? [short] : [])].filter(usable);
+    return { key: person.key, names };
+  }).filter((person) => person.names.length > 0);
+}
+
+/** The teammates a text tags, in prose only (never inside code), each once with the line or paragraph that tags them.
+ * A bot's name of the same length or longer wins, as for the person's own tag. */
+export function teammateMentions(text: string, people: readonly MentionablePerson[], botNames: readonly string[] = []): Array<{ key: string; excerpt: string }> {
+  const prose = proseOnly(text);
+  const found = new Map<string, string>();
+  let at = -1;
+  while ((at = prose.indexOf("@", at + 1)) !== -1) {
+    if (!isMentionBoundary(prose, at)) continue;
+    const rest = prose.slice(at + 1);
+    let best: { key: string; length: number } | null = null;
+    for (const person of people) {
+      const length = personTagAt(rest, person.names, botNames);
+      if (length !== undefined && (!best || length > best.length)) best = { key: person.key, length };
+    }
+    if (!best) continue;
+    if (!found.has(best.key)) found.set(best.key, excerptAround(text, { start: at, end: at + best.length + 1 }));
+    at += best.length;
+  }
+  return [...found].map(([key, excerpt]) => ({ key, excerpt }));
 }

@@ -11,7 +11,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useCaptionChrome: () => ({}),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useReactor: () => "user" }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 
 const { ChatView } = await import("./ChatView");

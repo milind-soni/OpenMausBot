@@ -37,6 +37,7 @@ const HISTOGRAM_BINS = 20;
 const SAMPLE_SCAN_ROWS = 1_000;
 const STATS_CACHE_MAX = 64;
 const PAGE_LIMIT_MAX = 10 * DATA_LIMITS.pageSize;
+const INTERRUPT_DELIVERY_MS = 10;
 const RESULT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLAIN_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 
@@ -164,6 +165,8 @@ function missingTableName(message: string): string | null {
 
 type InterruptCause = "timeout" | "cancelled";
 
+type RunState = { interrupted: InterruptCause | null; retry?: NodeJS.Timeout };
+
 function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | null, timeoutMs: number): DataFailure {
   if (error instanceof DataFailure) return error;
   const message = error instanceof Error ? error.message : String(error);
@@ -178,7 +181,7 @@ function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | 
 
 export class Lane {
   private queue: Promise<unknown> = Promise.resolve();
-  private running: { interrupted: InterruptCause | null } | null = null;
+  private running: RunState | null = null;
 
   readonly connection: DuckDB.DuckDBConnection;
   constructor(connection: DuckDB.DuckDBConnection) { this.connection = connection; }
@@ -192,12 +195,24 @@ export class Lane {
   private async execute<T>(sql: string, options: { timeoutMs?: number; signal?: AbortSignal }, work: (connection: DuckDB.DuckDBConnection) => Promise<T>): Promise<T> {
     const timeoutMs = options.timeoutMs ?? DATA_LIMITS.sqlTimeoutMs;
     if (options.signal?.aborted) throw new DataFailure({ code: "cancelled", message: "Cancelled before it ran.", sql });
-    const state: { interrupted: InterruptCause | null } = { interrupted: null };
+    const state: RunState = { interrupted: null };
+    const deadline = Date.now() + timeoutMs;
     this.running = state;
+    // DuckDB honours an interrupt only once its statement is dispatched, so a cause keeps re-delivering
+    // until the statement settles: one that lands first is not lost, and no cause blocks the next.
     const interrupt = (cause: InterruptCause) => {
-      if (state.interrupted) return;
-      state.interrupted = cause;
+      state.interrupted ??= cause;
       this.connection.interrupt();
+      if (state.retry || Date.now() >= deadline) return;
+      const retry = setInterval(() => {
+        if (Date.now() >= deadline) {
+          clearInterval(retry);
+          state.retry = undefined;
+          return;
+        }
+        this.connection.interrupt();
+      }, INTERRUPT_DELIVERY_MS);
+      state.retry = retry;
     };
     const timer = setTimeout(() => interrupt("timeout"), timeoutMs);
     const onAbort = () => interrupt("cancelled");
@@ -208,6 +223,7 @@ export class Lane {
       throw failureFrom(error, sql, state.interrupted, timeoutMs);
     } finally {
       clearTimeout(timer);
+      if (state.retry) clearInterval(state.retry);
       options.signal?.removeEventListener("abort", onAbort);
       this.running = null;
     }

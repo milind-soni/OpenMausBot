@@ -47,6 +47,35 @@ profile and conversation selectors, stale response isolation, and the absence
 of effects on sibling conversations must also be checked with the isolated
 [chat UI workflow](chat-ui.md) before claiming the GUI is verified.
 
+## OpenCode 2 and GitHub Copilot models
+
+OpenCode 2 rejects `models --verbose`, so a model's effort levels reach the
+catalog only from its ACP session: discovery selects each model once on a
+throwaway session and keeps the `effort` choices OpenCode then names. This
+optional test checks that path end to end with an explicitly supplied
+OpenCode 2.1.4 binary (`@opencode/cli`) and a loopback stand-in for the Copilot
+API:
+
+```sh
+OMB_OPENCODE2_E2E_CLI=/absolute/path/to/opencode pnpm exec vitest run server/opencode-copilot-efforts.e2e.test.ts
+```
+
+The test imports a synthetic Copilot credential whose `apiEndpoint` is the
+loopback server, so no GitHub account is involved. The stand-in's `/models`
+offers a Responses model with an effort list, a Messages model with adaptive
+thinking, and a chat model with neither. The checks require `/api/instances`
+to offer `low`…`xhigh` and `default` for the first, `low`…`high` and `default`
+for the second and nothing for the third, then send four turns in one
+conversation: `high`, then `low` (a switch mid-conversation), then the Messages
+model at `medium`, then the plain model. The stand-in must receive
+`reasoning.effort`, then `output_config.effort`, with each value, and no effort
+for the last; each answer echoes the effort it received. Evidence is written
+beside the server log as `*.opencode-copilot-efforts.json`.
+
+This proves the catalog and the turn transport against OpenCode's own Copilot
+code and a simulated API. It does not prove which efforts a real Copilot
+account lists for each model; OpenCode reads those from Copilot's `/models`.
+
 ## An unavailable engine returns without variant support
 
 ```sh

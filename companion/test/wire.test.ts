@@ -39,11 +39,59 @@ describe("scrub", () => {
     expect(cleaned).toEqual({ box: { configured: false }, vps: { configured: true } });
   });
 
+  it("withholds per-bot and inventory alias tags but keeps ordinary fields", () => {
+    const payload = {
+      configured: true,
+      available: true,
+      vpsAliases: ["production-vps", "alpha-vps"],
+      problem: null,
+      instances: [
+        { name: "openmausbot-vps-one", state: "running", vpsAlias: "production-vps", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false },
+        { name: "openmausbot-vps-two", state: "exited", vpsAlias: "alpha-vps", ownerBotId: null, ownerName: null, orphaned: true, inUse: false },
+      ],
+      bot: { id: "b1", name: "Rio", vpsAlias: "alpha-vps" },
+    };
+    const cleaned = scrub(payload);
+
+    expect(JSON.stringify(cleaned)).not.toContain("vpsAliases");
+    expect(JSON.stringify(cleaned)).not.toContain("vpsAlias");
+    expect(JSON.stringify(cleaned)).not.toContain("production-vps");
+    expect(JSON.stringify(cleaned)).not.toContain("alpha-vps");
+    expect(cleaned).toEqual({
+      configured: true,
+      available: true,
+      problem: null,
+      instances: [
+        { name: "openmausbot-vps-one", state: "running", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false },
+        { name: "openmausbot-vps-two", state: "exited", ownerBotId: null, ownerName: null, orphaned: true, inUse: false },
+      ],
+      bot: { id: "b1", name: "Rio" },
+    });
+  });
+
   it("leaves values it does not own alone", () => {
     expect(scrub(null)).toBe(null);
     expect(scrub(42)).toBe(42);
     expect(scrub("resumeCursors")).toBe("resumeCursors"); // a string, not a key
     expect(scrub([1, [2, [3]]])).toEqual([1, [2, [3]]]);
+  });
+
+  it("leaves the alias's text alone wherever it is not a withheld key", () => {
+    // "vps" is a natural SSH alias; the bot's backend, a container name and a message say "vps" too.
+    const payload = {
+      bot: { id: "b1", cloudBackend: "vps", vpsAlias: "vps", computers: [{ name: "openmausbot-vps-one" }] },
+      messages: [{ text: "Is the vps up?" }],
+    };
+    expect(scrub(payload)).toEqual({
+      bot: { id: "b1", cloudBackend: "vps", computers: [{ name: "openmausbot-vps-one" }] },
+      messages: [{ text: "Is the vps up?" }],
+    });
+  });
+
+  it("ignores empty and absent withheld values", () => {
+    const cleaned = scrub({ vpsAlias: "", vpsAliases: [], problem: "plain words", nested: { list: ["", "kept"] } });
+
+    expect(cleaned).toEqual({ problem: "plain words", nested: { list: ["", "kept"] } });
   });
 });
 
@@ -80,6 +128,17 @@ describe("createSseScrubber", () => {
     expect(out).not.toContain("resumeCursors");
     const data = JSON.parse(out.split("\n").find((l) => l.startsWith("data:"))!.slice(5));
     expect(data).toEqual({ kind: "bot", bot: { id: "b1" } });
+  });
+
+  it("strips per-bot alias tags from a bot frame but never the id: line", () => {
+    const frame = 'id: abc123:7\ndata: {"kind":"bot","bot":{"id":"b1","vpsAlias":"alpha-vps","vpsAliases":["alpha-vps"],"computers":[{"name":"n1","vpsAlias":"alpha-vps"}]}}\n\n';
+    const out = createSseScrubber()(frame);
+
+    expect(out).toContain("id: abc123:7\n");
+    expect(out).not.toContain("vpsAlias");
+    expect(out).not.toContain("alpha-vps");
+    const data = JSON.parse(out.split("\n").find((l) => l.startsWith("data:"))!.slice(5));
+    expect(data).toEqual({ kind: "bot", bot: { id: "b1", computers: [{ name: "n1" }] } });
   });
 
   it("emits an event as soon as it is complete, not when the chunk ends", () => {

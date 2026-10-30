@@ -41,11 +41,21 @@ describe("a turn the trial's Claude credit refused", () => {
     expect(usedUp.html).toContain("Dein Claude-Guthaben der Testphase ist aufgebraucht.");
     expect(usedUp.html).not.toContain("Your trial Claude credit is used up");
     expect(usedUp.buttons).toEqual(["Eigene KI verbinden"]);
-    expect(show(stored("ended")).html).toContain("Das Claude-Guthaben der Testphase ist auf My Cloud nicht mehr verfügbar.");
+    expect(show(stored("ended")).html).toContain("Das Claude-Guthaben der Testphase ist in der Cloud nicht mehr verfügbar.");
     expect(show(stored("too_low")).html).toContain("reicht für diesen Chat nicht aus");
     const paused = show(stored("paused"), vi.fn());
     expect(paused.html).toContain("Das Claude-Guthaben der Testphase ist vorübergehend pausiert.");
     expect(paused.buttons.some(label => label.includes("Eigene KI"))).toBe(false);
+  });
+
+  it("used up or gone, is a quiet note with the one way on, never an error; paused and too low stay errors", () => {
+    for (const kind of ["used_up", "ended"] as const) {
+      const { html, buttons } = show(stored(kind));
+      expect(html).toContain(`role="note" data-trial-credit-notice="${kind}"`);
+      expect(html).not.toMatch(/danger|lucide-triangle-alert|lucide-alert-triangle/);
+      expect(buttons).toEqual(["Connect your own AI"]);
+    }
+    for (const kind of ["paused", "too_low"] as const) expect(show(stored(kind), vi.fn()).html).toContain("danger");
   });
 
   it("is told apart by its words alone, whichever engine the turn ran on", () => {

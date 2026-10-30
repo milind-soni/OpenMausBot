@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { setLocale } from "@/lib/i18n";
 import { RunLog } from "./RunLog";
 import { timelineEvents, type TimelineEvent } from "@/lib/taskTimeline";
 
@@ -22,10 +23,26 @@ describe("Run log", () => {
     expect(html).toContain("pnpm control:omb doctor");
     expect(html).toContain("Completed");
     expect(html).toContain("Failed");
-    expect(html).toContain("In progress");
+    expect(html).toContain("No result");
+    expect(html).not.toContain("animate-spin");
     expect(html).toContain("Commands may be shortened");
     expect(html).toContain('aria-label="Copy redacted run log"');
     expect(html).not.toContain("tests passed");
+  });
+
+  it("retains the live indicator only for the active tool turn", () => {
+    const html = render(timelineEvents([{ id: "live", at: 100, role: "bot", kind: "activity", tool: { name: "Bash" } }], { busy: true, turnStartedAt: 90 }));
+    expect(html).toContain("In progress");
+    expect(html).toContain("animate-spin");
+  });
+  it("translates unverified status in active locale", () => {
+    try {
+      setLocale("es");
+      const html = render(timelineEvents([{ id: "c", at: 3, role: "bot", kind: "activity", tool: { name: "Read" } }]));
+      expect(html).toContain("Sin resultado");
+    } finally {
+      setLocale("en");
+    }
   });
 
   it("keeps long histories bounded and wraps command text", () => {

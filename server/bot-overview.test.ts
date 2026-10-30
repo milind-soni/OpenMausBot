@@ -42,12 +42,20 @@ const WONT_ORDER = [
 ];
 
 describe("buildBotOverview", () => {
-  it("describes additional teams only for an authorized Chief", () => {
+  it("describes additional departments only for an authorized Chief", () => {
     const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managedSections: ["Engineering", "Research"], peers: undefined }, engine: { agentsMcp: true }, sectionPeers: 3 });
-    expect(buildBotOverview(facts).reaches).toContain("Can talk to 3 other bots in its allowed teams.");
-    expect(buildBotOverview(facts).reaches).toContain("May also coordinate these teams: Engineering, Research.");
+    expect(buildBotOverview(facts).reaches).toContain("Also in charge of these departments: Engineering, Research.");
     facts.bot.chiefOfStaff = false;
     expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("Engineering");
+  });
+
+  it("says a bot can talk to every other bot unless a peers list narrows it", () => {
+    const open = baseFacts({ bot: { ...baseFacts().bot, peers: undefined }, engine: { agentsMcp: true }, sectionPeers: 3 });
+    expect(buildBotOverview(open).reaches).toContain("Can talk to all 3 other bots, in any department.");
+    expect(buildBotOverview({ ...open, sectionPeers: 1 }).reaches).toContain("Can talk to the other bot.");
+    const listed = baseFacts({ bot: { ...baseFacts().bot, peers: ["a", "b"] }, engine: { agentsMcp: true }, sectionPeers: 2 });
+    expect(buildBotOverview(listed).reaches).toContain("Talks only to the bots chosen for it.");
+    expect(buildBotOverview(listed).reaches.join(" ")).not.toContain("department");
   });
   it("yields all six wont lines in order and no does lines for a bot on Ask", () => {
     const overview = buildBotOverview(baseFacts({ bot: { ...baseFacts().bot, approvalMode: "ask" } }));

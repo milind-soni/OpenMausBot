@@ -377,7 +377,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
 
       const saved = await api("PUT", "/api/config?secretStorage=external", { decider: { provider: "openrouter", openrouterModel: MODEL, openrouterKey: OR_KEY } });
       expect(saved.status).toBe(200);
-      expect(saved.body.decider).toEqual({ provider: "openrouter", model: MODEL, api: "chat", configured: true, enabled: true, jobs: { roomRouting: true } });
+      expect(saved.body.decider).toEqual({ provider: "openrouter", model: MODEL, api: "chat", configured: true, keySource: "own", enabled: true, jobs: { roomRouting: true } });
       expect(saved.text).not.toContain(OR_KEY);
       const check = openrouterRequests.at(-1)!;
       expect(check.auth).toBe(`Bearer ${OR_KEY}`);
@@ -431,6 +431,29 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
       expect(check.auth).toBe(`Bearer ${OR_KEY}`);
       expect(check.body).toMatchObject({ model: DECISIONS_MODEL, state: expect.anything(), question: { type: "noul" } });
       expect((await api("PUT", "/api/config", { decider: { openrouterModel: MODEL } })).body.decider).toMatchObject({ model: MODEL, api: "chat" });
+    });
+
+    it("the OpenRouter key from API keys is never sent to an operator's base URL; a key of its own still is", async () => {
+      const SHARED = "sk-or-v1-e2e-shared-value-4c7a1f";
+      // No own key of any kind: the Jev key saved earlier would otherwise come first.
+      const cleared = await api("PUT", "/api/config", { decider: { openrouterKey: "", key: "" } });
+      expect(cleared.body.decider).toMatchObject({ configured: false, enabled: false });
+
+      const keyed = await api("PUT", "/api/config", { openrouter: { key: SHARED } });
+      expect(keyed.status).toBe(200);
+      expect(keyed.body.decider).toEqual({ provider: "jev", configured: false, enabled: false, jobs: { roomRouting: true } });
+      expect((await api("PUT", "/api/config", { decider: { enabled: true } })).status).toBe(400);
+      expect(await api("POST", "/api/decider/test", {})).toMatchObject({ body: { ok: false, reason: "no_key" } });
+
+      const own = await api("PUT", "/api/config", { decider: { openrouterKey: OR_KEY } });
+      expect(own.body.decider).toMatchObject({ configured: true, keySource: "own", enabled: true });
+      expect(await api("POST", "/api/decider/test", {})).toMatchObject({ body: { ok: true } });
+      expect(openrouterRequests.at(-1)!.auth).toBe(`Bearer ${OR_KEY}`);
+
+      expect(openrouterRequests.every((request) => request.auth !== `Bearer ${SHARED}`)).toBe(true);
+      for (const response of [cleared, keyed, own]) expect(response.text).not.toContain(SHARED);
+      expect((await api("GET", "/api/config")).text).not.toContain(SHARED);
+      expect(output).not.toContain(SHARED);
     });
 
     it("engines never see the OpenRouter decision key", () => {

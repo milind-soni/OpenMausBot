@@ -19,3 +19,6 @@ export const SIDEBAR_AND_PANEL_FIT = "(min-width: 1280px)";
 
 /** Tailwind's md breakpoint. */
 export const SIDEBAR_INLINE = "(min-width: 768px)";
+
+/** Below Tailwind's md breakpoint: the phone layout, where the sidebar is a full-screen bot list. */
+export const PHONE_LAYOUT = "(max-width: 767.98px)";

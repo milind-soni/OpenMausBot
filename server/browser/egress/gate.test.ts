@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 import type { NetworkInterfaceInfo } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { LinkOpened } from "../../../electron/device-link-protocol.mjs";
 import { gateChromeFlags, openGate, resolveTarget, type EgressGate, type GateTarget } from "./gate.ts";
 import { ownAddresses, refusalFor, type EgressRules, type Refusal } from "./policy.ts";
 
@@ -250,5 +251,120 @@ describe("egress gate", () => {
     ]);
     expect(gateChromeFlags(4321, "linux").at(-1)).toBe("--password-store=basic");
     expect(gateChromeFlags(4321, "win32")).toHaveLength(4);
+  });
+});
+
+describe("egress gate with the person's own computer as the way out", () => {
+  type Opened = LinkOpened;
+  /** An upstream that answers each open as `answer` says, and joins a stream to an echo of what it carries. */
+  function upstream(answer: (target: GateTarget) => Opened | Promise<Opened>) {
+    const asked: GateTarget[] = [];
+    return { asked, upstream: { open: async (target: GateTarget) => { asked.push(target); return answer(target); } } };
+  }
+  const joinedEcho = (): Opened => ({
+    join: (client: NodeNet.Socket, early: readonly Buffer[] = []) => {
+      if (early.length) client.write(Buffer.concat([...early]));
+      client.on("data", (chunk: Buffer) => client.write(chunk));
+    },
+    cancel: () => {},
+  });
+  async function gateThrough(way: ReturnType<typeof upstream>["upstream"] | null, resolve?: (host: string) => Promise<Array<{ address: string; family: number }>>) {
+    const refusals: Array<[GateTarget, string]> = [];
+    const opened = await openGate({
+      refuseName: (target) => (target.host.endsWith("reddit.com") ? "reddit" : null),
+      decide: (target, addresses) => refusalFor(target, addresses, { host: "cloud", ownPort: (port) => port === 8799, botPort: async () => false, localNetwork: false, allowed: () => false }, ownAddresses(interfaces())),
+      onRefusal: (target, reason) => refusals.push([target, reason]),
+      upstream: () => way,
+      own: () => ownAddresses(interfaces()),
+      ...(resolve ? { resolve } : {}),
+    });
+    gates.push(opened);
+    return { port: opened.port, refusals };
+  }
+
+  it("sends a public name and a public address through it, unresolved here, bytes early and late included", async () => {
+    const looked: string[] = [];
+    const way = upstream(joinedEcho);
+    const { port } = await gateThrough(way.upstream, async (host) => { looked.push(host); return []; });
+    const echoed = await new Promise<string>((resolve) => {
+      const socket = NodeNet.connect(port, "127.0.0.1", () => {
+        socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0]), domainTarget("www.instagram.com", 443), Buffer.from("early")]));
+      });
+      let received = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        received = Buffer.concat([received, chunk]);
+        if (received.length === 12 + 5) socket.write("+late");
+        if (received.length >= 12 + 10) { socket.destroy(); resolve(received.subarray(12).toString()); }
+      });
+    });
+    expect(echoed).toBe("early+late");
+    const { code, socket } = await connectThrough(port, ipv4Target("93.184.215.14", 443));
+    socket.destroy();
+    expect(code).toBe(0);
+    expect(way.asked).toEqual([{ host: "www.instagram.com", port: 443 }, { host: "93.184.215.14", port: 443 }]);
+    expect(looked, "the person's computer looks the name up, not My Cloud").toEqual([]);
+  });
+
+  it("keeps this machine's names and every non-public address on its own way, under its own policy", async () => {
+    const way = upstream(joinedEcho);
+    const { port, refusals } = await gateThrough(way.upstream);
+    for (const target of [domainTarget("localhost", 8799), ipv4Target("127.0.0.1", 8799), ipv4Target("10.0.0.1", 80), ipv4Target("169.254.169.254", 80), ipv6Target("fdaa::3", 4280), ipv6Target("64:ff9b::a00:1", 80), ipv4Target(OWN_PUBLIC_IPV4, 443)]) {
+      const { code, socket } = await connectThrough(port, target);
+      socket.destroy();
+      expect(code).toBe(2);
+    }
+    expect(way.asked, "nothing private is ever asked of the person's computer").toEqual([]);
+    expect(refusals.map(([, reason]) => reason)).toEqual(["omb", "omb", "local-network", "metadata", "local-network", "local-network", "this-computer"]);
+  });
+
+  it("refuses Reddit before anything else, and never asks the person's computer for it", async () => {
+    const way = upstream(joinedEcho);
+    const { port, refusals } = await gateThrough(way.upstream);
+    const { code, socket } = await connectThrough(port, domainTarget("old.reddit.com", 443));
+    socket.destroy();
+    expect(code).toBe(2);
+    expect(way.asked).toEqual([]);
+    expect(refusals).toEqual([[{ host: "old.reddit.com", port: 443 }, "reddit"]]);
+  });
+
+  it("reports the computer's refusal as the page's, and answers its failures as SOCKS does", async () => {
+    const way = upstream((target) => (target.host === "router.test" ? { refused: "home-network" } : target.port === 8080 ? { refused: "port" } : { failed: target.host === "closed.test" ? "refused" : "unreachable" }));
+    const { port, refusals } = await gateThrough(way.upstream);
+    const codes: number[] = [];
+    for (const target of [domainTarget("router.test", 443), domainTarget("example.test", 8080), domainTarget("closed.test", 443), domainTarget("down.test", 443)]) {
+      const { code, socket } = await connectThrough(port, target);
+      socket.destroy();
+      codes.push(code);
+    }
+    expect(codes).toEqual([2, 2, 5, 4]);
+    expect(refusals.map(([target, reason]) => [target.host, reason])).toEqual([["router.test", "home-network"], ["example.test", "port"]]);
+  });
+
+  it("goes its own way when the computer is gone before it answers, and the moment none is offered", async () => {
+    const resolved: string[] = [];
+    const resolve = async (host: string) => { resolved.push(host); return []; };
+    const gone = await gateThrough(upstream(() => ({ gone: true })).upstream, resolve);
+    const first = await connectThrough(gone.port, domainTarget("example.test", 443));
+    first.socket.destroy();
+    expect(first.code, "answered at once, from this server's own way (the name does not resolve here)").toBe(4);
+    const none = await gateThrough(null, resolve);
+    const second = await connectThrough(none.port, domainTarget("example.test", 443));
+    second.socket.destroy();
+    expect(second.code).toBe(4);
+    expect(resolved).toEqual(["example.test", "example.test"]);
+  });
+
+  it("cancels a stream whose browser connection left while the computer was connecting it", async () => {
+    let answer: (opened: Opened) => void = () => {};
+    const cancelled = vi.fn();
+    const way = upstream(() => new Promise<Opened>((resolve) => { answer = resolve; }));
+    const { port } = await gateThrough(way.upstream);
+    const socket = NodeNet.connect(port, "127.0.0.1", () => socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0]), domainTarget("example.test", 443)])));
+    socket.on("error", () => {});
+    await vi.waitFor(() => expect(way.asked).toHaveLength(1));
+    socket.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    answer({ join: () => { throw new Error("joined a connection that left"); }, cancel: cancelled });
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
   });
 });

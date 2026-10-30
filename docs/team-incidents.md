@@ -7,7 +7,7 @@ in and nothing anywhere else — the person found it hours later, from a phone,
 by opening the desktop and reading every thread, then retried by hand.
 
 Now the team's coordinator hears first. When a run breaks on a bot whose
-section has a **Chief of Staff** (or that a Chief was allowed to coordinate),
+section has a **Chief of Staff** (or that a Chief was put in charge of),
 OpenMausBot:
 
 1. opens — once — a **Team incidents** thread on the Chief and leaves a chip

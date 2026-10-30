@@ -13,7 +13,8 @@ import { usePushToTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
-import { CallTargetButton } from "./CallView";
+import { CallTargetButton, type CallButtonPlacement } from "./CallView";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 
@@ -23,12 +24,16 @@ const CALL_ENDPOINT_MS = 850;
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
-export function GroupCallButton({ group, members }: { group: Group; members: Bot[] }) {
+/** `fill` (Simple composer): a round button in that colour, with its glyph in `ink`. */
+export function GroupCallButton({ group, members, placement, fill, ink }: { group: Group; members: Bot[]; placement?: CallButtonPlacement; fill?: string; ink?: string }) {
   const { capabilities, ready } = useDesktopCapabilities();
   if (group.dm) return null;
   if (ready && !capabilities.dictation.available) return null;
   return (
     <CallTargetButton
+      placement={placement}
+      fill={fill}
+      ink={ink}
       targetId={group.id}
       targetName={group.name}
       voices={members.map((member) => member.voice)}
@@ -37,6 +42,12 @@ export function GroupCallButton({ group, members }: { group: Group; members: Bot
       onStart={() => track("group_call_started", { memberCount: members.length })}
     />
   );
+}
+
+/** The room header's call button: in Simple mode the room calls from its composer instead. */
+export function RoomHeaderCallButton({ group, members }: { group: Group; members: Bot[] }) {
+  const advanced = useAdvancedMode();
+  return advanced ? <GroupCallButton group={group} members={members} /> : null;
 }
 
 export function GroupCallOverlay({ group, members }: { group: Group; members: Bot[] }) {
@@ -480,7 +491,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
               <div
                 key={member.id}
                 className={cn(
-                  "flex w-[124px] flex-col items-center gap-2 rounded-3xl px-2 py-3 transition-all duration-200",
+                  "flex w-[124px] flex-col items-center gap-2 rounded-2xl px-2 py-3 transition-all duration-200",
                   focused ? "scale-105 bg-raised/70 shadow-lg" : "opacity-75",
                 )}
               >
@@ -503,7 +514,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{group.name}</div>
-        <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
+        <div className="flex items-center gap-2 text-[14px] text-ink-secondary">
           {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
           {status}
         </div>
@@ -526,7 +537,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       {note && (
-        <div className="flex max-w-[520px] flex-col items-center gap-2 text-center text-[12.5px] text-warning">
+        <div className="flex max-w-[520px] flex-col items-center gap-2 text-center text-[13px] text-warning">
           <span>{note}</span>
           <button
             onClick={listen}
@@ -536,13 +547,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           </button>
         </div>
       )}
-      {speech.error && <div className="max-w-[460px] text-center text-[12.5px] text-danger">{speech.error}</div>}
+      {speech.error && <div className="max-w-[460px] text-center text-[13px] text-danger">{speech.error}</div>}
 
       <div className="flex items-center gap-3">
         {speaker.isSpeaking() && (
           <button
             onClick={interruptSpeech}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            className="rounded-full border border-hairline/50 px-4 py-2 text-[14px] text-ink hover:bg-raised"
           >
             Interrupt
           </button>
@@ -555,7 +566,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-tertiary">
+      <div className="text-[12px] text-ink-tertiary">
         Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
       </div>
     </div>

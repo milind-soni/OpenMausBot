@@ -77,6 +77,44 @@ describe("the Connected apps card state", () => {
   });
 });
 
+describe("saving a grant", () => {
+  const apps = ["gmail", "slack", "notion"] as const;
+
+  it("keeps the other connected apps at All tools when the record does not exist yet", () => {
+    // An absent record means every app keeps every tool. Restricting one app
+    // must not silently empty the rest.
+    expect(withServiceGrant(undefined, "gmail", { tools: ["GMAIL_SEND_EMAIL"] }, apps)).toEqual({
+      gmail: { tools: ["GMAIL_SEND_EMAIL"] },
+      slack: { tools: "*" },
+      notion: { tools: "*" },
+    });
+  });
+
+  it("keeps the other connected apps at All tools when the first grant is a wildcard", () => {
+    expect(withServiceGrant(null, "slack", { tools: "*" }, apps)).toEqual({
+      gmail: { tools: "*" },
+      slack: { tools: "*" },
+      notion: { tools: "*" },
+    });
+  });
+
+  it("leaves an existing record exactly as it was for the other apps", () => {
+    const current = { gmail: { tools: "*" }, slack: { tools: ["SLACK_POST_MESSAGE"] } };
+    expect(withServiceGrant(current, "gmail", { tools: ["GMAIL_FETCH_EMAILS"] }, apps)).toEqual({
+      gmail: { tools: ["GMAIL_FETCH_EMAILS"] },
+      slack: { tools: ["SLACK_POST_MESSAGE"] },
+    });
+  });
+
+  it("still removes a service the person turns off, even after seeding", () => {
+    const seeded = withServiceGrant(undefined, "gmail", { tools: "*" }, apps);
+    expect(withServiceGrant(seeded, "notion", null, apps)).toEqual({
+      gmail: { tools: "*" },
+      slack: { tools: "*" },
+    });
+  });
+});
+
 describe("editing one service's grant", () => {
   it("creates the record on a first grant and keeps other services intact", () => {
     expect(withServiceGrant(undefined, "gmail", { tools: ["GMAIL_SEND_EMAIL"] }))

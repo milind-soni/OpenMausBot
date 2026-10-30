@@ -5,6 +5,7 @@ export type TrialCreditEnd = "used_up" | "ended";
 export const trialCreditEnds = (refusal: TrialCreditRefusal): refusal is TrialCreditEnd => refusal === "used_up" || refusal === "ended";
 
 export const TRIAL_CREDIT_OWN_AI = "Your own AI is connected on My Cloud, so bots use it instead of the trial Claude credit.";
+export const TRIAL_KEY_HELD = "Saved on My Cloud. Your bots use this key once the trial's Claude credit runs out.";
 
 const RELAY_CODES = "trial_credit_used_up|trial_credit_ended|trial_credit_too_low|invalid_api_key";
 const RELAY_CODE = new RegExp(`"code"\\s*:\\s*"(${RELAY_CODES})"|\\((${RELAY_CODES})\\)$`);

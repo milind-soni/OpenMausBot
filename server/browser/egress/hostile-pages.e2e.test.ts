@@ -3,15 +3,20 @@
 // OpenMausBot's stand-in must see nothing.
 import type { ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
+import { connect as tcpConnect, type AddressInfo, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { runDeviceLink } from "../../../electron/device-link.mjs";
+import { DeviceLinks } from "../../device-links.ts";
 
 import { botEngineSessions, killCliTree, spawnCli } from "../../procs.ts";
 import { findChrome, launchPipeChrome, type ChromePage } from "../../testing/chrome-pipe.ts";
 import { hostTimeout } from "../../testing/host-timeout.ts";
 import { gateChromeFlags, openGate, resolveTarget } from "./gate.ts";
 import { ListenerOwnership } from "./ownership.ts";
-import { refusalFor, type EgressHost } from "./policy.ts";
+import { namesThisMachine, refusalFor, type EgressHost } from "./policy.ts";
+import { REDDIT_REFUSAL } from "./reddit.ts";
 import { BrowserEgress, OwnListeners } from "./registry.ts";
 
 const chrome = findChrome();
@@ -185,6 +190,108 @@ describe.skipIf(!chrome)("S6: a hostile page in a bot's browser", () => {
     expect(reasons("10.0.0.1")).toEqual(new Set(["local-network"]));
     expect(reasons("169.254.169.254")).toEqual(new Set(["metadata"]));
     expect(reasons("fd00:ec2::254")).toEqual(new Set(["metadata"]));
+  }, hostTimeout(240_000));
+
+  it("never opens Reddit on MausBot Cloud, by navigation, redirect, link, frame or request, and tells the bot why", async () => {
+    const targets = ["https://www.reddit.com/", "https://old.reddit.com/r/test/", "https://i.redd.it/", "https://www.redditstatic.com/", "https://reddit.app.link/"];
+    // Only this machine's names resolve, so nothing here can reach Reddit, even if the block broke.
+    const looked: string[] = [];
+    const egress = new BrowserEgress();
+    egress.configure({
+      host: "cloud", config: () => ({}), ownership: siteOwnership(),
+      listeners: new OwnListeners("cloud", { env: {}, streamPorts: () => [], devToolsPorts: () => [] }),
+      resolve: async (name) => { looked.push(name); return namesThisMachine(name) ? resolveTarget(name) : []; },
+    });
+    const browser = await launchPipeChrome(chrome!, gateChromeFlags(await egress.open("s6-reddit")));
+    try {
+      const page = await browser.page();
+      const home = `http://127.0.0.1:${sitePort}/`;
+      await page.navigate(home);
+      await page.loaded(home);
+      const { results, navigations } = await attack(page, targets);
+      blockedEverywhere(results, targets);
+      for (const target of targets) {
+        expect(navigations[target], target).toMatch(/ERR_(SOCKS|PROXY|TUNNEL)/);
+        expect(navigations[`redirect ${target}`], `redirect ${target}`).toMatch(/ERR_/);
+      }
+      const notice = egress.takeNotice("s6-reddit");
+      expect(notice).toContain('"www.reddit.com:443" (blocked: Reddit)');
+      expect(notice!.endsWith(` ${REDDIT_REFUSAL}`)).toBe(true);
+      // A link the bot clicks.
+      await page.navigate(home);
+      await page.loaded(home);
+      await page.evaluate(`(() => { const link = document.createElement("a"); link.href = "https://np.reddit.com/r/test/"; document.body.append(link); link.click(); return true; })()`);
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(egress.takeNotice("s6-reddit")).toContain('"np.reddit.com:443" (blocked: Reddit)');
+      expect(looked.filter((name) => /redd/u.test(name)), "no Reddit name was looked up").toEqual([]);
+    } finally {
+      await browser.close();
+      await egress.close();
+    }
+  }, hostTimeout(240_000));
+
+  // My Cloud's browsing through the person's own computer: every target below is a name only the computer resolves, so
+  // My Cloud cannot judge it; the computer must refuse each one itself, and connect nowhere. My Cloud sends only the sites
+  // that turn away data centres there (home-sites.ts); this gate sends every name, as a Cloud gone wrong would.
+  it("through the person's computer, refuses their home network, the computer itself, metadata, NAT64 and other ports, on the computer", async () => {
+    const PUBLIC = "93.184.215.14";
+    const names: Record<string, string[]> = {
+      "lan.test": ["192.168.1.1"], "mac-loopback.test": ["127.0.0.1"], "metadata.test": ["169.254.169.254"], "nat64.test": ["64:ff9b::c0a8:101"],
+      "own.test": ["192.168.7.20"], "home-public.test": ["203.0.113.9"], "public.test": [PUBLIC], "rebind.test": [PUBLIC, "10.0.0.1"],
+    };
+    const connects: string[] = [];
+    const http = createServer();
+    const links = new DeviceLinks({ pingMs: 1_000 });
+    http.on("upgrade", (req, socket, head) => links.accept({ req, socket: socket as Socket, head }, { key: "mac", person: "cloud-home", internet: true, chrome: false, seenAs: "203.0.113.9", live: () => true }));
+    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+    const stop = new AbortController();
+    const link = runDeviceLink({
+      url: `ws://127.0.0.1:${(http.address() as AddressInfo).port}/api/shared-computers/mac/link`, signal: stop.signal,
+      egress: {
+        interfaces: () => ({ en0: [{ address: "192.168.7.20", cidr: "192.168.7.20/24", family: "IPv4", internal: false, netmask: "255.255.255.0", mac: "00:00:00:00:00:00" }] }) as never,
+        resolve: async (host: string) => (names[host] ?? []).map((address) => ({ address, family: address.includes(":") ? 6 : 4 })),
+        // The computer's own connect, recorded: had the check let anything through, OpenMausBot's stand-in would see it.
+        connect: (options: { host: string; port: number }) => { connects.push(`${options.host}:${options.port}`); return tcpConnect(ombPort, "127.0.0.1"); },
+      },
+    });
+    const egress = new BrowserEgress();
+    egress.configure({ host: "cloud", config: () => ({}), ownership: siteOwnership(), listeners: new OwnListeners("cloud", { env: {}, streamPorts: () => [], devToolsPorts: () => [] }) });
+    await expect.poll(() => links.route("cloud-home") !== null, { timeout: 5_000 }).toBe(true);
+    const refusals: Array<{ host: string; port: number; reason: string }> = [];
+    const gate = await openGate({
+      refuseName: (target) => egress.nameRefusal(target.host),
+      decide: (target, addresses) => refusalFor(target, addresses, egress.rules()),
+      onRefusal: (target, reason) => refusals.push({ ...target, reason }),
+      upstream: () => links.route("cloud-home"),
+    });
+    const browser = await launchPipeChrome(chrome!, gateChromeFlags(gate.port));
+    const targets = ["http://lan.test/", "http://mac-loopback.test/", "https://mac-loopback.test/", "http://metadata.test/latest/meta-data/", "http://nat64.test/",
+      "http://own.test/", "https://home-public.test/", `http://public.test:${ombPort}/`, "http://public.test:8080/", "https://rebind.test/"];
+    try {
+      const page = await browser.page();
+      const home = `http://127.0.0.1:${sitePort}/`;
+      expect((await page.navigate(home)).errorText, "the bot's own dev server on My Cloud still loads").toBeUndefined();
+      await page.loaded(home);
+      const { results, navigations } = await attack(page, targets);
+      blockedEverywhere(results, targets);
+      for (const target of targets) expect(navigations[target], target).toMatch(/ERR_/);
+      expect(connects, "the computer connected nowhere").toEqual([]);
+      expect(hits, "OpenMausBot's stand-in saw nothing").toEqual([]);
+      const reasons = (host: string) => new Set(refusals.filter((refusal) => refusal.host === host).map((refusal) => `${refusal.port} ${refusal.reason}`));
+      for (const host of ["lan.test", "nat64.test", "own.test"]) expect(reasons(host), host).toEqual(new Set(["80 home-network"]));
+      expect(reasons("mac-loopback.test")).toEqual(new Set(["80 home-network", "443 home-network"]));
+      for (const host of ["home-public.test", "rebind.test"]) expect(reasons(host), host).toEqual(new Set(["443 home-network"]));
+      expect(reasons("metadata.test")).toEqual(new Set(["80 metadata"]));
+      expect(reasons("public.test")).toEqual(new Set([`${ombPort} port`, "8080 port"]));
+    } finally {
+      await browser.close();
+      await gate.close();
+      await egress.close();
+      stop.abort();
+      await link;
+      links.close();
+      http.close();
+    }
   }, hostTimeout(240_000));
 
   it("tells the bot what its page tried in its next browser result, and loads public pages unchanged", async () => {

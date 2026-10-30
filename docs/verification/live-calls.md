@@ -27,43 +27,31 @@ is "The call id and the call row" in
   by call id and reads the whole transcript, so a record lists only its own
   call's work, also the steps that land after the row.
 
-## Live calls from a phone need Pro
+## Anyone may call, with their own OpenAI key
 
-A call from the desktop app (client `desktop`, or `web` on this computer) is
-free. A call from a phone needs an active OMB Cloud plan of any tier (Personal,
-Pro or Max): a call that comes through the companion (it carries the paired
-device, which the phone cannot choose or drop) or names client `ios`/`android`
-(`liveCallFromPhone` in `server/live-call-controller.ts`). Without one,
+Live calls need no plan, from any client: the desktop app, a web browser, or a
+phone through the companion. Each call uses the person's own OpenAI key: the
+separate Live key when one is saved (`live.key`, `OMB_OPENAI_LIVE_KEY`, or the
+desktop credential `openaiLiveKey`), else the OpenAI API key from Settings →
+API keys (`openai.key`, `OMB_OPENAI_API_KEY`); `liveCallKey` in
+`server/live-settings.ts`. `GET /api/config` reports `live.configured` and
+`live.keySource` (`live` or `openai`), never the key. Without either key,
 `POST /api/live/session` answers
-`402 { "error": "Live calls from your phone need a Pro plan.", "needsPro": true }`
-before it would ask for a key (`409 needsKey`) and before anything reaches
-OpenAI; the companion passes it to the phones unchanged. The desktop then
-shows the Pro card under the call button instead of the key form, with an offer
-only for someone signed out (signing in first) or free. A payment still being
-linked counts as Pro. While the plan cannot be checked (not read yet, signing
-in, OMB Cloud unreachable, or this computer's sign-in ended) the plan last
-verified decides. A Cloud home always counts. The plan is asked only when a
-phone's call starts, so a plan change never ends a running call. The rule is
-`liveCallsAllowed` in `electron/pro-plan.mjs`; the design is "Live calls need
-Pro" in the spec above.
-
-The desktop app hands its server the answer: `OMB_PRO_PLAN` at spawn, then a
-private `openmausbot:pro-plan` message on each Cloud sign-in change. A server it
-did not start (dev, tests, headless or Docker, and this fixture) says Pro with
-`OMB_PRO_PLAN=1`, which the fixture launcher lets cross only as `1`.
+`409 { "error": "Live calls use your own OpenAI key. Add it in Settings → API keys.", "needsKey": true }`
+before anything reaches OpenAI, and the companion passes it to the phones
+unchanged. The desktop and web app show that sentence under the call button
+with **Open API keys**, which opens Settings at API keys.
 
 ```sh
-node --test electron/pro-plan.node-test.mjs
-pnpm exec vitest run server/pro-plan.test.ts server/live-call-controller.test.ts server/routes/live.test.ts companion/test/proxy-response.test.ts scripts/control-omb.test.ts
-pnpm exec vitest run src/lib/live-call-media.test.ts src/components/CallView.live-mode.test.ts src/components/ProIntroduction.test.ts
+pnpm exec vitest run server/live-settings.test.ts server/live-call-controller.test.ts server/routes/live.test.ts companion/test/proxy-response.test.ts
+pnpm exec vitest run src/lib/live-call-media.test.ts src/components/CallView.live-mode.test.ts src/components/LiveKeyNeeded.test.ts src/components/LiveCallBar.render.test.ts
 ```
 
-`server/live-call.e2e.test.ts` boots its main server with `OMB_PRO_PLAN=1`, a
-Cloud home without it (Pro, so only the key is asked for), and a third server
-the way the desktop app starts one (`OMB_PRO_PLAN=0`, then the private message
-over a stand-in parent port): refused with 402 and no session, a call once the
-message says Pro, still live after the message says not Pro, and the next start
-refused.
+`server/live-call.e2e.test.ts` boots a server with no plan and no key: a
+phone's start (through the companion or by its own client) and a desktop's
+start answer 409 `needsKey`; after the OpenAI key is saved through
+`PUT /api/config`, a phone's call starts with that key; a separate Live key
+then wins; neither key appears in the config or the log.
 
 ## User path
 
@@ -106,8 +94,8 @@ standalone fake cannot be scripted from the shell, so nothing is asked on it:
 # terminal 1: the fake GPT-Live prints its base URL
 node --experimental-strip-types server/testing/fake-openai-live.ts
 # terminal 2: the renderer fixture, pointed at it (the key only ever reaches
-# the fake), and Pro, which Live calls need
-OMB_OPENAI_LIVE_URL=http://127.0.0.1:FAKE_PORT OMB_OPENAI_LIVE_KEY=sk-fake OMB_PRO_PLAN=1 \
+# the fake)
+OMB_OPENAI_LIVE_URL=http://127.0.0.1:FAKE_PORT OMB_OPENAI_LIVE_KEY=sk-fake \
   node --experimental-strip-types scripts/control-omb.ts ui launch
 # terminal 3, with the url, botId and ui handle it prints
 pnpm control:omb messages --bot BOT_ID --url http://127.0.0.1:PORT
@@ -148,9 +136,9 @@ no `title`, because nothing was asked; and the snapshot's transcript has
   End a call a failed run left open, or restart the fixture.
 - `OMB_OPENAI_LIVE_URL` crosses into a fixture only when it is a loopback
   `http://127.0.0.1:PORT`, and `OMB_OPENAI_LIVE_KEY` only with it.
-- Without `OMB_PRO_PLAN=1` the fixture answers every start with `402`
-  `needsPro`, and the desktop shows the Pro card under the call button. That
-  is the way to see the card by hand; the runs recorded below predate the gate.
+- Without `OMB_OPENAI_LIVE_KEY` the fixture answers every start with `409`
+  `needsKey`, and the desktop shows "Live calls use your own OpenAI key" with
+  **Open API keys** under the call button. That is the way to see it by hand.
 
 ## Boundaries
 

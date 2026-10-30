@@ -2,8 +2,9 @@
 // stops with the server, and a killed daemon leaves its Chrome running, re-parented to init. Every process is recorded with
 // its start time, so a pid the system has since given to another program is never signalled.
 import { execFile } from "node:child_process";
-import { readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import { basename, isAbsolute } from "node:path";
+import { readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { hostname } from "node:os";
+import { basename, isAbsolute, join, sep } from "node:path";
 
 /** `started` tells a process from a later one that reused its pid; a zombie has exited and counts as gone. */
 type ListedProcess = { ppid: number; pgid: number; zombie: boolean; started: string; args?: string };
@@ -26,6 +27,9 @@ function temporaryProfile(args: string | undefined): string | null {
   const dir = args?.split(" ").find((arg) => arg.startsWith("--user-data-dir="))?.slice("--user-data-dir=".length);
   return dir && isAbsolute(dir) && TEMPORARY_PROFILE.test(basename(dir)) ? dir : null;
 }
+
+/** macOS keeps ps at /bin/ps; a server started with a bare PATH (a test fixture's, a service's) still finds it there. */
+const PS = process.platform === "darwin" ? "/bin/ps" : "ps";
 
 /** The C locale keeps `ps` start times in one fixed five-word form. */
 function execText(file: string, args: string[]): Promise<string | null> {
@@ -50,7 +54,7 @@ function linuxArgs(pid: number): string {
 
 async function processArgs(pid: number): Promise<string | null> {
   if (process.platform === "linux") return linuxArgs(pid) || null;
-  return (await execText("ps", ["-ww", "-o", "args=", "-p", String(pid)]))?.trim() || null;
+  return (await execText(PS, ["-ww", "-o", "args=", "-p", String(pid)]))?.trim() || null;
 }
 
 /** Linux reads /proc (an image without procps still works), one file at a time so a busy host keeps its descriptors. */
@@ -72,7 +76,7 @@ async function processTable(withArgs = false): Promise<Map<number, ListedProcess
     return table;
   }
   // lstart is always five words (Tue Oct 13 23:48:58 2026); args follow.
-  const listing = await execText("ps", ["-A", "-ww", "-o", `pid=,ppid=,pgid=,stat=,lstart=${withArgs ? ",args=" : ""}`]);
+  const listing = await execText(PS, ["-A", "-ww", "-o", `pid=,ppid=,pgid=,stat=,lstart=${withArgs ? ",args=" : ""}`]);
   if (listing === null) return null;
   for (const line of listing.split("\n")) {
     const [pid, ppid, pgid, stat, ...rest] = line.trim().split(/\s+/);
@@ -88,7 +92,7 @@ async function processEnvironment(pid: number): Promise<Map<string, string> | nu
     try { entries = readFileSync(`/proc/${pid}/environ`, "utf8").split("\0"); } catch { return null; }
   } else {
     // ps -E appends the environment to the arguments, space separated.
-    const listing = await execText("ps", ["-E", "-ww", "-o", "command=", "-p", String(pid)]);
+    const listing = await execText(PS, ["-E", "-ww", "-o", "command=", "-p", String(pid)]);
     if (listing === null) return null;
     entries = listing.trim().split(/\s+/);
   }
@@ -138,15 +142,22 @@ export async function browserProcessTree(binaryPath: string, daemon: number, ses
   return { daemon, members, groups, profiles };
 }
 
-/** Chromes that outlived their daemon. agent-browser starts Chrome on an `agent-browser-chrome-` profile in its own group, and
- * Chrome inherits AGENT_BROWSER_DAEMON=1 and the session's name. POSIX only: Windows lists no environments. */
-export async function orphanedBrowsers(home: string | undefined): Promise<Array<{ session: string; tree: BrowserProcessTree }>> {
+/** Whether a Chrome's arguments name a profile folder inside `root`; a path may hold spaces where `ps` joins arguments with them. */
+function profileUnder(args: string, root: string): boolean {
+  return args.includes(`--user-data-dir=${root.replace(/[\\/]+$/, "")}${sep}`);
+}
+
+/** Chromes that outlived their daemon. agent-browser starts Chrome on an `agent-browser-chrome-` profile, or a saved session's
+ * own profile under `profiles`, in its own group, and Chrome inherits AGENT_BROWSER_DAEMON=1 and the session's name. Only a
+ * temporary profile is ever listed for removal. POSIX only: Windows lists no environments. */
+export async function orphanedBrowsers(home: string | undefined, profiles?: string): Promise<Array<{ session: string; tree: BrowserProcessTree }>> {
   const table = await processTable(true);
   if (!table) return [];
   const found: Array<{ session: string; tree: BrowserProcessTree }> = [];
   for (const [pid, entry] of table) {
     const args = entry.args?.split(" ") ?? [];
-    if (entry.zombie || entry.pgid !== pid || !args.includes("--remote-debugging-port=0") || !args.some((arg) => arg.startsWith("--user-data-dir=") && arg.includes("agent-browser-chrome-"))) continue;
+    const onProfile = args.some((arg) => arg.startsWith("--user-data-dir=") && arg.includes("agent-browser-chrome-")) || (!!profiles && profileUnder(entry.args ?? "", profiles));
+    if (entry.zombie || entry.pgid !== pid || !args.includes("--remote-debugging-port=0") || !onProfile) continue;
     // A daemon runs as agent-browser (or its platform build) with no arguments.
     const parent = table.get(entry.ppid);
     if (parent && !parent.zombie && entry.ppid > 1 && (/(?:^|\/)agent-browser[^/\s]*$/.test(parent.args ?? "") || (await processEnvironment(entry.ppid))?.get("AGENT_BROWSER_DAEMON") === "1")) continue;
@@ -157,6 +168,49 @@ export async function orphanedBrowsers(home: string | undefined): Promise<Array<
     found.push({ session, tree: { daemon: pid, members: new Map([[pid, entry.started]]), groups: [pid], profiles: profile ? [profile] : [] } });
   }
   return found;
+}
+
+/** The lock a daemon's own Chrome held when last checked, and that daemon: while both live, a call lists no processes. */
+const heldProfiles = new Map<string, { target: string; daemon: number }>();
+
+function namesProfile(args: string, dir: string): boolean {
+  const flag = `--user-data-dir=${dir}`;
+  for (let at = args.indexOf(flag); at >= 0; at = args.indexOf(flag, at + 1)) {
+    if (at + flag.length === args.length || args[at + flag.length] === " ") return true;
+  }
+  return false;
+}
+
+async function daemonOf(pid: number, table: Map<number, ListedProcess>): Promise<number | null> {
+  for (let parent = table.get(pid)?.ppid ?? 0, depth = 0; parent > 1 && depth < 3; parent = table.get(parent)?.ppid ?? 0, depth++) {
+    if (table.get(parent)?.zombie) return null;
+    if ((await processEnvironment(parent))?.get("AGENT_BROWSER_DAEMON") === "1") return parent;
+  }
+  return null;
+}
+
+/** POSIX Chrome locks its profile with a SingletonLock symlink to `<host>-<pid>`. A later launch on the profile hands itself
+ * to the Chrome the lock names and exits, and refuses a lock that names another host (a renamed Mac, a moved Cloud volume).
+ * A Chrome whose daemon was killed keeps running, re-parented, and would take every later launch, so it is stopped; then the
+ * lock goes. A daemon's own Chrome keeps it. The profile's contents are never touched. */
+export async function releaseBrowserProfile(dir: string | undefined): Promise<void> {
+  if (!dir || process.platform === "win32") return;
+  let target: string;
+  try { target = readlinkSync(join(dir, "SingletonLock")); }
+  catch { heldProfiles.delete(dir); return; }
+  const match = /^(.*)-(\d+)$/.exec(target);
+  const held = heldProfiles.get(dir);
+  if (held?.target === target && match?.[1] === hostname() && processAlive(Number(match[2])) && processAlive(held.daemon)) return;
+  heldProfiles.delete(dir);
+  const table = await processTable(true);
+  if (!table) return;
+  const browsers = [...table].filter(([, entry]) => !entry.zombie && namesProfile(entry.args ?? "", dir) && !/(?:^|\s)--type=/.test(entry.args ?? ""));
+  for (const [pid, entry] of browsers) {
+    const daemon = await daemonOf(pid, table);
+    if (daemon !== null) { heldProfiles.set(dir, { target, daemon }); return; }
+    if (!await stopBrowserProcesses({ daemon: pid, members: new Map([[pid, entry.started]]), groups: entry.pgid === pid ? [pid] : [] })) return;
+  }
+  for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) { try { unlinkSync(join(dir, name)); } catch {} }
 }
 
 function stillRuns(tree: BrowserProcessTree, table: Map<number, ListedProcess>, pid: number): boolean {

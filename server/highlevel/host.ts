@@ -27,7 +27,8 @@ export interface HighLevelHost {
   handle(body: unknown, capability: { botId: string; threadId: string }, assertActive: () => void): Promise<HighLevelToolsList | HighLevelToolResult>;
   /** The HIGHLEVEL_* names for the per-bot tool grants picker (/api/connectors/tools); null when the integration is unavailable. */
   toolListing(): { highlevel: Array<{ name: string; description: string }> } | null;
-  /** Merges {highlevel:{connected}} into the Cloud health connectors report. */
+  /** Merges {highlevel:{connected}} into the Cloud health connectors report, only while a HighLevel connection is saved
+   * (signed in, or needing sign-in again): a HighLevel never set up is not listed. */
   health(base: Promise<Record<string, { connected: boolean; pending?: boolean }>> | null): Promise<Record<string, { connected: boolean; pending?: boolean }>> | null;
 }
 
@@ -76,9 +77,10 @@ export function createHighLevelHost(deps: HighLevelHostDeps): HighLevelHost {
       });
     },
     health(base) {
-      const connected = service.connected();
-      if (!base && !service.store.get()) return null;
-      return (base ?? Promise.resolve({})).then((connectors) => ({ ...connectors, highlevel: { connected } }), () => ({ highlevel: { connected } }));
+      const connection = service.store.get();
+      if (!connection) return base;
+      const highlevel = { connected: connection.state === "signed-in" };
+      return (base ?? Promise.resolve({})).then((connectors) => ({ ...connectors, highlevel }), () => ({ highlevel }));
     },
   };
 }
