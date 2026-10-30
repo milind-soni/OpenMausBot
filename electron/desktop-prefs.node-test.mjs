@@ -13,12 +13,12 @@ const require = createRequire(import.meta.url);
 const environments = require("./environments.cjs");
 const localOrigin = require("./local-origin.cjs");
 
-const POPUP = "cloud-pro-update-2026-10";
+const POPUP = "cloud-pro-update-2026-10", BOAT = "boat-credit-2026-11";
 const HOUR = 3600_000, NOON = new Date(2026, 9, 16, 12).getTime();
 const LOCAL = "http://127.0.0.1:18799", CLOUD = "https://omb-u-1.fly.dev", VPS = "https://bots.example.test";
 
-test("the popup is the one notice a page can record; seen and analytics survive a restart; a broken record never stops the app", () => {
-  assert.deepEqual([...DESKTOP_NOTICES], [POPUP]);
+test("the popup and Boat's credit offer are the notices a page can record; seen and analytics survive a restart; a broken record never stops the app", () => {
+  assert.deepEqual([...DESKTOP_NOTICES], [POPUP, BOAT]);
   let saved = null;
   const writes = [];
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { writes.push(value); saved = structuredClone(value); }, now: () => NOON });
@@ -27,9 +27,11 @@ test("the popup is the one notice a page can record; seen and analytics survive 
   assert.equal(writes.length, 0, "nothing a page names outside the list is written");
   prefs.markSeen(POPUP); prefs.markSeen(POPUP);
   assert.deepEqual(prefs.seen(), [POPUP]); assert.equal(writes.length, 1);
+  prefs.markSeen(BOAT);
+  assert.deepEqual(prefs.seen(), [POPUP, BOAT]); assert.equal(writes.length, 2);
   prefs.setAnalytics(false);
   const restarted = createDesktopPrefs({ read: () => saved, write: value => { saved = value; }, now: () => NOON });
-  assert.deepEqual(restarted.seen(), [POPUP]); assert.equal(restarted.analytics(), false);
+  assert.deepEqual(restarted.seen(), [POPUP, BOAT]); assert.equal(restarted.analytics(), false);
   restarted.setAnalytics("yes"); assert.equal(restarted.analytics(), false, "only true turns it on");
   restarted.setAnalytics(true); assert.equal(restarted.analytics(), true);
 
