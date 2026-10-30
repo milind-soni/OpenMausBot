@@ -1,7 +1,8 @@
 // The rail at the window's left edge once a person has two places or more: one circle per Cloud, team's Cloud or server,
 // the place on screen marked, ⋯ for the rest past eight, ＋ last. Main lists the places and opens one by its id; the rail
 // never names an address. A right-click on a circle (or its row past eight) opens that place's menu: its colour, changed
-// here for every place whatever its server runs.
+// here for every place whatever its server runs, and Remove from list for a Cloud of the person's own that ended or was
+// never paid for (asked first; main takes it off their list on the Admin).
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { Laptop, MoreHorizontal, Plus, Search, Server } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
@@ -12,7 +13,7 @@ import { cloudColor, cloudColorFill } from "@/lib/cloud-look";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { placeInitials, recolorPlace, usePlaces, type RailPlace } from "@/lib/places";
+import { placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
@@ -30,6 +31,7 @@ export function placeLabel(place: RailPlace, now = Date.now()): string {
   if (place.waiting) return t("rail.waiting", { name });
   if (place.progress !== undefined) return t("rail.settingUp", { name });
   if (place.attention) return t("rail.attention", { name });
+  if (place.ended) return t("rail.ended", { name });
   const status = place.offline
     ? place.lastSeenAt ? t("rail.lastSeen", { name, when: localizedRelativeTime(place.lastSeenAt, activeLocale(), now) }) : t("rail.offline", { name })
     : place.pairs ? t("rail.notConnected", { name }) : name;
@@ -69,8 +71,8 @@ function ProgressRing({ value = 0, waiting = false }: { value?: number; waiting?
 
 export function PlaceMark({ place, size = CIRCLE }: { place: RailPlace; size?: number }) {
   const color = cloudColor(place.color);
-  return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined}
-    className={cn("grid shrink-0 place-items-center rounded-full font-semibold leading-none", color ? "text-white" : "bg-raised text-ink", place.offline && "opacity-55 grayscale")}
+  return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
+    className={cn("grid shrink-0 place-items-center rounded-full font-semibold leading-none", color ? "text-white" : "bg-raised text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
     style={{ width: size, height: size, fontSize: Math.round(size * 0.36), ...(color ? { background: cloudColorFill(color) } : {}) }}>
     {place.kind === "computer" ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : placeInitials(place.name)}
   </span>;
@@ -78,10 +80,11 @@ export function PlaceMark({ place, size = CIRCLE }: { place: RailPlace; size?: n
 
 /** A place's menu opens where it was asked for: beside its circle, or its row past eight. */
 type MenuAt = { place: RailPlace; from: HTMLElement };
-/** The right-click (or the keyboard's menu key) on a place with a colour to show opens its menu; elsewhere, nothing. */
+/** The right-click (or the keyboard's menu key) on a place with a colour to show, or one to remove from the list, opens its
+ * menu; elsewhere, nothing. */
 const menuOpener = (place: RailPlace, onMenu: (at: MenuAt) => void) => (event: ReactMouseEvent<HTMLElement>) => {
   event.preventDefault();
-  if (place.paint) onMenu({ place, from: event.currentTarget });
+  if (place.paint || place.removable) onMenu({ place, from: event.currentTarget });
 };
 
 /** How far down the rail an element of it sits, in the rail's own units (offsets, not the screen's: the rail's page
@@ -110,22 +113,51 @@ function PlaceCircle({ place, calm, canPair, onOpen, onMenu }: { place: RailPlac
   </button>;
 }
 
+/** Remove from list in a place's menu: asked first, in plain words; once main took it off the list, the menu closes and the
+ * circle goes with main's next list. */
+function RemoveRow({ place, onRemoved }: { place: RailPlace; onRemoved: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<"refused" | "failed" | null>(null);
+  const confirm = () => {
+    setBusy(true); setSaid(null);
+    void removePlace(place.id).then((outcome) => {
+      setBusy(false);
+      if (outcome === "removed" || outcome === "gone") { onRemoved(); return; }
+      setAsking(false); setSaid(outcome === "refused" ? "refused" : "failed");
+    });
+  };
+  return <div data-rail-remove className="flex flex-col gap-1.5 border-t border-hairline/50 px-0.5 pt-1.5">
+    {asking
+      ? <div role="alertdialog" aria-label={t("rail.remove")} className="flex flex-col gap-2 px-1.5 pb-1">
+        <p className="text-[12px] leading-snug text-ink">{t("rail.removeAsk", { name: place.name })}</p>
+        <div className="flex gap-2">
+          <button type="button" data-rail-remove-confirm className="ui-button ui-button-primary" disabled={busy} onClick={confirm}>{t("rail.removeYes")}</button>
+          <button type="button" className="ui-button" disabled={busy} onClick={() => setAsking(false)}>{t("rail.removeNo")}</button>
+        </div>
+      </div>
+      : <button type="button" data-rail-remove-ask className={MENU_ROW} onClick={() => { setSaid(null); setAsking(true); }}>{t("rail.remove")}</button>}
+    {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{t(said === "refused" ? "rail.removeRefused" : "rail.removeFailed")}</p>}
+  </div>;
+}
+
 /** A place's own menu on the window's rail: its name and its colour, in the six swatches, saved by main for every place
- * whatever its server runs (on the Admin for a Cloud). A team member sees who may change it. */
+ * whatever its server runs (on the Admin for a Cloud), and Remove from list for a Cloud its owner may take off their list.
+ * A team member sees who may change its colour. */
 function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onClose: () => void }) {
   const paint = place.paint;
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']")?.focus(); }, []);
-  if (!paint) return null;
+  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask]"))?.focus(); }, []);
+  if (!paint && !place.removable) return null;
   const name = place.kind === "computer" ? t("rail.thisComputer") : place.name;
   const choose = (swatch: CloudSwatch) => {
-    if (paint.locked || pending || swatch === paint.swatch) return;
+    if (!paint || paint.locked || pending || swatch === paint.swatch) return;
     setPending(swatch); setOutcome(null);
     void recolorPlace(place.id, swatch).then((answer) => { setPending(null); setOutcome(answer); if (answer === "saved") onClose(); });
   };
-  const note = paint.locked === "member" || outcome === "refused" ? t("placeLook.member") : paint.locked === "signed-out" ? t("placeLook.signedOut")
+  const note = paint?.locked === "member" || outcome === "refused" ? t("placeLook.member") : paint?.locked === "signed-out" ? t("placeLook.signedOut")
     : outcome === "unsupported" ? t("placeLook.unsupported") : null;
   return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("absolute left-full z-50 ml-2 w-72", MENU_SHEET)} style={{ top }}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
@@ -133,12 +165,15 @@ function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
-    <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
-    <div className="px-2 pb-1.5 pt-0.5">
-      <SwatchRadios value={pending ?? paint.swatch} onChange={choose} label={t("placeLook.aria", { name })} disabled={Boolean(paint.locked)} offset="menu" none />
-    </div>
-    {note && <p data-rail-menu-note className="px-2 pb-1 text-[12px] text-ink-secondary">{note}</p>}
-    {outcome === "failed" && <p role="alert" className="px-2 pb-1 text-[12px] text-danger">{t("placeLook.failed")}</p>}
+    {paint && <>
+      <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
+      <div className="px-2 pb-1.5 pt-0.5">
+        <SwatchRadios value={pending ?? paint.swatch} onChange={choose} label={t("placeLook.aria", { name })} disabled={Boolean(paint.locked)} offset="menu" none />
+      </div>
+      {note && <p data-rail-menu-note className="px-2 pb-1 text-[12px] text-ink-secondary">{note}</p>}
+      {outcome === "failed" && <p role="alert" className="px-2 pb-1 text-[12px] text-danger">{t("placeLook.failed")}</p>}
+    </>}
+    {place.removable && <RemoveRow place={place} onRemoved={onClose} />}
   </div>;
 }
 

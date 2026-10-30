@@ -37,7 +37,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   editingInstructions?: boolean;
   onEditInstructions?: (open: boolean) => void;
 }) {
-  const { dispatch } = useStore();
+  const { dispatch, flushBotPatches } = useStore();
   const { capabilities, ready } = useDesktopCapabilities();
   const apps = useBotApps(bot);
   const approval = useThreadApproval(currentTaskBot(bot));
@@ -93,7 +93,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
             />
             {editingInstructions && (
               <div className="flex justify-end">
-                <button type="button" data-panel-done="soul" onClick={() => onEditInstructions?.(false)} className={buttonCls}>
+                <button type="button" data-panel-done="soul" onClick={() => { void flushBotPatches(bot.id); onEditInstructions?.(false); }} className={buttonCls}>
                   {t("botSettings.simple.done")}
                 </button>
               </div>

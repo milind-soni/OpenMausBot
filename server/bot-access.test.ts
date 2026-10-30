@@ -88,6 +88,10 @@ describe("what a request needs", () => {
     expect(memberBotPatchViolation({ unread: false }, "view")).toBeNull();
     expect(memberBotPatchViolation({ color: "teal" }, "view")).toBe("color");
     expect(memberBotPatchViolation({ color: "teal" }, "chat")).toBeNull();
+    // A Team Cloud member who may only chat changes no other bot's look; one who may edit it can.
+    expect(memberBotPatchViolation({ color: "teal" }, "chat", false, true)).toBe("color");
+    expect(memberBotPatchViolation({ color: "teal", name: "Mine" }, "chat", true, true)).toBeNull();
+    expect(memberBotPatchViolation({ color: "teal" }, "edit", false, true)).toBeNull();
     expect(memberBotPatchViolation({ soul: "x" }, "chat")).toBe("soul");
     expect(memberBotPatchViolation({ soul: "x", modelSelection: {}, threadId: "t", composio: true, connectorTools: {}, mcpServers: [] }, "edit")).toBeNull();
     for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "cwd", "computer", "section", "chiefOfStaff", "peers", "visibility", "access", "reportsTo", "browserProfile"]) {

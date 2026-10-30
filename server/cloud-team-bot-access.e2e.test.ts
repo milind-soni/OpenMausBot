@@ -173,11 +173,13 @@ describe("a team bot shared with a level per person", () => {
     const said = await as("cara", "POST", `/api/groups/${room}/messages`, { text: "Hello both" });
     expect(said.status, JSON.stringify(said.body)).toBe(202);
     await until(idle);
-    expect((await as("cara", "PATCH", `/api/bots/${payroll.id}`, { color: "teal" })).status).toBe(200);
+    // Her own place in the list is hers; how the bot looks is everyone's, so changing it takes "Can edit".
+    expect((await as("cara", "PATCH", `/api/bots/${payroll.id}`, { pinned: true })).status).toBe(200);
     expect((await as("cara", "PATCH", `/api/routines/${caraRoutine}`, { name: "My pay check" })).status).toBe(200);
     expect((await as("cara", "POST", `/api/routines/${caraRoutine}/run`)).status).toBe(201);
     for (const [method, path, body] of [
       ["PATCH", `/api/bots/${payroll.id}`, { soul: "Be brief." }],
+      ["PATCH", `/api/bots/${payroll.id}`, { color: "teal" }],
       ["PATCH", `/api/bots/${payroll.id}`, { composio: true }],
       ["PATCH", `/api/bots/${payroll.id}/profile`, { soul: "Be brief." }],
       ["PUT", `/api/bots/${payroll.id}/access`, { everyone: "chat", people: {} }],

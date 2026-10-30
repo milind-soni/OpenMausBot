@@ -364,3 +364,37 @@ it("a right-click on a circle opens its place's menu: its colour, saved by main 
   await act(async () => { locked!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   expect(host.querySelector("[data-rail-menu]")).toBeNull();
 });
+
+it("a Cloud of the person's own that ended says so on its circle, and its menu offers Remove from list, asked first; once removed the menu closes", async () => {
+  const remove = vi.fn(async (_id: string) => ({ outcome: "refused" as const }) as { outcome: "removed" | "refused" | "gone" | "unsupported" | "failed" });
+  rail = { places: [
+    place("home", "My Cloud", { active: true, paint: { swatch: null } }),
+    place("old", "Old Cloud", { ended: true, removable: true, paint: { swatch: null } }),
+    place("a", "Client A", { paint: { swatch: "green" } }),
+  ], add: { cloud: false, link: false, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, remove }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  expect(host.querySelector('[data-rail-place="old"]')?.getAttribute("aria-label")).toBe("Old Cloud: ended");
+  expect(host.querySelector('[data-rail-place="old"] [data-rail-ended]'), "dimmed, as a Cloud that isn't running").toBeTruthy();
+  expect((await menuOf("a"))?.querySelector("[data-rail-remove]"), "a running Cloud: no such choice").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("old");
+  await click(menu!.querySelector("[data-rail-remove-ask]"));
+  expect(menu!.querySelector("[data-rail-remove] [role='alertdialog'] p")?.textContent).toBe("Remove “Old Cloud” from your list? You can buy a new Cloud any time.");
+  expect(remove).not.toHaveBeenCalled();
+  await click(menu!.querySelector("[data-rail-remove-confirm]"));
+  await settle();
+  expect(remove).toHaveBeenCalledWith("old");
+  expect(host.querySelector("[data-rail-menu] [role='alert']")?.textContent, "the Admin's no, said plainly").toBe("It can't be removed right now: it is running again, or still has a plan.");
+  remove.mockResolvedValueOnce({ outcome: "removed" });
+  await click(host.querySelector("[data-rail-menu] [data-rail-remove-ask]"));
+  await click(host.querySelector("[data-rail-menu] [data-rail-remove-confirm]"));
+  await settle();
+  expect(host.querySelector("[data-rail-menu]"), "removed: the menu closes, and the circle goes with main's next list").toBeNull();
+  expect(workspaces.places).toHaveBeenCalled();
+});

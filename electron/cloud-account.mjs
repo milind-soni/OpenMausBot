@@ -741,6 +741,26 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (grant === signedIn) await refresh().catch(() => {});
       return { outcome: "saved" };
     },
+    /** Remove from list (POST clouds/:id/hide, contract v1): one of the person's own Clouds the verified session says they may
+     * take off their list (`removable`: it ended, or was never paid for). Only the list changes on the Admin; its files still go
+     * when they were going to. `removed` once the Admin did (the session is read again, so every list here follows); `refused`
+     * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
+     * Remove from list (whose session never says `removable`). */
+    async hideCloud(cloudId) {
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };
+      try { await request(`clouds/${encodeURIComponent(cloudId)}/hide`, { method: "POST", body: {}, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && error?.code === "not_removable") { await refresh().catch(() => {}); return { outcome: "refused" }; }
+        if (!error?.opaque && error?.code === "not_found") { await refresh().catch(() => {}); return { outcome: "gone" }; }
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "removed" };
+    },
     /** The Cloud being bought's checkout, again: the same page while it is kept here; false when there is none. */
     async reopenAdd() {
       const kept = adding;

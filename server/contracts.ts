@@ -46,9 +46,16 @@ export class TurnNotStartedError extends Error {
   }
 }
 
-/** The CLI refused sign-in before any model or tool activity, and its process stopped. */
+/** The CLI refused sign-in before any model or tool activity, and its process stopped. `known`: refused here because the
+ * engine is already known to be signed out, so it is no new refusal. */
 export class TurnAuthenticationRefusedError extends TurnNotStartedError {
   override readonly name = "TurnAuthenticationRefusedError";
+  readonly known: boolean;
+
+  constructor(turnId: TurnId, message: string, known = false) {
+    super(turnId, message);
+    this.known = known;
+  }
 }
 
 /** The engine's usage limit refused the turn before any model or tool activity (or is known to be refusing until

@@ -29,6 +29,7 @@ import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { LiveConnectionStrip } from "@/components/LiveConnectionStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
@@ -64,6 +65,8 @@ import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
 import { useAiSwitchKeeper } from "@/lib/ai-switch";
 import { useChiefStepOpen } from "@/lib/default-bot";
+import { SESSION_ENDED_REASON, useSessionEnded } from "@/lib/session-ended";
+import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
@@ -303,6 +306,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <div className="flex h-full flex-col">
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
       <CloudAsleepStrip />
+      <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
       <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
       <HomeLine />
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
@@ -454,5 +458,7 @@ function Application() {
 }
 
 export default function App() {
+  const ended = useSessionEnded();
+  if (ended) return <PairPage initialCode={null} reason={SESSION_ENDED_REASON} />;
   return <WorkspaceBackupRecovery><Application /></WorkspaceBackupRecovery>;
 }

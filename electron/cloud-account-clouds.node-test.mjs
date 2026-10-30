@@ -19,7 +19,8 @@ const grant = (origin) => ({ cloudContractVersion: 1, origin, code: "ABCD-EFGH-J
 async function admin(t) {
   const f = { requests: [], browsers: [], timer: null, delay: null,
     session: { cloud: { state: "ready", origin: HOME, pairingAvailable: true } },
-    pairing: () => [200, grant(HOME)], add: () => [404, { error: "not_found" }], patch: () => [404, { error: "not_found" }], organization: () => [404, { error: "not_found" }] };
+    pairing: () => [200, grant(HOME)], add: () => [404, { error: "not_found" }], patch: () => [404, { error: "not_found" }], organization: () => [404, { error: "not_found" }],
+    hide: () => [404, { error: "Not found." }] };
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const parsed = body ? JSON.parse(body) : undefined;
@@ -32,6 +33,7 @@ async function admin(t) {
     if (req.url === "/api/cloud/desktop/clouds" && req.method === "POST") return send(f.add(parsed));
     if (req.url === "/api/cloud/desktop/organizations" && req.method === "POST") return send(f.organization(parsed));
     if (req.url.startsWith("/api/cloud/desktop/clouds/") && req.method === "PATCH") return send(f.patch(decodeURIComponent(req.url.slice("/api/cloud/desktop/clouds/".length)), parsed));
+    if (req.url.startsWith("/api/cloud/desktop/clouds/") && req.url.endsWith("/hide") && req.method === "POST") return send(f.hide(decodeURIComponent(req.url.slice("/api/cloud/desktop/clouds/".length, -"/hide".length)), parsed));
     if (req.url === "/api/public/config") return send([200, { plans: [{ tier: "pro", price: { currency: "USD", interval: "month", amount: 4900 } }], trial: { days: 7 } }]);
     send([404, { error: "not_found" }]);
   });
@@ -217,6 +219,32 @@ test("a Cloud's colour is the Admin's: PATCH with the swatch, then the session r
   assert.equal(f.requests.filter(row => row.method === "PATCH").length, patches, "neither was asked");
   await assert.rejects(f.client.setCloudColor("c-a", "chartreuse"), /Invalid Cloud color/);
   await assert.rejects(f.client.setCloudColor("../c-a", "blue"), /Invalid Cloud color/);
+});
+
+test("Remove from list: only a Cloud the session says is removable is asked about, by its id, then the session is read again; the Admin's no, a Cloud gone and an older Admin are said plainly", async t => {
+  const f = await admin(t);
+  const ENDED = entry({ id: "c-old", name: "Old Cloud", status: "ended", origin: "https://omb-c-old.fly.dev", deleteAfter: NOW + 2 * 86400_000, removable: true });
+  f.session = { ...f.session, clouds: [PRIMARY, entry(), ENDED, entry({ id: "c-team", name: "Acme", teamId: "team-acme", role: "owner", origin: TEAM, status: "ended", removable: true })] };
+  const state = await f.client.start();
+  assert.deepEqual(state.clouds.map(cloud => [cloud.id, cloud.removable ?? false, cloud.deleteAfter ?? null]),
+    [["c-home", false, null], ["c-a", false, null], ["c-old", true, NOW + 2 * 86400_000], ["c-team", false, null]], "a team's Cloud is never removable here, whatever an Admin says");
+  // Never asked about a Cloud the session doesn't say is removable: a running one, a team's, or one not listed.
+  for (const id of ["c-a", "c-team", "c-home", "c-gone"]) assert.deepEqual(await f.client.hideCloud(id), { outcome: "unsupported" }, id);
+  assert.equal(f.requests.some(row => row.route.endsWith("/hide")), false, "none of those reached the Admin");
+  await assert.rejects(f.client.hideCloud("../c-old"), /Invalid Cloud to remove/);
+  f.hide = (id) => { f.session = { ...f.session, clouds: f.session.clouds.filter(cloud => cloud.id !== id) }; return [200, { cloudContractVersion: 1, hidden: true }]; };
+  const reads = () => f.requests.filter(row => row.route === "/api/cloud/desktop/session").length, before = reads();
+  assert.deepEqual(await f.client.hideCloud("c-old"), { outcome: "removed" });
+  assert.deepEqual(f.requests.find(row => row.route.endsWith("/hide")), { route: "/api/cloud/desktop/clouds/c-old/hide", method: "POST", body: {} });
+  assert.equal(reads(), before + 1, "the session is read again, so every list here follows the Admin");
+  assert.deepEqual(f.client.state().clouds.map(cloud => cloud.id), ["c-home", "c-a", "c-team"]);
+  const again = (answer) => { f.session = { ...f.session, clouds: [PRIMARY, ENDED] }; f.hide = () => answer; return f.client.refresh().then(() => f.client.hideCloud("c-old")); };
+  assert.deepEqual(await again([409, { error: "not_removable", errorDescription: "Only a Cloud of your own that has ended…" }]), { outcome: "refused" });
+  assert.deepEqual(await again([404, { error: "not_found", errorDescription: "There is no such Cloud on your account." }]), { outcome: "gone" });
+  for (const answer of [[404, { error: "Not found." }], [405, { error: "invalid_method" }], [501, { error: "unsupported" }]]) {
+    assert.deepEqual(await again(answer), { outcome: "unsupported" }, JSON.stringify(answer));
+  }
+  assert.deepEqual(await again([500, { error: "server_error" }]), { outcome: "failed" });
 });
 
 const PLAN = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", ORGANIZATION = "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f";

@@ -31,6 +31,12 @@ export function pairIntro({ mode, sent, email, cloudHome }: { mode: "email" | "c
   return "Enter the pairing code shown on the server. Codes work once and expire after five minutes.";
 }
 
+export function pairTitle(environment: EnvironmentDescriptor | null, mode: "email" | "code" | null): string {
+  if (environment?.capabilities.cloudTeam) return environment.label;
+  if (environment?.capabilities.cloudHome) return "My Cloud";
+  return `${mode === "email" ? "Sign in to" : "Connect to"} ${environment?.label ?? `this ${productName()}`}`;
+}
+
 export function PairPage({ initialCode, initialEmail = null, reason }: { initialCode: string | null; initialEmail?: string | null; reason?: string }) {
   const [code, setCode] = useState(initialCode ?? "");
   const [label, setLabel] = useState(defaultDeviceLabel());
@@ -118,7 +124,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
         {opening ? (
           <p role="status" className="text-[20px] font-semibold">{cloudHome ? "Opening the Cloud…" : `Connecting to ${environment?.label ?? `this ${productName()}`}…`}</p>
         ) : <>
-        <h1 className="text-[20px] font-semibold">{cloudHome ? "My Cloud" : `${mode === "email" ? "Sign in to" : "Connect to"} ${environment?.label ?? `this ${productName()}`}`}</h1>
+        <h1 className="text-[20px] font-semibold">{pairTitle(environment, mode)}</h1>
         <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">
           {environment && !cloudHome ? `Version ${environment.version} on ${environment.platform}. ` : ""}
           {pairIntro({ mode, sent, email, cloudHome })}
