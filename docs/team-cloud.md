@@ -43,7 +43,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   (below), never off the team.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
-  person's own* (below): then every member connects their own, and only work their own message started uses it. A person's
+  person's own* (below): then every member connects their own, and only their own chats use it. A person's
   connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
   an Admin only, for the whole team.
@@ -110,12 +110,18 @@ is, is one connection an Admin makes and every turn uses. `person` is one connec
 their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
 
 - **Who gets a member's own connection.** Only a turn that acts for them (server/host/acting-person.ts), read from the
-  harness's records: their own message started it, in their private chat, a group chat or the bot's main chat; or it is
-  work handed on (delegated, assigned, consulted, or a thread a bot opened for it) by a turn that acted for them, recorded
-  as it is handed on (`handed-people.json`, so a restart keeps it). A turn stops acting for anyone once another person's
-  words join it after it began (a line of theirs, queued or sent into it, or their answer to one of its cards), and never
-  acts for anyone in another member's private chat (no Admin can write in theirs). A routine, a webhook and a bot's own
-  work act for nobody. Each step that uses one says whose ("using Ada's Gmail").
+  harness's records, and only in a chat that is theirs alone, where nobody else reads what their connection brings back.
+  A turn acts for them when their own message started it, or when it is work handed on (delegated, assigned, consulted,
+  or a thread a bot opened for it) by a turn that acted for them, recorded as it is handed on (`handed-people.json`, so a
+  restart keeps it). A turn stops acting for anyone once another person's words join it after it began (a line of theirs,
+  queued or sent into it, or their answer to one of its cards); a routine, a webhook and a bot's own work act for nobody.
+  Each step that uses one says whose ("using Ada's Gmail").
+- **Work they start where others read.** Their own line in a group chat or the bot's main chat never uses their own
+  connections there; the bot is told to hand that part on. When they have connected anything of their own, the work their
+  request hands on opens in the receiving bot's chat with them (a thread private to them, as their own chats are: no
+  other member and no admin sees it), where their own connections work. What that chat hands back to the place they
+  asked in is only where the result is ("Done. The result is in Clerk's chat with Ada."), never the result: a private chat
+  never reaches a room or the team (server/host/room-access.ts).
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
   registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
@@ -347,11 +353,11 @@ inbox is unread.
 
 | What | Line | It answers back to |
 |---|---|---|
-| `message_person` ("tell Marco that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |
-| @Marco in a teammate's line, anywhere (only their words travel) | the line or paragraph, `"message"` | the teammate's own inbox |
-| @Marco in a bot's settled reply, where Marco can see it | the same | that bot, in that conversation |
-| a question or approval routed to Marco (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
-| a routine's report or a failure routed to Marco | the report, `"result"` / `"notice"` | nothing |
+| `message_person` ("tell Ben that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |
+| @Ben in a teammate's line, anywhere (only their words travel) | the line or paragraph, `"message"` | the teammate's own inbox |
+| @Ben in a bot's settled reply, where Ben can see it | the same | that bot, in that conversation |
+| a question or approval routed to Ben (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
+| a routine's report or a failure routed to Ben | the report, `"result"` / `"notice"` | nothing |
 
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
@@ -364,9 +370,9 @@ person types while the bot waits on its own question card answers that card, as 
 card or to its copy.
 
 **Answering is replying.** A reply to a line (the chat's Reply) goes back as the table says, and the inbox's bot takes no
-turn for it; the line records the answer and a "Told Philipp" chip follows it. A bot that asked carries on: its
-conversation gets a line from the inbox's bot, "Marco replied to your message ("…"): …" (`relay.kind: "reply"`), which
-starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Philipp yes") works
+turn for it; the line records the answer and a "Told Cleo" chip follows it. A bot that asked carries on: its
+conversation gets a line from the inbox's bot, "Ben replied to your message ("…"): …" (`relay.kind: "reply"`), which
+starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Cleo yes") works
 too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line. A 👍
 or 👎 on a line answers it the same way, with that emoji.
 
@@ -391,7 +397,7 @@ newest line that needed the person (`InboxView.anchor`) and updates in place. Th
 `inboxChangedAt`, which moves whenever the list changes; a client showing the list reads it again then.
 
 **The representative.** When a message asks something a fact the person already shares with the team answers, their
-inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Marco's
+inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Ben's
 assistant answered …" (`relay.kind: "assistant"`), and the line shows the question, the answer and that a reply corrects
 it, with the one notification saying so. What it reads is built by the server, never chosen by a model:
 
@@ -406,7 +412,7 @@ It has **no tools**: one text call on its bot's engine (`SideJob` `"representati
 process). Its answer must be JSON `{"answer"}` or `{"wait": true}`; anything else waits. Code holds back what only the
 person can say, before any model call: anything not a question, and a question that decides, approves, agrees, promises,
 commits, books, sends or shares, reaches outside the team, or asks about something private (English and German words);
-and after it, an answer that speaks for the person's will ("Marco will…", "approved"). Asks and approvals never reach it,
+and after it, an answer that speaks for the person's will ("Ben will…", "approved"). Asks and approvals never reach it,
 nor tags of the person in a teammate's words that are not a question.
 
 **Refused, in words a bot repeats:** someone who left ("Carl has left Acme…"), nobody of that name (the people are
