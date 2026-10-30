@@ -169,7 +169,24 @@ describe("CI outputs", () => {
     expect(out.jobs).toEqual(["vitest"]);
     expect(out.vitest_matrix.include).toEqual([1, 2].map((shard) => ({
       os: "ubuntu-latest", part: `locale tests ${shard}/2`, shard, shards: 2,
-      files: "src/ scripts/generate-locale.test.mjs scripts/testing/key-readback.e2e.test.ts", e2e: "all", node_tests: shard === 1,
+      files: "src/ electron/menu.test.mjs electron/updater.test.mjs scripts/generate-locale.test.mjs "
+        + "scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/key-readback.e2e.test.ts "
+        + "scripts/testing/one-workspace-ui.e2e.test.ts scripts/testing/team-own-chat.e2e.test.ts "
+        + "server/body-thread-guards.e2e.test.ts server/client-notifications.e2e.test.ts server/cloud-connections.e2e.test.ts "
+        + "server/cloud-lending-browser.e2e.test.ts server/cloud-lending-chrome.e2e.test.ts server/cloud-lending-memory.e2e.test.ts "
+        + "server/cloud-lending.e2e.test.ts server/cloud-send-kinds.e2e.test.ts server/cloud-send-move.e2e.test.ts "
+        + "server/cloud-send-rooms.e2e.test.ts server/cloud-send-routine-merge.e2e.test.ts server/cloud-send-store.e2e.test.ts "
+        + "server/cloud-send.e2e.test.ts server/cloud-sync.e2e.test.ts server/cloud-team-browser.e2e.test.ts "
+        + "server/cloud-team-connections.e2e.test.ts server/cloud-team-engine-homes.e2e.test.ts server/cloud-team-gateway-mcp.e2e.test.ts "
+        + "server/cloud-team-inbox.e2e.test.ts server/cloud-team-open-reach.e2e.test.ts server/cloud-team-owners.e2e.test.ts "
+        + "server/cloud-team-people.e2e.test.ts server/cloud-team-phones.e2e.test.ts server/cloud-team-pictures.e2e.test.ts "
+        + "server/cloud-team-private.e2e.test.ts server/cloud-team-profile.e2e.test.ts server/cloud-team-requests.e2e.test.ts "
+        + "server/cloud-team-setup-request.e2e.test.ts server/cloud-team.e2e.test.ts server/lent-folders.e2e.test.ts "
+        + "server/one-home-keep.e2e.test.ts server/one-home-outdated.e2e.test.ts server/one-home-retry.e2e.test.ts "
+        + "server/one-home-session.e2e.test.ts server/one-home-trial-key.e2e.test.ts server/one-home-two-desks.e2e.test.ts "
+        + "server/one-home.e2e.test.ts server/question-cards.e2e.test.ts server/shared-computers.e2e.test.ts "
+        + "server/team-move.e2e.test.ts server/use-my-mac.e2e.test.ts server/workspace-banner.e2e.test.ts",
+      e2e: "all", node_tests: shard === 1,
     })));
     expect(ciOutputs(selectCiScope(["src/locales/de.json", "src/App.tsx"]), PR).vitest_matrix).toEqual(vitestMatrix(["ubuntu-latest"]));
   });
