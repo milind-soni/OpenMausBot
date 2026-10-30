@@ -74,10 +74,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Remove the coding agents Boat installs
+      - name: Remove what Boat installs and GitHub's runners lack
         # The server starts an engine it finds on PATH: Boat's Hermes then downloads its own Python, Node and tools into
-        # each test's home, about nine seconds for every test that adds a bot. GitHub's runners have none of these.
-        run: sudo rm -f /usr/local/bin/{agent,claude,codex,cua-driver,cursor-agent,hermes,hermes-acp,hermes-agent,kimi,openclaw,opencode,pi,prime-agent,vibe,vibe-acp}
+        # each test's home, about nine seconds for every test that adds a bot. A Team Cloud runs its turns in a
+        # bubblewrap box wherever bwrap works; bwrap refuses to start while it holds a capability, so it worked here
+        # only once the job's shell dropped Boat's, and it never works on a GitHub runner.
+        run: sudo rm -f /usr/bin/bwrap /usr/local/bin/{agent,claude,codex,cua-driver,cursor-agent,hermes,hermes-acp,hermes-agent,kimi,openclaw,opencode,pi,prime-agent,vibe,vibe-acp}
       - name: Prepare Electron test runtime
         # As in ci.yml: Electron downloads its runtime on first import, which must not use up a test's timeout.
         run: node --input-type=commonjs -e "require('electron')"
