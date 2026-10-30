@@ -75,8 +75,8 @@ describe("the chats a dream reads", () => {
       b: { askedAt: 300, path: [{ id: "b1", at: 300, role: "user", kind: "text", text: "Too long again" }] },
     };
     const expected = [
-      { threadId: "b", lines: [{ by: "person", text: "Too long again" }] },
-      { threadId: "a", lines: [{ by: "person", text: "Shorter please" }] },
+      { threadId: "b", lines: [{ by: "person", text: "Too long again", at: 300 }] },
+      { threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 200 }] },
     ];
     expect(dreamConversations(source(threads), "bot", 100)).toEqual(expected);
     for (const thread of Object.values(threads)) thread.path = stampOwner(thread.path, owner);
@@ -105,10 +105,10 @@ describe("the chats a dream reads", () => {
     expect(dreamConversations(source({ a: { askedAt: 140, path } }), "bot", 0, allowed,
       (sender) => ownerPerson(sender?.id))).toEqual([{
       threadId: "a", lines: [
-        { by: "person", text: "Shorter please" },
-        { by: "bot", text: "A shorter draft." },
-        { by: "person", text: "Keep it plain too" },
-        { by: "bot", text: "A plain draft." },
+        { by: "person", text: "Shorter please", at: 100 },
+        { by: "bot", text: "A shorter draft.", at: 110 },
+        { by: "person", text: "Keep it plain too", at: 140 },
+        { by: "bot", text: "A plain draft.", at: 150 },
       ],
     }]);
   });
@@ -126,7 +126,7 @@ describe("the chats a dream reads", () => {
       { id: "owner-reply", at: 130, role: "bot", kind: "text", text: "A shorter draft.", requestMessageId: "owner" },
     ];
     expect(dreamConversations(source({ a: { askedAt: 100, path } }), "bot", 0)).toEqual([{
-      threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "A shorter draft." }],
+      threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 100 }, { by: "bot", text: "A shorter draft.", at: 130 }],
     }]);
   });
 
@@ -140,7 +140,7 @@ describe("the chats a dream reads", () => {
     ];
     expect(dreamConversations(source({ a: { askedAt: 100, path } }), "bot", 0, () => true,
       (sender) => sender?.id === owner.id)).toEqual([{
-      threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "A shorter draft." }],
+      threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 100 }, { by: "bot", text: "A shorter draft.", at: 120 }],
     }]);
   });
 
@@ -256,7 +256,7 @@ describe("dreaming in the upkeep loop", () => {
     BOT.memoryUpkeep = true;
     clock = new Date(2026, 9, 22, 10, 0);
     chats = [
-      { threadId: "a", lines: [{ by: "person", text: "Shorter please" }] },
+      { threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 200 }] },
       { threadId: "b", lines: [{ by: "person", text: "Too long again. Also I moved to Bangalore" }] },
     ];
     engine = {
@@ -273,13 +273,16 @@ describe("dreaming in the upkeep loop", () => {
   it("files what it learned as dream entries, updates an outdated note, journals both, and reports it", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, "# Memory\n\n- 2026-09-01 · The person lives in Pune\n");
+    chats[0]!.lines[0]!.text = "I want drafts under 100 words. I review drafts with my editor. I prefer plain words.";
+    chats[1]!.lines[0]!.text = "Again, drafts under 100 words. I review drafts with my editor. I prefer plain words. I moved to Bangalore.";
+    const evidence = chats.map((chat) => chat.lines[0]!.text);
     answers.push(JSON.stringify({
       learned: [
-        { text: "The person wants drafts under 100 words", from: [1, 2], confidence: 0.9 },
-        { text: "The person reviews drafts with their editor", from: [1, 2], topic: "work", topicAliases: ["editor"], confidence: 0.8 },
-        { text: "The person prefers plain words", from: [1, 2], aboutUser: true, confidence: 0.8 },
+        { text: "The person wants drafts under 100 words", from: [1, 2], evidence, confidence: 0.9 },
+        { text: "The person reviews drafts with their editor", from: [1, 2], topic: "work", topicAliases: ["editor"], evidence, confidence: 0.8 },
+        { text: "The person prefers plain words", from: [1, 2], evidence, aboutUser: true, confidence: 0.8 },
       ],
-      outdated: [{ line: 0, now: "The person lives in Bangalore", from: [2] }],
+      outdated: [{ line: 0, now: "The person lives in Bangalore", from: [2], evidence: [chats[1]!.lines[0]!.text] }],
       ideas: [{ text: "Keep a short-draft checklist as a skill", from: [1, 2] }],
     }));
     const report = await upkeep().dream(BOT.id);
@@ -306,6 +309,21 @@ describe("dreaming in the upkeep loop", () => {
     expect(upkeep().status(BOT.id)).toMatchObject({ lastDream: { conversations: 2 } });
   });
 
+  it("refuses invented numbers and family facts before notebook or profile writes", async () => {
+    ensureWorkspace(BOT.id);
+    writeMemoryFile(BOT.id, "# Memory\n\n- 2026-09-01 · The person lives in Pune\n");
+    answers.push(JSON.stringify({
+      learned: [{ text: "The person has 17 sisters", from: [1, 2], evidence: ["Shorter please", "Too long again. Also I moved to Bangalore"], confidence: 0.9, aboutUser: true }],
+      outdated: [{ line: 0, now: "The person lives in Delhi", from: [2], evidence: ["Too long again. Also I moved to Bangalore"] }],
+    }));
+    const before = memory();
+    const report = await upkeep().dream(BOT.id);
+    expect(report.learned).toEqual([]);
+    expect(report.outdated).toEqual([]);
+    expect(aboutMeAdded).toEqual([]);
+    expect(memory()).toBe(before);
+  });
+
   it("the next dream reads only the chats after the last one that answered", async () => {
     answers.push("{}");
     await upkeep().dream(BOT.id);
@@ -321,7 +339,7 @@ describe("dreaming in the upkeep loop", () => {
       generateText: async (prompt) => {
         if (!prompt.includes(DREAM_MARKER)) return "{}";
         writeMemoryFile(BOT.id, "# Memory\n\n- 2026-10-22 · The person has a cat\n- 2026-09-01 · The person lives in Pune\n");
-        return JSON.stringify({ outdated: [{ line: 0, now: "The person lives in Bangalore", from: [2] }] });
+        return JSON.stringify({ outdated: [{ line: 0, now: "The person lives in Bangalore", from: [2], evidence: [chats[1]!.lines[0]!.text] }] });
       },
     };
     const report = await upkeep().dream(BOT.id);
