@@ -12,6 +12,7 @@ import { personKey } from "../person-key.ts";
 import { Store, type BotRecord } from "../store.ts";
 import { ThreadStarters } from "../thread-starters.ts";
 import { workspaceDir } from "../workspace.ts";
+import { privateHandBack } from "./acting-person.ts";
 import { createCloudTeamHost } from "./cloud-team-host.ts";
 import { createTeamMessages } from "./team-messages.ts";
 
@@ -77,6 +78,32 @@ function legacyFixture(records: "homes" | "items" | "both" | "relays" = "both") 
 }
 
 describe("private message ownership", () => {
+  it("reuses handed-on work only for its owner and keeps private results out of shared chats", () => {
+    const f = fixture();
+    const openedBy = { botId: f.botId, name: "Scout", kind: "work" as const, threadId: f.main, at: 1 };
+    const orphan = f.store.createTask(f.botId, "Legacy private work", false, undefined, openedBy)!;
+    f.store.backfillPrivateTasks([{ botId: f.botId, threadId: orphan.threadId }]);
+    const own = f.store.createTask(f.botId, "Ada's handed-on work", false, undefined, openedBy)!;
+    f.starters.set(own.threadId, key(ADA.email));
+    const shared = f.store.createTask(f.botId, "Shared work", false, undefined, openedBy)!;
+    expect(f.store.workThread(f.botId, f.botId, f.main, false, (task) => f.starters.get(task.threadId) === key(ADA.email))?.threadId).toBe(own.threadId);
+    expect(f.store.workThread(f.botId, f.botId, f.main)?.threadId).toBe(shared.threadId);
+    const restarted = f.open();
+    expect(restarted.host.audienceOf(shared.threadId)).toBe("team");
+    for (const threadId of [orphan.threadId, own.threadId]) {
+      expect(restarted.sees(BOB.email, threadId)).toBe(false);
+      expect(restarted.sees(CARL.email, threadId)).toBe(false);
+      const outcome = { ok: true, text: "Private result", evidence: { text: "Private observation" } };
+      const child = restarted.host.privateTo(threadId);
+      expect(child).not.toBeNull();
+      expect(privateHandBack(outcome, { child, parent: restarted.host.privateTo(f.main), bot: "Scout", person: "Ada" }))
+        .toEqual({ ok: true, text: "Done. The result is in Scout's chat with Ada." });
+      expect(privateHandBack(outcome, { child, parent: child, bot: "Scout", person: "Ada" })).toEqual(outcome);
+    }
+    expect(restarted.sees(ADA.email, own.threadId)).toBe(true);
+    expect(restarted.sees(ADA.email, orphan.threadId)).toBe(false);
+  });
+
   it.each([false, true])("finishes private memory capture and learns About you only for an owner (owned: %s)", async (owned) => {
     const f = fixture();
     const task = f.store.createTask(f.botId, "Private preferences", false)!;

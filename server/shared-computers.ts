@@ -18,12 +18,15 @@ export const sharedComputerRegistration = z.object({
   /** It takes and honours run_command's timeout_seconds; sent only to a server that advertises commandTimeouts. Older
    * desktops refuse a job with a field they do not know, and stop every command at 30 seconds. */
   commandTimeouts: z.literal(true).optional(),
+  /** It takes edit_file, append_file and delete_file; sent only to a server that advertises fileEdits. */
+  fileEdits: z.literal(true).optional(),
 }).strict();
 export const sharedComputerOperation = z.object({
   computer_id: z.string().uuid(),
-  action: z.enum(["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"]),
+  action: z.enum(["list_files", "read_file", "write_file", "edit_file", "append_file", "delete_file", "run_command", "computer_tools", "computer_call"]),
   folder_id: z.string().uuid().optional(), path: z.string().max(2048).optional(),
   content: z.string().max(350_000).optional(), encoding: z.enum(["utf8", "base64"]).optional(),
+  old_text: z.string().min(1).max(350_000).optional(), new_text: z.string().max(350_000).optional(),
   expected_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   command: z.string().max(8000).optional(), timeout_seconds: z.number().int().min(1).max(240).optional(), tool_name: z.string().max(100).optional(),
   arguments: z.record(z.string(), z.unknown()).optional(),
@@ -73,16 +76,22 @@ export function responseGone(res: { once(event: "close", listener: () => void): 
 export function sharedComputerScopeRefusal(registration: Registration, operation: Pick<Operation, "action" | "folder_id">): string | null {
   switch (operation.action) {
     case "run_command":
-      return registration.terminal ? null : `${registration.name} does not lend its terminal, so commands cannot run there. Do not try to run the command another way or anywhere else; use its folders, or tell the person in one sentence what to run themselves.`;
+      return registration.terminal ? null : `${registration.name} does not lend its terminal, so commands cannot run there. Do not try to run the command another way or anywhere else; use its folders, or tell the person in one sentence what to run themselves, or, when it is their own Cloud, that they can turn on "Let Clouds run commands on this ${deviceWord(registration.platform)}" from the OpenMausBot icon in its menu bar or taskbar.`;
     case "computer_tools":
     case "computer_call":
       return registration.computer ? null : `Apps and screen are not lent to this server. ${lendScreenSteps(deviceWord(registration.platform))}`;
     case "list_files":
     case "read_file":
-    case "write_file": {
+    case "write_file":
+    case "edit_file":
+    case "append_file":
+    case "delete_file": {
       const lent = registration.folders.find(entry => entry.id === operation.folder_id);
       if (!lent) return "This folder has not been shared with this server.";
-      return operation.action === "write_file" && !lent.write ? "This folder is read-only." : null;
+      if (operation.action === "list_files" || operation.action === "read_file") return null;
+      if (!lent.write) return "This folder is read-only.";
+      return operation.action === "write_file" || registration.fileEdits ? null
+        : `${registration.name} runs an older OpenMausBot that only writes whole files: read the file and write it whole with write_file, and tell the person that updating OpenMausBot there lets you change files by a passage.`;
     }
   }
 }
@@ -295,7 +304,9 @@ export class SharedComputers {
     if (entry.jobs.size >= 1) throw failure("This shared computer is busy. Wait for its current action to finish.");
     if (!active()) throw failure("The requesting turn ended", 401);
     const { timeout_seconds: _timeout, ...withoutTimeout } = operation;
-    const forDesktop = entry.registration.commandTimeouts ? operation : withoutTimeout;
+    const timed = entry.registration.commandTimeouts ? operation : withoutTimeout;
+    const { old_text: _old, new_text: _new, ...withoutEdits } = timed;
+    const forDesktop = entry.registration.fileEdits ? timed : withoutEdits;
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const job: Job = { id, operation: forDesktop, active, sent: false, leased: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), jobDeadlineMs(entry.registration, operation)) };
