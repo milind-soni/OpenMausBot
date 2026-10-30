@@ -16,18 +16,18 @@ import { createTeamConnectionsHost } from "./team-connections-host.ts";
 const ADA = personKey({ id: "", email: "ada@acme.test" });
 const BEN = personKey({ id: "", email: "ben@acme.test" });
 const CLEO = personKey({ id: "", email: "cleo@acme.test" });
+const OLIVE = personKey({ id: "", email: "olive@acme.test" });
 const ADA_ACCESS = { url: "https://broker.test", token: "a".repeat(64) };
 const CLEO_ACCESS = { url: "https://broker.test", token: "c".repeat(64) };
 
-/** Ada's private chat, Cleo's, a group chat, the bot's main chat and a thread a bot opened for work handed on. Who each
+/** Ada's private chat, Cleo's, Olive's, a group chat, the bot's main chat and a thread a bot opened for work handed on. Who each
  * turn acts for is acting-person.ts's answer (the `requester`); "" is a turn that acts for nobody, as a routine's. */
 const AUDIENCES: Record<string, Audience> = {
-  "ada-chat": `member:${ADA}`, "cleo-chat": `member:${CLEO}`, "room-chat": "room:launch", "main-chat": "team", "work-chat": "team",
+  "ada-chat": `member:${ADA}`, "cleo-chat": `member:${CLEO}`, "olive-chat": `member:${OLIVE}`, "room-chat": "room:launch", "main-chat": "team", "work-chat": "team",
   // Work her own request handed on, opened in the receiving bot's chat with her (handOnFor); Cleo's likewise.
   "ada-work": `member:${ADA}`, "cleo-work": `member:${CLEO}`,
 };
 
-const OLIVE = personKey({ id: "", email: "olive@acme.test" });
 /** The members the Admin paired: Olive owns the team, Ben is an admin, Ada and Cleo are Users. */
 const ROSTER = [
   { person: OLIVE, email: "olive@acme.test", role: "owner" as const }, { person: BEN, email: "ben@acme.test", role: "admin" as const },
@@ -407,12 +407,16 @@ describe("who is told to connect a team app", () => {
     expect(one.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["figma"])).toContain("\"Figma is connected for the whole team by olive@acme.test: ask them to connect it.\"");
   });
 
-  it("sends an owner or an admin to the team's Apps page for their own connections, and a User to their team home", () => {
-    const { host } = setup({ roster: ROSTER, requester: { "main-chat": OLIVE } });
+  it("sends an owner or an admin to the team's Apps page for their own connections, and a User to their team home", async () => {
+    const { host } = setup({ roster: ROSTER, requester: { "main-chat": OLIVE, "olive-chat": OLIVE } });
     host.scopes.set("app", "gmail", "person");
-    expect(host.connectRefusal({ threadId: "main-chat", generation: "g" }, ["gmail"])).toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1/apps\"");
-    expect(host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1\"");
-    expect(host.prompt("main-chat", "g", {})).toContain("\"Connect your <name> here: https://cloud.example.test/cloud/team/team-acme-1/apps\"");
-    expect(host.relayActor({ threadId: "main-chat", generation: "g", connectorsFor: OLIVE }).refusal).toContain("\"Connect your apps again here: https://cloud.example.test/cloud/team/team-acme-1/apps\"");
+    const apps = "https://cloud.example.test/cloud/team/team-acme-1/apps", home = "https://cloud.example.test/cloud/team/team-acme-1";
+    for (const thread of ["olive-chat", "main-chat"]) {
+      expect(host.connectRefusal({ threadId: thread, generation: "g" }, ["gmail"]), thread).toContain(`"Connect your Gmail here: ${apps}"`);
+      expect(await host.callRefusal({ threadId: thread, generation: "g" }, [{ slug: "GMAIL_FETCH_EMAILS" }]), thread).toContain(`"Connect your Gmail here: ${apps}"`);
+      expect(host.prompt(thread, "g", {}), thread).toContain(`"Connect your <name> here: ${apps}"`);
+    }
+    expect(host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toContain(`"Connect your Gmail here: ${home}"`);
+    expect(host.relayActor({ threadId: "olive-chat", generation: "g", connectorsFor: OLIVE }).refusal).toContain(`"Connect your apps again here: ${apps}"`);
   });
 });
