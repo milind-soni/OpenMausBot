@@ -8,6 +8,7 @@ import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolve
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -93,6 +94,10 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.restart !== undefined) node.restart = a.restart;
   return node;
 }
+
+/** How often a request that joined another looks at it. */
+const JOIN_POLL_MS = 1_000;
+const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answered once, for both of you:";
 
 export class RuntimeCoordinator implements Coordinator {
   private readonly host: CoordinatorHost;
@@ -470,6 +475,10 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   private async run(a: Assignment, input: RunInput, signal: AbortSignal): Promise<RunResult> {
+    const first = input.turn === "first" || input.turn === "rerun" ? this.answeredElsewhere(a) : undefined;
+    if (first && input.turn === "first") this.host.joined?.(this.project(a), this.project(first));
+    const answer = first ? await this.joinAnswer(a, first.id, signal) : undefined;
+    if (answer) return answer;
     const parent = a.parentId ? this.store.get(a.parentId) : undefined;
     const node = view(a, parent);
     const resumed = input.turn === "resume";
@@ -499,6 +508,43 @@ export class RuntimeCoordinator implements Coordinator {
 
   private live(): Assignment[] {
     return this.store.all({ nonTerminal: true });
+  }
+
+  /** The same request to the same bot from another requester (same words, mode, approval level and finish line), asked
+   * earlier and still being answered when this one was asked, whose answer this one's requester may read
+   * (host.shareAnswer): two teammates asking the same thing at the same time get one answer. An answer from before this
+   * request was asked is never reused, as things may have changed since. Rooms keep their own turn order, and a request
+   * still to be answered in this one's conversation could only go on after it: neither is joined. */
+  private answeredElsewhere(a: Assignment): Assignment | undefined {
+    const share = this.host.shareAnswer;
+    if (!share || !a.parentId || a.mode === "notify" || a.rework || a.assignee.destination.groupId !== undefined) return undefined;
+    const mine = this.project(a);
+    // In the order they were asked, each still open when this one was asked.
+    const rows = this.store.all({ openSince: a.createdAt });
+    const at = rows.findIndex(o => o.id === a.id);
+    return rows.slice(0, Math.max(at, 0))
+      .filter(o => o.parentId !== undefined && o.parentId !== a.parentId && !o.rework && o.mode === a.mode
+        && o.level === a.level && o.doneWhen === a.doneWhen
+        && o.assignee.botId === a.assignee.botId && o.assignee.destination.groupId === undefined
+        && (o.status === "completed" || (!isTerminal(o) && o.assignee.destination.threadId !== a.assignee.destination.threadId))
+        && sameRequest(o.brief, a.brief))
+      .find(o => share(this.project(o), mine));
+  }
+
+  /** Waits for the request `firstId` to be answered, keeping this one's turn out of the stall window, and ends with that
+   * answer. Undefined when it ends without one: this request is then worked on as usual. */
+  private async joinAnswer(a: Assignment, firstId: string, signal: AbortSignal): Promise<RunResult | undefined> {
+    this.log(`${a.id} joins ${firstId}: the same request to ${a.assignee.botId}`);
+    // One listener for the whole wait, however long the first takes.
+    const stopped = new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+    for (;;) {
+      if (signal.aborted) return { kind: "failed", outcome: "stopped", text: "" };
+      const first = this.store.get(firstId);
+      if (first?.status === "completed") return { kind: "completed", text: `${JOINED_NOTE}\n${first.result.replace(`${JOINED_NOTE}\n`, "")}` };
+      if (!first || isTerminal(first)) return undefined;
+      this.runtime.progress(a.id);
+      await Promise.race([stopped, new Promise<void>(resolve => setTimeout(resolve, JOIN_POLL_MS))]);
+    }
   }
 
   private parkedIn(threadId: string): Assignment | undefined {

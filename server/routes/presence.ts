@@ -8,6 +8,9 @@ export interface PresenceRouteDeps {
   active(source: "desktop" | "phone", timeZone?: string, language?: string): Promise<PresenceAnswer>;
   /** A Team Cloud: every member's arrival counts, for their own brief, in the language their app shows. */
   member?(auth: RequestAuth, language?: string): PresenceAnswer;
+  /** The language the app of a ping that counts shows (the owner's, or a member's), for the lines the server writes for
+   * that person (host/person-languages.ts). */
+  heard?(auth: RequestAuth, language: string): void;
 }
 
 const IANA_ZONE = /^(?:UTC|[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+)$/;
@@ -22,6 +25,7 @@ export function createPresenceRoutes(deps: PresenceRouteDeps): RouteHandler {
     const source = given.source === "phone" ? "phone" : "desktop";
     const timeZone = typeof given.timeZone === "string" && given.timeZone.length <= 128 && IANA_ZONE.test(given.timeZone) ? validZone(given.timeZone) : undefined;
     const language = typeof given.language === "string" && LANGUAGE_TAG.test(given.language) ? given.language.toLowerCase() : undefined;
+    if (language && (deps.member || deps.isOwner(auth))) deps.heard?.(auth, language);
     if (deps.member) return json(res, 200, { ok: true, ...deps.member(auth, language) });
     // A guest's activation is not the person's: answered, never recorded.
     if (!deps.isOwner(auth)) return json(res, 200, { ok: true, returned: false });
