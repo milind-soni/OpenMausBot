@@ -59,9 +59,16 @@ const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as CSSProperties;
 
 export type WindowDragProps = { "data-window-drag"?: ""; style?: CSSProperties };
 
+/** A window that draws its own frame: the top bar holding the traffic lights or the Windows caption buttons
+ * (WindowFrameBar), the rail of places, and the app in a rounded card beside them. Nothing under the bar makes room
+ * for the window's buttons. */
+export function windowFramed(windowChrome: DesktopCapabilities["windowChrome"] | undefined): boolean {
+  return windowChrome === "mac-inset" || windowChrome === "win-caption";
+}
+
 export function captionChrome(windowChrome: DesktopCapabilities["windowChrome"] | undefined) {
   const windowsCaption = windowChrome === "win-caption";
-  const draggable = windowsCaption || windowChrome === "mac-inset";
+  const draggable = windowFramed(windowChrome);
   const dragProps: WindowDragProps = draggable ? { "data-window-drag": "", style: DRAG_STYLE } : {};
   return {
     windowsCaption,
@@ -69,13 +76,6 @@ export function captionChrome(windowChrome: DesktopCapabilities["windowChrome"] 
     dragProps,
     dragStyle: draggable ? DRAG_STYLE : undefined,
     noDragStyle: draggable ? NO_DRAG_STYLE : undefined,
-    // Margins, not a transform: Blink resolves -webkit-app-region from untransformed layout boxes, so translateY would
-    // leave dead clicks in the drag region.
-    controlsShiftStyle: windowsCaption
-      ? ({ WebkitAppRegion: "no-drag", marginTop: "16px", marginBottom: "-16px" } as CSSProperties)
-      : undefined,
-    // tailwind-merge in cn() lets this override only the pt half of py-*.
-    padClass: windowsCaption ? "pt-[28px]" : undefined,
   };
 }
 

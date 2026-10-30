@@ -14,7 +14,7 @@ vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvance
 
 const { ChatView } = await import("./ChatView");
 const { GroupView } = await import("./GroupView");
-const { DesktopCapabilitiesProvider, WindowDragStrip, captionChrome } = await import("./DesktopCapabilities");
+const { DesktopCapabilitiesProvider, WindowDragStrip, captionChrome, windowFramed } = await import("./DesktopCapabilities");
 
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const noDragRule = /\/\* Window drag regions\.[\s\S]*?\*\/\s*([^{]+)\{\s*-webkit-app-region: no-drag;/.exec(css);
@@ -71,11 +71,12 @@ describe("caption chrome", () => {
     },
   );
 
-  it("keeps the caption corner offsets on Windows only", () => {
-    expect(captionChrome("win-caption").controlsShiftStyle).toMatchObject({ marginTop: "16px" });
-    expect(captionChrome("win-caption").padClass).toBe("pt-[28px]");
-    expect(captionChrome("mac-inset").controlsShiftStyle).toBeUndefined();
-    expect(captionChrome("mac-inset").padClass).toBeUndefined();
+  it("frames the window on macOS and Windows: nothing under the frame's top bar moves out of the window's buttons", () => {
+    expect([windowFramed("mac-inset"), windowFramed("win-caption"), windowFramed("native"), windowFramed(undefined)]).toEqual([true, true, false, false]);
+    for (const chrome of ["mac-inset", "win-caption", "native"] as const) {
+      expect(Object.keys(captionChrome(chrome))).not.toContain("padClass");
+      expect(Object.keys(captionChrome(chrome))).not.toContain("controlsShiftStyle");
+    }
   });
 
   it("opts controls, menus and dialogs out of a drag region in styles.css", () => {
@@ -102,12 +103,12 @@ describe.each([
     expect(region(header.querySelector("[data-chathead-identity], [data-roomhead-identity]"))).toBe("no-drag");
   });
 
-  it("drops the right-hand controls below the caption buttons on Windows only", () => {
+  it("keeps the right-hand controls level on Windows too: the caption buttons sit in the frame's top bar above it", () => {
     const controls = (chrome: Chrome) => {
       fixture.chrome = chrome;
       return dom(view()).querySelector("[data-chathead-controls], [data-roomhead-controls]");
     };
-    expect(styleValue(controls("win-caption"), "margin-top")).toBe("16px");
+    expect(styleValue(controls("win-caption"), "margin-top")).toBe("");
     expect(styleValue(controls("mac-inset"), "margin-top")).toBe("");
   });
 

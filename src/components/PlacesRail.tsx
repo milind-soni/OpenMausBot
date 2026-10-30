@@ -1,6 +1,6 @@
-// The rail at the window's left edge once a person has two places or more: one circle per Cloud, team's Cloud or server,
+// The rail at the window's left edge once a person has two places or more: one tile per Cloud, team's Cloud or server,
 // the place on screen marked, ⋯ for the rest past eight, ＋ last. Main lists the places and opens one by its id; the rail
-// never names an address. A right-click on a circle (or its row past eight) opens that place's menu: its colour, changed
+// never names an address. A right-click on a tile (or its row past eight) opens that place's menu: its colour, changed
 // here for every place whatever its server runs, and Remove from list for a Cloud of the person's own that ended or was
 // never paid for (asked first; main takes it off their list on the Admin).
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
@@ -14,16 +14,19 @@ import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
 import { SwatchRadios } from "./SwatchRadios";
 
-/** Circles before ⋯ opens the searchable list of every place. */
+/** Tiles before ⋯ opens the searchable list of every place. */
 export const RAIL_SHOWN = 8;
-const CIRCLE = 32;
+/** A place's tile on the rail: a small rounded square, so the rail stays as thin as it can (36px). */
+const TILE = 24;
+/** A place's mark at any size: a rounded square, its corners in step with its size. */
+const tileRadius = (size: number) => Math.round(size * 0.3);
 
-/** A circle's words for its tooltip and a screen reader: the place, and what it is doing now. A server of the person's
+/** A tile's words for its tooltip and a screen reader: the place, and what it is doing now. A server of the person's
  * own that signed in with their account says so, whether it is online, and why there is nothing to open when it is only
  * reachable on its own network. */
 export function placeLabel(place: RailPlace, now = Date.now()): string {
@@ -38,11 +41,11 @@ export function placeLabel(place: RailPlace, now = Date.now()): string {
   return [status, place.update && t("rail.update", place.update), place.ownNetwork && t("rail.ownNetwork")].filter(Boolean).join(" · ");
 }
 
-/** Whether a circle does anything: opens its place, or, for a server of the person's own not connected yet, shows how
+/** Whether a tile does anything: opens its place, or, for a server of the person's own not connected yet, shows how
  * to connect it (only where a pairing link can be pasted). */
 export const placeActs = (place: RailPlace, canPair: boolean): boolean => place.opens || (place.pairs === true && canPair);
 
-/** The circles before ⋯: every place up to RAIL_SHOWN; past that the first ones, with the place on screen always among them. */
+/** The tiles before ⋯: every place up to RAIL_SHOWN; past that the first ones, with the place on screen always among them. */
 export function shownPlaces(places: RailPlace[], limit = RAIL_SHOWN): RailPlace[] {
   if (places.length <= limit) return places;
   const first = places.slice(0, limit - 1), active = places.find((place) => place.active);
@@ -58,27 +61,32 @@ export function matchingPlaces(places: RailPlace[], query: string): RailPlace[] 
   });
 }
 
+/** The tile's progress, drawn round its edge. The line starts at the top edge's middle and runs clockwise. */
 function ProgressRing({ value = 0, waiting = false }: { value?: number; waiting?: boolean }) {
-  const box = CIRCLE + 8, radius = box / 2 - 1.5, around = 2 * Math.PI * radius;
+  const box = TILE + 6, inset = 1, side = box - 2 * inset, corner = tileRadius(TILE) + 2;
+  const around = 4 * (side - 2 * corner) + 2 * Math.PI * corner;
   const shown = waiting ? 0.28 : Math.max(0.06, Math.min(1, value));
+  const edge = `M ${box / 2} ${inset} H ${box - inset - corner} A ${corner} ${corner} 0 0 1 ${box - inset} ${inset + corner} V ${box - inset - corner}`
+    + ` A ${corner} ${corner} 0 0 1 ${box - inset - corner} ${box - inset} H ${inset + corner} A ${corner} ${corner} 0 0 1 ${inset} ${box - inset - corner}`
+    + ` V ${inset + corner} A ${corner} ${corner} 0 0 1 ${inset + corner} ${inset} Z`;
   return <svg aria-hidden="true" data-rail-ring={waiting ? "waiting" : Math.round(value * 100)} width={box} height={box} viewBox={`0 0 ${box} ${box}`}
-    className={cn("pointer-events-none absolute -left-1 -top-1 -rotate-90", waiting && "animate-spin [animation-duration:2.4s] motion-reduce:animate-none")}>
-    <circle cx={box / 2} cy={box / 2} r={radius} fill="none" stroke="var(--color-hairline)" strokeWidth={2} />
-    <circle cx={box / 2} cy={box / 2} r={radius} fill="none" stroke="var(--color-accent)" strokeWidth={2} strokeLinecap="round" strokeDasharray={`${shown * around} ${around}`}
+    className={cn("pointer-events-none absolute -left-[3px] -top-[3px]", waiting && "animate-pulse motion-reduce:animate-none")}>
+    <path d={edge} fill="none" stroke="var(--color-hairline)" strokeWidth={1.5} />
+    <path d={edge} fill="none" stroke="var(--color-accent)" strokeWidth={1.5} strokeLinecap="round" strokeDasharray={`${shown * around} ${around}`}
       className="transition-[stroke-dasharray] duration-500 motion-reduce:transition-none" />
   </svg>;
 }
 
-export function PlaceMark({ place, size = CIRCLE }: { place: RailPlace; size?: number }) {
+export function PlaceMark({ place, size = TILE }: { place: RailPlace; size?: number }) {
   const color = cloudColor(place.color);
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
-    className={cn("grid shrink-0 place-items-center rounded-full font-semibold leading-none", color ? "text-white" : "bg-raised text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
-    style={{ width: size, height: size, fontSize: Math.round(size * 0.36), ...(color ? { background: cloudColorFill(color) } : {}) }}>
+    className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
+    style={{ width: size, height: size, borderRadius: tileRadius(size), fontSize: Math.round(size * 0.4), ...(color ? { background: cloudColorFill(color) } : {}) }}>
     {place.kind === "computer" ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : placeInitials(place.name)}
   </span>;
 }
 
-/** A place's menu opens where it was asked for: beside its circle, or its row past eight. */
+/** A place's menu opens where it was asked for: beside its tile, or its row past eight. */
 type MenuAt = { place: RailPlace; from: HTMLElement };
 /** The right-click (or the keyboard's menu key) on a place with a colour to show, or one to remove from the list, opens its
  * menu; elsewhere, nothing. */
@@ -96,25 +104,25 @@ export function topWithin(element: HTMLElement, rail: HTMLElement): number {
   return top;
 }
 
-function PlaceCircle({ place, calm, canPair, onOpen, onMenu }: { place: RailPlace; calm: boolean; canPair: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
+function PlaceTile({ place, calm, canPair, onOpen, onMenu }: { place: RailPlace; calm: boolean; canPair: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
   const label = placeLabel(place), acts = placeActs(place, canPair);
   return <button type="button" aria-label={label} title={label} aria-current={place.active ? "page" : undefined} aria-disabled={acts ? undefined : true}
     data-rail-place={place.id} data-rail-kind={place.kind} onClick={() => { if (acts && !place.active) onOpen(place); }} onContextMenu={menuOpener(place, onMenu)}
-    className={cn("relative shrink-0 rounded-full transition-[box-shadow,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus",
-      place.active ? cn("ring-2 ring-offset-2 ring-offset-panel", calm ? "ring-ink/45" : "ring-ink/75")
-        : acts ? "hover:ring-2 hover:ring-ink/15 hover:ring-offset-2 hover:ring-offset-panel" : cn("cursor-default", !place.offline && "opacity-75"))}>
+    className={cn("relative shrink-0 rounded-[7px] transition-[box-shadow,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-offset-[3px] focus-visible:outline-focus",
+      place.active ? cn("ring-[1.5px] ring-offset-[1.5px] ring-offset-frame", calm ? "ring-ink/45" : "ring-ink/75")
+        : acts ? "hover:ring-[1.5px] hover:ring-ink/15 hover:ring-offset-[1.5px] hover:ring-offset-frame" : cn("cursor-default", !place.offline && "opacity-75"))}>
     <PlaceMark place={place} />
     {place.progress !== undefined && <ProgressRing value={place.progress} waiting={place.waiting === true} />}
-    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-panel bg-danger" />}
-    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-panel bg-accent" />}
-    {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-0.5 -right-0.5 grid size-3.5 place-items-center rounded-full border border-hairline bg-panel text-ink-secondary">
-      <Server size={8} strokeWidth={2.25} />
+    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-frame bg-danger" />}
+    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-frame bg-accent" />}
+    {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-1 -right-1 grid size-3 place-items-center rounded-full border border-hairline bg-frame text-ink-secondary">
+      <Server size={7} strokeWidth={2.25} />
     </span>}
   </button>;
 }
 
 /** Remove from list in a place's menu: asked first, in plain words; once main took it off the list, the menu closes and the
- * circle goes with main's next list. */
+ * tile goes with main's next list. */
 function RemoveRow({ place, onRemoved }: { place: RailPlace; onRemoved: () => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -233,37 +241,37 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     track("rail_place_opened", { kind: place.kind });
     void bridge?.open?.(place.id).catch(() => {});
   };
-  const macInset = capabilities.windowChrome === "mac-inset";
-  const draggable = macInset || capabilities.windowChrome === "win-caption";
+  const framed = windowFramed(capabilities.windowChrome), draggable = framed;
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline style.
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
   const shown = shownPlaces(state.places);
   const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair || state.add.organization === true;
-  // The menu opens next to the circle or row it was asked from (measured now, while that row is there), within the rail.
+  // The menu opens next to the tile or row it was asked from (measured now, while that row is there), within the rail.
   const openMenu = ({ place, from }: MenuAt) => {
     const nav = navRef.current;
     setMenu({ place, top: nav ? Math.max(8, Math.min(topWithin(from, nav) - 6, nav.clientHeight - 200)) : 8 });
   };
   return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
-    className={cn("relative w-16 shrink-0 flex-col items-center bg-panel", chrome ? "flex h-full" : "hidden md:flex", calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50")}>
-    {/* The macOS traffic lights sit over the rail's top; nothing here takes a click before they end. */}
-    <div aria-hidden="true" className={macInset ? "h-[52px] shrink-0" : "h-3 shrink-0"} />
-    <ul className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto px-1 py-1" style={noDrag}>
+    className={cn("relative w-9 shrink-0 flex-col items-center bg-frame", chrome ? "flex h-full" : "hidden md:flex", !framed && (calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50"))}>
+    {/* In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the
+        frame's top bar (the traffic lights' place), so its places start under that bar. */}
+    <div aria-hidden="true" className={!framed ? "h-3 shrink-0" : chrome ? "h-[37px] shrink-0" : "h-[9px] shrink-0"} />
+    <ul className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto py-[3px]" style={noDrag}>
       {shown.map((place) => <li key={place.id} className="flex">
-        <PlaceCircle place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={openMenu} />
+        <PlaceTile place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={openMenu} />
       </li>)}
     </ul>
     <div className="relative mt-2 flex flex-col items-center gap-2 pb-3" style={noDrag} ref={moreRef}>
       {state.places.length > RAIL_SHOWN && <button type="button" aria-label={t("rail.more", { count: state.places.length })} title={t("rail.more", { count: state.places.length })}
         aria-haspopup="dialog" aria-expanded={more} data-rail-more-button onClick={() => setMore(!more)}
-        className="grid size-8 place-items-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
-        <MoreHorizontal size={16} aria-hidden="true" />
+        className="grid size-6 place-items-center rounded-[7px] text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
+        <MoreHorizontal size={13} aria-hidden="true" />
       </button>}
       {more && <MorePlaces places={state.places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
       {canAdd && <button type="button" aria-label={t("rail.add")} title={t("rail.add")} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
-        className="grid size-8 place-items-center rounded-full border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-        <Plus size={16} aria-hidden="true" />
+        className="grid size-6 place-items-center rounded-[7px] border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+        <Plus size={13} aria-hidden="true" />
       </button>}
     </div>
     {/* The list is read again while it is open: the menu shows the place as main lists it now. */}
