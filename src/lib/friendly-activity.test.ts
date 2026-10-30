@@ -28,7 +28,7 @@ describe("Simple mode's working line", () => {
 
   it("says the command, search or page the server could name, as Advanced does, and still no file names", () => {
     expect(friendlyNowPhrases({ activity: "command", itemId: "x", target: "scrape.py" }).phrases).toEqual(["Running scrape.py"]);
-    expect(friendlyNowPhrases({ activity: "web", itemId: "s", target: "Biber Dammbau" }).phrases).toEqual(["Searching the web for “Biber Dammbau”"]);
+    expect(friendlyNowPhrases({ activity: "web", itemId: "s", target: "Acme construction leads" }).phrases).toEqual(["Searching the web for “Acme construction leads”"]);
     expect(friendlyNowPhrases(null, running("WebFetch", { step: { activity: "fetch", target: "linkedin.com" } })).phrases).toEqual(["Reading linkedin.com"]);
     expect(friendlyNowPhrases(null, running("Write", { step: { activity: "write", target: "report.md" } })).phrases).toEqual(["Writing some code"]);
   });
