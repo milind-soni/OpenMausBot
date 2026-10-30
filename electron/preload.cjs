@@ -148,6 +148,9 @@ const bridge = {
     // Remove from list, for a Cloud the window's rail lists as removable, from a click on the rail's own page (main refuses any other page).
     remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:remove", String(id)) : Promise.reject(new Error("Choose Remove from list.")),
+    // Make a server of the person's own their bots' home, from a click on the rail's own page (main refuses any other page).
+    makeHome: (id) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:make-home", String(id)) : Promise.reject(new Error("Choose Make my home.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
