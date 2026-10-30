@@ -5,7 +5,7 @@
 // transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
 import { z } from "zod";
 
-import type { BotVisibility } from "../shared/wire.ts";
+import type { BotActivity, BotVisibility } from "../shared/wire.ts";
 import { audienceIncludes, type Audience } from "./audience.ts";
 
 export type { BotVisibility };
@@ -138,6 +138,7 @@ export interface VisibilityGroup {
 }
 
 export type ThreadOwner = { bot: string; group?: undefined } | { group: string; bot?: undefined };
+export type RoomActivity = { threadId: string; activity: BotActivity };
 
 export class VisibleSet {
   readonly everything: boolean;
@@ -148,6 +149,7 @@ export class VisibleSet {
   private readonly audiences: ThreadAudiences | null;
   private threads: Map<string, ThreadOwner> | null = null;
   private readonly botMemo = new Map<string, boolean>();
+  private readonly roomActivities: (botId: string) => readonly RoomActivity[];
 
   constructor(
     bots: readonly VisibilityBot[],
@@ -155,8 +157,10 @@ export class VisibleSet {
     viewer: Viewer,
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
     audiences?: ThreadAudiences,
+    roomActivities: (botId: string) => readonly RoomActivity[] = () => [],
   ) {
     this.viewer = viewer;
+    this.roomActivities = roomActivities;
     this.audiences = audiences ?? null;
     // On a Team Cloud nobody's view is everything, an admin's included: each conversation has its own audience.
     this.everything = this.audiences === null && (viewer.kind === "all" ||
@@ -194,6 +198,10 @@ export class VisibleSet {
   /** Conversations have audiences of their own (a Team Cloud): a bot's tasks are then filtered one by one. */
   get filtersThreads(): boolean {
     return this.audiences !== null;
+  }
+
+  visibleRoomActivities(botId: string): BotActivity[] {
+    return this.roomActivities(botId).filter(room => this.thread(room.threadId)).map(room => room.activity);
   }
 
   /** An unknown thread is not visible to a member; on a Team Cloud another person's conversation is visible to nobody,
@@ -364,7 +372,9 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
     out = { ...record, tasks: kept };
     if (record.activity === "waiting-on-you") {
       const activities = kept.map(task => (task as { activity?: unknown } | null)?.activity);
+      if (typeof record.id === "string") activities.push(...visible.visibleRoomActivities(record.id));
       out.activity = ["waiting-on-you", "no-signal", "working", "dead"].find(activity => activities.includes(activity)) ?? "idle";
+      out.busy = ["waiting-on-you", "no-signal", "working"].includes(out.activity as string);
     }
     if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
   }
