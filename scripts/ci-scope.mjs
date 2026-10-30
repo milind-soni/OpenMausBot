@@ -83,12 +83,15 @@ export function areaOf(file) {
 
 export const FULL_SCOPE = { areas: ["everything"], checks: [...EVERY_CHECK].sort() };
 
-/** A push to main and a merge group: the build, every test file on Linux, the macOS smokes and the Linux checks no
- * longer than a shard. The Windows and macOS shards and smokes, the Linux package, the browser driver and the ARM
- * installer run in the full lane only: nightly, manual runs and the release lane. */
+/** A push to main and a merge group: the build, every test file on Linux and the Windows shards, the macOS smokes and
+ * the Linux checks no longer than a shard. The macOS shards, the Windows CUA smoke, the Linux package, the browser driver
+ * and the ARM installer run in the full lane only: nightly, manual runs and the release lane. */
 export const MAIN_SCOPE = {
   areas: ["main"],
-  checks: ["behavior-evals", "browser-identity", "build", "control-plane", "electron-smokes", "foss", "linux-tests", "packaged-server", "ui-smoke"],
+  checks: [
+    "behavior-evals", "browser-identity", "build", "control-plane", "electron-smokes", "foss", "host-tests", "linux-tests", "packaged-server",
+    "ui-smoke",
+  ],
 };
 
 /** A push whose commit already passed the CI gate in the merge queue: only the control-plane checks the broker deploy needs. */
@@ -99,6 +102,43 @@ export function selectCiScope(files) {
   const areas = Array.isArray(files) && files.length > 0 ? [...new Set(files.map(areaOf))].sort() : ["everything"];
   if (areas.includes("everything")) return FULL_SCOPE;
   return { areas, checks: [...new Set(areas.flatMap((area) => AREA_CHECKS[area]))].sort() };
+}
+
+/** The pull request label that runs the Windows jobs whatever the change. */
+export const WINDOWS_LABEL = "windows";
+
+/** Paths whose change can break Windows first: Windows by name, the desktop app and its installer, the dependencies,
+ * the scripts that build, package or smoke the app, and what decides how the Windows shards run. */
+export const WINDOWS_PATH = new RegExp([
+  String.raw`(?:^|[/._-])(?:win|win32|win64|windows|nsis|powershell|pwsh)(?:[/._-]|$)`,
+  String.raw`\.(?:ps1|psm1|psd1|cmd|bat|exe|msi|nsh|nsi)$`,
+  String.raw`^(?:electron|build|third_party)/`,
+  String.raw`^(?:electron-builder\.yml|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.gitattributes|vite\.config\.ts)$`,
+  String.raw`^\.github/workflows/ci\.yml$|^scripts/ci-scope\.mjs$`,
+  String.raw`^scripts/testing/(?:host-e2e\.ts|duration-sequencer\.ts|vitest-shard-weights\.json|ci-retry-[^/]+)$|^server/testing/host-timeout\.ts$`,
+  String.raw`^scripts/(?:build|bundle|prepare|package|smoke|after-pack|stage)[^/]*$`,
+].join("|"), "i");
+
+/** A changed line of code that names Windows or one of its APIs. */
+export const WINDOWS_TEXT = new RegExp([
+  String.raw`\bwin32\b|\bWindows\b|\bwindows-latest\b|[Pp]ower[Ss]hell|\bpwsh\b|\bcmd\.exe\b|\.exe\b|\bpath\.win32\b`,
+  String.raw`\b(?:USERPROFILE|LOCALAPPDATA|APPDATA|PATHEXT|ComSpec)\b|\bwindows(?:Hide|VerbatimArguments)\b`,
+].join("|"));
+
+/** Why a pull request runs the Windows jobs, or null when nothing in it is Windows-sensitive: its label, a path above,
+ * an e2e file the Windows shards also run (`hostE2e`), or a changed line in `lines` (`git diff -U0` of its code). */
+export function windowsReason({ files, labels = [], hostE2e = [], lines = () => [] }) {
+  if (labels.includes(WINDOWS_LABEL)) return `the "${WINDOWS_LABEL}" label`;
+  const file = files.find((path) => WINDOWS_PATH.test(path) || hostE2e.includes(path));
+  if (file) return file;
+  let changed;
+  try {
+    changed = lines();
+  } catch (error) {
+    return `a change whose lines could not be read (${error.message})`;
+  }
+  const line = changed.find((text) => /^[+-](?![+-]{2} )/.test(text) && WINDOWS_TEXT.test(text));
+  return line ? `the changed line ${JSON.stringify(line.slice(0, 80))}` : null;
 }
 
 /** True when two package.json texts differ only in the top-level "version"
@@ -135,11 +175,12 @@ export function selectPushScope(files, show) {
 
 // macOS runners are the scarce ones (five at a time for the whole account),
 // and only a couple of test blocks are macOS-only, so a PR runs the suite on
-// Linux and Windows, and a push to main or a merge group on Linux. The full lane
-// adds macOS. A PR that can affect the macOS smokes still runs them.
+// Linux, and on Windows only when its change can break Windows (windowsReason);
+// a push to main and a merge group run Linux and Windows. The full lane adds
+// macOS. A PR that can affect the macOS smokes still runs them.
 export const ALL_OS = ["macos-latest", "ubuntu-latest", "windows-latest"];
-const PR_OS = ["ubuntu-latest", "windows-latest"];
-const MAIN_OS = ["ubuntu-latest"];
+export const LINUX_OS = ["ubuntu-latest"];
+export const WINDOWS_OS = ["ubuntu-latest", "windows-latest"];
 
 /** Events whose runs test every platform: the nightly run, manual runs and the release lane (a manual run). */
 export const FULL_LANE_EVENTS = ["schedule", "workflow_dispatch"];
@@ -180,7 +221,8 @@ export function ciOutputs({ checks }, oses) {
       });
     }
   }
-  const jobs = SELECTABLE_JOBS.filter((job) => (job === "vitest" ? include.length > 0 : checks.includes(job)));
+  const jobs = SELECTABLE_JOBS.filter((job) => (job === "vitest" ? include.length > 0
+    : job === "windows-cua" ? checks.includes(job) && oses.includes("windows-latest") : checks.includes(job)));
   return {
     build: checks.includes("build"),
     jobs,
@@ -189,6 +231,29 @@ export function ciOutputs({ checks }, oses) {
     packaged_server_os: oses.filter((os) => os !== "macos-latest"),
     // GitHub refuses an empty matrix, so a vitest job its `if` skips keeps the full one.
     vitest_matrix: include.length > 0 ? { include } : vitestMatrix(oses),
+  };
+}
+
+/** The outputs for a static job that does the Linux work itself (on a Boat VM, `OMB_CI_LINUX_IN_STATIC`): the Linux
+ * vitest entries, behavior evals and the Linux packaged server smoke become `linux_lanes`
+ * (scripts/ci-linux-lanes.mjs), and the jobs left with nothing to run drop out of the selection. */
+export function moveLinuxIntoStatic(outputs) {
+  const vitest = outputs.jobs.includes("vitest") ? outputs.vitest_matrix.include : [];
+  const others = vitest.filter((entry) => entry.os !== "ubuntu-latest");
+  const packagedOs = outputs.packaged_server_os.filter((os) => os !== "ubuntu-latest");
+  const packaged = outputs.jobs.includes("packaged-server");
+  return {
+    ...outputs,
+    jobs: outputs.jobs.filter((job) => job !== "behavior-evals" && !(job === "vitest" && others.length === 0)
+      && !(job === "packaged-server" && packagedOs.length === 0)),
+    // A job that drops out keeps its old matrix: GitHub refuses an empty one, even for a skipped job.
+    vitest_matrix: others.length > 0 ? { include: others } : outputs.vitest_matrix,
+    packaged_server_os: packaged && packagedOs.length > 0 ? packagedOs : outputs.packaged_server_os,
+    linux_lanes: {
+      vitest: vitest.filter((entry) => entry.os === "ubuntu-latest"),
+      evals: outputs.jobs.includes("behavior-evals"),
+      packaged_server: packaged && outputs.packaged_server_os.includes("ubuntu-latest"),
+    },
   };
 }
 
@@ -203,6 +268,13 @@ function changedFiles(range) {
   return diff.slice(0, -1).split("\0");
 }
 
+/** The added and removed lines of a range's code, docs and translations left out. */
+function changedCodeLines(range) {
+  return execFileSync("git", [
+    "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", range, "--", ".", ":(exclude)*.md", ":(exclude)docs/**", ":(exclude)src/locales/**",
+  ], { encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }).split("\n");
+}
+
 async function github(path) {
   const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL = "https://api.github.com" } = process.env;
   if (!GH_TOKEN || !GITHUB_REPOSITORY) throw new Error("GH_TOKEN and GITHUB_REPOSITORY are needed to read CI runs");
@@ -215,6 +287,19 @@ async function github(path) {
 }
 
 const ciRuns = async (sha) => (await github(`/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`)).workflow_runs;
+
+/** A pull request's labels as they are now, so a label added after the push counts when the run is re-run; the
+ * event's own list when GitHub cannot be read. */
+async function pullRequestLabels(pr) {
+  const fromEvent = (Array.isArray(pr?.labels) ? pr.labels : []).map((label) => label?.name).filter((name) => typeof name === "string");
+  if (!Number.isSafeInteger(pr?.number) || !process.env.GH_TOKEN || !process.env.GITHUB_REPOSITORY) return fromEvent;
+  try {
+    return (await github(`/issues/${pr.number}/labels?per_page=100`)).map((label) => label.name);
+  } catch (error) {
+    console.warn(`CI scope: reading the pull request's labels from its event (${error.message})`);
+    return fromEvent;
+  }
+}
 
 /** Did the commit before this push get a green CI run of its own? Main keeps
  * one run going and one waiting, and a push replaces the waiting run: if the
@@ -238,7 +323,7 @@ async function passedMergeQueue(sha) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const lane = laneOf(process.env.GITHUB_EVENT_NAME);
   let scope = lane === "main" ? MAIN_SCOPE : FULL_SCOPE;
-  let vitestOs = lane === "main" ? MAIN_OS : ALL_OS;
+  let vitestOs = lane === "main" ? WINDOWS_OS : ALL_OS;
   if (lane === "pr") {
     try {
       const { pull_request: pr } = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
@@ -247,8 +332,20 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       if (![base, head].every((sha) => typeof sha === "string" && SHA.test(sha))) {
         throw new Error("Missing or invalid pull request commit SHAs");
       }
-      scope = selectCiScope(changedFiles(`${base}...${head}`));
-      vitestOs = PR_OS;
+      const files = changedFiles(`${base}...${head}`);
+      scope = selectCiScope(files);
+      vitestOs = LINUX_OS;
+      if (scope.checks.includes("host-tests")) {
+        const why = windowsReason({
+          files,
+          labels: await pullRequestLabels(pr),
+          hostE2e: Object.keys((await import("./testing/host-e2e.ts")).HOST_E2E),
+          lines: () => changedCodeLines(`${base}...${head}`),
+        });
+        if (why) vitestOs = WINDOWS_OS;
+        console.log(why ? `CI scope: Windows runs for ${why}`
+          : `CI scope: nothing here can break Windows first, so its jobs wait for main (label the PR "${WINDOWS_LABEL}" and re-run to run them)`);
+      }
     } catch (error) {
       console.warn(`CI scope: using all checks because the pull request diff is unavailable: ${error.message}`);
     }
@@ -273,8 +370,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       console.warn(`CI scope: using main's checks because the push diff or its CI is unavailable: ${error.message}`);
     }
   }
-  const outputs = ciOutputs(scope, vitestOs);
+  const linuxInStatic = process.env.OMB_CI_LINUX_IN_STATIC === "true";
+  const outputs = linuxInStatic ? moveLinuxIntoStatic(ciOutputs(scope, vitestOs)) : ciOutputs(scope, vitestOs);
   console.log(`CI scope: ${scope.areas.join(", ")} -> ${outputs.jobs.join(", ") || "static checks only"}`);
+  if (linuxInStatic) {
+    const { vitest, evals, packaged_server: packaged } = outputs.linux_lanes;
+    console.log(`CI scope: this job runs ${vitest.length} Linux vitest lane(s)${evals ? ", behavior evals" : ""}${packaged ? ", the packaged server smoke" : ""}`);
+  }
   appendFileSync(
     process.env.GITHUB_OUTPUT,
     Object.entries(outputs).map(([key, value]) => `${key}=${typeof value === "boolean" ? value : JSON.stringify(value)}\n`).join(""),

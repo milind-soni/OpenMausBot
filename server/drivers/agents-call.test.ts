@@ -235,6 +235,34 @@ describe("memory_update", () => {
     expect(readMemoryFile(bot).text).toContain(" · kept anyway\n");
   });
 
+  it("saves a preference once in the About me every bot reads, says not to pass it on, and only for work a person began", async () => {
+    const bot = "bot-memory-prefer";
+    profile.aboutMe = "I live in Pune.";
+    let allowed = true;
+    const client: ToolCallContext["client"] = {
+      api: async () => ({}),
+      apiResponse: async (_path, init) => {
+        const body = JSON.parse(String(init?.body));
+        const prefer = allowed ? { person: "Ada", save: (text: string) => aboutMe.learn({ botId: bot, botName: "Scout" }, [text]) } : null;
+        const result = botMemoryUpdate(bot, body, { source: 'chat "Turn"', aboutMe, prefer });
+        return { ok: result.ok, status: result.ok ? 200 : 400, body: result };
+      },
+    };
+    const ctx = context({ botId: bot, client });
+    const saved = await callTool("memory_update", { action: "prefer", text: "Reminders  go to the task app" }, ctx);
+    expect(saved).toEqual({ text: "Saved in Ada's About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too." });
+    expect(profile.aboutMe).toBe("I live in Pune.\n- 2026-10-27 · learned by Scout · Reminders go to the task app");
+    expect(readMemoryFile(bot).text, "nothing went into the bot's own notes").not.toContain("task app");
+    expect((await callTool("memory_update", { action: "prefer", text: "Reminders go to the task app" }, ctx)).text)
+      .toBe("Already in Ada's About me, or they removed it before: nothing to save or pass on.");
+    expect(await callTool("memory_update", { action: "prefer" }, ctx)).toMatchObject({ isError: true });
+    expect(await callTool("memory_update", { action: "prefer", text: "x".repeat(301) }, ctx)).toMatchObject({ isError: true, text: expect.stringContaining("at most 300 characters") });
+    allowed = false;
+    expect(await callTool("memory_update", { action: "prefer", text: "Replies in German" }, ctx))
+      .toMatchObject({ isError: true, text: "Only work one person began with their own words can save their preference: ask them to say it in their own chat with you." });
+    expect(profile.aboutMe).not.toContain("German");
+  });
+
   it("forgets a fact everywhere it was kept, says so without naming a file, and keeps it from being learned again", async () => {
     const bot = "bot-memory-forget";
     const ctx = context({ botId: bot, client: harness(bot) });
