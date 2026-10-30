@@ -45,7 +45,7 @@ describe("server search admission", () => {
   it("rejects absent configuration without calling the backend", async () => {
     const search = vi.fn(); const ctx = context();
     await createWebSearchRoute(() => undefined, search)(ctx);
-    expect(ctx.json).toHaveBeenCalledWith(ctx.res, 503, expect.anything());
+    expect(ctx.json).toHaveBeenCalledWith(ctx.res, 503, { error: "Web search is not configured. Configure SearXNG or Brave Search before using web search." });
     expect(search).not.toHaveBeenCalled();
   });
   it("admits one call per bot and four globally, releases slots on failure", async () => {

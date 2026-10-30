@@ -202,15 +202,16 @@ before turn admission.
 
 ## Configured web search
 
-API runtimes and Pi receive `web_search` when a backend is configured and their
-current tool selection permits it. Connections with `tools: false`, native-search
+API runtimes and Pi receive `web_search` when their engine capability and bot
+tool selection permit it. Backend settings do not change a conversation's tool list. Connections with `tools: false`, native-search
 engines and unknown ACP engines keep their existing tools. The adapter must opt
 in with `webSearch`; the harness sends only the `OMB_WEB_SEARCH` availability bit.
 
 In Settings → Connections, set a SearXNG base URL or a Brave Search API key.
 The same settings are `webSearch.searxngUrl` and `webSearch.braveApiKey` in
 `config.json`. `OMB_BRAVE_SEARCH_API_KEY` can supply the key on the server.
-SearXNG takes priority. With neither configured, the tool is absent.
+SearXNG takes priority. With neither configured, the listed tool returns
+"Web search is not configured." Invalid backend settings return a specific error.
 A failed SearXNG request never falls back to Brave.
 
 OMB stores Brave result text in conversation history and keeps it for as long as

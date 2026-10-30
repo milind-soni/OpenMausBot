@@ -9203,6 +9203,26 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mounts the USB phone server on every turn, whatever its words: they pick only the phone skill's instructions", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Phone words" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      for (const [text, instructed] of [["hello", false], ["open the Uber app on my Android", true], ["thanks", false]] as const) {
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text })).status).toBe(202);
+        const seen = await readJsonFileWhenReady<{ systemPrompt: string; mcpConfig: { mcpServers: Record<string, unknown> } }>(fakeClaudeDump, 15_000);
+        expect(seen.mcpConfig.mcpServers.phone, text).toBeDefined();
+        expect(seen.systemPrompt.includes('<openmaus-skill id="phone-harness"'), text).toBe(instructed);
+        expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+        await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      }
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("re-enters setup mode for a configured bot when the user sends /setup, and rewrites the turn text", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", description: "Files bugs." })).body.bot;
     try {
@@ -10009,6 +10029,13 @@ describe("harness HTTP API", () => {
   it.each(["direct", "room"] as const)("loads the browser tools up front only when the browser is the conversation's place in %s turns", async (target) => {
     const bots: string[] = [];
     const rooms: string[] = [];
+    const send = async (path: string) => {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
+      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
+      return dump.mcpConfig.mcpServers.browser!;
+    };
     const mounted = async (computer: "browser" | undefined) => {
       const bot = (await api("POST", "/api/bots")).body.bot;
       bots.push(bot.id);
@@ -10017,23 +10044,30 @@ describe("harness HTTP API", () => {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
         ...(computer ? { computer } : {}),
       })).status).toBe(200);
-      let path = `/api/bots/${bot.id}/messages`;
+      let path = `/api/bots/${bot.id}/messages`, stop = `/api/bots/${bot.id}/interrupt`;
       if (target === "room") {
         const room = (await api("POST", "/api/groups", { name: `Browser preload ${bots.length}`, memberIds: [bot.id] })).body.group;
         rooms.push(room.id);
         expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
         path = `/api/groups/${room.id}/messages`;
+        stop = `/api/groups/${room.id}/interrupt`;
       }
-      rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
-      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
-      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
-      return dump.mcpConfig.mcpServers.browser!;
+      return { bot, path, stop, browser: await send(path) };
     };
     try {
       expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      expect((await mounted(undefined)).alwaysLoad).toBeUndefined();
-      expect((await mounted("browser")).alwaysLoad).toBe(true);
+      const auto = await mounted(undefined);
+      expect(auto.browser.alwaysLoad).toBeUndefined();
+      expect((await mounted("browser")).browser.alwaysLoad).toBe(true);
+      // The first turn pinned the browser on its own; the next is handed it the same way, so its cached prompt carries over.
+      expect((await api("POST", auto.stop, {})).status).toBe(200);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === auto.bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      if (target === "direct") {
+        const task = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: { id: string }) => candidate.id === auto.bot.id).tasks[0];
+        expect(task).toMatchObject({ surface: "browser", surfaceAuto: true });
+      }
+      expect((await send(auto.path)).alwaysLoad).toBeUndefined();
     } finally {
       for (const id of rooms) await api("POST", `/api/groups/${id}/interrupt`, {}).catch(() => undefined);
       for (const id of bots) await api("POST", `/api/bots/${id}/interrupt`, {}).catch(() => undefined);

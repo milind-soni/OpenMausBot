@@ -69,7 +69,7 @@ function braveRetrySeconds(headers: IncomingHttpHeaders): number | undefined {
 
 export async function searchWeb(config: WebSearchConfig | undefined, query: string, limit = 5, signal?: AbortSignal, options: WebSearchOptions = {}): Promise<WebSearchHit[]> {
   const backend = configuredWebSearch(config);
-  if (!backend) throw new Error("Configure SearXNG or Brave Search before using web search.");
+  if (!backend) throw new Error("Web search is not configured. Configure SearXNG or Brave Search before using web search.");
   const url = backend === "searxng" ? new URL("search", searxngBase(config!.searxngUrl!)) : new URL("https://api.search.brave.com/res/v1/web/search");
   url.searchParams.set("q", query);
   if (backend === "searxng") url.searchParams.set("format", "json");

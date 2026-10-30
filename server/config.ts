@@ -451,7 +451,7 @@ const appConfigSchema = z.object({
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
 const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
-  browserProfiles: storedBrowserProfilesSchema.optional(),
+  webSearch: webSearchConfigSchema.catch({}).optional(), browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
   opencodeGo: z.object({
     apiKey: optionalText,

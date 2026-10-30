@@ -25,7 +25,7 @@ export function createWebSearchRoute(config: () => WebSearchConfig | undefined, 
     ctx.assertWebSearchAllowed();
     const settings = config();
     const backend = configuredWebSearch(settings);
-    if (!backend) return ctx.json(ctx.res, 503, { error: "Configure SearXNG or Brave Search before using web search." });
+    if (!backend) return ctx.json(ctx.res, 503, { error: "Web search is not configured. Configure SearXNG or Brave Search before using web search." });
     if (now() >= windowEnd) {
       windowEnd = now() + WINDOW_MS; used = 0;
       for (const [id, bot] of bots) { if (!bot.active) bots.delete(id); else bot.used = 0; }

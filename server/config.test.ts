@@ -201,6 +201,12 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
   });
 
+  it.each<JsonValue>([{ searxngUrl: "https://search.example/?q=oops" }, { braveApiKey: "invalid key" }, "not-an-object"])("drops invalid stored webSearch without losing other settings: %j", webSearch => {
+    const other = { profile: { name: "Ada" }, features: { browser: false }, instances: { local: { driver: "openai-compat" } } };
+    expect(parseStoredConfig({ ...other, webSearch })).toEqual({ ...other, webSearch: {} });
+    expect(() => parseConfigPatch({ webSearch })).toThrow("webSearch");
+  });
+
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
     expect(() => parseStoredConfig({ browserProfiles: [{ id: "../evil", name: "Unsafe" }] })).toThrow(
