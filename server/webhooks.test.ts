@@ -89,6 +89,34 @@ afterEach(() => {
 });
 
 describe("WebhookManager", () => {
+  it("stores and forwards resultsThreadId when configured on a trigger", () => {
+    const h = harness();
+    const created = h.manager.create({
+      name: "Github push",
+      prompt: "Review PR",
+      botId: "maus-sales",
+      resultsThreadId: "thread-custom-123",
+    });
+    expect(created.webhook).toMatchObject({ resultsThreadId: "thread-custom-123" });
+    expect(h.manager.list()[0]).toMatchObject({ resultsThreadId: "thread-custom-123" });
+
+    h.manager.receive(created.webhook.endpointId, created.secret, { payload: { ref: "main" }, deliveryId: "d-1" });
+    expect(h.queued).toHaveLength(1);
+    expect(h.queued[0]).toMatchObject({
+      webhookId: created.webhook.id,
+      botId: "maus-sales",
+      resultsThreadId: "thread-custom-123",
+    });
+
+    // Can update resultsThreadId
+    h.manager.update(created.webhook.id, { resultsThreadId: "thread-updated-456" });
+    expect(h.manager.list()[0]).toMatchObject({ resultsThreadId: "thread-updated-456" });
+
+    // Can clear resultsThreadId
+    h.manager.update(created.webhook.id, { resultsThreadId: null });
+    expect(h.manager.list()[0].resultsThreadId).toBeUndefined();
+  });
+
   it("rejects malformed management input before it reaches stored state", () => {
     const h = harness();
     expect(() => h.manager.create({ name: 42, prompt: "Review it", botId: "maus-1" })).toThrow("name");
