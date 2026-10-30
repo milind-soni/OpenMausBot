@@ -26,6 +26,7 @@ vi.mock("react", async (original) => ({
   useLayoutEffect: () => {},
 }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./MenuMotion", () => ({
   useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }),
   useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
@@ -43,7 +44,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
-import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
+import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
 import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { SidebarFooter } from "./SidebarFooter";
@@ -206,7 +207,7 @@ describe("Simple-mode sidebar layout", () => {
     for (const action of ["onAddBots", "onRename", "onShare", "onDelete"] as const) expect(items[action]).toBeTypeOf("function");
   });
 
-  it("keeps a saved order for the departments and writes a Simple move back without moving the fixed lists", () => {
+  it("starts from the shared order for the departments, and a Simple move is saved for Simple only", () => {
     fixture.state = { ...fixture.state, sections: ["Work", "Home"] };
     const saved = [userSectionId("Home"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")];
     fixture.storage.set(SIDEBAR_SECTION_ORDER_KEY, JSON.stringify(saved));
@@ -214,11 +215,21 @@ describe("Simple-mode sidebar layout", () => {
     const work = () => headers(render().tree).find((header) => header.props.name === "Work")!;
     expect(work().props.reorderable).toBe(true);
     work().props.onMove!(-1);
-    const moved = [userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Home")];
-    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
-    expect(sectionOrder(render().tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work"), userSectionId("Home")]);
-    work().props.onMove!(-1);
-    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
+    const moved = [BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work"), userSectionId("Home")];
+    expect(JSON.parse(fixture.storage.get(SIMPLE_SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
+    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(saved);
+    expect(sectionOrder(render().tree)).toEqual(moved);
+  });
+
+  it("moves group chats above the bots, which then get their own heading, and leaves Advanced's order alone", () => {
+    const chats = () => headers(render().tree).find((header) => header.props.name === "Group chats")!;
+    expect(chats().props.reorderable).toBe(true);
+    chats().props.onMove!(-1);
+    const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")]);
+    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Bots", "Work"]);
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
+    expect(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)).toBeUndefined();
   });
 
   it("never hides the heading-less bots behind a collapse saved in Advanced", () => {
@@ -304,7 +315,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(menu.props.className).toEqual(expect.stringContaining("left-full top-0"));
     expect(menu.props.className).toEqual(expect.stringContaining("rounded-[var(--radius-menu)]"));
     const item = (label: string) => nodes(top().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
-    expect(item("Create department"), "Simple mode never asks the person to design a department").toBeUndefined();
+    expect(item("Create department"), "Simple makes a department from its bots, by dragging one onto another or from a bot's menu").toBeUndefined();
     expect(item("New chat"), "a new conversation starts from the bot panel").toBeUndefined();
     expect(item("New bot")).toBeDefined();
     expect(item("New group chat")).toBeDefined();

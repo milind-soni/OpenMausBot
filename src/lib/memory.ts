@@ -61,16 +61,19 @@ export type SaveResult =
   | { ok: true; doc: MemoryDoc; overview: MemoryOverview }
   | { ok: false; conflict: true; current: string; currentHash: string };
 
-export function fetchMemoryOverview(botId: string): Promise<MemoryOverview> {
-  return api(`/api/bots/${botId}/memory`);
+/** `mine`: on a Team Cloud, the signed-in person's own layer of the bot's memory rather than the team's. */
+const memoryRoute = (botId: string, mine: boolean) => `/api/bots/${botId}/memory${mine ? "/mine" : ""}`;
+
+export function fetchMemoryOverview(botId: string, mine = false): Promise<MemoryOverview> {
+  return api(memoryRoute(botId, mine));
 }
 
-export function fetchMemoryDoc(botId: string, path: string): Promise<MemoryDoc> {
-  return api(`/api/bots/${botId}/memory/file?path=${encodeURIComponent(path)}`);
+export function fetchMemoryDoc(botId: string, path: string, mine = false): Promise<MemoryDoc> {
+  return api(`${memoryRoute(botId, mine)}/file?path=${encodeURIComponent(path)}`);
 }
 
-export async function saveMemoryDoc(botId: string, path: string, text: string, expectedHash: string | undefined): Promise<SaveResult> {
-  const response = await fetch(`/api/bots/${botId}/memory/file`, {
+export async function saveMemoryDoc(botId: string, path: string, text: string, expectedHash: string | undefined, mine = false): Promise<SaveResult> {
+  const response = await fetch(`${memoryRoute(botId, mine)}/file`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path, text, expectedHash }),
@@ -84,8 +87,8 @@ export async function saveMemoryDoc(botId: string, path: string, text: string, e
   return { ok: true, doc: { path: saved.path, text: saved.text, hash: saved.hash, exists: saved.exists }, overview: saved.overview };
 }
 
-export function deleteMemoryDoc(botId: string, path: string): Promise<{ overview: MemoryOverview }> {
-  return api(`/api/bots/${botId}/memory/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+export function deleteMemoryDoc(botId: string, path: string, mine = false): Promise<{ overview: MemoryOverview }> {
+  return api(`${memoryRoute(botId, mine)}/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 }
 
 export async function fetchMemoryJournal(botId: string, limit = 50): Promise<MemoryJournalRow[]> {

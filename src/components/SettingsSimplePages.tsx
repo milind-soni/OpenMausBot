@@ -31,6 +31,7 @@ import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
 import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
 import { ThemeRow } from "./ThemeRow";
+import { AdminOnly } from "./AdminOnly";
 
 export type SimpleDisclosureId = "ai-more" | "ai-keys" | "computer-elsewhere" | "billing-limits";
 
@@ -86,7 +87,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
           </SettingsRows>
         </SettingsGroup>
       )}
-      {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><ImportSettings /></SettingsGroup>}
+      {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><AdminOnly><ImportSettings /></AdminOnly></SettingsGroup>}
       {has("organization") && <SettingsGroup label={t("settings.section.organization")} block="organization"><OrganizationSettings /></SettingsGroup>}
       {has("activity") && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
       <div data-settings-block="advanced-mode" className="scroll-mt-4">
@@ -108,11 +109,13 @@ export function SimpleLooksPage({ onBack }: { onBack: () => void }) {
 export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclose: Disclose; connections: ReactNode }) {
   return (
     <>
-      {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><EnginesSettings simple more={disclose("ai-more")} /></div>}
+      {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><AdminOnly><EnginesSettings simple more={disclose("ai-more")} /></AdminOnly></div>}
       {has("connections") && (
-        <SettingsDisclosureRow title={t("settings.simple.ai.keys")} block="connections" {...disclose("ai-keys")}>
-          {connections}
-        </SettingsDisclosureRow>
+        <AdminOnly>
+          <SettingsDisclosureRow title={t("settings.simple.ai.keys")} block="connections" {...disclose("ai-keys")}>
+            {connections}
+          </SettingsDisclosureRow>
+        </AdminOnly>
       )}
     </>
   );
@@ -123,7 +126,7 @@ export type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "compan
 export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { has: Has; remoteAccess: RemoteAccessCards; servers: ReactNode; disclose: Disclose }) {
   return (
     <>
-      {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><LocalComputerSection /></SettingsGroup>}
+      {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><AdminOnly><LocalComputerSection /></AdminOnly></SettingsGroup>}
       {has("companion") && (
         <SettingsGroup label={t("settings.simple.computer.devices")} block="companion">
           {remoteAccess.pairing}
@@ -154,12 +157,12 @@ export function SimpleBillingPage({ has, disclose, cloudAccount }: { has: Has; d
   return (
     <>
       <div data-settings-block="usage" className="scroll-mt-4">
-        {usage ? <CloudUsageSummaryView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSummaryView> : <PlanUsageSummary />}
+        {usage ? <CloudUsageSummaryView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSummaryView> : <AdminOnly note="settings.adminOnly.usage"><PlanUsageSummary /></AdminOnly>}
       </div>
       {(usage || has("usage")) && (
         <SettingsDisclosureRow title={t("settings.simple.billing.limits")} {...disclose("billing-limits")}>
           {usage && <CloudUsageDetails usage={usage} upgrade={upgrade} />}
-          {has("usage") && <UsageSection />}
+          {has("usage") && <AdminOnly note="settings.adminOnly.usage"><UsageSection /></AdminOnly>}
         </SettingsDisclosureRow>
       )}
       {has("cloudAccount") && (

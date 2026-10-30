@@ -12,7 +12,7 @@ import type { SessionRegistry } from "../sessions.ts";
 export interface CloudSignedHostDeps {
   cloudHome: CloudHomeConfig | null;
   health: Omit<CloudHealthDeps, "box">;
-  sessions: Pick<SessionRegistry, "openPairing" | "attemptAllowed" | "noteFailure" | "clearFailures">;
+  sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
   /** The home's power once the server listens (a late-bound singleton of index.ts). */
   power: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
   box: () => BoxReport;

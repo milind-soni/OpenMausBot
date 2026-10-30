@@ -8,7 +8,7 @@ import { availableTools } from "./drivers/agents-catalog.ts";
 /** Every catalog tool's name, whoever may call it, and every alias a call may still use. */
 export const CATALOG_TOOL_NAMES: ReadonlySet<string> = new Set([...availableTools({
   skillAuthoring: true, sharedComputers: true, voiceNotes: true, xResearch: true, escalations: true, team: true,
-  computerSelection: true, activeWaits: true, cloudHome: false, chief: true, mausbot: true, botId: WATCHER_OPTIONS_CARD_BOT_ID,
+  computerSelection: true, cloudHome: false, chief: true, mausbot: true, botId: WATCHER_OPTIONS_CARD_BOT_ID,
 }).map((tool) => tool.name), ...Object.keys(AGENTS_TOOL_ALIASES)]);
 
 /** A call's name with a bridged call read as the tool it ran. With `serverNamed`, only a title that names

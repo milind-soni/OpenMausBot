@@ -170,6 +170,9 @@ const __APP_VERSION__: string;
         /** The colour of a place the window's rail lists, by its circle's id, from the person's click on the rail's own
          * page (refused on any other page). */
         recolor?: (id: string, swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
+        /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
+         * the rail's own page (refused on any other page). Absent on an older app. */
+        remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
       };

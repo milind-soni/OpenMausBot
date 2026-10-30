@@ -65,6 +65,14 @@ function remember(dataDir: string, person: string, botId: string): void {
   writeFileAtomic(join(dataDir, LEDGER), JSON.stringify({ v: 1, places: { ...places, [person]: botId } }), { mode: 0o600 });
 }
 
+/** A member who left: should they join again, they are given a MausBot of their own again. */
+export function forgetDefaultBot(dataDir: string, person: string): void {
+  const places = ledger(dataDir);
+  if (!person || !Object.hasOwn(places, person)) return;
+  delete places[person];
+  writeFileAtomic(join(dataDir, LEDGER), JSON.stringify({ v: 1, places }), { mode: 0o600 });
+}
+
 /** A new install's own MausBot from before it was marked: the place's oldest bot, still live, outside any department,
  * not installed from a package, and still named MausBot or still in the colour a new install gave it. */
 export function seededMausBot(bots: readonly BotRecord[]): BotRecord | undefined {
