@@ -88,6 +88,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "gsk_…",
     helpUrl: "https://console.groq.com/keys",
   },
+  greenferenceApiKey: {
+    label: "Greenference API key",
+    description: "Runs Greenference models with your own key.",
+    placeholder: "Paste your Greenference API key",
+    helpUrl: "https://greenference.com/dashboard/tokens",
+  },
   metaApiKey: {
     label: "Meta API key",
     description: "Runs Meta's models with your own key.",
@@ -108,7 +114,7 @@ export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
 /** AI provider keys: the server's config only, like Settings → Keys, and refused where Admin manages the models. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "metaApiKey", "deepseekApiKey",
+  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
 export type DesktopCredentialSlot = Exclude<ConfigCredentialTargetId, (typeof PROVIDER_CREDENTIAL_TARGETS)[number]>;
 export type CredentialConfig = {
@@ -124,6 +130,7 @@ export type CredentialConfig = {
   mistral?: { key?: string };
   cerebras?: { key?: string };
   groq?: { key?: string };
+  greenference?: { key?: string };
   meta?: { key?: string };
   deepseek?: { key?: string };
   /** Not in the settings file: the server fills it from its login store. */
@@ -191,6 +198,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { cerebras: { key: value } };
     case "groqApiKey":
       return { groq: { key: value } };
+    case "greenferenceApiKey":
+      return { greenference: { key: value } };
     case "metaApiKey":
       return { meta: { key: value } };
     case "deepseekApiKey":
@@ -228,6 +237,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.cerebras?.key);
     case "groqApiKey":
       return Boolean(config.groq?.key);
+    case "greenferenceApiKey":
+      return Boolean(config.greenference?.key);
     case "metaApiKey":
       return Boolean(config.meta?.key);
     case "deepseekApiKey":

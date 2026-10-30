@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { OUTSIDE, workOriginSchema, type WorkOrigin } from "../peer-provenance.ts";
 import { personKey } from "../person-key.ts";
-import { createActingPeople, HandedPeople, onlyTheirs, withPerson, type ActingLine, type DirectRequest, type RoomRun } from "./acting-person.ts";
+import { createActingPeople, HandedPeople, onlyTheirs, privateHandBack, withPerson, type ActingLine, type DirectRequest, type RoomRun } from "./acting-person.ts";
 
 const ADA = personKey({ id: "", email: "ada@acme.test" });
 const BEN = personKey({ id: "", email: "ben@acme.test" });
@@ -174,5 +174,26 @@ describe("the person on a handed-on origin", () => {
     const thread = [said("m0", 5, BEN), said("m1", 10, ADA), said("m2", 15, BEN)];
     expect(onlyTheirs(thread, ADA, 10)).toBe(false);
     expect(onlyTheirs(thread.slice(0, 2), ADA, 10)).toBe(true);
+  });
+});
+
+describe("what work in one person's private chat hands back", () => {
+  const place = (parent: string | null) => ({ child: ADA, parent, bot: "Helper", person: "Ada" });
+  const done = { ok: true, text: "Ada's latest email: the Q3 salary review.", evidence: { summary: "read 1 email from the board" } };
+
+  it("to a chat others read: only where the result is, never the result or what was observed", () => {
+    expect(privateHandBack(done, place(null))).toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada." });
+    expect(privateHandBack({ ok: false, text: "Gmail said the board's thread is gone." }, place(null)).text).toBe("It stopped before it finished. The result is in Helper's chat with Ada.");
+    expect(privateHandBack(done, place(BEN)).text, "another person's private chat reads none of hers").toBe("Done. The result is in Helper's chat with Ada.");
+  });
+
+  it("keeps a question a question, with its words left in her chat", () => {
+    const asked = privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: Forward the salary review to Ben?", cards: { question: "Forward the salary review to Ben?", ids: ["c1"] } }, place(null));
+    expect(asked).toEqual({ ok: true, text: "NEEDS INPUT: Helper has a question for Ada, in Helper's chat with Ada.", cards: { question: "Helper has a question for Ada, in Helper's chat with Ada.", ids: ["c1"] } });
+  });
+
+  it("hands everything back into her own private chat, and anything from a chat others read already", () => {
+    expect(privateHandBack(done, place(ADA))).toBe(done);
+    expect(privateHandBack(done, { child: null, parent: null, bot: "Helper", person: "them" })).toBe(done);
   });
 });
