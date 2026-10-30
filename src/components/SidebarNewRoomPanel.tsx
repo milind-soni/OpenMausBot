@@ -2,6 +2,7 @@ import { useState } from "react";
 import { track } from "@/lib/analytics";
 import { useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
 import { BotPickerList } from "./BotPickerList";
 
 /** Sidebar → New channel: name it, optionally file it under a context, pick its bots. */
@@ -42,6 +43,7 @@ export function NewRoomPanel({ onClose }: { onClose: () => void }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
+            if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
             if (e.key === "Enter") create();
             if (e.key === "Escape") onClose();
           }}
@@ -54,6 +56,7 @@ export function NewRoomPanel({ onClose }: { onClose: () => void }) {
           maxLength={60}
           onChange={(e) => setSection(e.target.value)}
           onKeyDown={(e) => {
+            if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
             if (e.key === "Enter") create();
             if (e.key === "Escape") onClose();
           }}
