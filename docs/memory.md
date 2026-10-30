@@ -423,6 +423,12 @@ free form, or one you rewrite by hand, works the same.
 
 All of them need the owner (admin) session, like the other bot-settings routes.
 
+On a Team Cloud each person also reaches what a bot remembers about them, their own layer of its memory
+(`workspaces/<bot>--member-<person>`, see [team-cloud.md](team-cloud.md)), from any session:
+`GET /api/bots/:id/memory/mine` is its overview, and `GET`, `PUT` and `DELETE /api/bots/:id/memory/mine/file` read,
+save and remove one of its files as above. Nobody reaches another person's layer. The bot panel's **What it
+remembers** shows these notes on a team.
+
 ## Shared team memory integrity
 
 Team memory ownership uses persistent keys. Renaming a team preserves its notes

@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
 import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { productName } from "@/lib/brand";
 
 // Security: the value goes straight to the host's settings, never into the chat.
 
@@ -46,7 +47,7 @@ export function SecretRequestCard({
       ? "Saved securely. Your bot is continuing the task."
       : "Saved securely. Your bot will continue when its current turn settles."
     : declined
-      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
+      ? `You chose not to provide this credential. ${productName()} could not resume the bot yet.`
       : custom && secret.reason ? secret.reason : secret.description;
   const footerLabel = stopped
     ? "Stopped"
@@ -222,7 +223,7 @@ export function SecretRequestCard({
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
               <LockKeyhole size={11} />{" "}
-              {!custom ? "Stored securely by OpenMausBot and never added to chat." : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
+              {!custom ? `Stored securely by ${productName()} and never added to chat.` : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
             {secret.helpUrl && (
               <a

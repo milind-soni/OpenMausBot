@@ -1359,11 +1359,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       let child: ReturnType<typeof spawnCli>;
       try {
-        child = spawnCli(config.cli, args, {
-          cwd,
-          env,
-          stdio: ["pipe", "pipe", "pipe"],
-        }, "bot");
+        child = spawnCli(config.cli, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], ...(broker ? { box: { rw: [broker.socketPath] } } : {}) }, "bot");
       } catch (error) {
         cleanupUnownedLaunch();
         throw error;

@@ -33,6 +33,11 @@ describe("botThreads", () => {
     expect(botThreads(store, withRun, "Milind").map((thread) => thread.threadId)).not.toContain("run-1");
   });
 
+  it("on a Team Cloud calls only a chat private to one person private, never the bot's shared main chat", () => {
+    const threads = botThreads(store, me, "Milind", (threadId) => threadId === "t-inv");
+    expect(threads.filter((thread) => thread.private).map((thread) => thread.threadId)).toEqual(["t-inv", "dm-them"]);
+  });
+
   it("lists the main chat, tasks, and the rooms the bot belongs to, each named for the bot", () => {
     expect(botThreads(store, me, "Milind")).toEqual([
       { threadId: "main", where: "1:1 with Milind", title: "Getting started", private: true },

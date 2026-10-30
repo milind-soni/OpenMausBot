@@ -90,7 +90,7 @@ describe("Computer panel Works on", () => {
   it("lists neither on My Cloud, and says why", () => {
     const markup = computerTab({ cloudHome: true });
     expect(places(markup)).toEqual(["Auto", "Cloud desktop", "Browser", "Off"]);
-    expect(markup).toContain("Choose where this bot works. It can also use your computer whenever OpenMausBot is open on it.");
+    expect(markup).toContain("Choose where this bot works. It can also use your computer whenever MausBot is open on it.");
   });
 });
 

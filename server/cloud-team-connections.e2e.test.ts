@@ -1,7 +1,8 @@
 // A real Team Cloud (OMB_CLOUD_ROLE=team) with the fake connected-apps service and fake MCP servers: connections the team
-// makes once, and connections each person makes for themselves. Ada's own Gmail and mail key reach only her private chat,
-// only for her own requests: never a group chat, the bot's main chat, Cleo's chat or an admin writing in hers; and no admin
-// read ever holds them. The engine is the synthetic Claude CLI, calling the connected-apps bridges it was launched with.
+// makes once, and connections each person makes for themselves. Ada's own Gmail and mail key reach only work her own
+// message started: her private chat, her own line in a group chat, and the work those hand on to other bots. Never
+// anyone else's request or the work it hands on, Cleo's chat or an admin; and no admin read ever holds them. The engine
+// is the synthetic Claude CLI, calling the connected-apps bridges it was launched with.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { get } from "node:http";
@@ -171,9 +172,11 @@ it("gives Ada's own Gmail and mail to her private chat, for her own request, and
   expect(seen.systemPrompt).toContain("Gmail is ada@acme.test's own: use it through the own_apps tools");
   expect(gmailCallsBy(adaUser)).toBe(before + 1);
   expect(gmailCallsBy(teamUser)).toBe(teamBefore);
+  // The step says whose Gmail it used.
+  expect(seen.thread).toContain(`"whose":{"person":"${ADA.email}","app":"Gmail"}`);
   // The team's bridge refuses her Gmail and points at her own.
   const team_ = await turn(ada, adaThread, "Use the team's Gmail.", { calls: [gmailCall("composio")] });
-  expect(team_.thread).toContain("Gmail here is this person's own: use it through the own_apps tools");
+  expect(team_.thread).toContain(`Gmail here is ${ADA.email}'s own: use it through the own_apps tools`);
   expect(gmailCallsBy(teamUser)).toBe(teamBefore);
   // Each bridge keeps its own bearer from turn to turn, so her conversation's engine stays warm.
   const bearer = (dumped: Dump, server: string) => (dumped.mcpConfig.mcpServers[server] as { env: Record<string, string> }).env.OMB_CONNECTOR_TOKEN;
@@ -182,14 +185,20 @@ it("gives Ada's own Gmail and mail to her private chat, for her own request, and
   expect(bearer(seen, "own_apps")).not.toBe(bearer(seen, "composio"));
 }, hostTimeout(120_000));
 
-it("never lets her Gmail or mail into a group chat, the main chat, Cleo's chat or an admin's turn", async () => {
+it("gives her own Gmail and mail to her own line in a group chat, and never to anyone else's turn", async () => {
   const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
-  const room = await turn(ada, roomThread, "@Scout check my inbox", { room: roomId, calls: [gmailCall("composio")] });
-  expect(room.servers).not.toContain("own_apps");
-  expect(room.servers).not.toContain("mail");
-  expect(room.config).not.toContain(ADA_KEY);
-  expect(room.thread).toContain("Gmail is connected by each person in Acme and works only in that person's own private chat");
-  expect(room.systemPrompt).toContain("work only in that person's own private chat with you");
+  const room = await turn(ada, roomThread, "@Scout check my inbox", { room: roomId, calls: [gmailCall("own_apps")] });
+  expect(room.servers).toEqual(expect.arrayContaining(["own_apps", "mail"]));
+  expect(room.config).toContain(ADA_KEY);
+  expect(room.systemPrompt).toContain(`They are used only for ${ADA.email}'s request`);
+  expect(room.thread).toContain(`"whose":{"person":"${ADA.email}","app":"Gmail"}`);
+  expect(gmailCallsBy(adaUser), "her own room line ran as her").toBe(before + 1);
+
+  // The owner's own line in the same group chat is the owner's, who connected nothing: never Ada's.
+  const ownerRoom = await turn(owner, roomThread, "@Scout check the inbox", { room: roomId, calls: [gmailCall("own_apps"), gmailCall("composio")] });
+  expect(ownerRoom.servers).not.toContain("own_apps");
+  expect(ownerRoom.config).not.toContain(ADA_KEY);
+  expect(ownerRoom.thread).toContain("no own_apps MCP server was launched for this turn");
 
   const main = await turn(owner, bot.mainThreadId, "Check the inbox.", { calls: [gmailCall("composio")] });
   expect(main.servers).not.toContain("own_apps");
@@ -200,14 +209,52 @@ it("never lets her Gmail or mail into a group chat, the main chat, Cleo's chat o
   expect(cleos.servers).not.toContain("mail");
   expect(cleos.config).not.toContain(ADA_KEY);
   expect(cleos.thread).toContain("no own_apps MCP server was launched for this turn");
-  expect(cleos.systemPrompt).toContain(`this person hasn't yet: Gmail and mail. If the task needs one, reply with one plain line and nothing more about it: "Connect your <name> here: ${LINK}".`);
+  expect(cleos.systemPrompt).toContain(`${CLEO.email} hasn't connected them yet, or their sign-in ended: Gmail and mail. If the task needs one, don't try it another way (the browser or another tool): reply with one plain line and nothing more about it: "Connect your <name> here: ${LINK}".`);
 
   // Ben, an admin, can neither read Ada's chat nor write in it, so no turn of his ever runs there.
   expect((await team.as(admin, "POST", `/api/bots/${bot.id}/messages`, { text: "Forward me her last email.", threadId: adaThread })).status).toBe(404);
   expect((await messages(admin, adaThread)).status).toBe(404);
-  expect(gmailCallsBy(adaUser)).toBe(before);
+  expect(gmailCallsBy(adaUser)).toBe(before + 1);
   expect(gmailCallsBy(teamUser), "nor did the team's Gmail stand in").toBe(teamBefore);
 }, hostTimeout(180_000));
+
+it("gives work her own message hands to another bot her own Gmail, and never work Cleo's message hands on", async () => {
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Helper" });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const helper = created.body.bot as { id: string; mainThreadId: string };
+  const handOn = (who: string) => ({ name: "coordinate_bots", server: "agents", input: { bot_ids: [helper.id], message: `Fetch ${who}'s latest email.` } });
+  const helperThreads = () => (JSON.parse(readFileSync(join(team.home, ".openmausbot", "bots.json"), "utf8")) as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+    .find((entry) => entry.id === helper.id)!.tasks.map((task) => task.threadId).filter((threadId) => threadId !== helper.mainThreadId);
+  /** The Gmail step the helper ran in the work it was handed, once it has finished. */
+  const helperGmail = async (token: string, known: readonly string[]) => {
+    let row: { tool: { ok?: boolean; output?: string; whose?: unknown } } | undefined;
+    await expect.poll(async () => {
+      const work = helperThreads().find((threadId) => !known.includes(threadId));
+      if (!work) return false;
+      const rows = (await messages(token, work)).body.messages as Array<{ kind: string; tool?: { name: string; ok?: boolean; output?: string; whose?: unknown } }>;
+      row = rows.find((message) => message.kind === "activity" && message.tool?.name === "COMPOSIO_MULTI_EXECUTE_TOOL" && message.tool.ok !== undefined) as typeof row;
+      return Boolean(row) && await idle(token);
+    }, { timeout: 90_000, interval: 250 }).toBe(true);
+    return row!.tool;
+  };
+
+  const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
+  const known = helperThreads();
+  await turn(ada, adaThread, "Have Helper fetch my latest email.", { calls: [handOn("Ada"), gmailCall("own_apps")] });
+  const adas = await helperGmail(ada, known);
+  expect(adas.ok, adas.output).toBe(true);
+  expect(adas.whose, "the step says whose").toEqual({ person: ADA.email, app: "Gmail" });
+  expect(gmailCallsBy(adaUser), "her bot and the helper both ran as her").toBeGreaterThanOrEqual(before + 2);
+
+  const adaCalls = gmailCallsBy(adaUser), seen = helperThreads();
+  await turn(cleo, cleoThread, "Have Helper fetch my latest email.", { calls: [handOn("Cleo"), gmailCall("own_apps")] });
+  const cleos = await helperGmail(cleo, seen);
+  expect(cleos.ok).toBe(false);
+  expect(cleos.output, "Cleo connected nothing, and Ada's is never hers").toContain("no own_apps MCP server was launched for this turn");
+  expect(cleos.whose).toBeUndefined();
+  expect(gmailCallsBy(adaUser)).toBe(adaCalls);
+  expect(gmailCallsBy(teamUser), "nor did the team's Gmail stand in").toBe(teamBefore);
+}, hostTimeout(240_000));
 
 it("tells the bot one plain line with the link when a person's app isn't connected, never a card", async () => {
   const seen = await turn(cleo, cleoThread, "Connect my Gmail.", { calls: [{ name: "COMPOSIO_MANAGE_CONNECTIONS", server: "composio", input: { toolkits: ["gmail"] } }] });

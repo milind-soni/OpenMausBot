@@ -7,7 +7,11 @@ export type HomeView = { name?: string } & (
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
   | { screen: "offline"; reason?: string }
   | { screen: "signin"; other?: true }
-  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" });
+  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" }
+  /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
+   * files are deleted), its checkout wasn't finished, or its payment has a problem; `removable` while its owner may take it
+   * off their list. */
+  | { screen: "ended" | "checkout" | "payment"; deleteAt?: number; removable?: true });
 
 /** The window onto My Cloud once it is the person's home (preload `home`). */
 export interface HomeBridge {
@@ -16,6 +20,8 @@ export interface HomeBridge {
   onState(callback: (view: HomeView) => void): () => void;
   /** This computer's screen only: look again now. */
   retry(): Promise<HomeView>;
+  /** This computer's screen only, once the person said yes there: the Cloud it shows leaves their list (absent: an older app). */
+  remove?(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
   /** This device's MausBot Cloud sign-in, again; on My Cloud's page only from the person's click. */
   signIn(): Promise<void>;
   /** My Cloud's own page only: its session ended, so the app signs it in again by itself. */
@@ -31,9 +37,12 @@ export type HomePlace = { kind: "cloud"; origin: string } | { kind: "team" | "ow
 export type HomeAsk = "cloud" | { team: string; name?: string } | { cloud: string; name?: string } | null;
 export type RememberedPlace = (({ team: string } | { cloud: string }) & { name?: string; origin?: string }) | null;
 export declare function otherPlace(place: unknown): boolean;
+/** This computer's screen for a listed Cloud that isn't running (or its setup's step); null for one that opens. */
+export declare function cloudScreen(cloud: import("./cloud-list.mjs").CloudListEntry | null | undefined): HomeView | null;
 
 export declare const HOME_SCREEN_PATH: string;
 export declare const LOOK_MS: number;
+export declare const OPEN_MS: number;
 export declare const RETRY_MS: readonly number[];
 export declare const QUIET_MS: number;
 export declare const VERSION_EVERY_MS: number;
@@ -60,6 +69,8 @@ type Timers = { set(work: () => void, ms: number): unknown; clear(timer: unknown
 export interface HomeWindow {
   show(options?: { open?: "phone" | null; place?: HomeAsk }): Promise<unknown>;
   openCloud(open?: "phone" | null): Promise<unknown>;
+  /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
+  remove(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
   asking(): boolean;
   refresh(): Promise<Home>;
   view(): HomeView;
@@ -88,7 +99,8 @@ export function createHomeWindow(deps: {
   journal(): unknown;
   frozen(): Promise<{ frozen: boolean; cloud?: string } | null>;
   account(): { state(): any; power(): any; wakeHome(): Promise<unknown>; setWaking(on: boolean): void; pairHome(cloudId?: string | null): Promise<{ origin: string; code: string; expiresAt: number }>;
-    pairTeam?(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>; signInAgain(): Promise<unknown>; begin(): Promise<unknown> } | null;
+    pairTeam?(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>; signInAgain(): Promise<unknown>; begin(): Promise<unknown>;
+    hideCloud?(cloudId: string): Promise<{ outcome: import("./cloud-account.mjs").CloudRemoveOutcome }> } | null;
   restored?(): Promise<unknown>;
   window(): WindowLike | null;
   ensureWindow(): void;

@@ -57,6 +57,7 @@
 //     under it the reply is "tools: <server>=<count>,…"
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
+//   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -572,6 +573,17 @@ process.stdin.on("data", (c) => {
   }
 });
 
+function heldByHoldFile(msg: any): boolean {
+  const hold = process.env.FAKE_ACP_HOLD_FILE;
+  if (!hold || !existsSync(hold)) return false;
+  const poll = setInterval(() => {
+    if (existsSync(hold)) return;
+    clearInterval(poll);
+    handle(msg);
+  }, 50);
+  return true;
+}
+
 function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingAskQuestionId) {
     pendingAskQuestionId = null;
@@ -594,6 +606,7 @@ function handle(msg: any) {
     return;
   }
   if (!msg.method) return;
+  if (msg.method === "session/prompt" && heldByHoldFile(msg)) return;
   recordMethod(msg.method);
 
   switch (msg.method) {

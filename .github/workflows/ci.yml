@@ -9,24 +9,30 @@ on:
   # lands, so a PR that is green alone but red together with what just
   # merged is stopped in the queue instead of on main (that shape reddened
   # main twice in Sep 2026). Turning the queue on is a branch-ruleset
-  # setting; this trigger is what lets CI report on those runs.
+  # setting, which GitHub offers only once an organization owns the
+  # repository (docs/ci.md); this trigger is what lets CI report on those runs.
   merge_group:
+  # The full lane every night on main's newest commit: every platform's shards
+  # and smokes, which pushes to main and merge groups leave out (docs/ci.md).
+  schedule:
+    - cron: "17 21 * * *"
 
 # least privilege: CI only reads the checkout, it never writes back
 permissions:
   contents: read
 
 concurrency:
-  # A new PR push supersedes that PR's older checks. Main keeps one run going
-  # and one waiting: each merge replaces the waiting run, so a burst of
-  # merges costs two full runs, not one per merge (fifteen queued behind each
-  # other in October 2026). The running one always finishes. A release runs
-  # CI on its own commit in a release-ci/v<version> lane when main's run for
-  # it was replaced (scripts/release-ci.mjs). Merge-queue runs stay on their
-  # own refs. A PR's group is named by its number, never by github.ref: a
-  # merged PR's closed event reports the base branch as github.ref, so a
-  # ref-named group let every merge cancel main's run (ci-stop-closed.yml).
-  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  # A new PR push supersedes that PR's older checks. Main's pushes keep one run
+  # going and one waiting: each merge replaces the waiting run, so a burst of
+  # merges costs two runs, not one per merge (fifteen queued behind each other
+  # in October 2026). The running one always finishes. Every other run has a
+  # group no push can join: a merge group its own ref, the nightly run and each
+  # manual run (the release branch's, and the release-ci/v<version> lane that
+  # scripts/release-ci.mjs starts) their event and branch. A PR's group is
+  # named by its number, never by github.ref: a merged PR's closed event
+  # reports the base branch as github.ref, so a ref-named group let every merge
+  # cancel main's run (ci-stop-closed.yml).
+  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -40,12 +46,14 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      # ci-scope reads whether the commit before a push got its own green run
+      # ci-scope reads whether the commit before a push got its own green run,
+      # and whether the pushed commit already passed the merge queue
       actions: read
     outputs:
       jobs: ${{ steps.scope.outputs.jobs }}
       vitest_os: ${{ steps.scope.outputs.vitest_os }}
       vitest_matrix: ${{ steps.scope.outputs.vitest_matrix }}
+      packaged_server_os: ${{ steps.scope.outputs.packaged_server_os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,8 +93,9 @@ jobs:
     needs: static
     if: contains(needs.static.outputs.jobs, '"vitest"')
     # scripts/ci-scope.mjs picks the platforms and their shards: PRs run Linux
-    # and Windows (the account runs only five macOS jobs at a time); main
-    # pushes, merge groups and manual runs add macOS. A pull request that
+    # and Windows (the account runs only five macOS jobs at a time), main
+    # pushes and merge groups Linux, and the full lane (nightly, manual runs,
+    # the release lane) all three. A pull request that
     # cannot affect a platform's results leaves it out, and one that changes
     # only translations runs the locale tests alone. Linux runs every file;
     # Windows and macOS run every file but the e2e files that test only OMB's
@@ -195,12 +204,12 @@ jobs:
     # `pnpm build:server`, then the bundle is copied out of the repo and run
     # with no node_modules in reach: every bare import must be inlined. The
     # macOS copy runs inside the macOS smokes job, so it takes no extra
-    # macOS runner.
+    # macOS runner. The Windows copy runs where the Windows shards do.
     name: packaged server smoke (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON(needs.static.outputs.packaged_server_os) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -236,8 +245,9 @@ jobs:
     if: contains(needs.static.outputs.jobs, '"electron-smokes"')
     # Real Electron utility processes against disposable homes and fake CLIs.
     # Never the live app. Each script prints its own evidence lines. Every
-    # PR's macOS checks live in this one job: macOS runners are the scarce
-    # ones, and each extra job pays its own queue wait and install.
+    # PR's, push's and merge group's macOS checks live in this one job: macOS
+    # runners are the scarce ones, and each extra job pays its own queue wait
+    # and install.
     name: macOS smokes (packaged server + Electron)
     runs-on: macos-latest
     timeout-minutes: 25
@@ -579,9 +589,9 @@ jobs:
     if: contains(needs.static.outputs.jobs, '"browser-driver"')
     # Advisory, outside the CI gate until it has run green for a while: the
     # omb-cdp S4 conformance suites and the new browser's checklist and viewer
-    # suites on the runner's own Google Chrome (PRs run Linux and Windows;
-    # main pushes, merge groups and manual runs add macOS, as for the vitest
-    # shards), then on Linux inside the server image's runtime as a non-root
+    # suites on the runner's own Google Chrome (PRs run Linux and Windows, the
+    # full lane all three; pushes to main and merge groups leave it out), then
+    # on Linux inside the server image's runtime as a non-root
     # user. Every S4 suite also fails when its trace holds Runtime.enable or
     # another forbidden CDP method (docs/ci.md).
     name: browser driver S4 (${{ matrix.os }})
