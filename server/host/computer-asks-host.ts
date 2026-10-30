@@ -1,6 +1,10 @@
 // On the person's own Cloud: the asks its bots raise for their computer, read against what
 // lends now, the ask_for_computer call itself, and a request that goes on by itself once the computer is on.
+import type { ServerResponse } from "node:http";
+
 import { ComputerAsks } from "../computer-asks.ts";
+import type { json as sendJson } from "../harness/http.ts";
+import { PASS } from "../routes/table.ts";
 import type { Notification } from "../notify.ts";
 import type { SharedComputers } from "../shared-computers.ts";
 import type { Store } from "../store.ts";
@@ -64,5 +68,12 @@ export function createComputerAsksHost(deps: ComputerAsksHostDeps) {
     return { status: 200, body: { state: reply.state, text: ComputerAsks.say(reply, bot.name) } };
   }
 
-  return { asks, call };
+  /** Inside index.ts's /api/internal/ block, after the capability bearer is checked: this route, or PASS. */
+  async function internal(ctx: { method: string; path: string; res: ServerResponse; json: typeof sendJson; turn: Turn; readBody: () => Promise<unknown> }): Promise<typeof PASS | void> {
+    if (ctx.method !== "POST" || ctx.path !== "/api/internal/computer-asks") return PASS;
+    const answer = await call(ctx.turn, await ctx.readBody());
+    ctx.json(ctx.res, answer.status, answer.body);
+  }
+
+  return { asks, call, internal };
 }
