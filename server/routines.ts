@@ -328,8 +328,7 @@ export class RoutineManager {
   private frozenPending = false;
   private readonly bootedAt: number;
   private readonly checking = new Map<string, AbortController>();
-  private readonly checkDrains = new Set<Promise<void>>();
-  private readonly checkReleases = new Set<string>();
+  private readonly checkDrains = new Set<Promise<void>>(); private readonly checkReleases = new Set<string>();
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
@@ -952,8 +951,7 @@ export class RoutineManager {
 
   start() {
     if (this.closing || this.timer) return;
-    if (!this.scheduler.active) this.scheduler = { active: true };
-    this.recoverCheckReleases();
+    if (!this.scheduler.active) this.scheduler = { active: true }; this.recoverCheckReleases();
     if (!this.startupRunsQueued) this.startupRunsQueued = this.queueStartupRuns();
     this.tickInBackground();
     this.timer = setInterval(() => this.tickInBackground(), 10_000);
@@ -961,8 +959,7 @@ export class RoutineManager {
   }
 
   stop() {
-    this.scheduler.active = false;
-    for (const controller of this.checking.values()) controller.abort();
+    this.scheduler.active = false; for (const controller of this.checking.values()) controller.abort();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
@@ -1202,32 +1199,22 @@ export class RoutineManager {
   /** Runs a routine's checks: what needs the AI becomes one run, or fills `manual`, the queued run the person started.
    * Nothing new leaves no run behind a scheduled check, and a quiet completed one behind a manual check. */
   private async runChecks(routineId: string, hold: CheckHold | undefined, manual?: string): Promise<void> {
-    const hook = this.options.checks, key = routineId, routine = this.routines.find((candidate) => candidate.id === routineId);
-    const scheduler = this.scheduler;
+    const hook = this.options.checks, key = routineId, routine = this.routines.find((candidate) => candidate.id === routineId); const scheduler = this.scheduler;
     if (this.closing || !scheduler.active || !hook || !routine || this.checking.has(key) || this.checkDrains.size) return;
-    const revision = routine.updatedAt, controller = new AbortController();
-    this.checking.set(key, controller);
+    const revision = routine.updatedAt, controller = new AbortController(); this.checking.set(key, controller);
     let result: RoutineCheckResult;
     try {
       result = await runRoutineCheck(hook, cloneRoutine(routine), { manual: manual !== undefined, ...(hold ? { hold } : {}) }, controller, (key) => this.releaseCheck(key), this.checkDrains);
     } catch (error) {
       if (!controller.signal.aborted) console.error(`routines: the checks of ${routineId} failed`, error);
       result = { trouble: error instanceof RoutineCheckDrainTimeoutError ? error.message : "The checks could not run; they try again at the next check." };
-    } finally {
-      this.checking.delete(key);
-    }
-    const current = this.routines.find((candidate) => candidate.id === routineId);
-    const queued = manual === undefined ? undefined : this.runs.find((run) => run.id === manual && run.status === "queued");
+    } finally { this.checking.delete(key); }
+    const current = this.routines.find((candidate) => candidate.id === routineId); const queued = manual === undefined ? undefined : this.runs.find((run) => run.id === manual && run.status === "queued");
     if (this.closing || !scheduler.active || !current?.checks || (manual === undefined ? !current.enabled : !queued)) {
-      if (result.run) this.releaseCheck(result.run.key);
-      return;
-    }
+      if (result.run) this.releaseCheck(result.run.key); return; }
     if (current.updatedAt !== revision) {
-      if (result.run) this.releaseCheck(result.run.key);
-      return this.runChecks(routineId, hold, manual);
-    }
-    const allocations: ResultsThreadAllocation[] = [];
-    let run: RoutineRun | undefined;
+      if (result.run) this.releaseCheck(result.run.key); return this.runChecks(routineId, hold, manual); }
+    const allocations: ResultsThreadAllocation[] = []; let run: RoutineRun | undefined;
     try {
       this.commitMutation(() => {
         if (manual === undefined && current.nextRunAt != null && current.nextRunAt <= this.now()) this.advancePastOccurrence(current, this.now(), current.nextRunAt);
@@ -1236,40 +1223,27 @@ export class RoutineManager {
           result.trouble || result.run ? {} : { checkedAt: this.now() });
         if (result.run) {
           run = queued ?? this.newRun(current, this.now(), false, allocations);
-          if (queued) Object.assign(run, routineRunDefinition(current), {
-            timeoutMinutes: current.timeoutMinutes,
+          if (queued) Object.assign(run, routineRunDefinition(current), { timeoutMinutes: current.timeoutMinutes,
             resultsThreadId: resolveRoutineResultsThread(current, this.options.resolveResultsThread, allocations, this.now(), run.sourceThreadId),
           });
-          if (run.timeoutMinutes === undefined) delete run.timeoutMinutes;
-          Object.assign(run, { prompt: result.run.prompt, checkKey: result.run.key });
+          if (run.timeoutMinutes === undefined) delete run.timeoutMinutes; Object.assign(run, { prompt: result.run.prompt, checkKey: result.run.key });
         } else if (queued && !result.trouble) {
           Object.assign(queued, { status: "completed", output: "Nothing new since the last check", report: { state: "quiet" }, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         }
       }, () => this.discardResultsThreads(allocations));
     } catch (error) {
       if (result.run) this.releaseCheck(result.run.key);
-      return console.error(`routines: could not save the checks of ${routineId}`, error);
-    }
-    this.emitRoutine(current);
-    if (queued && !result.run && result.trouble) this.failRun(queued, result.trouble);
-    else if (run ?? queued) this.emitRun((run ?? queued)!);
-    if (run) queueMicrotask(() => { if (scheduler.active) this.tickInBackground(); });
+      return console.error(`routines: could not save the checks of ${routineId}`, error); }
+    this.emitRoutine(current); if (queued && !result.run && result.trouble) this.failRun(queued, result.trouble); else if (run ?? queued) this.emitRun((run ?? queued)!); if (run) queueMicrotask(() => { if (scheduler.active) this.tickInBackground(); });
   }
-
   private recoverCheckReleases(): void {
-    if (this.checking.size || this.checkDrains.size) return;
-    const owned = new Set(this.runs.map((run) => run.checkKey));
-    for (const key of this.options.checks?.pendingKeys?.() ?? []) if (!owned.has(key)) this.checkReleases.add(key);
-    for (const key of this.checkReleases) this.options.checks?.release(key);
-    this.checkReleases.clear();
+    if (this.checking.size || this.checkDrains.size) return; const owned = new Set(this.runs.map((run) => run.checkKey)); for (const key of this.options.checks?.pendingKeys?.() ?? []) if (!owned.has(key)) this.checkReleases.add(key); for (const key of this.checkReleases) this.options.checks?.release(key); this.checkReleases.clear();
   }
-
   private releaseCheck(key: string): void {
     if (this.options.checks?.pendingKeys && !this.options.checks.pendingKeys().includes(key)) return;
     if (!this.scheduler.active && !this.closing) this.checkReleases.add(key);
     else this.options.checks?.release(key);
   }
-
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
     if (!run || (run.target === "bot" && run.status === "waiting" && !run.asked && this.options.routineTurn?.(event.threadId) === false)) return null;
