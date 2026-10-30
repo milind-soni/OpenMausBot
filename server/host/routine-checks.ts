@@ -11,13 +11,16 @@ import { SourceError, type CalendarEvent, type ConnectedReads, type EmailHeader,
 import type { Routine, RoutineCheckResult, RoutineChecks, RoutineRun } from "../routines.ts";
 import type { CheckHold } from "../routine-check-pacing.ts";
 import {
-  clashes, emailSince, fingerprint, keepNewest, LOOKAHEAD_MS, mergeMeetings, nextMeetingDue, planMail, planMeetings, pruneMeetings, type MeetingRecord,
+  clashes, emailSince, fingerprint, keepNewest, LOOKAHEAD_MS, mergeMeetings, neighbours, nextMeetingDue, planMail, planMeetings, pruneMeetings, type MeetingRecord,
 } from "./check-plan.ts";
 import { checkedPrompt, watchPrompt, type CheckItems } from "./check-prompts.ts";
 import type { InboxTriage } from "./inbox-triage.ts";
+import { outsideGuests, sourcesOf, type PeopleLookup } from "./people-lookup.ts";
 
 const MINUTE = 60_000;
 const CHECK_MS = 15 * MINUTE;
+/** A prep waiting on a web search about its guests is checked again this soon. */
+const LOOKUP_RECHECK_MS = MINUTE;
 const MAX_JUDGED = 1_000;
 const MAIL_READ_LIMIT = 100;
 /** A run that took items and was never heard of again gives them back after this long. */
@@ -95,7 +98,12 @@ export interface RoutineChecksDeps {
   inbox?: Pick<InboxTriage, "ready" | "triage">;
   /** Emails a routine's checks had sorted: by a run whose answer was kept, or by the helper models. */
   sorted?(routineId: string, count: number): void;
+  /** Web searches about a meeting's outside guests, before its prep. */
+  people?: Pick<PeopleLookup, "prepare">;
 }
+
+/** A meeting handed to a run for prep, with the pages a web search about its guests found. */
+export interface HandedPrep { key: string; event: CalendarEvent; sources?: string[] }
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 const appName: Record<ReadApp, string> = { gmail: "Gmail", googlecalendar: "Google Calendar" };
@@ -115,7 +123,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   mayDraft(key: string, threadId: string, to: string | undefined): boolean;
   drafted(key: string, threadId: string): void;
   /** The emails and meetings a run was handed, while it holds them. */
-  items(key: string): { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> } | null;
+  items(key: string): { mail: EmailHeader[]; prep: HandedPrep[] } | null;
   pendingKeys(): string[];
   forget(routineId: string): void;
   /** The person's own Gmail address, once a check has read it. */
@@ -132,7 +140,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`checks: ${file} is unreadable; starting fresh`);
   }
   /** The headers and events a pending run was handed, while this process holds them: the state keeps only their ids. */
-  const handed = new Map<string, { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> }>();
+  const handed = new Map<string, { mail: EmailHeader[]; prep: HandedPrep[] }>();
 
   const save = (): void => {
     try {
@@ -241,17 +249,26 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
           report.remind = jobs.filter((job) => job.kind === "remind").map((job) => job.event);
           for (const event of report.remind) record(event).remindedAt = at;
         }
+        let searching = false;
         for (const job of jobs) {
           if (job.kind !== "prep" || held.has(job.event.id)) continue;
           if (!aiAllowed) {
             if (!context.hold) report.unfenced = true;
             continue;
           }
-          items.prep.push({ key: job.event.id, event: job.event, short: job.short });
+          const guests = job.short || !deps.people ? [] : outsideGuests(job.event, entry.address);
+          const people = guests.length ? deps.people!.prepare(routine.botId, guests) : [];
+          if (people === "looking") {
+            searching = true;
+            continue;
+          }
+          const around = neighbours(job.event, meetings, deps.timeZone());
+          items.prep.push({ key: job.event.id, event: job.event, short: job.short, ...(people.length ? { people } : {}), ...(around.before || around.after ? { around } : {}) });
           Object.assign(record(job.event), { prepStartedAt: at, fingerprint: fingerprint(job.event), start: job.event.start });
           pending.prep.push(job.event.id);
         }
         wakeAt = nextMeetingDue({ now: at, events: meetings, meetings: records });
+        if (searching) wakeAt = Math.min(wakeAt ?? Infinity, at + LOOKUP_RECHECK_MS);
       } catch (error) {
         trouble.push(failed(entry, "googlecalendar", error));
       }
@@ -318,7 +335,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (work > 0) {
       const key = `chk-${randomUUID()}`;
       entry.pending = { ...entry.pending, [key]: { at, ...pending } };
-      handed.set(key, { mail: items.mail, prep: items.prep.map(({ key: meeting, event }) => ({ key: meeting, event })) });
+      handed.set(key, { mail: items.mail, prep: items.prep.map(({ key: meeting, event, people }) => ({ key: meeting, event, ...(people?.length ? { sources: sourcesOf(people) } : {}) })) });
       run = {
         key,
         prompt: brief

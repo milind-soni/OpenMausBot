@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SourceError, type CalendarEvent, type ConnectedReads, type EmailHeader, type ReadApp } from "../connected-reads.ts";
 import type { Routine, RoutineRun } from "../routines.ts";
+import type { Finding, Guest } from "./people-lookup.ts";
 import { CHECKS_FILE, createRoutineChecks, type CheckReport } from "./routine-checks.ts";
 
 const MINUTE = 60_000;
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = {}) {
+function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean; found?: () => Finding[] | "looking" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-routine-checks-"));
   dirs.push(dir);
   let now = Date.parse("2026-10-22T08:00:00Z");
@@ -37,10 +38,12 @@ function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = 
     }),
   };
   const sorted: Array<[string, number]> = [];
+  const searched: Array<[string, Guest[]]> = [];
   const checks = createRoutineChecks({
     dataDir: dir, reads, now: () => now, mayRead: (_bot, app) => options.may?.(app) ?? true, fenced: () => options.fenced ?? true,
     timeZone: () => "UTC", runs: () => runs, dismissedFrom: () => [], report: (report) => { reports.push(report); },
     sorted: (routineId, count) => sorted.push([routineId, count]),
+    ...(options.found ? { people: { prepare: (botId: string, guests: Guest[]) => { searched.push([botId, guests]); return options.found!(); } } } : {}),
   });
   const routine = (extra: Partial<Routine> = {}): Routine => ({
     id: "watch", name: "Keep an eye on my day", prompt: "Check my day.", target: "bot", botId: "chief", runOn: "maus", enabled: true,
@@ -58,7 +61,7 @@ function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = 
     events.push(event);
     return event;
   };
-  return { checks, routine, mail, meeting, failing, calls, runs, reports, inbox, sorted, advance: (ms: number) => { now += ms; }, now: () => now, file: join(dir, CHECKS_FILE) };
+  return { checks, routine, mail, meeting, failing, calls, runs, reports, inbox, sorted, searched, advance: (ms: number) => { now += ms; }, now: () => now, file: join(dir, CHECKS_FILE) };
 }
 
 const run = (key: string, status: RoutineRun["status"], deliver?: "brief"): RoutineRun => ({
@@ -93,6 +96,36 @@ describe("a routine's checks", () => {
     expect(saved.judged).toEqual(["b", "a"]);
     expect(Object.values(saved.meetings as Record<string, { preppedAt?: number }>).map((one) => one.preppedAt)).toEqual([expect.any(Number)]);
     expect(JSON.stringify(saved)).not.toContain("Subject a");
+  });
+
+  it("a meeting with someone from outside waits for a web search about them, then its prep carries what was found", async () => {
+    let found: Finding[] | "looking" = "looking";
+    const s = setup({ found: () => found });
+    s.meeting("standup", 205);
+    const call = s.meeting("call", 235);
+    call.attendees.push({ email: "Priya@Harbour.test", name: "Priya Raman", self: false, organizer: false });
+    const waiting = await s.checks.check(s.routine({ checks: ["calendar"] }), { manual: false });
+    expect(s.checks.items(waiting.run!.key)?.prep.map((one) => one.event.title)).toEqual(["standup"]);
+    expect(waiting.wakeAt).toBe(s.now() + MINUTE);
+    expect(s.searched).toEqual([["chief", [{ email: "priya@harbour.test", name: "Priya Raman" }]]]);
+    s.checks.commit(waiting.run!.key);
+
+    found = [{ email: "priya@harbour.test", name: "Priya Raman", unsure: false, facts: [{ text: "Founded Harbour Tax in 2025.", url: "https://harbour.test/about" }] }];
+    s.advance(MINUTE);
+    const result = await s.checks.check(s.routine({ checks: ["calendar"] }), { manual: false });
+    expect(result.run!.prompt).toContain("right before it standup");
+    expect(result.run!.prompt).toContain("[Records from a web search about the outside guests.");
+    expect(result.run!.prompt).toContain("Priya Raman <priya@harbour.test> · Founded Harbour Tax in 2025. (harbour.test)");
+    expect(s.checks.items(result.run!.key)?.prep.find((one) => one.event.title === "call")?.sources).toEqual(["https://harbour.test/about"]);
+  });
+
+  it("searches for no colleague and holds no late prep for a search", async () => {
+    const s = setup({ found: () => "looking" });
+    s.meeting("planning", 235);
+    s.meeting("soon", 30).attendees.push({ email: "guest@elsewhere.test", self: false, organizer: false });
+    const result = await s.checks.check(s.routine({ checks: ["calendar"] }), { manual: false });
+    expect(s.searched).toEqual([]);
+    expect(s.checks.items(result.run!.key)?.prep.map((one) => one.event.title).sort()).toEqual(["planning", "soon"]);
   });
 
   it("a meeting its run's answer did not prepare is settled too, never handed out every tick", async () => {

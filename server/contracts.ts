@@ -534,6 +534,9 @@ export interface ProviderInstance {
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (titles, summaries); the signal is a best-effort cap. */
   generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
+  /** One-shot text that may search the web and do nothing else: no MCP servers, files, shell or page fetches. Only for
+   * prompts that hold nothing private, since what it searches for leaves this computer. */
+  searchWeb?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** One-shot text for background steps only, on engines whose turns are whole agent processes; never for titles or compaction. */
   generateMemoryText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review; separate from generateText so no security capability is inferred from a generic helper. */

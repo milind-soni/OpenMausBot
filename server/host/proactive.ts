@@ -16,7 +16,7 @@ import type { AppConfig } from "../config.ts";
 import { createConnectedReads, READ_APPS, type ReadApp } from "../connected-reads.ts";
 import { evaluateConnectorTools } from "../connector-verdict.ts";
 import type { DecisionRow } from "../decision-log.ts";
-import type { ProviderAdapter } from "../contracts.ts";
+import type { ProviderAdapter, ProviderInstance } from "../contracts.ts";
 import { createReadAndDraft, type ReadAndDraftDeps } from "../read-and-draft.ts";
 import type { Routine, RoutineChecks, RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
@@ -26,6 +26,7 @@ import { createBrief, type BriefDeps, type MorningDeps } from "./brief.ts";
 import { WATCH_EVERY_MINUTES, WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 import { createHelperSuggestion } from "./helper-suggestion.ts";
 import { createInboxTriage } from "./inbox-triage.ts";
+import { createPeopleLookup, LOOKUP_TIMEOUT_MS } from "./people-lookup.ts";
 import { mainChief, proactiveOwner } from "./proactive-owner.ts";
 import { createRoutineChecks } from "./routine-checks.ts";
 import type { ValueKind } from "./value-ledger.ts";
@@ -59,7 +60,7 @@ export interface ProactiveDeps {
     connectedServices(cfg: AppConfig): Promise<Record<string, { connected: boolean }>>;
     relayMcp(cfg: AppConfig, payload: never, transportSessionId?: string, beforeSend?: () => void, signal?: AbortSignal): Promise<{ status: number; bytes: Uint8Array; transportSessionId?: string }>;
   };
-  registry: { get(instanceId: string): { driverKind: string; adapter: ProviderAdapter } | null | undefined };
+  registry: { get(instanceId: string): ({ driverKind: string; adapter: ProviderAdapter } & Pick<ProviderInstance, "searchWeb">) | null | undefined };
   dataDir: string;
   /** A hosted team workspace or a Team Cloud. */
   team: boolean;
@@ -139,8 +140,16 @@ export function createProactive(deps: ProactiveDeps) {
     // Set up and on, or switched off on purpose: either way there is nothing to suggest.
     settled: () => deciderEnabled(cfg) || cfg.decider?.enabled === false || cfg.decider?.provider === "off",
   });
+  const people = createPeopleLookup({
+    dataDir: deps.dataDir,
+    search: (botId) => {
+      const bot = store.bot(botId);
+      const engine = bot ? deps.registry.get(bot.modelSelection.instanceId) : undefined;
+      return bot && engine?.searchWeb ? (prompt) => engine.searchWeb!(prompt, { model: bot.modelSelection.model, timeoutMs: LOOKUP_TIMEOUT_MS }) : null;
+    },
+  });
   const checks = createRoutineChecks({
-    dataDir: deps.dataDir, reads, mayRead, fenced, runs, timeZone: brief.timeZone, dismissedFrom: brief.dismissedFrom,
+    dataDir: deps.dataDir, reads, mayRead, fenced, runs, timeZone: brief.timeZone, dismissedFrom: brief.dismissedFrom, people,
     report: async (found) => {
       await brief.report(found);
       if (found.gmail) suggestion.consider({ gmailConnected: found.gmail.connected, ...(found.gmail.address ? { inbox: found.gmail.address } : {}) });

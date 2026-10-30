@@ -21,7 +21,7 @@ import { parseWatchResult } from "./check-prompts.ts";
 import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { proactiveOwner } from "./proactive-owner.ts";
-import type { CheckReport } from "./routine-checks.ts";
+import type { CheckReport, HandedPrep } from "./routine-checks.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
 const MINUTE = 60_000;
@@ -94,7 +94,7 @@ export interface BriefDeps {
   failRun(runId: string, why: string): void;
   /** The run's answer was read: its items are settled. */
   keep(key: string): void;
-  items(key: string): { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> } | null;
+  items(key: string): { mail: EmailHeader[]; prep: HandedPrep[] } | null;
   /** What the bot's last nightly dream noticed across its chats, while fresh. AI text: shown as plain text only. */
   ideas?(botId: string): { ideas: string[]; conversations: number };
   /** A meeting prep card was posted. */
@@ -453,7 +453,7 @@ export function createBrief(deps: BriefDeps) {
       for (const prep of result.prep) {
         const meeting = items.prep.find((one) => one.key === prep.id)!;
         if (state.preps.some((one) => one.key === meeting.key && one.at > at - DAY)) continue;
-        if (postCard(prepCard({ event: meeting.event, prep: prep.brief, timeZone: timeZone(), now: at }))) {
+        if (postCard(prepCard({ event: meeting.event, prep: prep.brief, sources: meeting.sources ?? [], timeZone: timeZone(), now: at }))) {
           state.preps = [...state.preps, { key: meeting.key, at }].slice(-MAX_ROWS);
           deps.prepped?.();
         }

@@ -53,7 +53,11 @@ desktop, headless and on a Cloud.
      **Draft a reply**, **Open in Gmail** and **Dismiss**;
   4. **Routines**: other routines' results today.
 - **Meeting prep**: a card in the same chat when a meeting with other people is
-  within four hours.
+  within four hours. At most eight short lines: who the guests are, how the
+  meeting was booked and what they wrote, what the person and they have emailed
+  about, the meeting's time where they are, what comes right before or after it,
+  one open question and one next step. Under it, **Sources** links to the pages
+  a web search about the guests found, each labelled with its site.
 - **The 10-minute reminder**: a card posted by the server, with no AI.
 - One notification per update that adds something that needs the person.
 
@@ -111,6 +115,33 @@ there is no brief at all. Its row says
 4. **Deliver to the brief** (`deliver: "brief"`): results become brief rows,
    not chat lines of their own.
 
+## Who the guests are
+
+The run that writes a prep reads the person's mail, so it never reaches the
+web. Before it, a separate web search (`server/host/people-lookup.ts`) finds out
+who the guests are:
+
+- **Who is searched.** Guests outside the person's own email domain, the
+  organizer first, at most three a meeting. Colleagues are never searched, and
+  neither is anyone at a meeting with more than eight outside guests. When the
+  person's own address is a personal one (Gmail and the like), everyone else
+  counts as outside.
+- **What the search gets.** The guests' names, addresses and company domains,
+  as records. It is a one-shot call on the bot's own Claude engine
+  (`searchWeb`, `server/drivers/claude-background.ts`): web search is its only
+  tool, with no MCP servers, settings or hooks of the person's, in an empty
+  folder. WebFetch is left out because it fetches from this computer, so a page
+  could aim it at local addresses. A Claude Code too old to be held to that
+  searches nothing.
+- **What comes back.** Up to four one-sentence facts per guest, each with the
+  https page it came from, or "unsure" when the results may be about someone
+  else. The facts reach the prep run as records. The card's Sources row is
+  built by the server from those links, labelled with each link's own site.
+- **Timing.** A prep due now waits for its guests' search and checks again a
+  minute later. A failed search lets the prep go ahead without it. A prep already
+  late, because the computer was asleep when it was due, never waits. At most
+  twelve searches a day; past that, preps go ahead without one.
+
 ## Reliability, for every routine with checks
 
 - **Overlap.** While a run works, checks still run (reminders stay on time), but
@@ -139,6 +170,9 @@ there is no brief at all. Its row says
   senders and subjects it shows are read back from Gmail by id after a restart.
 - `watch.json`: that the default routine was made, so it is never made again,
   and the bot each briefing routine was handed to.
+- `people.json`: what a web search found about each outside guest, by email
+  address: up to four one-sentence facts with their links, kept 30 days. A
+  failed search is kept a day, so it isn't retried every check.
 - A card the server built carries `serverCard`. A bot can't edit it, and it
   replays into a turn only as records. Dismiss works only for the owner or an
   admin, only on the brief, checks thread ownership before reading a widget, and
