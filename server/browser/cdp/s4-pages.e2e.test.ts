@@ -160,7 +160,8 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     await page.click({ selector: "#o" });
     expect(run.browser.activePage).toBe(page);
     await popup.close();
-    await page.waitFor({ ms: 200 });
+    // Chrome reports the closed tab with an event after Target.closeTarget has answered.
+    for (const until = Date.now() + hostTimeout(5_000); run.browser.pages().includes(popup) && Date.now() < until;) await page.waitFor({ ms: 25 });
     expect(run.browser.pages()).not.toContain(popup);
   });
 
@@ -194,7 +195,7 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     await second.click({ selector: "#b" });
     expect(await read(`document.getElementById("b").textContent`, second)).toBe("two");
     await second.close();
-    await page.waitFor({ ms: 200 });
+    for (const until = Date.now() + hostTimeout(5_000); run.browser.pages().includes(second) && Date.now() < until;) await page.waitFor({ ms: 25 });
     expect(run.browser.pages()).toEqual([page]);
     await expect(second.click({ selector: "#b" })).rejects.toMatchObject({ code: "closed" });
   });

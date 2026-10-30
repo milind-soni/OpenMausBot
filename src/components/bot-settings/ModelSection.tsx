@@ -97,9 +97,8 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
     <div className="rounded-xl bg-card p-4">
       <div className="text-[15px] font-medium text-ink">{t("model.fallback.title")}</div>
       <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {t("model.fallback.help")}
+        {t("model.fallback.uses")}
       </div>
-      {!state.config?.automaticRecovery?.enabled && <p className="mt-2 text-[12px] text-ink-secondary">{t("model.fallback.off")}</p>}
       {chain.length > 0 && (
         <ol className="mt-3 flex flex-col gap-1">
           {chain.map((entry, index) => (

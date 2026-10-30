@@ -37,6 +37,8 @@ export interface BotMemoryRouteDeps {
     owner(auth: RequestAuth): boolean;
   };
   ownersWrite?: <T>(auth: RequestAuth, botId: string, write: () => T) => T;
+  /** Team Cloud only: the signed-in person's own layer of this bot's memory (`/memory/mine`); null for anyone else. */
+  ownLayer?(auth: RequestAuth, botId: string): string | null;
 }
 
 export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
@@ -58,6 +60,39 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const write = <T>(botId: string, change: () => T): T => deps.ownersWrite ? deps.ownersWrite(auth, botId, change) : change();
+    /** One memory file of `id`, a bot's own folder or a layer of it. */
+    const serveFile = async (id: string, guarded: <T>(change: () => T) => T) => {
+      if (method === "GET") {
+        try {
+          return json(res, 200, readMemoryDoc(id, url.searchParams.get("path") ?? MEMORY_INDEX));
+        } catch (error) {
+          return replyMemoryError(res, error);
+        }
+      }
+      if (method === "PUT") {
+        const parsed = z
+          .object({ path: z.string().default(MEMORY_INDEX), text: z.string(), expectedHash: z.string().optional() })
+          .safeParse(await readBody(req));
+        if (!parsed.success) return json(res, 400, { error: "text must be a string; path and expectedHash are optional strings" });
+        try {
+          const { doc, entry } = guarded(() => journalMemoryWrite(id, parsed.data.path, parsed.data.text, {
+            actor: "person",
+            via: "ui",
+            expectedHash: parsed.data.expectedHash,
+          }));
+          return json(res, 200, { ok: true, ...doc, entry: entry ? journalEntryForClient(id, entry) : null, overview: memoryOverview(id) });
+        } catch (error) {
+          return replyMemoryError(res, error);
+        }
+      }
+      const file = url.searchParams.get("path") ?? "";
+      try {
+        const entry = guarded(() => journalMemoryDelete(id, file, { actor: "person", via: "ui" }));
+        return json(res, 200, { ok: true, path: file, entry: entry ? journalEntryForClient(id, entry) : null, overview: memoryOverview(id) });
+      } catch (error) {
+        return replyMemoryError(res, error);
+      }
+    };
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory$/);
     if (m && method === "GET") {
       if (!deps.bot(m[1])) return json(res, 404, { error: "no such bot" });
@@ -102,42 +137,18 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       return json(res, 200, { ok: true, lendingReview: false });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/file$/);
-    if (m && method === "GET") {
+    if (m && ["GET", "PUT", "DELETE"].includes(method)) {
       if (!deps.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      try {
-        return json(res, 200, readMemoryDoc(m[1], url.searchParams.get("path") ?? MEMORY_INDEX));
-      } catch (error) {
-        return replyMemoryError(res, error);
-      }
+      const botId = m[1];
+      return serveFile(botId, (change) => write(botId, change));
     }
-    if (m && method === "PUT") {
-      if (!deps.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      const parsed = z
-        .object({ path: z.string().default(MEMORY_INDEX), text: z.string(), expectedHash: z.string().optional() })
-        .safeParse(await readBody(req));
-      if (!parsed.success) return json(res, 400, { error: "text must be a string; path and expectedHash are optional strings" });
-      try {
-        const botId = m[1];
-        const { doc, entry } = write(botId, () => journalMemoryWrite(botId, parsed.data.path, parsed.data.text, {
-          actor: "person",
-          via: "ui",
-          expectedHash: parsed.data.expectedHash,
-        }));
-        return json(res, 200, { ok: true, ...doc, entry: entry ? journalEntryForClient(m[1], entry) : null, overview: memoryOverview(m[1]) });
-      } catch (error) {
-        return replyMemoryError(res, error);
-      }
-    }
-    if (m && method === "DELETE") {
-      if (!deps.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      const file = url.searchParams.get("path") ?? "";
-      try {
-        const botId = m[1];
-        const entry = write(botId, () => journalMemoryDelete(botId, file, { actor: "person", via: "ui" }));
-        return json(res, 200, { ok: true, path: file, entry: entry ? journalEntryForClient(m[1], entry) : null, overview: memoryOverview(m[1]) });
-      } catch (error) {
-        return replyMemoryError(res, error);
-      }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/mine(\/file)?$/);
+    if (m && (method === "GET" || m[2])) {
+      const layer = deps.bot(m[1]) ? deps.ownLayer?.(auth, m[1]) ?? null : null;
+      if (!layer) return json(res, 404, { error: "no such bot" });
+      if (!m[2]) return json(res, 200, memoryOverview(layer));
+      if (!["GET", "PUT", "DELETE"].includes(method)) return PASS;
+      return serveFile(layer, (change) => change());
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/journal$/);
     if (m && method === "GET") {

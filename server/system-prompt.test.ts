@@ -301,6 +301,8 @@ describe("shared sentences", () => {
     expect(TRIGGER_PROMPT).toContain("set it up with trigger action=create in this turn");
     expect(TRIGGER_PROMPT).toContain("Do not ask for confirmation");
     expect(TRIGGER_PROMPT).toContain("Edit, Pause and Undo");
+    expect(TRIGGER_PROMPT).toContain("use wait_until instead of staying busy or making a short-interval routine");
+    expect(TRIGGER_PROMPT).toContain("give follow_up only when they asked for something to be done at that moment");
     expect(TRIGGER_PROMPT).not.toMatch(/pending|explicitly asks/);
     expect(CREDENTIAL_PROMPT).toContain("secure credential request");
     expect(CREDENTIAL_PROMPT).not.toContain("applied immediately");

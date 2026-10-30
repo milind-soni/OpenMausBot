@@ -94,7 +94,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const pairedDevice = req.headers["x-openmausbot-companion"] === "1";
       if ((auth.kind === "session" && !auth.scopes.includes("admin")) || pairedDevice) {
-        const field = clientBotPatchViolation(body, ownsDefaultBot(store.bot(m[1]), auth.kind === "session" ? auth.session.email : undefined));
+        const session = auth.kind === "session" ? auth.session : undefined;
+        const field = clientBotPatchViolation(body, ownsDefaultBot(store.bot(m[1]), session?.email), session?.membershipAuthority === "team");
         if (field) {
           return json(res, 403, {
             error: pairedDevice

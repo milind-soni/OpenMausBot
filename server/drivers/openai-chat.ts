@@ -26,6 +26,7 @@ import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
+import { Agent, fetch as fetchWithoutLimits } from "undici";
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -99,6 +100,16 @@ interface NativeLog {
   incoming(completion: Completion): unknown;
 }
 
+// Node's fetch (undici 7.29 in Electron 43, 8.9 in Node 26) fails a request after 300 s without response headers
+// or body bytes, whatever its signal allows. A local model sends nothing until its first token.
+const FETCH_LIMIT_MS = 300_000;
+const LIVENESS_MISSES = 3;
+let unlimitedAgent: Agent | undefined;
+function fetchPastLimit(url: string, init: RequestInit): Promise<Response> {
+  unlimitedAgent ??= new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+  return fetchWithoutLimits(url, { ...init, dispatcher: unlimitedAgent } as Parameters<typeof fetchWithoutLimits>[1]) as unknown as Promise<Response>;
+}
+
 interface RuntimeOptions<Config> {
   input: DriverCreateInput<Config>;
   driverKind: string;
@@ -110,6 +121,9 @@ interface RuntimeOptions<Config> {
   missingKeyError: string;
   unavailableReason: string;
   timeoutMs: number;
+  /** Ask a server on this machine or network for its models this often while a reply is pending, and stop the reply
+   * when it misses LIVENESS_MISSES checks in a row: it crashed, froze or left the network. */
+  livenessEveryMs?: number;
   nativeLog: NativeLog;
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
@@ -306,6 +320,19 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     createdAt: new Date().toISOString(),
   });
 
+  const watchServer = (everyMs: number, stop: (reason: Error) => void) => {
+    let misses = 0;
+    const timer = setInterval(() => {
+      fetch(`${options.apiUrl}/models`, { headers: { authorization: `Bearer ${options.apiKey}` }, signal: AbortSignal.timeout(everyMs) })
+        .then((response) => { misses = 0; void response.body?.cancel(); })
+        .catch(() => {
+          if (++misses === LIVENESS_MISSES) stop(new Error(`The model server at ${new URL(options.apiUrl).host} stopped answering, so the reply was stopped.`));
+        });
+    }, everyMs);
+    timer.unref();
+    return timer;
+  };
+
   const complete = async (
     messages: OpenAIChatMessage[],
     model: string,
@@ -325,6 +352,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     };
 
     resetIdleTimer();
+    const liveness = options.livenessEveryMs ? watchServer(options.livenessEveryMs, (reason) => timeoutController.abort(reason)) : null;
 
     try {
       const activeSignal = signal
@@ -335,7 +363,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ...options.requestBody(model, messages, stream),
         ...(tools.length ? { tools } : {}),
       });
-      const response = await fetch(`${options.apiUrl}/chat/completions`, {
+      const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
+      const response = await send(`${options.apiUrl}/chat/completions`, {
         method: "POST",
         ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
@@ -488,6 +517,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       return { text, reasoning, usage, toolCalls: calls.finish(finishReason, malformedFrame), finishReason, protocolReasoning, protocolReasoningDetails: details.blocks };
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
+      if (liveness) clearInterval(liveness);
     }
   };
 

@@ -198,7 +198,7 @@ describe("Tailscale pairing onboarding", () => {
   it("keeps HTTPS as the recommended default surface", () => {
     expect(pairingSurfaceCopy({ localFallback: false, tailscaleFallback: false })).toEqual({
       title: "Secure HTTPS pairing",
-      subtitle: "Recommended — the simplest setup, and it keeps working when the paired device leaves this Wi-Fi.",
+      subtitle: "Recommended. The simplest setup, and it keeps working when the paired device leaves this Wi-Fi.",
     });
     expect(pairingSurfaceCopy({ localFallback: false, tailscaleFallback: true }).title).toBe(
       "Tailscale pairing",

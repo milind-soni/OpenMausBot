@@ -269,7 +269,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /for \(const port of DESKTOP_PORTS\)/, "main tries the ports this module names, in order");
   assert.deepEqual([...DESKTOP_PORTS], [8799, 18799, 28799]);
-  const start = main.indexOf("  const desktopPrefs = createDesktopPrefs("), end = main.indexOf("\n", main.indexOf("page:", start));
+  const start = main.indexOf("  desktopPrefs = createDesktopPrefs("), end = main.indexOf("\n", main.indexOf("page:", start));
   assert.ok(start >= 0 && end > start, "main.mjs registers the desktop prefs");
   let options = null;
   const localFrame = { url: `${LOCAL}/` }, serverFrame = { url: `${VPS}/` };
@@ -310,6 +310,19 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });
   assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");
   assert.equal(await vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: null })(`${LOCAL}/`), false, "no window");
+});
+
+test("the window's rail of places is shown until the person hides it, and the choice survives a restart", () => {
+  let saved = null, writes = 0;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); writes++; } });
+  assert.equal(prefs.railHidden(), false);
+  prefs.setRailHidden(false);
+  assert.equal(writes, 0, "showing a rail that shows writes nothing");
+  prefs.setRailHidden(true);
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).railHidden(), true);
+  prefs.setRailHidden("no");
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).railHidden(), false, "only true hides it");
+  assert.equal(createDesktopPrefs({ read: () => ({ railHidden: "yes" }), write: () => {} }).railHidden(), false);
 });
 
 test("the talk shortcut is on with ⌃⌥Space until changed, and the choice survives a restart", () => {
