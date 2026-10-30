@@ -4156,7 +4156,7 @@ const coordinator: Coordinator = createCoordinator({
     },
   },
 });
-threadAwaitingAnswer = (threadId) => coordinator.awaitingAnswer(threadId);
+threadAwaitingAnswer = (threadId) => coordinator.awaitingTypedAnswer(threadId);
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
 const groupUsageReader = new GroupUsageReader(DATA_DIR);
 try { groupUsageReader.refresh(); } catch {}
