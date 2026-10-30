@@ -56,8 +56,8 @@ Properties are counts, `true` or `false`, or words from fixed lists in the app's
 
 | List | Values |
 | --- | --- |
-| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg`, `postiz` |
-| Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `meta`, `muse_code`, `deepseek`, `copilot` |
+| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `greenference`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg`, `postiz` |
+| Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `greenference`, `meta`, `muse_code`, `deepseek`, `copilot` |
 | App | The 24 apps Connected apps lists by default: `slack`, `github`, `gmail`, `googlecalendar`, `googlesheets`, `googledocs`, `googledrive`, `notion`, `linear`, `sentry`, `posthog`, `discord`, `twitter`, `reddit`, `zapier`, `hubspot`, `salesforce`, `jira`, `asana`, `trello`, `dropbox`, `airtable`, `figma`, `stripe`. Every other app is `other`. |
 | Starting role | `assistant`, `inbox`, `research`, `coder`, `community`, `ops` |
 | Cloud plan | `starter`, `personal`, `pro`, `max` |
@@ -168,6 +168,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_welcome_step` | A step of a new Cloud's welcome is shown | `step`: `bring`, `engine`, `files`, `done` |
 | `cloud_welcome_ended` | A new Cloud's welcome ends | `reason`: `done`, `skipped`; `at`: the step it ended on |
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
+| `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
 
 `api_key_saved` reports `ok` for a key the server checks with its provider before saving it (Boat, Composio,

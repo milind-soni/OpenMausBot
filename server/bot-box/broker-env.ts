@@ -29,7 +29,7 @@ export const BROKERED_PROVIDERS: readonly BrokeredProvider[] = [
 
 /** Keys the box would otherwise carry raw: named in the report when present. */
 export const UNBROKERED_KEY_ENV: readonly string[] = [
-  "XAI_API_KEY", "MISTRAL_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "META_API_KEY", "MINIMAX_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY",
+  "XAI_API_KEY", "MISTRAL_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "GREENFERENCE_API_KEY", "META_API_KEY", "MINIMAX_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY",
   "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "FACTORY_API_KEY", "CLINE_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY",
 ];
 

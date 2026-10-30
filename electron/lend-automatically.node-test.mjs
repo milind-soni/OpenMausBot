@@ -70,16 +70,17 @@ function session() {
     state: () => state,
     isOwnCloud: origin => state.status === "connected" && (state.machine?.origin === origin || state.clouds.some(cloud => ownCloud(cloud) && cloud.origin === origin)),
   };
-  return { account, signOut: () => { state = { status: "signed-out", account: null, machine: null, clouds: [] }; }, signIn: () => { state = { ...session().account.state() }; } };
+  return { account, signOut: () => { state = { status: "signed-out", account: null, machine: null, clouds: [] }; }, signIn: () => { state = { ...session().account.state() }; },
+    signInAs: id => { state = { ...session().account.state(), account: { id } }; } };
 }
 
 /** This computer lending to every saved place the way main wires it: the session's own Clouds, its home folder, and
  * apps and screen while `screen` says so. */
-async function computer(t, { places = [myCloud, clientA, acme], screen = () => false, home, homes = {}, cuaConnection = async () => null, askForScreen } = {}) {
+async function computer(t, { places = [myCloud, clientA, acme], screen = () => false, home, homes = {}, cuaConnection = async () => null, askForScreen, ownHome } = {}) {
   const dir = await scratch(t);
   const file = path.join(dir, "profile", "computer-sharing.json");
   const signedIn = session();
-  const target = createLendingTarget({ account: () => signedIn.account, environments: () => places });
+  const target = createLendingTarget({ account: () => signedIn.account, environments: () => places, ...(ownHome ? { ownHome } : {}) });
   const summaries = [];
   const dials = [];
   const make = () => createComputerSharing({
@@ -98,7 +99,7 @@ async function computer(t, { places = [myCloud, clientA, acme], screen = () => f
   return { dir, file, target, summaries, dials, signedIn, get sharing() { return sharing; }, restart: () => { sharing.close(); sharing = make(); return sharing; } };
 }
 
-test("each Cloud of the person's own is lent this computer by itself: the internet connection, their Chrome and the home folder with editing; never the terminal", async t => {
+test("each Cloud of the person's own is lent this computer by itself: the internet connection, their Chrome and the home folder with editing; not the terminal unless turned on", async t => {
   const homes = { [HOME]: cloudHome(), [OTHER]: cloudHome() };
   const dir = await scratch(t);
   const home = path.join(dir, "me");
@@ -113,6 +114,45 @@ test("each Cloud of the person's own is lent this computer by itself: the intern
   const kept = JSON.parse(await readFile(mac.file, "utf8")).records[myCloud.id];
   assert.deepEqual({ home: kept.folders[0].home, path: kept.folders[0].path, write: kept.folders[0].write }, { home: true, path: home, write: true });
   assert.deepEqual(mac.summaries.at(-1).clouds, ["My Cloud"]);
+});
+
+test("a server of the person's own their bots moved to is lent as their Clouds are, only while it is home, says it is theirs alone and is the server the move chose", async t => {
+  const GARAGE = "https://garage.example.test", garage = { id: "garage", kind: "remote", name: "Garage server", origin: GARAGE };
+  const server = cloudHome({ link: false, chrome: false });
+  const answer = server.fetch;
+  let own = true;
+  server.fetch = async (url, init) => (new URL(url).pathname === "/api/auth/session"
+    ? { ok: true, status: 200, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify({ kind: "session", id: server.sessionId, scopes: ["admin", "client"], ...(own ? { own: true } : {}) })); })() }
+    : answer(url, init));
+  let home = null;
+  const mac = await computer(t, { homes: { [GARAGE]: server }, places: [garage], ownHome: () => home });
+  mac.sharing.start();
+  await delay(100);
+  assert.equal(server.connects.length, 0, "connected by hand and not home: never lent by itself");
+  home = { origin: GARAGE, environmentId: server.environmentId };
+  mac.sharing.cloudChanged();
+  await until(() => server.connects.length === 1, "Garage server to be lent this computer, with no click");
+  assert.equal(server.connects[0].terminal, false);
+  assert.deepEqual(mac.summaries.at(-1).clouds, ["Garage server"], "the menu bar says who can use this computer");
+  mac.sharing.pause();
+  assert.equal(mac.summaries.at(-1).paused, true);
+  await mac.sharing.resume();
+  await until(() => server.connects.length === 2, "lent again on Resume");
+
+  own = false;
+  const strangers = mac.restart();
+  strangers.start();
+  await delay(150);
+  assert.equal(server.connects.length, 2, "a server with other people on it now is never lent");
+  assert.match(strangers.cloudState(garage).error ?? "", /not your bots' home any more/u);
+
+  own = true;
+  const chosen = { origin: GARAGE, environmentId: randomUUID() };
+  const elsewhere = await computer(t, { homes: { [GARAGE]: server }, places: [garage], ownHome: () => chosen });
+  elsewhere.sharing.start();
+  await until(() => elsewhere.sharing.cloudState(garage).error, "the lending to be refused");
+  assert.equal(server.connects.length, 2, "another server behind the same address than the one the move chose is never lent");
+  assert.match(elsewhere.sharing.cloudState(garage).error, /not your bots' home any more/u);
 });
 
 test("apps and screen are lent once computer control works here, and follow it", async t => {
@@ -169,7 +209,7 @@ test("Pause stops every Cloud at once and lasts across restarts; Resume lends ag
   await until(() => homes[HOME].connects.length === 1 && homes[OTHER].connects.length === 1, "both Clouds to be lent");
   mac.sharing.pause();
   await until(() => homes[HOME].disconnects.length === 1 && homes[OTHER].disconnects.length === 1, "both Clouds to be told");
-  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, busy: null });
+  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, terminal: false, busy: null });
   assert.equal(mac.sharing.lentToCloud(myCloud).paused, true, "Files keeps My Cloud's copies, and holds bots' changes there");
   const plans = path.join(mac.dir, "Plans");
   await mkdir(plans);
@@ -241,6 +281,64 @@ test("a grant kept from before keeps its folders, which Files keeps copies of; t
   assert.equal(homes[HOME].results[0].isError, true, "no command runs here");
 });
 
+test("the terminal is lent only once the person turns it on: every own Cloud gets it, it lasts across restarts, and turning it off takes it back", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const mac = await computer(t, { homes, places: [myCloud] });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  assert.equal(homes[HOME].connects[0].terminal, false, "off by default");
+  assert.equal(mac.summaries.at(-1).terminal, false);
+  await mac.sharing.lendTerminal(true);
+  await until(() => homes[HOME].connects.length === 2, "the grant with the terminal to reach My Cloud");
+  assert.equal(homes[HOME].connects[1].terminal, true);
+  assert.equal(mac.summaries.at(-1).terminal, true);
+  homes[HOME].push({ action: "run_command", command: "echo lent" });
+  await until(() => homes[HOME].results.length === 1, "the command's answer");
+  assert.notEqual(homes[HOME].results[0].isError, true, "the command ran here");
+  const restarted = mac.restart();
+  restarted.start();
+  await until(() => homes[HOME].connects.length === 3, "the kept grant to reach My Cloud after a restart");
+  assert.equal(homes[HOME].connects[2].terminal, true, "still lent after a restart");
+  await restarted.lendTerminal(false);
+  await until(() => homes[HOME].connects.length === 4, "the grant without the terminal to reach My Cloud");
+  assert.equal(homes[HOME].connects[3].terminal, false);
+});
+
+test("a terminal choice that can't be saved is not kept, so nothing lends it later", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const mac = await computer(t, { homes, places: [myCloud] });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  // A folder where the file goes makes the save's rename fail on every platform.
+  await rm(mac.file);
+  await mkdir(mac.file);
+  assert.throws(() => mac.sharing.lendTerminal(true));
+  await rm(mac.file, { recursive: true });
+  await mac.sharing.screenChanged();
+  await delay(100);
+  assert.equal(homes[HOME].connects.length, 1, "no grant with the terminal reached My Cloud");
+  assert.equal(mac.summaries.at(-1).terminal, false);
+});
+
+test("the terminal is lent only to the account that turned it on: another account signed in here gets none until it does", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const mac = await computer(t, { homes, places: [myCloud] });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  await mac.sharing.lendTerminal(true);
+  await until(() => homes[HOME].connects.length === 2, "the grant with the terminal to reach My Cloud");
+  assert.equal(homes[HOME].connects[1].terminal, true);
+  mac.signedIn.signInAs("acct_2");
+  await mac.sharing.screenChanged();
+  await until(() => homes[HOME].connects.length === 3, "the other account's grant to reach My Cloud");
+  assert.equal(homes[HOME].connects[2].terminal, false, "the other account did not confirm");
+  assert.equal(mac.summaries.at(-1).terminal, false);
+  const restarted = mac.restart();
+  restarted.start();
+  await delay(200);
+  assert.ok(homes[HOME].connects.slice(3).every(connect => connect.terminal === false), "not after a restart either");
+});
+
 test("the automatic grant, piece by piece: the home folder first with editing, folders kept as they were, project folders with editing, at most 20", () => {
   const folder = (name, write = false, extra = {}) => ({ id: randomUUID(), path: `/Users/me/${name}`, name, write, ...extra });
   const home = { id: randomUUID(), path: "/Users/me", name: "me", write: true, home: true };
@@ -255,6 +353,8 @@ test("the automatic grant, piece by piece: the home folder first with editing, f
   assert.deepEqual(automaticGrant({}).folders, [], "no home folder where it can't be lent");
   const record = { enabled: true, cloud: { accountId: "a", origin: HOME }, folders: wanted.folders, internet: true, chrome: true, computer: true, terminal: false };
   assert.equal(lendsAsWanted(record, wanted), true);
+  assert.equal(automaticGrant({ terminal: true }).terminal, true, "the terminal only when the person turned it on");
+  assert.equal(lendsAsWanted({ ...record, terminal: true }, { ...wanted, terminal: true }), true);
   for (const changed of [{ terminal: true }, { chrome: false }, { internet: false }, { computer: false }, { enabled: false }, { cloud: undefined }, { folders: wanted.folders.slice(1) }]) {
     assert.equal(lendsAsWanted({ ...record, ...changed }, wanted), false, JSON.stringify(Object.keys(changed)));
   }
@@ -330,7 +430,7 @@ test("the move's project folders are lent to My Cloud with editing on top; while
   await assert.rejects(mac.sharing.lendProjects([app]), /waits/);
 });
 
-test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, See activity, and nothing else to set", () => {
+test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the terminal switch and See activity", () => {
   const trays = [];
   class Tray {
     constructor() { this.destroyed = false; trays.push(this); }
@@ -338,17 +438,18 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, See a
     setContextMenu(menu) { this.menu = menu; } isDestroyed() { return this.destroyed; } destroy() { this.destroyed = true; }
   }
   const clicked = [];
+  const turned = [];
   const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "icon.png",
-    onPause: () => clicked.push("pause"), onResume: () => clicked.push("resume"), onActivity: () => clicked.push("activity"), device: "Mac" });
+    onPause: () => clicked.push("pause"), onResume: () => clicked.push("resume"), onActivity: () => clicked.push("activity"), onTerminal: on => turned.push(on), device: "Mac" });
   const labels = () => trays.at(-1).menu.map(item => item.type === "separator" ? "-" : item.label);
   indicator.update({ clouds: [], using: [], paused: false });
   assert.equal(trays.length, 0, "nothing in the menu bar without a Cloud of the person's own");
   indicator.update({ clouds: ["My Cloud", "Client A"], using: [], paused: false });
-  assert.deepEqual(labels(), ["My Cloud and Client A can use this Mac", "-", "Pause", "See activity"]);
+  assert.deepEqual(labels(), ["My Cloud and Client A can use this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
   assert.equal(trays[0].title, "");
   indicator.update({ clouds: ["My Cloud", "Client A"], using: ["Client A"], paused: false });
   assert.equal(trays.length, 1);
-  assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "See activity"]);
+  assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
   assert.equal(trays[0].title, "Client A is using this Mac");
   assert.equal(trays[0].tip, "OpenMausBot: Client A is using this Mac");
   trays[0].menu.find(item => item.label === "Pause").click();
@@ -358,7 +459,17 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, See a
   assert.equal(trays[0].title, "Paused");
   trays[0].menu.find(item => item.label === "Resume").click();
   assert.deepEqual(clicked, ["pause", "activity", "resume"]);
-  assert.ok(trays[0].menu.every(item => item.type !== "checkbox"), "no switch in it");
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, terminal: true });
+  const terminal = () => trays[0].menu.find(item => item.label === "Let Clouds run commands on this Mac");
+  assert.equal(terminal().checked, true);
+  terminal().click();
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, terminal: false });
+  assert.equal(terminal().checked, false);
+  terminal().click();
+  assert.deepEqual(turned, [false, true]);
+  terminal().checked = true;
+  terminal().click();
+  assert.equal(terminal().checked, false, "a click the person cancels leaves the box as it was");
   indicator.update({ clouds: [], using: [], paused: true });
   assert.equal(trays[0].destroyed, true, "gone once there is no Cloud to resume");
   assert.deepEqual(indicatorText({ clouds: ["A", "B", "C"], using: ["A", "B", "C"], paused: false }, "PC"),
