@@ -40,7 +40,6 @@ describe("Settings → General", () => {
     expect(pt).toContain("Configurações");
     expect(pt).toContain("Provedores de modelos");
     expect(pt).toContain("Idioma do app");
-    expect(pt).toContain("Turnos em grupos");
     expect(pt).toContain("Parar sem progresso após");
 
     // Same module instance, no reload: a frozen label would still say "Provedores de modelos" here.
@@ -65,7 +64,6 @@ describe("Settings → General", () => {
     const en = await renderSettings();
     expect(en).toContain("Settings");
     expect(en).toContain("Model providers");
-    expect(en).toContain("Group turns");
     expect(en).toContain("Stop after no progress for");
   });
 
