@@ -18,6 +18,7 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
+import { closeRefusal, closeThread, isNoticeThread } from "../thread-close.ts";
 import { readThreadNotifications } from "./notifications.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
@@ -26,7 +27,7 @@ export interface TaskRouteDeps {
   store: Pick<Store,
     | "bot" | "bots" | "taskByThread" | "project" | "projectBotForTask" | "patchTask" | "patchProject" | "tasks"
     | "switchTaskModel" | "switchTask" | "retitleTask" | "reorderProjects" | "refreshTaskPermissions" | "messagesTail"
-    | "messagesFor" | "deleteTasks" | "deleteProject" | "createTask" | "createProject">;
+    | "messagesFor" | "deleteTasks" | "deleteProject" | "createTask" | "createProject" | "appendMessage" | "setTaskClosedBy">;
   /** On a Cloud home only the owner changes how a bot asks for approval. */
   cloudHome: boolean;
   /** The desktop app owns this server, so a loopback caller is its owner. */
@@ -36,7 +37,7 @@ export interface TaskRouteDeps {
   hostedFullAccessRefusal: string;
   hostedModels: Pick<HostedModels, "resetTask"> | null;
   routines(): Pick<RoutineManager, "isActiveThread"> | null;
-  coordinator: Pick<Coordinator, "cancelDirect">;
+  coordinator: Pick<Coordinator, "cancelDirect" | "awaitingAnswer" | "activeDirect">;
   handoffs: Pick<Handoffs, "forget">;
   skillReview: Pick<SkillReview, "dropThread">;
   threadStarters: Pick<ThreadStarters, "set">;
@@ -49,6 +50,7 @@ export interface TaskRouteDeps {
   sharedWorkspaceFullAccessEnabled(): boolean;
   supportsApprovalMode(selection: ModelSelection, mode: ApprovalMode): boolean;
   threadBusy(botId: string, threadId: string): boolean;
+  queuedThreadPosition(botId: string, threadId: string): number | null;
   broadcast(payload: Record<string, unknown>): void;
   publicBot(bot: BotRecord): WireBot;
   wireBot(bot: BotRecord): WireBot;
@@ -245,10 +247,29 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "pinned", "snoozedUntil", "surface", "refreshPermissions", "link"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "pinned", "snoozedUntil", "surface", "refreshPermissions", "link", "close"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
       const notYours = cloudThreadRefusal(auth, m[2]);
       if (notYours) return json(res, 403, { error: notYours });
+      if (body.close !== undefined) {
+        if (body.close !== true || Object.keys(body).length !== 1) return json(res, 400, { error: "close must be true and the only field" });
+        if (!ownerOrAdmin(auth)) return json(res, 403, { error: "only the owner can close a thread here" });
+        const bot = store.bot(m[1]);
+        const task = store.taskByThread(m[1], m[2]);
+        if (!bot || !task) return json(res, 404, { error: "no such task" });
+        const answerClosed = (alreadyClosed: boolean) => {
+          const closed = store.taskByThread(bot.id, task.threadId)!;
+          return json(res, 200, { closed: true, ...(alreadyClosed ? { alreadyClosed: true } : {}), task: wireTask(closed, store.bot(bot.id)!.modelSelection), bot: publicBot(store.bot(bot.id)!) });
+        };
+        if (task.closedBy) return answerClosed(true);
+        const opener = task.openedBy ? store.bot(task.openedBy.botId) : undefined;
+        if (!opener) return json(res, 403, { error: "only a thread a bot opened can be closed here" });
+        if (isNoticeThread(task)) return json(res, 403, { error: `#${task.title} is where OpenMausBot reports to this bot — it stays open` });
+        const refusal = closeRefusal(deps, bot.id, task) ?? (deps.routines()?.isActiveThread(task.threadId) ? `#${task.title} is running a routine — wait for it to finish` : null);
+        if (refusal) return json(res, 409, { error: refusal });
+        closeThread(store, bot.id, task, opener);
+        return answerClosed(false);
+      }
       // On a Cloud home only the owner decides whether a bot may act without asking, even in someone else's conversation.
       if (CLOUD_HOME && !cloudOwnerSession(auth) &&
         (body.approvalMode !== undefined || body.autoApprove !== undefined || body.acknowledgeLocalAuto !== undefined || body.updateBotDefault === true || body.refreshPermissions === true)) {

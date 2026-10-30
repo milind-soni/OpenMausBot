@@ -696,4 +696,32 @@ describe("close_thread", () => {
       await cleanup([pm.id, qa.id]);
     }
   });
+
+  it("lets the owner close a bot-opened thread over the public PATCH, as the bot that opened it", async () => {
+    const pm = await createBot("Parker", "gated");
+    try {
+      const token = await heldTurn(pm, "Open a follow-up thread for yourself.");
+      const opened = await api("POST", "/api/internal/threads", { title: "Follow-up", message: "Check the export later." }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      const threadId = opened.body.threadId as string;
+      const close = () => api("PATCH", `/api/bots/${pm.id}/tasks/${threadId}`, { close: true });
+      await expect.poll(async () => (await taskOf(pm.id, threadId))?.busy, { timeout: 15_000 }).toBe(true);
+      expect((await close()).status).toBe(409);
+      release(threadId);
+      release(pm.threadId);
+      await expect.poll(async () => (await taskOf(pm.id, threadId))?.busy, { timeout: 15_000 }).toBe(false);
+      const closed = await close();
+      expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+      expect(closed.body).toMatchObject({ closed: true, task: { threadId, closedBy: { botId: pm.id, name: "Parker" } }, bot: { id: pm.id } });
+      expect(closed.body).not.toHaveProperty("alreadyClosed");
+      expect((await close()).body).toMatchObject({ closed: true, alreadyClosed: true });
+      expect((await messages(threadId)).filter((message) => message.tool?.name === "Closed by @Parker")).toHaveLength(1);
+      expect(await taskOf(pm.id, threadId)).not.toHaveProperty("archivedAt");
+      const persons = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Started by the person" })).body.task.threadId as string;
+      expect((await api("PATCH", `/api/bots/${pm.id}/tasks/${persons}`, { close: true })).status).toBe(403);
+      expect(await taskOf(pm.id, persons)).not.toHaveProperty("closedBy");
+    } finally {
+      await cleanup([pm.id]);
+    }
+  });
 });

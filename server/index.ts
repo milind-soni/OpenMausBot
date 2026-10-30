@@ -12444,7 +12444,7 @@ const taskRoutes = createTaskRoutes({
   cloudThreadRefusal,
   sharedWorkspaceFullAccessEnabled,
   supportsApprovalMode,
-  threadBusy, broadcast,
+  threadBusy, queuedThreadPosition, broadcast,
   publicBot,
   wireBot,
   wireTask,

@@ -2,6 +2,7 @@ import { chiefTidies } from "../chief-of-staff.ts";
 import type { Coordinator } from "../coordinator.ts";
 import { reachablePeers } from "../peer-roster.ts";
 import type { BotRecord, Store, TaskRecord } from "../store.ts";
+import { closeRefusal, closeThread } from "../thread-close.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";
@@ -81,23 +82,12 @@ export function createInternalThreadRoutes(deps: {
       return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, its own bot, or (for a thread a bot opened) a Chief of Staff can" });
     }
     if (threadId === fromThreadId) return json(res, 400, { error: "you cannot close the thread you are speaking in — finish your turn instead" });
-    if (coordinator.awaitingAnswer(threadId)) {
-      return json(res, 409, { error: `#${task.title} is waiting on the person's answer to its question — it continues once they reply there, so leave it open` });
-    }
-    if (deps.threadBusy(owner.id, threadId) || deps.queuedThreadPosition(owner.id, threadId) !== null || coordinator.activeDirect(threadId)) {
-      return json(res, 409, { error: `#${task.title} is still running — wait for it to finish (list_threads), or the person can stop it from the app` });
-    }
+    const refusal = closeRefusal(deps, owner.id, task);
+    if (refusal) return json(res, 409, { error: refusal });
     if (task.closedBy) {
       return json(res, 200, { closed: true, alreadyClosed: true, threadId, title: task.title, botName: owner.name, closedBy: task.closedBy.name });
     }
-    store.appendMessage(threadId, {
-      role: "bot",
-      kind: "activity",
-      from: { botId: from.id, name: from.name, color: from.color },
-      tool: { name: `Closed by @${from.name}`, ok: true },
-    });
-    if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
-    store.setTaskClosedBy(owner.id, threadId, { botId: from.id, name: from.name, at: Date.now() });
+    closeThread(store, owner.id, task, from);
     return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
   };
 }
