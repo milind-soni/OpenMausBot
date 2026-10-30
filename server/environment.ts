@@ -32,8 +32,12 @@ export interface EnvironmentDescriptor {
     myChromeLink?: true;
     /** A lent computer may say it takes run_command's timeout_seconds; only then does this server send it. */
     commandTimeouts?: true;
+    /** A lent computer may say it takes edit_file, append_file and delete_file; only then does this server send them. */
+    fileEdits?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
+    /** A team's Cloud home: `label` is the team's name. */
+    cloudTeam?: true;
     /** A Cloud home that takes the one-time move from the person's computer: by-row chats, the manifest, the chats and
      * credentials checks, and lines its owner wrote there stamped as the owner's. */
     move?: 1;
@@ -133,10 +137,11 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       remoteSessions: true,
       // Never advertise a protocol this server would refuse.
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
-      ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const } : {}),
+      ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, fileEdits: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
+      ...(input.cloudHome === true && input.cloudTeam === true ? { cloudTeam: true as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       emailSignIn: input.emailSignIn === true,
       jobs: true,

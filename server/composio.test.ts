@@ -7,6 +7,7 @@ import {
   applyManagedBrokerMessage,
   authorizeService,
   connectedServiceSlugs,
+  verifiedConnectedServiceSlugs,
   connectedServices,
   connectedServicesInventory,
   connectionMode,
@@ -73,7 +74,8 @@ let brokerMcpTools: Array<{ name: string; description?: string }> | null = null;
 let brokerToolsListFail = false;
 // What /broker/v1/connectors/connected serves; null falls back to github
 // only, the state the existing validation tests were written against.
-let brokerConnectedServicesBody: { complete: boolean; services: Record<string, { connected: boolean; status: string }> } | null = null;
+let brokerConnectedServicesBody: { complete?: boolean; services: Record<string, { connected: boolean; status: string }> } | null = null;
+let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
 // The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
@@ -113,6 +115,10 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ services }));
       }
       if (req.method === "GET" && url.pathname === "/broker/v1/connectors/connected") {
+        if (brokerConnectedServicesFail) {
+          res.writeHead(503, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "unavailable" }));
+        }
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify(
           brokerConnectedServicesBody ?? { complete: true, services: { github: { connected: true, status: "ACTIVE" } } },
@@ -973,15 +979,19 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
+  it("reads an unreachable connection inventory as no service slugs", async () => {
+    await expect(connectedServiceSlugs({})).resolves.toEqual([]);
+  });
+
   it("rejects an unreachable connection inventory instead of reporting no service slugs", async () => {
-    await expect(connectedServiceSlugs({})).rejects.toThrow(/unavailable/);
+    await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/unavailable/);
   });
 
   it("does not cache a failed inventory and retries discovery on the same backend", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "9".repeat(64) });
     const broken = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("synthetic inventory timeout"));
     try {
-      await expect(connectedServiceSlugs({})).rejects.toThrow(/synthetic inventory timeout/);
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/synthetic inventory timeout/);
       await expect(connectedServiceSlugs({})).resolves.toEqual(["github"]);
     } finally {
       broken.mockRestore();
@@ -995,7 +1005,7 @@ describe.sequential("Composio Sessions", () => {
     const cfg: AppConfig = { composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" } };
     connectedAccountsUnavailable = true;
     try {
-      await expect(connectedServiceSlugs(cfg)).rejects.toThrow(/inventory.*incomplete/i);
+      await expect(verifiedConnectedServiceSlugs(cfg)).rejects.toThrow(/inventory.*incomplete/i);
       connectedAccountsUnavailable = false;
       await expect(connectedServiceSlugs(cfg)).resolves.toContain("toolkit_41");
     } finally {
@@ -1008,7 +1018,7 @@ describe.sequential("Composio Sessions", () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "b".repeat(64) });
     const broken = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({}));
     try {
-      await expect(connectedServiceSlugs({})).rejects.toThrow(/services/);
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/services/);
     } finally {
       broken.mockRestore();
       setManagedBrokerAccess(null);
@@ -1026,6 +1036,24 @@ describe.sequential("Composio Sessions", () => {
       expect(integration?.env[CONNECTOR_SERVICE_SLUGS_ENV]).toBeUndefined();
     } finally {
       setManagedBrokerAccess(null);
+    }
+  });
+
+  it("keeps the last service slugs when a later read fails, so the bridge's tools stay as they were", async () => {
+    const access = { url: origin + "/broker", token: "e".repeat(64) };
+    brokerConnectedServicesBody = { services: { bland_ai: { connected: true, status: "ACTIVE" } } };
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    try {
+      await expect(connectedServiceSlugs({}, access)).resolves.toEqual(["bland_ai"]);
+      brokerConnectedServicesFail = true;
+      now.mockReturnValue(start + 61_000);
+      await expect(connectedServiceSlugs({}, access)).resolves.toEqual(["bland_ai"]);
+      await expect(connectedServiceSlugs({}, { ...access, token: "d".repeat(64) })).resolves.toEqual([]);
+    } finally {
+      now.mockRestore();
+      brokerConnectedServicesFail = false;
+      brokerConnectedServicesBody = null;
     }
   });
 
@@ -1404,16 +1432,18 @@ describe("connector tool inventory", () => {
   const initializeCalls = () =>
     calls.filter((call) => call.path.endsWith("/v1/mcp") && call.body?.method === "initialize");
 
-  it("refuses to group tools using an unavailable service inventory", async () => {
+  it("groups tools using the cached service inventory after a failed refresh", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "8".repeat(64) });
+    brokerConnectedServicesBody = { complete: true, services: { bland_ai: { connected: true, status: "ACTIVE" } } };
     brokerMcpTools = [{ name: "BLAND_AI_MAKE_CALL" }];
+    await expect(connectedServiceSlugs({})).resolves.toEqual(["bland_ai"]);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
     const broken = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("synthetic inventory timeout"));
     try {
-      await expect(listConnectorTools({})).rejects.toThrow(/synthetic inventory timeout/);
-      brokerConnectedServicesBody = { complete: true, services: { bland_ai: { connected: true, status: "ACTIVE" } } };
       await expect(listConnectorTools({})).resolves.toEqual({ bland_ai: [{ name: "BLAND_AI_MAKE_CALL" }] });
     } finally {
       broken.mockRestore();
+      now.mockRestore();
       brokerMcpTools = null;
       brokerConnectedServicesBody = null;
       setManagedBrokerAccess(null);

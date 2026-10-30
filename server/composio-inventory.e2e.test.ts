@@ -57,8 +57,8 @@ it.each(["connected_accounts", "toolkits"])("refuses opaque calls from the actua
   }
 });
 
-it.each(["legacy", "incomplete", "cycle", "page cap"])("ordinary unrestricted calls succeed during %s discovery failure while restricted calls fail closed", async (failure) => {
-  let mode = failure;
+it.each(["legacy", "incomplete", "cycle", "page cap"])("ordinary calls keep their cached service inventory during %s discovery failure", async (failure) => {
+  let mode = "complete";
   const executed: string[] = [];
   const broker = createServer(async (req, res) => {
     let raw = "";
@@ -101,7 +101,7 @@ it.each(["legacy", "incomplete", "cycle", "page cap"])("ordinary unrestricted ca
       return result;
     };
     const { bot } = await api("POST", "/api/bots", { name: "Fixture" });
-    await api("PATCH", `/api/bots/${bot.id}`, { composio: true, approvalMode: "full" });
+    await api("PATCH", `/api/bots/${bot.id}`, { composio: true, approvalMode: "full", connectorTools: { slack: { tools: "*" }, bland: { tools: "*" } } });
     await api("POST", `/api/bots/${bot.id}/messages`, {
       threadId: bot.threadId, text: "Hold the fixture turn", sendId: "direct-inventory-fixture-0001",
     });
@@ -120,6 +120,8 @@ it.each(["legacy", "incomplete", "cycle", "page cap"])("ordinary unrestricted ca
       expect.soft(response.status, JSON.stringify(body)).toBe(200);
       return body;
     };
+    mode = failure;
+    await api("PATCH", `/api/bots/${bot.id}`, { connectorTools: null });
     expect((await call("SLACK_LIST_CHANNELS")).result).toEqual({ content: [{ type: "text", text: "synthetic direct tool success" }] });
     expect(executed).toEqual(["SLACK_LIST_CHANNELS"]);
     for (const permissions of [
@@ -127,17 +129,10 @@ it.each(["legacy", "incomplete", "cycle", "page cap"])("ordinary unrestricted ca
       { connectorScopes: null, connectorTools: { slack: { tools: "*" }, bland: { tools: "*" } } },
     ]) {
       await api("PATCH", `/api/bots/${bot.id}`, permissions);
-      for (const name of ["SLACK_LIST_CHANNELS", "BLAND_AI_SEND_MESSAGE"]) {
-        const result = (await call(name)).result;
-        expect.soft(result?.isError, name).toBe(true);
-        expect.soft(result?.content[0]?.text, name).toMatch(/discovery.*unavailable|inventory.*verified/i);
-      }
-      expect(executed).toEqual(["SLACK_LIST_CHANNELS"]);
+      expect((await call("SLACK_LIST_CHANNELS")).result).toEqual({ content: [{ type: "text", text: "synthetic direct tool success" }] });
+      expect((await call("BLAND_AI_SEND_MESSAGE")).result.isError).toBe(true);
     }
-    mode = "complete";
-    expect((await call("SLACK_LIST_CHANNELS")).result).toEqual({ content: [{ type: "text", text: "synthetic direct tool success" }] });
-    expect((await call("BLAND_AI_SEND_MESSAGE")).result.isError).toBe(true);
-    expect(executed).toEqual(["SLACK_LIST_CHANNELS", "SLACK_LIST_CHANNELS"]);
+    expect(executed).toEqual(["SLACK_LIST_CHANNELS", "SLACK_LIST_CHANNELS", "SLACK_LIST_CHANNELS"]);
   } finally {
     await fixture?.close();
     await new Promise<void>((resolve) => broker.close(() => resolve()));

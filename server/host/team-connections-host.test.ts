@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -17,26 +17,26 @@ const ADA = personKey({ id: "", email: "ada@acme.test" });
 const BEN = personKey({ id: "", email: "ben@acme.test" });
 const CLEO = personKey({ id: "", email: "cleo@acme.test" });
 const ADA_ACCESS = { url: "https://broker.test", token: "a".repeat(64) };
+const CLEO_ACCESS = { url: "https://broker.test", token: "c".repeat(64) };
 
-/** Ada's private chat (she or Ben, an admin, may write in it), Cleo's, a group chat and the bot's main chat. */
-const AUDIENCES: Record<string, Audience> = { "ada-chat": `member:${ADA}`, "cleo-chat": `member:${CLEO}`, "room-chat": "room:launch", "main-chat": "team" };
+/** Ada's private chat, Cleo's, a group chat, the bot's main chat and a thread a bot opened for work handed on. Who each
+ * turn acts for is acting-person.ts's answer (the `requester`); "" is a turn that acts for nobody, as a routine's. */
+const AUDIENCES: Record<string, Audience> = { "ada-chat": `member:${ADA}`, "cleo-chat": `member:${CLEO}`, "room-chat": "room:launch", "main-chat": "team", "work-chat": "team" };
 
 function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown> } = {}) {
-  const dataDir = mkdtempSync(join(homedir(), "omb-team-connections-"));
-  const requester = { "ada-chat": ADA, "cleo-chat": CLEO, "room-chat": ADA, "main-chat": ADA, ...options.requester };
+  const dataDir = mkdtempSync(join(tmpdir(), "omb-team-connections-"));
+  const requester = { "ada-chat": ADA, "cleo-chat": CLEO, "room-chat": ADA, "main-chat": ADA, "work-chat": ADA, ...options.requester };
   const cfg = { mcpServers: options.servers ?? {
     mail: { type: "http", url: "https://mail.example/mcp", headers: { Authorization: "Bearer team-mail-key" }, enabled: true },
     console: { type: "http", url: "https://console.example/mcp", headers: { Authorization: "Bearer team-console-key" }, enabled: true },
   } } as unknown as AppConfig;
   const minted: Array<{ threadId: string; connectorsFor?: string }> = [];
-  const connectedServices = vi.fn(async (_cfg: AppConfig, as?: { token: string }) => (as?.token === ADA_ACCESS.token
-    ? { gmail: { connected: true, pending: false, status: "ACTIVE", accounts: [{ id: "ca_1", status: "ACTIVE", alias: "ada@gmail.example" }] } } : {}));
   const composio = {
     configured: () => true,
     mcpIntegration: vi.fn(async (_cfg: AppConfig, context: { commsToken: string; as?: unknown }) => ({ command: "node", args: ["bridge"], env: { TOKEN: context.commsToken, AS: context.as ? "own" : "team" } })),
-    connectedServices,
-    connectedServicesInventory: vi.fn(async (cfg: AppConfig, as?: { token: string }) => ({ services: await connectedServices(cfg, as), complete: true })),
-    connectedServiceSlugs: vi.fn(async () => ["google_search_console"] as readonly string[]),
+    connectedServices: vi.fn(async (_cfg: AppConfig, as?: { token: string }) => (as?.token === ADA_ACCESS.token || as?.token === CLEO_ACCESS.token
+      ? { gmail: { connected: true, pending: false, status: "ACTIVE", accounts: [{ id: "ca_1", status: "ACTIVE", alias: "own@gmail.example" }] } } : {})),
+    verifiedConnectedServiceSlugs: vi.fn(async () => ["google_search_console"] as readonly string[]),
     authorizeService: vi.fn(),
     removeService: vi.fn(),
   };
@@ -58,14 +58,19 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
   return { host, dataDir, minted, composio };
 }
 
-/** Ada has her own installation, and her own key for the mail server; Gmail and mail are each person's. */
-function adaConnected(host: ReturnType<typeof setup>["host"], dataDir: string) {
+/** Ada has her own installation, and her own key for the mail server; Gmail and mail are each person's. With `cleo`, Cleo
+ * has her own installation and key too. */
+function adaConnected(host: ReturnType<typeof setup>["host"], dataDir: string, options: { cleo?: boolean } = {}) {
   host.scopes.set("app", "gmail", "person");
   host.scopes.set("mcp", "mail", "person");
   const file = join(dataDir, "people-connections", "apps.json");
   host.people.putKey(ADA, "ada@acme.test", "mail", { url: "https://mail.example/mcp", header: "Authorization", value: "Bearer ada-own-mail-key" });
+  if (options.cleo) host.people.putKey(CLEO, "cleo@acme.test", "mail", { url: "https://mail.example/mcp", header: "Authorization", value: "Bearer cleo-own-mail-key" });
   // As ensureAppsAccess saves it after the service registered her.
-  (host.people as unknown as { write(name: string, value: unknown): void }).write("apps.json", { v: 1, brokerUrl: ADA_ACCESS.url, people: { [ADA]: { email: "ada@acme.test", installationId: "inst-ada", token: ADA_ACCESS.token } } });
+  (host.people as unknown as { write(name: string, value: unknown): void }).write("apps.json", { v: 1, brokerUrl: ADA_ACCESS.url, people: {
+    [ADA]: { email: "ada@acme.test", installationId: "inst-ada", token: ADA_ACCESS.token },
+    ...(options.cleo ? { [CLEO]: { email: "cleo@acme.test", installationId: "inst-cleo", token: CLEO_ACCESS.token } } : {}),
+  } });
   return file;
 }
 
@@ -77,52 +82,86 @@ describe("whose connection a turn may use", () => {
     expect(host.personApps()).toEqual([]);
   });
 
-  it("is a member only in her private chat, and only for her own message", () => {
-    const { host } = setup({ requester: { "ada-chat": ADA } });
+  it("is the person the turn acts for, wherever their own request began it, never in another member's private chat", () => {
+    const { host } = setup({ requester: { "room-chat": ADA, "main-chat": BEN, "work-chat": CLEO } });
     expect(host.turnPerson("ada-chat")).toBe(ADA);
-    expect(host.turnPerson("room-chat"), "a group chat is nobody's own").toBeNull();
-    expect(host.turnPerson("main-chat"), "the bot's main chat is the team's").toBeNull();
+    expect(host.turnPerson("room-chat"), "her own line in a group chat").toBe(ADA);
+    expect(host.turnPerson("main-chat"), "his own line in the bot's main chat").toBe(BEN);
+    expect(host.turnPerson("work-chat"), "work handed on from her request").toBe(CLEO);
     expect(host.turnPerson("cleo-chat")).toBe(CLEO);
     const admin = setup({ requester: { "ada-chat": BEN } }).host;
-    expect(admin.turnPerson("ada-chat"), "an admin writing in Ada's chat is not Ada").toBeNull();
-    const routine = setup({ requester: { "ada-chat": "" } }).host;
-    expect(routine.turnPerson("ada-chat"), "a routine or a webhook proves nobody").toBeNull();
+    expect(admin.turnPerson("ada-chat"), "Ben's request never acts for anyone in Ada's private chat").toBeNull();
+    const routine = setup({ requester: { "ada-chat": "", "room-chat": "", "work-chat": "" } }).host;
+    for (const thread of ["ada-chat", "room-chat", "work-chat"]) expect(routine.turnPerson(thread), `a routine or a webhook acts for nobody (${thread})`).toBeNull();
     expect(setup({ team: false }).host.turnPerson("ada-chat"), "off a team nothing is anyone's").toBeNull();
   });
 });
 
 describe("apps each person connects", () => {
-  it("mounts a member's own bridge only in her own turn, minted for her", async () => {
-    const { host, dataDir, minted } = setup();
+  it("mounts a member's own bridge in every turn that acts for her, minted for her, and in no other", async () => {
+    const { host, dataDir, minted } = setup({ requester: { "main-chat": CLEO } });
     adaConnected(host, dataDir);
     const own = await host.appsIntegrations({ id: "scout", name: "Scout" }, "ada-chat", "gen-1");
     expect(own.composio?.env.AS).toBe("team");
     expect(own.composioOwn?.env.AS).toBe("own");
     expect(minted.map((entry) => entry.connectorsFor)).toEqual([undefined, ADA]);
-    for (const thread of ["room-chat", "main-chat", "cleo-chat"]) {
+    for (const thread of ["room-chat", "work-chat"]) {
+      minted.length = 0;
+      const hers = await host.appsIntegrations({ id: "scout", name: "Scout" }, thread, "gen-1");
+      expect(hers.composioOwn?.env.AS, `${thread}: her own request`).toBe("own");
+      expect(minted.map((entry) => entry.connectorsFor), thread).toEqual([undefined, ADA]);
+    }
+    for (const thread of ["main-chat", "cleo-chat"]) {
       const elsewhere = await host.appsIntegrations({ id: "scout", name: "Scout" }, thread, "gen-1");
       expect(elsewhere.composio, thread).toBeDefined();
-      expect(elsewhere.composioOwn, thread).toBeUndefined();
+      expect(elsewhere.composioOwn, `${thread}: Cleo's request, and Cleo connected nothing`).toBeUndefined();
     }
     const admin = setup({ requester: { "ada-chat": BEN } });
     adaConnected(admin.host, admin.dataDir);
     expect((await admin.host.appsIntegrations({ id: "scout", name: "Scout" }, "ada-chat", "gen-1")).composioOwn).toBeUndefined();
   });
 
-  it("relays a member's own bridge to her installation, and refuses it once the turn isn't hers", () => {
-    const { host, dataDir } = setup();
+  it("never gives one person's work another's: Ada's room line and the work it hands on get only Ada's, Cleo's only Cleo's", async () => {
+    const { host, dataDir, minted, composio } = setup({ requester: { "room-chat": ADA, "work-chat": CLEO } });
+    adaConnected(host, dataDir, { cleo: true });
+    await host.appsIntegrations({ id: "scout", name: "Scout" }, "room-chat", "gen-room");
+    await host.appsIntegrations({ id: "helper", name: "Helper" }, "work-chat", "gen-work");
+    expect(minted.filter((entry) => entry.connectorsFor).map((entry) => [entry.threadId, entry.connectorsFor])).toEqual([["room-chat", ADA], ["work-chat", CLEO]]);
+    const owns = composio.mcpIntegration.mock.calls.map(([, context]) => context as typeof context & { threadId: string }).filter((context) => context.as);
+    expect(owns.map((context) => [context.threadId, context.as])).toEqual([["room-chat", ADA_ACCESS], ["work-chat", CLEO_ACCESS]]);
+    // A bridge minted for one person is refused in a turn that acts for the other, on every call.
+    expect(host.relayActor({ threadId: "room-chat", generation: "gen-room", connectorsFor: ADA })).toEqual({ access: ADA_ACCESS });
+    expect(host.relayActor({ threadId: "room-chat", generation: "gen-room", connectorsFor: CLEO }).refusal).toMatch(/cleo@acme.test's own apps, and this turn no longer acts for cleo@acme.test/);
+    expect(host.relayActor({ threadId: "work-chat", generation: "gen-work", connectorsFor: ADA }).refusal).toMatch(/ada@acme.test's own apps/);
+    expect(host.relayActor({ threadId: "cleo-chat", generation: "g", connectorsFor: ADA }).refusal, "her bridge in Cleo's private chat").toMatch(/ada@acme.test's own apps/);
+    // Each turn's MCP servers carry only its own person's key.
+    const room = JSON.stringify(await host.turnMcp(BOT, "room-chat", "gen-room")), work = JSON.stringify(await host.turnMcp(BOT, "work-chat", "gen-work"));
+    expect(room).toContain("ada-own-mail-key");
+    expect(room).not.toContain("cleo-own-mail-key");
+    expect(work).toContain("cleo-own-mail-key");
+    expect(work).not.toContain("ada-own-mail-key");
+  });
+
+  it("relays a member's own bridge to her installation, and refuses it once the turn doesn't act for her", () => {
+    const { host, dataDir } = setup({ requester: { "room-chat": "" } });
     adaConnected(host, dataDir);
     expect(host.relayActor({ threadId: "ada-chat", generation: "g", connectorsFor: ADA })).toEqual({ access: ADA_ACCESS });
     expect(host.relayActor({ threadId: "ada-chat", generation: "g" })).toEqual({});
-    expect(host.relayActor({ threadId: "cleo-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/one person's own apps/);
-    expect(host.relayActor({ threadId: "room-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/one person's own apps/);
+    const refused = host.relayActor({ threadId: "cleo-chat", generation: "g", connectorsFor: ADA }).refusal;
+    expect(refused).toMatch(/ada@acme.test's own apps, and this turn no longer acts for ada@acme.test: it was stopped, or someone else wrote in it since/);
+    expect(refused, "never worked around").toContain("Don't try it another way (the browser or another tool).");
+    expect(host.relayActor({ threadId: "room-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/no longer acts for ada@acme.test/);
     const admin = setup({ requester: { "ada-chat": BEN } });
     adaConnected(admin.host, admin.dataDir);
-    expect(admin.host.relayActor({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/one person's own apps/);
+    expect(admin.host.relayActor({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/no longer acts for/);
+    // Her installation went (she disconnected, or left): one line with where to connect again.
+    const gone = setup();
+    gone.host.scopes.set("app", "gmail", "person");
+    expect(gone.host.relayActor({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/own apps aren't connected here any more.*"Connect your apps again here: https:\/\/cloud.example.test\/cloud\/team\/team-acme-1"/);
   });
 
   it("gives a bot a Chief made the Chief's grants, never a connection: each turn still gets only its own person's", async () => {
-    const { host, dataDir, composio } = setup();
+    const { host, dataDir, composio } = setup({ requester: { "main-chat": CLEO } });
     adaConnected(host, dataDir);
     const inherited = appsFromCreator({ createdBy: "ada@acme.test", connectorTools: { gmail: { tools: "*" } } }, { createdBy: "ada@acme.test" });
     const made = { id: "scout-helper", name: "Scout's helper", ...inherited };
@@ -134,10 +173,15 @@ describe("apps each person connects", () => {
   });
 
   it("refuses a person's app through the team's bridge, and a team app through her own", async () => {
-    const { host, dataDir } = setup();
+    const { host, dataDir } = setup({ requester: { "main-chat": "" } });
     adaConnected(host, dataDir);
-    const team = { threadId: "room-chat", generation: "g" };
-    expect(await host.callRefusal(team, [{ slug: "GMAIL_FETCH_EMAILS" }])).toMatch(/Gmail is connected by each person in Acme and works only in that person's own private chat/);
+    const team = { threadId: "main-chat", generation: "g" };
+    const nobody = await host.callRefusal(team, [{ slug: "GMAIL_FETCH_EMAILS" }]);
+    expect(nobody).toMatch(/Gmail is each person's own in Acme, and this work doesn't act for one person/);
+    expect(nobody, "the fix, in one line, never \"open a private chat\"").toContain("\"Gmail is each person's own, so I can't use it here. Ask me yourself and I'll use yours, or an admin can connect Gmail for the whole team: https://cloud.example.test/cloud/team/team-acme-1/apps.\"");
+    expect(nobody).toContain("Don't try it another way (the browser or another tool).");
+    expect(nobody).not.toMatch(/private chat/);
+    expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "GMAIL_FETCH_EMAILS" }]), "her own room line: hers, through her bridge").toMatch(/Gmail here is ada@acme.test's own: use it through the own_apps tools/);
     expect(await host.callRefusal(team, [{ slug: "SLACK_SEND_MESSAGE" }]), "a team app passes").toBeNull();
     expect(await host.callRefusal({ threadId: "ada-chat", generation: "g" }, [{ slug: "GMAIL_SEND_EMAIL" }])).toMatch(/through the own_apps tools/);
     expect(await host.callRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, [{ slug: "GMAIL_SEND_EMAIL" }])).toBeNull();
@@ -149,7 +193,7 @@ describe("apps each person connects", () => {
     const { host, composio } = setup();
     host.scopes.set("app", "google_search_console", "person");
     expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "COMPOSIO_PROXY_EXECUTE" }])).toMatch(/Google Search Console is connected by each person/);
-    composio.connectedServiceSlugs.mockResolvedValue([]);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue([]);
     expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "COMPOSIO_PROXY_EXECUTE" }])).toBeNull();
   });
 
@@ -158,20 +202,21 @@ describe("apps each person connects", () => {
     host.scopes.set("app", "gmail", "person");
     const cap = { threadId: "room-chat", generation: "g" };
     const calls = [{ slug: "COMPOSIO_PROXY_EXECUTE" }];
-    composio.connectedServiceSlugs.mockResolvedValue(["gmail"]);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue(["gmail"]);
     expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*Gmail/);
-    composio.connectedServiceSlugs.mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    composio.verifiedConnectedServiceSlugs.mockRejectedValueOnce(new Error("synthetic inventory timeout"));
     expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*inventory.*could not be verified/);
     expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*Gmail/);
-    composio.connectedServiceSlugs.mockResolvedValue([]);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue([]);
     expect(await host.callRefusal(cap, calls)).toBeNull();
   });
 
   it("answers a connection card for a person's app with the one plain line, never a card", () => {
-    const { host } = setup();
+    const { host } = setup({ requester: { "main-chat": "" } });
     host.scopes.set("app", "gmail", "person");
     expect(host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1\"");
-    expect(host.connectRefusal({ threadId: "room-chat", generation: "g" }, ["gmail"])).toMatch(/can't be used here/);
+    expect(host.connectRefusal({ threadId: "room-chat", generation: "g" }, ["gmail"]), "her own room line: where to connect hers").toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1\"");
+    expect(host.connectRefusal({ threadId: "main-chat", generation: "g" }, ["gmail"])).toMatch(/this work doesn't act for one person/);
     expect(host.connectRefusal({ threadId: "room-chat", generation: "g" }, ["slack"]), "a team app keeps its card").toBeNull();
     expect(host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["slack"])).toMatch(/ask an admin/);
     expect(setup({ team: false }).host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toBeNull();
@@ -181,13 +226,15 @@ describe("apps each person connects", () => {
 const BOT = { id: "bot-1", name: "Bot" };
 
 describe("MCP servers each person connects", () => {
-  it("gives a member's own turn her key, never the team's, and no other turn either", async () => {
-    const { host, dataDir } = setup();
+  it("gives a turn that acts for her her key, never the team's, and no other turn either", async () => {
+    const { host, dataDir } = setup({ requester: { "main-chat": "" } });
     adaConnected(host, dataDir);
     const own = await host.turnMcp(BOT, "ada-chat", "g");
     expect(own.mail).toEqual({ type: "http", url: "https://mail.example/mcp", headers: { Authorization: "Bearer ada-own-mail-key" } });
     expect(own.console, "the team's server is the team's, with its key").toEqual({ type: "http", url: "https://console.example/mcp", headers: { Authorization: "Bearer team-console-key" } });
-    for (const thread of ["room-chat", "main-chat", "cleo-chat"]) {
+    expect((await host.turnMcp(BOT, "room-chat", "g")).mail, "her own room line").toEqual(own.mail);
+    expect((await host.turnMcp(BOT, "work-chat", "g")).mail, "work handed on from her request").toEqual(own.mail);
+    for (const thread of ["main-chat", "cleo-chat"]) {
       const elsewhere = await host.turnMcp(BOT, thread, "g");
       expect(elsewhere.mail, thread).toBeUndefined();
       expect(JSON.stringify(elsewhere), thread).not.toContain("ada-own-mail-key");
@@ -222,18 +269,45 @@ describe("MCP servers each person connects", () => {
 });
 
 describe("what the bot and the admins are told", () => {
-  it("tells her own turn what is hers and how to connect the rest; elsewhere, that it works only in each person's chat", () => {
-    const { host, dataDir } = setup();
+  it("tells a turn that acts for her what is hers and how to connect the rest; one that acts for nobody, why and what to do", () => {
+    const { host, dataDir } = setup({ requester: { "main-chat": "" } });
     adaConnected(host, dataDir);
     host.scopes.set("app", "outlook", "person");
-    const own = host.prompt("ada-chat", { composioOwn: {}, custom: { mail: {} } });
+    const own = host.prompt("room-chat", "g", { composioOwn: {}, custom: { mail: {} } });
     expect(own).toContain("Gmail and Outlook are ada@acme.test's own: use them through the own_apps tools");
     expect(own).toContain("The MCP server mail acts as ada@acme.test's own account.");
-    const missing = host.prompt("ada-chat", { custom: {} });
-    expect(missing).toContain("Each person connects these for themselves, and this person hasn't yet: Gmail, Outlook and mail.");
+    expect(own, "in a group chat, never for anyone else's request").toContain("They are used only for ada@acme.test's request: if someone else asks for something from them, say they are ada@acme.test's.");
+    const missing = host.prompt("ada-chat", "g", { custom: {} });
+    expect(missing).toContain("Each person connects these for themselves, and ada@acme.test hasn't connected them yet, or their sign-in ended: Gmail, Outlook and mail.");
     expect(missing).toContain("\"Connect your <name> here: https://cloud.example.test/cloud/team/team-acme-1\"");
-    expect(host.prompt("room-chat", {})).toContain("work only in that person's own private chat with you");
-    expect(setup().host.prompt("room-chat", {}), "nothing each person's: nothing said").toBe("");
+    expect(missing).toContain("don't try it another way (the browser or another tool)");
+    const nobody = host.prompt("main-chat", "g", {});
+    expect(nobody).toContain("Gmail, Outlook and mail are each person's own in Acme: they work for the person whose own message started the work");
+    expect(nobody).toContain("Ask me yourself and I'll use yours, or an admin can connect <name> for the whole team: https://cloud.example.test/cloud/team/team-acme-1/apps.");
+    expect(nobody).not.toMatch(/private chat/);
+    expect(setup().host.prompt("room-chat", "g", {}), "nothing each person's: nothing said").toBe("");
+  });
+
+  it("says whose own account a step used: a person's app through her bridge, or a person's server, in a turn that acts for her", () => {
+    const { host, dataDir } = setup({ requester: { "main-chat": "" } });
+    adaConnected(host, dataDir);
+    const named = (tool: string, input?: unknown, thread = "room-chat") => host.toolWhose(thread, "g", tool, input);
+    expect(named("mcp__own_apps__GMAIL_FETCH_EMAILS")).toEqual({ whose: { person: "ada@acme.test", app: "Gmail" } });
+    expect(named("mcp__own_apps__COMPOSIO_MULTI_EXECUTE_TOOL", JSON.stringify({ tools: [{ tool_slug: "GMAIL_SEND_EMAIL" }] })), "a meta-tool names its app tools").toEqual({ whose: { person: "ada@acme.test", app: "Gmail" } });
+    expect(named("GMAIL_FETCH_EMAILS"), "an engine that names the tool alone").toEqual({ whose: { person: "ada@acme.test", app: "Gmail" } });
+    expect(named("gmail.fetch_emails"), "an app tool").toEqual({ whose: { person: "ada@acme.test", app: "Gmail" } });
+    expect(named("mcp__mail__read_inbox"), "her own MCP server").toEqual({ whose: { person: "ada@acme.test", app: "mail" } });
+    expect(named("mcp__console__query"), "the team's server").toEqual({});
+    expect(named("mcp__composio__SLACK_SEND_MESSAGE"), "a team app").toEqual({});
+    expect(named("mcp__own_apps__GMAIL_FETCH_EMAILS", undefined, "main-chat"), "a turn that acts for nobody").toEqual({});
+    expect(host.toolWhose("room-chat", undefined, "mcp__own_apps__GMAIL_FETCH_EMAILS"), "no turn running").toEqual({});
+    const cleos = setup({ requester: { "work-chat": CLEO } });
+    adaConnected(cleos.host, cleos.dataDir);
+    expect(cleos.host.toolWhose("work-chat", "g", "mcp__own_apps__GMAIL_FETCH_EMAILS"), "Cleo connected nothing of hers").toEqual({});
+    expect(cleos.host.toolWhose("work-chat", "g", "mcp__mail__read_inbox")).toEqual({});
+    const named2 = setup({ requester: { "room-chat": ADA } });
+    adaConnected(named2.host, named2.dataDir);
+    expect(named2.host.toolWhose("room-chat", "g", "mcp__own_apps__GMAIL_FETCH_EMAILS")).toEqual({ whose: { person: "ada@acme.test", app: "Gmail" } });
   });
 
   it("says who connected what for the admin read, by address, never a secret", async () => {
@@ -285,15 +359,5 @@ describe("the connected apps a turn's app tools come from", () => {
     expect(composio.connectedServices, "not read again at once").toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(appTools(await host.appsIntegrations(bot, "main-chat", "g3"))).toContain("gmail.search_emails");
-  });
-
-  it("does not cache an incomplete app inventory as an empty installation", async () => {
-    vi.useFakeTimers();
-    const { host, composio } = setup();
-    composio.connectedServicesInventory.mockResolvedValueOnce({ services: {}, complete: false });
-    composio.connectedServices.mockResolvedValue(GMAIL as never);
-    expect(appTools(await host.appsIntegrations(bot, "main-chat", "g1"))).toEqual([]);
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(appTools(await host.appsIntegrations(bot, "main-chat", "g2"))).toContain("gmail.search_emails");
   });
 });

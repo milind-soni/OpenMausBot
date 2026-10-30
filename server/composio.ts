@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { connectedAccountsPageSchema, toolkitPageSchema, toolkitInventoryPageSchema, type ConnectedAccountResponse, type ToolkitItem } from "./composio-inventory-schema.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason, managedCustomAuthReason } from "../shared/connector-availability.ts";
 import {
@@ -54,41 +55,6 @@ interface AccountLinkRequest {
   toolkit: string;
   alias?: string;
 }
-
-const connectedAccountResponseSchema = z.object({
-  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
-  alias: z.string().nullable().optional(),
-  status: z.string().optional(),
-  updated_at: z.string().optional(),
-  toolkit: z.object({ slug: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/) }),
-});
-type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
-
-const connectedAccountsPageSchema = z.object({
-  items: z.array(connectedAccountResponseSchema),
-  next_cursor: z.string().nullable().optional(),
-});
-
-const toolkitItemSchema = z.object({
-  slug: z.string().optional(),
-  is_no_auth: z.boolean().optional(),
-  connected_account: z.object({ id: z.string().optional(), status: z.string().optional() }).nullable().optional(),
-});
-type ToolkitItem = z.infer<typeof toolkitItemSchema>;
-const toolkitPageSchema = z.object({
-  items: z.array(toolkitItemSchema).optional(),
-  next_cursor: z.string().nullable().optional(),
-});
-
-const toolkitInventoryPageSchema = toolkitPageSchema.extend({
-  items: z.array(toolkitItemSchema.extend({
-    slug: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
-    connected_account: z.object({
-      id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
-      status: z.string().optional(),
-    }).nullable().optional(),
-  }).refine((item) => item.is_no_auth === true || item.connected_account != null)),
-});
 
 const connectorServiceSchema = z.object({
   connected: z.boolean(),
@@ -261,7 +227,7 @@ export async function mcpIntegration(
   }
   const serviceSlugs = context.connectorTools === undefined
     ? undefined
-    : await connectedServiceSlugs(cfg, context.as).then(serializeConnectorServiceSlugs).catch(() => undefined);
+    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg, context.as));
   if (serviceSlugs?.oversized) {
     console.warn(
       `[composio] connector service slugs for bot ${context.botId} exceed ${CONNECTOR_SERVICE_SLUGS_MAX_BYTES} bytes;`
@@ -516,6 +482,12 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
   };
 }
 
+export async function verifiedConnectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+  const { services, complete } = await connectedServicesInventory(cfg, as);
+  if (!complete) throw new Error("Connected-app inventory is incomplete; account discovery did not finish.");
+  return Object.keys(services);
+}
+
 export async function connectedServices(cfg: AppConfig, as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>> {
   return (await connectedServicesInventory(cfg, as)).services;
 }
@@ -592,7 +564,7 @@ function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
 
 let connectorToolsRequest: { identity: string; services: Promise<Record<string, ConnectorToolListing[]>> } | null = null;
 
-/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland). */
+/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read answers the last good one. */
 export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
   const identity = connectorToolsIdentity(cfg, as);
   if (connectorServiceSlugsCache?.identity === identity
@@ -600,12 +572,14 @@ export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): 
     return connectorServiceSlugsCache.slugs;
   }
   if (connectorServiceSlugsRequest?.identity === identity) return connectorServiceSlugsRequest.slugs;
-  const walk = connectedServicesInventory(cfg, as).then(({ services, complete }) => {
-    if (!complete) throw new Error("Connected-app inventory is incomplete; account discovery did not finish.");
-    const slugs = Object.keys(services);
-    connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
-    return slugs;
-  });
+  const walk = connectedServices(cfg, as).then(
+    (services) => {
+      const slugs = Object.keys(services);
+      connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
+      return slugs;
+    },
+    () => connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache.slugs : [] as readonly string[],
+  );
   connectorServiceSlugsRequest = { identity, slugs: walk };
   try {
     return await walk;

@@ -281,7 +281,7 @@ describe("the Simple composer in a group chat", () => {
 
   it("keeps the room's @ hint only when the room answers to mentions", () => {
     render({ group: { ...room, defaultResponder: { kind: "mentions" } }, members: [bot, peer] });
-    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Launch planning — @ to bring a bot in");
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Launch planning (@ to bring a bot in)");
   });
 });
 

@@ -13,6 +13,7 @@ describe("built-in agent tool read policy", () => {
       "session_search",
       "tool_result_read",
       "trigger_info",
+      "list_waits",
       "skills_list",
       "list_unread_notifications",
     ]);
@@ -32,7 +33,7 @@ describe("built-in agent tool read policy", () => {
     // These post into the chat: never read-only.
     "attach_file", "show_widget", "update_widget", "show_html", "update_html",
     "create_bot", "request_credential", "request_sign_in", "memory_update", "trigger", "delete_trigger", "create_trigger",
-    "manage_trigger", "memory_log", "manage_room", "create_room", "propose_profile", "skill_manage",
+    "manage_trigger", "memory_log", "manage_room", "create_room", "wait_until", "cancel_wait", "propose_profile", "skill_manage",
     // Read through their action tools, never as read-only names of their own.
     "list_triggers", "list_trigger_events", "session_read",
     "propose_team_setup", "propose_bot_deletion",

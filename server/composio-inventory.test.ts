@@ -33,6 +33,34 @@ afterEach(() => {
 });
 
 describe("broker inventory completeness", () => {
+  it.each(["unavailable", "incomplete", "malformed"])("keeps display and bridge slugs but refuses opaque calls after an %s refresh", async (failure) => {
+    composio.setManagedBrokerAccess({ url: `https://broker.test/${++backend}`, token: "a".repeat(64) });
+    let broken = false;
+    vi.stubGlobal("fetch", async () => {
+      if (broken && failure === "unavailable") throw new Error("synthetic inventory timeout");
+      if (broken && failure === "malformed") return Response.json({});
+      return Response.json({ services: { slack: { connected: true } }, complete: !(broken && failure === "incomplete") });
+    });
+    const context = { harnessUrl: "http://127.0.0.1:1", commsToken: "fixture", botId: "bot", threadId: "room", connectorTools: { slack: { tools: "*" as const } } };
+    const host = guard();
+    const initialBridge = await composio.mcpIntegration({}, context);
+    await expect(composio.connectedServiceSlugs({})).resolves.toEqual(["slack"]);
+    await expect(host.callRefusal(capability, opaqueCalls)).resolves.toBeNull();
+    broken = true;
+    // A fresh display cache cannot prove that a person's app is absent now.
+    await expect(host.callRefusal(capability, opaqueCalls)).resolves.toEqual(expect.stringMatching(/inventory.*could not be verified/));
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+    try {
+      await expect(composio.connectedServiceSlugs({})).resolves.toEqual(["slack"]);
+      expect(await composio.mcpIntegration({}, context)).toEqual(initialBridge);
+      await expect(host.callRefusal(capability, opaqueCalls)).resolves.toEqual(expect.stringMatching(/inventory.*could not be verified/));
+      broken = false;
+      await expect(host.callRefusal(capability, opaqueCalls)).resolves.toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it.each([
     { label: "legacy HTTP 200", proof: {} },
     { label: "explicitly incomplete HTTP 200", proof: { complete: false } },
@@ -44,7 +72,7 @@ describe("broker inventory completeness", () => {
 
     await expect(host.callRefusal(capability, opaqueCalls)).resolves.toEqual(expect.stringMatching(/inventory.*could not be verified/));
     await expect(composio.connectedServicesInventory({})).resolves.toEqual({ services: {}, complete: false });
-    await expect(composio.connectedServiceSlugs({})).rejects.toThrow(/inventory.*incomplete/i);
+    await expect(composio.verifiedConnectedServiceSlugs({})).rejects.toThrow(/inventory.*incomplete/i);
 
     body = { configured: true, services: {}, complete: true };
     await expect(composio.connectedServicesInventory({})).resolves.toEqual({ services: {}, complete: true });
@@ -99,7 +127,7 @@ describe.each(["connected_accounts", "toolkits"])("self-hosted %s inventory", (w
       });
       const host = guard(cfg);
       await expect(host.callRefusal(capability, opaqueCalls)).resolves.toEqual(expect.stringMatching(/inventory.*could not be verified/));
-      await expect(composio.connectedServiceSlugs(cfg)).rejects.toThrow();
+      await expect(composio.verifiedConnectedServiceSlugs(cfg)).rejects.toThrow();
       broken = false;
       await expect(host.callRefusal(capability, opaqueCalls)).resolves.toBeNull();
       await expect(composio.connectedServiceSlugs(cfg)).resolves.toEqual([]);

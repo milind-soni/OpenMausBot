@@ -6,6 +6,7 @@ import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
 import { cn } from "@/lib/cn";
 import { KEY_FIELD } from "./keys/KeyRow";
+import { Select } from "./Select";
 
 export function modelIds(text: string): string[] {
   return [...new Set(text.split(/[,，、\s]+/).map((id) => id.trim()).filter(Boolean))];
@@ -68,7 +69,9 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
             <div className="truncate text-[12px] text-ink">{server.displayName}</div>
             {server.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{server.url}</div>}
           </div>
-          <select
+          <Select
+            size="sm"
+            className="shrink-0"
             value={server.replyWaitMinutes ?? ""}
             onChange={(event) => {
               const minutes = event.target.value ? Number(event.target.value) : null;
@@ -77,13 +80,12 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
             disabled={busy !== null}
             aria-label={t("apiInstances.replyWaitFor", { name: server.displayName })}
             title={t("apiInstances.replyWaitHint")}
-            className="shrink-0 rounded-md border border-hairline/60 bg-inset px-1.5 py-1 text-[11.5px] text-ink focus:border-accent focus:outline-none disabled:opacity-50"
           >
             <option value="">{t("apiInstances.replyWaitDefault")}</option>
             {[...new Set([...REPLY_WAIT_CHOICES, ...(server.replyWaitMinutes ? [server.replyWaitMinutes] : [])])].sort((a, b) => a - b).map((minutes) => (
               <option key={minutes} value={minutes}>{t("apiInstances.replyWaitMinutes", { minutes: String(minutes) })}</option>
             ))}
-          </select>
+          </Select>
           <button
             type="button"
             onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}/refresh-models`, { method: "POST" }))}

@@ -44,7 +44,7 @@
     },
     {
       "name": "shared_computer",
-      "description": "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant and stops after timeout_seconds (default 120, at most 240): run longer jobs in the background with output to a file, then read it. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+      "description": "Use a desktop the user explicitly shared. Get computer_id and folder_id from list_shared_computers. File actions stay in chosen folders; paths are relative. read_file returns sha256, needed as expected_sha256 to overwrite or delete_file. edit_file swaps old_text (once) for new_text; append_file adds content. Binary files: base64 encoding. run_command requires a SEPARATE unrestricted terminal grant and stops after timeout_seconds (default 120, at most 240): run longer jobs in the background with output to a file, then read it. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried: inspect an uncertain outcome before retrying.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -58,6 +58,9 @@
               "list_files",
               "read_file",
               "write_file",
+              "edit_file",
+              "append_file",
+              "delete_file",
               "run_command",
               "computer_tools",
               "computer_call"
@@ -80,6 +83,12 @@
             ]
           },
           "expected_sha256": {
+            "type": "string"
+          },
+          "old_text": {
+            "type": "string"
+          },
+          "new_text": {
             "type": "string"
           },
           "command": {
@@ -1506,6 +1515,92 @@
         },
         "required": [
           "trigger_id"
+        ]
+      }
+    },
+    {
+      "name": "wait_until",
+      "description": "Tell the person in this chat when something happens. No AI runs while you wait, only plain code checks. Ends after hours (default 24, 1-168).",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "A noun phrase in the person's words, e.g. \"the build\"."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "url_contains",
+              "url_missing",
+              "file_exists",
+              "file_missing",
+              "file_changed",
+              "process_running",
+              "process_gone",
+              "bot_idle"
+            ],
+            "description": "url_*: the page at url has or lacks text. file_*: path exists, is gone or changes. process_*: process (name or pid) runs or stops. bot_idle: bot (name or id) finishes its work."
+          },
+          "url": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "process": {
+            "type": "string"
+          },
+          "bot": {
+            "type": "string"
+          },
+          "follow_up": {
+            "type": "string",
+            "description": "Only if the person asked for something to be done then: that request, for a run that won't see this chat. You carry it out here."
+          },
+          "hours": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "list_waits",
+      "description": "Your waits in this chat that have not ended (wait_until): id, label, what it checks, when it was made and when it stops.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "cancel_wait",
+      "description": "Stop one of your waits; its id comes from list_waits or wait_until's answer.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
         ]
       }
     },

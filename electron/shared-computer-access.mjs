@@ -8,6 +8,7 @@ import readline from "node:readline";
 import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.mjs";
 import { typeOneCharacterAtATime, typesInOneBurst } from "./paced-typing.mjs";
 import { helperMissing } from "./lent-screen-failures.mjs";
+import { commandPath } from "./shell-path.mjs";
 
 /** Reads stay under the 4 MB body that carries a result to the server (base64 of 2 MiB is 2.8 MB); writes stay small. */
 const READ_LIMIT = 2 * 1024 * 1024;
@@ -64,6 +65,15 @@ export const insideHomeSettings = relative => {
   return Boolean(first) && (first.startsWith(".") || ["library", "appdata"].includes(first.normalize("NFC").toLowerCase()));
 };
 const hash = data => createHash("sha256").update(data).digest("hex");
+
+function editedText(current, oldText, newText) {
+  const before = current.toString("utf8");
+  if (!Buffer.from(before, "utf8").equals(current)) throw new Error("edit_file changes text files only: read it and write it whole with write_file");
+  const at = before.indexOf(oldText);
+  if (at < 0) throw new Error("old_text was not found in the file: read it again and copy the passage exactly");
+  if (before.indexOf(oldText, at + 1) >= 0) throw new Error("old_text occurs more than once: include more of the surrounding text");
+  return Buffer.from(before.slice(0, at) + newText + before.slice(at + oldText.length), "utf8");
+}
 const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
 const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
 
@@ -165,9 +175,11 @@ const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "US
 
 export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
 
-export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
+export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
   if (typeof command !== "string" || !command.trim() || command.length > 8000) throw new Error("Give a command of at most 8000 characters");
   if (!validCommandSeconds(seconds)) throw new Error(`Give timeout_seconds as a whole number from 1 to ${MAX_COMMAND_SECONDS}`);
+  signal.throwIfAborted();
+  const PATH = await commandPath();
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const windows = process.platform === "win32";
@@ -179,7 +191,7 @@ export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
       // Without PATHEXT, PowerShell treats even .exe files as documents.
-      env: hostEnvironment(),
+      env: { ...hostEnvironment(), ...(PATH ? { PATH } : {}) },
     });
     const chunks = []; let bytes = 0; let reason; let settled = false;
     const graces = [];
@@ -285,7 +297,7 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
     if (grant.computer !== true) throw new Error("Computer control is not enabled for this server");
     return (await cua()).call(operation, signal);
   }
-  if (!["list_files", "read_file", "write_file"].includes(operation.action)) throw new Error("Unsupported shared-computer operation");
+  if (!["list_files", "read_file", "write_file", "edit_file", "append_file", "delete_file"].includes(operation.action)) throw new Error("Unsupported shared-computer operation");
   const folder = grant.folders.find(entry => entry.id === operation.folder_id);
   if (!folder) throw new Error("This folder has not been shared with this server");
   const target = await sharedPath(folder, operation.path);
@@ -303,10 +315,11 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
     }));
     return text({ entries: shown, truncated: entries.length > 200 });
   }
-  const write = operation.action === "write_file";
-  if (write && folder.write !== true) throw new Error("This folder is read-only");
-  if (write && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
-  if (write && folder.home === true && insideHomeSettings(operation.path ?? "")) throw new Error(HOME_SETTINGS);
+  const write = operation.action === "write_file", edit = operation.action === "edit_file", append = operation.action === "append_file";
+  const remove = operation.action === "delete_file", changes = write || edit || append || remove;
+  if (changes && folder.write !== true) throw new Error("This folder is read-only");
+  if (changes && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
+  if (changes && folder.home === true && insideHomeSettings(operation.path ?? "")) throw new Error(HOME_SETTINGS);
   let data;
   if (write) {
     if (typeof operation.content !== "string") throw new Error("Give file content to write");
@@ -314,7 +327,22 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
     if (data.length > WRITE_LIMIT) throw new Error("A file written here is limited to 256 KiB");
     if (!operation.expected_sha256) await makeMissingFolders(folder, operation.path ?? "");
   }
-  const flags = (write ? operation.expected_sha256 ? constants.O_RDWR : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  if (edit) {
+    if (typeof operation.old_text !== "string" || !operation.old_text || typeof operation.new_text !== "string") throw new Error("Give old_text to find and new_text to put in its place");
+    if (Buffer.byteLength(operation.new_text) > WRITE_LIMIT) throw new Error("new_text is limited to 256 KiB");
+  }
+  if (append) {
+    if (typeof operation.content !== "string") throw new Error("Give content to append");
+    data = Buffer.from(operation.content, operation.encoding === "base64" ? "base64" : "utf8");
+    if (data.length > WRITE_LIMIT) throw new Error("Content appended at once is limited to 256 KiB");
+    await makeMissingFolders(folder, operation.path ?? "");
+  }
+  if (remove && !operation.expected_sha256) throw new Error("Read the file first and pass its sha256 as expected_sha256 to delete it");
+  let opening = constants.O_RDONLY;
+  if (write) opening = operation.expected_sha256 ? constants.O_RDWR : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL;
+  else if (edit) opening = constants.O_RDWR;
+  else if (append) opening = constants.O_RDWR | constants.O_CREAT;
+  const flags = opening | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
   const file = await fs.open(target, flags, 0o600);
   try {
     const stat = await file.stat({ bigint: true });
@@ -337,17 +365,31 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
       if (total > READ_LIMIT) throw new Error("File grew beyond the 2 MiB limit");
       current = buffer.subarray(0, total);
     }
-    if (write) {
-      if (operation.expected_sha256 && hash(current) !== operation.expected_sha256) throw new Error("File changed. Read it again before overwriting it.");
+    if (changes && operation.expected_sha256 && hash(current) !== operation.expected_sha256) throw new Error("File changed since it was read. Read it again first.");
+    if (remove) {
+      signal.throwIfAborted();
+      // The path must still name the file just checked: never unlink what a swapped folder or file put there.
+      await sharedPath(folder, operation.path);
+      const named = await fs.lstat(target, { bigint: true });
+      if (named.ino !== stat.ino || named.dev !== stat.dev || named.isSymbolicLink()) throw new Error("The file changed while deleting it; retry after inspecting the folder");
+      await fs.unlink(target);
+      return text({ deleted: true });
+    }
+    if (edit) data = editedText(current, operation.old_text, operation.new_text);
+    // An append writes only its own bytes, after what is there.
+    const at = append ? current.length : 0;
+    if (data && at + data.length > READ_LIMIT) throw new Error("A file changed here is limited to 2 MiB");
+    if (data) {
       signal.throwIfAborted();
       for (let offset = 0; offset < data.length;) {
         signal.throwIfAborted();
-        const { bytesWritten } = await file.write(data, offset, data.length - offset, offset);
+        const { bytesWritten } = await file.write(data, offset, data.length - offset, at + offset);
         if (!bytesWritten) throw new Error("File write did not make progress; inspect before retrying");
         offset += bytesWritten;
       }
-      await file.truncate(data.length); await file.sync();
-      return text({ written: true, bytes: data.length, sha256: hash(data) });
+      await file.truncate(at + data.length); await file.sync();
+      const whole = append ? Buffer.concat([current, data]) : data;
+      return text({ written: true, bytes: whole.length, sha256: hash(whole) });
     }
     signal.throwIfAborted();
     const read = text({ content: current.toString(operation.encoding === "base64" ? "base64" : "utf8"), encoding: operation.encoding ?? "utf8", bytes: current.length, sha256: hash(current) });
