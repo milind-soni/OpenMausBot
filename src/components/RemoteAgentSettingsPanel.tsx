@@ -5,6 +5,8 @@ import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { VoiceSettings } from "./VoiceSettings";
+import { ModelPicker, EffortRow } from "./ModelPicker";
+import { t } from "@/lib/i18n";
 import { Switch } from "./SettingsPrimitives";
 import { BotAvatar } from "./Avatar";
 import { imageAttachmentFromFile } from "@/lib/composer-attachments";
@@ -120,6 +122,14 @@ export function RemoteAgentSettingsPanel({ bot, overlay = false }: {
               <textarea key={bot.id} defaultValue={bot.description ?? ""} maxLength={BOT_PROFILE_LIMITS.description} rows={4} onBlur={(event) => { if (event.currentTarget.value !== (bot.description ?? "")) void patch({ description: event.currentTarget.value }); }} className="mt-1 w-full resize-y rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink focus:outline-none focus:ring-1 focus:ring-accent" />
             </label>
           </div>
+
+          <div className="rounded-xl bg-card p-4">
+            <ModelPicker bot={bot} contained label={<div>
+              <div className="text-[15px] font-medium text-ink">{t("model.section.default")}</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">{t("model.section.threads")}</div>
+            </div>} />
+          </div>
+          <EffortRow bot={bot} threadId={bot.threadId} updateBotDefault className="rounded-xl bg-card p-4" label={t("model.section.effort")} />
 
           <VoiceSettings
             bot={bot}

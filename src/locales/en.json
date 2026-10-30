@@ -5725,6 +5725,8 @@
   "newBot.sections": "Bot settings",
   "newBot.saveDefaults": "Save defaults",
   "newBot.create": "Create bot",
+  "newBot.remoteDefaultModel": "Use the paired computer's default",
+  "newBot.remoteModelUnavailable": "That model is no longer available. Choose another model.",
   "newBot.startingRole": "Starting role",
   "newBot.presetsFromOrganization": "From {name}",
   "newBot.presetsImported": "Imported presets",
