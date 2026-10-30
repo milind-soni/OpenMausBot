@@ -1391,6 +1391,18 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     expect(ask.coordinator.node(asked.id)?.decide).toBeUndefined();
   });
 
+  it("puts a question to the person at Full access when an outside event started the work: its brief is not the person's authority", async () => {
+    const w = world(asks("NEEDS INPUT: CSV or Excel?\nDefault: CSV"));
+    w.host.levels.builder = { level: "full" };
+    begun(w, chief, "gen-1", "A webhook asked for the export", { origin: undefined });
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Export the report");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "CSV or Excel?\nDefault: CSV" });
+    expect(w.coordinator.node(node.id)?.decide).toBeUndefined();
+    expect(w.host.runs.find(run => run.node.id === node.id)?.text).toContain("If something genuinely needs Milind");
+  });
+
   it("lists the work a bot has parked, for an answer passed on to it", async () => {
     const w = world(asks("NEEDS INPUT: CSV or Excel?"));
     const { node } = send(w, chief, "gen-1", undefined, builder, "Export the report");

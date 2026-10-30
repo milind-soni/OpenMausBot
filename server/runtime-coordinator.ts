@@ -6,7 +6,7 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
-import { personOnly, withDefault } from "./runtime/questions.ts";
+import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
 import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Answerer, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 
@@ -59,9 +59,6 @@ function runtimeOrigin(origin: WorkOrigin | undefined, source: RoomAddress): Ori
     : { kind: "outside", source: "chat", ref: source.threadId };
 }
 
-/** At Full access a teammate's question is its requester's to answer, unless only the person can give what it asks. */
-const requesterAnswers = (a: Assignment, question: string): boolean =>
-  a.level === "full" && a.requester.kind === "bot_turn" && !personOnly(question);
 
 /** The question a reply ends on: its last line starts with NEEDS INPUT:, or the line before a closing `Default:` line. */
 export function needsInputQuestion(text: string): string | undefined {
@@ -511,7 +508,7 @@ export class RuntimeCoordinator implements Coordinator {
     const question = root ? undefined : needsInputQuestion(result.text);
     if (question === undefined) return { kind: "completed", text: result.text, ...evidence(result) };
     const named = withDefault(question);
-    const decide = requesterAnswers(a, named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
+    const decide = requesterDecides(a) && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
     return { kind: "needs_input", question, ...decide, ...evidence(result) };
   }
 

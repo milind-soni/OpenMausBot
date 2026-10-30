@@ -356,9 +356,9 @@ inbox is unread.
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
 
-**A teammate's question.** At Full access ("Just do it", every bot's default) a question from work handed on never
-reaches the person unless only they can give what it asks (a sign-in or code, a payment, a secret or an account of
-theirs): the bot that handed the work on answers it, and with no answer from it the bot goes on with the default it
+**A teammate's question.** At Full access ("Just do it", every bot's default) a question from work the person started
+and a bot handed on never reaches them unless only they can give what it asks (a sign-in or code, a payment, a secret or
+an account of theirs; work a webhook or another outside event started still asks them): the bot that handed the work on answers it, and with no answer from it the bot goes on with the default it
 named and says so; its card in the bot's conversation shows who picked what, waits on nobody, and still takes the
 person's own answer. What only the person can do is asked for exactly, once, while the rest of the work moves on. On
 "Ask me first" work handed on that needs the person asks them with a card: a decision with a few set answers through the

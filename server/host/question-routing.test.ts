@@ -63,23 +63,24 @@ function world(options: { live?: string[] } = {}) {
 }
 
 describe("at Full access a question asked with an ask tool", () => {
-  it("is not asked in work handed on, or in a turn nobody watches: the bot takes its default or hands the choice to its requester", () => {
+  it("is not asked in work the person started and a bot handed on: the bot takes its default or hands the choice to its requester", () => {
     const w = world();
-    w.node({ status: "running" });
-    const handedOn = w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", unattended: false, question: "CSV or Excel?" });
-    expect(handedOn).toBe("Not asked: at this level nobody is interrupted. Take the sensible default yourself, carry on, and say in one plain line what you chose. "
-      + "If you truly cannot choose, end your turn with NEEDS INPUT:, the question and Default: your pick, and @Fuchs decides.");
-    expect(w.routing.notAsked({ botId: "otter", threadId: "routine-run", level: "full", unattended: true, question: "Which inbox?" }))
-      .toBe("Not asked: at this level nobody is interrupted. Take the sensible default yourself, carry on, and say in one plain line what you chose.");
+    w.node({ status: "running", origin: { kind: "user", request: "Export the report" } });
+    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "CSV or Excel?" }))
+      .toBe("Not asked: at this level nobody is interrupted. Take the sensible default yourself, carry on, and say in one plain line what you chose. "
+        + "If you truly cannot choose, end your turn with NEEDS INPUT:, the question and Default: your pick, and @Fuchs decides.");
   });
 
-  it("still reaches the person when only they can give it, below Full access, and in their own chat", () => {
+  it("still reaches the person when only they can give it, below Full access, in their own chat, and in work an outside event started", () => {
     const w = world();
     w.node({ status: "running" });
-    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", unattended: false, question: "Please sign in to the bank portal" })).toBeUndefined();
-    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", unattended: false, question: "Soll ich die Rechnung bezahlen?" })).toBeUndefined();
-    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "ask", unattended: false, question: "CSV or Excel?" })).toBeUndefined();
-    expect(w.routing.notAsked({ botId: "dachs", threadId: "chat", level: "full", unattended: false, question: "CSV or Excel?" })).toBeUndefined();
+    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "Please sign in to the bank portal" })).toBeUndefined();
+    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "Soll ich die Rechnung bezahlen?" })).toBeUndefined();
+    expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "ask", question: "CSV or Excel?" })).toBeUndefined();
+    expect(w.routing.notAsked({ botId: "dachs", threadId: "chat", level: "full", question: "CSV or Excel?" })).toBeUndefined();
+    const hooked = world();
+    hooked.node({ status: "running", origin: { kind: "outside" } });
+    expect(hooked.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "CSV or Excel?" })).toBeUndefined();
   });
 });
 

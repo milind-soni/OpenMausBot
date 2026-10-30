@@ -1,5 +1,5 @@
-// Who answers a bot's question. At Full access ("Just do it") a question asked with an ask tool in work handed on, or in
-// a turn nobody watches, is not put to the person: the bot takes its default, or hands a real choice to its requester.
+// Who answers a bot's question. At Full access ("Just do it") a question asked with an ask tool in work handed on that the
+// person started is not put to them: the bot takes its default, or hands a real choice to its requester.
 // Otherwise a question waits for the person, and an answer counts wherever it is given, also when their Chief or another
 // bot passes it on to the bot that asks, naming the question it answers.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
@@ -35,16 +35,15 @@ interface Waiting {
 export function createQuestionRouting(deps: QuestionRoutingDeps) {
   const { store } = deps;
 
-  /** At Full access a question asked with an ask tool, in work handed on or a turn nobody watches, is answered at once
-   * with this instead of a card; undefined shows the card. What only the person can give still reaches them. */
-  function notAsked(input: { botId: string; threadId: string; level: ApprovalMode; unattended: boolean; question: string }): string | undefined {
+  /** At Full access a question asked with an ask tool in work handed on, which the person started, is answered at once
+   * with this instead of a card; undefined shows the card. What only the person can give still reaches them, and so
+   * does every question in work an outside event started. */
+  function notAsked(input: { botId: string; threadId: string; level: ApprovalMode; question: string }): string | undefined {
     if (input.level !== "full" || personOnly(input.question)) return undefined;
     const node = deps.active().find((n) => n.threadId === input.threadId && n.botId === input.botId && n.status === "running" && n.parentId !== undefined);
-    if (!node && !input.unattended) return undefined;
     const requester = node?.parentId ? deps.node(node.parentId) : undefined;
-    const name = requester ? store.bot(requester.botId)?.name : undefined;
-    return `Not asked: at this level nobody is interrupted. Take the sensible default yourself, carry on, and say in one plain line what you chose.${name
-      ? ` If you truly cannot choose, end your turn with NEEDS INPUT:, the question and Default: your pick, and @${name} decides.` : ""}`;
+    if (!node || !requester || node.origin?.kind === "outside") return undefined;
+    return `Not asked: at this level nobody is interrupted. Take the sensible default yourself, carry on, and say in one plain line what you chose. If you truly cannot choose, end your turn with NEEDS INPUT:, the question and Default: your pick, and @${store.bot(requester.botId)?.name ?? "your requester"} decides.`;
   }
 
   const signInsOnly = (node: HandoffView): boolean => {

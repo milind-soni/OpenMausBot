@@ -425,6 +425,12 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(opening(envelope).length, "no longer than the ask line it replaces").toBeLessThanOrEqual(opening(composeEnvelope(base, { ...names, askTool: "mcp__ogb__ask_user" })).length + 40);
   });
 
+  it("keeps the ask line for work an outside event started, at Full access too", () => {
+    const outside = composeEnvelope(assignment({ level: "full", origin: { kind: "outside", source: "webhook" } }), names);
+    expect(outside).toContain("If something genuinely needs Milind (a credential, a decision only they can make, a step with consequences nobody authorised)");
+    expect(outside).not.toContain("At this level do not stop to ask");
+  });
+
   it("keeps the ask line below Full access", () => {
     expect(composeEnvelope(assignment({ level: "auto" }), { ...names, askTool: "mcp__ogb__ask_user" })).toContain("ask it with mcp__ogb__ask_user, not show_widget");
   });
