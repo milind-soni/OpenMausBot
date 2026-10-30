@@ -43,7 +43,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   (below), never off the team.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
-  person's own* (below): then every member connects their own, and only work their own message started uses it. A person's
+  person's own* (below): then every member connects their own, and only their own chats use it. A person's
   connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
   an Admin only, for the whole team.
@@ -110,12 +110,18 @@ is, is one connection an Admin makes and every turn uses. `person` is one connec
 their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
 
 - **Who gets a member's own connection.** Only a turn that acts for them (server/host/acting-person.ts), read from the
-  harness's records: their own message started it, in their private chat, a group chat or the bot's main chat; or it is
-  work handed on (delegated, assigned, consulted, or a thread a bot opened for it) by a turn that acted for them, recorded
-  as it is handed on (`handed-people.json`, so a restart keeps it). A turn stops acting for anyone once another person's
-  words join it after it began (a line of theirs, queued or sent into it, or their answer to one of its cards), and never
-  acts for anyone in another member's private chat (no Admin can write in theirs). A routine, a webhook and a bot's own
-  work act for nobody. Each step that uses one says whose ("using Ada's Gmail").
+  harness's records, and only in a chat that is theirs alone, where nobody else reads what their connection brings back.
+  A turn acts for them when their own message started it, or when it is work handed on (delegated, assigned, consulted,
+  or a thread a bot opened for it) by a turn that acted for them, recorded as it is handed on (`handed-people.json`, so a
+  restart keeps it). A turn stops acting for anyone once another person's words join it after it began (a line of theirs,
+  queued or sent into it, or their answer to one of its cards); a routine, a webhook and a bot's own work act for nobody.
+  Each step that uses one says whose ("using Ada's Gmail").
+- **Work they start where others read.** Their own line in a group chat or the bot's main chat never uses their own
+  connections there; the bot is told to hand that part on. When they have connected anything of their own, the work their
+  request hands on opens in the receiving bot's chat with them (a thread private to them, as their own chats are: no
+  other member and no admin sees it), where their own connections work. What that chat hands back to the place they
+  asked in is only where the result is ("Done. The result is in Clerk's chat with Ada."), never the result: a private chat
+  never reaches a room or the team (server/host/room-access.ts).
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
   registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
