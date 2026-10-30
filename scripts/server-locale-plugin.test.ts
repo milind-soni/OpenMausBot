@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { serverLinesOnly, serverLocalePlugin } from "./server-locale-plugin.mjs";
 
-const SERVER_LINES = fileURLToPath(new URL("../server/server-lines.ts", import.meta.url));
+const SERVER_LINES = fileURLToPath(new URL("../server/server-line-packs.ts", import.meta.url));
 
 describe("the server's bundle of the language packs", () => {
   it("keeps only the lines the server writes", () => {

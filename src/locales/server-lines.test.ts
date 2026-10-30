@@ -454,7 +454,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/room-holds.ts", "…  is held (stopped by you) — @mention it or say resume"],
     ["server/room-reply.ts", "…  finished without a summary — asking for a short result"],
     ["server/room-reply.ts", "…  finished without a summary"],
-    ["server/room-turn-timeout.ts", "… 's room turn exceeded  …   …  and was stopped"],
+    ["server/room-turn-timeout.ts", "… 's room turn made no progress for  …   …  and was stopped"],
     ["server/routes/internal-threads.ts", "Closed by @ …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
@@ -598,6 +598,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
 };
 
 
+
 const listed = (finding: Finding, file: string, snippet: string) => finding.file === file && finding.text.includes(snippet);
 
 describe("lines the server writes for a person", () => {
@@ -630,11 +631,13 @@ describe("lines the server writes for a person", () => {
     expect(keys.filter((key) => !code.includes(`"${key}"`))).toEqual([]);
   });
 
-  it("only server/server-lines.ts reads the language packs on the server, whose bundle keeps only their server keys", () => {
+  it("only server-lines.ts (English) and server-line-packs.ts (the rest) read the language packs on the server", () => {
     const readers = SCANNED.flatMap((top) => [...sources(join(ROOT, top))])
       .filter((path) => /from ["'][./]+\/src\/locales\//.test(readFileSync(path, "utf8")))
       .map((path) => relative(ROOT, path).split("\\").join("/"));
-    expect(readers).toEqual(["server/server-lines.ts"]);
+    expect(readers.sort()).toEqual(["server/server-line-packs.ts", "server/server-lines.ts"]);
+    // The server loads the other languages when it starts; without them every line reads in English.
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/^import [^\n]*\bimport "\.\/server-line-packs\.ts";$|^import "\.\/server-line-packs\.ts";$/m);
   });
 });
 

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import "../server-line-packs.ts";
 import type { DevsReportPayload } from "../devs-report.ts";
 import type { SendOutcome } from "../devs-report-send.ts";
 import { personKey } from "../person-key.ts";

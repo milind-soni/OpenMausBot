@@ -38,9 +38,17 @@ export const AREA_CHECKS = {
  * shards, as vitest filters. Locale tests: every test that reads a translation
  * other than English (the renderer's files take about nine minutes in one
  * process), with the Electron node tests, which compare their own copy of some
- * strings with every catalog. Docs tests: every test that reads the docs. */
+ * strings with every catalog, and the server's tests of its lines in other
+ * languages (they load server/server-line-packs.ts). Docs tests: every test that
+ * reads the docs. */
 export const VITEST_SUBSETS = {
-  "locale-tests": { part: "locale tests", files: ["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts"], shards: 2, nodeTests: true },
+  "locale-tests": {
+    part: "locale tests",
+    files: ["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts", "scripts/server-locale-plugin.test.ts",
+      "server/server-lines.test.ts", "server/host/devs-reports.test.ts"],
+    shards: 2,
+    nodeTests: true,
+  },
   "docs-tests": {
     part: "docs tests",
     files: ["scripts/testing/analytics-docs.test.ts", "server/model-providers-docs.test.ts", "src/locales/vocabulary.test.ts"],
@@ -51,7 +59,9 @@ export const VITEST_SUBSETS = {
 
 /** Renderer files that also run outside the renderer: the server imports
  * them, or the macOS app-frame smoke bundles them. ci-scope.test.ts holds this
- * equal to the import graph. */
+ * equal to the import graph. The language packs are left out, though the
+ * server reads their "server." lines: a change to English runs every Linux test,
+ * and one to another language runs every test that reads it (the locale tests). */
 export const SRC_OUTSIDE_RENDERER = [
   "src/components/app/app-frame-host.ts",
   "src/lib/citations.ts",

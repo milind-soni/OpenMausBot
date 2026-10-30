@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { serverLine } from "./server-lines.ts";
 
 describe("serverLine", () => {
