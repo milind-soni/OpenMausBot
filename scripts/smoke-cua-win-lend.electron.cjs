@@ -28,7 +28,11 @@ async function driverTools(mcp) {
   const request = (id, method, params) => new Promise((done, fail) => {
     const timer = setTimeout(() => fail(new Error(`${method} timed out; stderr: ${stderr}`)), 15_000);
     child.once("exit", (code) => fail(new Error(`proxy exited ${code}; stderr: ${stderr}`)));
-    pending.set(id, (message) => { clearTimeout(timer); message.error ? fail(new Error(JSON.stringify(message.error))) : done(message.result); });
+    pending.set(id, (message) => {
+      clearTimeout(timer);
+      if (message.error) fail(new Error(JSON.stringify(message.error)));
+      else done(message.result);
+    });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
   });
   try {
