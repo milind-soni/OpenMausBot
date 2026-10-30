@@ -85,6 +85,13 @@ describe("every credential has one home on the keys page", () => {
     for (const section of KEY_SECTIONS) expect(KEY_CATALOG.some((entry) => entry.section === section.id), section.id).toBe(true);
   });
 
+  it("opens the existing Brave Search settings and shows whether its key is configured", () => {
+    const entry = keyEntry("braveSearch");
+    expect(entry).toMatchObject({ section: "apps", kind: "elsewhere", opens: "connections", env: ["OMB_BRAVE_SEARCH_API_KEY"] });
+    expect(savedState(entry, { webSearch: { braveConfigured: true } } as ConfigStatus)).toEqual({ configured: true });
+    expect(savedState(entry, {} as ConfigStatus)).toEqual({ configured: false });
+  });
+
   it("keeps the OpenAI key once: live calls point at it instead of holding a copy", () => {
     const live = keyEntry("liveCalls");
     expect(live).toMatchObject({ section: "voice", kind: "uses", uses: "openai" });

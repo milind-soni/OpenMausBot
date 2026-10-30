@@ -41,7 +41,7 @@ export interface KeyTarget {
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
-  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageCustom";
+  | "braveSearch" | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
 
@@ -152,6 +152,9 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
       saved: (config) => ({ ...flag((config.composio?.mode ?? "self-hosted") === "self-hosted" ? config.composio : undefined),
         ...(config.composio?.mode === "managed" ? { included: true } : {}) }),
       placeholder: "ak_…", href: "https://dashboard.composio.dev", analytics: "composio", shape: /^ak_/ } },
+  { id: "braveSearch", section: "apps", labelKey: "settings.webSearch.key", purposeKey: "keys.purpose.webSearch", name: "Brave Search", env: ["OMB_BRAVE_SEARCH_API_KEY"],
+    words: ["brave", "web", "search", "searxng"], mark: { icon: Search }, kind: "elsewhere", opens: "connections", whereKey: "keys.where.webSearch",
+    status: (config) => ({ configured: config.webSearch?.braveConfigured === true }) },
   { id: "treg", section: "apps", labelKey: "keys.treg.label", purposeKey: "keys.purpose.treg", name: "treg", env: ["OMB_TREG_KEY"],
     words: ["treg", "research", "x", "twitter", "companies", "people", "funding", "news"], mark: { icon: Search }, kind: "key",
     target: { ...providerKey("treg", { slot: "tregApiKey", placeholder: "…", placeholderKey: "keys.treg.placeholder", href: "https://treg.to", test: "treg", analytics: "treg" }),

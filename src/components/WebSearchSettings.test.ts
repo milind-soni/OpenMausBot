@@ -28,7 +28,7 @@ it("preserves a saved key when saving only the URL and hides raw server errors",
 });
 
 it("explains Brave result retention and storage rights with a terms link", () => {
-  expect(host.textContent).toContain("OMB stores Brave results for as long as conversation history.");
+  expect(host.textContent).toContain("OpenMausBot stores Brave results for as long as conversation history.");
   expect(host.textContent).toContain("Choose a Brave API plan with storage rights that permit this retention.");
   const terms = host.querySelector<HTMLAnchorElement>("a")!;
   expect(terms.textContent).toBe("Brave API terms");
