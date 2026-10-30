@@ -428,16 +428,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/store.ts", "reached its turn limit"],
     ["server/waiting-on-person.ts", "Queued for @ …  behind your  …  in “ … ”"],
   ],
-  "notifications": [
-    ["server/host/person-inbox.ts", "…  · your assistant answered"],
-    ["server/notify.ts", "…  needs approval"],
-    ["server/notify.ts", "…  needs you to sign in to  …"],
-    ["server/notify.ts", "… 's routine failed"],
-    ["server/notify.ts", "… 's routine is waiting"],
-    ["server/notify.ts", "…  resumed with results"],
-    ["server/notify.ts", "…  mentioned you"],
-    ["server/notify.ts", "… 's wait is over"],
-  ],
   "AI engines and limits": [
     ["server/cloud-credit-moves.ts", "notice:  …  is connected, so this conversation uses it now instead of"],
     ["server/computer-engine-removal.ts", "The Computer choice in the model list was removed."],
@@ -569,6 +559,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
 
 
 
+
 const listed = (finding: Finding, file: string, snippet: string) => finding.file === file && finding.text.includes(snippet);
 
 describe("lines the server writes for a person", () => {
@@ -607,7 +598,11 @@ describe("lines the server writes for a person", () => {
       .map((path) => relative(ROOT, path).split("\\").join("/"));
     expect(readers.sort()).toEqual(["server/server-line-packs.ts", "server/server-lines.ts"]);
     // The server loads the other languages when it starts; without them every line reads in English.
-    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/^import [^\n]*\bimport "\.\/server-line-packs\.ts";$|^import "\.\/server-line-packs\.ts";$/m);
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/(?:^|;\s*)import "\.\/server-line-packs\.ts";/m);
+  });
+
+  it("titles notifications in the language of the conversation's person (server/notify.ts)", () => {
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toContain("setNotificationLanguage(threadLanguage);");
   });
 });
 

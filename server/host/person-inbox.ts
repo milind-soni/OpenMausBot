@@ -19,7 +19,9 @@ import { writeFileAtomic } from "../atomic.ts";
 import { audienceMember, type Audience } from "../audience.ts";
 import { isRestricted } from "../bot-visibility.ts";
 import type { CloudTeam } from "../cloud-team.ts";
+import { notificationLanguage } from "../notify.ts";
 import { peerStatus, peerStatusWords } from "../peer-roster.ts";
+import { serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import type { Representative, SharedFacts } from "./representative.ts";
 import { clip, oneLine } from "./text-clip.ts";
@@ -317,7 +319,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       console.warn(`person inbox: the assistant could not answer: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (answer && answerItem(item, answer, "assistant").status === 200) {
-      notifyItem(item, `${delivery.title} · your assistant answered`, delivery.notify, `${delivery.text} → ${answer}`);
+      notifyItem(item, serverLine(notificationLanguage(item.threadId), "server.notify.assistantAnswered", { title: delivery.title }), delivery.notify, `${delivery.text} → ${answer}`);
     } else notifyItem(item, delivery.title, delivery.notify, delivery.text);
   }
 
