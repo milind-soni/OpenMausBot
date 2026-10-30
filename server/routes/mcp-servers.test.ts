@@ -20,6 +20,7 @@ afterEach(async () => {
 
 async function serve() {
   const cfg: Pick<AppConfig, "mcpServers"> = { mcpServers: {} };
+  const changes: string[] = [];
   let busy = false;
   const route = createMcpServerRoutes({
     cfg,
@@ -33,6 +34,7 @@ async function serve() {
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
+    connectionsChanged: (change) => { changes.push(change); },
   });
   const active = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -47,8 +49,19 @@ async function serve() {
   const post = (path: string, body: unknown) => fetch(`${base}${path}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
-  return { cfg, post, get: () => fetch(`${base}/api/mcp/servers`) };
+  return { cfg, post, changes, get: () => fetch(`${base}/api/mcp/servers`), remove: (name: string) => fetch(`${base}/api/mcp/servers/${name}`, { method: "DELETE" }) };
 }
+
+it("says when a server is added, imported or removed on purpose, so a Cloud home's routines can wait while none is left", async () => {
+  const { post, remove, changes } = await serve();
+  const added = await post("/api/mcp/servers", { name: "warehouse", url: "https://data.example.com/mcp", headers: { Authorization: "" } });
+  expect(added.status, await added.clone().text()).toBe(201);
+  const imported = await post("/api/mcp/servers/import", { json: JSON.stringify({ mcpServers: { nightwatch: { type: "http", url: "https://nightwatch.example.com/mcp" } } }) });
+  expect(imported.status, await imported.clone().text()).toBe(201);
+  expect((await remove("warehouse")).status).toBe(200);
+  expect((await remove("missing")).status).toBe(404);
+  expect(changes).toEqual(["added", "added", "removed"]);
+});
 
 it.each([["private", "person"], ["public", "team"]])("lists the scope of %s in reads and mutation responses", async (name, scope) => {
   const { post, get } = await serve();

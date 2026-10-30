@@ -76,11 +76,11 @@ function session() {
 
 /** This computer lending to every saved place the way main wires it: the session's own Clouds, its home folder, and
  * apps and screen while `screen` says so. */
-async function computer(t, { places = [myCloud, clientA, acme], screen = () => false, home, homes = {}, cuaConnection = async () => null, askForScreen } = {}) {
+async function computer(t, { places = [myCloud, clientA, acme], screen = () => false, home, homes = {}, cuaConnection = async () => null, askForScreen, ownHome } = {}) {
   const dir = await scratch(t);
   const file = path.join(dir, "profile", "computer-sharing.json");
   const signedIn = session();
-  const target = createLendingTarget({ account: () => signedIn.account, environments: () => places });
+  const target = createLendingTarget({ account: () => signedIn.account, environments: () => places, ...(ownHome ? { ownHome } : {}) });
   const summaries = [];
   const dials = [];
   const make = () => createComputerSharing({
@@ -114,6 +114,45 @@ test("each Cloud of the person's own is lent this computer by itself: the intern
   const kept = JSON.parse(await readFile(mac.file, "utf8")).records[myCloud.id];
   assert.deepEqual({ home: kept.folders[0].home, path: kept.folders[0].path, write: kept.folders[0].write }, { home: true, path: home, write: true });
   assert.deepEqual(mac.summaries.at(-1).clouds, ["My Cloud"]);
+});
+
+test("a server of the person's own their bots moved to is lent as their Clouds are, only while it is home, says it is theirs alone and is the server the move chose", async t => {
+  const GARAGE = "https://garage.example.test", garage = { id: "garage", kind: "remote", name: "Garage server", origin: GARAGE };
+  const server = cloudHome({ link: false, chrome: false });
+  const answer = server.fetch;
+  let own = true;
+  server.fetch = async (url, init) => (new URL(url).pathname === "/api/auth/session"
+    ? { ok: true, status: 200, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify({ kind: "session", id: server.sessionId, scopes: ["admin", "client"], ...(own ? { own: true } : {}) })); })() }
+    : answer(url, init));
+  let home = null;
+  const mac = await computer(t, { homes: { [GARAGE]: server }, places: [garage], ownHome: () => home });
+  mac.sharing.start();
+  await delay(100);
+  assert.equal(server.connects.length, 0, "connected by hand and not home: never lent by itself");
+  home = { origin: GARAGE, environmentId: server.environmentId };
+  mac.sharing.cloudChanged();
+  await until(() => server.connects.length === 1, "Garage server to be lent this computer, with no click");
+  assert.equal(server.connects[0].terminal, false);
+  assert.deepEqual(mac.summaries.at(-1).clouds, ["Garage server"], "the menu bar says who can use this computer");
+  mac.sharing.pause();
+  assert.equal(mac.summaries.at(-1).paused, true);
+  await mac.sharing.resume();
+  await until(() => server.connects.length === 2, "lent again on Resume");
+
+  own = false;
+  const strangers = mac.restart();
+  strangers.start();
+  await delay(150);
+  assert.equal(server.connects.length, 2, "a server with other people on it now is never lent");
+  assert.match(strangers.cloudState(garage).error ?? "", /not your bots' home any more/u);
+
+  own = true;
+  const chosen = { origin: GARAGE, environmentId: randomUUID() };
+  const elsewhere = await computer(t, { homes: { [GARAGE]: server }, places: [garage], ownHome: () => chosen });
+  elsewhere.sharing.start();
+  await until(() => elsewhere.sharing.cloudState(garage).error, "the lending to be refused");
+  assert.equal(server.connects.length, 2, "another server behind the same address than the one the move chose is never lent");
+  assert.match(elsewhere.sharing.cloudState(garage).error, /not your bots' home any more/u);
 });
 
 test("apps and screen are lent once computer control works here, and follow it", async t => {
