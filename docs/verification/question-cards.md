@@ -13,20 +13,20 @@ pnpm exec vitest run server/question-cards.e2e.test.ts
 ```
 
 It starts a Team Cloud on the two-server fixture (`scripts/testing/cloud-send-fixture.ts`) with the scripted fake engine
-(`server/testing/room-handoff-agent.ts`): Philipp asks Luchs, his Chief, whose chat is his inbox, to have Biber fix
-something, and Luchs hands it on with `coordinate_bots`. Expected:
+(`server/testing/room-handoff-agent.ts`): Cleo asks Scout, her Chief, whose chat is her inbox, to have Ledger fix
+something, and Scout hands it on with `coordinate_bots`. Expected:
 
-- Biber's envelope offers its card tool for set answers (`ask it with ask_user`), and Biber's turn calls the real
-  `ask_user` server with three German choices. The card is in Biber's work thread, and its copy is in Philipp's inbox
+- Ledger's envelope offers its card tool for set answers (`ask it with ask_user`), and Ledger's turn calls the real
+  `ask_user` server with three choices. The card is in Ledger's work thread, and its copy is in Cleo's inbox
   with the same choices, listed under Needs you, with one notification and no chip beside it.
-- A tap on the copy (`POST /api/threads/<inbox>/respond`) answers Biber's waiting tool call; Biber's reply quotes the
-  choice, Luchs is resumed once with Biber's report, and both cards read as answered.
-- A line Philipp types in Biber's thread while Biber waits answers the card the same way, and stays in the thread
+- A tap on the copy (`POST /api/threads/<inbox>/respond`) answers Ledger's waiting tool call; Ledger's reply quotes the
+  choice, Scout is resumed once with Ledger's report, and both cards read as answered.
+- A line Cleo types in Ledger's thread while Ledger waits answers the card the same way, and stays in the thread
   under it.
-- Biber's `NEEDS INPUT:` question becomes a question card with no choices in place of its line, and a copy in the inbox.
-  Luchs is resumed once with the question and told not to repeat it; Philipp's reply on the copy reaches Biber's next
+- Ledger's `NEEDS INPUT:` question becomes a question card with no choices in place of its line, and a copy in the inbox.
+  Scout is resumed once with the question and told not to repeat it; Cleo's reply on the copy reaches Ledger's next
   turn as `The person answered: "…"`.
-- Stopping Biber's thread closes an open question as stopped, in the thread and in the inbox.
+- Stopping Ledger's thread closes an open question as stopped, in the thread and in the inbox.
 
 Unit tests: `server/host/ask-cards.test.ts` (the card a parked question becomes, its stopped and expired states, the
 chip that stays out of the inbox, typed answers), `server/runtime/envelope.test.ts` (the ask line with and without a

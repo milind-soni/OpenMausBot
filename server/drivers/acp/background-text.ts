@@ -34,7 +34,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
   const name = input.displayName;
   if (signal?.aborted) return Promise.reject(new Error(`${name} background call aborted`));
   return new Promise<string>((resolve, reject) => {
-    const child = input.spawn(input.command, input.argv, { cwd: input.cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = input.spawn(input.command, input.argv, { cwd: input.cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"], botWork: true });
     let settled = false;
     let buffer = "";
     let received = 0;

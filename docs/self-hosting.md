@@ -1201,7 +1201,7 @@ The note needs an engine that accepts a message in the middle of a turn
 only the stop, and only if you set it. The note and the stop do not cover bots
 on API models or turns in a room yet.
 
-Bots on API models (xAI, Mistral, Groq, Cerebras, Meta, MiniMax or an
+Bots on API models (xAI, Mistral, Groq, Greenference, Cerebras, Meta, MiniMax or an
 OpenAI-compatible endpoint) end a turn as failed when a tool call failed and
 the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to

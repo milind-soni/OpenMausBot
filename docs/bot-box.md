@@ -83,7 +83,7 @@ Cloudflare Worker answers with 404), anything below it below that address, with 
 upstream's own. Connected apps (Composio,
 HighLevel) were already behind the harness (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
-A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Cerebras, MiniMax, Kimi, Cursor, Factory,
+A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Greenference, Cerebras, MiniMax, Kimi, Cursor, Factory,
 Cline, OpenCode, OpenRouter's own variable) stays raw in that box, and the report names it under `broker.unbrokered`,
 so the gap is visible. The self-check adds six broker checks (29 in all): the key is nowhere in the box's environment
 or files, the base URL is the broker, a call with the token reaches the upstream with the real key, a wrong token is
