@@ -37,6 +37,8 @@
   "notice.dismiss": "Dauerhaft ausblenden",
   "notice.notNow": "Jetzt nicht",
   "notice.openFailed": "Dein Browser konnte nicht geöffnet werden. Bitte versuche es erneut.",
+  "server.moves.webhookMoved": "Jetzt, wo ich auf {place} lebe, hat mein Webhook „{name}“ eine neue Adresse. Öffne Automatisierungen, wähle bei „{name}“ die Option „Adresse kopieren“ und füge sie in die App ein, die Daten dorthin sendet.",
+  "server.coordination.joined": "Ein anderes Teammitglied hat gerade dasselbe gefragt. Deshalb wird hier diese Antwort übernommen, statt eine zweite zu erstellen.",
   "server.reports.sent": "An das MausBot-Team gesendet (Bericht {report}). Milind und Omkar bekommen ihn per E-Mail.",
   "server.reports.sentReply": "An das MausBot-Team gesendet (Bericht {report}). Milind und Omkar bekommen ihn per E-Mail und antworten dir an {contact}.",
   "server.reports.sentLater": "An das MausBot-Team gesendet (Bericht {report}), nachdem ein früherer Versuch nicht geklappt hat. Milind und Omkar bekommen ihn per E-Mail.",

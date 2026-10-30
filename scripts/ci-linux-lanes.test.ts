@@ -38,7 +38,8 @@ describe("Linux lanes", () => {
     expect(lanesFor({ vitest: [], evals: true, packaged_server: false }, "/r")).toEqual([EVALS_LANE]);
   });
 
-  it("runs lanes at once, prints each log whole when it ends, and names every lane that failed or ran out of time", async () => {
+  // The lane runner uses POSIX process groups to stop its Bash commands on Linux CI.
+  it.skipIf(process.platform === "win32")("runs lanes at once, prints each log whole when it ends, and names every lane that failed or ran out of time", async () => {
     const lines: string[] = [];
     let summary = "";
     const failed = await runLanes([

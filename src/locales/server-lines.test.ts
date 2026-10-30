@@ -589,7 +589,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
   ],
   "moves to the Cloud": [
-    ["server/cloud-send-arrived.ts", "Now that I live on My Cloud, my webhook \" … \" has a new address. Open"],
     ["server/cloud-send-arrived.ts", "I'm back on this computer, so my webhook \" … \" has an address here aga"],
   ],
   "calls": [
