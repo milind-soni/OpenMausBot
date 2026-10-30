@@ -275,7 +275,7 @@ import { mainThread, wasOldestThread } from "./main-thread.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER } from "./hosted-models.ts";
 import { CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal, firstCloudTurnPatch } from "./cloud-home.ts";
-import { botBox, startBotBoxAtBoot } from "./bot-box/boot.ts";
+import { botBox, startBotBoxAtBoot } from "./bot-box/boot.ts"; import { mcpReconnectLine, retryBrokeredMcp } from "./bot-box/broker-mcp.ts";
 import { createCloudSignedHost } from "./host/cloud-signed-host.ts"; import { hiddenThreadRefusal, hideOthersSyncFolders } from "./host/team-private.ts"; import { createTeamMemberLeft } from "./host/team-member-left.ts"; import { createUploadOwners, uploadsFor } from "./host/member-uploads.ts"; import { createMemberOwnBot } from "./host/member-own-bot.ts"; import { createVisibilityHost } from "./host/visibility-host.ts";
 import { createCloudPower, registerCloudPower, wokeFromSleep, type CloudPower } from "./cloud-power.ts"; import { createSharedComputerRoutes } from "./routes/shared-computers.ts";
 import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts";
@@ -6499,7 +6499,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (bot && event.sessionId && event.providerInstanceId) {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
       }
-      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model); if (bot && event.mcpFailed?.length) mcpServersHost.health.engineFailed(bot.id, event.mcpFailed);
+      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model); if (bot && event.mcpFailed?.length) mcpServersHost.health.engineFailed(bot.id, event.mcpFailed); const reconnecting = event.mcpFailed?.length && (bot ?? speaker) ? retryBrokeredMcp({ botId: bot?.id ?? speaker!.botId, threadId: event.threadId }, event.mcpFailed) : []; if (reconnecting.length) pushMessage({ role: "bot", kind: "activity", tool: { name: mcpReconnectLine(reconnecting), ok: false } });
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {

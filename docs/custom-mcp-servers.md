@@ -18,11 +18,16 @@ is never saved as written. **Edit details** shows the whole form:
 
 **Add** saves the server, connects to it (it starts the command or reaches the
 address, completes the MCP handshake and lists the tools) and turns it on when
-it answers: *Connected: 12 tools*. One that doesn't answer stays off with the
-reason. When it refused the keys (HTTP 401 or 403), the line names the headers
+it answers: *Connected: 12 tools*. While that test runs, the row says it's off
+until it passes. One that doesn't answer stays off and says so plainly: *Saved,
+but off: the test failed*, with the reason, and that bots can use it once it's
+on. When it refused the keys (HTTP 401 or 403), the line names the headers
 to check and **Fix the keys** asks for just their values, then tests again; when
 it couldn't be reached or timed out, **Try again** tests again. One that wants
-you to sign in opens its sign-in page.
+you to sign in opens its sign-in page. A click on a server's switch in the
+moment after a passing test turned it on keeps it on (*it passed its test a
+moment ago*): it was aimed at the Off you saw, never at switching it straight
+back off.
 Compatible bots get it on their next task; no app restart is needed. On a
 Team Cloud everyone on the team can use a server an Admin adds; **Only for
 me**, offered for a server with one key, keeps that key as the Admin's own.
