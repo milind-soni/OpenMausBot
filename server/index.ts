@@ -123,7 +123,7 @@ import { createCacheKeepWarm, type KeepWarmStatus, type KeepWarmTarget } from ".
 import { createSkillReview, turnToolSteps } from "./skill-review.ts";
 import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
-import { createAboutMe } from "./about-me.ts";
+import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
 import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import {
@@ -5200,6 +5200,7 @@ const sideJobs = createSideJobs({
 
 const aboutMeFacts = createAboutMe({ read: () => cfg.profile?.aboutMe ?? "", write: (aboutMe) => { saveConfig({ profile: { ...cfg.profile, aboutMe } }); Object.assign(cfg, loadConfig()); },
   changed: () => broadcast({ kind: "config", ...configStatus() }), today: () => memoryDate(), ...(CLOUD_TEAM ? { person: (layer: string, plan: Parameters<typeof teamHost.learnAbout>[1]) => teamHost.learnAbout(layer, plan) } : {}) });
+const personPreference = createPersonPreference<InternalCapability>({ team: Boolean(CLOUD_TEAM), aboutMe: aboutMeFacts, requester: actingPeople.requester, userStarted: (turn) => turnOrigin(turn).kind === "user", personName: teamHost.personName });
 const setupSuggestions = setupSuggestionsFor({ store, config: () => cfg, shared: sharedMembership, languageCode: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, engine: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities, browserOn: () => builtInBrowserEnabled(cfg),
   withinBudget: () => { try { assertWithinBudget(cfg, DATA_DIR); return true; } catch { return false; } }, writer: (botId) => sideJobs.text("setup-suggestions", botId), apps: { configured: () => composio.configured(cfg), mode: () => composio.connectionMode(cfg), connected: () => composio.connectedServices(cfg) }, log: (line) => console.log(line) });
 
@@ -13259,7 +13260,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();
         const ownersAsk = CLOUD_TEAM || (!store.groupByThread(internalCapability.threadId) && ownersOwnAsk(store.activePath(internalCapability.threadId)));
-        const result = ownersWrite(() => botMemoryUpdate(teamHost.layer(internalSender.id, internalCapability.threadId), body, { source: memorySource(), aboutMe: ownersAsk ? aboutMeFacts : null }));
+        const result = ownersWrite(() => botMemoryUpdate(teamHost.layer(internalSender.id, internalCapability.threadId), body, { source: memorySource(), aboutMe: ownersAsk ? aboutMeFacts : null,
+          prefer: body?.action === "prefer" ? personPreference.target(internalCapability, internalSender) : null }));
         return json(res, result.ok ? 200 : result.code === "conflict" ? 409 : 400, result);
       }
       if (method === "POST" && path === "/api/internal/memory/log") {
@@ -13600,7 +13602,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const owner = connectorThread(from.id, body.fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         if (!sameAudience(from.visibility, undefined) || (owner.group && !roomFeedsBot(owner.group, from)) || teamHost.privateTo(body.fromThreadId)) {
-          return json(res, 403, { error: "restricted conversations cannot publish section-wide memory; ask an admin to add it" });
+          return json(res, 403, { error: "restricted conversations cannot publish section-wide memory; ask an admin to add it. A preference of the person's own goes in their About me with memory_update action=prefer." });
         }
         if (!(TEAM_MEMORY_KINDS as readonly string[]).includes(body.kind)) {
           return json(res, 400, { error: `kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}` });
