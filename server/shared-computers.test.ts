@@ -9,7 +9,7 @@ import { TurnResources } from "./turn-resources.ts";
 
 const secret = "a".repeat(64);
 const other = "b".repeat(64);
-const registration = (scopes: Partial<{ folders: { id: string; name: string; write: boolean }[]; terminal: boolean; computer: boolean }> = {}) =>
+const registration = (scopes: Partial<{ folders: { id: string; name: string; write: boolean }[]; terminal: boolean; computer: boolean; fileEdits: true }> = {}) =>
   ({ id: randomUUID(), name: "Desktop", environmentId: randomUUID(), folders: [], terminal: false, computer: false, ...scopes });
 const alice = { session: "owner", person: "p_alice" };
 const bob = { session: "intruder", person: "p_bob" };
@@ -111,6 +111,18 @@ describe("shared computer authority and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(45_000);
     await rejection;
     broker.close();
+  });
+  it("never sends old_text or new_text to a desktop that did not say it takes passage edits", async () => {
+    const folder = { id: randomUUID(), name: "Drafts", write: true };
+    for (const [scopes, sent] of [[{}, false], [{ fileEdits: true as const }, true]] as const) {
+      const broker = new SharedComputers(() => true);
+      const computer = registration({ folders: [folder], ...scopes }); broker.register(computer, alice, secret);
+      const write = broker.request({ computer_id: computer.id, action: "write_file", folder_id: folder.id, path: "a.md", content: "x", new_text: "y" }, alice.person, () => true);
+      write.catch(() => {});
+      const job = await broker.poll(computer.id, alice.session, secret);
+      expect("new_text" in job!.operation).toBe(sent);
+      broker.close();
+    }
   });
   it("turn cancellation rejects queued and already delivered actions", async () => {
     vi.useFakeTimers();
@@ -315,6 +327,15 @@ describe("server-side scope check (audit M1)", () => {
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: randomUUID() })).toMatch(/not been shared/);
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id })).toBeNull();
     expect(sharedComputerScopeRefusal(lent, { action: "write_file", folder_id: writable.id })).toBeNull();
+  });
+  it("edits, appends and deletes only in a folder lent with editing, and only on a desktop that takes them", () => {
+    const current = registration({ folders: [readOnly, writable], fileEdits: true });
+    for (const action of ["edit_file", "append_file", "delete_file"] as const) {
+      expect(sharedComputerScopeRefusal(current, { action, folder_id: readOnly.id })).toMatch(/read-only/);
+      expect(sharedComputerScopeRefusal(current, { action, folder_id: randomUUID() })).toMatch(/not been shared/);
+      expect(sharedComputerScopeRefusal(current, { action, folder_id: writable.id })).toBeNull();
+      expect(sharedComputerScopeRefusal(lent, { action, folder_id: writable.id })).toMatch(/older OpenMausBot .* write_file/);
+    }
   });
   it("names the computer when its terminal isn't lent, sends the bot to no switch, and tells it not to run the command another way", () => {
     const refusal = sharedComputerScopeRefusal({ ...lent, name: "Ubuntu NUC", platform: "linux" }, { action: "run_command" });
