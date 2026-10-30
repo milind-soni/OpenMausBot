@@ -16,6 +16,9 @@ export const SIMPLE_TOP_BUTTON = `${SIMPLE_TOP} ${ELEVATED_CONTROL} ${ELEVATED_H
  * wears the tint of an open menu. */
 export const SIMPLE_TOP_TOGGLE = `${SIMPLE_TOP} ${ELEVATED_CONTROL} ${ELEVATED_TINT} ${SIMPLE_TOP_FOCUS}`;
 
+/** Search and New in the top corner of Simple's sidebar in a framed window: plain icons, each its own button. */
+export const SIMPLE_CORNER_BUTTON = `flex size-[26px] shrink-0 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06] aria-expanded:text-ink ${SIMPLE_TOP_FOCUS}`;
+
 /** The round control at either end of the phone bot list's top row. */
 export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-center rounded-full border border-hairline bg-card text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
@@ -77,7 +80,7 @@ export function SidebarEdgeToggle({ collapsed, onToggle, style, anchorRef, shown
   return pinned ? createPortal(button, document.body) : button;
 }
 
-export function SidebarSearchToggle({ open, onToggle, ref }: { open: boolean; onToggle: () => void; ref?: Ref<HTMLButtonElement> }) {
+export function SidebarSearchToggle({ open, onToggle, corner = false, ref }: { open: boolean; onToggle: () => void; corner?: boolean; ref?: Ref<HTMLButtonElement> }) {
   return (
     <button
       ref={ref}
@@ -87,9 +90,9 @@ export function SidebarSearchToggle({ open, onToggle, ref }: { open: boolean; on
       aria-label={t("sidebar.searchAria")}
       aria-expanded={open}
       title={t("sidebar.searchAria")}
-      className={SIMPLE_TOP_BUTTON}
+      className={corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
     >
-      <Search size={18} strokeWidth={1.5} aria-hidden="true" />
+      <Search size={corner ? 17 : 18} strokeWidth={1.5} aria-hidden="true" />
     </button>
   );
 }

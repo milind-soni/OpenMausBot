@@ -142,12 +142,12 @@ describe("the Now card", () => {
   const toggle = () => host.querySelector<HTMLButtonElement>("button[aria-expanded]");
   const card = () => host.querySelector("[role=region]");
   const open = (extra: Record<string, unknown> = {}) =>
-    render({ label: "Working", since: Date.now(), phrases: ["Running scrape.py"], phase: "step", card: createElement("p", null, "steps"), cardLabel: "What Biber is doing", ...extra });
+    render({ label: "Working", since: Date.now(), phrases: ["Running scrape.py"], phase: "step", card: createElement("p", null, "steps"), cardLabel: "What Ledger is doing", ...extra });
 
   it("is one calm line by default; a click unfolds the card under it and another folds it", () => {
     open();
     expect(toggle()?.getAttribute("aria-expanded")).toBe("false");
-    expect(toggle()?.getAttribute("aria-label")).toBe("What Biber is doing");
+    expect(toggle()?.getAttribute("aria-label")).toBe("What Ledger is doing");
     expect(card()).toBeNull();
     act(() => toggle()!.click());
     expect(toggle()?.getAttribute("aria-expanded")).toBe("true");
@@ -184,7 +184,7 @@ describe("the Now card", () => {
     open({ simple: true });
     act(() => toggle()!.click());
     expect(card()).not.toBeNull();
-    render({ visible: false, card: createElement("p", null, "steps"), cardLabel: "What Biber is doing" });
+    render({ visible: false, card: createElement("p", null, "steps"), cardLabel: "What Ledger is doing" });
     act(() => void vi.advanceTimersByTime(300));
     open({ simple: true });
     expect(toggle()?.getAttribute("aria-expanded"), "a new turn starts folded").toBe("false");
