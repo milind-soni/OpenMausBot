@@ -11,7 +11,7 @@ import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
-export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10"]);
+export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10", "boat-credit-2026-11"]);
 const CLOUD_PRO = DESKTOP_NOTICES[0];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
