@@ -6,7 +6,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { NewBrowserSettings } from "./BrowserSettingsRows";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
@@ -37,8 +37,8 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
           ? t("settings.updates.preparing")
           : s.status === "downloaded"
             ? s.installMode === "handoff"
-              ? t("settings.updates.readyInstall", { app: brand().name, version: s.version ?? "" })
-              : t("settings.updates.ready", { app: brand().name, version: s.version ?? "" })
+              ? t("settings.updates.readyInstall", { app: productName(), version: s.version ?? "" })
+              : t("settings.updates.ready", { app: productName(), version: s.version ?? "" })
             : s.status === "installing"
               ? s.message ||
                 (s.installMode === "handoff"

@@ -211,7 +211,7 @@ async function connect(url: string) {
     receipts.failureFeedback = true;
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:window.fixtureClipboardWrite }); true`);
     await tap(0, "copy");
-    await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`)).toBe("Copied!");
+    await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`)).toBe("Copied");
     expect(await feedbackLayout()).toEqual(beforeFeedback);
     receipts.successFeedback = true;
     await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`), { timeout: 5_000 }).toBe("Copy");

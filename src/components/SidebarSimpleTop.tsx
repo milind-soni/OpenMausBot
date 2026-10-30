@@ -4,12 +4,17 @@ import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
+import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_TINT } from "./elevated";
 
 /** Keyboard focus on a Simple row or tile: the focus ring drawn inside its edge. */
 export const SIMPLE_ROW_FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2! focus-visible:outline-focus";
 
-export const SIMPLE_TOP_BUTTON = `flex size-9 shrink-0 items-center justify-center rounded-full text-ink/90 ${ELEVATED_CONTROL} ${ELEVATED_HOVER} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`;
+const SIMPLE_TOP = "flex size-9 shrink-0 items-center justify-center rounded-full text-ink/90";
+const SIMPLE_TOP_FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+export const SIMPLE_TOP_BUTTON = `${SIMPLE_TOP} ${ELEVATED_CONTROL} ${ELEVATED_HOVER} ${SIMPLE_TOP_FOCUS}`;
+/** The same round control for the button of the window's rail, which is shown most of the time: its aria-expanded never
+ * wears the tint of an open menu. */
+export const SIMPLE_TOP_TOGGLE = `${SIMPLE_TOP} ${ELEVATED_CONTROL} ${ELEVATED_TINT} ${SIMPLE_TOP_FOCUS}`;
 
 /** The round control at either end of the phone bot list's top row. */
 export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-center rounded-full border border-hairline bg-card text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";

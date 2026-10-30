@@ -7,6 +7,7 @@ import { BotEditorStore, initialState, reducer, type Action, type AppState, type
 import { BotContextMenu } from "./Sidebar";
 import { setLocale } from "@/lib/i18n";
 
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 const mode = vi.hoisted(() => ({ advanced: true }));
 vi.mock("@/lib/interface-mode", async (original) => ({

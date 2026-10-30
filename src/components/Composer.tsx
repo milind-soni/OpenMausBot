@@ -1,6 +1,6 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -36,7 +36,7 @@ import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
-import { PlaceChip, usePlaceMenuItem } from "./PlaceChip";
+import { PlaceChip } from "./PlaceChip";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
 import { approvalModeFor } from "../../shared/approval-mode";
 import { useOnCall } from "@/lib/call";
@@ -48,6 +48,7 @@ import {
   clipboardImageFiles,
   composeMessage,
   dataContextFor,
+  discardUnsentUpload,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
@@ -66,6 +67,7 @@ import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
 import { ApprovalChip, ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
+import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ComposerReplyStrip } from "./ReplyQuote";
@@ -97,18 +99,6 @@ const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
 
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
-}
-
-type PhonePlusProps = Pick<ComponentProps<typeof ComposerPlusMenu>, "onAttach" | "goal" | "teach" | "approval" | "callBotId">;
-
-function PhonePlusWithPlace({ place, ...rest }: PhonePlusProps & { place: Parameters<typeof usePlaceMenuItem>[0] }) {
-  const item = usePlaceMenuItem(place);
-  return <ComposerPlusMenu {...rest} extraItems={[item]} circle />;
-}
-
-/** The phone composer's round +: attach, Finish together, where the bot works, approval level and call mode. */
-function PhonePlus({ place, ...rest }: PhonePlusProps & { place?: Parameters<typeof usePlaceMenuItem>[0] }) {
-  return place ? <PhonePlusWithPlace place={place} {...rest} /> : <ComposerPlusMenu {...rest} circle />;
 }
 
 export function Composer({
@@ -207,6 +197,7 @@ export function Composer({
     (id: string) => {
       const removed = attachments.find((attachment) => attachment.id === id);
       if (removed?.kind === "image") releaseAttachmentImagePreview(removed);
+      if (removed) discardUnsentUpload(removed);
       editAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
     },
     [attachments, editAttachments],

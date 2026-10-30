@@ -77,6 +77,7 @@ export function RoomWorkingFolder({ group, heading = true }: { group: Group; hea
         >
           <input
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 font-mono text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            aria-label={t("room.folder.title")}
             placeholder={t("room.folder.placeholder")}
             value={draft ?? group.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}

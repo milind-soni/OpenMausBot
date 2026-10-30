@@ -148,6 +148,12 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ ...base, sharedComputers: false, cloudHome: true }).capabilities).not.toHaveProperty("myChromeLink");
   });
 
+  it("says a team's Cloud home is a team's, so a sign-in page names the team", () => {
+    const base = { environmentId: "abc", desktopManaged: false, label: "Acme Labs" };
+    expect(environmentDescriptor({ ...base, cloudHome: true, cloudTeam: true }).capabilities.cloudTeam).toBe(true);
+    expect(environmentDescriptor({ ...base, cloudHome: true }).capabilities).not.toHaveProperty("cloudTeam");
+  });
+
   it("falls back to the checkout's package.json version, then to unknown", () => {
     delete process.env.OMB_APP_VERSION;
     expect(serverVersion()).toMatch(/^\d+\.\d+\.\d+/);

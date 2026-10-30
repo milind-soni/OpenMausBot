@@ -31,7 +31,7 @@ const index = (overrides: Partial<MemoryCapacity> = {}): MemoryCapacity => ({
 describe("MemoryGauge", () => {
   it("always carries the plain sentence about what loads", () => {
     const markup = render(createElement(MemoryGauge, { index: index() }));
-    expect(markup).toContain("only the first 200 lines load each turn");
+    expect(markup).toContain("Only the first 200 lines load each turn");
     expect(markup).toContain('aria-valuenow="20"');
     expect(markup).toContain("bg-accent");
     expect(markup).not.toContain("bg-danger");
@@ -40,7 +40,7 @@ describe("MemoryGauge", () => {
   it("turns red and says how many lines are not being loaded", () => {
     const markup = render(createElement(MemoryGauge, { index: index({ lines: 260, loadedLines: 200, truncated: true }) }));
     expect(markup).toContain("60 lines are not being loaded");
-    expect(markup).toContain("only the first 200 lines load each turn");
+    expect(markup).toContain("Only the first 200 lines load each turn");
     expect(markup).toContain("bg-danger");
     expect(markup).toContain('aria-valuenow="100"');
   });

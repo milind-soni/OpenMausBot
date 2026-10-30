@@ -185,9 +185,10 @@ const BROWSE_NOTE_MS = 10 * 60_000;
  * project folders are lent to. `ownClouds()`: the saved servers that are the verified session's own Clouds, never a
  * Team Cloud: each is lent this computer by itself (automaticGrant) unless lending is paused. `screen()`: whether apps
  * and screen can be lent here: computer control works, or only macOS's permissions are missing, which
- * `askForScreen(connection)` asks macOS for when a Cloud's bot first needs them. */
+ * `askForScreen(connection)` asks macOS for when a Cloud's bot first needs them. `cloudPower(origin)`: the Admin's word on
+ * another Cloud of the person's own (the Clouds list's `power`), so a sleeping one is never dialled. */
 export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, screenLocked = () => false, idleSeconds = () => null, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
-  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {} }) {
+  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {}, cloudPower = () => null }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
   const presence = createLentScreenPresence({ idleSeconds, now });
@@ -276,12 +277,13 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   const sleepsHere = env => Boolean(records[env.id]?.cloud) || cloud()?.origin === env.origin;
   /** My Cloud sleeps by the Admin's word and its own, on the gate this app shares with Files (`power`); another Cloud of
-   * the person's own by its own "going to sleep" answer alone, on a gate of its own, so one Cloud asleep never holds
-   * another's lending, and a sleeping one is not dialled again before its hold ends. */
+   * the person's own by the same two (the Clouds list's `power`, `cloudPower`, and its own "going to sleep" answer) on a
+   * gate of its own, so one Cloud asleep never holds another's lending, and a sleeping one is not dialled until the Admin
+   * says it is awake (any request reaching it would wake it). */
   const ownGates = new Map();
   const sleepGate = env => {
     if (env.id === myCloud()?.id || cloud()?.origin === env.origin) return power;
-    if (!ownGates.has(env.id)) ownGates.set(env.id, createCloudPowerGate());
+    if (!ownGates.has(env.id)) ownGates.set(env.id, createCloudPowerGate({ power: () => cloudPower(env.origin) }));
     return ownGates.get(env.id);
   };
   const request = async (env, route, body, signal, secret) => {
@@ -696,6 +698,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     },
     cloudChanged() {
       if (closed) return;
+      // The Admin's word on each other Cloud may have changed: a lending loop waiting for one to wake goes on.
+      for (const gate of ownGates.values()) gate.changed();
       const automatic = lentAutomatically();
       for (const env of environments()) {
         const grant = records[env.id];
