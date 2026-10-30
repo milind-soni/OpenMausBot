@@ -1,9 +1,11 @@
 // Whose connection a turn on a Team Cloud may use. The team's connections serve every turn; a `person` app or MCP server
-// is offered to a turn only for the person it acts for (server/host/acting-person.ts): their own message started its work,
-// in their private chat, a group chat or the bot's main chat, or the work was handed on from a turn that acted for them.
+// is offered to a turn only for the person it acts for (server/host/acting-person.ts), and only in that person's own
+// private chat, where nobody else reads what it brings back. Work their own message started in a group chat or the bot's
+// main chat reaches their own connections by being handed on (handOnFor): it opens in the receiving bot's chat with them,
+// and the shared place gets only a line saying where the result is (acting-person.ts privateHandBack).
 // Security: nothing else ever gets a member's connection: not another person's request or the work it hands on, not a
-// turn someone else wrote into, not another member's private chat, a routine or a webhook. The relay checks it again on
-// every call. Off a team nothing changes.
+// turn someone else wrote into, not a chat anyone else reads, a routine or a webhook. The relay checks it again on every
+// call. Off a team nothing changes.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -96,18 +98,20 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const without = <T,>(servers: Record<string, T>, names: readonly string[]) =>
     Object.fromEntries(Object.entries(servers).filter(([name]) => !names.includes(name)));
 
-  /** The member a turn acts for, so it may use their own connections: never in another member's private chat. */
+  /** The member a turn acts for, in a chat nobody else reads: theirs. */
+  const actingFor = (threadId: string, generation?: string): string | null => (team ? deps.requester(threadId, generation) : null);
+  /** The member a turn may use the own connections of: the one it acts for, in their own private chat only. */
   const turnPerson = (threadId: string, generation?: string): string | null => {
-    if (!team) return null;
-    const person = deps.requester(threadId, generation);
-    const member = audienceMember(deps.audienceOf(threadId));
-    return person && (member === null || member === person) ? person : null;
+    const member = team ? audienceMember(deps.audienceOf(threadId)) : null;
+    return member && actingFor(threadId, generation) === member ? member : null;
   };
   const nameOf = (person: string): string => deps.personName?.(person) || people.emailOf(person) || "this person";
   const teamName = () => team?.name ?? "the team";
   /** An admin's page for who connects each app, where one can be connected for the whole team. */
   const appsPage = () => { const where = link(); return where ? `${where}/apps` : null; };
   const noWorkaround = "Nothing was run. Don't try it another way (the browser or another tool).";
+  /** How work a person started where others read reaches their own apps: handed on into a chat that is theirs alone. */
+  const handOnHow = (who: string) => `To use it, hand that part on: to yourself with start_thread, or to a teammate with coordinate_bots. It runs in that bot's chat with ${who}, with ${who}'s own apps, and only a line saying where the result is comes back here: say only that here.`;
 
   const lines = {
     connect: (name: string, who: string) => {
@@ -121,6 +125,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       return `${name} is each person's own in ${teamName()}, and this work doesn't act for one person (a routine, an outside app or a bot started it, or more than one person wrote in it), so no one's ${name} can be used. ${noWorkaround} Reply with this one line and nothing more about it: `
         + `"${name} is each person's own, so I can't use it here. Ask me yourself and I'll use yours${where ? `, or an admin can connect ${name} for the whole team: ${where}` : ""}."`;
     },
+    /** The person's own app, asked for where others read: never here, and how it gets done instead. */
+    shared: (name: string, who: string) => `${name} is ${who}'s own, and others read this chat, so what it brings back can't come here and it isn't used here. ${noWorkaround} ${handOnHow(who)}`,
     ownOnly: (who: string) => `These are ${who}'s own apps, and this turn no longer acts for ${who}: it was stopped, or someone else wrote in it since. ${noWorkaround} Say so in one plain line: ${who} can ask again.`,
     ownGone: (who: string) => {
       const where = link();
@@ -135,8 +141,18 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   /** What a `person` app the team's bridge was asked for says: in a turn that acts for someone, where theirs is; else no. */
   const personAppLine = (app: string, threadId: string, generation?: string): string => {
     const person = turnPerson(threadId, generation);
-    if (!person) return lines.nobody(appLabel(app));
-    return people.appsAccess(person) ? `${appLabel(app)} here is ${nameOf(person)}'s own: use it through the ${OWN_APPS_SERVER} tools. Nothing was run.` : lines.connect(appLabel(app), nameOf(person));
+    if (person) return people.appsAccess(person) ? `${appLabel(app)} here is ${nameOf(person)}'s own: use it through the ${OWN_APPS_SERVER} tools. Nothing was run.` : lines.connect(appLabel(app), nameOf(person));
+    const acting = actingFor(threadId, generation);
+    if (!acting) return lines.nobody(appLabel(app));
+    return people.appsAccess(acting) ? lines.shared(appLabel(app), nameOf(acting)) : lines.connect(appLabel(app), nameOf(acting));
+  };
+  /** Whether a person connected anything of their own here: an app installation, or a key or sign-in for a server. */
+  const hasOwn = (person: string): boolean => {
+    if (personApps().length && people.appsAccess(person)) return true;
+    return personMcp().some((name) => {
+      const server = teamServer(name);
+      return Boolean(server && isRemoteMcpServer(server) && (people.key(person, name, server.url) || people.oauth(person).authState(name, server.url) === "signed-in"));
+    });
   };
 
   const personSpec = async (person: string, name: string, spec: Extract<McpServerSpec, { url: string }>): Promise<McpServerSpec | null> => {
@@ -158,6 +174,12 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     personMcp,
     link,
     turnPerson,
+    /** The person whose private chat work this turn hands on opens in, so it can use their own connections there: the
+     * person the turn acts for, when they connected anything of their own. Null: it opens where it always did. */
+    handOnFor(threadId: string, generation: string): string | null {
+      const person = actingFor(threadId, generation);
+      return person && hasOwn(person) ? person : null;
+    },
     /** At start: the team's installation's apps are read now, so the first turn need not wait for them. */
     primeApps(): void {
       if (deps.composio.configured(deps.cfg())) void appsConnected();
@@ -221,7 +243,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
         const app = apps.includes(slug) ? slug : null;
         if (capability.connectorsFor) return app ? lines.connect(appLabel(app), nameOf(capability.connectorsFor)) : lines.teamCard(appLabel(slug));
         if (app) {
-          const person = turnPerson(capability.threadId, capability.generation);
+          const person = turnPerson(capability.threadId, capability.generation) ?? actingFor(capability.threadId, capability.generation);
           return person ? lines.connect(appLabel(app), nameOf(person)) : lines.nobody(appLabel(app));
         }
       }
@@ -257,6 +279,14 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       if (!team || (!apps.length && !servers.length)) return "";
       const names = [...apps.map(appLabel), ...servers];
       const person = turnPerson(threadId, generation);
+      const acting = person ? null : actingFor(threadId, generation);
+      if (acting) {
+        const who = nameOf(acting);
+        const these = `${list(names)} ${names.length === 1 ? "is" : "are"} each person's own in ${team.name}`;
+        return hasOwn(acting)
+          ? ` ${these}, used only in a chat that is theirs alone. Others read this chat, so ${who}'s own aren't here: what they bring back would be read here. If the task needs one, don't try it another way (the browser or another tool). ${handOnHow(who)}`
+          : ` ${these}, and ${who} hasn't connected any yet. If the task needs one, don't try it another way (the browser or another tool): reply with one plain line and nothing more about it: "Connect your <name> here: ${link() ?? "your team's page in MausBot Cloud"}".`;
+      }
       if (!person) {
         const where = appsPage();
         return ` ${list(names)} ${names.length === 1 ? "is" : "are"} each person's own in ${team.name}: ${names.length === 1 ? "it works" : "they work"} for the person whose own message started the work, and this work doesn't act for one person (a routine, an outside app or a bot started it, or more than one person wrote in it). `
