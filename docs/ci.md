@@ -333,12 +333,13 @@ instead (Settings → Secrets and variables → Actions → Variables; anything 
   this repository, when the repository owner authored the PR and both pushed
   and started the run (`github.actor`, `github.triggering_actor`). Boat runs a
   public repository's job only for the users on its allow-list
-  (`boat ci public milind-soni on --users "milind-soni"`), and a job it
-  refuses waits for a runner that never comes, so every other run stays on
-  GitHub: forks, teammates, bots, re-runs by anyone else, the nightly run and
-  manual runs (the release lane needs every platform's shards by name). To
-  give a teammate Boat too, add them to Boat's list and to the condition in
-  `ci.yml`'s `static` job.
+  (`boat ci public milind-soni on --users "milind-soni"`) and fails any
+  other job at once (a teammate's PR got nine failed Boat jobs that way), so
+  every other run stays on GitHub: forks, teammates, bots, re-runs by anyone
+  else, the nightly run and manual runs (the release lane needs every
+  platform's shards by name). To give a teammate Boat too, add them to Boat's
+  list and to the condition in `ci.yml`'s `static` job. To run Windows on a PR
+  as well, label it `windows` (Windows above).
 - **What changes.** `static` runs on `boat-xlarge` (16 vCPU, 32 GB) and is
   named "typecheck + lint + Linux tests (Boat)". After its usual checks it
   runs the Linux vitest shards, behavior evals and the Linux packaged server

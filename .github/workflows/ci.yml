@@ -3,9 +3,9 @@
 # Linux work on one 16 vCPU Boat VM, one Boat start per run: the static job runs on boat-xlarge and, after its checks,
 # runs the Linux vitest shards, behavior evals and the Linux packaged server smoke side by side
 # (scripts/ci-linux-lanes.mjs) instead of as GitHub-hosted jobs. Boat runs a public repository's job only for the users
-# on its allow-list (`boat ci public`), and a job it refuses waits for a runner that never comes, so every other run, a
-# fork's, the nightly and manual runs (the release lane among them), and every run while BOAT_CI is anything else run on
-# GitHub's runners exactly as before. `boat ci` and the dashboard's CI on Boat VMs tab list the Boat jobs (docs/ci.md).
+# on its allow-list (`boat ci public`) and fails any other at once, so every other run, a fork's, the nightly and manual
+# runs (the release lane among them), and every run while BOAT_CI is anything else run on GitHub's runners exactly as
+# before. `boat ci` and the dashboard's CI on Boat VMs tab list the Boat jobs (docs/ci.md).
 name: CI
 
 on:
