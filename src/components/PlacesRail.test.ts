@@ -296,17 +296,18 @@ it("a server of the person's own on an older release than the newest has a quiet
   expect(host.querySelector('[data-rail-place="s-old"] [data-rail-dot]')).toBeTruthy();
 });
 
-it("the window's own rail: drawn at every width, small circles named on hover, and its sheets cover the window while open", async () => {
+it("the window's own rail: drawn at every width, 36px wide with small rounded tiles named on hover, and its sheets cover the window while open", async () => {
   const expand = vi.fn(async () => {});
   Object.assign(window, { ogb: { workspaces, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
   await mount(createElement(PlacesRail, { chrome: true }));
   const nav = host.querySelector("[data-places-rail]")!;
   expect(nav.className).toContain("flex h-full");
+  expect(nav.className, "as thin as its tiles allow, in the frame's colour").toContain("w-9 shrink-0 flex-col items-center bg-frame");
   expect(nav.className, "never hidden on a narrow window").not.toContain("hidden");
-  expect(nav.textContent, "no name under the place on screen: its circle's ring marks it").toBe("MCCAACBCCO");
+  expect(nav.textContent, "no name under the place on screen: its tile's ring marks it").toBe("MCCAACBCCO");
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");
-  expect(host.querySelector('[data-rail-place="home"] span')?.getAttribute("style")).toContain("width: 32px; height: 32px");
-  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-8");
+  expect(host.querySelector('[data-rail-place="home"] span')?.getAttribute("style")).toContain("width: 24px; height: 24px; border-radius: 7px");
+  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[7px]");
   expect(expand.mock.calls.at(-1)).toEqual([false]);
   await click(host.querySelector("[data-rail-add]"));
   expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);
@@ -397,4 +398,33 @@ it("a Cloud of the person's own that ended says so on its circle, and its menu o
   await settle();
   expect(host.querySelector("[data-rail-menu]"), "removed: the menu closes, and the circle goes with main's next list").toBeNull();
   expect(workspaces.places).toHaveBeenCalled();
+});
+
+it("a server of the person's own that main offers as home: its menu's one tap starts the move and closes; main's own words when it can't", async () => {
+  const makeHome = vi.fn(async (_id: string): Promise<{ started: true }> => { throw new Error("Error invoking remote method 'workspaces:make-home': Error: Garage server has other people on it, so your bots stay here."); });
+  rail = { places: [
+    place("home", "This computer", { kind: "computer", active: true, paint: { swatch: null } }),
+    place("garage", "Garage server", { kind: "server", makeHome: true, paint: { swatch: null } }),
+    place("office", "Office", { kind: "server", paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, makeHome }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  expect((await menuOf("office"))?.querySelector("[data-rail-make-home]"), "not offered: no such choice").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("garage");
+  const row = menu!.querySelector("[data-rail-make-home-start]");
+  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it.");
+  await click(row);
+  await settle();
+  expect(makeHome).toHaveBeenCalledWith("garage");
+  expect(host.querySelector("[data-rail-menu] [data-rail-make-home] [role='alert']")?.textContent).toBe("Garage server has other people on it, so your bots stay here.");
+  makeHome.mockResolvedValueOnce({ started: true });
+  await click(host.querySelector("[data-rail-menu] [data-rail-make-home-start]"));
+  await settle();
+  expect(host.querySelector("[data-rail-menu]"), "started: the menu closes, and the account says how it goes").toBeNull();
 });

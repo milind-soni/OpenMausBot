@@ -65,14 +65,18 @@ pnpm exec vite --port 5287
 `http://127.0.0.1:5287/question-cards-preview.html` mounts the real chat, inbox card and inbox panel over a fixed store
 (`src/question-cards-preview.tsx`): `?state=question|approval|open|answered`, `surface=chat|inbox|panel`,
 `skin=midnight|daylight`, `mode=simple|advanced`, `lang=de`; `state=others` shows the key, sign-in, connection and
-first-run cards that share the card's shell. Captured at 1338×870 at 2x, before and after:
+first-run cards that share the card's shell.
 
-| | Before | After |
-|---|---|---|
-| Set answers, chat | ![](evidence/question-cards/before-question-chat-midnight-simple.png) | ![](evidence/question-cards/after-question-chat-midnight-simple.png) |
-| Set answers, inbox | ![](evidence/question-cards/before-question-inbox-daylight-simple.png) | ![](evidence/question-cards/after-question-inbox-daylight-simple.png) |
-| Set answers, panel | ![](evidence/question-cards/before-question-panel-midnight-advanced.png) | ![](evidence/question-cards/after-question-panel-midnight-advanced.png) |
-| Approval | ![](evidence/question-cards/before-approval-chat-daylight-advanced.png) | ![](evidence/question-cards/after-approval-chat-daylight-advanced.png) |
-| Open question, inbox | ![](evidence/question-cards/before-open-inbox-midnight-simple.png) | ![](evidence/question-cards/after-open-inbox-midnight-simple.png) |
-| Answered | ![](evidence/question-cards/before-answered-chat-daylight-simple.png) | ![](evidence/question-cards/after-answered-chat-daylight-simple.png) |
-| Phone | ![](evidence/question-cards/before-phone-question-chat-midnight-simple.png) | ![](evidence/question-cards/after-phone-question-chat-midnight-simple.png) |
+The before-and-after screenshots were removed because they showed real example data. To see each screen, run the
+command above and open `question-cards-preview.html` in a 1338×870 window with these settings (for Phone, narrow the
+window to a phone's width):
+
+| Screen | Settings |
+|---|---|
+| Set answers, chat | `?state=question&surface=chat&skin=midnight&mode=simple` |
+| Set answers, inbox | `?state=question&surface=inbox&skin=daylight&mode=simple` |
+| Set answers, panel | `?state=question&surface=panel&skin=midnight&mode=advanced` |
+| Approval | `?state=approval&surface=chat&skin=daylight&mode=advanced` |
+| Open question, inbox | `?state=open&surface=inbox&skin=midnight&mode=simple` |
+| Answered | `?state=answered&surface=chat&skin=daylight&mode=simple` |
+| Phone | `?state=question&surface=chat&skin=midnight&mode=simple` |

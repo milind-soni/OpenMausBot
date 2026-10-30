@@ -91,15 +91,18 @@ async function answer(response) {
  *   teamJournal?: { read(): unknown, write(value: unknown): void },
  *   keep?: { read(): unknown, write(value: unknown): void },
  *   reportTimers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
+ *   other?(): null | { view(): unknown, seen(): unknown, retry(): Promise<unknown>, active(): boolean },
  * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
  * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default; `keep`: the
  * person's choice to keep this computer's bots here, one-home-keep.json beside it by default. `openTeam`:
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
  * `teamJournal`, team-moves.json beside this one by default). `reportTimers`: the waits of the move's report to the Admin
- * (move-status.mjs), setTimeout's by default. The rest are installCloudSend's.
+ * (move-status.mjs), setTimeout's by default. `other`: the move to a server of the person's own (own-home-main.mjs):
+ * while it is chosen no move to My Cloud starts, and its line is the one this computer's page shows. The rest are
+ * installCloudSend's.
  */
 export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
-  reportTimers, ...sendDeps }) {
+  reportTimers, other = () => null, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -107,8 +110,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   let teamMove = null;
   // One owner session for the whole move, every pass and check and the switch: each new one is one of the Admin's codes.
   const moveSession = createMoveSession({ open: (target) => openOwnerSession(target, fetchImpl, { label: MOVE_LABEL, background: false }) });
-  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home, teamMove: () => teamMove,
-    moveSession });
+  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
+    move: () => (home?.view() === null && other()?.view() ? other() : home), teamMove: () => teamMove, moveSession });
   teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
@@ -191,7 +194,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   home = createOneHome({
     journal,
     // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
-    cloud: () => { typed(); return oneHomeCloud(account()?.state()); },
+    cloud: () => { typed(); const cloud = oneHomeCloud(account()?.state()); return cloud && other()?.active() ? { ...cloud, moves: false } : cloud; },
     send,
     local: {
       ...local,

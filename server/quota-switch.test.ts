@@ -9,6 +9,7 @@ import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
+import { toolFailureMessage } from "./drivers/tool-failure.ts";
 
 const QUOTA = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
 const defaultSelection = (): ModelSelection => ({ instanceId: "claude", model: "claude-default" });
@@ -214,6 +215,16 @@ describe("quota switch", () => {
       expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", ok: true });
       expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
       expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
+    });
+
+    it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {
+      const turn = begin(bot.threadId, { messageId: said("export the quota report") });
+      coordinator.endTurn(turn.id, { ok: false, text: "tool failed" });
+      cause = toolFailureMessage(["mcp__billing__get-quota"], []);
+      expect(await quota.turnFailed(thread(), { ...turn.event, stopReason: "tool_error" }, false)).toBeNull();
+      expect(thread().modelSelection).toEqual(defaultSelection());
+      expect(told).toEqual([]);
+      expect(resend).not.toHaveBeenCalled();
     });
 
     it("goes by the engine's own limit flag and its reset when it gives them", async () => {
