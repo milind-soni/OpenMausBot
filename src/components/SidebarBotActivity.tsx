@@ -22,7 +22,7 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
 }
 
 export function openSidebarBot(dispatch: Dispatch<Action>, bot: Bot, threadsShown: boolean) {
-  const waiting = threadsShown ? [] : sidebarBotActivityTasks(bot, {}).filter((task) => task.activity === "waiting-on-you");
+  const waiting = threadsShown ? [] : (bot.tasks ?? []).filter((task) => task.activity === "waiting-on-you" && !isArchived(task));
   const target = waiting.find((task) => task.threadId === bot.threadId) ?? waiting[0];
   if (target) openBotThread(dispatch, bot, target.threadId, threadsShown);
   else openBot(dispatch, bot, threadsShown);

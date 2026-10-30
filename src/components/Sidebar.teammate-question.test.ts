@@ -67,10 +67,17 @@ describe("a teammate waiting in another conversation", () => {
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "ledger" }]);
   });
 
-  it("keeps the main chat for idle, archived and hidden routine conversations", () => {
+  it("keeps the main chat for idle and archived conversations", () => {
     setAdvancedMode(false);
-    const row = mount({ ...teammate, tasks: [task("main"), task("idle"), task("archived", { activity: "waiting-on-you", archivedAt: 2 }), task("routine", { activity: "waiting-on-you", routineRunId: "run" })] });
+    const row = mount({ ...teammate, tasks: [task("main"), task("idle"), task("archived", { activity: "waiting-on-you", archivedAt: 2 })] });
     act(() => row.click());
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "ledger" }]);
+  });
+
+  it("opens a routine run that waits, since the waiting marker counts it", () => {
+    setAdvancedMode(false);
+    const row = mount({ ...teammate, activity: "waiting-on-you", tasks: [task("main"), task("routine", { activity: "waiting-on-you", routineRunId: "run" })] });
+    act(() => row.click());
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: "ledger", threadId: "routine" });
   });
 });
