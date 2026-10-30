@@ -45,6 +45,7 @@ export function PublishedPageCard({ message }: { message: Message }) {
         {usage && <span className="ms-auto shrink-0 text-xs text-ink-tertiary">{usage}</span>}
       </div>
       {card.state === "live" && card.url && <>
+        {card.uncertain && <p role="status" className="mt-1 text-[13px] text-ink-secondary">{t("chat.page.uncertain")}</p>}
         <a href={card.url} dir="ltr" onClick={(event) => { event.preventDefault(); openPage(card.url!); }}
           className="mt-1 block truncate text-[13px] text-accent-text hover:underline">{card.url}</a>
         <div className="mt-2 flex flex-wrap gap-1.5">

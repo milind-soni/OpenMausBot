@@ -14,6 +14,7 @@ export interface PublishedPageRecord {
   cards: Array<{ threadId: string; messageId: string }>;
   createdAt: number;
   updatedAt: number;
+  uncertain?: boolean;
 }
 
 const MAX_RECORDS = 5_000, MAX_CARDS = 50;
@@ -58,11 +59,11 @@ export class PublishedPagesStore {
   }
 
   /** Records a publish (a new page or an update) and the card that shows it. */
-  published(input: { pageId: string; url: string; title: string; botId: string; source: string; card: { threadId: string; messageId: string } | null }, now = Date.now()): PublishedPageRecord {
+  published(input: { pageId: string; url: string; title: string; botId: string; source: string; card: { threadId: string; messageId: string } | null; uncertain?: boolean }, now = Date.now()): PublishedPageRecord {
     const existing = this.get(input.pageId);
     const cards = [...(existing?.cards ?? []), ...(input.card ? [input.card] : [])].slice(-MAX_CARDS);
     const record: PublishedPageRecord = { pageId: input.pageId, url: input.url, title: input.title, botId: input.botId, source: input.source, cards,
-      createdAt: existing?.createdAt ?? now, updatedAt: now };
+      createdAt: existing?.createdAt ?? now, updatedAt: now, ...(input.uncertain ? { uncertain: true } : {}) };
     this.records = [...this.records.filter((each) => each.pageId !== input.pageId), record].slice(-MAX_RECORDS);
     this.save();
     return record;

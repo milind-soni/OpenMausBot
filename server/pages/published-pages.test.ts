@@ -125,6 +125,39 @@ describe("publishing a page", () => {
     expect([...f.service.pages.keys()][0]).not.toBe(first);
   });
 
+  it("recovers a lost PUT response by updating the remembered page instead of creating another", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT") throw new TypeError("response lost");
+      return response;
+    };
+    const outcome = await f.publish({ path: "site" });
+    const [pageId] = [...f.service.pages.keys()];
+    expect(outcome).toMatchObject({ status: 503, card: { pageId, uncertain: true } });
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).get(pageId!)).toMatchObject({ uncertain: true });
+    f.service.fetch = fetch;
+    expect(await f.publish({ path: "site" })).toMatchObject({ status: 200, card: { pageId } });
+    expect(f.service.pages.size).toBe(1);
+    expect(f.service.minted.map((each) => each.action)).toEqual(["create", "update"]);
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).get(pageId!)?.uncertain).toBeUndefined();
+  });
+
+  it.each([402, 410, 413])("drops a new pending record when the Worker confirms rejection with %s", async (status) => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const fetch = f.service.fetch;
+    f.service.fetch = (input, init) => init?.method === "PUT" ? Promise.resolve(Response.json({}, { status })) : fetch(input, init);
+    expect((await f.publish({ path: "site" })).status).not.toBe(200);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.list()).toEqual([]);
+    expect(f.cards.every(({ card }) => card.state === "limit")).toBe(true);
+  });
+
   it("at the plan's limit, says so for the bot to pass on and shows a card offering more pages, with the usage", async () => {
     const f = setup({ quota: 1 });
     signIn();
@@ -286,7 +319,7 @@ describe("a page tool call whose turn ends", () => {
     expect(f.service.pages.size).toBe(0);
   });
 
-  it("shows no card when the tool call's request goes while the upload's answer is still arriving", async () => {
+  it("keeps a removable page when the request goes while the committed upload's answer is still arriving", async () => {
     const f = setup();
     signIn();
     writeSite(join(f.work, "site"));
@@ -303,6 +336,10 @@ describe("a page tool call whose turn ends", () => {
     const { call, sent } = tool(f, { signal: gone.signal });
     await call("/api/internal/pages/publish", { path: "site", title: "Bake sale" });
     expect(sent.status).toBe(503);
+    const [pageId] = [...f.service.pages.keys()];
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).get(pageId!)).toMatchObject({ uncertain: true, cards: [{ threadId: "thread-1", messageId: "m1" }] });
+    expect(await f.pages.publisher.unpublish({ path: "site", botId: "bot-1", roots: [f.work] })).toMatchObject({ status: 200 });
+    expect(f.service.pages.size).toBe(0);
     expect(f.pages.store.list()).toEqual([]);
   });
 });

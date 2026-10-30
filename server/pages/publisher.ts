@@ -16,7 +16,7 @@ export interface PublishInput {
   pageId?: string;
   /** The bot's own folders: nothing outside them is read. */
   roots: readonly string[];
-  /** Puts a card in the conversation the tool was called from; its message id, or null when the turn has ended. A live
+  /** Puts a card in the conversation the tool was called from; its message id, or null when the conversation is gone. A live
    * card comes with the files published, so it can show the page itself. */
   post: (text: string, card: PublishedPageCard, bundle?: PageBundle) => string | null;
   /** The bot's tool call: nothing is sent to the pages service once its turn has ended or its request is gone. */
@@ -32,6 +32,7 @@ const usageWords = (usage: PageUsage) => `${usage.pages} of ${usage.limit} pages
 export function cardText(card: PublishedPageCard): string {
   if (card.state === "limit") return card.message ?? "This account's pages are used up.";
   if (card.state === "unpublished") return `Unpublished “${card.title}”. Its link no longer opens.`;
+  if (card.uncertain) return `“${card.title}” may be live: ${card.url}. Unpublish it to remove it.`;
   return `Published “${card.title}”: ${card.url}${card.usage ? ` (${usageWords(card.usage)})` : ""}`;
 }
 
@@ -103,13 +104,27 @@ export function createPagePublisher(deps: {
     const title = pageTitle(input.title);
     if (!title) return TITLE_REQUIRED;
     const remembered = target ? store.get(target) : null;
-    let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}) }, input.call);
+    let pending: string | undefined;
+    const beforeUpload = (page: { pageId: string; url: string }) => {
+      if (store.get(page.pageId)) return;
+      store.published({ ...page, title, botId: remembered?.botId ?? input.botId, source: bundle.source, card: null, uncertain: true });
+      pending = page.pageId;
+    };
+    let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}), beforeUpload }, input.call);
     // The page this folder was published to before is gone (unpublished, or taken down): it gets a new link.
     if (!result.ok && result.reason === "gone" && !input.pageId && target) {
       store.forget(target);
-      result = await client.publish({ title, files: bundle.files }, input.call);
+      result = await client.publish({ title, files: bundle.files, beforeUpload }, input.call);
     }
     if (!result.ok) {
+      if (result.uncertain) {
+        const card: PublishedPageCard = { state: "live", title, ...result.uncertain, uncertain: true };
+        const messageId = input.post(cardText(card), card);
+        store.published({ ...result.uncertain, title, botId: remembered?.botId ?? input.botId, source: bundle.source, uncertain: true,
+          card: messageId ? { threadId: input.threadId, messageId } : null });
+        return { status: failureStatus[result.reason], text: cardText(card), card };
+      }
+      if (pending) store.forget(pending);
       if (result.reason === "limit") {
         const card: PublishedPageCard = { state: "limit", title, message: result.message, ...(result.usage ? { usage: result.usage } : {}), ...(result.upgrade ? { upgrade: true } : {}),
           ...(result.plan ? { plan: result.plan } : {}) };
