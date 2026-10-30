@@ -74,6 +74,11 @@ export type RoutineAccess = "read-and-draft";
 /** Where a routine's results go. `brief`: they become rows of the main agent's brief, not chat lines of their own. */
 export type RoutineDelivery = "brief";
 
+/** Why OpenMausBot paused a routine by itself, after its owner left: no AI of theirs is signed in here any more, they
+ * removed every connected app and server, or the plan was cancelled. It turns back on once that changes. */
+export type RoutineHoldCause = "plan_cancelled" | "no_engine" | "no_connections";
+export const ROUTINE_HOLD_CAUSES: readonly RoutineHoldCause[] = ["plan_cancelled", "no_engine", "no_connections"];
+
 /** What a finished run left in the chat it reports to: nothing, because it
  * found nothing to tell; a report waiting for a turn there to end; or the bot
  * message it wrote. */
@@ -145,6 +150,8 @@ export interface Routine {
   weekRuns?: { ok: number; total: number };
   /** A plain sentence when the routine names a path that cannot exist on the computer that runs it. */
   warning?: string;
+  /** Set while OpenMausBot keeps it paused because its owner left; turning it on or off clears it. */
+  heldFor?: RoutineHoldCause;
   attachments?: RoutineContextAttachment[];
   sourceThreadId?: string;
   resultsThreadId?: string;
