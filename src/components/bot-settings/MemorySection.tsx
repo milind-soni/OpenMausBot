@@ -36,6 +36,7 @@ import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";
 import { api, ApiError, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { DreamMemoryCard } from "./DreamMemoryCard";
 import { inputCls } from "./field";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
@@ -343,6 +344,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
 
       {overview && <MemoryGauge index={overview.index} />}
 
+      {active && <DreamMemoryCard key={bot.id} botId={bot.id} enabled={bot.memoryEnabled !== false && bot.memoryUpkeep !== false} onChange={() => refresh()} />}
       {bot.memoryEnabled !== false && <MemoryUpkeepCard
         enabled={bot.memoryUpkeep !== false}
         status={upkeep}

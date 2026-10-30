@@ -6283,5 +6283,18 @@
   "botPanel.backups.choose": "Wybierz zapasowe AI",
   "model.fallback.add": "Dodaj zapasowe AI",
   "model.fallback.uses": "Używane po kolei, bez żadnych innych ustawień, gdy AI tego bota osiągnie limit użycia albo dostawca potwierdzi, że żądanie nigdy nie zostało rozpoczęte. Praca, która mogła zostać wykonana, nie jest powtarzana. Przełącza się tylko ten wątek; domyślne ustawienia bota i inne wątki pozostają bez zmian. Mogą obowiązywać opłaty u dostawcy zapasowego.",
-  "settings.recovery.ownBackups": "Boty z własnymi modelami zapasowymi (Model → Modele zapasowe dla tego bota) używają ich, niezależnie od tego, czy to jest włączone."
+  "settings.recovery.ownBackups": "Boty z własnymi modelami zapasowymi (Model → Modele zapasowe dla tego bota) używają ich, niezależnie od tego, czy to jest włączone.",
+  "memory.dream.title": "Przegląd pamięci",
+  "memory.dream.help": "Czyta ostatnie rozmowy razem, aby zauważyć trwałe wzorce. Przed zmianą notatek lub sekcji O mnie zapisuje pełną kopię. Zachowuje pięć ostatnich kopii.",
+  "memory.dream.now": "Przejrzyj teraz",
+  "memory.dream.working": "Pracuje…",
+  "memory.dream.result": "Rozmowy: {chats} · nowe fakty: {learned} · zmienione: {outdated} · pomysły: {ideas}",
+  "memory.dream.backup": "Kopia pamięci",
+  "memory.dream.newest": "Najnowsza kopia",
+  "memory.dream.restore": "Przywróć kopię",
+  "memory.dream.changed": "Pamięć lub sekcja O mnie zmieniły się od zapisania tej kopii. Przywrócenie zastąpi te zmiany. Sprawdź notatki, zanim przejdziesz dalej.",
+  "memory.dream.confirm": "Zastąp zapisaną kopią",
+  "memory.dream.failed": "Nie udało się ukończyć operacji. Sprawdź, czy porządkowanie pamięci jest włączone i kopia jest dostępna.",
+  "memory.dream.busy": "Ten bot jest zajęty. Spróbuj ponownie, gdy skończy pracę.",
+  "memory.dream.paused": "Porządkowanie pamięci wstrzymano na czas tworzenia kopii. Spróbuj ponownie po jej ukończeniu."
 }

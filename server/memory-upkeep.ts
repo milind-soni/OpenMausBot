@@ -5,6 +5,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, captureItemLimit, capturePrompt, captureSize, newCandidates, parseCandidates, statedInConversation, worthCapturing, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { DREAM_FIRST_LOOKBACK_MS, DREAM_MIN_CONVERSATIONS, dreamPrompt, parseDream, type DreamConversation } from "./memory-dream.ts";
+import { backupDreamMemory, DreamMemoryError, recoverDreamRestore, restoreDreamMemory, type DreamProfile } from "./memory-dream-backups.ts";
 import { checkDreamFacts } from "./memory-fact-checks.ts";
 import { factIdentity, lineFactIdentity, notebookIdentities } from "./memory-entries.ts";
 import { mergeTopicText } from "./memory-topics.ts";
@@ -63,6 +64,7 @@ export interface UpkeepDeps {
   dreamer?: () => string | undefined;
   quietMs: () => number;
   tidyHour: () => number;
+  profile?: DreamProfile;
   writing?: <T>(botId: string, write: () => T) => T;
   now?: () => Date;
   log?: (line: string) => void;
@@ -257,6 +259,8 @@ export interface MemoryUpkeep {
   capture(batch: CaptureBatch): Promise<CaptureReport>;
   tidy(botId: string): Promise<TidyReport>;
   dream(botId: string): Promise<DreamReport>;
+  dreamNow(botId: string): Promise<DreamReport>;
+  restoreDream(botId: string, options: { id?: string; expectedHash?: string }): void;
   /** The last dream's ideas while they are fresh, with how many chats it read. */
   ideas(botId: string): { ideas: string[]; conversations: number };
   status(botId: string): { lastTidy?: TidyReport; lastCapture?: CaptureReport; lastDream?: DreamReport; modelSteps: boolean };
@@ -269,6 +273,7 @@ export interface MemoryUpkeep {
 }
 
 export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
+  for (const bot of deps.bots()) recoverDreamRestore(bot.id, deps.profile);
   const now = () => deps.now?.() ?? new Date();
   const log = (line: string) => deps.log?.(line);
   const inflight = new Set<Promise<unknown>>();
@@ -730,6 +735,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       const text = checkDreamFacts(item.now, item.from, item.evidence, conversations);
       return text && !isForgotten(text) ? [{ ...item, now: text }] : [];
     });
+    if (deps.busy(botId)) throw new DreamMemoryError("busy");
+    backupDreamMemory(botId, deps.profile?.read());
     const source = `dream across ${conversations.length} chats`;
     // Re-read inside the write: if the notes changed after the prompt, its line numbers are stale.
     const written = writing(botId, () => {
@@ -841,6 +848,17 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     capture: (batch) => new Promise<CaptureReport>((resolve, reject) => enqueue({ batch, done: { resolve, reject } })),
     tidy,
     dream,
+    dreamNow(botId) {
+      if (paused) throw new DreamMemoryError("paused");
+      if (deps.busy(botId) || dreaming.has(botId) || tidying.has(botId) || worker) throw new DreamMemoryError("busy");
+      if (!upkeepEnabled(deps.bot(botId))) throw new DreamMemoryError("disabled");
+      return dream(botId);
+    },
+    restoreDream(botId, options) {
+      if (paused) throw new DreamMemoryError("paused");
+      if (deps.busy(botId) || dreaming.has(botId) || tidying.has(botId) || worker) throw new DreamMemoryError("busy");
+      writing(botId, () => restoreDreamMemory(botId, options, deps.profile));
+    },
     ideas(botId) {
       const last = loadState().bots[botId]?.lastDream;
       return last && now().getTime() - last.at < IDEAS_FOR_MS ? { ideas: last.ideas, conversations: last.conversations } : { ideas: [], conversations: 0 };

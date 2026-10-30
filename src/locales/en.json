@@ -7005,5 +7005,18 @@
   "commandPalette.searchPlaceholder": "Search bots, group chats, messages…",
   "secretCard.ref": "{app} keeps it for one use by its own tools. Your bot never sees it, and it is never added to chat.",
   "secretCard.file": "Saved to a private file your bot's commands can read for 24 hours, then deleted. It is never added to chat.",
-  "secretCard.resumed": "Bot resumed"
+  "secretCard.resumed": "Bot resumed",
+  "memory.dream.title": "Dream",
+  "memory.dream.help": "Read recent chats together to notice lasting patterns. Saves a full backup before changing notes or About me. Keeps the last five backups.",
+  "memory.dream.now": "Dream now",
+  "memory.dream.working": "Working…",
+  "memory.dream.result": "{chats} chats · {learned} learned · {outdated} updated · {ideas} ideas",
+  "memory.dream.backup": "Memory backup",
+  "memory.dream.newest": "Newest backup",
+  "memory.dream.restore": "Restore backup",
+  "memory.dream.changed": "Memory or About me changed since this backup. Restoring replaces those changes. Review your notes before you continue.",
+  "memory.dream.confirm": "Replace with backup",
+  "memory.dream.failed": "The memory action could not finish. Check that memory upkeep is on and the backup is available.",
+  "memory.dream.busy": "This bot is busy. Try again when its work finishes.",
+  "memory.dream.paused": "Memory upkeep is paused for a backup. Try again when it finishes."
 }
