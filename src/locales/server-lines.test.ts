@@ -572,7 +572,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
   ],
   "moves to the Cloud": [
-    ["server/cloud-send-arrived.ts", "Now that I live on My Cloud, my webhook \" … \" has a new address. Open"],
+    ["server/cloud-send-arrived.ts", "Now that I live on  … , my webhook \" … \" has a new address. Open Autom"],
     ["server/cloud-send-arrived.ts", "I'm back on this computer, so my webhook \" … \" has an address here aga"],
   ],
   "calls": [
@@ -621,7 +621,7 @@ describe("lines the server writes for a person", () => {
       .map((path) => relative(ROOT, path).split("\\").join("/"));
     expect(readers.sort()).toEqual(["server/server-line-packs.ts", "server/server-lines.ts"]);
     // The server loads the other languages when it starts; without them every line reads in English.
-    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/^import [^\n]*\bimport "\.\/server-line-packs\.ts";$|^import "\.\/server-line-packs\.ts";$/m);
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/(?:^|;\s*)import "\.\/server-line-packs\.ts";/m);
   });
 });
 
