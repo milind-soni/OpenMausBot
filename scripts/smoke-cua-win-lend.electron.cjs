@@ -48,7 +48,7 @@ async function driverTools(mcp) {
 
 async function smoke() {
   const cua = await load("cua.mjs");
-  const { localComputerReady } = require(join(root, "electron", "capabilities.cjs"));
+  const { screenStatus } = await load("screen-status.mjs");
   const { sharedCuaConnection } = await load("shared-cua-connection.mjs");
   const { createSharedCua, executeSharedOperation } = await load("shared-computer-access.mjs");
   const { LENT_SCREEN_ARGUMENTS } = await load("lent-screen-tools.mjs");
@@ -56,21 +56,22 @@ async function smoke() {
   if (!app.isPackaged) throw new Error("Electron did not take this copy for the installed app");
 
   try {
-    return await lend(cua, { localComputerReady, sharedCuaConnection, createSharedCua, executeSharedOperation, LENT_SCREEN_ARGUMENTS });
+    return await lend(cua, { screenStatus, sharedCuaConnection, createSharedCua, executeSharedOperation, LENT_SCREEN_ARGUMENTS });
   } finally {
     await cua.stopCua();
   }
 }
 
-async function lend(cua, { localComputerReady, sharedCuaConnection, createSharedCua, executeSharedOperation, LENT_SCREEN_ARGUMENTS }) {
+async function lend(cua, { screenStatus, sharedCuaConnection, createSharedCua, executeSharedOperation, LENT_SCREEN_ARGUMENTS }) {
   const started = Date.now();
   const connection = await cua.startCua();
   Object.assign(report, { mode: connection?.mode ?? null, reason: connection?.reason ?? null, startMs: Date.now() - started });
   say(`computer control mode: ${report.mode} after ${report.startMs} ms${report.reason ? `: ${report.reason}` : ""}`);
   const mcp = sharedCuaConnection(connection);
-  report.lendsScreen = mcp !== null && localComputerReady("win32", connection);
-  say(`apps and screen lent to the Cloud: ${report.lendsScreen ? "yes" : "no"}`);
-  if (!report.lendsScreen) return false;
+  const status = screenStatus({ platform: "win32", connection });
+  Object.assign(report, { lendsScreen: status.lent, screen: status });
+  say(`apps and screen lent to the Cloud: ${status.lent ? "yes" : `no (${status.reason}; fix: ${status.fix ?? "none"})`}`);
+  if (!status.lent || mcp === null) return false;
 
   try {
     const tools = await driverTools(mcp);
