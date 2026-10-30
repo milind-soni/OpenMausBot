@@ -14,7 +14,7 @@ export const WORKSPACES_DIR = join(DATA_DIR, "workspaces");
 export const TASK_WORKSPACES_DIR = join(DATA_DIR, "task-workspaces");
 
 export function supportsWorkspaceFiles(driverKind: string): boolean {
-  return !["grok", "openai-compat", "minimax", "mistral", "cerebras", "groq", "meta"].includes(driverKind);
+  return !["grok", "openai-compat", "minimax", "mistral", "cerebras", "groq", "greenference", "meta"].includes(driverKind);
 }
 
 /** Directory organization, not a shell sandbox. */
