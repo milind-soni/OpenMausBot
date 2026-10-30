@@ -21,7 +21,7 @@ const MINUTE = 60_000;
 const ROUTING = "stream error: workspace routing discovery failed: error sending request";
 const STALL = "No activity for 20 minutes — the routine was stopped";
 const SIGNED_OUT = "Not logged in · Please run /login";
-const SIGN_IN_ACTION = "This bot's AI is signed out. Sign in again in Settings → Model providers.";
+const SIGN_IN_ACTION = "This bot's AI is signed out. Sign in again in Settings → AI.";
 const BUSY = "this thread is already working — interrupt it first";
 const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
 const CAPPED = "Stopped after 40 tool calls without a final answer";
@@ -360,6 +360,22 @@ describe("an unattended run only its owner can fix", () => {
     const fourth = await h.start(h.manager.listRoutines().find((routine) => routine.name === "Inbox sweep")!.id);
     h.fail(fourth.threadId!, SIGNED_OUT, { setup: true, stopReason: "auth_required" });
     expect(h.failed.at(-1)!.alert).toEqual({ detail: SIGN_IN_ACTION });
+  });
+
+  it("starts a signed-out run once more on the backup the person chose, and fails it as before when there is none", async () => {
+    const scopes: unknown[] = [];
+    const h = harness({ limitBackup: (botId, scope) => { scopes.push(scope); return botId === "maus-1"; } });
+    const run = await h.start(h.routine("maus-1").id);
+    h.fail(run.threadId!, SIGNED_OUT, { setup: true, stopReason: "auth_required" });
+    expect(scopes).toEqual(["signed-out"]);
+    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "failed", attention: "Starting again on the backup AI: this bot's AI is signed out" });
+    expect(h.failed).toEqual([]);
+    await h.advance(20 * SECOND);
+    expect(h.attempts).toEqual([run.threadId, run.threadId]);
+
+    const other = await h.start(h.routine("maus-2").id);
+    h.fail(other.threadId!, SIGNED_OUT, { setup: true, stopReason: "auth_required" });
+    expect(h.run(other.id)).toMatchObject({ status: "failed", error: `${SIGN_IN_ACTION} The AI said: “${SIGNED_OUT}”` });
   });
 
   it("fails an out-of-credit refusal at once with what to do, and the trial credit says to sign in", async () => {

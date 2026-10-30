@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   state: {} as Record<string, unknown>,
   toolsLayout: "rows" as SidebarToolsLayout,
+  panels: [] as { id: string; name: string; url: string }[],
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) }));
@@ -15,6 +16,7 @@ vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
   useSidebarToolsLayout: () => fixture.toolsLayout,
 }));
+vi.mock("@/lib/web-panel-preferences", () => ({ useWebPanels: () => fixture.panels }));
 vi.mock("./UpdateIndicator", () => ({ UpdateIndicator: () => null }));
 import { SidebarAppsButton, SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 
@@ -39,6 +41,7 @@ beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.state = { activeView: "chat", routineRuns: [], pluginsOpen: false };
   fixture.toolsLayout = "rows";
+  fixture.panels = [];
   vi.stubGlobal("window", {});
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -83,6 +86,29 @@ describe("sidebar footer places", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines", view: "list" });
     fixture.state.activeView = "routines";
     expect(render("comfortable").html).toMatch(/data-sidebar-nav="automations"[^>]*aria-current="page"/);
+  });
+
+  it("adds a row per pinned web panel after Team map, in Advanced mode only", () => {
+    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
+    fixture.state = { ...fixture.state, activeView: "web-panel", webPanelId: "panel-1" };
+    expect(render("comfortable").html).toBe("");
+    fixture.advanced = true;
+    const { html, nodes: tree } = render("comfortable");
+    expect(html.indexOf('data-sidebar-nav="web-panel-panel-1"')).toBeGreaterThan(html.indexOf('data-sidebar-nav="team-map"'));
+    expect(html).toContain(">Fleet board</span>");
+    expect(html).toMatch(/aria-current="page"[^>]*>[\s\S]*Fleet board/);
+    const row = tree.find((node) => node.props.id === "web-panel-panel-1" && typeof node.props.onClick === "function")!;
+    (row.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showWebPanel", id: "panel-1" });
+  });
+
+  it("shows a pinned panel as an icon with its name as the label in the toolbar layout", () => {
+    fixture.advanced = true;
+    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
+    const { html } = render("comfortable", { toolsLayout: "toolbar" });
+    expect(html).toContain('data-sidebar-nav="web-panel-panel-1"');
+    expect(html).not.toContain(">Fleet board</span>");
+    expect(html).toContain('aria-label="Fleet board"');
   });
 
   it("keeps the guided tour's anchors on the rows", () => {

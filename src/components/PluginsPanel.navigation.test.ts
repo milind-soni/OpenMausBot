@@ -55,6 +55,9 @@ vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
 }));
+vi.mock("./PostizCard", () => ({
+  PostizCard: () => createElement("div", { "data-postiz-card": true }, "Postiz"),
+}));
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
 import { FACE_BOX } from "./cursor-face-data";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
@@ -65,6 +68,8 @@ const STATUS = 6;
 const PHASE = 13;
 const HIGHLEVEL_CONNECTED = 21;
 const X_CONNECTED = 22;
+const CATEGORY = 20;
+const POSTIZ_CONNECTED = 23;
 const MODE = 4;
 const SEARCH = 15;
 const TAB = 16;
@@ -145,6 +150,26 @@ describe("Apps pop-up", () => {
     fixture.overrides.set(15, "growably");
     expect(wrapper(render().nodes).props.className).toBe("contents");
     fixture.overrides.set(15, "zendesk");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
+  it("shows the Postiz card in the grid and under Social, with a Social pill, and counts it once connected", () => {
+    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "postiz")!;
+    const { html, nodes: tree } = render();
+    expect(wrapper(tree).props.className).toBe("contents");
+    expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toContain("Social");
+    expect(html).toContain("1 connected");
+    fixture.overrides.set(POSTIZ_CONNECTED, true);
+    expect(render().html).toContain("2 connected");
+    fixture.overrides.set(CATEGORY, "Social");
+    const social = render();
+    expect(wrapper(social.nodes).props.className).toBe("contents");
+    expect([...social.html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1])).toEqual(["Social"]);
+    fixture.overrides.set(CATEGORY, "Productivity");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+    fixture.overrides.set(CATEGORY, null);
+    fixture.overrides.set(SEARCH, "instagram");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(SEARCH, "gmail");
     expect(wrapper(render().nodes).props.className).toBe("hidden");
   });
   it("shows the X card in the grid for every install and counts it once bots have X", () => {
@@ -487,8 +512,9 @@ describe("Apps pop-up", () => {
     ]);
     const { html, nodes: tree } = render();
     const headings = [...html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Connected", "Productivity", "Communication", "Analytics", "All apps"]);
-    expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toEqual(["Productivity", "Communication", "Analytics", "Design", "Files"]);
+    // Postiz's own card lives in Social, so Social counts it beside the catalog's one social app.
+    expect(headings).toEqual(["Connected", "Productivity", "Communication", "Social", "All apps"]);
+    expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toEqual(["Productivity", "Communication", "Social", "Analytics", "Design"]);
     expect(html).toContain('aria-label="More categories"');
     // The dialog clips overflow, so the menu must portal out of it rather than open in place.
     expect(tree.find((node) => node.props.ariaLabel === "More categories")!.props.placement).toBeUndefined();

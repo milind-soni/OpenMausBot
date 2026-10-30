@@ -125,7 +125,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const now = deps.now ?? Date.now;
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
   const inbox = team ? loadPersonInboxState(deps.dataDir) : { state: { homes: {}, items: [] }, prepareSave: () => true };
-  let { homes, items } = inbox.state;
+  let { homes, items }: Pick<z.infer<typeof fileSchema>, "homes" | "items"> = inbox.state;
   const legacy = team ? loadLegacyRelayState(deps.dataDir).state.relays : [];
   store.backfillPrivateTasks([...Object.values(homes), ...items, ...legacy]);
   let savePending = false;
@@ -157,18 +157,15 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (email) deps.ensureOwnBot?.(email);
     const bot = representativeOf(person);
     if (!bot) return null;
-    const kept = homes[person];
-    const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
-    if (task && !task.archivedAt && deps.starters.get(task.threadId) === person) {
-      if (!task.private) store.patchTask(bot.id, task.threadId, { private: true });
-      return { bot, threadId: task.threadId };
+    const standing = standingHome(person, bot);
+    if (standing?.kept) {
+      const task = store.taskByThread(bot.id, standing.threadId);
+      if (task && !task.private) store.patchTask(bot.id, task.threadId, { private: true });
+      return { bot, threadId: standing.threadId };
     }
-    const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
-    const brief = own.find((one) => one.title === BRIEF_TITLE);
-    const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
-    let threadId = chat?.threadId;
-    if (brief) store.patchTask(bot.id, brief.threadId, { title: INBOX_TITLE });
-    else if (!chat) {
+    let threadId = standing?.threadId;
+    if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
+    else if (!standing) {
       const created = store.createTask(bot.id, INBOX_TITLE, false);
       if (!created) return null;
       try {
@@ -180,11 +177,27 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       }
       threadId = created.threadId;
     }
-    if (chat && !chat.private) store.patchTask(bot.id, chat.threadId, { private: true });
+    if (standing && !store.taskByThread(bot.id, standing.threadId)?.private) store.patchTask(bot.id, standing.threadId, { private: true });
     homes[person] = { botId: bot.id, threadId: threadId! };
     indexHomes();
     save();
     return { bot, threadId: threadId! };
+  }
+
+  function standingHome(person: string, bot: BotRecord): { threadId: string; kept: boolean; brief: boolean } | null {
+    const kept = homes[person];
+    const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
+    if (task && !task.archivedAt && deps.starters.get(task.threadId) === person) return { threadId: task.threadId, kept: true, brief: false };
+    const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
+    const brief = own.find((one) => one.title === BRIEF_TITLE);
+    const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
+    return chat ? { threadId: chat.threadId, kept: false, brief: Boolean(brief) } : null;
+  }
+
+  /** Whether this conversation is the person's inbox, or the one `home` would make it, before anything reached it. */
+  function isHomeOf(threadId: string, person: string | null): boolean {
+    const bot = team && person && deps.person(person) ? representativeOf(person) : null;
+    return bot ? standingHome(person!, bot)?.threadId === threadId : false;
   }
 
   let homeThreads = new Map<string, string>();
@@ -425,6 +438,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   return {
     home,
     personOf,
+    isHomeOf,
     deliver,
     route,
     answeredIn,

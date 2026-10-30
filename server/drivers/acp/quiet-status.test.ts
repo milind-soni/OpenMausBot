@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import {
-  classifyQuiet, describeQuiet, LogTail, parseOpenCodeLogLine, parseQwenLogLine, quietKey, sampleProcessTree, startedSince, treePids,
+  classifyQuiet, describeQuiet, LogTail, parseOpenCodeLogLine, parseQwenLogLine, quietKey, sampleLinuxProc, sampleProcessTree, startedSince, treePids,
+  quietVerdict, waitingOutLimit, type ProcReader,
 } from "./quiet-status.ts";
 import { qwenDebugLogPath } from "./qwen.ts";
 
@@ -204,5 +205,95 @@ describe("qwenDebugLogPath", () => {
     expect(qwenDebugLogPath({ QWEN_DEBUG_LOG_FILE: "1", QWEN_HOME: "/q", QWEN_RUNTIME_DIR: "/r" }, "abc")).toBe(join("/r", "debug", "abc.txt"));
     expect(qwenDebugLogPath({ QWEN_DEBUG_LOG_FILE: "0" }, "abc")).toBeNull();
     expect(qwenDebugLogPath({ QWEN_DEBUG_LOG_FILE: "1" }, "../escape")).toBeNull();
+  });
+});
+
+describe("a Linux process tree from /proc alone", () => {
+  // stat as /proc/<pid>/stat writes it: utime, stime and starttime are fields 14, 15 and 22, after a comm with spaces.
+  const stat = (pid: number, ppid: number, utime: number, stime: number, start: number) =>
+    `${pid} (node (mcp) x) S ${ppid} ${pid} ${pid} 0 -1 4194304 0 0 0 0 ${utime} ${stime} 0 0 20 0 1 0 ${start} 1000 100`;
+  const row = (inode: number, remote: string, state = "01") => `   0: 0100007F:9C40 ${remote} ${state} 00000000:00000000 00:00000000 00000000  1000        0 ${inode} 1 0000000000000000 20 4 30 10 -1`;
+  const header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode";
+  // An engine (100) and its MCP server (101) in one network namespace, the engine's boxed child (102) in its own, and a
+  // process of something else (200).
+  const files: Record<string, string> = {
+    "/proc/stat": "cpu  1 2 3 4\nbtime 1700000000\n",
+    "/proc/100/stat": stat(100, 1, 300, 200, 1000),
+    "/proc/101/stat": stat(101, 100, 50, 50, 1200),
+    "/proc/102/stat": stat(102, 101, 100, 0, 5000),
+    "/proc/200/stat": stat(200, 1, 9999, 0, 10),
+    "/proc/100/net/tcp": [header, row(11, "0100007F:225F"), row(12, "5DB8D822:01BB"), row(13, "00000000:0000", "0A"), row(15, "5DB8D822:01BB")].join("\n"),
+    "/proc/100/net/tcp6": header,
+    "/proc/102/net/tcp": [header, row(14, "0100007F:0C38")].join("\n"),
+    "/proc/102/net/tcp6": header,
+  };
+  const links: Record<string, string> = {
+    "/proc/100/ns/net": "net:[1]", "/proc/101/ns/net": "net:[1]", "/proc/102/ns/net": "net:[2]",
+    "/proc/100/fd/0": "/dev/null", "/proc/100/fd/3": "socket:[11]", "/proc/100/fd/4": "socket:[12]", "/proc/101/fd/5": "socket:[13]",
+    "/proc/102/fd/6": "socket:[14]", "/proc/200/fd/7": "socket:[15]",
+  };
+  const lists: Record<string, string[]> = {
+    "/proc": ["100", "101", "102", "200", "self", "stat"], "/proc/100/fd": ["0", "3", "4"], "/proc/101/fd": ["5"], "/proc/102/fd": ["6"], "/proc/200/fd": ["7"],
+  };
+  const missing = (path: string) => Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+  const proc = (overrides: Partial<Record<keyof ProcReader, (path: string) => never>> = {}): ProcReader => ({
+    read: (path) => { if (path in files) return files[path]!; throw missing(path); },
+    list: (path) => { if (path in lists) return lists[path]!; throw missing(path); },
+    link: (path) => { if (path in links) return links[path]!; throw missing(path); },
+    ...overrides,
+  });
+
+  it("adds the tree's CPU, and counts its open connections in each of its network namespaces", () => {
+    // 11 is the harness on loopback; 12 a model request; 13 listens; 14 is the box's egress gate on loopback 3128;
+    // 15 belongs to another process.
+    expect(sampleLinuxProc(100, undefined, proc())).toEqual({ cpuMs: 7_000, connections: 3 });
+  });
+
+  it("counts only what started since a time, without the root, as a tool call's own processes", () => {
+    const boot = 1_700_000_000_000;
+    expect(sampleLinuxProc(100, boot + 40_000, proc())).toEqual({ cpuMs: 1_000, connections: 1 });
+    expect(sampleLinuxProc(100, boot + 90_000, proc())).toEqual({ cpuMs: null, connections: null });
+  });
+
+  it("reads nothing it cannot see as unknown, never as idle", () => {
+    expect(sampleLinuxProc(999, undefined, proc()), "no such process").toEqual({ cpuMs: null, connections: null });
+    expect(sampleLinuxProc(100, undefined, proc({ list: (path) => { throw missing(path); } }))).toEqual({ cpuMs: null, connections: null });
+    const noTables = proc({ read: (path) => { if (path.includes("/net/")) throw missing(path); if (path in files) return files[path] as never; throw missing(path); } });
+    expect(sampleLinuxProc(100, undefined, noTables)).toEqual({ cpuMs: 7_000, connections: null });
+  });
+});
+
+describe("an engine waiting out a limit", () => {
+  it("is a model request that failed on a usage or rate limit, or a long wait after a 429", () => {
+    expect(waitingOutLimit({ kind: "provider-error", message: "Usage limit reached" })).toBe(true);
+    expect(waitingOutLimit({ kind: "provider-error", message: "Rate limit exceeded. Please try again later." })).toBe(true);
+    expect(waitingOutLimit({ kind: "provider-error", message: "Incorrect API key provided" })).toBe(false);
+    expect(waitingOutLimit({ kind: "provider-error", message: 'Model \\"x\\" is overloaded' })).toBe(false);
+    expect(waitingOutLimit({ kind: "retry", status: 429, delayMs: 20_000, attempt: 1 })).toBe(false);
+    expect(waitingOutLimit({ kind: "retry", status: 429, delayMs: 600_000, attempt: 1 })).toBe(true);
+    expect(waitingOutLimit({ kind: "retry", status: 503, delayMs: 600_000, attempt: 1 })).toBe(false);
+    expect(waitingOutLimit(null)).toBe(false);
+  });
+});
+
+describe("ending a quiet turn early", () => {
+  const base = { logged: null, noSignsSince: null, now: 1_000_000, quietMs: 420_000, name: "OpenCode Go", stuckAfterMs: 180_000 };
+  it("reads no sign of life as between requests at first, and stops the turn as stuck once it lasts five minutes", () => {
+    expect(quietVerdict({ ...base, next: { kind: "no-signs" } })).toEqual({ next: { kind: "between-requests" }, noSignsSince: 1_000_000, stop: null });
+    expect(quietVerdict({ ...base, next: { kind: "no-signs" }, noSignsSince: 1_000_000 - 200_000 })).toMatchObject({ next: { kind: "no-signs" }, stop: null });
+    const stuck = quietVerdict({ ...base, next: { kind: "no-signs" }, noSignsSince: 1_000_000 - 300_000 }).stop;
+    expect(stuck?.message).toBe("OpenCode Go sent nothing for 7 min with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.");
+    expect(stuck).toMatchObject({ acpPromptStall: true });
+    expect(quietVerdict({ ...base, next: { kind: "waiting-model", nearFullContext: false }, noSignsSince: 1 }), "a sign of life starts it over").toEqual({ next: { kind: "waiting-model", nearFullContext: false }, noSignsSince: null, stop: null });
+  });
+
+  it("ends the turn as a usage limit two minutes after the request that failed on one, and never for another error", () => {
+    const limit = { kind: "provider-error" as const, message: "Usage limit reached" };
+    expect(quietVerdict({ ...base, next: { kind: "provider-error", message: limit.message }, logged: { signal: limit, at: 1_000_000 - 60_000 } }).stop).toBeNull();
+    const ended = quietVerdict({ ...base, next: { kind: "provider-error", message: limit.message }, logged: { signal: limit, at: 1_000_000 - 120_000 } }).stop;
+    expect(ended?.message).toBe("OpenCode Go reached a usage limit (“Usage limit reached”) and is waiting it out without replying, so this turn was stopped.");
+    expect(ended).toMatchObject({ acpUsageLimit: true });
+    const other = { kind: "provider-error" as const, message: "Incorrect API key provided" };
+    expect(quietVerdict({ ...base, next: { kind: "provider-error", message: other.message }, logged: { signal: other, at: 0 } }).stop).toBeNull();
   });
 });

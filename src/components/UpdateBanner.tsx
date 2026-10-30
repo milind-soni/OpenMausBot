@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2, PackageOpen, RefreshCw, Sparkles, X } from "lucide-react";
 import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { NoticeToast } from "./NoticeCard";
 
 const primaryAction =
@@ -38,7 +38,7 @@ function UpdatedLine({ version, onSeen }: { version: string; onSeen: () => void 
       document.removeEventListener("visibilitychange", look);
     };
   }, [shown]);
-  return shown ? <NoticeToast text={t("update.updatedItself", { app: brand().name, version })} onDone={onSeen} /> : null;
+  return shown ? <NoticeToast text={t("update.updatedItself", { app: productName(), version })} onDone={onSeen} /> : null;
 }
 
 export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
@@ -63,7 +63,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
 
   const title =
     s.status === "downloaded"
-      ? `${brand().name} ${s.version} is ready`
+      ? `${productName()} ${s.version} is ready`
       : installing
         ? handoff
           ? "Opening a terminal…"
@@ -76,12 +76,12 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
       ? handoff
         ? "Copy the install command and open a terminal."
         : s.installsByItself
-          ? t("update.card.idleNote", { app: brand().name })
+          ? t("update.card.idleNote", { app: productName() })
           : "Restart to finish updating."
       : installing
         ? handoff
           ? "Copying the command…"
-          : s.message || `${brand().name} will reopen in a moment.`
+          : s.message || `${productName()} will reopen in a moment.`
         : s.status === "handed-off"
           ? // when the automatic install could not run, say why before the steps
             `${s.message ? `${s.message} ` : ""}${
@@ -90,7 +90,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
                 : "Command copied — paste it in a terminal to finish."
             }`
           : s.retryable === false
-            ? `${friendlyError(s.message?.split(" Quit and reopen ")[0])} Quit and reopen ${brand().name} before trying the update again.`
+            ? `${friendlyError(s.message?.split(" Quit and reopen ")[0])} Quit and reopen ${productName()} before trying the update again.`
             : friendlyError(s.message);
 
   return (

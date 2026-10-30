@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { claudeSignedIn } from "./claude-auth-status.ts";
 import { claudeAuthFailure } from "./claude-auth-recovery.ts";
 import { claudeResultError, claudeVersionTooOld } from "./claude.ts";
-import { claudeApiErrorMessage, claudeEngineReset, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit } from "./claude-limits.ts";
+import { claudeApiErrorMessage, claudeEngineReset, claudeLimitFacts, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit } from "./claude-limits.ts";
 import { classifyError } from "./retry.ts";
 
 describe("claudeSignedIn", () => {
@@ -107,6 +107,14 @@ describe("Claude usage limits", () => {
     expect(claudeEngineReset(claudeLimitRefusal(WEEKLY))).toEqual({ limitResetsAt: 1791795600_000 });
     expect(claudeEngineReset(claudeLimitRefusal({ ...WEEKLY, rateLimitType: "seven_day_overage_included" }))).toEqual({ limitResetsAt: 1791795600_000 });
     expect(claudeEngineReset(null)).toBeUndefined();
+  });
+
+  it("names what a limit refuses for the runtime error: the model's credits, its own window with that reset, or the account", () => {
+    expect(claudeLimitFacts(claudeLimitRefusal(OUT_OF_CREDITS)), "no countdown to the billing period's end").toEqual({ limit: "credits" });
+    expect(claudeLimitFacts(claudeLimitRefusal({ ...WEEKLY, rateLimitType: "seven_day_opus" }))).toEqual({ limit: "model", limitResetsAt: 1791795600_000 });
+    expect(claudeLimitFacts(claudeLimitRefusal(WEEKLY))).toEqual({ limit: "engine", limitResetsAt: 1791795600_000 });
+    expect(claudeLimitFacts(claudeLimitRefusal({ status: "rejected" }))).toEqual({ limit: "engine" });
+    expect(claudeLimitFacts(null)).toEqual({ limit: "engine" });
   });
 
   it("says a model's credits ran out, with no countdown to the billing reset", () => {

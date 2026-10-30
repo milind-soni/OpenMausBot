@@ -222,9 +222,9 @@ describe("BotListItem", () => {
       }
     });
 
-    it("says Expired once nothing can answer it", () => {
+    it("says it got no answer in time once nothing can answer it", () => {
       const markup = renderRow(approval({ expired: true, options: [] }));
-      expect(markup).toContain("Expired");
+      expect(markup).toContain("No answer in time");
       expect(markup).not.toContain("Approval needed");
     });
   });

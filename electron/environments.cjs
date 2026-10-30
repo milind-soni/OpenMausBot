@@ -117,7 +117,7 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
   if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin });
   return [
     ...(places ? [{ id: "workspace-places", label: places, enabled: false }, { type: "separator" }] : []),
-    { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
+    { id: "workspace-local", label: "This computer", type: "radio", checked: !active, ...(iconFor && cleanColor(state.localColor) ? { icon: iconFor(state.localColor) } : {}), click: () => onSwitch(LOCAL_ID) },
     ...[...state.environments].sort((a, b) => listedPlace(b) - listedPlace(a)).map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
       const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role) : null;
@@ -341,7 +341,8 @@ function parseEnvironments(raw) {
       if (!dataDir || seen.has(dirKey)) continue;
       seen.add(id);
       seen.add(dirKey);
-      environments.push({ id, kind: "local", name: cleanName(entry.name, dirBasename(dataDir)), dataDir });
+      const color = cleanColor(entry?.color);
+      environments.push({ id, kind: "local", name: cleanName(entry.name, dirBasename(dataDir)), dataDir, ...(color ? { color } : {}) });
       continue;
     }
     const origin = normalizeOrigin(entry?.origin);
@@ -354,11 +355,14 @@ function parseEnvironments(raw) {
       ...(color ? { color } : {}), ...(entry?.home === true ? { home: true } : {}), ...(team ? { team } : {}), ...(cloud ? { cloud } : {}) });
   }
   const activeId = typeof value?.activeId === "string" && environments.some((e) => e.id === value.activeId) ? value.activeId : LOCAL_ID;
-  return { environments, activeId };
+  const localColor = cleanColor(value?.localColor);
+  return { environments, activeId, ...(localColor ? { localColor } : {}) };
 }
 
+/** `localColor`: This computer's own colour, which has no entry in the list; absent for none. */
 function serializeEnvironments(state) {
-  return JSON.stringify({ version: 2, environments: state.environments, activeId: state.activeId }, null, 2) + "\n";
+  const localColor = cleanColor(state.localColor);
+  return JSON.stringify({ version: 2, environments: state.environments, activeId: state.activeId, ...(localColor ? { localColor } : {}) }, null, 2) + "\n";
 }
 
 function withEnvironment(state, input, makeId) {
@@ -375,14 +379,24 @@ function withEnvironment(state, input, makeId) {
   return { ...state, environments };
 }
 
-/** One saved place's colour as the person chose it, or none (`color` null); a colour this app doesn't draw changes
- * nothing, and neither does this computer. The same state when it is that colour already. */
+/** One place's colour as the person chose it, or none (`color` null): a saved place's, or This computer's (LOCAL_ID).
+ * A colour this app doesn't draw changes nothing. The same state when it is that colour already. */
 function withPlaceColor(state, id, color) {
-  const existing = state.environments.find((entry) => entry.id === id);
-  if (!existing || existing.kind === "local" || (color !== null && !cleanColor(color)) || (cleanColor(existing.color) ?? null) === color) return state;
+  const existing = savedPlace(state, id);
+  if (!existing || (color !== null && !cleanColor(color)) || (cleanColor(existing.color) ?? null) === color) return state;
+  if (id === LOCAL_ID) {
+    const { localColor: _old, ...rest } = state;
+    return color ? { ...rest, localColor: color } : rest;
+  }
   const { color: _old, ...rest } = existing;
   const next = color ? { ...rest, color } : rest;
   return { ...state, environments: state.environments.map((entry) => (entry === existing ? next : entry)) };
+}
+
+/** The place `id` names (the one on screen by default): a saved entry, or This computer as one, named and coloured. */
+function savedPlace(state, id = state.activeId) {
+  if (id === LOCAL_ID) return { id: LOCAL_ID, kind: "local", name: "This computer", ...(cleanColor(state.localColor) ? { color: state.localColor } : {}) };
+  return state.environments.find((entry) => entry.id === id) ?? null;
 }
 
 /** The colours the Admin keeps for My Cloud (`home`) and team Clouds (`teamId`), on their saved places: once a colour
@@ -444,7 +458,7 @@ function bootEnvironmentDir(state, defaultDir) {
 
 function withoutEnvironment(state, id) {
   const environments = state.environments.filter((e) => e.id !== id);
-  return { environments, activeId: state.activeId === id ? LOCAL_ID : state.activeId };
+  return { ...state, environments, activeId: state.activeId === id ? LOCAL_ID : state.activeId };
 }
 
 function withMicrophone(state, id) {
@@ -491,6 +505,7 @@ module.exports = {
   parseEnvironments,
   parsePairingLink,
   parseHostedWorkspaceLink,
+  savedPlace,
   serializeEnvironments,
   startupEnvironmentDir,
   withActive,

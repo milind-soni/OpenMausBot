@@ -23,6 +23,14 @@ describe("who can see a team's private chat", () => {
     expect(renderToStaticMarkup(createElement(TeamSharedHeader, { team: { name: "Acme" } }))).toContain("Shared · everyone in Acme can see");
   });
 
+  it("keeps the bot's name in view on a narrow header: the label gives way to its icon, never the name", () => {
+    for (const html of [renderToStaticMarkup(createElement(TeamSharedHeader, { team: { name: "Acme" } })), renderToStaticMarkup(createElement(TeamPrivateHeader))]) {
+      expect(html).not.toMatch(/^<span[^>]*\bshrink-0\b/);
+      expect(html).toMatch(/^<span[^>]*title="[^"]+"[^>]*class="[^"]*\bmin-w-0\b/);
+      expect(html).toMatch(/<span class="[^"]*@max-\[30rem\]\/chathead:sr-only[^"]*">/);
+    }
+  });
+
   it("says the sentence in one private chat per team, then never again on this device", () => {
     const storage = memory();
     expect(teamPrivateChatsLineDue("acme", storage)).toBe(true);

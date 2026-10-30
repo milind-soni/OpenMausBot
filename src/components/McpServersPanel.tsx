@@ -30,6 +30,7 @@ import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
 import { WHOP_MCP_URL, isWhopServer, whopServerName } from "@/lib/whop-integration";
+import { POSTIZ_SERVER } from "../../shared/postiz";
 import { openBotSettings } from "./bot-panel/panel-link";
 
 export interface ProbeResult {
@@ -89,6 +90,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   onWhopConnection?: (connected: boolean) => void;
 } = {}) {
   const { state: store, dispatch } = useStore();
+  const botName = (id: string) => store.bots?.find((bot) => bot.id === id)?.name ?? id;
   const policy = store.config?.managedPolicy;
   const restricted = Boolean(policy && !policy.mcp.allowCustom);
   const [servers, setServers] = useState<McpServerListing[] | null>(null);
@@ -471,7 +473,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     </div>;
   }
 
-  const visibleServers = servers?.filter((server) => !hideWhop || !isRemoteMcpListing(server) || !isWhopServer(server));
+  const visibleServers = servers?.filter((server) => !hideWhop || !isRemoteMcpListing(server) || !(isWhopServer(server) || server.name === POSTIZ_SERVER));
 
   return (
     <section
@@ -556,6 +558,8 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                       </div>
                       {server.managedBy && <div className="mt-1 text-[12px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
                       {server.runsOn && <div data-mcp-runs-on className="mt-1 text-[12px] text-ink-secondary">{t("mcp.runsOn", { computer: server.runsOn.label })}</div>}
+                      {server.bot && <div data-mcp-own-bot className="mt-1 text-[12px] text-ink-secondary">{t("mcp.ownBot", { bot: botName(server.bot) })}</div>}
+                      {server.offFor?.length ? <div data-mcp-off-for className="mt-1 text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") })}</div> : null}
                       <div className="mt-1 truncate font-mono text-[12px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>

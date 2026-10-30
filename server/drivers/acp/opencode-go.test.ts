@@ -810,6 +810,54 @@ describe("OpenCode turns without a sign-in gate", () => {
       vi.restoreAllMocks();
     }
   });
+
+  // OpenCode 1.18.27 against a provider at its limit (a 429 naming GoUsageLimitError, retry-after 5 h): one "stream
+  // error" row in its log, then nothing over ACP while it sleeps the whole retry-after, uncapped, five times over.
+  it("ends a turn that waits out a usage limit as that limit, so another AI can carry on", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 0 });
+    vi.stubEnv("OMB_ACP_QUIET_NOTICE_MS", "300");
+    vi.stubEnv("OMB_ACP_QUIET_TICK_MS", "50");
+    vi.stubEnv("OMB_ACP_LIMIT_QUIET_MS", "400");
+    const row = `timestamp=2026-10-28T22:11:15.919Z level=ERROR run=fixture_run message="stream error" providerID=opencode-go modelID=kimi-k3 session.id={session} small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached"`;
+    const f = await open("opencode-go-limit", () => ({
+      FAKE_ACP_MODE: "quiet-then-answer", FAKE_ACP_QUIET_MS: "30000", FAKE_ACP_MODELS: "opencode/big-pickle",
+      FAKE_ACP_OPENCODE_LOG: JSON.stringify([row]),
+    }));
+    try {
+      const { done, events } = await f.run("t-go-limit", "opencode/big-pickle");
+      expect(done).toMatchObject({ ok: false, stopReason: "quota" });
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine", message: expect.stringMatching(/usage limit/i) });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("marks OpenCode's own usage-limit refusal as the account's limit, so another AI can carry on", async () => {
+    const f = await open("opencode-gave-up", (scratch) => ({ FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_FAILURE_FILE: join(scratch, "failure.json") }));
+    writeFileSync(join(f.scratch, "failure.json"), JSON.stringify({
+      code: -32603, message: "Internal error: Monthly usage limit reached for this key", data: { service: "session", errorName: "APIError" },
+    }));
+    const { done, events } = await f.run("t-gave-up", "opencode/big-pickle");
+    expect(done).toMatchObject({ ok: false });
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine" });
+  });
+
+  it("stops an engine with no open request, no CPU use and nothing logged after a few minutes, not the full silence guard", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 0 });
+    vi.stubEnv("OMB_ACP_QUIET_NOTICE_MS", "200");
+    vi.stubEnv("OMB_ACP_QUIET_TICK_MS", "50");
+    vi.stubEnv("OMB_ACP_NO_SIGNS_STOP_MS", "500");
+    const f = await open("opencode-lifeless", () => ({ FAKE_ACP_MODE: "quiet-then-answer", FAKE_ACP_QUIET_MS: "30000", FAKE_ACP_MODELS: "opencode/big-pickle" }));
+    try {
+      const { done, events } = await f.run("t-lifeless", "opencode/big-pickle");
+      expect(done).toMatchObject({ ok: false });
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ stalled: true, message: expect.stringContaining("no open request to its model and no CPU use") });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 // Measured on opencode 1.18.27: a pooled `opencode acp` kept its old model list after `opencode auth login`.

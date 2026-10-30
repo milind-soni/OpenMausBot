@@ -371,6 +371,7 @@ const support: AcpSupport = {
     "_x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
     "x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
   },
+  askTool: "ask_user_question",
   displayName: "Grok",
   images: true,
   acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
@@ -486,7 +487,7 @@ const support: AcpSupport = {
     }
   },
 
-  pickAuthMethod: (methods) => (methods.some((m) => m.id === "cached_token") ? "cached_token" : null),
+  pickAuthMethod: (methods) => ["cached_token", "grok.com"].find((id) => methods.some((m) => m.id === id)) ?? null,
   authFailure: "fail",
   isAuthenticated: (env) => grokSignedIn(env),
 

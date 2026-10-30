@@ -15,13 +15,15 @@ export function allow<const T extends string>(value: unknown, list: readonly T[]
 export const KEY_PROVIDER = [
   "anthropic", "openai", "openrouter", "openai_compat", "xai", "mistral", "cerebras", "groq", "meta", "boat", "composio",
   "opencode_go", "custom_endpoint", "elevenlabs", "fish_audio", "jev", "openrouter_decider", "openai_image", "custom_image",
-  "openai_live", "onepassword", "treg", "deepseek",
+  "openai_live", "onepassword", "treg", "deepseek", "postiz",
 ] as const;
 export type KeyProvider = (typeof KEY_PROVIDER)[number];
 
 const CREDENTIAL_PROVIDER = new Map<string, KeyProvider>(Object.entries({
   boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio",
-  openaiImageApiKey: "openai_image", onePasswordToken: "onepassword",
+  openaiImageApiKey: "openai_image", onePasswordToken: "onepassword", composioApiKey: "composio", openaiApiKey: "openai",
+  anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq",
+  metaApiKey: "meta", deepseekApiKey: "deepseek",
 } satisfies Record<CredentialTargetId, KeyProvider>));
 
 export function credentialProvider(target: unknown): KeyProvider | "other" {

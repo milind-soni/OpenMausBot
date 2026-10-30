@@ -10,7 +10,8 @@ export const MIN_CHUNK_BYTES = 512 * 1024;
 export const QUIET_MS = 2_000;
 export const TRASH_DAYS = 30;
 
-const SKIP_DIRS = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".next", ".turbo", ".cache"]);
+// Security: .openmausbot-secrets holds a bot's private secret files, which never leave the computer they were given on.
+const SKIP_DIRS = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".next", ".turbo", ".cache", ".openmausbot-secrets"]);
 const SKIP_FILES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(?:\..*)?$/i;

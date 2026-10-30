@@ -25,7 +25,16 @@ export interface CloudListEntry {
   lastSeenAt?: number;
   /** The OpenMausBot version it runs, for an update reminder. */
   version?: string;
+  /** Ended, stopped or with a payment problem, its files still kept: when they are deleted (ms). */
+  deleteAfter?: number;
+  /** Its owner may take it off their list (one of their own, in no team, that ended or was never paid for): the Admin's word. */
+  removable?: true;
+  /** A Ready Cloud whose plan sleeps: whether it is asleep now. */
+  power?: import("./cloud-power.mjs").CloudPower;
 }
+/** What this app says of a listed Cloud it doesn't open: ended, its checkout not finished, a payment problem, or being set up. */
+export type CloudState = "ended" | "checkout" | "payment" | "setup";
+export declare function cloudState(cloud: Pick<CloudListEntry, "status"> | null | undefined): CloudState | null;
 /**
  * The account's own plan's renewal, as the Admin says it for the account that pays (display only): a free trial (`trial`), its
  * renewal off (`cancelled`), when it renews (`renewsAt`) or, once cancelled, ends (`endsAt`; null: the end of the period paid
@@ -34,6 +43,13 @@ export interface CloudListEntry {
  */
 export interface CloudRenewal { trial: boolean; cancelled: boolean; renewsAt: number | null; endsAt: number | null; keptDays: number | null; team?: string }
 export declare function parseCloudRenewal(clouds: unknown): (CloudRenewal & { cloudId: string }) | null;
+/** Why an organization can't be added to the Team plan now. */
+export type OrganizationBlock = "no_team_plan" | "limit" | "rate" | "off";
+/** The session's `organizations`: the Team plan this account pays for, whether ＋ may add an organization to it now (else
+ * why), and how many it has of how many. */
+export interface CloudOrganizations { planCloudId: string; canAdd: boolean; blocked?: OrganizationBlock; count: number; max: number }
+export declare const ORGANIZATION_BLOCKS: readonly OrganizationBlock[];
+export declare function parseOrganizations(input: unknown): CloudOrganizations | null;
 export declare const MAX_CLOUDS: number;
 export declare const CLOUD_LIST_STATUSES: readonly CloudListStatus[];
 export declare const CLOUD_SWATCH_COLORS: Readonly<Record<CloudSwatch, import("./cloud-buy.mjs").CloudColor | null>>;

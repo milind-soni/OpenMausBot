@@ -1,70 +1,51 @@
-// ＋ at the end of the rail: one sheet, two choices. Buy a Cloud (the buying sheet: another Cloud right here, or the
-// first one on this computer's own sheet) or add a server of the person's own through today's pairing link.
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Cloud, Copy, Server, X } from "lucide-react";
+// ＋ at the end of the rail: one sheet of choices. A new organization on the Team plan the person pays for (when they run
+// one), buy a Cloud (the buying sheet: another Cloud right here, or the first one on this computer's own sheet), or add a
+// server of the person's own by pasting its pairing link.
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Building2, Cloud, Loader2, Server, X } from "lucide-react";
 import type { RailAddChoices } from "../../electron/cloud-rail.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
-import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import type { LocaleKey } from "@/locales";
 import { AddCloudFlow } from "./cloud-buy/AddCloudFlow";
+import { NewOrganization } from "./cloud-buy/NewOrganization";
 import { BackLink, Heading } from "./cloud-buy/parts";
 
-/** The commands a server of the person's own runs to be reached from this app. */
-export const OWN_SERVER_INSTALL = "npx openmausbot start";
-export const OWN_SERVER_PAIR = "npx openmausbot pair --label \"My desktop\"";
-
-export interface OwnServerStep { key: string; title: LocaleKey; detail: LocaleKey; command?: string }
-/** What a server of the person's own takes, step by step. `managed`: one command from MausBot Cloud that installs and
- * connects it by itself; without it, today's install, then its pairing link pasted here. `installed`: it runs
- * OpenMausBot already (it signed in with the person's account), so only its pairing link is left. */
-export function ownServerSteps(managed: { command: string } | null = null, { installed = false }: { installed?: boolean } = {}): OwnServerStep[] {
-  if (managed) return [{ key: "install", title: "rail.step1", detail: "rail.step1Sub", command: managed.command }];
-  const steps: OwnServerStep[] = [
-    { key: "install", title: "rail.step1", detail: "rail.step1Sub", command: OWN_SERVER_INSTALL },
-    { key: "pair", title: "rail.step2", detail: "rail.step2Sub", command: OWN_SERVER_PAIR },
-    { key: "connect", title: "rail.step3", detail: "rail.step3Sub" },
-  ];
-  return installed ? steps.filter((step) => step.key !== "install") : steps;
-}
-
-function Command({ text }: { text: string }) {
-  const { state, copy } = useCopyFeedback(text);
-  return <div className="mt-2 flex items-center gap-2 rounded-lg border border-hairline bg-app py-1.5 pe-1.5 ps-3">
-    <code data-own-server-command className="min-w-0 flex-1 select-all break-words font-mono text-[13px] text-ink">{text}</code>
-    <button type="button" onClick={copy} className="ui-button inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[12px]">
-      {state === "copied" ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-      {t(state === "copied" ? "rail.copied" : "rail.copy")}
-    </button>
-  </div>;
-}
-
-/** Install OpenMausBot there, open its pairing window, paste its link: the pasted link and the typed address are main's
- * own Connect dialogs, as the Server menu opens them. `connect`: a server of theirs that signed in with their account,
- * not connected to this app yet. */
-export function OwnServerSteps({ choices, onBack, onChoose, managed = null, connect = null }: {
-  choices: RailAddChoices; onBack: (() => void) | null; onChoose: (choice: "link" | "address") => void; managed?: { command: string } | null; connect?: { name: string } | null;
-}) {
-  const steps = ownServerSteps(managed, { installed: Boolean(connect) });
-  return <div data-place-add={connect ? "connect-server" : "own-server"} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+/** A server's pairing link, pasted here: main checks it and asks "Connect to <host>?" itself, then opens it. The sheet
+ * stays open when the person cancels, and says so when the link isn't one. `connect`: a server of theirs that signed in
+ * with their account, not connected to this app yet. */
+export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null }) {
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const pasted = link.trim();
+    if (!pasted || busy) return;
+    track("rail_add", { step: "link" });
+    setBusy(true);
+    setFailed(false);
+    try {
+      if (await window.ogb?.workspaces?.add?.("link", pasted) !== false) onConnected();
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <form data-place-add={connect ? "connect-server" : "own-server"} onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
-    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : t("rail.own")} sub={t(connect ? "rail.connectLede" : "rail.ownLede")} />
-    <ol className="flex flex-col gap-3">
-      {steps.map((step, index) => <li key={step.key} className="grid grid-cols-[26px_minmax(0,1fr)] gap-3">
-        <span aria-hidden="true" className="grid size-[26px] place-items-center rounded-full bg-accent/12 text-[13px] font-semibold text-accent-text">{index + 1}</span>
-        <div className="min-w-0">
-          <p className="text-[14px] font-semibold text-ink">{t(step.title)}</p>
-          <p className="text-[13px] leading-relaxed text-ink-secondary">{t(step.detail)}</p>
-          {step.command && <Command text={step.command} />}
-          {step.key === "connect" && <div className="mt-2.5 flex flex-wrap gap-2">
-            {choices.link && <button type="button" data-autofocus className="ui-button ui-button-primary" onClick={() => onChoose("link")}>{t("rail.paste")}</button>}
-            {choices.address && <button type="button" className="ui-button" onClick={() => onChoose("address")}>{t("rail.address")}</button>}
-          </div>}
-        </div>
-      </li>)}
-    </ol>
-  </div>;
+    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : t("rail.own")} sub={t(connect ? "rail.connectPasteLede" : "rail.pasteLede")} />
+    <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("rail.paste")}
+      <input data-autofocus data-own-server-link value={link} disabled={busy} onChange={(event) => { setLink(event.target.value); setFailed(false); }}
+        placeholder="https://" autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={failed || undefined}
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
+    </label>
+    {failed && <p role="alert" className="text-[13px] text-danger">{t("rail.linkFailed")}</p>}
+    <div><button type="submit" disabled={busy || !link.trim()} className="ui-button ui-button-primary inline-flex items-center gap-2">
+      {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{t("rail.connect")}
+    </button></div>
+  </form>;
 }
 
 function Choice({ icon, title, sub, onClick, kind }: { icon: ReactNode; title: string; sub: string; onClick: () => void; kind: string }) {
@@ -109,24 +90,27 @@ export function RailSheet({ wide = false, focusKey, onClose, children }: { wide?
 }
 
 export function PlaceAddSheet({ choices, connect = null, onClose }: { choices: RailAddChoices; connect?: { name: string } | null; onClose: () => void }) {
-  const server = choices.link || choices.address;
-  const [view, setView] = useState<"choose" | "cloud" | "server">(connect ? "server" : choices.cloud && server ? "choose" : choices.cloud ? "cloud" : "server");
+  const server = choices.link, organization = choices.organization === true;
+  const several = [organization, choices.cloud, server].filter(Boolean).length > 1;
+  const [view, setView] = useState<"choose" | "cloud" | "server" | "organization">(connect ? "server" : several ? "choose" : organization ? "organization" : choices.cloud ? "cloud" : "server");
   const [wide, setWide] = useState(false);
   const workspaces = window.ogb?.workspaces;
-  const choose = (choice: "cloud" | "link" | "address") => {
-    track("rail_add", { step: choice });
+  const firstCloud = () => {
+    track("rail_add", { step: "cloud" });
     onClose();
-    void workspaces?.add?.(choice).catch(() => {});
+    void workspaces?.add?.("cloud").catch(() => {});
   };
   return <RailSheet wide={view === "cloud" && wide} focusKey={view} onClose={onClose}>
     {view === "choose" && <div data-place-add="choose" className="flex flex-col gap-5 px-[30px] pb-[26px] pt-7">
       <Heading title={t("rail.add")} />
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Choice kind="cloud" icon={<Cloud size={19} />} title={t("rail.buy")} sub={t("rail.buySub")} onClick={() => setView("cloud")} />
-        <Choice kind="server" icon={<Server size={19} />} title={t("rail.own")} sub={t("rail.ownSub")} onClick={() => setView("server")} />
+        {organization && <Choice kind="organization" icon={<Building2 size={19} />} title={t("rail.org")} sub={t("rail.orgSub")} onClick={() => setView("organization")} />}
+        {choices.cloud && <Choice kind="cloud" icon={<Cloud size={19} />} title={t("rail.buy")} sub={t("rail.buySub")} onClick={() => setView("cloud")} />}
+        {server && <Choice kind="server" icon={<Server size={19} />} title={t("rail.own")} sub={t("rail.ownSub")} onClick={() => setView("server")} />}
       </div>
     </div>}
-    {view === "server" && <OwnServerSteps choices={choices} onBack={choices.cloud && !connect ? () => setView("choose") : null} onChoose={choose} connect={connect} />}
-    {view === "cloud" && <AddCloudFlow onClose={onClose} onFirstCloud={() => choose("cloud")} onWide={setWide} onBack={server ? () => setView("choose") : null} />}
+    {view === "server" && <OwnServerLink onBack={several && !connect ? () => setView("choose") : null} onConnected={onClose} connect={connect} />}
+    {view === "cloud" && <AddCloudFlow onClose={onClose} onFirstCloud={firstCloud} onWide={setWide} onBack={several ? () => setView("choose") : null} />}
+    {view === "organization" && <NewOrganization onClose={onClose} onBack={several ? () => setView("choose") : null} />}
   </RailSheet>;
 }

@@ -6,41 +6,43 @@ import { choosePlaceColor, usePlaceLook } from "@/lib/place-look";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore } from "@/state/store";
 import { PlacePicture } from "./PlacePicture";
-import { Card } from "./SettingsPrimitives";
+import { SettingRow, SettingsRows, SIMPLE_BUTTONS } from "./SettingsPrimitives";
 import { SwatchRadios } from "./SwatchRadios";
 
-/** The look of the place on screen, where it is changed: its colour, in the six swatches the rail's circles use (a
- * Cloud's is the Admin's, so every app of theirs follows), and next to it a banner picture, kept on the place's own
- * server for everyone there. A team member sees both and who may change them. This computer's own page has no colour,
- * so there only the picture. */
-export function PlaceLookCard() {
+/** The sidebar's look, as two rows of Settings: its colour, in the six swatches the rail's circles use, and its picture,
+ * kept on the place's own server for everyone there. Both start plain. This computer's colour is the app's own; a
+ * Cloud's is the Admin's, so every app of theirs follows it, and a team member sees both and who may change them. A
+ * browser knows no colour, only the picture. */
+export function PlaceLookRows() {
   const look = usePlaceLook();
   const { state } = useStore();
   const admin = useOwnerOrAdmin() === true;
+  const computer = window.ogb?.app?.ownPage === true;
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
-  const picture = <PlacePicture banner={state.config?.workspaceBanner ?? null} canChange={admin} />;
-  if (!look) return <Card title={t("placeLook.picture")} subtitle={t("placeLook.pictureSub")}>{picture}</Card>;
-  const locked = look.change === null;
+  const locked = look?.change === null;
   const choose = (swatch: CloudSwatch) => {
-    if (locked || pending || swatch === look.swatch) return;
+    if (!look || locked || pending || swatch === look.swatch) return;
     setPending(swatch); setOutcome(null);
     void choosePlaceColor(swatch).then((answer) => { setPending(null); setOutcome(answer); });
   };
-  const note = look.reason === "member" || outcome === "refused" ? t("placeLook.member") : look.reason === "signed-out" ? t("placeLook.signedOut")
+  const note = look?.reason === "member" || outcome === "refused" ? t("placeLook.member") : look?.reason === "signed-out" ? t("placeLook.signedOut")
     : outcome === "unsupported" ? t("placeLook.unsupported") : null;
-  return <Card title={t("placeLook.title")} subtitle={t("placeLook.sub", { name: look.name })}>
-    <div data-place-look={look.change ?? "locked"} className="flex flex-col gap-3">
-      <SwatchRadios value={pending ?? look.swatch} onChange={choose} label={t("placeLook.aria", { name: look.name })} disabled={locked} offset="card" />
-      {note && <p className="text-[13px] text-ink-secondary">{note}</p>}
-      {outcome === "failed" && <p role="alert" className="text-[13px] text-danger">{t("placeLook.failed")}</p>}
-      <div className="mt-1 flex flex-col gap-2 border-t border-hairline/50 pt-4">
-        <div>
-          <p className="text-[14px] font-medium text-ink">{t("placeLook.picture")}</p>
-          <p className="text-[13px] leading-relaxed text-ink-secondary">{t("placeLook.pictureSub")}</p>
-        </div>
-        {picture}
-      </div>
-    </div>
-  </Card>;
+  return <>
+    {look && <div data-place-look={look.change ?? "locked"}>
+      <SettingRow title={t("placeLook.sidebarColor")} subtitle={computer ? t("placeLook.sidebarColorSub") : t("placeLook.sub", { name: look.name })}
+        message={outcome === "failed" ? <p role="alert" className="text-danger">{t("placeLook.failed")}</p> : note && <p className="text-ink-secondary">{note}</p>}>
+        <SwatchRadios value={pending ?? look.swatch} onChange={choose} label={computer ? t("placeLook.sidebarColor") : t("placeLook.aria", { name: look.name })}
+          disabled={locked} offset="menu" none />
+      </SettingRow>
+    </div>}
+    <PlacePicture banner={state.config?.workspaceBanner ?? null} canChange={admin} subtitle={t(computer ? "placeLook.sidebarPictureSub" : "placeLook.pictureSub")} />
+  </>;
+}
+
+/** The same rows in a card of their own, in the Simple look in Advanced too. */
+export function PlaceLookCard() {
+  return <div data-sidebar-look data-settings-look="simple" className={SIMPLE_BUTTONS}>
+    <SettingsRows><PlaceLookRows /></SettingsRows>
+  </div>;
 }
