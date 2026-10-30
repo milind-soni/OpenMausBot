@@ -135,7 +135,7 @@ describe("which engines a turn is bridged on", () => {
 
   it.each([
     // ACP agents keep their own permissions, Grok among them
-    ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["hermesAgent"],
+    ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["copilotAgent"], ["hermesAgent"],
     ["opencodeGo"], ["antigravityAgent"], ["customAcp"],
     // not shown to qualify, and anything nobody has heard of
     ["museCode"], ["someFutureDriver"], [""],
@@ -766,12 +766,12 @@ describe("the prompt of a bridged turn", () => {
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: {} })).toEqual(plain);
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, {})).toEqual(plain);
     expect(plain.text).not.toContain(FIND_TOOL);
-    expect(plain.sections.map((section) => section.id)).toEqual(["persona", "soul", "routine", "memory", "credential"]);
+    expect(plain.sections.map((section) => section.id)).toEqual(["persona", "soul", "routine", "memory", "credential", "reply-habits"]);
   });
 
   it("has the section only when this turn was asked to bridge, once, right after the soul", () => {
     const built = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, bridged);
-    expect(built.sections.map((section) => section.id)).toEqual(["persona", "soul", "tool-bridge", "routine", "memory", "credential"]);
+    expect(built.sections.map((section) => section.id)).toEqual(["persona", "soul", "tool-bridge", "routine", "memory", "credential", "reply-habits"]);
     const section = built.sections.find((entry) => entry.id === "tool-bridge")!;
     expect(section.text).toBe(AGENTS_TOOL_BRIDGE_PROMPT);
     expect(section.bytes).toBe(Buffer.byteLength(AGENTS_TOOL_BRIDGE_PROMPT, "utf8"));

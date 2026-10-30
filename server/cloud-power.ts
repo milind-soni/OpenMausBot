@@ -17,11 +17,14 @@ export interface CloudPowerReport {
   v: 1; at: number; bootedAt: number; wokeAt: number;
   idle: boolean; busy: CloudPowerBusy[];
   lastActivityAt: number | null; lastWorkAt: number | null;
-  /** The earliest scheduled run (an enabled routine's next run or a queued run's retry), null when none: the Admin
-   * starts a sleeping home a minute before it. */
+  /** The earliest scheduled run (an enabled routine's next run or a queued run's retry, or 30 minutes on while a bot
+   * waits for something), null when none: the Admin starts a sleeping home a minute before it. */
   nextDueAt: number | null;
   /** The home said yes to a sleep request and has not been used or woken since. */
   sleeping: boolean;
+  /** What the first request after its last wake (or boot) was, if one came within WOKE_BY_MS: a fixed code for its kind
+   * (`wakeCode`) and whether it was a background one. The Admin logs it for a wake by Fly's proxy: what woke it. */
+  wokeBy: { by: string; background: boolean } | null;
 }
 
 export interface CloudPowerProbes {
@@ -49,6 +52,17 @@ export const CLOUD_IDLE_DUE_MS = 5 * 60_000;
 export const CLOUD_SLEEP_PENDING_MS = 120_000;
 /** The clock tick that notices a resume: a jump this much larger than the tick means the machine was suspended. */
 const TICK_MS = 5_000, RESUME_JUMP_MS = 15_000;
+/** The first request this soon after a wake or a boot is taken for what woke the home (`wokeBy`). */
+export const WOKE_BY_MS = 30_000;
+/** Each kind of request, as a fixed code, by its path: never more of the request than that. Anything else is a page. */
+const WAKE_CODES: readonly [RegExp, string][] = [
+  [/^\/api\/events$/, "events"], [/^\/api\/sync(\/|$)/, "sync"], [/^\/api\/shared-computers(\/|$)/, "lending"],
+  [/^\/\.well-known\/openmausbot\/environment$/, "version"], [/^\/api\/phones(\/|$)/, "phone"], [/^\/api\/presence(\/|$)/, "presence"],
+  [/^\/api\/auth\/session$/, "session"], [/^\/(?:api\/)?(?:auth\/)?pair(?:ing)?(?:\/|$)/, "pair"], [/^\/api\/cloud\//, "admin"],
+  [/^\/api\/health$/, "health"], [/^\/hooks(\/|$)/, "webhook"], [/^\/mcp-oauth\//, "sign-in"], [/^\/api\//, "api"],
+];
+/** A request's kind (`wokeBy`): "events" (a page's live stream), "version" (the desktop's version check), "api" and so on. */
+export const wakeCode = (path: string) => WAKE_CODES.find(([pattern]) => pattern.test(path))?.[1] ?? "page";
 /** Paths that never count as someone using the home: the event stream, the public probe, Files and lending loops,
  * and the Admin's own power reads. */
 const BACKGROUND = [/^\/api\/events$/, /^\/api\/health$/, /^\/api\/sync(\/|$)/, /^\/api\/shared-computers(\/|$)/, /^\/api\/cloud\/power(\/|$)/];
@@ -98,6 +112,8 @@ export function createCloudPower(options: {
   const now = options.now ?? Date.now;
   const bootedAt = now();
   let wokeAt = bootedAt, lastActivityAt: number | null = null, lastWorkAt: number | null = null;
+  /** The first request since `wokeAt` (`arrived`), and whether one came. */
+  let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false;
   let sleepingSince: number | null = null, inFlight = 0;
   let sleepAbort = new AbortController();
   let lastTick = now();
@@ -123,13 +139,19 @@ export function createCloudPower(options: {
     if (probes.maintenance() || inFlight > 0) busy.push("maintenance");
     return busy;
   };
+  /** A resume: the clock jumped past the tick (noticed once, by the tick or by a request). */
+  const resumed = (at: number) => {
+    if (at - lastTick <= TICK_MS + RESUME_JUMP_MS) return;
+    lastTick = at;
+    wokeAt = at;
+    wokeBy = null;
+    wokeSeen = false;
+    endSleep();
+  };
   /** Samples work (so "finished two minutes ago" needs no hook in every kind of work) and notices a resume. */
   const tick = () => {
     const at = now();
-    if (at - lastTick > TICK_MS + RESUME_JUMP_MS) {
-      wokeAt = at;
-      endSleep();
-    }
+    resumed(at);
     lastTick = at;
     if (working().length) lastWorkAt = at;
   };
@@ -164,6 +186,15 @@ export function createCloudPower(options: {
   return {
     noteActivity,
     begin,
+    /** Any request at all, first thing (the server's own and its webhooks'): the first after a wake or a boot is what woke
+     * it (`wokeBy`). Only its kind is kept. A resume is noticed here too, before the clock tick. */
+    arrived(path: string, headers: IncomingHttpHeaders) {
+      const at = now();
+      resumed(at);
+      if (wokeSeen || at - wokeAt > WOKE_BY_MS) return;
+      wokeSeen = true;
+      wokeBy = { by: wakeCode(path), background: !countsAsActivity(path, headers) };
+    },
     /** An authenticated request: someone using the home (`countsAsActivity`), and work in progress until it ends. */
     request(path: string, headers: IncomingHttpHeaders, res: Pick<ServerResponse, "once">) {
       if (countsAsActivity(path, headers)) noteActivity();
@@ -171,7 +202,7 @@ export function createCloudPower(options: {
     },
     report(activityMs = CLOUD_IDLE_ACTIVITY_MS): CloudPowerReport {
       const busy = busyNow(activityMs);
-      return { v: 1, at: now(), bootedAt, wokeAt, idle: busy.length === 0, busy, lastActivityAt, lastWorkAt, nextDueAt: options.probes.nextDueAt(), sleeping: sleeping() };
+      return { v: 1, at: now(), bootedAt, wokeAt, idle: busy.length === 0, busy, lastActivityAt, lastWorkAt, nextDueAt: options.probes.nextDueAt(), sleeping: sleeping(), wokeBy };
     },
     /** The Admin is about to suspend or stop this machine: yes only when idle now. From here until a resume, someone's
      * use or CLOUD_SLEEP_PENDING_MS, held polls answer "asleep" and new ones are refused (`sleeping`). */

@@ -12,7 +12,7 @@ const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.e
 const enabled = Boolean(binary) || process.env.OMB_UI_E2E === "1";
 if (!enabled) console.log("skipping draft visibility UI: set OMB_UI_E2E=1 to install the pinned browser");
 
-(enabled ? it : it.skip)("creates a restricted bot from the full draft dialog without widening its audience", async () => {
+(enabled ? it : it.skip)("creates a restricted ready-made bot from its review without widening its audience", async () => {
   let child: ChildProcess | undefined;
   try {
     let stdout = "", stderr = "";
@@ -30,7 +30,10 @@ if (!enabled) console.log("skipping draft visibility UI: set OMB_UI_E2E=1 to ins
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
     const bots = async () => (await fetch(`${info.url}/api/bots?messages=0`).then(response => response.json())).bots as Array<{ id: string; visibility?: string }>;
     const before = await bots();
-    await ui("press", "--keys", "Control+n");
+    await ui("click", "--name", "New or share");
+    await ui("click", "--name", "Templates");
+    await expect.poll(snapshot, { timeout: 20_000 }).toContain("Add Scout, Researcher");
+    await ui("click", "--name", "Add Scout, Researcher");
     await expect.poll(snapshot).toContain("Who can see it");
     // The dialog appears before its defaults request completes. Never click
     // the disabled Create button while the fixture is still loading its draft.

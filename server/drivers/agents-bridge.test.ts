@@ -34,6 +34,8 @@ const profile = (options: { chief?: boolean; skills?: boolean; shared?: boolean;
     OMB_VOICE_NOTES: flag(options.voice ?? false),
     OMB_CLOUD_HOME: flag(options.cloudHome ?? false),
     OMB_MEMORY_ENABLED: flag(options.memory ?? true),
+    // A person's own request, which may pick its computer.
+    OMB_COMPUTER_SELECTION: "1",
   });
 
 /** Every switch combination the harness can ask for, as the wire test's
@@ -51,7 +53,7 @@ function everyProfile(): Array<{ name: string; profile: CatalogProfile }> {
 const bridgeFor = (options: Parameters<typeof profile>[0] = {}) => createToolBridge(availableTools(profile(options)) as BridgeTool[]);
 const names = (tools: readonly { name: string }[]) => tools.map((tool) => tool.name);
 const FULL_CHIEF = { chief: true, skills: true, shared: true, voice: true } as const;
-const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 
 type Match = { name: string; description: string; inputSchema: Record<string, unknown> };
 type FindPayload = { matches: Match[]; next: string };
@@ -199,7 +201,7 @@ describe("what a bridged turn is listed", () => {
     const tools = availableTools(profile(FULL_CHIEF)) as BridgeTool[];
     const bridge = createToolBridge(tools);
     expect(bridge.listed.find((tool) => tool.name === FIND_TOOL)!.annotations).toEqual(READ_ONLY_ANNOTATIONS);
-    expect(bridge.listed.find((tool) => tool.name === FIND_TOOL)!.annotations).toEqual(tools.find((tool) => tool.name === "list_triggers")!.annotations);
+    expect(bridge.listed.find((tool) => tool.name === FIND_TOOL)!.annotations).toEqual(tools.find((tool) => tool.name === "trigger_info")!.annotations);
     expect(bridge.listed.find((tool) => tool.name === USE_TOOL)).not.toHaveProperty("annotations");
   });
 
@@ -241,12 +243,13 @@ describe("what a bridged turn is listed", () => {
 
 describe("find_tool", () => {
   it.each([
-    ["schedule a recurring task every morning", "create_trigger"],
-    ["pause or delete one of my routines", "manage_trigger"],
-    ["what routines do I have", "list_triggers"],
+    ["schedule a recurring task every morning", "trigger"],
+    ["pause or resume one of my routines", "trigger"],
+    ["what routines do I have", "trigger_info"],
     ["change my name and title", "propose_profile"],
     ["switch this bot to a different model", "propose_model"],
     ["search my earlier conversations", "session_search"],
+    ["delete one of my routines for good", "delete_trigger"],
     ["run a shell command in the VM", "vm_exec"],
     ["add an MCP server", "add_mcp_server"],
     ["see how the threads I opened are going", "list_threads"],
@@ -254,13 +257,12 @@ describe("find_tool", () => {
     ["remember a decision for the whole team", "propose_team_memory"],
     ["save this procedure as a reusable skill", "skill_manage"],
     ["create a new specialist bot", "create_bot"],
-    ["delete a teammate", "propose_bot_deletion"],
     ["rename a room or change its members", "manage_room"],
     ["use the desktop the user shared", "shared_computer"],
     ["open a separate job for each pull request", "start_thread"],
-    ["read the whole message from an old conversation", "session_read"],
+    ["read the whole message from an old conversation", "session_search"],
     ["retry the failed thread", "retry_thread"],
-    ["cron", "create_trigger"],
+    ["cron", "trigger"],
   ])("ranks the hidden tool first from how a person would ask: %s", async (query, expected) => {
     const matches = (await found(bridgeFor(FULL_CHIEF), query)).matches;
     expect(matches[0]!.name).toBe(expected);
@@ -270,7 +272,9 @@ describe("find_tool", () => {
   it.each([
     // each of these lands second, behind a tool that does nearly the same
     ["check how a hand-off is going", "assignment_status"],
-    ["make a new room", "create_room"],
+    ["make a new room", "manage_room"],
+    // delete_trigger shares the word
+    ["delete a teammate", "propose_bot_deletion"],
     ["my skills", "skills_list"],
     ["computers shared with this workspace", "list_shared_computers"],
   ])("returns the hidden tool among its few matches for a looser request: %s", async (query, expected) => {
@@ -278,10 +282,10 @@ describe("find_tool", () => {
   });
 
   it("matches on words, not meaning: a request that shares none with any tool gets the names instead", async () => {
-    // A known limit of a lexical search: create_trigger is what "nudge me" wants, but no word of it is in any tool.
+    // A known limit of a lexical search: trigger is what "nudge me" wants, but no word of it is in any tool.
     const payload = await found(bridgeFor(FULL_CHIEF), "nudge me tomorrow at 9");
     expect(payload.matches).toEqual([]);
-    expect(payload.next).toContain("create_trigger");
+    expect(payload.next).toContain("trigger");
   });
 
   it("puts a tool asked for by its exact name first, with what the unbridged turn would have listed: its name, its one-line description and its full input schema", async () => {
@@ -302,6 +306,13 @@ describe("find_tool", () => {
     }
   });
 
+  it("reads a tool's other name, asked for exactly, as the tool it belongs to", async () => {
+    const bridge = bridgeFor(FULL_CHIEF);
+    expect((await found(bridge, "create_trigger")).matches[0]!.name).toBe("trigger");
+    expect((await found(bridge, "list_trigger_events")).matches[0]!.name).toBe("trigger_info");
+    expect((await found(bridge, "update_widget")).matches[0]!.name).toBe("show_widget");
+  });
+
   it("says how to run a match", async () => {
     expect((await found(bridgeFor(FULL_CHIEF), "list my routines")).next).toContain(`${USE_TOOL}({ "name": `);
   });
@@ -316,7 +327,7 @@ describe("find_tool", () => {
       expect(Math.max(...bridge.hidden.map((tool) => JSON.stringify(tool).length)), name).toBeLessThan(20_000);
     }
     const bridge = bridgeFor(FULL_CHIEF);
-    for (const query of ["routine schedule cron timezone interval", "team setup bots models rooms", "propose change profile model routine"]) {
+    for (const query of ["routine schedule cron timezone interval webhook bot", "team setup bots models rooms", "propose change profile model routine"]) {
       const answer = await bridge.find({ query });
       expect(JSON.parse(answer.text).matches.length, query).toBe(FIND_MATCHES_MAX);
       expect(answer.text.length, query).toBeLessThan(24_000);

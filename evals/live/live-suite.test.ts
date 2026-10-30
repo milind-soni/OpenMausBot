@@ -113,6 +113,11 @@ describe("committed live scenarios", () => {
     expect(loadLiveScenarios().map((scenario) => scenario.id).sort()).toEqual([
       "live-delegation-lane",
       "live-open-ended-judge",
+      "live-reply-dead-link",
+      "live-reply-plan-week",
+      "live-reply-remember",
+      "live-reply-research",
+      "live-reply-routine",
     ]);
   });
 });
@@ -123,6 +128,7 @@ describe("judge prompts", () => {
     expect(prompt.text).toContain("{{task}}");
     expect(prompt.text).toContain("{{reply}}");
     expect(() => loadJudgePrompt("missing-v9")).toThrow(/no judge prompt version/);
+    expect(loadJudgePrompt("reply-habits-v1").text).toContain("{{reply}}");
   });
 
   it("parses strict verdicts from plain, fenced, or prose-wrapped replies", () => {

@@ -296,8 +296,9 @@ describe("RoutineRequestService", () => {
     expect(routines.listRoutines()).toHaveLength(0);
     expect(proposed.timeZone).toBe("America/New_York");
     expect(proposed.summary).toContain("0 9 1 * *");
-    expect(proposed.summary).toContain("America/New_York");
-    expect(proposed.detail).toContain("Next 3 runs (America/New_York): Sep 1, 2026, 9:00 AM · Oct 1, 2026, 9:00 AM · Nov 1, 2026, 9:00 AM");
+    expect(proposed.summary).toContain("Monthly on day 1 at 9:00 Eastern time");
+    expect(`${proposed.summary}\n${proposed.detail}`).not.toContain("America/New_York");
+    expect(proposed.detail).toContain("Next 3 runs (Eastern time): Sep 1, 2026, 9:00 AM · Oct 1, 2026, 9:00 AM · Nov 1, 2026, 9:00 AM");
     expect(proposed.nextRunAt).toBe(Date.parse("2026-09-01T13:00:00Z"));
     const message = store.messagesFor("thread-a")[0]!;
     message.card = JSON.parse(JSON.stringify(message.card)) as RoutineRequestOptionCard;
@@ -370,7 +371,8 @@ describe("RoutineRequestService", () => {
 
     expect(routines.listRoutines()).toHaveLength(0);
     expect(proposed.timeZone).toBe("Asia/Kolkata");
-    expect(proposed.summary).toContain("Monday, Wednesday at 09:00 (Asia/Kolkata)");
+    expect(proposed.summary).toContain("Monday, Wednesday at 9:00 India time");
+    expect(proposed.summary).not.toContain("Asia/Kolkata");
     const card = store.messagesFor("thread-a")[0]!.card!;
     expect(card.requestId).toBe(proposed.requestId);
     expect(card.tool).toBe("schedule_routine");
@@ -752,7 +754,7 @@ describe("RoutineRequestService", () => {
 
     expect(proposed.summary).toContain("Every 15 minutes");
     expect(proposed.summary).toContain("Monday, Friday");
-    expect(proposed.summary).toContain("09:00–17:00");
+    expect(proposed.summary).toContain("during 9:00–17:00 India time");
     expect(proposed.summary).toContain("Sep 30, 2026");
     expect(proposed.summary).toContain("no run limit");
     expect(store.messagesFor("thread-a")[0]?.card?.routineRequest?.operation).toMatchObject({
@@ -851,9 +853,9 @@ describe("RoutineRequestService", () => {
     expect(restrictedWithoutAnchor.summary).toContain(
       "cadence starting at confirmation; first run is the next allowed time",
     );
-    expect(restrictedWithoutAnchor.summary).toContain("Friday (Asia/Kolkata)");
-    expect(restrictedWithoutAnchor.summary).toContain("16:00–17:00 (Asia/Kolkata)");
-    expect(restrictedWithoutAnchor.detail).toContain("Next allowed time after confirmation (Asia/Kolkata)");
+    expect(restrictedWithoutAnchor.summary).toContain("Friday (India time)");
+    expect(restrictedWithoutAnchor.summary).toContain("16:00–17:00 India time");
+    expect(restrictedWithoutAnchor.detail).toContain("Next allowed time after confirmation (India time)");
     expect(restrictedWithoutAnchor.detail).not.toContain("One interval after confirmation");
 
     clock.now = now + 7 * 60_000;

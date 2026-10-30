@@ -1,6 +1,7 @@
 // One function per HighLevel endpoint a bot may reach, with inputs typed and outputs trimmed to what a person cares
 // about. The client itself cannot address a message, campaign, workflow or payment endpoint: that guard is here, not
 // in the tool list, so no later tool can grow a path to them.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { HIGHLEVEL_NOT_CONNECTED_TEXT, HIGHLEVEL_SIGNED_OUT_TEXT } from "./instructions.ts";
 import { HighLevelRelayError, type RelayTokens } from "./relay.ts";
 import { sameTokens, type HighLevelConnection, type HighLevelStore } from "./store.ts";
@@ -240,6 +241,7 @@ export class HighLevelClient {
   private readonly fetch: typeof fetch;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly activeCall = new AsyncLocalStorage<() => void>();
   private readonly budget = new Map<string, number[]>();
   private refreshing: { from: HighLevelConnection; promise: Promise<HighLevelConnection | null> } | null = null;
   /** `refused` holds a missing-permission answer so contact reads do not re-ask HighLevel on every call. */
@@ -252,6 +254,15 @@ export class HighLevelClient {
     this.fetch = options.fetch ?? fetch;
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
+
+  withActiveCall<T>(assertActive: () => void, run: () => Promise<T>): Promise<T> {
+    return this.activeCall.run(assertActive, run);
+  }
+
+  private async wait(ms: number): Promise<void> {
+    await this.sleep(ms);
+    this.activeCall.getStore()?.();
   }
 
   /** The connection, refreshed ahead of expiry; throws the signed-out error when a person must reconnect. */
@@ -282,6 +293,7 @@ export class HighLevelClient {
    * connection was replaced meanwhile, so nothing was refreshed. */
   private refresh(current: HighLevelConnection): Promise<HighLevelConnection | null> {
     if (this.refreshing && sameTokens(this.refreshing.from, current)) return this.refreshing.promise;
+    this.activeCall.getStore()?.();
     const promise = (async () => {
       if (current.kind !== "oauth" || !current.refreshToken) {
         this.store.markNeedsSignIn("The saved token was rejected by HighLevel.", current);
@@ -313,7 +325,7 @@ export class HighLevelClient {
     const now = this.now();
     const recent = window.filter((at) => now - at < BUDGET_WINDOW_MS);
     if (recent.length >= BUDGET_CALLS) {
-      await this.sleep(Math.max(1, recent[0]! + BUDGET_WINDOW_MS - now));
+      await this.wait(Math.max(1, recent[0]! + BUDGET_WINDOW_MS - now));
       return this.spend(locationId);
     }
     recent.push(now);
@@ -324,6 +336,7 @@ export class HighLevelClient {
     const url = new URL(`${this.apiUrl}${path}`);
     for (const [key, value] of Object.entries(options.query ?? {})) if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
     await this.spend(connection.locationId);
+    this.activeCall.getStore()?.();
     try {
       return await this.fetch(url, {
         method, redirect: "error",
@@ -384,7 +397,7 @@ export class HighLevelClient {
       if (response.status >= 500 && !retried5xx) {
         await response.body?.cancel().catch(() => {});
         retried5xx = true;
-        await this.sleep(1_000);
+        await this.wait(1_000);
         continue;
       }
       const body = await this.body(response, method, path, options);
@@ -406,7 +419,7 @@ export class HighLevelClient {
       }
       if (response.status === 429 && !waited) {
         waited = true;
-        await this.sleep(waitFromHeaders(response.headers, this.now()));
+        await this.wait(waitFromHeaders(response.headers, this.now()));
         continue;
       }
       if (response.status === 401) {

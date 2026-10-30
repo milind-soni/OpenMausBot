@@ -1,8 +1,9 @@
 import type { IncomingMessage } from "node:http";
+import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import { readBody } from "./http.ts";
+import { onParsedBody, parsedBodyOf, readBody } from "./http.ts";
 
 const request = (chunks: Buffer[]) => Readable.from(chunks) as unknown as IncomingMessage;
 
@@ -13,6 +14,18 @@ function splitInsideCharacter(bytes: Buffer, from: number): [Buffer, Buffer] {
 }
 
 describe("readBody", () => {
+  it("rejects a throwing body check without letting the exception escape the end callback", async () => {
+    const req = new EventEmitter() as IncomingMessage;
+    const error = new Error("body check failed");
+    onParsedBody(req, () => { throw error; });
+    const body = readBody(req);
+    const rejected = expect(body).rejects.toBe(error);
+    req.emit("data", Buffer.from('{"threadId":"private"}'));
+    expect(() => req.emit("end")).not.toThrow();
+    await rejected;
+    expect(parsedBodyOf(req)).toBeUndefined();
+  });
+
   it("keeps a character whole when a chunk boundary splits it", async () => {
     const text = "مرحبا بالعالم 中文 😀 ".repeat(50);
     const bytes = Buffer.from(JSON.stringify({ text }));

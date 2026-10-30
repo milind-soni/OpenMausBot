@@ -15,7 +15,7 @@ import { readSessionState } from "@/lib/session";
  * opened: null anywhere but a team's Cloud. */
 export type TeamChats = { teamId: string; member: boolean; opened?: readonly string[] };
 
-type TaskLike = { threadId: string; createdAt?: number; updatedAt?: number; private?: unknown; routineRunId?: unknown; openedBy?: unknown; archivedAt?: unknown; closedBy?: unknown };
+type TaskLike = { threadId: string; createdAt?: number; updatedAt?: number; private?: unknown; inbox?: unknown; routineRunId?: unknown; openedBy?: unknown; archivedAt?: unknown; closedBy?: unknown };
 type BotLike = { id: string; tasks?: TaskLike[] };
 
 let current: TeamChats | null = null;
@@ -35,13 +35,14 @@ export function rememberOwnChat(teamId: string, threadId: string) {
 const ownKind = (task: TaskLike) => task.private === true && !task.routineRunId && !task.openedBy && !task.archivedAt && !task.closedBy;
 const newest = (tasks: TaskLike[]) => [...tasks].sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))[0];
 
-/** The conversation clicking this team bot opens: the person's newest own (for an Admin, of those the server says they
- * opened); null when there is none yet (one is made). Never the main chat, and for an Admin never a chat only marked
- * private. */
+/** The conversation clicking this team bot opens: the person's inbox when this bot is where it lives (the server marks it
+ * for its person alone), else their newest own (for an Admin, of those the server says they opened); null when there is
+ * none yet (one is made). Never the main chat, and for an Admin never a chat only marked private. */
 export function ownChatOf(bot: BotLike, team: TeamChats): string | null {
   const own = (bot.tasks ?? []).filter(ownKind);
   const opened = new Set(team.opened ?? []);
-  return newest(team.member ? own : own.filter((task) => opened.has(task.threadId)))?.threadId ?? null;
+  const mine = team.member ? own : own.filter((task) => opened.has(task.threadId));
+  return (own.find((task) => task.inbox === true) ?? newest(mine))?.threadId ?? null;
 }
 
 const making = new Set<string>();

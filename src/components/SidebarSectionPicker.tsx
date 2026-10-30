@@ -4,6 +4,8 @@ import { useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useHeldMenuMotion } from "./MenuMotion";
+import { MENU_HEADING, MENU_ITEM, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
+import { departmentNames } from "./bot-sections";
 
 /** "Move to context": the sidebar sections in use, a field for a new one, and "remove from context". */
 export function SectionPicker({
@@ -41,13 +43,7 @@ export function SectionPicker({
     };
   }, [anchor, onClose]);
 
-  const sections = [
-    ...new Set([
-      ...(state.sections ?? []),
-      ...state.bots.filter((b) => !b.hidden && b.section).map((b) => b.section!),
-      ...state.groups.filter((g) => g.section).map((g) => g.section!),
-    ]),
-  ];
+  const sections = departmentNames(state);
 
   const assign = (section: string) => {
     onAssign(section);
@@ -63,20 +59,20 @@ export function SectionPicker({
     <div
       data-section-picker
       style={{ top, left }}
-      className={cn("fixed z-40 w-[236px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
+      className={cn("fixed z-40 w-[236px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
-      <div className="px-3.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+      <div className={MENU_HEADING}>
         {t("sidebar.section.moveToContext")}
       </div>
       {sections.length > 0 && (
-        <div className="flex flex-col gap-0.5 px-1.5 py-1">
+        <div className="flex flex-col gap-1">
           {sections.map((section) => (
             <button
               key={section}
               onClick={() => assign(section)}
               className={cn(
-                "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px]",
-                section === sectionCurrent ? "bg-raised text-ink" : "text-ink hover:bg-raised/70",
+                MENU_ITEM, "justify-between",
+                section === sectionCurrent ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
               )}
             >
               <span className="truncate">{section}</span>
@@ -86,7 +82,7 @@ export function SectionPicker({
         </div>
       )}
       <form
-        className="flex items-center gap-1.5 px-2.5 py-1"
+        className="flex items-center gap-1.5 p-0.5"
         onSubmit={(e) => {
           e.preventDefault();
           if (!trimmed || trimmed.length > 60) return;
@@ -100,27 +96,24 @@ export function SectionPicker({
           onChange={(e) => setName(e.target.value)}
           placeholder={t("sidebar.section.newContext")}
           aria-label={t("sidebar.section.newContextAria")}
-          className="w-full rounded-lg bg-raised/70 px-2.5 py-1.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+          className="w-full rounded-md bg-ink/[0.05] px-2 py-1.5 text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none"
         />
         <button
           type="submit"
           disabled={!trimmed || trimmed.length > 60}
-          className={cn(
-            "shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium",
-            trimmed ? "bg-accent text-panel" : "bg-raised/70 text-ink-secondary",
-          )}
+          className="ui-button ui-button-md ui-button-primary shrink-0"
         >
           {t("common.add")}
         </button>
       </form>
       {sectionCurrent && (
         <>
-          <div className="mx-2 my-1 border-t border-hairline/40" />
+          <div role="separator" className={MENU_ITEM_SEPARATOR} />
           <button
             onClick={() => assign("")}
-            className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[13px] text-danger hover:bg-raised/70"
+            className={cn(MENU_ITEM, "text-danger hover:bg-menu-hover")}
           >
-            <FolderMinus size={15} />
+            <FolderMinus size={16} />
             {t("sidebar.section.removeFromContext")}
           </button>
         </>

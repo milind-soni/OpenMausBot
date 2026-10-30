@@ -1,8 +1,9 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as atomic from "../atomic.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { MAX_BLOCKED, MAX_PHONES, PHONE_ONLINE_MS, PHONE_REMOVED_TEXT, phoneRegistration, PhoneRegistry, type PhoneRegistration } from "./registry.ts";
 
@@ -14,7 +15,7 @@ describe("PhoneRegistry", () => {
   let at: number;
   const now = () => at;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "omb-phones-")); file = join(dir, "phones.json"); at = 1_000_000; });
-  afterEach(async () => { await removeTempDir(dir); });
+  afterEach(async () => { vi.restoreAllMocks(); await removeTempDir(dir); });
 
   it("registers, lists online, and persists across a reload", () => {
     const registry = new PhoneRegistry(file, now);
@@ -106,6 +107,35 @@ describe("PhoneRegistry", () => {
     expect(registry.blocked("session:s1")).toBe(true);
     expect(registry.blocked(`session:s${MAX_BLOCKED}`)).toBe(true);
     expect(new PhoneRegistry(file, now).blocked(`session:s${MAX_BLOCKED}`)).toBe(true);
+  });
+
+  it.each([false, true])("reports a failed removal save and persists its retry (block=%s)", (block) => {
+    const registry = new PhoneRegistry(file, now);
+    registry.register("session:s1", "owner", reg());
+    const saved = readFileSync(file, "utf8");
+    const fault = Object.assign(new Error("fixture permission denied"), { code: "EACCES" });
+    const write = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw fault; });
+    expect(() => registry.remove("session:s1", { block })).toThrow(fault);
+    expect(registry.get("session:s1")).toBeUndefined();
+    expect(registry.blocked("session:s1")).toBe(block);
+    expect(readFileSync(file, "utf8")).toBe(saved);
+    if (block) expect(() => registry.register("session:s1", "owner", reg())).toThrow(expect.objectContaining({ status: 403 }));
+    write.mockRestore();
+    expect(registry.remove("session:s1", { block })).toBe(false);
+    const reloaded = new PhoneRegistry(file, now);
+    expect(reloaded.get("session:s1")).toBeUndefined();
+    expect(reloaded.blocked("session:s1")).toBe(block);
+  });
+
+  it("retries storing a failed block even when the key was already absent", () => {
+    const registry = new PhoneRegistry(file, now);
+    const fault = Object.assign(new Error("fixture permission denied"), { code: "EACCES" });
+    const write = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw fault; });
+    expect(() => registry.remove("session:gone", { block: true })).toThrow(fault);
+    expect(registry.blocked("session:gone")).toBe(true);
+    write.mockRestore();
+    expect(registry.remove("session:gone", { block: true })).toBe(false);
+    expect(new PhoneRegistry(file, now).blocked("session:gone")).toBe(true);
   });
 
   it("reads a file written before blocks existed", () => {

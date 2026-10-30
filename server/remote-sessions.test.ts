@@ -499,13 +499,19 @@ describe("pairing", () => {
       return opened;
     }
     expect((await call("/api/config", { method: "PUT", body: JSON.stringify({ opencodeGo: { providerKeys: { VENICE_API_KEY: "venice-fixture-key" } } }) })).status).toBe(200);
+    expect((await call("/api/config", { method: "PUT", body: JSON.stringify({ openai: { key: "sk-proj-fixture-hint-a1b2" }, live: { key: "sk-proj-fixture-live-b2c3" } }) })).status).toBe(200);
     function expectClientConfig(config: any) {
+      expect(config.openai).toEqual({ configured: true });
+      expect(config.savedKeys.openaiLiveKey).toEqual({ configured: true });
+      expect(JSON.stringify(config)).not.toContain("last4");
       expect(config.opencodeGo).toEqual({ configured: false, providerKeys: [] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "" });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser" }]);
     }
     function expectAdminConfig(config: any) {
+      expect(config.openai).toEqual({ configured: true, last4: "a1b2" });
+      expect(config.savedKeys.openaiLiveKey).toEqual({ configured: true, last4: "b2c3" });
       expect(config.opencodeGo).toEqual({ configured: false, providerKeys: ["VENICE_API_KEY"] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid", aboutMe: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host" });

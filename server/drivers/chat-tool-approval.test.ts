@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createChatToolApproval } from "./chat-tool-approval.ts";
+import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 
 afterEach(() => vi.useRealTimers());
 
@@ -236,5 +236,11 @@ describe("chat tool question lifecycle", () => {
     expect(gate.answer(request.id, "allow")).toBe("allowed-once");
 
     await expect(allowed).resolves.toBe(true);
+  });
+});
+
+describe("a refused call, as the model reads it", () => {
+  it("says it did not run and how to answer: what was not done, the simplest other way, what comes next", () => {
+    expect(refusal(null, () => undefined)).toBe("Permission denied or expired; the tool was not executed. Tell the person in one line what you did not do, offer the simplest other way (for a file: drag it into the chat or paste its text), and say what you will deliver once you have it.");
   });
 });

@@ -1,6 +1,6 @@
-import { cronPreset, type CronPreset } from "../../shared/cron-label";
+import { cronPreset, cronScheduleLabel, type CronPreset } from "../../shared/cron-label";
 import type { RoutineCronSchedule } from "../../shared/routine-schedule";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { namesLocale } from "@/lib/clock-time";
 import type { LocaleKey } from "@/locales";
 
@@ -23,7 +23,7 @@ const monthName = (month: number): string =>
   new Intl.DateTimeFormat(namesLocale(), { month: "long", timeZone: "UTC" }).format(Date.UTC(2023, month, 1));
 
 function presetText(preset: CronPreset): string {
-  const { time } = preset;
+  const time = activeLocale() === "en" ? preset.time.replace(/^0(?=\d:)/, "") : preset.time;
   switch (preset.kind) {
     case "everyDay": return t("routines.cron.everyDay", { time });
     case "monthlyLastDay": return t("routines.cron.monthlyLastDay", { time });
@@ -44,5 +44,6 @@ export function cronPresetText(schedule: Pick<RoutineCronSchedule, "expression">
 }
 
 export function cronText(schedule: RoutineCronSchedule): string {
+  if (activeLocale() === "en") return cronScheduleLabel(schedule);
   return `${cronPresetText(schedule) ?? t("routines.cron.raw", { expression: schedule.expression })} · ${schedule.timeZone}`;
 }

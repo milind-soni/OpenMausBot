@@ -1,13 +1,15 @@
 # Preset bots
 
-A preset is a named starting point in **New bot**. Choosing one fills in the
-new bot's name, title, description, standing instructions and look, and when
-you press **Create bot** it also brings the preset's skills, playbooks and
-starter notes. You can change every field before creating the bot.
+A preset is a named starting point in the review that opens when you add a
+ready-made bot from **Templates** (**New bot** itself makes a bot at once,
+with no review). Choosing one under **Starting role** fills in the new bot's
+name, title, description, standing instructions and look, and when you press
+**Create bot** it also brings the preset's skills, playbooks and starter
+notes. You can change every field before creating the bot.
 
 Presets come from a shared file (a team file or a preset file someone sent
 you) or from your organization's shelf (**Templates → From {Organization}**,
-see [org-library.md](org-library.md)). In New bot's **Starting role** list,
+see [org-library.md](org-library.md)). In that review's **Starting role** list,
 your organization's presets come first under **From {Organization}**, then
 **Imported presets**, then the built-in roles.
 
@@ -24,7 +26,7 @@ A preset is an allowlist. It can carry only:
 
 It has no field for a model, a folder, a computer, an approval level,
 connected apps, MCP servers, a browser, peers or routines. Whatever you have
-chosen for those in New bot (or in your New bot defaults) stays as it is, so
+chosen for those in the review (or in your New bot defaults) stays as it is, so
 a preset can never widen what a bot may do. Every stored preset is read
 through the same package parser as every import, so a hand-edited preset
 still says only what a file may.
@@ -42,7 +44,7 @@ still says only what a file may.
   changes. The bot is still yours, not part of the package: it never keeps
   the package added, so a team you deleted can be added again.
 
-The New bot dialog says which applies before you create the bot. A preset's
+The review says which applies before you create the bot. A preset's
 skills and starter notes win over your New bot defaults' own skill or note of
 the same name. The bot records where it came from (`installedPackage` with
 `presetKey`).
@@ -52,7 +54,7 @@ deleted, is no longer offered, and a bot already made from a withdrawn one
 has that release's skills switched off (once; switching them back on is
 yours). Which presets are offered follows the organization library's own
 state (`OrgLibrary.installStatuses()` in `server/org-library.ts`), not a
-separate read of `state.json`, so New bot and the shelf never disagree. With
+separate read of `state.json`, so the review and the shelf never disagree. With
 no organization there are no installs and nothing is hidden. Adding the same organization package again, for example a
 team you deleted, refreshes its presets in place rather than adding copies. Organization presets are
 managed in Admin; an imported preset can be removed with **Remove from New
@@ -78,7 +80,7 @@ confirmation step: **Save file** is the decision.
 
 A preset file is added in **Templates → Import** like a team file. The
 preview shows the preset bots and any skills the file only offers; **Add
-presets** puts the presets in New bot and changes nothing else. A file with
+presets** puts the presets in the review's **Starting role** list and changes nothing else. A file with
 skills but no bots or presets has nothing to add here and is refused with a
 sentence. Adding the same file twice offers its presets once.
 

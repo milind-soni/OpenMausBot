@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CloudUsage, CloudUsageMeter } from "../../electron/cloud-home.mjs";
 import { setLocale } from "@/lib/i18n";
 import {
-  CARD_METERS, meterAmounts, meterBand, meterPercent, NEAR_LIMIT_PERCENT, nextPlan, resetLine, tightMeters, upgradeConfirmBody, upgradeLabel, upgradePath,
+  CARD_METERS, includedUsePercent, meterAmounts, meterBand, meterPercent, NEAR_LIMIT_PERCENT, nextPlan, resetLine, tightMeters, upgradeConfirmBody, upgradeLabel, upgradePath,
   usageCardView,
 } from "./usage-meter";
 
@@ -85,5 +85,13 @@ describe("the words", () => {
     expect(meterAmounts(meter("storage", 120, 100))).toBe("100 of 100 GB");
     expect(resetLine(usage([]))).toBe("Resets on Nov 1.");
     expect(resetLine(usage([], { trialEndsAt: Date.UTC(2026, 9, 27) }))).toBe("Your full allowance starts on Oct 27.");
+  });
+});
+
+describe("included use", () => {
+  it("is the most-used allowance, so the summary never hides the one that runs out first", () => {
+    expect(includedUsePercent({ meters: [{ kind: "computerHours", used: 30, max: 300 }, { kind: "voice", used: 45_000, max: 60_000 }] })).toBe(75);
+    expect(includedUsePercent({ meters: [{ kind: "storage", used: 1, max: 100, usedUp: true }] })).toBe(100);
+    expect(includedUsePercent({ meters: [] })).toBe(0);
   });
 });

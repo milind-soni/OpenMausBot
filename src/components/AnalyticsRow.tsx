@@ -5,13 +5,13 @@ import { SettingRow, Switch } from "./SettingsPrimitives";
 
 const ANALYTICS_DOC_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/analytics.md";
 
-export function AnalyticsRow() {
+export function AnalyticsRow({ simple = false }: { simple?: boolean }) {
   const [on, setOn] = useState(analyticsEnabled);
   const subtitle = (
     <>
-      {t("settings.analytics.subtitle")}{" "}
+      {t(simple ? "settings.simple.analytics" : "settings.analytics.subtitle")}{" "}
       <a href={ANALYTICS_DOC_URL} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-        {t("settings.analytics.link")}
+        {t(simple ? "settings.simple.analyticsLink" : "settings.analytics.link")}
       </a>
     </>
   );

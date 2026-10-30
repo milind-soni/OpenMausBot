@@ -1,0 +1,37 @@
+{
+  "id": "live-reply-plan-week",
+  "title": "Live: an ambiguous ask gets at most one plain question, not a form",
+  "behavior": "Against a real model, \"Plan my week.\" is met by looking first and asking for exactly one thing with its reason (or starting on stated defaults), never several questions or a multi-field form.",
+  "bots": [
+    {
+      "key": "helper",
+      "name": "Helper"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "helper",
+      "text": "Plan my week."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "helper",
+      "count": 1
+    }
+  ],
+  "invariants": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "helper"
+    },
+    {
+      "kind": "botReplied",
+      "bot": "helper",
+      "thread": "active"
+    }
+  ],
+  "judged": {
+    "prompt": "reply-habits-v1"
+  }
+}

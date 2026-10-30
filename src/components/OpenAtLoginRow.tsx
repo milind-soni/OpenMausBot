@@ -4,7 +4,7 @@ import { SettingRow, Switch } from "./SettingsPrimitives";
 
 type OpenAtLogin = { available: boolean; on: boolean };
 
-export function OpenAtLoginRow() {
+export function OpenAtLoginRow({ simple = false }: { simple?: boolean }) {
   const bridge = window.ogb?.openAtLogin;
   const [state, setState] = useState<OpenAtLogin | null>(null);
   const [busy, setBusy] = useState(false);
@@ -19,7 +19,7 @@ export function OpenAtLoginRow() {
     setBusy(true); setFailed(false);
     void bridge.set(on).then(setState, () => setFailed(true)).finally(() => setBusy(false));
   };
-  return <SettingRow title={t("settings.openAtLogin.title")} subtitle={t("settings.openAtLogin.subtitle")}
+  return <SettingRow title={t("settings.openAtLogin.title")} subtitle={t(simple ? "settings.simple.openAtLogin" : "settings.openAtLogin.subtitle")}
     message={failed ? <span role="alert" className="text-danger">{t("settings.openAtLogin.failed")}</span> : undefined}>
     <Switch checked={state.on} disabled={busy} aria-label={t("settings.openAtLogin.title")} onClick={() => set(!state.on)} />
   </SettingRow>;

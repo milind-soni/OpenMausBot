@@ -15,6 +15,7 @@ import {
   listMemoryTopics,
   loadMemory,
   memorySystemPrompt,
+  REMEMBER_AND_FORGET,
   supportsWorkspaceFiles,
   readMemoryFile,
   readMemoryTopic,
@@ -459,6 +460,11 @@ describe("workspace", () => {
     expect(refused).not.toContain("Change MEMORY.md only with memory_update");
     expect(refused).not.toContain("Record only facts");
     expect(memorySystemPrompt(BOT, { managedWrites: true, fileTools: true })).toContain("Change MEMORY.md only with memory_update");
+    // asked to remember, it saves at once and says so; asked to forget, it forgets everywhere
+    expect(memorySystemPrompt(BOT, { managedWrites: true, fileTools: true })).toContain(REMEMBER_AND_FORGET);
+    expect(refused).not.toContain(REMEMBER_AND_FORGET);
+    expect(REMEMBER_AND_FORGET).toContain("save it now with memory_update append");
+    expect(REMEMBER_AND_FORGET).toContain("call memory_update with action forget");
   });
 
   it("requires explicit remove to delete a memory passage", () => {

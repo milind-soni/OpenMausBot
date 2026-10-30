@@ -12,6 +12,7 @@ afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
 
 describe("a cron schedule in words", () => {
   it("says in English exactly what the server says", () => {
+    expect(cronPresetText(cron("0 9 * * *"))).toBe("Every day at 9:00");
     for (const expression of EXPRESSIONS) expect(cronText(cron(expression)), expression).toBe(cronScheduleLabel(cron(expression)));
   });
 

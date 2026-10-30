@@ -33,12 +33,13 @@ export function normalizeSignInSite(raw: unknown): { url: string; site: string }
 }
 
 /** A still-open sign-in card for this site — the set a newer request
- * supersedes. Done, cancelled and already-superseded cards keep their
- * settled state. In a room only the asking bot's own cards count. */
+ * supersedes. Done, cancelled, already-superseded and answered-in-chat
+ * cards keep their settled state. In a room only the asking bot's own
+ * cards count. */
 export function isPendingSignInRequest(
   message: {
     kind?: unknown;
-    signIn?: { site?: unknown; done?: unknown; cancelled?: unknown; superseded?: unknown };
+    signIn?: { site?: unknown; done?: unknown; cancelled?: unknown; superseded?: unknown; answeredInChat?: unknown };
     from?: { botId?: unknown };
   },
   site: string,
@@ -48,11 +49,14 @@ export function isPendingSignInRequest(
   return (
     message.kind === "signin" &&
     message.signIn?.site === site &&
-    message.signIn.done !== true &&
-    message.signIn.cancelled !== true &&
-    message.signIn.superseded !== true &&
+    signInWaits(message.signIn) &&
     (!roomThread || message.from?.botId === requestingBotId)
   );
+}
+
+/** Whether the card still waits on the person: not done, cancelled, superseded or answered in the chat. */
+export function signInWaits(card: { done?: unknown; cancelled?: unknown; superseded?: unknown; answeredInChat?: unknown }): boolean {
+  return card.done !== true && card.cancelled !== true && card.superseded !== true && card.answeredInChat !== true;
 }
 
 /** How a card ended, or null while it is open. */

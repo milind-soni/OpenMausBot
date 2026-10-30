@@ -17,7 +17,7 @@ const providers: Record<string, string> = {
   claudeAgent: "Anthropic", codex: "OpenAI", grok: "xAI", grokAgent: "xAI",
   kimiAgent: "Moonshot AI", droidAgent: "Factory", cursorAgent: "Cursor",
   antigravityAgent: "Google", opencodeGo: "OpenCode", qwenAgent: "Qwen",
-  hermesAgent: "Nous Research", clineAgent: "Cline", piAgent: "pi.dev", mistral: "Mistral AI", cerebras: "Cerebras", groq: "Groq", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
+  hermesAgent: "Nous Research", clineAgent: "Cline", copilotAgent: "GitHub", piAgent: "pi.dev", mistral: "Mistral AI", cerebras: "Cerebras", groq: "Groq", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
 };
 
 export function providerName(instance: InstanceInfo): string {
@@ -28,7 +28,8 @@ export function providerName(instance: InstanceInfo): string {
 export interface EngineCardSummary { title: string; subtitle: string; ready: boolean; status: string; action: string }
 
 /** Children stay mounted so closing a card does not abandon an in-progress sign-in or a CLI path draft. */
-export function EngineCard({ instance, children, summary }: { instance: InstanceInfo; children: ReactNode; summary?: EngineCardSummary }) {
+export function EngineCard({ instance, children, summary, bare = false }: { instance: InstanceInfo; children: ReactNode; summary?: EngineCardSummary; bare?: boolean }) {
+  if (bare) return <div data-engine-card={instance.instanceId} className="min-w-0">{children}</div>;
   const ready = summary?.ready ?? engineReady(instance);
   const email = instance.snapshot.authenticated === true ? instance.snapshot.account?.email : undefined;
   const title = summary?.title ?? instance.displayName;

@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
-import { readCuaConnection } from "./local-computer.ts";
+import { decodeCuaConnection } from "./local-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -80,14 +80,15 @@ describe("surface pin provenance against the real server", () => {
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
     output = "";
-    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
+    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href,
+      "--import", pathToFileURL(join(ROOT, "server/testing/desktop-parent.mjs")).href, join(ROOT, "server/index.ts")], {
       cwd: ROOT, env: {
         PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         HOME: home, USERPROFILE: home, OMB_DATA_DIR: data,
         APPDATA: join(home, "appdata"), LOCALAPPDATA: join(home, "localappdata"),
         TEMP: home, TMP: home, TMPDIR: home,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
-        OMB_BOAT_API: boatApi, OMB_USER_DATA: join(home, "user-data"),
+        OMB_BOAT_API: boatApi, OMB_USER_DATA: join(home, "user-data"), OMB_TEST_DESKTOP_CUA_CONNECTION: cuaDescriptor,
         ...(withBrowser ? { OMB_AGENT_BROWSER_PATH: inertBrowser, AGENT_BROWSER_EXECUTABLE_PATH: inertBrowser } : {}),
       }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -366,7 +367,7 @@ describe("surface pin provenance against the real server", () => {
       // Validate the fixture on every host before waiting for a provider; Windows cannot emulate the POSIX ownership check.
       const platforms: NodeJS.Platform[] = process.platform === "win32" ? ["win32"] : ["darwin", "win32"];
       for (const platform of platforms) {
-        expect(readCuaConnection({ platform, userData: dirname(cuaDescriptor), home }))
+        expect(decodeCuaConnection(JSON.parse(readFileSync(cuaDescriptor, "utf8")), { platform }))
           .toMatchObject({ command: "/fixture/cua-driver", platform, scope: "local-computer" });
       }
       // Linux requires a separately validated native runtime descriptor.

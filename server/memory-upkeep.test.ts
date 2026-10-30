@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, capturePrompt, newCandidates, parseCandidates, topicFileName, type CaptureTurn } from "./memory-capture.ts";
+import { passageMatcher } from "./memory-entries.ts";
 import { mergeTopicText, parseTopicHeader } from "./memory-topics.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, ORGANIZE_MARKER, parseMoves } from "./memory-organize.ts";
 import { flushMemoryJournal, readMemoryJournal } from "./memory-journal.ts";
 import { applyTidy, contradictionBudget, contradictionCandidates, parseContradictions, planTidy } from "./memory-tidy.ts";
 import { createMemoryUpkeep, MAX_PENDING_THREADS, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
-import { aboutMeLine, appendAboutMe, commitLearned, listLearnedFacts, planLearned, removeLearned } from "./profile-learned.ts";
+import { aboutMeLine, appendAboutMe, clearForgotten, commitLearned, listLearnedFacts, planLearned, rememberForgotten, removeLearned } from "./profile-learned.ts";
 import { ensureWorkspace, readMemoryTopic, workspaceDir, writeMemoryFile, writeMemoryTopic, WORKSPACES_DIR } from "./workspace.ts";
 
 const TODAY = "2026-09-25";
@@ -285,8 +286,8 @@ describe("the upkeep loop", () => {
   it("captures new facts as dated, sourced entries, journaled as upkeep, and adds About me lines", async () => {
     ensureWorkspace(BOT.id);
     answers.push(JSON.stringify([
-      { text: "The person is vegetarian", kind: "preference", aboutUser: true, confidence: 0.9 },
-      { text: "The person has exams this weekend", kind: "fact", until: "2026-09-27", confidence: 0.9 },
+      { text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 },
+      { text: "The person has exams this weekend", kind: "fact", evidence: "I have exams this weekend", until: "2026-09-27", confidence: 0.9 },
     ]));
     const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I'm vegetarian and I have exams this weekend", bot: "Good luck!" }] });
     expect(report).toMatchObject({ added: 2, topics: 0, aboutMe: 1 });
@@ -301,8 +302,8 @@ describe("the upkeep loop", () => {
     const old = Array.from({ length: 200 }, (_, i) => `- 2026-08-01 · old fact ${i}`);
     writeMemoryFile(BOT.id, `${old.join("\n")}\n`);
     answers.push(JSON.stringify([
-      { text: "The staging host is kestrel", kind: "fact", confidence: 0.9 },
-      { text: "Deploys go out on Tuesdays", kind: "fact", confidence: 0.9 },
+      { text: "The staging host is kestrel", kind: "fact", evidence: "staging is kestrel", confidence: 0.9 },
+      { text: "Deploys go out on Tuesdays", kind: "fact", evidence: "we deploy Tuesdays", confidence: 0.9 },
     ]));
     const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "staging is kestrel; we deploy Tuesdays", bot: "Noted." }] });
     expect(report).toMatchObject({ added: 2 });
@@ -318,7 +319,7 @@ describe("the upkeep loop", () => {
   it("forgets a deleted bot: its waiting turns and its status go", async () => {
     ensureWorkspace(BOT.id);
     const loop = upkeep();
-    answers.push(JSON.stringify([{ text: "The person is vegetarian", kind: "preference", aboutUser: false, confidence: 0.9 }]));
+    answers.push(JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: false, confidence: 0.9 }]));
     await loop.capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I'm vegetarian", bot: "Noted" }] });
     expect(loop.status(BOT.id).lastCapture).toBeDefined();
     loop.noteTurn(BOT.id, "t2", { person: "I moved to Lyon", bot: "Nice" });
@@ -343,7 +344,7 @@ describe("the upkeep loop", () => {
   it("adds to About me a fact the notebook already holds, without appending it again", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, "- 2026-09-25 · The user's company is called Northwind Studio.\n");
-    answers.push(JSON.stringify([{ text: "The user's company is Northwind Studio", kind: "fact", aboutUser: true, noted: true }]));
+    answers.push(JSON.stringify([{ text: "The user's company is Northwind Studio", kind: "fact", evidence: "My company is Northwind Studio", aboutUser: true, noted: true }]));
     const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "My company is Northwind Studio", bot: "Noted." }] });
     expect(report).toMatchObject({ added: 0, aboutMe: 1 });
     expect(memory().match(/Northwind/g)).toHaveLength(1);
@@ -352,9 +353,9 @@ describe("the upkeep loop", () => {
   it("files detail into a topic it creates, with other words for it", async () => {
     ensureWorkspace(BOT.id);
     answers.push(JSON.stringify([
-      { text: "The person loves pasta", kind: "preference", topic: "Food", topicAliases: ["restaurants", "dinner"] },
-      { text: "Sister Asha lives in Delhi", kind: "fact", topic: "family", topicAliases: ["sister", "asha"] },
-      { text: "The person is vegetarian", kind: "preference" },
+      { text: "The person loves pasta", kind: "preference", evidence: "I love pasta", topic: "Food", topicAliases: ["restaurants", "dinner"] },
+      { text: "Sister Asha lives in Delhi", kind: "fact", evidence: "my sister Asha lives in Delhi", topic: "family", topicAliases: ["sister", "asha"] },
+      { text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian" },
     ]));
     const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I love pasta, I'm vegetarian, my sister Asha lives in Delhi", bot: "Noted." }] });
     expect(report).toMatchObject({ added: 1, topics: 2 });
@@ -364,16 +365,55 @@ describe("the upkeep loop", () => {
     expect(parseTopicHeader(food)).toEqual({ title: "food", aliases: ["restaurants", "dinner"] });
     expect(food).toContain('from chat "Plans" (noticed) · The person loves pasta');
     expect(readMemoryTopic(BOT.id, "family.md")).toContain("Sister Asha lives in Delhi");
-    answers.push(JSON.stringify([{ text: "The person loves pasta", kind: "preference", topic: "food" }]));
+    answers.push(JSON.stringify([{ text: "The person loves pasta", kind: "preference", evidence: "pasta again", topic: "food" }]));
     expect((await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "pasta again", bot: "ok" }] })).topics).toBe(0);
     await flushMemoryJournal(BOT.id);
     expect(readMemoryJournal(BOT.id, 10).filter((row) => row.via === "capture").map((row) => row.path).sort()).toEqual(["MEMORY.md", "memory/family.md", "memory/food.md"]);
   });
 
   it("does not add About me lines from another person's message", async () => {
-    answers.push(JSON.stringify([{ text: "Is vegetarian", kind: "preference", aboutUser: true }]));
+    answers.push(JSON.stringify([{ text: "Is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true }]));
     const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I'm vegetarian", bot: "ok", owner: false }] });
     expect(report).toMatchObject({ added: 1, aboutMe: 0 });
+  });
+
+  it("keeps only what the person says about themselves: nothing guessed from a question, a task or a made-up case", async () => {
+    ensureWorkspace(BOT.id);
+    answers.push(JSON.stringify([
+      { text: "The person works at a 10-person startup", kind: "fact", evidence: "for a 10-person startup", aboutUser: true, confidence: 0.9 },
+      { text: "The person is developing an AI agent app", kind: "fact", aboutUser: true, confidence: 0.9 },
+      { text: "The person builds AI agent apps", kind: "fact", evidence: "I build AI agent apps", aboutUser: true, confidence: 0.9 },
+      { text: "The person is a teacher", kind: "fact", evidence: "I'm a teacher", aboutUser: true, confidence: 0.9 },
+      { text: "The person prefers short answers", kind: "preference", evidence: "I prefer short answers", aboutUser: true, confidence: 0.9 },
+    ]));
+    const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [
+      { person: "What are the 3 best AI meeting note-takers for a 10-person startup right now? Price and a one-line verdict each.", bot: "Fathom, Granola, Avoma." },
+      { person: "Write a one-page launch plan for an open-source AI agent app, with a 7-day timeline.", bot: "Here it is." },
+      { person: "Suppose I'm a teacher. Draft a lesson plan.", bot: "Done." },
+      { person: "Remember: I prefer short answers.", bot: "Got it: short answers." },
+    ] });
+    expect(report).toMatchObject({ added: 1, aboutMe: 1 });
+    expect(memory()).toContain("The person prefers short answers");
+    expect(memory()).not.toMatch(/startup|agent app|teacher/);
+    expect(aboutMeAdded).toEqual(["The person prefers short answers"]);
+  });
+
+  it("never learns again what the person asked a bot to forget, until they ask to remember it", async () => {
+    ensureWorkspace(BOT.id);
+    rememberForgotten("short answers", passageMatcher("short answers")!);
+    const said = { person: "Remember: I prefer short answers and I'm in India (IST).", bot: "Got it." };
+    const answer = JSON.stringify([
+      { text: "The person prefers short answers", kind: "preference", evidence: "I prefer short answers", aboutUser: true, confidence: 0.9 },
+      { text: "The person is in India (IST)", kind: "fact", evidence: "I'm in India (IST)", aboutUser: true, confidence: 0.9 },
+    ]);
+    answers.push(answer);
+    expect(await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [said] })).toMatchObject({ added: 1, aboutMe: 1 });
+    expect(memory()).not.toContain("short answers");
+    expect(aboutMeAdded).toEqual(["The person is in India (IST)"]);
+    clearForgotten("The person prefers short answers");
+    answers.push(answer);
+    expect(await upkeep().capture({ botId: BOT.id, threadId: "t2", turns: [said] })).toMatchObject({ added: 1 });
+    expect(memory()).toContain("The person prefers short answers");
   });
 
   it("captures a room turn sourced to the room, and drops one the host no longer allows", async () => {
@@ -394,8 +434,8 @@ describe("the upkeep loop", () => {
       tidyHour: () => 3,
       now: () => clock,
     });
-    const turn: CaptureTurn = { person: "", bot: "Noted.", owner: false, room: [{ by: "other", name: "Asha", text: "Launch moved to Friday" }] };
-    answers.push(JSON.stringify([{ text: "The launch moved to Friday", kind: "decision", confidence: 0.9 }, { text: "Asha is vegetarian", kind: "preference", aboutUser: true, confidence: 0.9 }]));
+    const turn: CaptureTurn = { person: "", bot: "Noted.", owner: false, room: [{ by: "other", name: "Asha", text: "Launch moved to Friday. I'm vegetarian, by the way." }] };
+    answers.push(JSON.stringify([{ text: "The launch moved to Friday", kind: "decision", confidence: 0.9 }, { text: "Asha is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 }]));
     const report = await roomUpkeep.capture({ botId: BOT.id, threadId: "room-thread", turns: [turn] });
     expect(report).toMatchObject({ added: 2, aboutMe: 0 });
     expect(memory()).toContain('from room "Launch" (noticed) · The launch moved to Friday');
@@ -614,7 +654,7 @@ describe("the upkeep loop", () => {
 
   it("defers capture while paused for a backup and runs it on resume", async () => {
     const loop = upkeep();
-    answers.push(JSON.stringify([{ text: "Likes jazz", kind: "preference" }]));
+    answers.push(JSON.stringify([{ text: "Likes jazz", kind: "preference", evidence: "I like jazz" }]));
     loop.pause();
     loop.noteTurn(BOT.id, "t1", { person: "I like jazz", bot: "Nice, jazz is a great pick." });
     loop.flushThread("t1");
@@ -643,7 +683,7 @@ describe("the upkeep loop", () => {
       { botId: BOT.id, threadId: "t3", turnIds: ["turn-gone"] },
     ] });
 
-    answers.push(JSON.stringify([{ text: "Likes jazz", kind: "preference" }]));
+    answers.push(JSON.stringify([{ text: "Likes jazz", kind: "preference", evidence: "I like jazz" }]));
     const second = upkeep();
     second.start();
     expect(existsSync(pending)).toBe(false);

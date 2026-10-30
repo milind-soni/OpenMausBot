@@ -64,11 +64,16 @@ export function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> 
       } catch {
         return fail(400, "invalid JSON body");
       }
-      const refused = bodyChecks.get(req)?.(body);
-      if (refused) return fail(refused.status, refused.error);
-      done = true;
-      parsedBodies.set(req, body);
-      resolve(body);
+      try {
+        const refused = bodyChecks.get(req)?.(body);
+        if (refused) return fail(refused.status, refused.error);
+        done = true;
+        parsedBodies.set(req, body);
+        resolve(body);
+      } catch (error) {
+        done = true;
+        reject(error);
+      }
     });
     req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
   });

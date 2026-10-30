@@ -1,3 +1,4 @@
+import { productName } from "@/lib/brand";
 import { en, localeChoices, locales, type LocaleKey, type LocalePack } from "@/locales";
 
 export function resolveLocale(tag: string | undefined, available: ReadonlySet<string>): string {
@@ -74,10 +75,11 @@ export function activePackComplete(): boolean {
   return activePack !== en && Object.keys(en).every((key) => Object.hasOwn(activePack, key));
 }
 
+/** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */
 export function t(key: LocaleKey, params?: Record<string, string | number>): string {
   const template = activePack[key] ?? en[key];
-  if (!params) return template;
+  if (!params && !template.includes("{app}")) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in params ? String(params[name]) : match,
+    params && name in params ? String(params[name]) : name === "app" ? productName() : match,
   );
 }

@@ -1,17 +1,32 @@
 // The agents catalog's X and research tools (through treg) and the internal route behind each. Every call is paid, from
 // the person's own treg balance or their Cloud plan's allowance, so a bot is shown these tools only when a treg key or a
 // plan credential is held and its research switch is on; each route checks both again before it spends.
+import { agentsCallMember } from "../../shared/agents-tool-names.ts";
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
-const RESEARCH_TOOL_ROUTES: Readonly<Record<string, string>> = {
+/** Each call's route, by the member name it goes by (x_search's actions are its members). */
+const RESEARCH_ROUTES: Readonly<Record<string, string>> = {
   x_search: "x/search", x_user_posts: "x/user-posts", x_post: "x/post", x_profile: "x/profile",
   research_search: "research/search", research_endpoint: "research/endpoint", research_call: "research/call",
 };
-export const RESEARCH_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(RESEARCH_TOOL_ROUTES));
+export const RESEARCH_TOOL_NAMES: ReadonlySet<string> = new Set(["x_search", "research_search", "research_endpoint", "research_call"]);
+
+/** What each X read cannot go without, said before anything is spent. */
+const X_NEEDS: Readonly<Record<string, string>> = { x_search: "query", x_user_posts: "handle", x_post: "post", x_profile: "handle" };
+const X_ACTIONS = new Set(["search", "user_posts", "post", "profile"]);
 
 export async function callResearchTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
-  const { ok, body } = await context.client.apiResponse(`/api/internal/${RESEARCH_TOOL_ROUTES[name]}`, { method: "POST", body: JSON.stringify(args) });
+  const member = agentsCallMember(name, args);
+  const { action, ...rest } = args;
+  const input = name === "x_search" ? rest : args;
+  if (name === "x_search") {
+    if (action !== undefined && action !== null && !X_ACTIONS.has(String(action))) return { text: "x_search action is search (the default), user_posts, post or profile.", isError: true };
+    const needed = X_NEEDS[member]!;
+    const value = input[needed];
+    if (typeof value !== "string" || !value.trim()) return { text: `x_search ${member === "x_search" ? "search" : String(action)} needs ${needed}.`, isError: true };
+  }
+  const { ok, body } = await context.client.apiResponse(`/api/internal/${RESEARCH_ROUTES[member]}`, { method: "POST", body: JSON.stringify(input) });
   return ok ? { text: JSON.stringify(body) } : { text: String(body.error ?? "Research failed. Try again shortly."), isError: true };
 }
 
@@ -19,60 +34,21 @@ export const RESEARCH_TOOL_DEFINITIONS = [
   {
     name: "x_search",
     description:
-      "Search posts on X (Twitter) without an X account. Each call is paid (the user's treg balance or Cloud plan), so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
+      "Read X (Twitter) without an X account (was also x_user_posts / x_post / x_profile). Every call is paid (the user's treg balance or Cloud plan) and read-only: you cannot post, like or reply. search (the default) finds posts; write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. user_posts reads an account's recent posts, newest first. Both return compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId: to monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. post reads one post, and with replies the first page of up to 20 replies to it. profile looks up an account: name, bio, followers, following, post count and verified status.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        query: { type: "string", minLength: 1, maxLength: 512, description: "The X search query; operators allowed." },
-        sort: { type: "string", enum: ["latest", "top"], description: "latest (default) or top." },
-        limit: { type: "integer", minimum: 1, maximum: 50, description: "How many posts, 1-50. Default 20." },
-        sinceId: { type: "string", pattern: "^\\d{1,25}$", description: "Only posts newer than this post id: a newestId from an earlier call." },
+        action: { type: "string", enum: ["search", "user_posts", "post", "profile"], description: "search (default), user_posts, post or profile." },
+        query: { type: "string", minLength: 1, maxLength: 512, description: "search: the X search query; operators allowed." },
+        sort: { type: "string", enum: ["latest", "top"], description: "search: latest (default) or top." },
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "search and user_posts: how many posts, 1-50. Default 20." },
+        sinceId: { type: "string", pattern: "^\\d{1,25}$", description: "search and user_posts: only posts newer than this post id, a newestId from an earlier call." },
+        handle: { type: "string", minLength: 1, description: "user_posts and profile: the account: @handle, handle, or an x.com profile link." },
+        includeReplies: { type: "boolean", description: "user_posts: include the account's replies to others. Default false." },
+        post: { type: "string", minLength: 1, description: "post: an x.com or twitter.com post link, or the post id." },
+        replies: { type: "boolean", description: "post: also return replies to the post. Default false." },
       },
-      required: ["query"],
-    },
-  },
-  {
-    name: "x_user_posts",
-    description:
-      "Read an X account's recent posts, newest first (a paid call). Returns compact posts and newestId; pass newestId back as sinceId later to get only newer posts. Read-only.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        handle: { type: "string", minLength: 1, description: "The account: @handle, handle, or an x.com profile link." },
-        limit: { type: "integer", minimum: 1, maximum: 50, description: "How many posts, 1-50. Default 20." },
-        sinceId: { type: "string", pattern: "^\\d{1,25}$", description: "Only posts newer than this post id." },
-        includeReplies: { type: "boolean", description: "Include the account's replies to others. Default false." },
-      },
-      required: ["handle"],
-    },
-  },
-  {
-    name: "x_post",
-    description:
-      "Read one X post from its link or id, and optionally the first page of up to 20 replies to it (a paid call). Read-only.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        post: { type: "string", minLength: 1, description: "An x.com or twitter.com post link, or the post id." },
-        replies: { type: "boolean", description: "Also return replies to the post. Default false." },
-      },
-      required: ["post"],
-    },
-  },
-  {
-    name: "x_profile",
-    description:
-      "Look up an X account's profile: name, bio, followers, following, post count and verified status (a paid call). Read-only.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        handle: { type: "string", minLength: 1, description: "The account: @handle, handle, or an x.com profile link." },
-      },
-      required: ["handle"],
     },
   },
   {

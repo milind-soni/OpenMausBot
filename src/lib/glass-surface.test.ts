@@ -35,6 +35,18 @@ describe("glass surface", () => {
     }
   });
 
+  it("is an opaque sheet for Settings in Midnight and Daylight in both modes, 900 by 700 with radius 12 in Simple", () => {
+    const sheet = rule(':root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface');
+    expect(sheet).toContain("background: var(--color-app)");
+    expect(sheet).toContain("backdrop-filter: none");
+    expect(sheet).toContain("box-shadow: none");
+    expect(css.indexOf("[data-settings-look] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
+    const size = rule('.glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup');
+    expect(size).toContain("width: min(900px, 100%)");
+    expect(size).toContain("height: min(700px, 100%)");
+    expect(size).toContain("border-radius: 12px");
+  });
+
   it("falls back to the opaque menu colour when transparency is reduced", () => {
     const at = css.indexOf("@media (prefers-reduced-transparency: reduce)");
     expect(at).toBeGreaterThan(0);
@@ -83,7 +95,8 @@ describe("glass surface", () => {
   it("lets the Apps contents reflow inside the pop-up rather than overflow it", () => {
     const apps = readFileSync(join(src, "components", "PluginsPanel.tsx"), "utf8");
     expect(apps).toContain('data-apps-grid className="@container flex flex-col gap-7 pt-1"');
-    expect(apps).toContain("grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2");
+    const section = readFileSync(join(src, "components", "AppsSection.tsx"), "utf8");
+    expect(section).toContain("grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2");
     const mcp = readFileSync(join(src, "components", "McpServersPanel.tsx"), "utf8");
     expect(mcp).toContain('data-mcp-row className="flex flex-wrap items-center gap-3"');
     expect(mcp).toContain('data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1"');

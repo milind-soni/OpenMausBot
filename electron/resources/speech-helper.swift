@@ -11,7 +11,11 @@
 // request on silence by itself; it only produces `isFinal` after endAudio().
 // Composer dictation omits this flag and keeps its existing press-to-stop
 // behavior, while call mode opts into silence endpointing.
+//
+// `--finish-on-release control,option` finishes recognition once any of the
+// listed modifiers (control, option, shift, command) is no longer held.
 import AVFoundation
+import CoreGraphics
 import Foundation
 import Speech
 
@@ -51,6 +55,42 @@ let finishFile: String? = {
   return args[index + 1]
 }()
 
+func releaseModifiers(_ list: String) -> CGEventFlags? {
+  var flags = CGEventFlags()
+  for name in list.split(separator: ",", omittingEmptySubsequences: false) {
+    switch name {
+    case "control": flags.insert(.maskControl)
+    case "option": flags.insert(.maskAlternate)
+    case "shift": flags.insert(.maskShift)
+    case "command": flags.insert(.maskCommand)
+    default: return nil
+    }
+  }
+  return flags.isEmpty ? nil : flags
+}
+
+func released(_ required: CGEventFlags, _ current: CGEventFlags) -> Bool {
+  !current.contains(required)
+}
+
+if let index = CommandLine.arguments.firstIndex(of: "--release-check") {
+  let args = CommandLine.arguments
+  guard index + 2 < args.count, let required = releaseModifiers(args[index + 1]),
+    let raw = UInt64(args[index + 2])
+  else { fail("bad-modifiers") }
+  emit(["released": released(required, CGEventFlags(rawValue: raw))])
+  exit(0)
+}
+
+let finishOnRelease: CGEventFlags? = {
+  let args = CommandLine.arguments
+  guard let index = args.firstIndex(of: "--finish-on-release") else { return nil }
+  guard index + 1 < args.count, let flags = releaseModifiers(args[index + 1]) else {
+    fail("bad-modifiers")
+  }
+  return flags
+}()
+
 // LaunchServices gives the helper the bundle identity TCC needs, but it also
 // means the parent cannot terminate it by killing the `open -W` process. A
 // per-session stop marker keeps intentional mute/hang-up deterministic.
@@ -70,11 +110,14 @@ if let stopFile {
 // if an unusually fast key release beats authorization/setup.
 var finishHandler: (() -> Void)?
 var finishTimer: DispatchSourceTimer?
-if let finishFile {
+if finishFile != nil || finishOnRelease != nil {
   let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
   timer.schedule(deadline: .now() + .milliseconds(50), repeating: .milliseconds(50))
   timer.setEventHandler {
-    guard FileManager.default.fileExists(atPath: finishFile), let finish = finishHandler else { return }
+    let finishRequested =
+      finishFile.map { FileManager.default.fileExists(atPath: $0) } == true
+      || finishOnRelease.map { released($0, CGEventSource.flagsState(.combinedSessionState)) } == true
+    guard finishRequested, let finish = finishHandler else { return }
     timer.cancel()
     finish()
   }

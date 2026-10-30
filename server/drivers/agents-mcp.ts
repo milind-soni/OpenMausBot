@@ -1,6 +1,7 @@
 // The "agents" MCP server's answers (JSON-RPC 2.0, no MCP SDK), every tool routed through the harness. `env` is what the
 // harness sets for it (see agents-proxy.ts): the stdio proxy an engine starts and the HTTP endpoint an engine reaches
 // both answer through it.
+import { resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { TOOL_BRIDGE_ENV, createToolBridge } from "./agents-bridge.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
@@ -47,7 +48,9 @@ export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json |
         const bridged = bridge ? await bridge.route(called.name, called.arguments) : undefined;
         if (bridged && "answer" in bridged) return textResult(id, bridged.answer.text, bridged.answer.isError);
         const { name, arguments: args } = bridged ?? called;
-        if (!available.some((t) => t.name === name)) {
+        // An alias runs only where the tool it names is listed: never a way to a tool this turn was not given.
+        const runs = resolveAgentsCall(name, args).name;
+        if (!available.some((t) => t.name === runs)) {
           // A name written into use_tool fails the call, not the protocol: the chat runtime ends a turn on a protocol error.
           const unknown = `Unknown tool: ${name}`;
           return bridged ? textResult(id, unknown, true) : rpcErr(id, -32602, unknown);

@@ -61,7 +61,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     ]);
     expect(prompts()).toHaveLength(2);
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).systemPrompt).toContain(
-      "A plain yes or no, such as whether to go ahead, needs no widget: ask it in one short sentence and end your turn; the person answers in a word or with 👍 or 👎 on your message, and either comes back to you as their reply.");
+      "A plain yes or no, such as whether to go ahead, needs no widget: ask it in one short sentence; the person answers in a word or with 👍 or 👎 on your message, and either comes back to you as their reply.");
     const reactionPrompt = prompts()[1]!;
     evidence.push({ reactionPrompt });
     expect(reactionPrompt).toContain("The current message is the person's reaction: they reacted 👍 to your earlier message instead of typing a reply.");

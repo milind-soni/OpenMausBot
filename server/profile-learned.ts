@@ -5,11 +5,12 @@ import { randomUUID } from "node:crypto";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
-import { factIdentity } from "./memory-entries.ts";
+import { factIdentity, foldForMatch, passageMatcher } from "./memory-entries.ts";
 import { redactSecretsInText } from "./redact.ts";
 
 const MAX_KEPT = 200;
 const MAX_REMOVED = 500;
+const MAX_FORGOTTEN = 200;
 const TEXT_MAX = 300;
 
 export interface LearnedFact {
@@ -24,6 +25,8 @@ export interface LearnedFact {
 interface LearnedFile {
   learned: LearnedFact[];
   removed: string[];
+  /** What the person asked a bot to forget, as they named it: no bot learns a fact that mentions one again. */
+  forgotten?: string[];
 }
 
 function filePath(): string {
@@ -38,9 +41,10 @@ function load(): LearnedFile {
         Boolean(f) && typeof f.id === "string" && typeof f.text === "string" && typeof f.line === "string" && typeof f.botId === "string" && typeof f.botName === "string" && typeof f.at === "number")
       : [];
     const removed = Array.isArray(parsed.removed) ? parsed.removed.filter((r): r is string => typeof r === "string") : [];
-    return { learned, removed };
+    const forgotten = Array.isArray(parsed.forgotten) ? parsed.forgotten.filter((r): r is string => typeof r === "string") : [];
+    return { learned, removed, forgotten };
   } catch {
-    return { learned: [], removed: [] };
+    return { learned: [], removed: [], forgotten: [] };
   }
 }
 
@@ -57,18 +61,22 @@ export function aboutMeLine(fact: { text: string; botName: string }, today: stri
   return `- ${today} · learned by ${fact.botName.replace(/·/g, "-").replace(/\s+/g, " ").trim().slice(0, 60)} · ${fact.text}`;
 }
 
+/** A line aboutMeLine wrote: learned from chats, not typed by the person. */
+export const LEARNED_LINE = /^\s*-\s*\d{4}-\d{2}-\d{2} · learned by [^·\n]* · /;
+
 function lineIdentity(line: string): string {
-  return factIdentity(line.replace(/^\s*-\s*\d{4}-\d{2}-\d{2} · learned by [^·\n]* · /, ""));
+  return factIdentity(line.replace(LEARNED_LINE, ""));
 }
 
 export function planLearned(from: { botId: string; botName: string }, texts: readonly string[], aboutMe: string, today: string, now = Date.now()): LearnedFact[] {
   const file = load();
   const known = new Set([...file.removed, ...aboutMe.split("\n").map(lineIdentity)]);
+  const forgotten = forgottenIn(file);
   const out: LearnedFact[] = [];
   for (const raw of texts) {
     const text = redactSecretsInText(raw.replace(/\s+/g, " ").trim()).slice(0, TEXT_MAX);
     const key = factIdentity(text);
-    if (!key || known.has(key)) continue;
+    if (!key || known.has(key) || forgotten(text)) continue;
     known.add(key);
     out.push({ id: randomUUID(), text, line: aboutMeLine({ text, botName: from.botName }, today), botId: from.botId, botName: from.botName, at: now });
   }
@@ -89,6 +97,34 @@ export function appendAboutMe(aboutMe: string, lines: readonly string[], maxChar
   return next.length > maxChars ? null : next;
 }
 
+function forgottenIn(file: LearnedFile): (text: string) => boolean {
+  const matchers = (file.forgotten ?? []).map(passageMatcher).filter((match): match is (text: string) => boolean => match !== null);
+  return (text) => matchers.some((matches) => matches(text));
+}
+
+export function isForgotten(text: string): boolean {
+  return forgottenIn(load())(text);
+}
+
+/** Learned facts that mention it are dropped and never added again, and so is any fact that mentions it later. */
+export function rememberForgotten(passage: string, mentions: (text: string) => boolean): void {
+  const file = load();
+  const gone = file.learned.filter((fact) => mentions(fact.text));
+  const folded = foldForMatch(passage);
+  file.learned = file.learned.filter((fact) => !mentions(fact.text));
+  file.removed = [...file.removed, ...gone.map((fact) => factIdentity(fact.text))].slice(-MAX_REMOVED);
+  file.forgotten = [...(file.forgotten ?? []).filter((kept) => kept !== folded), folded].slice(-MAX_FORGOTTEN);
+  save(file);
+}
+
+/** The person asked to remember something again: what they forgot before stops blocking it. */
+export function clearForgotten(text: string): void {
+  const file = load();
+  const kept = (file.forgotten ?? []).filter((passage) => !passageMatcher(passage)?.(text));
+  if (kept.length === (file.forgotten ?? []).length) return;
+  save({ ...file, forgotten: kept, removed: file.removed.filter((identity) => identity !== factIdentity(text)) });
+}
+
 /** Save About me before committing removal, so a failed profile save leaves the fact retryable. */
 export function removeLearned(id: string, aboutMe: string, saveAboutMe?: (text: string) => void): { fact: LearnedFact; aboutMe: string } | null {
   const file = load();
@@ -107,7 +143,8 @@ export function removeLearned(id: string, aboutMe: string, saveAboutMe?: (text: 
 
 /** What this server learned about the person, and what the person removed, as another server takes them. */
 export function learnedState(): { learned: LearnedFact[]; removed: string[] } {
-  return load();
+  const { learned, removed } = load();
+  return { learned, removed };
 }
 
 /** Another server's learned facts and removals: each fact neither removed here nor already in About me is added to it
@@ -127,6 +164,6 @@ export function adoptLearned(facts: readonly LearnedFact[], removed: readonly st
   const next = appendAboutMe(aboutMe, lines);
   if (next === null) return null;
   const removals = [...new Set([...file.removed, ...removed])].slice(-MAX_REMOVED);
-  if (kept.length || removals.length !== file.removed.length) save({ learned: [...file.learned, ...kept].slice(-MAX_KEPT), removed: removals });
+  if (kept.length || removals.length !== file.removed.length) save({ ...file, learned: [...file.learned, ...kept].slice(-MAX_KEPT), removed: removals });
   return { aboutMe: next, added: lines.length };
 }

@@ -510,7 +510,7 @@ it("tells a teammate the person's job is its task, and a routine's handoff is no
   writeFileSync(join(userData, "cua-connection.json"), JSON.stringify({ mode: "embedded", status: "ready", socketPath: join(f.dataDir, "cua.sock"),
     mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {} }), { mode: 0o600 });
   // A call acts only if it got the computer within a second (production: 5).
-  await f.restart("SIGTERM", { OMB_USER_DATA: userData, OMB_COMPUTER_CALL_ACT_WITHIN_MS: "1000" });
+  await f.restart("SIGTERM", { OMB_TEST_DESKTOP_CUA_CONNECTION: join(userData, "cua-connection.json"), OMB_COMPUTER_CALL_ACT_WITHIN_MS: "1000" });
   const kai = await f.bot("Kai", "Engineering");
   f.script(f.clive.id,
     { key: "S0", match: ["PHASE-SCREEN-MARCH"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "EXPORT-MARCH: export March from the invoice app on screen." } }], reply: "S0: Mira is exporting March." },
@@ -522,11 +522,15 @@ it("tells a teammate the person's job is its task, and a routine's handoff is no
   const march = await f.newJob("March export");
   await f.say(march, "PHASE-SCREEN-MARCH: have Mira export March.");
   await expect.poll(() => f.child(march, f.mira.id, "EXPORT-MARCH")?.threadId, { timeout: 20_000 }).toBeTruthy();
-  await expect.poll(async () => (await f.messages(f.child(march, f.mira.id, "EXPORT-MARCH").threadId)).some((message: any) => message.text === "MIRA-ON-SCREEN"), { timeout: 20_000 }).toBe(true);
+  // On Auto, each teammate's first screen call asks the person once before it touches their computer.
+  const miraThread = f.child(march, f.mira.id, "EXPORT-MARCH").threadId;
+  await f.respond(f.mira.id, miraThread, await f.openCard(miraThread), "allow");
+  await expect.poll(async () => (await f.messages(miraThread)).some((message: any) => message.text === "MIRA-ON-SCREEN"), { timeout: 20_000 }).toBe(true);
   const april = await f.newJob("April export");
   await f.say(april, "PHASE-SCREEN-APRIL: have Kai export April.");
   await expect.poll(() => f.child(april, kai.id, "EXPORT-APRIL")?.threadId, { timeout: 20_000 }).toBeTruthy();
   const kaiThread = f.child(april, kai.id, "EXPORT-APRIL").threadId;
+  await f.respond(kai.id, kaiThread, await f.openCard(kaiThread), "allow");
   await expect.poll(async () => (await f.rows(kaiThread)).some((name: string) => name.startsWith("Waiting for its turn on this computer")), { timeout: 20_000 }).toBe(true);
   await new Promise((resolve) => setTimeout(resolve, 1_200));
   f.open("mira");

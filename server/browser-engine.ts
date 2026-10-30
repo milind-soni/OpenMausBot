@@ -9,7 +9,8 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
 import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
-import { BROWSER_VIEWPORT_ARGS, browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
+import { BROWSER_VIEWPORT, viewportArgs, type PageSize } from "./browser-page-size.ts";
+import { browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
 import { SIGN_IN_PROMPT } from "./system-prompt.ts";
 import { gateChromeSettings } from "./browser/egress/gate.ts";
 import {
@@ -627,11 +628,11 @@ export function agentBrowserIntegration(input: {
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
 }
 
-export function setBrowserViewport(binaryPath: string, env: NodeJS.ProcessEnv, timeoutMs = 30_000): Promise<boolean> {
+export function setBrowserViewport(binaryPath: string, env: NodeJS.ProcessEnv, size: PageSize = BROWSER_VIEWPORT, timeoutMs = 30_000): Promise<boolean> {
   if (!ownsBrowserViewport(env)) return Promise.resolve(true);
   return new Promise((settle) => {
     let child: ReturnType<typeof spawn>;
-    try { child = spawn(binaryPath, [...BROWSER_VIEWPORT_ARGS, "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true }); }
+    try { child = spawn(binaryPath, [...viewportArgs(size), "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true }); }
     catch { settle(false); return; }
     let output = "";
     let settled = false;

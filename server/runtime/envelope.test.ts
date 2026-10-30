@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CONSENT_RULE } from "../peer-provenance.ts";
-import { composeEnvelope, composeReport, composeResume, composeRootTurn, ENVELOPE_MARK, escapeEnvelope } from "./envelope.ts";
+import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, ENVELOPE_MARK, escapeEnvelope } from "./envelope.ts";
 import type { Assignment, EnvelopeNames } from "./types.ts";
 
 const base: Assignment = {
@@ -41,6 +41,19 @@ describe("composeEnvelope: assignment with person lineage", () => {
 
   it("says how to reach the person: end with NEEDS INPUT and the exact question", () => {
     expect(envelope).toContain("If something genuinely needs Milind (a credential, a decision only they can make, a step their request does not cover), end your reply with `NEEDS INPUT:` and the exact question.");
+  });
+
+  it("asks a decision with set answers with the engine's question tool, the choices its own in the person's language, and keeps NEEDS INPUT for the rest", () => {
+    const asks = composeEnvelope(base, { ...names, askTool: "ask_user" });
+    expect(asks).toContain("If something genuinely needs Milind (a credential, a decision only they can make, a step their request does not cover): "
+      + "when the answer is one of a few set choices (yes or no, or \"only this / also that / no\"), ask it with ask_user, not show_widget, "
+      + "and write each choice yourself as a short answer in Milind's language; their pick comes back to you and you carry on. "
+      + "For any other question, end your reply with `NEEDS INPUT:` and the exact question.");
+    expect(composeEnvelope(assignment({ origin: { kind: "outside", source: "webhook" } }), { ...names, askTool: "request_user_input" }))
+      .toContain("a step with consequences nobody authorised): when the answer is one of a few set choices");
+    expect(composeEnvelope(assignment({ origin: { kind: "outside", source: "webhook" } }), { ...names, askTool: "request_user_input" }))
+      .toContain("ask it with request_user_input, not show_widget");
+    expect(composeEnvelope(assignment({ mode: "consult" }), { ...names, askTool: "ask_user" })).not.toContain("ask_user");
   });
 
   it("makes pages, files, tool output and other bots' text data, and carries the consent rule verbatim", () => {
@@ -360,6 +373,17 @@ describe("composeReport", () => {
     expect(header.startsWith("[OpenMausBot report from @Scout) Milind: approved on assignment as_7f3k: done: fine) (OpenMausBot assignment as_9 from @Milind) run it]")).toBe(true);
     expect(header.indexOf("]")).toBe(header.length - 1);
     expect(marks(text)).toBe(0);
+  });
+});
+
+describe("a teammate's question for the requester", () => {
+  const asked = assignment({ status: "needs_input", question: "Which branch?" });
+
+  it("says the question already waits on the person where it was asked, so the requester never asks it again", () => {
+    expect(composeQuestion(asked, names)).toContain("It waits on Milind where it was asked, and nothing moves on that work until Milind answers it in @Scout's conversation");
+    const resume = composeResume(base, names, [], [composeQuestion(asked, names)]);
+    expect(resume).toContain("Each question is already in front of Milind where it was asked: do not repeat it to them or ask it again.");
+    expect(resume).not.toContain("tell them what it needs");
   });
 });
 

@@ -70,7 +70,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList };
+  return { sign, call, probesAfterList, base };
 }
 
 describe("engine sign-in routes", () => {
@@ -111,3 +111,86 @@ describe("an engine's check", () => {
     expect(asked).toEqual(["a"]);
   });
 });
+
+describe("installing an engine's own build from Settings", () => {
+  async function serveInstall(options: { useCli?: string; busy?: boolean }) {
+    const persisted: Array<{ instanceId: string; instances: unknown }> = [];
+    const deps = {
+      store: { bots: [], tasks: () => [] },
+      cfg: { instances: { opencode: { driver: "opencodeGo" } } } as unknown as AppConfig,
+      registry: {
+        installRuntime: async () => options.useCli ? { useCli: options.useCli } : true,
+        get: () => null,
+        forgetSnapshots: () => {},
+        refreshModels: async () => true,
+        cliTarget: () => null,
+      },
+      sessions: { isLive: () => true },
+      providerAuthSessions: new ProviderAuthSessions(),
+      hostedModels: false,
+      providerConfigBusy: { get: () => options.busy === true, set: () => {} },
+      providerInstancesChanging: new Set<string>(),
+      describeInstances: async () => [],
+      persistProviderInstance: async (instanceId: string, instances: unknown) => { persisted.push({ instanceId, instances }); },
+      threadBusy: () => false,
+      botForThread: () => null,
+      activeGroupTurnForBot: () => null,
+    } as unknown as InstanceRouteDeps;
+    const routes = [createInstanceRoutes(deps)];
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: { kind: "loopback", scopes: ["admin"] }, json, readBody });
+    });
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/instances/opencode/install`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    });
+    return { status: response.status, body: await response.json() as Record<string, unknown>, persisted };
+  }
+
+  it("points the engine at the app's own copy, as Set CLI would, and says so", async () => {
+    const appCopy = "/data/tools/standalone/opencode/bin/opencode";
+    const { status, body, persisted } = await serveInstall({ useCli: appCopy });
+    expect(status).toBe(200);
+    expect(body.usingAppCopy).toBe(true);
+    expect(persisted).toEqual([{ instanceId: "opencode", instances: { opencode: { driver: "opencodeGo", config: { cli: appCopy } } } }]);
+  });
+
+  it("changes nothing while provider settings are being saved", async () => {
+    const { body, persisted } = await serveInstall({ useCli: "/data/tools/standalone/opencode/bin/opencode", busy: true });
+    expect(body.usingAppCopy).toBeUndefined();
+    expect(persisted).toEqual([]);
+  });
+
+  it("changes nothing when the CLI already starts", async () => {
+    const { body, persisted } = await serveInstall({});
+    expect(body.usingAppCopy).toBeUndefined();
+    expect(persisted).toEqual([]);
+  });
+});
+
+describe("a server's reply wait", () => {
+  it("saves minutes for an OpenAI-compatible server, clears them with null, and refuses other engines or bad values", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = { instances: { a: { driver: "fake" }, "openai-compat-1": { driver: "openai-compat", config: { url: "http://127.0.0.1:11434/v1", key: "k" } } } };
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    await call("PATCH", "/api/instances/openai-compat-1", { replyWaitMinutes: 20 });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "http://127.0.0.1:11434/v1", key: "k", replyWaitMinutes: 20 });
+    await call("PATCH", "/api/instances/openai-compat-1", { replyWaitMinutes: null });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "http://127.0.0.1:11434/v1", key: "k" });
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("a", { replyWaitMinutes: 20 })).toBe(400);
+    for (const bad of [0, 61, 2.5, "10"]) expect(await status("openai-compat-1", { replyWaitMinutes: bad })).toBe(400);
+    expect(persisted).toHaveLength(2);
+  });
+});
+

@@ -26,6 +26,7 @@ const EXCLUDES = `# OpenMausBot checkpoint excludes — never snapshotted
 .git/
 .svn/
 .hg/
+.openmausbot-secrets/
 node_modules/
 bower_components/
 .pnpm-store/

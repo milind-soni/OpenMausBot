@@ -8,10 +8,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
+import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { appHandsItOver } from "./testing/your-computer.ts";
+import { THIS_COMPUTER_NOT_READY } from "../shared/your-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CALL_WAIT_MS = 3_000;
@@ -113,7 +116,9 @@ beforeAll(async () => {
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   startServer = async (computerWaitMaxMs) => {
-    child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
+    // Started as the desktop app starts its own server, which hears the app's driver record over its parent port.
+    child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href,
+      "--import", pathToFileURL(join(ROOT, "server/testing/desktop-parent.mjs")).href, join(ROOT, "server/index.ts")], {
       cwd: ROOT, env: {
         PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
@@ -123,7 +128,7 @@ beforeAll(async () => {
         OMB_BOAT_API: `http://127.0.0.1:${boatPort}`,
         ...(computerWaitMaxMs ? { OMB_COMPUTER_WAIT_MAX_MS: String(computerWaitMaxMs) } : {}),
         OMB_COMPUTER_CALL_WAIT_MS: String(CALL_WAIT_MS),
-        OMB_USER_DATA: join(fixtureHome, "user-data"),
+        OMB_USER_DATA: join(fixtureHome, "user-data"), OMB_TEST_DESKTOP_CUA_CONNECTION: cuaDescriptor,
       }, stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", () => {});
@@ -582,6 +587,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(computer(after)).toBeTruthy();
       expect(after.systemPrompt).toContain("Local VM");
       expect(after.systemPrompt).not.toContain("call select_computer");
+      // The continuation, which may not pick again, is listed the agents tools its request was, select_computer too.
+      const agentsTools = (dumped: any) => availableTools(catalogProfileFromEnv(dumped.mcpConfig.mcpServers.agents.env));
+      expect(agentsTools(after)).toEqual(agentsTools(before));
+      expect(agentsTools(after).map((tool) => tool.name)).toContain("select_computer");
       await idle(bot.id);
       const state = await api("GET", "/api/bots?messages=30");
       const saved = state.bots.find((b: any) => b.id === bot.id);
@@ -748,6 +757,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const { bots, group } = await room();
     mkdirSync(dirname(cuaDescriptor), { recursive: true });
     writeFileSync(cuaDescriptor, JSON.stringify({ mode: "embedded", socketPath: "/fixture/cua.sock", mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {} }));
+    await appHandsItOver();
     try {
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
       await send(group.id);
@@ -765,6 +775,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(JSON.stringify(await api("GET", "/api/bots?messages=30"))).not.toContain("not available in channels yet");
     } finally {
       rmSync(cuaDescriptor, { force: true });
+      await appHandsItOver();
     }
   });
 
@@ -772,7 +783,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const { bots, group } = await room();
     await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
     await send(group.id);
-    await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("CUA Driver is not ready for this computer"));
+    await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes(THIS_COMPUTER_NOT_READY));
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
   });
@@ -782,6 +793,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
     mkdirSync(dirname(cuaDescriptor), { recursive: true });
     writeFileSync(cuaDescriptor, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    await appHandsItOver();
     try {
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
       await send(group.id);
@@ -792,6 +804,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(existsSync(dumpFile)).toBe(false);
     } finally {
       rmSync(cuaDescriptor, { force: true });
+      await appHandsItOver();
     }
   });
 

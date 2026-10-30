@@ -1,12 +1,13 @@
 // Who a Team Cloud bot reports to, end to end: Acme's Owner (Olive), an Admin (Ada) and a User (Bob), the synthetic
 // Claude CLI asking real question and approval cards through the permission socket, and each person's Needs you,
-// notifications, Chief of Staff and brief. It proves the routing and the audience rule, not a model's judgement.
+// notifications, Chief of Staff and inbox. It proves the routing and the audience rule, not a model's judgement.
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
+import { personKey } from "./person-key.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
@@ -22,7 +23,7 @@ process.env.FAKE_CLAUDE_MODE = "hang";
 process.env.FAKE_CLAUDE_RELEASE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/release";`;
 
 type Bot = { id: string; name: string; threadId: string; createdBy?: string; reportsTo?: string; chiefOfStaff?: boolean; busy?: boolean };
-type Frame = { kind: string; notification?: { kind: string; botId: string; threadId: string; body: string } };
+type Frame = { kind: string; notification?: { kind: string; botId: string; threadId: string; title: string; body: string; forPerson?: string } };
 
 let fx: CloudSendFixture, team: CloudTeamFixture, broker: BrokerFake;
 let olive = "", ada = "", bob = "";
@@ -86,7 +87,8 @@ function listen(token: string): Frame[] {
   })().catch(() => {});
   return frames;
 }
-const notified = (frames: Frame[], kind: string, botId: string) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.kind === kind && frame.notification.botId === botId);
+/** The notifications about `bot`'s asks: each reaches its person from their inbox, titled with the bot that asked. */
+const notified = (frames: Frame[], kind: string, bot: Bot) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.kind === kind && frame.notification.title.startsWith(bot.name));
 
 /** As `token`, a message holds `bot`'s turn in `threadId` while the bot asks a card through its permission socket. */
 async function askedBy(token: string, bot: Bot, threadId: string, card: { question: string } | { tool: string; command: string }) {
@@ -145,13 +147,15 @@ it("puts a question in a shared chat in its owner's Needs you and notifications,
   await expect.poll(() => asked(bob), { timeout: 10_000 }).toEqual(["Which landing page should I rewrite?"]);
   expect(await asked(ada)).toEqual([]);
   expect(await asked(olive)).toEqual([]);
-  await expect.poll(() => notified(bobs, "question", fox.id).length, { timeout: 10_000 }).toBe(1);
-  expect(notified(adas, "question", fox.id)).toEqual([]);
-  expect(notified(olives, "question", fox.id)).toEqual([]);
-  // The Admins' notification feed holds it for nobody but Bob.
+  await expect.poll(() => notified(bobs, "question", fox).length, { timeout: 10_000 }).toBe(1);
+  expect(notified(adas, "question", fox)).toEqual([]);
+  expect(notified(olives, "question", fox)).toEqual([]);
+  // It reaches Bob from his inbox, and the Admins' notification feed holds it for nobody but Bob.
+  expect(notified(bobs, "question", fox)[0]!.notification).toMatchObject({ forPerson: personKey({ id: "", email: BOB.email }) });
+  expect(notified(bobs, "question", fox)[0]!.notification!.threadId).not.toBe(fox.threadId);
   for (const token of [olive, ada]) {
-    const feed = (await team.as(token, "GET", "/api/notifications")).body.notifications as Array<{ kind: string; botId: string }>;
-    expect(feed.filter((entry) => entry.kind === "question" && entry.botId === fox.id)).toEqual([]);
+    const feed = (await team.as(token, "GET", "/api/notifications")).body.notifications as Array<{ kind: string; title: string }>;
+    expect(feed.filter((entry) => entry.kind === "question" && entry.title.startsWith("Fox"))).toEqual([]);
   }
   // The card itself stays in the shared chat, for everyone who sees it.
   expect((await messages(ada, fox.threadId)).some((row) => row.kind === "options")).toBe(true);
@@ -227,7 +231,7 @@ it("gives each person a Chief of Staff of their own whose team is the bots that 
   expect(bobs.others).toContain("Tech Lead");
 }, hostTimeout(90_000));
 
-it("keeps a member's private chat theirs: its asks reach only them, never the bot's owner, an Admin, or the owner's brief", async () => {
+it("keeps a member's private chat theirs: its asks reach only them, never the bot's owner, an Admin, or the owner's inbox", async () => {
   const bobs = listen(bob);
   const created = await team.as(olive, "POST", `/api/bots/${fox.id}/tasks`, { title: "Olive and Fox" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -238,34 +242,22 @@ it("keeps a member's private chat theirs: its asks reach only them, never the bo
   expect(await asked(ada)).not.toContain("Should I tell the board about my resignation?");
   await settle(fox);
   await new Promise((resolve) => setTimeout(resolve, 2_500));
-  expect(notified(bobs, "question", fox.id)).toEqual([]);
+  expect(notified(bobs, "question", fox)).toEqual([]);
 
-  // Bob opens the app: his brief, in his own chat with his Chief, holds Fox's shared question and never Olive's.
+  // Bob opens the app: his inbox, a private chat with the bot of his own, holds Fox's shared question and never Olive's.
   const arrived = await team.as(bob, "POST", "/api/presence/active", { source: "desktop" });
   expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
-  expect(arrived.body.open?.botId).toBe(bobsChief.id);
-  const brief = JSON.stringify(await messages(bob, arrived.body.open.threadId));
-  expect(brief).toContain("Fox is asking you");
-  expect(brief).toContain("Which landing page should I rewrite?");
-  expect(brief).not.toContain("resignation");
-  const tasks = (await bots(bob)).find((one) => one.id === bobsChief.id) as unknown as { tasks: Array<{ threadId: string; private?: boolean }> };
+  const inbox = JSON.stringify(await messages(bob, arrived.body.open.threadId));
+  expect(inbox).toContain("Which landing page should I rewrite?");
+  expect(inbox).not.toContain("resignation");
+  const tasks = (await bots(bob)).find((one) => one.id === arrived.body.open.botId) as unknown as { tasks: Array<{ threadId: string; private?: boolean }> };
   expect(tasks.tasks.find((task) => task.threadId === arrived.body.open.threadId)?.private).toBe(true);
-  // Ada's own brief lists Tech Lead's question, not Fox's.
+  // Ada's own inbox holds Tech Lead's question, not Fox's.
   const adaArrived = await team.as(ada, "POST", "/api/presence/active", { source: "desktop" });
-  const adasBrief = JSON.stringify(await messages(ada, adaArrived.body.open.threadId));
-  expect(adasBrief).toContain("Can I merge the auth refactor?");
-  expect(adasBrief).not.toContain("Which landing page");
-  expect(adasBrief).not.toContain("resignation");
-  // Bob's app shows Portuguese: his brief follows it in place, with no second notification; Ada's stays in hers.
-  await expect.poll(() => notified(bobs, "brief", bobsChief.id).length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const briefNotices = notified(bobs, "brief", bobsChief.id).length;
-  await team.as(bob, "POST", "/api/presence/active", { source: "desktop", language: "pt-br" });
-  const portuguese = JSON.stringify(await messages(bob, arrived.body.open.threadId));
-  expect(portuguese).toContain("Fox está perguntando a você");
-  expect(portuguese).not.toContain("Fox is asking you");
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
-  expect(notified(bobs, "brief", bobsChief.id)).toHaveLength(briefNotices);
-  expect(JSON.stringify(await messages(ada, adaArrived.body.open.threadId))).toContain("is asking you");
+  const adas = JSON.stringify(await messages(ada, adaArrived.body.open.threadId));
+  expect(adas).toContain("Can I merge the auth refactor?");
+  expect(adas).not.toContain("Which landing page");
+  expect(adas).not.toContain("resignation");
 }, hostTimeout(90_000));
 
 it("routes nothing on a server that is not a team", async () => {

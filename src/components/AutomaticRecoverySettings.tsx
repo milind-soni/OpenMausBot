@@ -42,11 +42,12 @@ export function AutomaticRecoverySettings() {
       <div className="flex items-center justify-between gap-4">
         <label htmlFor="automatic-recovery-enabled" className="text-[13px] font-medium text-ink">{t("settings.recovery.enable")}</label>
         <Switch id="automatic-recovery-enabled" checked={value.enabled} disabled={saving || !state.config}
-          aria-describedby="automatic-recovery-help automatic-recovery-scope"
+          aria-describedby="automatic-recovery-help automatic-recovery-scope automatic-recovery-own"
           onClick={() => change({ ...value, enabled: !value.enabled })} />
       </div>
       <p id="automatic-recovery-help" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.help")}</p>
       <p id="automatic-recovery-scope" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.scope")}</p>
+      <p id="automatic-recovery-own" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.ownBackups")}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="min-w-0">
           <label htmlFor="automatic-recovery-engine" className="block text-[13px] font-medium text-ink">{t("settings.recovery.engine")}</label>

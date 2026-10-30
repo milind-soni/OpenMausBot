@@ -21,6 +21,7 @@ import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
 import { VoicePicker, type PickerVoice } from "./VoicePicker";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
+import { KeysLink } from "./keys/KeysLink";
 
 const SAMPLE = "Morning. Overnight the tests went green, and I left two notes for you in the thread.";
 const FISH_MODELS = [
@@ -401,7 +402,7 @@ export function VoiceSettings({
 
       {provider === "xai" && (
         <p className="mt-4 text-[13px] text-ink-secondary">
-          {hostConfigured ? t("voice.grok.ready") : t("voice.grok.missingKey")}
+          {hostConfigured ? t("voice.grok.ready") : <>{t("voice.grok.missingKey")} <KeysLink id="xai" /></>}
         </p>
       )}
 

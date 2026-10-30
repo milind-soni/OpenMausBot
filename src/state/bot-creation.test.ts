@@ -1,8 +1,7 @@
 import { createElement, type Dispatch } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { botRole, roleProfilePatch } from "@/lib/bot-roles";
-import { createBotWithRole, initialState, reducer, StoreProvider, useStore, type Action, type Bot } from "./store";
+import { initialState, reducer, StoreProvider, useStore, type Action, type Bot } from "./store";
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const deferred = () => {
@@ -24,101 +23,49 @@ function mount(request: typeof fetch) {
 }
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-describe("bot presets", () => {
-  const bot = { id: "created", name: "Scout", messages: [] };
-
-  it("creates a blank bot with just one request", async () => {
-    const request = vi.fn().mockResolvedValue({ bot });
-    expect(await createBotWithRole(undefined, request)).toEqual({ bot });
-    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST" });
+describe("New bot", () => {
+  const bot = { id: "created", threadId: "created-main", name: "Scout", messages: [] };
+  const defaults = { defaults: { profile: {}, memory: {}, skills: [], routines: [] }, modelSelection: { instanceId: "claude", model: "sonnet" }, suggestedName: "Scout" };
+  const server = (create: () => Promise<Response>) => vi.fn<typeof fetch>(async (input, init) => {
+    const path = String(input);
+    if (path === "/api/bot-defaults") return response(defaults);
+    if (path === "/api/bots" && init?.method === "POST") return create();
+    if (path === "/api/bots/created" && init?.method === "PATCH") return response({ bot });
+    return response({});
   });
+  const creates = (request: ReturnType<typeof server>) => request.mock.calls.filter(([path, init]) => path === "/api/bots" && init?.method === "POST").length;
 
-  it("applies a preset only to the bot returned by creation", async () => {
-    const role = botRole("research")!;
-    const request = vi.fn().mockResolvedValueOnce({ bot }).mockResolvedValueOnce({ bot: { ...roleProfilePatch(role) } });
-    const created = await createBotWithRole(role, request);
-    expect(JSON.parse(request.mock.calls[0]![1].body)).toEqual({ name: role.name, title: role.title, description: role.description });
-    expect(request).toHaveBeenLastCalledWith("/api/bots/created", { method: "PATCH", body: JSON.stringify(roleProfilePatch(role)) });
-    expect(created.bot).toMatchObject({ id: "created", soul: role.soul, messages: [] });
-  });
-
-  it("creates directly in the selected team in the first POST", async () => {
-    const request = vi.fn().mockResolvedValue({ bot: { ...bot, section: "Studio" } });
-    const created = await createBotWithRole(undefined, request, undefined, "Studio");
-    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST", body: JSON.stringify({ section: "Studio" }) });
-    expect(created.bot.section).toBe("Studio");
-  });
-
-  it("retains the already-created bot if its optional preset fails, without creating another", async () => {
-    const request = vi.fn().mockResolvedValueOnce({ bot }).mockRejectedValueOnce(new Error("profile unavailable"));
-    expect(await createBotWithRole(botRole("research"), request)).toEqual({ bot, profileError: "profile unavailable" });
-    expect(request).toHaveBeenCalledTimes(2);
-  });
-
-  it("creates a restricted bot already restricted, in the one create request", async () => {
-    const request = vi.fn().mockResolvedValue({ bot });
-    await createBotWithRole(undefined, request, "admins");
-    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST", body: JSON.stringify({ visibility: "admins" }) });
-    const role = botRole("research")!;
-    const withRole = vi.fn().mockResolvedValueOnce({ bot }).mockResolvedValueOnce({ bot: { ...roleProfilePatch(role) } });
-    await createBotWithRole(role, withRole, { people: ["ada@example.test"] });
-    expect(JSON.parse(withRole.mock.calls[0]![1].body)).toEqual({ name: role.name, title: role.title, description: role.description, visibility: { people: ["ada@example.test"] } });
-    const open = vi.fn().mockResolvedValue({ bot });
-    await createBotWithRole(undefined, open, "everyone");
-    expect(open).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST" });
-  });
-
-  it("does not apply a profile after failed creation", async () => {
-    const request = vi.fn().mockRejectedValue(new Error("offline"));
-    await expect(createBotWithRole(botRole("research"), request)).rejects.toThrow("offline");
-    expect(request).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("shared bot creation guard", () => {
-  const bot = { id: "created", name: "Scout", messages: [] };
-
-  it.each([false, true])("blocks duplicates across dismissal through preset completion (profile failure: %s)", async (profileFails) => {
+  it("makes one bot from a double click", async () => {
     const post = deferred();
-    const profile = deferred();
-    const request = vi.fn<typeof fetch>().mockReturnValueOnce(post.promise).mockReturnValueOnce(profile.promise).mockResolvedValue(response({ bot }));
+    const request = server(() => post.promise);
     const dispatch = mount(request);
     const onCreated = vi.fn();
-    const onError = vi.fn();
-    dispatch({ type: "newBot", role: botRole("research"), onCreated, onError });
-    dispatch({ type: "toggleNewBot", open: false });
-    dispatch({ type: "toggleNewBot", open: true });
-    dispatch({ type: "newBot" });
-    expect(request).toHaveBeenCalledTimes(1);
+    dispatch({ type: "newBot", onCreated });
+    dispatch({ type: "newBot", onCreated });
+    await vi.waitFor(() => expect(creates(request)).toBe(1));
+    dispatch({ type: "newBot", onCreated });
     post.resolve(response({ bot }));
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     await flush();
-    expect(request).toHaveBeenCalledTimes(2);
-    dispatch({ type: "newBot" });
-    expect(request).toHaveBeenCalledTimes(2);
-    profile.resolve(response(profileFails ? { error: "profile unavailable" } : { bot }, profileFails ? 500 : 200));
-    await flush();
-    expect(onCreated).toHaveBeenCalledOnce();
-    expect(onError).not.toHaveBeenCalled();
-    dispatch({ type: "newBot" });
-    await flush();
-    expect(request).toHaveBeenCalledTimes(3);
+    expect(creates(request)).toBe(1);
   });
 
-  it("releases the guard after POST failure so a fresh attempt can succeed", async () => {
-    const request = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(response({ bot }));
+  it("lets the next click try again after a failure", async () => {
+    let fail = true;
+    const request = server(async () => {
+      if (fail) { fail = false; throw new Error("offline"); }
+      return response({ bot });
+    });
     const dispatch = mount(request);
     const onError = vi.fn();
     const onCreated = vi.fn();
     dispatch({ type: "newBot", onError, onCreated });
-    dispatch({ type: "newBot" });
-    await flush();
-    expect(request).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith("offline");
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("Couldn't make a new bot: offline"));
     expect(onCreated).not.toHaveBeenCalled();
-    dispatch({ type: "newBot", onCreated });
     await flush();
-    expect(request).toHaveBeenCalledTimes(2);
-    expect(onCreated).toHaveBeenCalledOnce();
+    dispatch({ type: "newBot", onCreated });
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(creates(request)).toBe(2);
   });
 });
 
@@ -133,19 +80,10 @@ describe("setup navigation", () => {
     expect(reducer(state, { type: "botAdded", bot })).toMatchObject({ activeView: "chat", selectedId: "created" });
   });
 
-  it("keeps creation pending through close/reopen until the request settles", () => {
-    const pending = reducer(initialState, { type: "botCreationPending", on: true });
-    const closed = reducer(pending, { type: "toggleNewBot", open: false });
-    const reopened = reducer(closed, { type: "toggleNewBot", open: true });
-    expect(reopened).toMatchObject({ newBotOpen: true, botCreationPending: true });
-    expect(reducer(reopened, { type: "botCreationPending", on: false })).toMatchObject({ newBotOpen: true, botCreationPending: false });
-  });
-
-  it("opens one modal with exclusive keyboard ownership", () => {
+  it("puts the new bot's chat in front of any open settings, except from a department's own dialog", () => {
     const start = { ...initialState, settingsOpen: true, appSettingsOpen: true, pluginsOpen: true, shortcutsOpen: true, computerOpen: true };
-    const next = reducer(start, { type: "toggleNewBot", open: true });
-    expect(next).toMatchObject({ newBotOpen: true, settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false, computerOpen: true });
-    expect(reducer(next, { type: "toggleNewBot", open: false })).toMatchObject({ settingsOpen: false, pluginsOpen: false });
+    expect(reducer(start, { type: "newBot" })).toMatchObject({ settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false, computerOpen: true });
+    expect(reducer(start, { type: "newBot", section: "Sales", preserveSelection: true })).toBe(start);
   });
 
   it("opens the requested Plugins surface and remembers it on reopen", () => {

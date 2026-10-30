@@ -257,7 +257,7 @@ export function VoicePicker({
       {...motion.exitProps}
       style={{ position: "fixed", ...place, visibility: place ? undefined : "hidden" }}
       className={cn(
-        "z-[70] flex flex-col overflow-hidden rounded-xl border border-hairline/50 bg-menu shadow-2xl shadow-black/50",
+        "popover-surface z-[70] flex flex-col overflow-hidden rounded-xl border border-hairline/50 bg-menu shadow-2xl shadow-black/50",
         motion.className,
       )}
     >

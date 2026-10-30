@@ -49,7 +49,11 @@ it("sets up schedule and webhook triggers from chat at Ask, with no confirmation
     const scheduled = await turn("Every weekday at 9, send me a summary of my inbox.", [
       { tool: "create_trigger", arguments: { when: "schedule", name: "Morning summary", instructions: "Summarize the fixture inbox; no external services.", schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"] } } },
     ]);
-    expect(toolText(scheduled, "create_trigger")).toContain("applied at once");
+    const created = toolText(scheduled, "create_trigger");
+    expect(created).toContain("applied at once; the person sees it right here in the chat, with Pause, Edit and Undo");
+    expect(created).toMatch(/weekdays at 9:00 [^\n(]*time\b|weekdays at 9:00 UTC/);
+    expect(created).not.toMatch(/\b(?:Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific|Etc)\/[A-Za-z_]+/);
+    expect(created).not.toMatch(/\bcard\b/i);
     expect(await unanswered()).toEqual([]);
     const scheduleCard = (await messages()).findLast((message) => message.card?.routineRequest)!.card;
     expect(scheduleCard).toMatchObject({ autoApplied: true, answered: "allow", options: [] });

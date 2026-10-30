@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,9 @@ import { BrowserRuntime } from "../browser-runtime.ts";
 import { LentChromeDoors, type ChromeLender } from "../browser/lent-chrome.ts";
 import { audienceBrowserSuffix } from "../browser/audience.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
+import type { CdpSession, Params } from "../browser/cdp/connection.ts";
+import { FileChoosers } from "../browser/cdp/files.ts";
+import { uploadableFiles } from "../browser-upload.ts";
 import { createBrowserHost, type BrowserHostDeps } from "./browser.ts";
 
 vi.mock("../browser-engine.ts", async (original) => {
@@ -313,7 +316,7 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
     const browser = (await host.browserIntegration("scout", "mine", turn))!;
     expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("is lent but offline") }] });
     lend(null);
-    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("turn on Your Chrome") }] });
+    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("lends its Chrome by itself") }] });
     expect(engine).not.toHaveBeenCalled();
   });
 
@@ -337,7 +340,7 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
     cfg.browserEngine = { engine: "chrome" };
     expect((await host.browserIntegration("scout", "mine", turn))?.spec.env.AGENT_BROWSER_CDP, "nor the new engine's").toBe(browser.spec.env.AGENT_BROWSER_CDP);
     expect(egress).not.toHaveBeenCalled();
-    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("turn on Your Chrome") }] });
+    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("lends its Chrome by itself") }] });
     expect(engine).not.toHaveBeenCalled();
   });
 
@@ -615,18 +618,70 @@ describe("a Team Cloud's browsers, one per audience", () => {
 describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
   afterEach(() => chromeLauncher.boxWith(() => null));
 
-  it("are linked into that browser's own profile, the one folder of the disk its box shows Chrome", () => {
-    const work = mkdtempSync(join(tmpdir(), "omb-host-upload-"));
+  it.each([null, "report.txt", "Report.txt"])("gives Chrome on Windows a private copy of a workspace file (name: %s)", async (name) => {
+    const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-windows-")));
+    try {
+      const file = join(work, "report.txt");
+      writeFileSync(file, "report");
+      const { host } = setup("chrome");
+      vi.stubGlobal("process", { ...process, platform: "win32" });
+      const [staged] = await host.uploadPaths([{ file, name }], "bot-scout", { command: "omb-cdp", args: ["bot:scout"], env: {} });
+      vi.unstubAllGlobals();
+      expect(staged!.startsWith(join(DATA_DIR, "browser-uploads"))).toBe(true);
+      expect(readFileSync(staged!, "utf8")).toBe("report");
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32").each([false, true])("keeps workspace bytes through a symlink swap while Chrome waits for a picker (boxed: %s)", async (boxed) => {
+    const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-")));
+    try {
+      const secret = join(work, "secret.txt");
+      const workspace = join(work, "workspace");
+      mkdirSync(workspace);
+      const source = join(workspace, "report.txt");
+      writeFileSync(source, "report");
+      writeFileSync(secret, "outside secret");
+      const checked = uploadableFiles([source], [workspace]);
+      if ("error" in checked) throw new Error(checked.error);
+      const box = { bwrap: "/usr/bin/bwrap", options: ["--unshare-pid"], seccomp: null };
+      const { host } = setup("chrome", { cloudHome: true, ...(boxed ? { browserBox: () => box } : {}) });
+      const paths = await host.uploadPaths(checked.files.map((file) => ({ file, name: null })), "bot-scout", { command: "omb-cdp", args: ["bot:scout"], env: {} });
+      const choosers = new FileChoosers();
+      let opened!: (params: Params) => void;
+      const uploaded: Array<{ method: string; files: unknown; bytes: string[] }> = [];
+      const session = {
+        on: (_method: string, listener: (params: Params) => void) => { opened = listener; return () => {}; },
+        send: async (method: string, params: Params) => { uploaded.push({ method, files: params.files, bytes: (params.files as string[]).map((path) => readFileSync(path, "utf8")) }); return {}; },
+      } as unknown as CdpSession;
+      choosers.watch(session);
+      const answering = choosers.answer(paths);
+      rmSync(source);
+      symlinkSync(secret, source);
+      opened({ frameId: "F", backendNodeId: 7, mode: "selectSingle" });
+      await answering;
+      expect(uploaded).toEqual([{ method: "DOM.setFileInputFiles", files: [expect.stringMatching(/browser-uploads/)], bytes: ["report"] }]);
+      expect(paths[0]).not.toBe(source);
+      expect(readFileSync(paths[0]!, "utf8")).toBe("report");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it("are copied into that browser's own profile, the one folder of the disk its box shows Chrome", async () => {
+    const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-")));
     const file = join(work, "report.txt");
     writeFileSync(file, "report");
     const box = { bwrap: "/usr/bin/bwrap", options: ["--unshare-pid"], seccomp: null };
     const boxed = setup(undefined, { cloudHome: true, browserBox: () => box }).host;
     const session = `bot-scout${ADA}`;
-    const [linked] = boxed.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} });
+    const [linked] = await boxed.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} });
     expect(linked!.startsWith(join(DATA_DIR, "agent-browser-profiles"))).toBe(true);
     expect(readFileSync(linked!, "utf8")).toBe("report");
     const plain = setup(undefined, { cloudHome: true }).host;
-    expect(plain.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} }), "unboxed, the file is given as it is").toEqual([file]);
+    expect(await plain.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} }), "unboxed, the file is given as it is").toEqual([file]);
     rmSync(work, { recursive: true, force: true });
   });
 });

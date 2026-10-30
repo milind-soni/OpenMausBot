@@ -165,6 +165,57 @@ it("a room's turn reads the room's layer and the team's, never a member's notes,
   expect(JSON.stringify((await messages(ada, roomThread)).body)).toContain("Ben says Wednesday");
 }, hostTimeout(120_000));
 
+it("a room's bot reply is unread for each person until they read it, and one person reading clears it for nobody else", async () => {
+  const room = async (token: string) => ((await team.as(token, "GET", "/api/bots")).body.groups as Array<{ id: string; unread?: boolean; lastReadMessageId?: string }>)
+    .find((group) => group.id === roomId)!;
+  for (const token of [ada, admin, cleo]) expect((await room(token)).unread).toBe(true);
+  const read = await team.as(ada, "POST", `/api/groups/${roomId}/read`);
+  expect(read.status, JSON.stringify(read.body)).toBe(200);
+  expect(read.body.group.unread).toBe(false);
+  expect((await room(ada)).unread).toBe(false);
+  for (const token of [admin, cleo]) expect((await room(token)).unread, "Ada reading is Ada's alone").toBe(true);
+  await turn(admin, roomThread, "@Scout and Friday?", roomId);
+  expect((await room(ada)).unread, "the bot's next reply is new to Ada").toBe(true);
+  const marked = await team.as(ada, "PATCH", `/api/groups/${roomId}`, { unread: false });
+  expect(marked.status, JSON.stringify(marked.body)).toBe(200);
+  expect(marked.body.group.unread).toBe(false);
+  expect((await room(ada)).unread, "marking a room read is reading it").toBe(false);
+  expect((await room(cleo)).unread, "Ada marking it read is Ada's alone").toBe(true);
+  expect((await team.as(ada, "PATCH", `/api/groups/${roomId}`, { unread: true })).body.group.unread).toBe(true);
+  expect((await room(ada)).unread).toBe(true);
+  expect((await team.as(cleo, "POST", `/api/groups/${roomId}/read`)).body.group.unread).toBe(false);
+  expect((await room(ada)).unread, "Cleo reading leaves Ada's mark").toBe(true);
+}, hostTimeout(120_000));
+
+it("sends a person's read of a room to their own streams only", async () => {
+  const listen = async (token: string) => {
+    const controller = new AbortController();
+    const stream = await fetch(`${team.base}/api/events`, { headers: { ...fx.edge, authorization: `Bearer ${token}`, accept: "text/event-stream" }, signal: controller.signal });
+    expect(stream.status).toBe(200);
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    const done = (async () => { for (;;) { const { value, done } = await reader.read(); if (done) return; text += decoder.decode(value, { stream: true }); } })().catch(() => {});
+    const rooms = () => text.split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)) as { kind: string; group?: { id: string } })
+      .filter((frame) => frame.kind === "group" && frame.group?.id === roomId);
+    await expect.poll(() => text.includes("\"hello\""), { timeout: 10_000 }).toBe(true);
+    return { rooms, close: async () => { controller.abort(); await done; } };
+  };
+  const adas = await listen(ada), cleos = await listen(cleo);
+  try {
+    expect((await team.as(ada, "POST", `/api/groups/${roomId}/read`)).status).toBe(200);
+    expect((await team.as(cleo, "POST", `/api/groups/${roomId}/read`)).status).toBe(200);
+    expect((await team.as(ada, "POST", `/api/groups/${roomId}/read`)).status).toBe(200);
+    await expect.poll(() => adas.rooms().length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(() => cleos.rooms().length, { timeout: 10_000 }).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect([adas.rooms().length, cleos.rooms().length], "nobody else's read reaches a stream").toEqual([2, 1]);
+  } finally {
+    await adas.close();
+    await cleos.close();
+  }
+}, hostTimeout(60_000));
+
 it("recall never crosses: a room's fact never surfaces in a private chat and a private chat's never in the room", async () => {
   const search = async (threadId: string, q: string) => {
     const token = await team.capability(bot.id, threadId);

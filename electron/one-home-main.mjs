@@ -81,7 +81,6 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
- *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -100,7 +99,8 @@ async function answer(response) {
  * `teamJournal`, team-moves.json beside this one by default). `reportTimers`: the waits of the move's report to the Admin
  * (move-status.mjs), setTimeout's by default. The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal, reportTimers, t = nativeText.englishText.t, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
+  reportTimers, t = nativeText.englishText.t, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -210,7 +210,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     },
     session: () => moveSession.open(target()),
     release: () => moveSession.end(),
-    lend, offer, phone, openHome, openLocal, restart, version, log,
+    lend, phone, openHome, openLocal, restart, version, log,
     again,
     keep,
     keepHome,

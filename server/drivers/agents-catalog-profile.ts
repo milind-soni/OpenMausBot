@@ -1,6 +1,7 @@
 // The OMB_* switches the harness gives the agents proxy, read into the profile agents-catalog.ts lists tools for.
 
-/** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
+/** Which tools a conversation is shown, the same on every one of its turns. Presentation only: the server still
+ * authenticates and scopes every call. */
 export interface CatalogProfile {
   skillAuthoring: boolean;
   sharedComputers: boolean;
@@ -19,6 +20,12 @@ export interface CatalogProfile {
   team?: boolean;
   /** The person's MausBot with a Chief's powers: its notification tools are mounted. */
   mausbot?: boolean;
+  /** A direct chat whose bot may pick where it works (Works on is not Off and no team computer is its own): select_computer
+   * is mounted, and the harness refuses a pick on any turn but a person's own message. */
+  computerSelection?: boolean;
+  /** A room's thread: the widget and page tools, which rooms refuse, and the wait tools, since a room holds no wait,
+   * are not mounted. */
+  room?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -35,5 +42,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     escalations: env.OMB_ESCALATIONS === "1",
     team: env.OMB_TEAM_PEOPLE === "1",
     mausbot: env.OMB_MAUSBOT === "1",
+    computerSelection: env.OMB_COMPUTER_SELECTION === "1",
+    room: env.OMB_ROOM === "1",
   };
 }

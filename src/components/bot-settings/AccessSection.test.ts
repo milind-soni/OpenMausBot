@@ -105,7 +105,7 @@ describe("owner tool selection status", () => {
 
   it("shows corrupt saved restrictions as a blocked setup, never all tools", () => {
     const corrupt = render(makeBot({ toolScope: { allow: "native:*" } } as unknown as Partial<Bot>));
-    expect(corrupt).toContain("Invalid saved selection. This bot cannot start until it is repaired.");
+    expect(corrupt).toContain("This bot&#x27;s saved tool selection is damaged, so the bot can&#x27;t start. Choose its tools again to fix it.");
     expect(corrupt).toContain('role="alert"');
   });
 

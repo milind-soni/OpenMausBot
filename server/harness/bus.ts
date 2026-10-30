@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { EVENTS_DIR } from "../config.ts";
 import { redactSecrets } from "../redact.ts";
 import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.ts";
-import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
+import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
+import { LiveSteps } from "./live-steps.ts";
 import { ProgressGate } from "./progress-gate.ts";
 
 const INCOMPLETE_LOG_MESSAGE =
@@ -35,6 +36,9 @@ function sameStream(a: TextDelta, b: TextDelta): boolean {
     a.itemId === b.itemId && a.streamKind === b.streamKind && a.synthetic === b.synthetic;
 }
 
+/** What changes the chat's status line, and so makes a waiting status report stale; a heartbeat or a token count does not. */
+const STATUS_LINE_EVENTS = new Set<RuntimeEvent["type"]>(["turn.started", "content.delta", "item.started", "item.completed", "request.opened"]);
+
 function isTerminalEvent(event: RuntimeEvent): boolean {
   if (event.type === "turn.completed" || event.type === "cap.exhausted" || event.type === "session.exited") {
     return true;
@@ -59,6 +63,11 @@ export class EventBus {
     if (this.pendingText.has(event.threadId)) this.flushThread(event.threadId);
     this.deliver(event);
   });
+  private readonly adapters = new Map<string, ProviderAdapter>();
+  private readonly steps = new LiveSteps({
+    offer: (event) => this.progress.offer(event),
+    enginePid: (event) => this.adapters.get(event.providerInstanceId ?? "")?.enginePid?.(event.threadId),
+  });
 
   private readonly gate?: (event: RuntimeEvent) => boolean;
 
@@ -71,6 +80,7 @@ export class EventBus {
   attach(instances: ProviderInstance[]) {
     for (const instance of instances) {
       this.detach(instance.instanceId);
+      this.adapters.set(instance.instanceId, instance.adapter);
       const unsub = instance.adapter.onEvent((event) => {
         // An adapter may only emit events for its own driver kind.
         if (event.provider !== instance.driverKind) {
@@ -84,12 +94,17 @@ export class EventBus {
     }
   }
 
-  publish(event: RuntimeEvent) {
-    if (event.type === "turn.progress") {
-      this.progress.offer(event);
+  publish(raw: RuntimeEvent) {
+    if (raw.type === "turn.progress") {
+      this.progress.offer(this.steps.progress(raw));
       return;
     }
-    this.progress.supersede(event.threadId, isTerminalEvent(event));
+    if (raw.type === "item.output") {
+      this.steps.output(raw);
+      return;
+    }
+    const event = this.steps.observe(raw, isTerminalEvent(raw));
+    if (STATUS_LINE_EVENTS.has(event.type) || isTerminalEvent(event)) this.progress.supersede(event.threadId, isTerminalEvent(event));
     const pending = this.pendingText.get(event.threadId);
     if (event.type === "content.delta") {
       if (pending && sameStream(pending.event, event)) {
@@ -104,6 +119,7 @@ export class EventBus {
     }
     if (pending) this.flushThread(event.threadId);
     this.write(event);
+    this.steps.announce(event);
   }
 
   flush(): Promise<void> {
@@ -279,6 +295,7 @@ export class EventBus {
   detach(instanceId: string) {
     this.unsubscribes.get(instanceId)?.();
     this.unsubscribes.delete(instanceId);
+    this.adapters.delete(instanceId);
     void this.flush();
   }
 }

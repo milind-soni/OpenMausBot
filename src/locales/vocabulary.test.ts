@@ -13,7 +13,7 @@ const RETIRED: ReadonlyArray<readonly [string, RegExp, string]> = [
   ["OpenMausBot Cloud", /OpenMausBot Cloud/i, "MausBot Cloud"],
   ["MausBot Pro", /MausBot Pro\b/, "MausBot Cloud"],
   // \b before "_" fails, so environment names such as OMB_PUBLIC_IPV4 pass.
-  ["OMB", /\bOMB\b/, "OpenMausBot"],
+  ["OMB", /\bOMB\b/, "MausBot"],
   ["Cloud box", /Cloud box/i, "cloud desktop"],
   ["Hosted desktop", /Hosted desktop/i, "cloud desktop"],
   ["Cloud VM", /Cloud VM/i, "cloud desktop"],
@@ -27,7 +27,8 @@ const RETIRED: ReadonlyArray<readonly [string, RegExp, string]> = [
   ["T3", /\bT3\b/, "no other app's name"],
 ];
 
-const OWN_KEY = /Boat (?:API key|account|key|token|plan|provider|credentials|setup|is not configured|is not connected|is a paid service)|boat\.dev|\b(?:Connect|Configure) Boat\b/g;
+// Boat makes the cloud desktops and is credited where they appear ("from Boat", "by Boat"); it never names one desktop.
+const OWN_KEY = /Boat (?:API key|account|key|token|plan|provider|credentials|setup|is not configured|is not connected|is a paid service)|boat\.dev|\b(?:Connect|Configure) Boat\b|\b(?:from|by) Boat\b/g;
 const BOAT = /\bBoats?\b/;
 
 function retiredIn(text: string, boat: RegExp = BOAT): string[] {
@@ -40,7 +41,6 @@ const PENDING_KEY_PREFIXES: string[] = [];
 const CHECKED_PACKS = ["pt-br"];
 const EN_ALLOWED: Record<string, string> = {
   "botAccess.cloud.boat": "the own-key provider picker names its two providers, Boat and a VPS",
-  "botAccess.cloud.hostedDescription": "the own-key provider picker names its two providers, Boat and a VPS",
   "botAccess.cloud.hostedBackendDescription": "the own-key provider picker names its two providers, Boat and a VPS",
   "botAccess.cloud.vpsAutoDescription": "the own-key provider picker's VPS line names its Cloud choice",
 };
@@ -161,14 +161,7 @@ describe("one name per thing", () => {
     const withoutEllipsis = (key: string) => (text: Text) => text(key).replace(/…$/, "");
     const pointers: Array<[string, Array<(text: Text) => string>]> = [
       ["cloudHome.connectHelp", [label("place.local")]],
-      ["cloudPhone.step1", [cloud, label("native.menu.server")]],
-      ["remote.client.server.switchNote", [label("native.menu.server")]],
-      ["sidebar.switchServerError", [label("native.menu.server")]],
-      ["lending.status.connectFirst", [label("cloudHome.connect")]],
-      ["computer.worksOnHintCloudHome", [label("lending.title.computer"), settings("settings.section.cloudAccount")]],
-      ["lending.cloudSide.empty", [label("lending.title.computer"), settings("settings.section.cloudAccount")]],
-      ["browser.passkey.lendPc", [label("lending.title.pc"), settings("settings.section.cloudAccount")]],
-      ["lending.explain", [label("lending.more")]],
+      ["cloudPhone.step1", [cloud]],
       ["cloudAccount.onCloudSignIn", [label("cloudAccount.signInAgain")]],
       ["cloudAccount.storageFailed", [label("cloudAccount.signOut")]],
       ["cloudAccount.codeExpired", [label("cloudAccount.signIn")]],
@@ -179,7 +172,6 @@ describe("one name per thing", () => {
       ["native.boot.unhealthy.body", [label("native.menu.server")]],
       ["native.dialog.connectFailed.detail", [withoutEllipsis("native.menu.connect")]],
       ["native.dialog.share.detail", [settings("settings.section.desktopWorkspaces")]],
-      ["native.lend.screen.detail", [cloud, settings("settings.section.cloudAccount")]],
     ];
     const staleIn = (text: Text, prefix: string) => pointers.flatMap(([key, labels]) => labels.map((of) => of(text))
       .filter((shown) => !text(key).includes(shown)).map((shown) => `${prefix}${key} → ${shown}`));
@@ -202,6 +194,7 @@ describe("one name per thing", () => {
       "Sign in to MausBot Cloud", "Pro active · verified by MausBot Cloud", "Restart OpenMausBot", "locked by another OpenMausBot process",
       "set OMB_PUBLIC_IPV4", "Open My Cloud", "Open the Cloud", "Choose Cloud desktop to wake", "Auto, Cloud desktop or Browser",
       "Included with your Cloud plan", "Add a Boat API key in Settings → API keys", "Connect Boat", "Check boat.dev",
+      "Bots here can get their own cloud desktops from Boat, a paid service", "Cloud desktops by Boat",
       "Local VM", "Open your Plan page",
     ]) expect(retiredIn(good), good).toEqual([]);
   });

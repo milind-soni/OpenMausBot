@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../shared/redact.ts";
+import { BROWSER_VIEWPORT } from "./browser-page-size.ts";
 import { BROWSER_CALL_DEFAULTS, BROWSER_HOVER_TOOL, BROWSER_RESTART_TOOL, BROWSER_UPLOAD_TOOL, BrowserRuntime, TransportError, browserRuntimeEnv, formatBrowserTiming, type BrowserSpawnSpec, type BrowserTiming } from "./browser-runtime.ts";
 import { HARNESS_CALL_BUDGET_MS, HARNESS_PROXY_TIMEOUT_MS } from "./harness-budget.ts";
 import { RelayPorts } from "./browser-relay.ts";
@@ -754,12 +755,37 @@ describe("server-owned browser MCP runtime", () => {
     order.push(first.content[0]!.text);
     await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "second" } });
     expect(applyViewport).toHaveBeenCalledOnce();
-    expect(applyViewport).toHaveBeenCalledWith(spec());
+    expect(applyViewport).toHaveBeenCalledWith(spec(), BROWSER_VIEWPORT);
     expect(order[0]).toBe("viewport");
     expect(order[1]).toContain("first");
     await value.close("s");
     await value.agentRpc("s", spec(), "tools/call", { name: "echo" });
     expect(applyViewport).toHaveBeenCalledTimes(2);
+  });
+
+  it("sizes the page for the panel a person watches once the bot's call ends, and back to the standard page at the bot's next call after they leave", async () => {
+    const sizes: Array<{ width: number; height: number }> = [];
+    const value = runtime({ applyViewport: async (_spec, size) => { sizes.push(size); } });
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo" });
+    expect(sizes).toEqual([BROWSER_VIEWPORT]);
+    const unwatch = value.watch("s", spec());
+    const typing = deferred<{ ok: boolean; text: string }>();
+    const holding = value.withSecretInput("s", spec(), () => typing.promise);
+    const resizing = value.pageSizes.resize("s", { width: 400, height: 750 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sizes).toEqual([BROWSER_VIEWPORT]);
+    typing.resolve({ ok: true, text: "typed" });
+    await holding;
+    await resizing;
+    expect(sizes).toEqual([BROWSER_VIEWPORT, { width: 1280, height: 2400 }]);
+    const shot = await value.agentRpc("s", spec(), "tools/call", { name: "agent_browser_screenshot", arguments: {} }) as { content: Array<{ text: string }> };
+    expect(sizes).toHaveLength(2);
+    expect(JSON.parse(shot.content[0]!.text)).toMatchObject({ name: "agent_browser_screenshot", arguments: { format: "jpeg", quality: 80 } });
+    unwatch();
+    await value.pageSizes.resize("s", null);
+    expect(sizes).toHaveLength(2);
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo" });
+    expect(sizes).toEqual([BROWSER_VIEWPORT, { width: 1280, height: 2400 }, BROWSER_VIEWPORT]);
   });
 
   it("prepares the browser before the engine may start it, and gives it its identity before the bot's command runs", async () => {

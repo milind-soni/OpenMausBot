@@ -13,7 +13,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 | `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
 | the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
-| put back: this turn's permission socket and the files its command line names (MCP config, system prompt), read-only | What the driver made for this one process |
+| put back: this turn's permission socket (the engine's question and approval helper reaches the server through it), and, read-only, the files its command line names (MCP config, system prompt) | What the driver made for this one process |
 | private `/tmp`, `/var/tmp`, `/run`, `/dev`, `/proc` | Its own PID namespace: other turns' processes do not exist for it |
 | a network namespace with loopback only | Two loopback ports are bridged to unix sockets from outside (below); nothing else on the machine's loopback is reachable, and there is no route out |
 
@@ -75,7 +75,10 @@ drops whatever credential header the client sent, adds the real key, and forward
 (the base URL the server had, or the provider's default); the box cannot choose the upstream. A URL MCP server's
 headers ride the same way (`server/bot-box/broker-mcp.ts`): the turn's server list carries
 `http://127.0.0.1:18080/b/<token>/mcp-<name>` with no headers, and that token is kept for the conversation's later
-turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. Connected apps (Composio,
+turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. A request for the grant
+itself goes to the upstream exactly as it was given (a server at `/mcp` is reached at `/mcp`, never `/mcp/`, which a
+Cloudflare Worker answers with 404), anything below it below that address, with the client's query beside the
+upstream's own. Connected apps (Composio,
 HighLevel) were already behind the harness (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
 A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Cerebras, MiniMax, Kimi, Cursor, Factory,

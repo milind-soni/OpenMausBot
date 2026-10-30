@@ -82,7 +82,7 @@ pnpm exec vitest run src/lib/bot-presets.test.ts src/components/SharePresetDialo
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/presets-ui.e2e.test.ts --silent=false
 ```
 
-The first command covers the New bot grouping, the draft fields a preset
+The first command covers the Starting role grouping, the draft fields a preset
 fills (never the model, computer, approval or connected apps), the picture,
 the summary lines, creation passing the preset and leaving its skills and
 notes to the server, the share request, part names, the preset file's
@@ -91,8 +91,9 @@ contents list and its import preview. The second owns a disposable
 saves `sky-1.0.0.openmaus.json` (captured in the page); **Templates →
 Import** of that file shows "Preset bots and skills · no team" and **Add
 presets** adds it; **Share team** shows no preset until **Include my New bot
-defaults as a preset** is ticked; then **New bot** lists **From Acme
-Partners**, **Imported presets** and **Built-in roles**, and a bot made from
+defaults as a preset** is ticked; then the review behind **Templates → Add
+Scout, Researcher** lists **From Acme Partners**, **Imported presets** and
+**Built-in roles** under **Starting role**, and a bot made from
 the file preset gets its skill off and its notes, one made from the
 organization preset its skill on. Screenshots go to
 `.omb-scratch/verify-evidence/presets-*.png`. CI runs it in the advisory

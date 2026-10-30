@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { DesktopWorkspaceSwitcher } from "../components/DesktopWorkspaceSwitcher";
+import { productName } from "../lib/brand";
 
 import {
   defaultDeviceLabel,
@@ -27,8 +28,14 @@ export function pairsAutomatically(initialCode: string | null, desktop = typeof 
 
 export function pairIntro({ mode, sent, email, cloudHome }: { mode: "email" | "code" | null; sent: boolean; email: string; cloudHome: boolean }): string {
   if (mode === "email") return sent ? t("pair.intro.emailSent", { email }) : t("pair.intro.email");
-  if (cloudHome) return t("pair.intro.cloud", { open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") });
+  if (cloudHome) return t("pair.intro.cloud", { app: productName(), open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") });
   return t("pair.intro.code");
+}
+
+export function pairTitle(environment: EnvironmentDescriptor | null, mode: "email" | "code" | null): string {
+  if (environment?.capabilities.cloudTeam) return environment.label;
+  if (environment?.capabilities.cloudHome) return t("pair.myCloud");
+  return t(mode === "email" ? "pair.signInTo" : "pair.connectTo", { name: environment?.label ?? t("pair.thisOpenMausBot", { app: productName() }) });
 }
 
 export function PairPage({ initialCode, initialEmail = null, reason }: { initialCode: string | null; initialEmail?: string | null; reason?: string }) {
@@ -118,13 +125,13 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
         {opening ? (
           <p role="status" className="text-[20px] font-semibold">{cloudHome ? t("pair.openingCloud") : t("pair.connectingTo", { name: environment?.label ?? t("pair.thisOpenMausBot") })}</p>
         ) : <>
-        <h1 className="text-[20px] font-semibold">{cloudHome ? t("pair.myCloud") : t(mode === "email" ? "pair.signInTo" : "pair.connectTo", { name: environment?.label ?? t("pair.thisOpenMausBot") })}</h1>
+        <h1 className="text-[20px] font-semibold">{pairTitle(environment, mode)}</h1>
         <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">
           {environment && !cloudHome ? `${t("pair.version", { version: environment.version, platform: environment.platform })} ` : ""}
           {pairIntro({ mode, sent, email, cloudHome })}
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
-        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("pair.expired", { open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") })}</p> : null}
+        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("pair.expired", { app: productName(), open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") })}</p> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[14px]">

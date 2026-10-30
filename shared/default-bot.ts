@@ -1,3 +1,4 @@
+import type { HelperFollowupField } from "./helper-followup.ts";
 import type { MausColor } from "./wire.ts";
 
 /** MausBot: every person's built-in helper. A new install's first bot (its Chief of Staff too); an existing place or
@@ -19,7 +20,7 @@ export interface DefaultBotFields {
   welcomed?: boolean;
 }
 
-export interface HelperIntroField {
+export interface HelperIntroField extends HelperFollowupField {
   /** MausBot's introduction. Clients that know it say it in the viewer's language with example asks; `text` is the
    * English fallback the model and older clients read. */
   helperIntro?: true;

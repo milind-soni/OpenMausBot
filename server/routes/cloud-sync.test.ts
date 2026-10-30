@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import { createLentClones } from "../lent-clone.ts";
 import { createCloudSyncRoutes } from "./cloud-sync.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -19,7 +20,9 @@ beforeEach(async () => {
   auth = owner; cloudHome = true;
   home = mkdtempSync(join(tmpdir(), "omb-sync-routes-"));
   mkdirSync(join(home, ".openmausbot"));
-  routes = createCloudSyncRoutes({ dataDir: join(home, ".openmausbot"), cloudHome: () => cloudHome, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }) });
+  // Never GitHub from a test: a repository that does not exist.
+  const clones = createLentClones({ dataDir: join(home, ".openmausbot"), url: () => `file://${join(home, "no-such-repo.git")}` });
+  routes = createCloudSyncRoutes({ dataDir: join(home, ".openmausbot"), cloudHome: () => cloudHome, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }), clones });
   server = createServer(async (req, res) => {
     const url = new URL(req.url!, "http://127.0.0.1");
     if (!await dispatchRoutes([routes], { req, res, url, path: url.pathname, method: req.method!, auth, json, readBody })) json(res, 404, { error: "not ours" });
@@ -109,4 +112,51 @@ it("answers the desktop's held changes poll \"asleep\" when a Cloud home agrees 
   expect((await call("GET", `/api/sync/changes?cursor=${cursor}&waitMs=60000`)).status).toBe(503);
   sleeping = false; abort = new AbortController();
   expect((await call("GET", `/api/sync/changes?cursor=${cursor}&waitMs=0`)).status).toBe(200);
+});
+
+it("lent folders: says it keeps their copies, registers one out of bots' reach, takes what is lent, and serves and answers waiting changes", async () => {
+  expect((await call("GET", "/api/sync")).body.lentCopies).toBe(true);
+  const registered = await call("POST", "/api/sync/folders", { computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Notes", name: "Notes", lent: true, git: { repo: "ash/notes", branch: "main", head: null } });
+  const folder = registered.body.folder;
+  expect(folder.cloudPath).toBe(join(home, ".openmausbot", "sync", "lent", "Ash-MBP", "Notes"));
+  // The repository can't be cloned here: once that is known, the copy is Files'.
+  expect(folder.cloning).toBe(true);
+  await routes.idle();
+  expect((await call("GET", "/api/sync")).body.folders.find((entry: { id: string }) => entry.id === folder.id)).toMatchObject({ staged: 0, lent: true });
+  expect((await call("GET", "/api/sync")).body.folders.find((entry: { id: string }) => entry.id === folder.id).cloning).toBeUndefined();
+  const lendingId = "8b6f1c1e-3d6a-4a8e-9f1e-0a1b2c3d4e5f", notes = "5d2b6a0e-1f3c-4b7a-8e9d-0c1b2a3f4e5d";
+  expect((await call("POST", "/api/sync/lent", { computerId: PC, lendingId, name: "Ash-MBP", platform: "darwin", folders: [{ id: notes, name: "Notes", write: true, syncId: folder.id, git: { repo: "ash/notes", branch: "main", head: null } }] })).status).toBe(200);
+  expect((await call("POST", "/api/sync/lent", { computerId: PC, lendingId, name: "Ash-MBP", folders: [{ id: notes, name: "Notes", write: true, syncId: "../x" }] })).status).toBe(400);
+  expect((await call("POST", `/api/sync/folders/${folder.id}/synced`)).status).toBe(200);
+  expect((await call("POST", "/api/sync/folders/nope/synced")).status).toBe(404);
+  expect((await call("GET", `/api/sync/folders/${folder.id}/staged`)).body).toEqual({ staged: [] });
+  const away = routes.lent.away("cloud-home", []);
+  expect(away.away_computers).toMatchObject([{ folders: [{ folder_id: notes, github: "ash/notes", branch: "main", copy: "from just now" }] }]);
+  expect(away.say).toContain("return code changes there as a new branch and a pull request with your GitHub tools");
+  await routes.lent.answer({ action: "write_file", computer_id: lendingId, folder_id: notes, path: "idea.md", content: "an idea" }, "cloud-home");
+  const [change] = (await call("GET", `/api/sync/folders/${folder.id}/staged`)).body.staged;
+  expect(change).toMatchObject({ path: "idea.md", sha256: sha("an idea"), baseSha256: null });
+  const served = await call("GET", `/api/sync/folders/${folder.id}/staged/${change.id}`);
+  expect(served.body).toBe("an idea");
+  expect(served.headers.get("x-omb-sha256")).toBe(sha("an idea"));
+  expect(served.headers.get("content-disposition")).toBe("attachment");
+  expect((await call("POST", `/api/sync/folders/${folder.id}/staged/${change.id}`, { sha256: sha("an idea") })).status).toBe(200);
+  expect((await call("GET", `/api/sync/folders/${folder.id}/staged`)).body).toEqual({ staged: [] });
+});
+
+it("touches a clone left mid-way by a restart only on first use, once the server owns its data folder", async () => {
+  const dataDir = join(home, "other");
+  mkdirSync(join(dataDir, "sync"), { recursive: true });
+  const record = JSON.stringify({ "pc-1": { state: "cloning", at: 1, repo: "ash/notes" } });
+  writeFileSync(join(dataDir, "sync", "clones.json"), record);
+  const lazy = createCloudSyncRoutes({ dataDir, cloudHome: () => true, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }) });
+  try {
+    expect(readFileSync(join(dataDir, "sync", "clones.json"), "utf8")).toBe(record);
+    const answered: unknown[] = [];
+    await lazy({ req: {} as never, res: { setHeader: () => {} } as never, url: new URL("http://127.0.0.1/api/sync/folders"), path: "/api/sync/folders", method: "POST", auth: owner,
+      json: ((_res: unknown, _status: number, body: unknown) => { answered.push(body); }) as never,
+      readBody: (async () => ({ computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Notes", name: "Notes", lent: true })) as never });
+    expect(answered).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(dataDir, "sync", "clones.json"), "utf8"))["pc-1"].state).toBe("failed");
+  } finally { lazy.close(); }
 });

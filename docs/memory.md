@@ -115,7 +115,12 @@ off. It keeps the notes in shape without the bot having to decide to:
 - **Noticing facts.** When a 1:1 chat has been quiet for two minutes
   (`memory.captureQuietMs`), or after six turns, one quick model call reads those turns — the person's words and
   the bot's under different rules — beside `MEMORY.md` and the list of topic
-  files, and files what is new:
+  files, and files what is new. A preference or a fact about the person is
+  kept only with the words it rests on, quoted from what was said to the bot
+  and checked against the chat: a question ("…note-takers for a 10-person
+  startup?"), a task ("write a launch plan for an AI app") or a "suppose…"
+  is never a fact about who they are. Decisions and verified outcomes need no
+  quote.
   - a core fact the bot needs in every conversation goes to `MEMORY.md`,
     marked `(noticed)`:
     `- 2026-09-25 · from chat "Plans" (noticed) · The person is vegetarian`;
@@ -277,6 +282,23 @@ count toward the monthly spend limit and stop at it. Each is its own row in
 engine and model: group by **Person** to see them together as *Helper
 model*, which is also what the CSV's `triggered_by` column says.
 
+## Remember and forget, in chat
+
+"Remember: short answers, and I'm in India" is saved during that turn with
+`memory_update`, so it shows under **What it remembers** in the bot's panel
+as soon as the turn ends, and the bot confirms it in one plain line ("Got it:
+short answers, and times in India time.").
+
+"Forget that" is `memory_update` with `action: "forget"` and a few words that
+name it. Every note that mentions those words as whole words ("IST" is not in
+"dentist") goes: from `MEMORY.md`, judged by the fact and never by the chat it
+came from; from every topic file and the archive, keeping their headers; and,
+when the person asked in their own 1:1 chat, from **About me**, learned or
+written. A note never ends up as a date with no words. The words are kept in
+`profile-learned.json` so no bot learns a fact that mentions them again, until
+the person asks a bot to remember it once more. The bot confirms in one plain
+line and names no files.
+
 ## Editing
 
 `MEMORY.md` and every topic file can be edited in the panel. A save carries
@@ -400,6 +422,12 @@ free form, or one you rewrite by hand, works the same.
 | `POST` | `/api/profile/learned/:id/remove` | Takes that line out of About me; the fact is never added again. |
 
 All of them need the owner (admin) session, like the other bot-settings routes.
+
+On a Team Cloud each person also reaches what a bot remembers about them, their own layer of its memory
+(`workspaces/<bot>--member-<person>`, see [team-cloud.md](team-cloud.md)), from any session:
+`GET /api/bots/:id/memory/mine` is its overview, and `GET`, `PUT` and `DELETE /api/bots/:id/memory/mine/file` read,
+save and remove one of its files as above. Nobody reaches another person's layer. The bot panel's **What it
+remembers** shows these notes on a team.
 
 ## Shared team memory integrity
 

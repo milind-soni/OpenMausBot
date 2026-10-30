@@ -13,6 +13,7 @@ export const CREDENTIAL_PATCH = {
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
   openaiLiveKey: (value) => ({ live: { key: value } }),
   tregApiKey: (value) => ({ treg: { key: value } }),
+  postizApiKey: (value) => ({ postiz: { key: value } }),
 };
 
 const DECIDER_ERRORS = Object.freeze({

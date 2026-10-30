@@ -266,7 +266,7 @@ jobs:
                 echo "::error::$bin is not the expected $expected_arch executable"; exit 1; }
             done
             if [ "$(uname -m)" = "$expected_arch" ]; then
-              "$cloudflared" version | grep -Fq "cloudflared version 2026.8.2 " || {
+              "$cloudflared" version | grep -Fq "cloudflared version 2026.10.3 " || {
                 echo "::error::$cloudflared has the wrong version"; exit 1; }
             fi
           done
@@ -361,10 +361,10 @@ jobs:
           [ -f "$res/cloudflared/cloudflared.exe" ] || { echo "::error::missing cloudflared.exe"; exit 1; }
           [ -f "$res/licenses/cloudflared-LICENSE.txt" ] || { echo "::error::missing cloudflared license"; exit 1; }
           [ -f "$res/licenses/cloudflared-README.md" ] || { echo "::error::missing cloudflared provenance"; exit 1; }
-          expected=c29eee2b121f5436a642eed69fd9767da7e7b8c510fa50aaa130337f931357b5
+          expected=$(node --input-type=module -e "import { CLOUDFLARED_ASSETS } from './scripts/prepare-cloudflared.mjs'; console.log(Object.values(CLOUDFLARED_ASSETS).find((asset) => asset.name === 'cloudflared-windows-amd64.exe').binarySha256)")
           actual=$(sha256sum "$res/cloudflared/cloudflared.exe" | cut -d' ' -f1)
           [ "$actual" = "$expected" ] || { echo "::error::cloudflared hash is $actual"; exit 1; }
-          "$res/cloudflared/cloudflared.exe" version | grep -Fq "cloudflared version 2026.8.2 " || {
+          "$res/cloudflared/cloudflared.exe" version | grep -Fq "cloudflared version 2026.10.3 " || {
             echo "::error::cloudflared has the wrong version"; exit 1; }
           [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
           grep -Eq '^owner: milind-soni$' "$res/app-update.yml" || { echo "::error::wrong update owner"; exit 1; }
@@ -498,7 +498,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
-      # to dispatch the npm and Docker publishes on the new tag
+      # to dispatch the npm, Docker and connector publishes on the new tag
       actions: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -701,9 +701,9 @@ jobs:
             --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
           echo "v$VERSION is live on the canonical feed and its legacy updater bridge"
           # Publishing created the tag with this workflow's token, and GitHub
-          # starts no workflow from events that token creates. Start the two
+          # starts no workflow from events that token creates. Start the
           # tag-driven publishes by hand, on the tag, so they see refs/tags/v*.
-          for workflow in npm-package.yml docker.yml; do
+          for workflow in npm-package.yml docker.yml connector-release.yml; do
             GH_TOKEN="$CANONICAL_TOKEN" gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
           done
-          echo "dispatched the npm package and Docker image publishes on v$VERSION"
+          echo "dispatched the npm package, Docker image and connector image publishes on v$VERSION"

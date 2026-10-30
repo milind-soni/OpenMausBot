@@ -24,7 +24,7 @@ import { revealPhonePairing } from "../lib/phone-pairing";
 import { PhonesList } from "./PhonesList";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { Card, Switch } from "./SettingsPrimitives";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
 export {
@@ -153,7 +153,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
   if (!companionBridge()) {
     return (
       <Card
-        title={t("remote.desktopOnly.title", { app: brand().name })}
+        title={t("remote.desktopOnly.title", { app: productName() })}
         subtitle={t("remote.desktopOnly.subtitle")}
       />
     );
@@ -237,7 +237,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
 
           <div className="border-t border-hairline/30 pt-4">
             <div className="text-[13px] text-ink">{t("remote.devices.title")}</div>
-            <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{pairedCount ? t("remote.devices.subtitle", { app: brand().name }) : t("remote.devices.empty")}</div>
+            <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{pairedCount ? t("remote.devices.subtitle", { app: productName() }) : t("remote.devices.empty")}</div>
             <div className="mt-3">
               {pairedCount > 0 && (
                 <ul className="flex flex-col gap-2">

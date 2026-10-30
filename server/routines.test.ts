@@ -3930,6 +3930,17 @@ describe("runs that report into a chat", () => {
     expect(h.taskTitles).toHaveLength(1);
   });
 
+  it("runs a wait's follow-up in the chat it was asked in, reporting nowhere else", async () => {
+    const h = harness();
+    h.options.eventResultsThread = () => "main";
+    h.options.joinConversation = (run) => run.eventSource === "wait" ? run.resultsThreadId ?? null : null;
+    const queued = h.manager.enqueueWebhook({ webhookId: "wait:w1", webhookName: "the build", prompt: "[Wait finished: the build] Deploy.", botId: "maus-1",
+      runOn: "maus", deliveryId: "w1", receivedAt: Date.now(), eventSource: "wait", resultsThreadId: "chat-1" });
+    await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === queued.id)).toMatchObject({ eventSource: "wait", resultsThreadId: "chat-1", threadId: "chat-1", status: "running" });
+    expect(h.taskTitles).toHaveLength(0);
+  });
+
   it("finds a conversation's live run before an older finished one", async () => {
     const h = harness();
     h.options.joinConversation = () => "chat";

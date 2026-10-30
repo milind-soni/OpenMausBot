@@ -52,10 +52,12 @@ export function codexLimitResetsAt(said: string, now = Date.now()): number | und
   return Number.isFinite(at) ? at : undefined;
 }
 
-/** The runtime.error fields a Codex usage-limit refusal adds: when it resets, if Codex said. */
-export function codexLimitFacts(raw: string, route: CodexRoute): { limitResetsAt?: number } {
+/** The runtime.error fields a Codex usage-limit refusal adds: that it is one, for the whole account or for one model
+ * ("You've hit your usage limit for gpt-6.1-sol. Switch to another model now…"), and when it resets, if Codex said. */
+export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?: unknown): { limit?: "engine" | "model"; limitResetsAt?: number } {
+  if (codexErrorInfo !== "usageLimitExceeded" && !USAGE_LIMIT.test(raw) && !raw.includes("subscription_sharing_usage_limit_exceeded")) return {};
   const at = route === "own" ? codexLimitResetsAt(raw) : undefined;
-  return at === undefined ? {} : { limitResetsAt: at };
+  return { limit: /\busage limit for \S+?\.(?:\s|$)/i.test(raw) ? "model" : "engine", ...(at === undefined ? {} : { limitResetsAt: at }) };
 }
 
 export function codexUserError(value: string, route: CodexRoute, codexErrorInfo?: unknown): string {
@@ -91,3 +93,22 @@ export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign 
 export function codexSignInExpired(raw: string): string {
   return `${CODEX_SIGN_IN_EXPIRED} Codex said: ${raw.slice(0, 300)}`;
 }
+
+export class CodexRpcError extends Error {
+  code: unknown;
+
+  constructor(error: { code?: unknown; message?: string }) {
+    super(error.message ?? JSON.stringify(error));
+    this.code = error.code;
+  }
+}
+
+export function missingNativeCodexThread(error: unknown, cursor: string): boolean {
+  // Codex's local thread/resume rejection, verified with an empty native home; unknown versions fail closed.
+  return error instanceof CodexRpcError && error.code === -32600 &&
+    error.message === `no rollout found for thread id ${cursor}`;
+}
+
+/** Codex refuses to resume an archived session: "session <id> is archived. Run `codex unarchive <id>` to unarchive it first." */
+export const archivedNativeCodexThread = (error: unknown, cursor: string): boolean =>
+  error instanceof CodexRpcError && error.message.includes(cursor) && /\bis archived\b/.test(error.message);

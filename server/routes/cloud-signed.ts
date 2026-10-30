@@ -25,7 +25,7 @@ export const CLOUD_TEAM_MEMBER_LEFT_PATH = "/api/cloud/team/member-left";
 
 export function createCloudSignedRoutes(deps: {
   secret: string;
-  sessions: Pick<SessionRegistry, "openPairing" | "attemptAllowed" | "noteFailure" | "clearFailures">;
+  sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
   /** A Team Cloud: every pairing body must carry the Admin's member claim (cloud-team.ts). */
   team?: CloudTeam | null;
   health: Pick<CloudHealth, "report">;

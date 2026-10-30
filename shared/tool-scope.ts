@@ -1,3 +1,5 @@
+import { agentsCallIdentities } from "./agents-tool-names.ts";
+
 export type ToolScope = {
   allow?: string[];
   deny?: string[];
@@ -59,22 +61,29 @@ export function parseToolScope(value: unknown): ParsedToolScope {
   return { ok: true, scope };
 }
 
-function matches(selector: string, tool: ToolIdentity): boolean {
+function matches(selector: string, tool: ToolIdentity, names: readonly string[] = [tool.name]): boolean {
   const selected = selectorIdentity(selector);
   return selected?.kind === tool.kind
     && (selected.kind !== "mcp" || (tool.kind === "mcp" && selected.server === tool.server))
-    && (selected.name === "*" || selected.name === tool.name);
+    && (selected.name === "*" || names.includes(selected.name));
 }
 
-function permits(scope: ToolScope | undefined, tool: ToolIdentity): boolean {
+function permitsNamed(scope: ToolScope | undefined, tool: ToolIdentity, names: readonly string[]): boolean {
+  return (scope?.allow === undefined || scope.allow.some((selector) => matches(selector, tool, names)))
+    && !scope?.deny?.some((selector) => matches(selector, tool, names));
+}
+
+function permits(scope: ToolScope | undefined, tool: ToolIdentity, args?: unknown): boolean {
   if (!validName(tool.name) || (tool.kind === "mcp" && !SERVER_NAME.test(tool.server))) return false;
-  return (scope?.allow === undefined || scope.allow.some((selector) => matches(selector, tool)))
-    && !scope?.deny?.some((selector) => matches(selector, tool));
+  // An agents call is named by what it does: a selector naming one action's own tool name allows or refuses that action.
+  const named = tool.kind === "mcp" && tool.server === "agents" ? agentsCallIdentities(tool.name, args) : [[tool.name]];
+  return named.some((names) => permitsNamed(scope, tool, names));
 }
 
-export function allowsTool(scope: unknown, tool: ToolIdentity): boolean {
+/** Whether the selection lets this tool run: with the call's arguments, this call; without them, any call it makes. */
+export function allowsTool(scope: unknown, tool: ToolIdentity, args?: unknown): boolean {
   const parsed = parseToolScope(scope);
-  return parsed.ok && permits(parsed.scope, tool);
+  return parsed.ok && permits(parsed.scope, tool, args);
 }
 
 /** Whether an engine needs a native catalog contract, in addition to MCP gates. */

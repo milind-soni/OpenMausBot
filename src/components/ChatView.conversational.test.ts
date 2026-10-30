@@ -18,6 +18,7 @@ vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useReactor: () 
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 
 const { ChatView } = await import("./ChatView");
+const { setAdvancedMode } = await import("@/lib/interface-mode");
 const { BotEditorStore, initialState } = await import("@/state/store");
 
 const reply = "Found it.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nWant me to run it?";
@@ -69,10 +70,17 @@ describe("conversational replies", () => {
     expect(document.querySelector("[data-quick-model]")?.textContent).toBe("Quick reply with Claude Haiku 4.5");
   });
 
-  it("shows history bubbles at once", async () => {
+  it("shows history bubbles at once, each part its own Simple bubble stacked close under the last", async () => {
     await draw(profile({ replyStyle: "conversational" }));
     const bubbles = [...document.querySelectorAll<HTMLElement>("[data-reply-segment]")];
-    expect(bubbles.every((el) => el.classList.contains("reply-bubble") && !el.classList.contains("reply-bubble-in"))).toBe(true);
+    expect(bubbles).toHaveLength(3);
+    expect(bubbles.every((el) => !el.classList.contains("reply-bubble-in"))).toBe(true);
+    for (const el of bubbles) expect([...el.classList]).toEqual(expect.arrayContaining(["bg-card", "rounded-[18px]", "px-3", "text-[15px]", "leading-[22px]", "min-w-9"]));
+    expect([...bubbles[0]!.classList]).toContain("rounded-es-[6px]");
+    expect([...bubbles[1]!.classList]).toEqual(expect.arrayContaining(["rounded-ss-[6px]", "rounded-es-[6px]"]));
+    expect([...bubbles[2]!.classList]).toContain("rounded-ss-[6px]");
+    expect([...bubbles[2]!.classList]).not.toContain("rounded-es-[6px]");
+    expect(document.querySelector("[data-conversational-reply]")!.classList).toContain("gap-1");
   });
 
   it("plays a reply that arrives while the chat is open in, one bubble after another", async () => {
@@ -92,5 +100,32 @@ describe("conversational replies", () => {
     await draw(profile({}));
     expect(segments()).toEqual([]);
     expect([...document.querySelectorAll("[data-md]")].map((el) => el.textContent)).toContain(reply);
+  });
+
+  it("keeps a reply's Reply and Copy in its … menu in Simple mode, beside the reaction button", async () => {
+    await draw(profile({}));
+    const row = document.querySelector("[data-mid='m2']")!;
+    expect(row.querySelector('[aria-label="Reply to message"]')).toBeNull();
+    expect(row.querySelector('[aria-label="Copy message"]')).toBeNull();
+    const more = row.querySelector<HTMLButtonElement>('button[aria-label="Message actions"]')!;
+    flushSync(() => more.click());
+    const items = [...document.querySelectorAll('[role="menu"][aria-label="Message actions"] [role="menuitem"]')].map((item) => item.textContent);
+    expect(items.slice(0, 2)).toEqual(["Reply", "Copy message"]);
+  });
+
+  it("puts a formatted reply in the bot's bubble in Simple mode, and on the open page in Advanced", async () => {
+    const bubbleOf = () => document.querySelector("[data-mid='m2'] [data-chat-bubble]")!;
+    await draw(profile({}));
+    expect(bubbleOf().getAttribute("data-chat-bubble")).toBe("simple");
+    expect([...bubbleOf().classList]).toEqual(expect.arrayContaining(["bg-card", "rounded-[18px]"]));
+    setAdvancedMode(true);
+    try {
+      await draw(profile({}));
+      expect(bubbleOf().getAttribute("data-chat-bubble")).toBe("");
+      expect(bubbleOf().classList).not.toContain("bg-card");
+      expect(bubbleOf().className).toContain("max-w-[min(var(--chat-prose-max),var(--chat-card-pct))]");
+    } finally {
+      setAdvancedMode(false);
+    }
   });
 });

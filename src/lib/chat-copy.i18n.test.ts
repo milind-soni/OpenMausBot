@@ -56,7 +56,7 @@ describe("usage chip", () => {
     expect(usageDetail(usage)).toContain("saída");
     expect(usageChip(usage)).toBe("US$\u00a00,02");
     expect(usageChip({ ...usage, costUsd: null })).toContain("entrada");
-    expect(costCaption("subscription")).toBe("equivalente — está na sua assinatura, não é cobrado");
+    expect(costCaption("subscription")).toBe("equivalente (incluído na assinatura, sem cobrança)");
     expect(costCaption(undefined)).toBe("conforme informado pelo provedor");
   });
 });

@@ -1,3 +1,4 @@
+import { compile as toVega, type TopLevelSpec } from "vega-lite";
 import { describe, expect, it } from "vitest";
 
 import { DATA_LIMITS, type DataColumn, type OmbChartSpec } from "../../shared/data-surface.ts";
@@ -110,27 +111,30 @@ describe("compileChart: reductions per chart type and column class", () => {
       },
     },
     {
-      name: "bar over a timestamp buckets with the unit chosen from the range",
+      name: "bar over a timestamp buckets with the unit chosen from the range and the data's own step",
       spec: { type: "bar", x: "ts" },
       method: "timeBucket",
       sql: [
-        "span_x AS ( SELECT CASE WHEN epoch(max(CAST(\"ts\" AS TIMESTAMP)) - min(CAST(\"ts\" AS TIMESTAMP))) <= 1800000 THEN INTERVAL 1 HOUR",
-        "<= 43200000 THEN INTERVAL 1 DAY",
-        "<= 302400000 THEN INTERVAL 1 WEEK",
-        "<= 1314900000 THEN INTERVAL 1 MONTH",
-        "<= 3944700000 THEN INTERVAL 3 MONTH ELSE INTERVAL 1 YEAR END AS unit FROM src )",
+        "span_x AS ( SELECT CASE WHEN span <= 1800000 AND step < 86400 THEN INTERVAL 1 HOUR",
+        "WHEN span <= 43200000 AND step < 604800 THEN INTERVAL 1 DAY",
+        "WHEN span <= 302400000 AND step < 2419200 THEN INTERVAL 1 WEEK",
+        "WHEN span <= 1314900000 AND step < 7689600 THEN INTERVAL 1 MONTH",
+        "WHEN span <= 3944700000 AND step < 31536000 THEN INTERVAL 3 MONTH ELSE INTERVAL 1 YEAR END AS unit",
+        'SELECT epoch(max(v) - min(v)) AS span, coalesce(min(gap), 0) AS step',
+        'SELECT v, epoch(v - lag(v) OVER (ORDER BY v)) AS gap FROM (SELECT DISTINCT CAST("ts" AS TIMESTAMP) AS v FROM src WHERE "ts" IS NOT NULL)',
         'time_bucket(span_x.unit, "ts") AS x, time_bucket(span_x.unit, "ts") + span_x.unit AS x2, count(*) AS y FROM src, span_x GROUP BY ALL',
       ],
       check: (vl) => {
-        expect(enc(vl).x).toMatchObject({ field: "x", type: "temporal", title: "ts" });
+        expect(enc(vl).x).toMatchObject({ field: "x", type: "temporal", title: "ts", axis: { formatType: "time" } });
         expect(enc(vl).x2).toEqual({ field: "x2" });
+        expect(vl.mark).toEqual({ type: "bar", orient: "vertical" });
       },
     },
     {
       name: "a DATE never buckets by hour",
       spec: { type: "bar", x: "d" },
       method: "timeBucket",
-      sql: ["<= 43200000 THEN INTERVAL 1 DAY"],
+      sql: ["CASE WHEN span <= 43200000 AND step < 604800 THEN INTERVAL 1 DAY"],
       notSql: ["INTERVAL 1 HOUR"],
       check: (vl) => expect(enc(vl).x.type).toBe("temporal"),
     },
@@ -340,6 +344,26 @@ describe("compileChart: top-N folding", () => {
       expect(sql).not.toContain("kept");
       expect(sql).not.toContain("'other'");
     }
+  });
+});
+
+describe("compileChart: bars that span a range", () => {
+  it("draws a stacked bar over dates as vertical bars stacked on y, not as ticks at each value", () => {
+    const { vegaLite } = compile({ type: "bar", x: "d", y: "amount", color: "channel", stack: true });
+    expect(vegaLite.mark).toEqual({ type: "bar", orient: "vertical" });
+    const { spec } = toVega(vegaLite as unknown as TopLevelSpec);
+    const transforms = (spec.data ?? []).flatMap((data) => data.transform ?? []);
+    expect(transforms.some((transform) => transform.type === "stack" && JSON.stringify(transform.groupby).includes("x"))).toBe(true);
+    const bar = (spec.marks ?? []).find((m) => m.type === "rect")!;
+    expect(bar.encode?.update).toHaveProperty("y2");
+    expect(bar.encode?.update).toHaveProperty("x2");
+  });
+
+  it("bins whole numbers in whole steps and labels them without decimals", () => {
+    const { sql, vegaLite } = compile({ type: "bar", x: "qty", y: "amount" });
+    expect(norm(sql)).toContain('greatest(1, ceil((max(CAST("qty" AS DOUBLE)) - min(CAST("qty" AS DOUBLE)) + 1) / 30)) AS width');
+    expect(enc(vegaLite).x).toMatchObject({ bin: "binned", axis: { format: "d" } });
+    expect(enc(compile({ type: "bar", x: "amount" }).vegaLite).x.axis).toBeUndefined();
   });
 });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   connectorAccessDecision,
   describeConnectorScopes,
+  grantScopedApps,
   isReadOnlyAction,
   normalizeConnectorScopes,
   toolkitOf,
@@ -93,5 +94,26 @@ describe("describeConnectorScopes", () => {
     const text = describeConnectorScopes({ apps: { gmail: "read", slack: "write" } });
     expect(text).toContain("gmail (read only)");
     expect(text).toContain("slack (read and write)");
+  });
+});
+
+describe("grantScopedApps", () => {
+  it("gives every tool to an app the scopes turn on and the tool list leaves out, and nothing else", () => {
+    const bot: Parameters<typeof grantScopedApps>[0] = { connectorTools: {}, connectorScopes: { apps: { gmail: "read" } } };
+    expect(grantScopedApps(bot)).toBe(true);
+    expect(bot.connectorTools).toEqual({ gmail: { tools: "*" } });
+    expect(grantScopedApps(bot), "once").toBe(false);
+    const listed = { connectorTools: { gmail: { tools: ["GMAIL_FETCH_EMAILS"] } }, connectorScopes: { apps: { gmail: "write" as const } } };
+    expect(grantScopedApps(listed)).toBe(false);
+    expect(listed.connectorTools).toEqual({ gmail: { tools: ["GMAIL_FETCH_EMAILS"] } });
+  });
+
+  it("leaves a bot with no tool list or no scopes alone: every app, or what its list says", () => {
+    const legacy = { connectorScopes: { apps: { gmail: "read" as const } } };
+    expect(grantScopedApps(legacy)).toBe(false);
+    expect(legacy).not.toHaveProperty("connectorTools");
+    const off = { connectorTools: {} };
+    expect(grantScopedApps(off)).toBe(false);
+    expect(off.connectorTools).toEqual({});
   });
 });

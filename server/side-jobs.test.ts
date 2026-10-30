@@ -12,14 +12,18 @@ import { ensureWorkspace, workspaceDir, WORKSPACES_DIR } from "./workspace.ts";
 type Booked = { row: Parameters<SideJobsDeps["book"]>[0]; tokensReported: boolean; notificationThreadId: string };
 type Call = { prompt: string; options?: TextGenerationOptions };
 
+const NO_MODELS: SideJobInstance["models"] = { default: "", options: [] };
+
 /** An engine with a one-off text call (Claude, an API model), reporting
  * usage the way those drivers do. */
-function textEngine(instanceId: string, driverKind: string, reply: (prompt: string) => Promise<string> | string = () => `${instanceId} wrote this`) {
+function textEngine(instanceId: string, driverKind: string, reply: (prompt: string) => Promise<string> | string = () => `${instanceId} wrote this`,
+  models: SideJobInstance["models"] = NO_MODELS) {
   const calls: Call[] = [];
   const instance: SideJobInstance = {
     instanceId,
     driverKind,
     enabled: true,
+    models,
     adapter: { capabilities: { agentsMcp: true } },
     generateText: async (prompt, options) => {
       calls.push({ prompt, options });
@@ -33,7 +37,7 @@ function textEngine(instanceId: string, driverKind: string, reply: (prompt: stri
 
 /** Pi or Muse Code: turns only, no one-off text call of any kind. */
 const turnsOnly = (instanceId: string, driverKind: string, agentsMcp = true): SideJobInstance =>
-  ({ instanceId, driverKind, enabled: true, adapter: { capabilities: { agentsMcp } } });
+  ({ instanceId, driverKind, enabled: true, models: NO_MODELS, adapter: { capabilities: { agentsMcp } } });
 
 /** Codex or an ACP engine: its only one-off call is the background one,
  * a whole agent process per call. */
@@ -43,6 +47,7 @@ function backgroundEngine(instanceId: string, driverKind: string) {
     instanceId,
     driverKind,
     enabled: true,
+    models: NO_MODELS,
     adapter: { capabilities: { agentsMcp: true } },
     generateMemoryText: async (prompt, options) => {
       calls.push({ prompt, options });
@@ -148,15 +153,68 @@ describe("the helper setting", () => {
   });
 });
 
+describe("the setup card's answers", () => {
+  const catalog: SideJobInstance["models"] = { default: "x-large", options: [{ id: "x-large", label: "X large" }, { id: "x-mini", label: "X mini" }] };
+  function card(options: { quickModelsUsable?: boolean; modelAllowed?: SideJobsDeps["modelAllowed"]; reply?: () => string } = {}) {
+    const remembered: string[] = [];
+    const booked: Booked[] = [];
+    const api = textEngine("api", "openai-compat", options.reply, catalog);
+    const claude = textEngine("claude", "claudeAgent", undefined, catalog);
+    const own: SideJobInstance = options.quickModelsUsable === undefined ? api.instance : { ...api.instance, quickModelsUsable: () => options.quickModelsUsable! };
+    const instances = new Map<string, SideJobInstance>([["api", own], ["claude", claude.instance], ["pi", turnsOnly("pi", "piAgent")]]);
+    const jobs = createSideJobs({
+      bot: (id) => ({ ...bot(id, id), modelSelection: { instanceId: id, model: id === "api" ? "x-large" : undefined } }),
+      instance: (id) => instances.get(id) ?? null,
+      refusal: () => undefined,
+      helper: () => ({ instanceId: "claude" }),
+      ...(options.modelAllowed ? { modelAllowed: options.modelAllowed } : {}),
+      smallModels: { refused: () => new Set(), remember: (_instance, model) => remembered.push(model) },
+      assertWithinBudget: () => {},
+      book: (row, tokensReported, notificationThreadId) => booked.push({ row, tokensReported, notificationThreadId }),
+    });
+    return { jobs, api, claude, remembered, booked };
+  }
+
+  it("use the engine's fastest model, but leave Claude on its own one-off model", async () => {
+    const { jobs, api, claude } = card();
+    await jobs.text("setup-suggestions", "api")!.generateText("p");
+    expect(api.calls[0]!.options?.model).toBe("x-mini");
+    await jobs.text("setup-suggestions", "claude")!.generateText("p");
+    expect(claude.calls[0]!.options?.model).toBeUndefined();
+  });
+
+  it("name no model where the sign-in refuses small ones or the workspace has not assigned it", async () => {
+    for (const options of [{ quickModelsUsable: false }, { modelAllowed: () => false }]) {
+      const { jobs, api } = card(options);
+      await jobs.text("setup-suggestions", "api")!.generateText("p");
+      expect(api.calls[0]!.options?.model, JSON.stringify(options)).toBeUndefined();
+    }
+  });
+
+  it("remember a refused fast model, so the next card skips it", async () => {
+    const { jobs, remembered } = card({ reply: () => { throw new Error("400 invalid_request_error: model x-mini is not available"); } });
+    await expect(jobs.text("setup-suggestions", "api")!.generateText("p")).rejects.toThrow("x-mini");
+    expect(remembered).toEqual(["x-mini"]);
+  });
+
+  it("are booked as their own rows, with the helper's job named", async () => {
+    const { jobs, booked } = card();
+    await jobs.text("setup-suggestions", "api")!.generateText("p");
+    await jobs.text("setup-suggestions", "pi")!.generateText("p");
+    expect(booked.map((entry) => entry.row.threadId)).toEqual([expect.stringMatching(/^setup-suggestions-/), expect.stringMatching(/^setup-suggestions-/)]);
+    expect(booked.map((entry) => entry.row.trigger)).toEqual([{ kind: "bot", botId: "api" }, { kind: "helper", botId: "pi", job: "setup-suggestions" }]);
+  });
+});
+
 describe("who writes a small job", () => {
   it("is the bot's own engine whenever it can: the helper is never called", async () => {
     const { jobs, state, claude, openrouter } = setup({ helper: { instanceId: "openrouter" } });
-    for (const job of ["compaction", "memory", "skill-review"] as const) {
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) {
       const text = jobs.text(job, "claude");
       expect(text?.via, job).toBe("engine");
       expect(await text!.generateText(`${job} prompt`)).toBe("claude wrote this");
     }
-    expect(claude.calls.map((call) => call.prompt)).toEqual(["compaction prompt", "memory prompt", "skill-review prompt"]);
+    expect(claude.calls.map((call) => call.prompt)).toEqual(["compaction prompt", "memory prompt", "skill-review prompt", "setup-suggestions prompt"]);
     expect(openrouter.calls).toEqual([]);
     expect(state.booked.every((entry) => entry.row.instanceId === "claude")).toBe(true);
   });
@@ -164,22 +222,34 @@ describe("who writes a small job", () => {
   it("is the helper for an engine with no text call, Pi and Muse Code alike", async () => {
     const { jobs, claude } = setup();
     for (const botId of ["pi", "muse"]) {
-      for (const job of ["compaction", "memory", "skill-review"] as const) {
+      for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) {
         const text = jobs.text(job, botId);
         expect(text?.via, `${botId} ${job}`).toBe("helper");
         expect(await text!.generateText(`${botId} ${job}`)).toBe("claude wrote this");
       }
     }
-    expect(claude.calls).toHaveLength(6);
+    expect(claude.calls).toHaveLength(8);
   });
 
   it("is nobody when no helper is set: the job keeps the fallback it has today", () => {
     const { jobs, state } = setup({ helper: null });
-    for (const job of ["compaction", "memory", "skill-review"] as const) {
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) {
       expect(jobs.text(job, "pi"), job).toBeNull();
       expect(jobs.text(job, "muse"), job).toBeNull();
     }
     expect(state.logs).toEqual([]);
+  });
+
+  it.each(["grok", "codex"] as const)("never answers for a person with %s's own background call, which runs a whole agent with tools", async (botId) => {
+    const all = setup();
+    const own = botId === "grok" ? all.acp : all.codex;
+    const answer = all.jobs.text("representative", botId);
+    expect(answer?.via).toBe("helper");
+    await answer!.generateText("representative prompt");
+    expect(own.calls).toEqual([]);
+    expect(all.claude.calls.map((call) => call.prompt)).toEqual(["representative prompt"]);
+    expect(setup({ helper: null }).jobs.text("representative", botId)).toBeNull();
+    expect(all.jobs.text("representative", "claude")?.via, "an engine's one-off text call has no tools").toBe("engine");
   });
 
   it.each(["grok", "codex"] as const)("gives %s the helper for the compaction summary only: its own background call keeps memory upkeep and the skill review", async (botId) => {
@@ -198,6 +268,12 @@ describe("who writes a small job", () => {
     expect(own.calls).toHaveLength(1);
     expect(claude.calls.map((call) => call.prompt)).toEqual(["summary prompt"]);
     expect(setup({ helper: null }).jobs.text("compaction", botId)).toBeNull();
+    // the setup card's answers are waited on too, so they never start an agent process either
+    const card = jobs.text("setup-suggestions", botId);
+    expect(card?.via).toBe("helper");
+    await card!.generateText("card prompt");
+    expect(own.calls).toHaveLength(1);
+    expect(setup({ helper: null }).jobs.text("setup-suggestions", botId)).toBeNull();
   });
 
   it("uses the engine a conversation is running on for its summary, when that is not the bot's default", async () => {
@@ -328,7 +404,7 @@ describe("when the helper is not used", () => {
     state.refused.add("muse");
     state.refused.add("codex");
     state.instances.delete("pi");
-    for (const job of ["compaction", "memory", "skill-review"] as const) {
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) {
       expect(jobs.text(job, "muse"), job).toBeNull();
       expect(jobs.text(job, "codex"), job).toBeNull();
       expect(jobs.text(job, "pi"), job).toBeNull();
@@ -339,7 +415,7 @@ describe("when the helper is not used", () => {
   it("is never an engine the organisation does not allow", async () => {
     const { jobs, state, claude } = setup();
     state.refused.add("claude");
-    for (const job of ["compaction", "memory", "skill-review"] as const) expect(jobs.text(job, "pi"), job).toBeNull();
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) expect(jobs.text(job, "pi"), job).toBeNull();
     expect(jobs.text("compaction", "codex")).toBeNull();
     expect(claude.calls).toEqual([]);
     expect(state.logs).toEqual([expect.stringContaining("the organisation does not allow this engine")]);
@@ -397,7 +473,7 @@ describe("when the helper is not used", () => {
     };
     for (const [what, { jobs, logs, claude }] of Object.entries(lookups)) {
       for (let i = 0; i < 3; i += 1) {
-        for (const job of ["compaction", "memory", "skill-review"] as const) expect(jobs.text(job, "pi"), `${what} ${job}`).toBeNull();
+        for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) expect(jobs.text(job, "pi"), `${what} ${job}`).toBeNull();
       }
       expect(logs, what).toHaveLength(1);
       expect(logs[0], what).toContain("could not be looked up");
@@ -429,7 +505,7 @@ describe("when the helper is not used", () => {
     // Pi has no text call at all; Codex has none for the summary
     state.bots.set("pi", { ...bot("pi", "pi"), helperModel: false });
     state.bots.set("codex", { ...bot("codex", "codex"), helperModel: false });
-    for (const job of ["compaction", "memory", "skill-review"] as const) expect(jobs.text(job, "pi"), job).toBeNull();
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) expect(jobs.text(job, "pi"), job).toBeNull();
     expect(jobs.text("compaction", "codex")).toBeNull();
     // nothing was asked of the helper, and nothing is said about it either
     expect(claude.calls).toEqual([]);
@@ -437,7 +513,7 @@ describe("when the helper is not used", () => {
     expect(state.logs).toEqual([]);
 
     // a bot without the switch still gets the helper, beside it
-    for (const job of ["compaction", "memory", "skill-review"] as const) expect(jobs.text(job, "muse")?.via, job).toBe("helper");
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) expect(jobs.text(job, "muse")?.via, job).toBe("helper");
     // and switching it back on is all it takes
     state.bots.set("pi", { ...bot("pi", "pi"), helperModel: true });
     expect(jobs.text("memory", "pi")?.via).toBe("helper");
@@ -447,7 +523,7 @@ describe("when the helper is not used", () => {
     const { jobs, state, claude } = setup();
     for (const odd of ["false", "true", 0, 1, null, {}, []]) {
       state.bots.set("pi", { ...bot("pi", "pi"), helperModel: odd as unknown as boolean });
-      for (const job of ["compaction", "memory", "skill-review"] as const) expect(jobs.text(job, "pi"), `${JSON.stringify(odd)} ${job}`).toBeNull();
+      for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) expect(jobs.text(job, "pi"), `${JSON.stringify(odd)} ${job}`).toBeNull();
     }
     expect(claude.calls).toEqual([]);
     expect(state.logs).toEqual([]);
@@ -462,7 +538,7 @@ describe("when the helper is not used", () => {
     const { jobs, state, claude, codex, openrouter } = setup({ helper: { instanceId: "openrouter" } });
     state.bots.set("claude", { ...bot("claude", "claude"), helperModel: false });
     state.bots.set("codex", { ...bot("codex", "codex"), helperModel: false });
-    for (const job of ["compaction", "memory", "skill-review"] as const) expect(jobs.text(job, "claude")?.via, job).toBe("engine");
+    for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) expect(jobs.text(job, "claude")?.via, job).toBe("engine");
     await jobs.text("memory", "claude")!.generateText("p");
     await jobs.text("memory", "codex")!.generateText("p");
     expect(claude.calls).toHaveLength(1);
@@ -486,7 +562,7 @@ describe("when the helper is not used", () => {
 // engine is whatever the resolver hands it, as server/index.ts wires it.
 describe("memory upkeep through the resolver", () => {
   const BOT: UpkeepBot = { id: "pi", name: "Bot pi" };
-  const facts = JSON.stringify([{ text: "The person is vegetarian", kind: "preference", confidence: 0.9 }]);
+  const facts = JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", confidence: 0.9 }]);
   const turns = [{ person: "I'm vegetarian", bot: "Noted." }];
 
   beforeEach(() => {

@@ -78,6 +78,27 @@ custom `CUA_DRIVER_PATH` executables. An explicit override remains untouched;
 an incomplete installed package reports a missing-driver error rather than
 silently falling back to the console binary.
 
+### Foreground typing and menu clicks
+
+The bundled Windows driver (0.28.2) sends a foreground `type_text` as one burst
+of key packets, which Windows 11 Notepad scrambles, and answers a click that
+picks a menu item with `foreground_unavailable` after the click worked. With a
+driver older than 0.35.0, OpenMausBot types such text one character at a time
+and tells the bot that the click was sent:
+
+```sh
+node --test electron/paced-typing.node-test.mjs electron/shared-computer-access.node-test.mjs
+pnpm exec vitest run server/local-computer-proxy.test.ts server/mcp-bridge.test.ts \
+  server/local-computer-guidance.test.ts server/unconfirmed-click.test.ts \
+  server/lent-screen-guidance.test.ts
+```
+
+A fake driver scrambles a burst the way the report showed (" Zeile Drei"
+became " iiiiiiiiii"); the proxy test runs the real local proxy against it, and
+the shared-access test the lent-screen path. No Windows app is driven. A
+driver of 0.35.0 or later types one character at a time itself, and these
+calls then reach it unchanged.
+
 The portable conversion checks use synthetic inert PE data:
 
 ```sh

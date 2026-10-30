@@ -29,7 +29,7 @@ export function ReplyQuote({
     </>
   );
   return (
-    <div className={cn(
+    <div data-reply-quote className={cn(
       "flex min-w-0 items-center gap-2 rounded-2xl bg-ink/[0.06] text-ink-secondary",
       compact ? "py-1 ps-2.5 pe-2 text-[13px] leading-5" : "py-1.5 ps-3 pe-1.5 text-[13px] leading-5",
     )}>

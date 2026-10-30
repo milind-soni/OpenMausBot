@@ -104,8 +104,10 @@ describe("the automation panel", () => {
     const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: fixture.state.routineRuns as never });
     const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "When your sales form sends something, Scout drafts a follow-up for the lead", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
     const text = container.textContent ?? "";
-    expect(text).toContain("When your sales form sends something, Scout drafts a follow-up for the lead");
-    expect(text).toContain("Working");
+    expect(container.querySelector("h2")!.textContent).toBe("Sales form leads");
+    expect(container.querySelector("h2 + p")!.textContent).toBe("When your sales form sends something, Scout drafts a follow-up for the lead");
+    expect(container.querySelector("[data-automation-status]")!.textContent).toContain("On");
+    expect(text).not.toContain("Working");
     expect(text).toContain("Paste this address into the other app");
     expect(text).toContain("Recent runs");
     expect(text).toMatch(/Today [^✓]*✓Drafted a follow-up for Ada\./);
@@ -122,6 +124,29 @@ describe("the automation panel", () => {
     flushSync(() => button(container, "Run now").click());
     await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/webhooks/hook-1/test", expect.objectContaining({ method: "POST" })));
     expect(container.textContent).toContain("It hasn't run yet.");
+  });
+});
+
+describe("a routine's panel", () => {
+  it("is titled with the routine's name, says when it runs and who runs it, and shows its whole instructions", () => {
+    const prompt = "Every weekday at 9 AM, search for the latest AI news from the last 24 hours (new models, funding, research) and send a 5-bullet brief, each with a source link.";
+    const routine = { id: "routine-1", name: "Daily AI News Brief", prompt, botId: "bot-a", runOn: "maus", enabled: true, createdAt: now, updatedAt: now,
+      schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, nextRunAt: now + 86_400_000, durationMinutes: 30 };
+    const [automation] = automationsFrom({ routines: [routine] as never, webhooks: [], runs: [] });
+    const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "Every weekday at 9 AM, Scout searches for the latest AI news from the last 24 hours (new…", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
+    expect(container.querySelector("h2")!.textContent).toBe("Daily AI News Brief");
+    expect(container.querySelector("h2 + p")!.textContent).toBe("Every weekday at 9 AM · Scout");
+    expect(container.querySelector("[data-testid=automation-instructions]")!.textContent).toBe(prompt);
+    expect(container.textContent).not.toContain("(new…");
+    expect(container.querySelector("[data-automation-status]")!.textContent).toBe("On");
+  });
+
+  it("falls back to its sentence when it has no name", () => {
+    const [automation] = automationsFrom({ routines: [], webhooks: [{ ...webhook, name: " " }] as never, runs: [] });
+    const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "When another app sends something, Scout drafts a follow-up", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
+    expect(container.querySelector("h2")!.textContent).toBe("When another app sends something, Scout drafts a follow-up");
+    expect(container.querySelector("h2 + p")).toBeNull();
+    expect(container.querySelector("[data-testid=automation-instructions]")).toBeNull();
   });
 });
 
@@ -247,10 +272,10 @@ describe("on a Cloud", () => {
   it("never asks the person to keep the app open for another app's automation", () => {
     const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: [] });
     const props = { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() };
-    expect(mount(createElement(AutomationPanel, props)).textContent).toContain("Keep OpenMausBot open so it can receive.");
+    expect(mount(createElement(AutomationPanel, props)).textContent).toContain("Keep MausBot open so it can receive.");
     root!.unmount();
     fixture.state.config = { cloudHome: true };
-    expect(mount(createElement(AutomationPanel, props)).textContent).not.toContain("Keep OpenMausBot open");
+    expect(mount(createElement(AutomationPanel, props)).textContent).not.toContain("Keep MausBot open");
   });
 });
 

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConfigSection } from "@/components/ApiKeys";
+import { KEY_CATALOG } from "@/components/keys/key-catalog";
 import { BOT_ROLES } from "@/lib/bot-roles";
 import { BUILT_IN_INSTANCE_DRIVERS } from "@/lib/built-in-instances";
 import { CURATED_CONNECTOR_SLUGS } from "../../shared/connector-curated";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
 import { TOOL_SCOPE_SUPPORT } from "../../shared/tool-scope-support";
 import {
-  allow, APP, BOT_TEMPLATE, credentialProvider, ENGINE, engineForDriver, engineSlug, KEY_PROVIDER, SECTION_PROVIDER,
+  allow, APP, BOT_TEMPLATE, credentialProvider, ENGINE, engineForDriver, engineSlug, KEY_PROVIDER,
 } from "./analytics-allowlist";
 
 const HOSTILE = [
@@ -73,22 +73,23 @@ describe("app, role and key lists", () => {
   });
 
   it("names a provider for every Settings key row", () => {
-    const rows = {
-      composio: "composio", box: "boat", opencodeGo: "opencode_go", anthropic: "anthropic", openai: "openai",
-      openrouter: "openrouter", openaiCompat: "openai_compat", xai: "xai", mistral: "mistral", cerebras: "cerebras",
-      groq: "groq", meta: "meta", treg: "treg", deepseek: "deepseek",
-    } satisfies Record<ConfigSection, string>;
-    for (const [section, provider] of Object.entries(rows)) {
-      expect(SECTION_PROVIDER[section as ConfigSection]).toBe(provider);
-      expect(KEY_PROVIDER).toContain(provider);
-    }
+    const rows = Object.fromEntries(KEY_CATALOG.flatMap((entry) => entry.target ? [[entry.id, entry.target.analytics]] : []));
+    expect(rows).toEqual({
+      openai: "openai", anthropic: "anthropic", xai: "xai", openrouter: "openrouter", mistral: "mistral", cerebras: "cerebras", groq: "groq",
+      meta: "meta", deepseek: "deepseek", opencodeGo: "opencode_go", openaiCompat: "openai_compat", liveKey: "openai_live",
+      elevenlabs: "elevenlabs", fishAudio: "fish_audio", box: "boat", composio: "composio", treg: "treg", jev: "jev",
+      openrouterHelper: "openrouter_decider", imageOpenai: "openai_image", postiz: "postiz",
+    });
+    for (const provider of Object.values(rows)) expect(KEY_PROVIDER).toContain(provider);
   });
 
   it("names a provider for every credential a bot can ask for in chat, and nothing else", () => {
     const expected = {
       boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio",
       openaiImageApiKey: "openai_image",
-      onePasswordToken: "onepassword",
+      onePasswordToken: "onepassword", composioApiKey: "composio", openaiApiKey: "openai", anthropicApiKey: "anthropic",
+      openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq", metaApiKey: "meta",
+      deepseekApiKey: "deepseek",
     };
     expect(Object.keys(expected).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
     for (const [target, provider] of Object.entries(expected)) expect(credentialProvider(target)).toBe(provider);

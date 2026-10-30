@@ -11,11 +11,12 @@ import { api, liveCallFromFrame, nextLiveCallLookup, useStore, type Action, type
 import { cn } from "@/lib/cn";
 import type { LiveCallState, LiveClient } from "../../shared/wire";
 import { LiveCallSettings } from "./LiveCallSettings";
+import { OpenSystemSettings } from "./OpenSystemSettings";
 
 export type LiveCallBarView =
   | { kind: "local"; title: string; caption: string; heard: string; muted: boolean; ending: boolean; hint: string | null }
   | { kind: "remote"; title: string; callId: string }
-  | { kind: "notice"; text: string; action: LiveCallAction | null };
+  | { kind: "notice"; text: string; action: LiveCallAction | null; micSettings?: boolean };
 
 const DEVICE_KEY = {
   ios: "call.live.device.ios",
@@ -37,7 +38,7 @@ export function liveCallBarView({ bot, media, server, now }: {
 }): LiveCallBarView | null {
   const here = media.botId === bot.id && media.threadId === bot.threadId;
   if (here && (media.phase === "failed" || media.phase === "ended") && media.notice) {
-    return { kind: "notice", text: media.notice, action: media.phase === "failed" ? media.action : null };
+    return { kind: "notice", text: media.notice, action: media.phase === "failed" ? media.action : null, ...(media.micSettings ? { micSettings: true } : {}) };
   }
   if (here && isLiveCallRunning(media.phase)) {
     const when = media.startedAt !== null ? clock(now - media.startedAt) : t("call.live.connecting");
@@ -123,6 +124,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
     return (
       <div role="status" className={cn(frame, "gap-2 border-hairline/60")}>
         <span className="min-w-0 flex-1 truncate" title={view.text}>{view.text}</span>
+        {view.micSettings && <OpenSystemSettings pane="mic" />}
         {action && (
           <button type="button" aria-label={action.label} className={cn(button, "bg-raised hover:bg-raised-hover")} onClick={takeLiveCallAction}>
             <action.Icon className="size-3.5" /> <span className="hidden sm:inline">{action.label}</span>

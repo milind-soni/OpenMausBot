@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hintSeenPatch, welcomeDue } from "@/lib/onboarding";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { emailGateDone } from "@/lib/analytics";
 import { anchorFor, cardAnswered, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
 import { t } from "@/lib/i18n";
@@ -14,8 +15,10 @@ const COPY: Record<SpotlightId, { key: "onboarding.spot.composer" | "onboarding.
   "spot.connector": { key: "onboarding.spot.connector", mascot: "curious" },
 };
 
+/** Spotlights on the first chat, in Advanced mode only: Simple mode's cards carry a one-line hint instead. */
 export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
   const { state, dispatch } = useStore();
+  const advanced = useAdvancedMode();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const record = state.config?.onboarding;
   const [dismissed, setDismissed] = useState<string[]>([]);
@@ -33,6 +36,7 @@ export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
   }, [busy]);
 
   const eligible =
+    advanced &&
     !quiet &&
     !remoteClient &&
     !state.welcomeOpen &&

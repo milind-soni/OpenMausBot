@@ -5,9 +5,21 @@ when that provider resumes an existing native thread. You can also change one
 while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
-explicit grant: Full Access, a saved exact command or MCP read-shaped tool, or
-the narrow built-in web-search allowance under Approve for me. In Full Access,
-OMB also applies its own configuration tools without another approval.
+explicit grant: Full Access, a saved exact command or MCP read-shaped tool,
+the narrow built-in web-search allowance under Approve for me, or a bot reading
+its own files. In Full Access, OMB also applies its own configuration tools
+without another approval.
+
+**A bot reading its own files never asks**, at any level: its standing
+instructions (`SOUL.md`), its skills with every saved revision, its memory and
+its conversation folders. That covers a plain reading command (`cat`, `head`,
+`tail`, `grep`, `rg`, `sed -n`, `ls`, `wc`, `nl`, `stat`) made of plain words
+alone, and Claude's Read, Grep, Glob, LS and NotebookRead, when every path is
+inside the bot's own folders once links are followed. Anything else in the
+command (a pipe, a redirect, a second command, a variable, a glob) asks as
+before, and so does every read in a guest's turn, since a bot's folder holds its
+owner's memory. On a Cloud the bot's box also shows it its own `SOUL.md`,
+read-only.
 
 Every bot and conversation starts at **Full access**, the default T3 Code uses
 too: each engine runs in its own most permissive mode, and a real question or
@@ -271,7 +283,7 @@ silently substitute unrestricted access when a mode is rejected.
 OpenMausBot's built-in agents MCP server describes its scoped reads with
 explicit read-only, non-destructive, idempotent, closed-world metadata:
 `list_bots`, `list_rooms`, `list_threads`, `assignment_status`,
-`session_search`, `session_read`, `list_triggers`, and `skills_list`.
+`session_search`, `trigger_info`, and `skills_list`.
 Session recall still enforces own-bot access and records its existing room
 disclosure audit. These hints do not grant access to another bot's conversations.
 Writes, credential requests, proposals, and third-party tools do not inherit

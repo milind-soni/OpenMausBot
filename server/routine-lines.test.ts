@@ -23,7 +23,7 @@ it("scrubs a quoted failure in the line and in its params alike", () => {
 describe("a long line", () => {
   const retry = (failure: string) => `Starting again shortly after a temporary error: ${failure}`.slice(0, 500);
   const busy = (failure: string) => `Did not start: still busy after 60 minutes (${failure})`.slice(0, 500);
-  const signedOut = (failure: string) => `This bot's AI is signed out. Sign in again in Settings → Model providers. The AI said: “${failure}”`.slice(0, 500);
+  const signedOut = (failure: string) => `This bot's AI is signed out. Sign in again in Settings → AI. The AI said: “${failure}”`.slice(0, 500);
 
   it.each([470, 500, 1000])("stores the old first 500 characters of a line ending in its failure, with a code that rebuilds them (%i)", (length) => {
     const failure = "x".repeat(length);

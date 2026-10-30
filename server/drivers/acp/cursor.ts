@@ -417,7 +417,7 @@ async function setCursorFast(
 
 const support = (run: typeof execCli): AcpSupport => ({
   driverKind: "cursorAgent",
-  questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION },
+  questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION }, askTool: "AskQuestion",
   displayName: "Cursor",
   models: STATIC_CURSOR_MODELS,
   // Other coding agents can install a generic `agent` shim; `cursor-agent` is unambiguous.

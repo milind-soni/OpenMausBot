@@ -2,7 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import { createPortal } from "react-dom";
 import { Undo2, Zap } from "lucide-react";
 
-import { automationFor, automationSentence, automationStatus, capital, cardAutomation, lastWhen, nextWhen, runLine } from "@/lib/automations";
+import { automationFor, automationSentence, automationStatus, capital, cardAutomation, firstRunLine, lastWhen, nextWhen, runLine } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
@@ -53,7 +53,7 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
   else if (status.state === "done") line = [t("automations.status.done"), lastRan].filter(Boolean).join(" · ");
   else if (status.state === "needs-you") line = t("automations.needsYou", { reason: status.reason ?? "" });
   else if (lastRan) line = [lastRan, next && t("automations.next", { when: next })].filter(Boolean).join(" · ");
-  else line = next ? t("automations.card.next", { when: next }) : automation.appTrigger ? appWaitingLine(automation.appTrigger) : capital(t("automations.notRunYet"));
+  else line = firstRunLine(automation) ?? (next ? t("automations.card.next", { when: next }) : automation.appTrigger ? appWaitingLine(automation.appTrigger) : capital(t("automations.notRunYet")));
 
   const undo = () => {
     if (!threadId || !card.requestId || undoing) return;

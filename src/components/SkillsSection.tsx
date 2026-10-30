@@ -274,8 +274,8 @@ export function SkillsSection() {
                   <LibrarySkillMeta skill={skill} />
                   <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-inset px-2.5 py-2">
                     <div>
-                      <div className="text-[11.5px] font-medium text-ink">{t("skills.library.everyBot")}</div>
-                      <div className="text-[10.5px] text-ink-secondary">{t("skills.library.everyBotHint")}</div>
+                      <div className="text-[12px] font-medium text-ink">{t("skills.library.everyBot")}</div>
+                      <div className="text-[11px] text-ink-secondary">{t("skills.library.everyBotHint")}</div>
                     </div>
                     <Switch
                       checked={skill.everyBot}

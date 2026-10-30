@@ -35,6 +35,7 @@ import {
 } from "@/lib/local-vm-workspace";
 import { z } from "zod";
 import { Select } from "./Select";
+import { productName } from "@/lib/brand";
 
 const SLOT_CONTEXTS = ["local-vm-workspace:left", "local-vm-workspace:right"] as const;
 
@@ -678,7 +679,7 @@ export function LocalVmWorkspace({
       setControlledBotId(null);
       return true;
     } catch {
-      setControlError(t("vm.workspace.handBackFailed"));
+      setControlError(t("vm.workspace.handBackFailed", { app: productName() }));
       return false;
     } finally {
       controlBusyRef.current = false;

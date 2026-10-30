@@ -55,7 +55,7 @@ async function askPermission(server: AgentsIntegration, ask: { tool_name: string
   }
 }
 
-/** `{{name}}` in a step's string arguments becomes what an earlier step's `capture` found. */
+/** `{{name}}` in a step's string arguments, and in a scripted entry's reply, becomes what an earlier step's `capture` found. */
 function withCaptured(value: unknown, captured: Record<string, string>): unknown {
   if (typeof value === "string") return value.replace(/\{\{(\w+)\}\}/g, (whole, name: string) => captured[name] ?? whole);
   if (Array.isArray(value)) return value.map((item) => withCaptured(item, captured));
@@ -245,7 +245,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       if (typeof plan.failWith === "string") throw new Error(plan.failWith);
       if (plan.failResumed && resumed) throw new Error("Scripted failure of a resumed turn");
       if (approval && approval.behavior !== "allow") return plan.replyIfDenied ?? `${plan.reply} (approval ${approval.behavior})`;
-      if (entry) return plan.reply ?? `Result from ${botId}`;
+      if (entry) return String(withCaptured(plan.reply ?? `Result from ${botId}`, captured));
       return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;
     })()]);
   } finally {

@@ -29,6 +29,7 @@ export const NOTIFICATION_TITLE = {
   "notifications.banner.approval": "{who} needs approval",
   "notifications.banner.question": "{who} has a question",
   "notifications.banner.done": "{who} finished",
+  "notifications.banner.wait": "{who}'s wait is over",
   "notifications.banner.mention": "{who} mentioned you",
   "notifications.banner.turnFailed": "{who} couldn't start",
   "notifications.banner.routineFailed": "{who}'s routine failed",
@@ -37,6 +38,10 @@ export const NOTIFICATION_TITLE = {
   "notifications.banner.delegationSettled": "{who} resumed with results",
   "notifications.banner.inRoom": "{name} in {room}",
 } as const;
+/** Something OpenMausBot did on its own about `bot` that the person hears once, in one plain line. */
+export function buildNoticeNotification(bot: Pick<NotifyBot, "id" | "name">, threadId: string, text: string): Notification {
+  return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
+}
 
 export function buildNotification(
   kind: NotifyKind,
@@ -53,7 +58,7 @@ export function buildNotification(
     : bot.name;
   const title = kind === "sign-in"
     ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-    : formatServerText(NOTIFICATION_TITLE[kind === "spend" || kind === "brief" ? NOTIFY_TITLE_KEY.done : NOTIFY_TITLE_KEY[kind]], { who });
+    : formatServerText(NOTIFICATION_TITLE[kind === "spend" || kind === "brief" || kind === "notice" ? NOTIFY_TITLE_KEY.done : NOTIFY_TITLE_KEY[kind]], { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

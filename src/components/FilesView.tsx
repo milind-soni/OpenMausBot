@@ -10,6 +10,7 @@ import { useStore } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { Switch } from "./SettingsPrimitives";
+import { MENU_SHEET } from "./menu-recipe";
 
 const REFUSAL: Record<string, LocaleKey> = {
   "too-broad": "files.refusal.tooBroad", "app-data": "files.refusal.appData", "already-shared": "files.refusal.alreadyShared",
@@ -35,7 +36,12 @@ export function refusalText(refusal: string, listed = false): string {
   return t(listed && refusal === "not-a-folder" ? "files.refusal.notAFolderListed" : REFUSAL[refusal] ?? "files.refusal.other");
 }
 
-export function folderStatus(folder: SharedFolder): string {
+/** A bot's change that met one of the person's is said for a week: theirs kept, the bot's beside it. */
+const KEPT_SHOWN_MS = 7 * 24 * 60 * 60_000;
+
+export function folderStatus(folder: SharedFolder, now = Date.now()): string {
+  const kept = folder.kept?.[0];
+  if (kept && now - kept.at < KEPT_SHOWN_MS && (folder.status === "synced" || folder.status === "copying")) return t("files.status.keptBoth", { file: kept.path, copy: kept.beside });
   if (folder.status === "copying") return t("files.status.copying", { done: count(folder.done), files: count(folder.files) });
   if (folder.status === "confirm-deletes") return t(folder.pendingDeletes === 1 ? "files.status.deletesOne" : "files.status.deletes", { count: count(folder.pendingDeletes) });
   if (folder.status === "problem") return folder.problem || t("files.status.problem");
@@ -206,7 +212,7 @@ function FolderMenu({ name, busy, onOpen, onStop }: { name: string; busy: boolea
   return <div ref={ref} className="relative shrink-0">
     <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={t("files.more", { name })}
       className="ui-icon-button hover:bg-control hover:text-ink" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
-    {open && <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 text-[13px] shadow-2xl shadow-black/50">
+    {open && <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
       {item(t("files.openHere"), onOpen)}
       {item(t("files.stop"), onStop, true)}
     </div>}

@@ -6,7 +6,20 @@ import type { CdpSession, Params } from "./connection.ts";
 
 /** Chromium keeps at most three frames unacknowledged, so acking 100 ms after arrival caps a stream near 30 fps. */
 export const ACK_PACE_MS = 100;
-export const MAX_SCREENSHOT_WIDTH = 1280;
+/**
+ * The largest picture a bot is sent. Claude's API (2026) shrinks an image past 1568 pixels on its long edge or about 1.2
+ * megapixels before the model sees it, without saying so, which would move every point the model reads off it; past
+ * 8000 pixels it refuses the image.
+ */
+export const PICTURE_LIMITS = { maxWidth: 1280, maxHeight: 1568, maxPixels: 1_200_000 } as const;
+
+/** A picture's pixels per CSS pixel of a region of `size`: one, or in hundredths below one as PICTURE_LIMITS needs. */
+export function pictureScale(size: { width: number; height: number }): number {
+  const width = Math.max(1, size.width);
+  const height = Math.max(1, size.height);
+  const fit = Math.min(1, PICTURE_LIMITS.maxWidth / width, PICTURE_LIMITS.maxHeight / height, Math.sqrt(PICTURE_LIMITS.maxPixels / (width * height)));
+  return fit >= 1 ? 1 : Math.max(0.01, Math.floor(fit * 100) / 100);
+}
 
 export interface ScreencastFrame {
   data: Buffer;
@@ -86,7 +99,6 @@ export class Screencast {
 export interface ScreenshotOptions {
   format?: "png" | "jpeg";
   quality?: number;
-  maxWidth?: number;
   fullPage?: boolean;
   /** CSS pixels in page coordinates. */
   clip?: { x: number; y: number; width: number; height: number };
@@ -97,6 +109,10 @@ export interface Screenshot {
   format: "png" | "jpeg";
   width: number;
   height: number;
+  /** The picture's pixels per CSS pixel: 1, or less for a region larger than PICTURE_LIMITS. */
+  scale: number;
+  /** What it shows, in CSS pixels. */
+  region: { width: number; height: number };
 }
 
 interface LayoutMetrics {
@@ -104,28 +120,32 @@ interface LayoutMetrics {
   cssContentSize: { width: number; height: number };
 }
 
-/** At most `maxWidth` device pixels wide; a capture at a smaller scale repaints, so callers pause a live screencast first. */
+/**
+ * One picture pixel per CSS pixel within PICTURE_LIMITS, of the region it names: the viewport without a classic
+ * scrollbar, the whole page, or a clip. The capture is always clipped and so repaints: callers pause a live screencast first.
+ */
 export async function captureScreenshot(session: CdpSession, devicePixelRatio: number, options: ScreenshotOptions = {}): Promise<Screenshot> {
   const format = options.format ?? "png";
-  const maxWidth = options.maxWidth ?? MAX_SCREENSHOT_WIDTH;
   const metrics = await session.send<LayoutMetrics>("Page.getLayoutMetrics");
   const viewport = metrics.cssVisualViewport;
   const region = options.clip
     ?? (options.fullPage
       ? { x: 0, y: 0, width: Math.ceil(metrics.cssContentSize.width), height: Math.min(Math.ceil(metrics.cssContentSize.height), 16_384) }
       : { x: viewport.pageX, y: viewport.pageY, width: viewport.clientWidth, height: viewport.clientHeight });
-  const scale = Math.min(1, maxWidth / Math.max(1, region.width * devicePixelRatio));
-  const needsClip = options.clip !== undefined || options.fullPage === true || scale < 1;
+  const scale = pictureScale(region);
   const { data } = await session.send<{ data: string }>("Page.captureScreenshot", {
     format,
     ...(format === "jpeg" ? { quality: Math.min(100, Math.max(1, Math.round(options.quality ?? 80))) } : {}),
-    ...(needsClip ? { clip: { ...region, scale } } : {}),
+    // Chrome draws a clip at its scale times the device pixel ratio (measured on 156).
+    clip: { ...region, scale: scale / devicePixelRatio },
     ...(options.fullPage ? { captureBeyondViewport: true } : {}),
   });
   return {
     data: Buffer.from(data, "base64"),
     format,
-    width: Math.round(region.width * devicePixelRatio * scale),
-    height: Math.round(region.height * devicePixelRatio * scale),
+    width: Math.round(region.width * scale),
+    height: Math.round(region.height * scale),
+    scale,
+    region: { width: region.width, height: region.height },
   };
 }

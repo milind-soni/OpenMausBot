@@ -192,6 +192,59 @@ describe("HighLevelClient requests", () => {
 });
 
 describe("HighLevelClient resilience", () => {
+  it("starts no OAuth refresh when the first 401 arrives after Stop", async () => {
+    const received = deferred();
+    const respond = deferred();
+    const { client, store, dir } = harness({}, { fetch: async (...args) => {
+      const response = await fetch(...args);
+      received.resolve();
+      await respond.promise;
+      return response;
+    } });
+    hl.tokens.delete("hl_access_seed");
+    const saved = store.get();
+    const relayCalls = relay.calls.length;
+    const stopped = Object.assign(new Error("turn ended"), { status: 409 });
+    let active = true;
+    const pending = client.withActiveCall(() => { if (!active) throw stopped; },
+      () => client.request("GET", "/contacts/contact_1")).catch((error: unknown) => error);
+    await received.promise;
+    active = false;
+    respond.resolve();
+    expect(await pending).toBe(stopped);
+    expect(hl.calls).toHaveLength(1);
+    expect(relay.refreshes).toBe(0);
+    expect(relay.calls).toHaveLength(relayCalls);
+    expect(new HighLevelStore({ dataDir: dir }).get()).toEqual(saved);
+  });
+
+  it("keeps and stores a shared refresh started by another call after Stop", async () => {
+    const refreshed = deferred();
+    const resume = deferred();
+    const upstream = createHighLevelRelay(relay.url);
+    const { client, dir } = harness({ expiresAt: clock + 30_000 }, { refresh: async (token) => {
+      const tokens = await upstream.refresh(token);
+      refreshed.resolve();
+      await resume.promise;
+      return tokens;
+    } });
+    const live = client.request("GET", "/contacts/contact_1");
+    await refreshed.promise;
+    const stopped = Object.assign(new Error("turn ended"), { status: 409 });
+    const pending = client.withActiveCall(() => {
+      expect(new HighLevelStore({ dataDir: dir }).get()?.accessToken).toBe(relay.issued.at(-1));
+      throw stopped;
+    }, () => client.request("GET", "/contacts/contact_2")).catch((error: unknown) => error);
+    resume.resolve();
+    await expect(live).resolves.toMatchObject({ contact: { id: "contact_1" } });
+    expect(await pending).toBe(stopped);
+    expect(relay.refreshes).toBe(1);
+    expect(hl.calls).toHaveLength(1);
+    expect(new HighLevelStore({ dataDir: dir }).get()).toMatchObject({
+      accessToken: relay.issued.at(-1), state: "signed-in",
+    });
+  });
+
   it("refreshes once through the relay on a 401, retries with the new token and keeps the rotated pair", async () => {
     const { client, store, dir } = harness();
     hl.tokens.delete("hl_access_seed");

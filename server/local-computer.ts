@@ -1,6 +1,5 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import type { Stats } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
@@ -26,9 +25,11 @@ export type LocalComputerConnection = {
   scope: "local-computer";
 };
 
+/** `journal`: the bridge records each computer call for saved steps. */
 export function gatedLocalComputer(
   connection: LocalComputerConnection,
   control: { url: string; token: string },
+  journal = false,
 ): LocalComputerConnection {
   return {
     ...connection,
@@ -40,8 +41,10 @@ export function gatedLocalComputer(
       ELECTRON_RUN_AS_NODE: "1",
       OMB_CUA_COMMAND: connection.command,
       OMB_CUA_ARGS: JSON.stringify(connection.args),
+      OMB_CUA_PLATFORM: connection.platform,
       OMB_CONTROL_URL: control.url,
       OMB_CONTROL_TOKEN: control.token,
+      OMB_COMPUTER_JOURNAL: journal ? "1" : "0",
     },
   };
 }
@@ -276,8 +279,8 @@ function ownedPrivate(stat: Stats, uid: number): boolean {
   return (stat.uid === uid || stat.uid === 0) && (stat.mode & 0o077) === 0;
 }
 
-export function validateLinuxDescriptorRuntime(
-  descriptorFile: string,
+/** The driver a Linux descriptor names is the one published: same binary, a private socket, and both processes alive. */
+export function validateLinuxRuntimeEndpoints(
   raw: LinuxConnectionDescriptor,
   {
     uid = process.getuid?.() ?? -1,
@@ -285,19 +288,6 @@ export function validateLinuxDescriptorRuntime(
   }: { uid?: number; isProcessAlive?: (pid: number) => boolean } = {},
 ): boolean {
   try {
-    const descriptorStat = lstatSync(descriptorFile);
-    const descriptorDirectoryStat = lstatSync(dirname(descriptorFile));
-    if (
-      !descriptorStat.isFile() ||
-      descriptorStat.isSymbolicLink() ||
-      !ownedPrivate(descriptorStat, uid) ||
-      !descriptorDirectoryStat.isDirectory() ||
-      descriptorDirectoryStat.isSymbolicLink() ||
-      !ownedPrivate(descriptorDirectoryStat, uid)
-    ) {
-      return false;
-    }
-
     const driver = raw.driver as Record<string, unknown>;
     const daemon = raw.daemon as Record<string, unknown>;
     const binaryPath = driver.path as string;
@@ -306,7 +296,7 @@ export function validateLinuxDescriptorRuntime(
     const currentFileIdentity = currentDriverFileIdentity(binaryPath);
     const socketStat = lstatSync(socketPath);
     const socketDirectoryStat = lstatSync(dirname(socketPath));
-    if (
+    return !(
       realpathSync(binaryPath) !== binaryPath ||
       !sameDriverFileIdentity(driver.fileIdentity, currentFileIdentity) ||
       !binaryStat.isFile() ||
@@ -321,13 +311,36 @@ export function validateLinuxDescriptorRuntime(
       !ownedPrivate(socketDirectoryStat, uid) ||
       !isProcessAlive(raw.ownerPid as number) ||
       !isProcessAlive(daemon.pid as number)
-    ) {
-      return false;
-    }
-    return true;
+    );
   } catch {
     return false;
   }
+}
+
+/** The file form adds the descriptor's own privacy: a regular, non-symlink file and folder only this user can read. */
+export function validateLinuxDescriptorRuntime(
+  descriptorFile: string,
+  raw: LinuxConnectionDescriptor,
+  options: { uid?: number; isProcessAlive?: (pid: number) => boolean } = {},
+): boolean {
+  const uid = options.uid ?? process.getuid?.() ?? -1;
+  try {
+    const descriptorStat = lstatSync(descriptorFile);
+    const descriptorDirectoryStat = lstatSync(dirname(descriptorFile));
+    if (
+      !descriptorStat.isFile() ||
+      descriptorStat.isSymbolicLink() ||
+      !ownedPrivate(descriptorStat, uid) ||
+      !descriptorDirectoryStat.isDirectory() ||
+      descriptorDirectoryStat.isSymbolicLink() ||
+      !ownedPrivate(descriptorDirectoryStat, uid)
+    ) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  return validateLinuxRuntimeEndpoints(raw, { ...options, uid });
 }
 
 /** Legacy descriptors name any command, so the file must be a regular non-symlink owned by this user and closed to
@@ -347,85 +360,54 @@ function validateLegacyDescriptorRuntime(
   }
 }
 
-/** An older fallback never overrides a present but unavailable, malformed or unreadable descriptor. */
-function firstPresentCuaDescriptor(candidates: string[]): string | null {
-  for (const file of new Set(candidates)) {
-    try {
-      lstatSync(file);
-      return file;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return file;
-    }
+/** The connection a driver record describes, or null: for Linux only while that driver is still the one published. */
+export function decodeCuaConnection(
+  raw: unknown,
+  {
+    platform = process.platform,
+    validateLinuxRuntime = validateLinuxRuntimeEndpoints,
+  }: {
+    platform?: NodeJS.Platform;
+    validateLinuxRuntime?: (raw: LinuxConnectionDescriptor) => boolean;
+  } = {},
+): LocalComputerConnection | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (platform === "linux") {
+    const decoded = decodeLinuxDescriptor(raw as LinuxConnectionDescriptor);
+    return decoded && validateLinuxRuntime(raw as LinuxConnectionDescriptor) ? decoded : null;
   }
-  return null;
+  return decodeLegacyDescriptor(raw as LegacyConnectionDescriptor, platform);
 }
 
+/** Why the driver is not ready, from a macOS/Windows record that says so and says nothing else; never a connection. */
+export function cuaUnavailableReason(raw: unknown, platform: NodeJS.Platform = process.platform): string | null {
+  if (!legacyPlatform(platform) || !raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (Object.keys(record).length !== 2 || record.mode !== "unavailable") return null;
+  const reason = record.reason;
+  return typeof reason === "string" && reason.trim() && reason.length <= 2_000 ? reason.trim() : null;
+}
+
+/** The desktop app's own record of its driver, read only by the packaging smoke check. No server mounts this computer from
+ * it: the app hands its own server the connection instead (desktop-computer.ts), so the file grants nothing. */
 export function readCuaConnection({
   platform = process.platform,
-  userData = process.env.OMB_USER_DATA,
-  home = homedir(),
+  userData,
   validateLinuxRuntime = validateLinuxDescriptorRuntime,
   validateLegacyRuntime = validateLegacyDescriptorRuntime,
 }: {
   platform?: NodeJS.Platform;
   userData?: string;
-  home?: string;
   validateLinuxRuntime?: (file: string, raw: LinuxConnectionDescriptor) => boolean;
   validateLegacyRuntime?: (file: string, platform: NodeJS.Platform) => boolean;
-} = {}): LocalComputerConnection | null {
-  const candidates = userData ? [join(userData, "cua-connection.json")] : [];
-  if (platform === "darwin" && !userData) {
-    for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
-      candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
-    }
-  }
-
-  const file = firstPresentCuaDescriptor(candidates);
-  if (!file) return null;
+}): LocalComputerConnection | null {
+  if (!userData) return null;
+  const file = join(userData, "cua-connection.json");
   try {
     const raw = JSON.parse(readFileSync(file, "utf8"));
-    if (platform === "linux") {
-      const decoded = decodeLinuxDescriptor(raw);
-      if (decoded && validateLinuxRuntime(file, raw)) return decoded;
-    } else {
-      const decoded = decodeLegacyDescriptor(raw, platform);
-      if (decoded && validateLegacyRuntime(file, platform)) return decoded;
-    }
+    if (platform === "linux") return decodeCuaConnection(raw, { platform, validateLinuxRuntime: (record) => validateLinuxRuntime(file, record) });
+    return validateLegacyRuntime(file, platform) ? decodeCuaConnection(raw, { platform }) : null;
   } catch {
+    return null;
   }
-  return null;
-}
-
-/** Diagnostic only: never a connection, and only a private, well-formed macOS/Windows descriptor may supply text. */
-export function readCuaUnavailableReason({
-  platform = process.platform,
-  userData = process.env.OMB_USER_DATA,
-  home = homedir(),
-}: {
-  platform?: NodeJS.Platform;
-  userData?: string;
-  home?: string;
-} = {}): string | null {
-  if (!legacyPlatform(platform)) return null;
-  const candidates = userData ? [join(userData, "cua-connection.json")] : [];
-  if (platform === "darwin" && !userData) {
-    for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
-      candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
-    }
-  }
-  const file = firstPresentCuaDescriptor(candidates);
-  if (!file) return null;
-  try {
-    if (validateLegacyDescriptorRuntime(file, platform)) {
-      const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
-      if (raw && typeof raw === "object" && !Array.isArray(raw) &&
-          Object.keys(raw).length === 2 &&
-          (raw as Record<string, unknown>).mode === "unavailable") {
-        const reason = (raw as Record<string, unknown>).reason;
-        if (typeof reason === "string" && reason.trim() && reason.length <= 2_000) return reason.trim();
-      }
-    }
-  } catch {
-  }
-  return null;
 }

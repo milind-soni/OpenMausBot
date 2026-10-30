@@ -173,7 +173,7 @@ it("queues reports that find the Chief's incidents thread busy, answers them tog
     expect(JSON.stringify(first.prompt)).toContain("Ada's run in its thread #Reconcile the September invoices. failed");
     expect(Object.keys(first.mcpConfig.mcpServers)).toContain("agents");
     expect(Object.keys(first.mcpConfig.mcpServers)).not.toContain("computer");
-    expect(first.systemPrompt).toContain("This turn answers a Team incidents report and your computer could not be prepared for it (A cloud desktop here needs your own Boat key");
+    expect(first.systemPrompt).toContain("This turn answers a Team incidents report and your computer could not be prepared for it (Bots here can get their own cloud desktops from Boat, a paid service.");
 
     const failsWhileBusy = async (bot: { id: string; activeTaskId: string }, name: string, request: string) => {
       await control(["send", "--bot", bot.id, "--text", request]);
@@ -227,8 +227,8 @@ it("reviews the work it handed on from a report without the Chief's computer, ev
     await turnEnded(chief.id, incidents);
 
     await control(["send", "--bot", chief.id, "--task", incidents, "--text", "Any update on the invoices?"]);
-    await expect.poll(async () => (await messages(incidents)).some((m) => m.kind === "activity" && /Boat key/.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
-    const refusals = (await messages(incidents)).filter((m) => m.kind === "activity" && /Boat key/.test(m.tool?.name ?? "")).length;
+    await expect.poll(async () => (await messages(incidents)).some((m) => m.kind === "activity" && /Connect your Boat account/.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
+    const refusals = (await messages(incidents)).filter((m) => m.kind === "activity" && /Connect your Boat account/.test(m.tool?.name ?? "")).length;
 
     writeFileSync(file(caraThread, "gate"), "finish");
     await expect.poll(async () => (await messages(incidents)).some((m) =>
@@ -239,7 +239,7 @@ it("reviews the work it handed on from a report without the Chief's computer, ev
     expect(review.systemPrompt).toContain("This turn answers a Team incidents report and your computer could not be prepared for it");
     expect((await control(["wait", "--bot", chief.id, "--task", incidents, "--timeout", "30"])).status).toBe("settled");
     const lines = await messages(incidents);
-    expect(lines.filter((m) => m.kind === "activity" && /Boat key/.test(m.tool?.name ?? "")).length).toBe(refusals);
+    expect(lines.filter((m) => m.kind === "activity" && /Connect your Boat account/.test(m.tool?.name ?? "")).length).toBe(refusals);
     expect(lines.some((m) => /could not reach/.test(m.tool?.name ?? ""))).toBe(false);
     const reviewReply = lines.findLast((m) => m.role === "bot" && m.kind === "text" && m.turnTerminal);
     expect(lines.indexOf(reviewReply)).toBeGreaterThan(lines.findIndex((m) => m.tool?.name === "Resumed with Cara results, reviewing"));

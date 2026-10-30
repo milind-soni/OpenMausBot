@@ -1,12 +1,15 @@
-// The trigger tools a bot uses from chat: list_triggers, list_trigger_events, create_trigger and manage_trigger. Every
-// change applies at once (no confirmation card); the harness records it on the automation's card with Pause, Edit and Undo.
+// The trigger tools a bot uses from chat: trigger_info reads (list, events), trigger changes (create, update, pause,
+// resume, run_now) and delete_trigger deletes. Every change applies at once (no confirmation card); the harness records
+// it on the automation's card with Pause, Edit and Undo.
 import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
+import { plainTimeZone } from "../../shared/plain-time-zone.ts";
+import { plainWhen } from "../plain-time.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import { WEEKDAYS } from "./agents-catalog.ts";
 import type { Json } from "./agents-client.ts";
 
-export const TRIGGER_TOOL_NAMES: ReadonlySet<string> = new Set(["list_triggers", "list_trigger_events", "create_trigger", "manage_trigger"]);
+export const TRIGGER_TOOL_NAMES: ReadonlySet<string> = new Set(["trigger_info", "trigger", "delete_trigger"]);
 
 const LIST_ROUTE = "/api/internal/triggers";
 const EVENTS_ROUTE = "/api/internal/trigger-events";
@@ -68,7 +71,7 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
   // Providers may send unused optional fields as null; any other unknown field refuses the call.
   const unsupported = fields && Object.keys(raw).find((key) => raw[key] != null && !fields.includes(key));
   if (unsupported) {
-    return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from list_triggers. ${SUPPORTED_SCHEDULES}` };
+    return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from trigger_info. ${SUPPORTED_SCHEDULES}` };
   }
   if (type === "cron") {
     try {
@@ -291,7 +294,7 @@ function triggerFields(args: Json): { fields: Json; error?: string } {
   if (filterError) return { fields, error: filterError };
   if (filter) fields.filter = filter;
   if (args.event_config !== undefined && args.event_config !== null) {
-    if (!jsonRecord(args.event_config)) return { fields, error: 'event_config must be an object of the event\'s settings from list_trigger_events, e.g. {"channel_id":"C0123"}.' };
+    if (!jsonRecord(args.event_config)) return { fields, error: 'event_config must be an object of the event\'s settings from trigger_info action=events, e.g. {"channel_id":"C0123"}.' };
     fields.config = args.event_config;
   }
   const eventTypes = args.webhook_event_types;
@@ -312,14 +315,26 @@ function addressText(r: Json): string {
   return `\n\nIts private address: ${JSON.stringify(r.address, null, 2)}`;
 }
 
-function appliedText(r: Json, done: string): ToolCallResult {
+/** What the bot should say about a schedule it just set: what it assumed, with the time zone and the next run in words. */
+function closingWords(r: Json, action: string): string {
+  const zone = typeof r.timeZone === "string" ? r.timeZone : "";
+  const plain = zone ? plainTimeZone(zone) : "";
+  const next = typeof r.nextRunAt === "number" && zone ? `${plainWhen(r.nextRunAt, zone)} ${plain}` : "";
+  if (next && action === "create") {
+    return `In a sentence or two of plain words, tell the person what you set up and what you assumed: when it runs, saying the time zone as "${plain}", never as a zone id; where its results will appear (here in this chat); what each run covers; and that the first run is ${next}.`;
+  }
+  if (next && (action === "update" || action === "resume")) return `Tell the person in one plain sentence what changed, saying the time zone as "${plain}", and that the next run is ${next}.`;
+  return "Tell the person in one sentence what will happen.";
+}
+
+function appliedText(r: Json, done: string, action: string): ToolCallResult {
   const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
   const detail = typeof r.detail === "string" && r.detail.trim() ? `\n\n${r.detail.trim()}` : "";
   const id = typeof r.resultId === "string" ? r.resultId : jsonRecord(r.result) && typeof r.result.resultId === "string" ? r.result.resultId : "";
   const attention = r.settlementPending && typeof r.message === "string" ? `\n\nNeeds attention: ${r.message}`
     : jsonRecord(r.result) && typeof r.result.message === "string" ? `\n\nNeeds attention: ${r.result.message}` : "";
   return {
-    text: `${done}${id ? ` (trigger id ${id})` : ""}. It applied at once; the person sees it on a card with Edit, Pause and Undo.${summary}${detail}${attention}${addressText(r)}\n\nDo not ask for confirmation. Tell the person in one sentence what will happen.`,
+    text: `${done}${id ? ` (trigger id ${id})` : ""}. It applied at once; the person sees it right here in the chat, with Pause, Edit and Undo.${summary}${detail}${attention}${addressText(r)}\n\nDo not ask for confirmation. ${closingWords(r, action)}`,
   };
 }
 
@@ -332,107 +347,127 @@ async function request(body: Json, context: ToolCallContext, done: string): Prom
     const error = typeof r.error === "string" ? r.error : `HTTP ${status}`;
     return { text: `The trigger change did not apply: ${error}\n\nDo not claim it was applied. Fix what the error says, or tell the person plainly what is missing.`, isError: true };
   }
-  return appliedText(r, done);
+  return appliedText(r, done, String(body.action ?? ""));
 }
+
+/** Everything a trigger call may carry beyond the fields it sets. */
+const CALL_KEYS = new Set(["action", "trigger_id", "for_bot_id"]);
+const CREATE_ONLY = ["when", "app", "event", "account", "engine", "repeat"] as const;
 
 export async function callTriggerTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const forBotId = typeof args.for_bot_id === "string" && args.for_bot_id.trim() ? args.for_bot_id.trim() : undefined;
-  if (name === "list_triggers") {
-    const query = new URLSearchParams({ fromBotId: context.botId, fromThreadId: context.threadId });
-    if (typeof args.trigger_id === "string" && args.trigger_id.trim()) query.set("triggerId", args.trigger_id.trim());
-    if (args.include_address === true) {
-      if (!query.has("triggerId")) return { text: "include_address needs trigger_id: the webhook automation whose address you want, from list_triggers.", isError: true };
-      query.set("includeAddress", "1");
-    }
-    if (forBotId) query.set("forBotId", forBotId);
-    const r = await context.client.api(`${LIST_ROUTE}?${query.toString()}`);
-    const now = typeof r.now === "string" ? r.now : new Date().toISOString();
-    const timeZone = typeof r.timeZone === "string" && r.timeZone ? r.timeZone : "local computer timezone";
-    const clock = `current time: ${now}; timezone: ${timeZone}`;
-    if (typeof r.error === "string") return { text: `${r.error} (${clock})`, isError: true };
-    if (r.trigger) return { text: `Trigger (${clock}):\n${JSON.stringify(r.trigger, null, 2)}` };
-    const triggers = Array.isArray(r.triggers) ? r.triggers : [];
-    if (!triggers.length) return { text: `This bot has no triggers. Current time: ${now}. Timezone: ${timeZone}.` };
-    return { text: `This bot's triggers (${clock}):\n${JSON.stringify(triggers, null, 2)}` };
+  if (name === "trigger_info") {
+    if (args.action === "events") return listEvents(args, context);
+    if (args.action !== undefined && args.action !== null && args.action !== "list") return { text: "trigger_info action is list or events.", isError: true };
+    return listTriggers(args, forBotId, context);
   }
-  if (name === "list_trigger_events") {
-    const query = new URLSearchParams({ fromBotId: context.botId, fromThreadId: context.threadId });
-    if (typeof args.app === "string" && args.app.trim()) query.set("app", args.app.trim().toLowerCase());
-    if (typeof args.search === "string" && args.search.trim()) query.set("search", args.search.trim().slice(0, 100));
-    const r = await context.client.api(`${EVENTS_ROUTE}?${query.toString()}`);
-    if (typeof r.error === "string") return { text: r.error, isError: true };
-    if (typeof r.unavailable === "string") return { text: r.unavailable };
-    const apps = Array.isArray(r.apps) ? r.apps : [];
-    const notConnected = Array.isArray(r.notConnected) ? r.notConnected : [];
-    const connect = notConnected.length
-      ? `\n\nNot connected yet: ${notConnected.map((app) => jsonRecord(app) ? String(app.name) : "").filter(Boolean).join(", ")}. If the person wants one of these, ask them to connect it (call COMPOSIO_MANAGE_CONNECTIONS for that app if you have it; otherwise they connect it under Connected apps), then call list_trigger_events again and create the trigger.`
-      : "";
-    if (!apps.length) return { text: `No connected app this bot may use offers events.${connect}` };
-    return {
-      text: `Events you can watch (delivery "poll" checks every 15 minutes; "instant" arrives at once). Filter at the source with filter for Gmail; put other required settings in event_config:\n${JSON.stringify(apps, null, 2)}${connect}`,
-    };
-  }
-  if (name === "create_trigger") {
-    const when = args.when;
-    if (when !== "schedule" && when !== "webhook" && when !== "app_event" && when !== "limit_reset") return { text: 'create_trigger needs when: "schedule", "app_event", "webhook" or "limit_reset".', isError: true };
-    if (when !== "limit_reset") {
-      const limitOnly = ["engine", "repeat"].find((key) => args[key] !== undefined && args[key] !== null);
-      if (limitOnly) return { text: `${limitOnly} applies only to when=limit_reset.`, isError: true };
-    }
-    const { fields, error } = triggerFields(args);
-    if (error) return { text: error, isError: true };
-    if (!fields.name || !fields.instructions) return { text: "create_trigger needs name and instructions.", isError: true };
-    if (when !== "app_event") {
-      const appOnly = [...APP_ONLY, "filter", "event_config"].find((key) => args[key] !== undefined && args[key] !== null);
-      if (appOnly) return { text: `${appOnly} applies only to when=app_event.`, isError: true };
-    }
-    if (when === "app_event") {
-      const misplaced = [...SCHEDULE_ONLY, "webhook_event_types"].find((key) => args[key] !== undefined && args[key] !== null);
-      if (misplaced) return { text: `An app-event trigger fires when the app's event happens, so it takes no ${misplaced}.`, isError: true };
-      const app = typeof args.app === "string" ? args.app.trim().toLowerCase() : "";
-      const event = typeof args.event === "string" ? args.event.trim() : "";
-      if (!app || !event) return { text: "An app_event trigger needs app and event from list_trigger_events. Call list_trigger_events first.", isError: true };
-      const trigger = {
-        name: fields.name, instructions: fields.instructions, app, event,
-        ...(typeof args.account === "string" && args.account.trim() ? { account: args.account.trim() } : {}),
-        ...(fields.filter ? { filter: fields.filter } : {}), ...(fields.config ? { config: fields.config } : {}), ...(fields.runOn ? { runOn: fields.runOn } : {}),
-      };
-      return request({ action: "create", kind: "app", trigger, ...(forBotId ? { forBotId } : {}) }, context, `Created the app-event trigger “${String(fields.name)}”`);
-    }
-    if (when === "limit_reset") {
-      const misplaced = ["schedule", "webhook_event_types", "run_on_startup", "runOnStartup"].find((key) => args[key] !== undefined && args[key] !== null);
-      if (misplaced) return { text: `A limit-reset trigger runs when the engine's limit resets, so it takes no ${misplaced}.`, isError: true };
-      const timing = limitResetSchedule(args.engine, args.repeat);
-      if (timing.error) return { text: timing.error, isError: true };
-      const { eventTypes: _unused, ...routine } = fields;
-      return request({ action: "create", kind: "schedule", routine: { ...routine, schedule: timing.schedule }, ...(forBotId ? { forBotId } : {}) }, context,
-        `Created the trigger “${String(fields.name)}” for when the limit resets`);
-    }
-    const label = `the ${when === "webhook" ? "webhook" : "schedule"} trigger “${String(fields.name)}”`;
-    if (when === "schedule") {
-      if (!fields.schedule) return { text: "A schedule trigger needs schedule.", isError: true };
-      if (fields.eventTypes) return { text: "webhook_event_types applies only to when=webhook.", isError: true };
-      const { eventTypes: _unused, ...routine } = fields;
-      return request({ action: "create", kind: "schedule", routine, ...(forBotId ? { forBotId } : {}) }, context, `Created ${label}`);
-    }
-    const misplaced = SCHEDULE_ONLY.find((key) => args[key] !== undefined && args[key] !== null);
-    if (misplaced) return { text: `A webhook trigger fires when its link is called, so it takes no ${misplaced}.`, isError: true };
-    const webhook = { name: fields.name, instructions: fields.instructions, ...(fields.runOn ? { runOn: fields.runOn } : {}), ...(fields.eventTypes ? { eventTypes: fields.eventTypes } : {}) };
-    return request({ action: "create", kind: "webhook", webhook, ...(forBotId ? { forBotId } : {}) }, context, `Created ${label}`);
+  if (name === "trigger" && args.action === "create") {
+    if (args.trigger_id !== undefined && args.trigger_id !== null) return { text: "trigger_id is for a trigger that exists; leave it out to create one.", isError: true };
+    return createTrigger(args, forBotId, context);
   }
   const triggerId = typeof args.trigger_id === "string" ? args.trigger_id.trim() : "";
-  const action = routineAction(args.action);
-  if (!triggerId || !action) return { text: "manage_trigger needs a trigger_id from list_triggers and an action.", isError: true };
+  // Deleting is its own tool, so an engine's remembered allow for trigger never covers it.
+  if (name === "trigger" && args.action === "delete") return { text: "trigger does not delete: call delete_trigger with the trigger_id.", isError: true };
+  const action = name === "delete_trigger" ? "delete" : routineAction(args.action);
+  if (!action) return { text: "trigger needs action: create, or update, pause, resume or run_now with a trigger_id from trigger_info.", isError: true };
+  if (!triggerId) return { text: `${name === "delete_trigger" ? "delete_trigger" : `trigger action=${action}`} needs the trigger_id from trigger_info.`, isError: true };
+  const createOnly = CREATE_ONLY.find((key) => args[key] !== undefined && args[key] !== null);
+  if (createOnly) return { text: `${createOnly} applies only to action=create.`, isError: true };
+  const { fields, error } = triggerFields(Object.fromEntries(Object.entries(args).filter(([key]) => !CALL_KEYS.has(key))));
+  if (error) return { text: error, isError: true };
   const body: Json = { action, triggerId, ...(forBotId ? { forBotId } : {}) };
   if (action === "update") {
-    if (!jsonRecord(args.changes)) return { text: "The update action needs at least one field in changes.", isError: true };
-    const { fields, error } = triggerFields(args.changes);
-    if (error) return { text: error, isError: true };
-    if (!Object.keys(fields).length) return { text: "The update action needs at least one supported field in changes.", isError: true };
+    if (!Object.keys(fields).length) return { text: "The update action needs at least one supported field to change.", isError: true };
     body.changes = fields;
-  } else if (args.changes !== undefined) {
-    return { text: `The ${action} action does not accept changes.`, isError: true };
+  } else if (Object.keys(fields).length) {
+    return { text: name === "delete_trigger" ? "delete_trigger takes only trigger_id and for_bot_id." : `The ${action} action changes no fields; send them with action=update.`, isError: true };
   }
   const done = action === "run_now" ? `Started trigger ${triggerId} once now` : `Applied ${action} to trigger ${triggerId}`;
   return request(body, context, done);
+}
+
+async function listTriggers(args: Json, forBotId: string | undefined, context: ToolCallContext): Promise<ToolCallResult> {
+  const query = new URLSearchParams({ fromBotId: context.botId, fromThreadId: context.threadId });
+  if (typeof args.trigger_id === "string" && args.trigger_id.trim()) query.set("triggerId", args.trigger_id.trim());
+  if (args.include_address === true) {
+    if (!query.has("triggerId")) return { text: "include_address needs trigger_id: the webhook automation whose address you want, from trigger_info.", isError: true };
+    query.set("includeAddress", "1");
+  }
+  if (forBotId) query.set("forBotId", forBotId);
+  const r = await context.client.api(`${LIST_ROUTE}?${query.toString()}`);
+  const now = typeof r.now === "string" ? r.now : new Date().toISOString();
+  const timeZone = typeof r.timeZone === "string" && r.timeZone ? r.timeZone : "local computer timezone";
+  const clock = `current time: ${now}; timezone: ${timeZone}`;
+  if (typeof r.error === "string") return { text: `${r.error} (${clock})`, isError: true };
+  if (r.trigger) return { text: `Trigger (${clock}):\n${JSON.stringify(r.trigger, null, 2)}` };
+  const triggers = Array.isArray(r.triggers) ? r.triggers : [];
+  if (!triggers.length) return { text: `This bot has no triggers. Current time: ${now}. Timezone: ${timeZone}.` };
+  return { text: `This bot's triggers (${clock}):\n${JSON.stringify(triggers, null, 2)}` };
+}
+
+async function listEvents(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const query = new URLSearchParams({ fromBotId: context.botId, fromThreadId: context.threadId });
+  if (typeof args.app === "string" && args.app.trim()) query.set("app", args.app.trim().toLowerCase());
+  if (typeof args.search === "string" && args.search.trim()) query.set("search", args.search.trim().slice(0, 100));
+  const r = await context.client.api(`${EVENTS_ROUTE}?${query.toString()}`);
+  if (typeof r.error === "string") return { text: r.error, isError: true };
+  if (typeof r.unavailable === "string") return { text: r.unavailable };
+  const apps = Array.isArray(r.apps) ? r.apps : [];
+  const notConnected = Array.isArray(r.notConnected) ? r.notConnected : [];
+  const connect = notConnected.length
+    ? `\n\nNot connected yet: ${notConnected.map((app) => jsonRecord(app) ? String(app.name) : "").filter(Boolean).join(", ")}. If the person wants one of these, ask them to connect it (call COMPOSIO_MANAGE_CONNECTIONS for that app if you have it; otherwise they connect it under Connected apps), then call trigger_info action=events again and create the trigger.`
+    : "";
+  if (!apps.length) return { text: `No connected app this bot may use offers events.${connect}` };
+  return {
+    text: `Events you can watch (delivery "poll" checks every 15 minutes; "instant" arrives at once). Filter at the source with filter for Gmail; put other required settings in event_config:\n${JSON.stringify(apps, null, 2)}${connect}`,
+  };
+}
+
+async function createTrigger(args: Json, forBotId: string | undefined, context: ToolCallContext): Promise<ToolCallResult> {
+  const when = args.when;
+  if (when !== "schedule" && when !== "webhook" && when !== "app_event" && when !== "limit_reset") return { text: 'trigger action=create needs when: "schedule", "app_event", "webhook" or "limit_reset".', isError: true };
+  if (when !== "limit_reset") {
+    const limitOnly = ["engine", "repeat"].find((key) => args[key] !== undefined && args[key] !== null);
+    if (limitOnly) return { text: `${limitOnly} applies only to when=limit_reset.`, isError: true };
+  }
+  const { fields, error } = triggerFields(args);
+  if (error) return { text: error, isError: true };
+  if (!fields.name || !fields.instructions) return { text: "trigger action=create needs name and instructions.", isError: true };
+  if (when !== "app_event") {
+    const appOnly = [...APP_ONLY, "filter", "event_config"].find((key) => args[key] !== undefined && args[key] !== null);
+    if (appOnly) return { text: `${appOnly} applies only to when=app_event.`, isError: true };
+  }
+  if (when === "app_event") {
+    const misplaced = [...SCHEDULE_ONLY, "webhook_event_types"].find((key) => args[key] !== undefined && args[key] !== null);
+    if (misplaced) return { text: `An app-event trigger fires when the app's event happens, so it takes no ${misplaced}.`, isError: true };
+    const app = typeof args.app === "string" ? args.app.trim().toLowerCase() : "";
+    const event = typeof args.event === "string" ? args.event.trim() : "";
+    if (!app || !event) return { text: "An app_event trigger needs app and event from trigger_info action=events. Call trigger_info action=events first.", isError: true };
+    const trigger = {
+      name: fields.name, instructions: fields.instructions, app, event,
+      ...(typeof args.account === "string" && args.account.trim() ? { account: args.account.trim() } : {}),
+      ...(fields.filter ? { filter: fields.filter } : {}), ...(fields.config ? { config: fields.config } : {}), ...(fields.runOn ? { runOn: fields.runOn } : {}),
+    };
+    return request({ action: "create", kind: "app", trigger, ...(forBotId ? { forBotId } : {}) }, context, `Created the app-event trigger “${String(fields.name)}”`);
+  }
+  if (when === "limit_reset") {
+    const misplaced = ["schedule", "webhook_event_types", "run_on_startup", "runOnStartup"].find((key) => args[key] !== undefined && args[key] !== null);
+    if (misplaced) return { text: `A limit-reset trigger runs when the engine's limit resets, so it takes no ${misplaced}.`, isError: true };
+    const timing = limitResetSchedule(args.engine, args.repeat);
+    if (timing.error) return { text: timing.error, isError: true };
+    const { eventTypes: _unused, ...routine } = fields;
+    return request({ action: "create", kind: "schedule", routine: { ...routine, schedule: timing.schedule }, ...(forBotId ? { forBotId } : {}) }, context,
+      `Created the trigger “${String(fields.name)}” for when the limit resets`);
+  }
+  const label = `the ${when === "webhook" ? "webhook" : "schedule"} trigger “${String(fields.name)}”`;
+  if (when === "schedule") {
+    if (!fields.schedule) return { text: "A schedule trigger needs schedule.", isError: true };
+    if (fields.eventTypes) return { text: "webhook_event_types applies only to when=webhook.", isError: true };
+    const { eventTypes: _unused, ...routine } = fields;
+    return request({ action: "create", kind: "schedule", routine, ...(forBotId ? { forBotId } : {}) }, context, `Created ${label}`);
+  }
+  const misplaced = SCHEDULE_ONLY.find((key) => args[key] !== undefined && args[key] !== null);
+  if (misplaced) return { text: `A webhook trigger fires when its link is called, so it takes no ${misplaced}.`, isError: true };
+  const webhook = { name: fields.name, instructions: fields.instructions, ...(fields.runOn ? { runOn: fields.runOn } : {}), ...(fields.eventTypes ? { eventTypes: fields.eventTypes } : {}) };
+  return request({ action: "create", kind: "webhook", webhook, ...(forBotId ? { forBotId } : {}) }, context, `Created ${label}`);
 }

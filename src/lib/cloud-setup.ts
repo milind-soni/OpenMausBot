@@ -1,10 +1,12 @@
 import { hintSeen, type OnboardingStatus, type WelcomeViewer } from "@/lib/onboarding";
+import { CLOUD_WELCOME_DONE } from "../../shared/cloud-hints";
+
+export { CLOUD_WELCOME_DONE };
 
 export const CLOUD_SETUP_HIDDEN = "cloud-setup-hidden";
 export const CLOUD_SETUP_MOVE_SKIPPED = "cloud-setup-move-skipped";
 export const CLOUD_INTENT_ASKED = "cloud-intent-asked";
 export const CLOUD_INTENT_GIVEN = "cloud-intent-given";
-export const CLOUD_WELCOME_DONE = "cloud-welcome-done";
 export const CLOUD_WELCOME_SHOWN = "cloud-welcome-shown";
 
 export const WELCOME_STEPS = ["bring", "engine", "files"] as const;

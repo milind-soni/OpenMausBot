@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, PackageOpen, RefreshCw, Sparkles, X } from "lucide-react";
 import { updaterMessage, useUpdaterState } from "@/lib/updater";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { t } from "@/lib/i18n";
 import { NoticeToast } from "./NoticeCard";
 
@@ -38,7 +38,7 @@ function UpdatedLine({ version, onSeen }: { version: string; onSeen: () => void 
       document.removeEventListener("visibilitychange", look);
     };
   }, [shown]);
-  return shown ? <NoticeToast text={t("update.updatedItself", { app: brand().name, version })} onDone={onSeen} /> : null;
+  return shown ? <NoticeToast text={t("update.updatedItself", { app: productName(), version })} onDone={onSeen} /> : null;
 }
 
 export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
@@ -63,7 +63,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
 
   const title =
     s.status === "downloaded"
-      ? t("update.banner.ready", { app: brand().name, version: s.version ?? "" })
+      ? t("update.banner.ready", { app: productName(), version: s.version ?? "" })
       : installing
         ? handoff
           ? t("settings.updates.openingTerminal")
@@ -76,16 +76,16 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
       ? handoff
         ? t("update.banner.copyCommand")
         : s.installsByItself
-          ? t("update.card.idleNote", { app: brand().name })
+          ? t("update.card.idleNote", { app: productName() })
           : t("update.banner.restartToFinish")
       : installing
         ? handoff
           ? t("update.banner.copying")
-          : updaterMessage(s) || t("update.banner.reopening", { app: brand().name })
+          : updaterMessage(s) || t("update.banner.reopening", { app: productName() })
         : s.status === "handed-off"
           ? `${updaterMessage(s) ? `${updaterMessage(s)} ` : ""}${s.terminalOpened ? t("update.banner.copiedOpened") : t("update.banner.copiedPaste")}`
           : s.retryable === false
-            ? t("update.banner.quitReopen", { error: friendlyError(updaterMessage(s, { restart: false })?.split(" Quit and reopen ")[0]), app: brand().name })
+            ? t("update.banner.quitReopen", { error: friendlyError(updaterMessage(s, { restart: false })?.split(" Quit and reopen ")[0]), app: productName() })
             : friendlyError(updaterMessage(s));
 
   return (

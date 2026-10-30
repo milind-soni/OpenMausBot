@@ -46,7 +46,7 @@ cloud VM, or external service.
 The launcher prepares these cases:
 
 - **Pepper** gets an **Agent-created inbox check** trigger, applied at once with
-  its live trigger card. The real `create_trigger` MCP handler creates it using
+  its live trigger card. The real `trigger` MCP handler (`action: "create"`) creates it using
   credentials captured from a running fixture turn. The fake model does not
   decide to call the tool.
 - **Manual inbox check** is created through the routine API and run twice for
@@ -191,7 +191,7 @@ accumulated. Manual runs and webhook deliveries remain independent. Pausing
 still cancels queued work. The cron renderer test changes this option, saves
 it, opens the editor again and switches it back.
 
-The List view and `list_triggers` expose saved skipped-occurrence counts and
+The List view and `trigger_info` expose saved skipped-occurrence counts and
 recent consecutive failures. Skips count occurrences observed by the scheduler
 while busy, not every interval elapsed while offline. Failure streaks are
 derived from retained terminal receipts (up to the existing history limit),

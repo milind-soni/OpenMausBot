@@ -4,7 +4,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { Message } from "@/state/store";
 
-type StepTool = Pick<NonNullable<Message["tool"]>, "name" | "summary" | "nameCode" | "nameParams">;
+type StepTool = Pick<NonNullable<Message["tool"]>, "name" | "summary" | "nameCode" | "nameParams" | "whose">;
 
 const STEP_KEYS: Record<string, LocaleKey> = {
   bash: "toolStep.runCommand",
@@ -48,6 +48,8 @@ const STEP_KEYS: Record<string, LocaleKey> = {
   agent: "toolStep.askHelper",
   think: "toolStep.think",
   list_bots: "toolStep.checkTeam",
+  trigger: "toolStep.manageAutomations",
+  trigger_info: "toolStep.checkAutomations",
   tool: "toolStep.useTool",
   other: "toolStep.useTool",
   mcp: "toolStep.useTool",
@@ -58,7 +60,16 @@ function sentence(words: string): string {
   return flat ? flat[0]!.toLocaleUpperCase() + flat.slice(1) : flat;
 }
 
+/** Whose own app or MCP server a step used, after its label: "Fetch emails · using Ada's Gmail". */
+export function withWhose(label: string, tool: Pick<StepTool, "whose">): string {
+  return tool.whose ? `${label} · ${t("toolStep.usingWhose", { person: tool.whose.person, app: tool.whose.app })}` : label;
+}
+
 export function toolStepLabel(tool: StepTool): string {
+  return withWhose(stepWords(tool), tool);
+}
+
+function stepWords(tool: StepTool): string {
   const { name } = tool;
   // Codex and ACP title a command's chip with the command line; only a command carries a summary.
   if (tool.summary) return t("toolStep.runCommand");

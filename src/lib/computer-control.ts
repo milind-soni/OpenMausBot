@@ -1,5 +1,6 @@
 import type { ComputerHelpRef } from "../../shared/wire";
 import { t } from "./i18n";
+import { productName } from "@/lib/brand";
 
 export type ComputerControlAction = "take" | "release";
 
@@ -68,11 +69,11 @@ export async function transitionComputerControlLease<
 }): Promise<Snapshot> {
   const { action, syncNativeBrowser, requestControl, setNativeBrowserControl } = input;
   if (action === "take" && syncNativeBrowser && !(await setNativeBrowserControl(true))) {
-    throw new Error(t("computer.err.pauseBrowser"));
+    throw new Error(t("computer.err.pauseBrowser", { app: productName() }));
   }
   const snap = await requestControl(action);
   if (snap.held !== (action === "take")) {
-    throw new Error(t(action === "take" ? "computer.err.confirmControl" : "computer.err.releaseControl"));
+    throw new Error(t(action === "take" ? "computer.err.confirmControl" : "computer.err.releaseControl", { app: productName() }));
   }
   if (action === "release" && syncNativeBrowser && !(await setNativeBrowserControl(false))) {
     throw new Error(t("computer.err.browserStillPaused"));

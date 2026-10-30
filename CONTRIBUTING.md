@@ -183,8 +183,9 @@ node scripts/generate-locale.mjs it "Italian"
 ```
 
 The helper runs the model without repository access, custom instructions, or
-write-capable tools. It accepts only one complete JSON object and tracks the
-English source hash for each reviewed translation. See
+write-capable tools. It accepts only one complete JSON object. Do not edit
+`src/locales/source-hashes.json` for new keys: the release records their
+English source hashes. See
 [`docs/localization.md`](docs/localization.md) for the workflow and safety rules.
 
 Only a slice of the UI is extracted so far. Move strings into the catalog

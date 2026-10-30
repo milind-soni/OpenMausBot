@@ -19,6 +19,19 @@ export interface ServerTextLine {
   textParams?: ServerTextParams;
 }
 
+/** The fixed name and summary of an activity chip, beside their English fallbacks. */
+export interface ServerToolText {
+  /** Catalog key (`chat.notice.*`) for the words of `name` after any
+   * `error:` marker, when they are one of the server's fixed notices.
+   * `name` keeps the English, which phones, exports and older clients show. */
+  nameCode?: string;
+  /** Values for the placeholders of `nameCode`. */
+  nameParams?: ServerTextParams;
+  /** Fixed summary words, only while they rebuild `summary`. */
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
+}
+
 /** The JSON body of a refused request. */
 export interface ServerErrorBody {
   /** English, always present: what a client that does not know `errorKey` shows. */

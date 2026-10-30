@@ -69,5 +69,5 @@ export function WidgetTable({ node, drawCell }: { node: WidgetNode; drawCell: (c
     }));
     return { columns, rows: cells, headless: !head };
   }, [node, drawCell]);
-  return <RichTable {...model} name={form.name || t("table.title")} />;
+  return <RichTable {...model} name={form.name || t("table.title")} card={false} />;
 }

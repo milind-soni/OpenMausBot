@@ -14,7 +14,7 @@ export const ROUTINE_LINE = {
   "routines.server.waitingToStart": "Waiting to start: {failure}",
   "routines.server.stillBusy": "Did not start: still busy after {minutes} minutes ({failure})",
   "routines.server.failedAfterRetry": "Failed after one automatic retry: {failure}",
-  "routines.server.signedOut": "This bot's AI is signed out. Sign in again in Settings → Model providers. The AI said: “{failure}”",
+  "routines.server.signedOut": "This bot's AI is signed out. Sign in again in Settings → AI. The AI said: “{failure}”",
   "routines.server.part.stalled": "the AI stalled",
   "routines.server.part.rateLimited": "a rate limit",
   "routines.server.part.provider": "a temporary error",

@@ -39,6 +39,17 @@ describe("computer control client", () => {
     } finally { await control.close(); }
   }, 10_000);
 
+  it("carries what a call would open to the gate, and never answers such a call from the cache", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ held: false, helpOpen: false }));
+    const client = createControlClient({ url: "http://control.test/api/internal/computer-control?botId=b", token: "t", fetchImpl });
+    await client.state(false);
+    await client.state(false, { app: "Chrome", site: "calendar.google.com" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const sent = new URL(String(fetchImpl.mock.calls[1]![0]));
+    expect(Object.fromEntries(sent.searchParams)).toEqual({ botId: "b", app: "Chrome", site: "calendar.google.com" });
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe("http://control.test/api/internal/computer-control?botId=b");
+  });
+
   it("outlasts the harness's longest hold", async () => {
     const timeout = vi.spyOn(AbortSignal, "timeout");
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ held: false, helpOpen: false }));

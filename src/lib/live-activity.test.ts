@@ -150,6 +150,20 @@ describe("turnNowPhrases: what the status line says is happening now", () => {
     expect(turnNowPhrases(null)).toBeNull();
   });
 
+  it("names the command, the search and the page the server read from the call, with the whole command for the hover", () => {
+    const command = turnNowPhrases({ activity: "command", itemId: "c", target: "scrape.py", detail: "cd ~/biber && python3 scrape.py --pages 40" });
+    expect(command).toEqual({ phase: "step:command:scrape.py", phrases: ["Running scrape.py"], hover: "cd ~/biber && python3 scrape.py --pages 40" });
+    expect(turnNowPhrases({ activity: "web", target: "Biber Dammbau" })?.phrases).toEqual(["Searching the web for “Biber Dammbau”"]);
+    expect(turnNowPhrases({ activity: "fetch", target: "linkedin.com" })?.phrases).toEqual(["Reading linkedin.com"]);
+  });
+
+  it("names a running chip by the step stored with it, before the server's English narration", () => {
+    const chip = activity("Bash", { spoken: "running a command", step: { activity: "command", target: "pnpm test", detail: "cd web && pnpm test" } });
+    expect(turnNowPhrases(null, chip)).toMatchObject({ phrases: ["Running pnpm test"], hover: "cd web && pnpm test" });
+    expect(activityStepLabel({ name: "Write", step: { activity: "write", target: "report.md" } })).toBe("Writing report.md");
+    expect(turnNowPhrases(null, activity("Bash", { ok: true, step: { activity: "command", target: "pnpm test" } }))).toBeNull();
+  });
+
   it("shows no size under a kilobyte", () => {
     expect(formatProgressSize(1023)).toBeUndefined();
     expect(formatProgressSize(1024)).toBe("1 KB");

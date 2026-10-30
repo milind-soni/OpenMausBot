@@ -45,7 +45,7 @@ const busyBot = {
 let host: HTMLDivElement;
 let root: Root;
 const trigger = () => host.querySelector<HTMLButtonElement>('[data-tour="model"]')!;
-const buttonNamed = (name: string) => Array.from(host.querySelectorAll<HTMLButtonElement>("button"))
+const buttonNamed = (name: string) => Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
   .find((button) => button.getAttribute("aria-label") === name || button.textContent?.includes(name));
 
 beforeEach(() => {
@@ -73,7 +73,7 @@ describe("the header model chip and Switch AI", () => {
     expect(trigger().disabled).toBe(true);
     act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
     expect(trigger().disabled).toBe(false);
-    expect(host.querySelector("[data-model-picker-content]")).not.toBeNull();
+    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
   });
 
   it("stops that turn, not the store's model, when another AI is picked", () => {
@@ -85,16 +85,25 @@ describe("the header model chip and Switch AI", () => {
     expect(vi.mocked(fixture.dispatch).mock.calls.filter(([action]) => (action as { type: string }).type === "setModel")).toEqual([]);
   });
 
-  it("shows no thinking-level buttons in the panel while the turn runs: the server refuses them until it ends", () => {
+  it("opens the bot panel's picker for Switch AI in Simple mode, where the panel's own Thinking row is the only effort control", () => {
     fixture.advanced = false;
     fixture.instances = [{ ...opencode, capabilities: { effortLevels: ["low", "high"] } }, codex];
-    const show = (bot: Bot) => act(() => root.render(createElement(ModelPicker, { bot, threadId: "thread-1", contained: true })));
-    show(busyBot);
+    act(() => root.render(createElement(ModelPicker, { bot: busyBot, threadId: "thread-1", contained: true })));
     act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "panel" }));
-    expect(host.querySelector("[data-model-picker-content]")).not.toBeNull();
-    expect(host.querySelector("[data-simple-effort]")).toBeNull();
+    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
+    expect(document.querySelector("[data-simple-effort]")).toBeNull();
+  });
+
+  it("shows no thinking-level buttons in the chat's menu while the turn runs: the server refuses them until it ends", () => {
+    fixture.advanced = false;
+    fixture.instances = [{ ...opencode, capabilities: { effortLevels: ["low", "high"] } }, codex];
+    const show = (bot: Bot) => act(() => root.render(createElement(ModelPicker, { bot, threadId: "thread-1" })));
+    show(busyBot);
+    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
+    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
+    expect(document.querySelector("[data-simple-effort]")).toBeNull();
     show({ ...busyBot, busy: false });
-    expect(host.querySelector("[data-simple-effort]")).not.toBeNull();
+    expect(document.querySelector("[data-simple-effort]")).not.toBeNull();
   });
 
   it("ignores an intent for another place", () => {
@@ -111,7 +120,7 @@ describe("a picker that opens before its engine has listed its models", () => {
     snapshot: { state: "available", version: "2.1.300", authenticated: true }, models: { default: "claude-sonnet-5", options },
   }) as unknown as InstanceInfo;
   const onClaude = { ...busyBot, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } as Bot;
-  const text = () => host.querySelector("[data-model-picker-content]")?.textContent ?? "";
+  const text = () => document.querySelector("[data-model-picker-content]")?.textContent ?? "";
   let arrive: () => void;
   const readList = (listed: Array<{ id: string; label: string; custom?: boolean }>) => {
     const read = new Promise<void>((resolve) => { arrive = () => { fixture.instances = [claude(listed), codex]; resolve(); }; });

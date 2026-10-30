@@ -25,7 +25,12 @@ export type NotifyKind =
   | "spend"
   /** The main agent's brief has something new that needs the person, or a
    * meeting prep or reminder it posted with no AI turn. Personal installs only. */
-  | "brief";
+  | "brief"
+  /** A wait a bot set up (wait_until) fired: what it was waiting for happened. */
+  | "wait"
+  /** Something OpenMausBot changed on its own that the person hears about
+   * once: a tool turned off for the bots it doesn't start for. */
+  | "notice";
 
 /** The catalog key of each kind's title, `{who}` standing for the bot's name
  * or, in a room, for `notifications.banner.inRoom`. Clients word the title
@@ -34,6 +39,7 @@ export const NOTIFY_TITLE_KEY = {
   approval: "notifications.banner.approval",
   question: "notifications.banner.question",
   done: "notifications.banner.done",
+  wait: "notifications.banner.wait",
   mention: "notifications.banner.mention",
   "turn-failed": "notifications.banner.turnFailed",
   "routine-failed": "notifications.banner.routineFailed",

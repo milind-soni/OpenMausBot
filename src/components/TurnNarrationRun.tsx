@@ -5,10 +5,12 @@ import { t } from "@/lib/i18n";
 
 export function TurnNarrationRun({
   label,
+  title,
   forceOpen = false,
   children,
 }: {
   label: string;
+  title?: string;
   forceOpen?: boolean;
   children: React.ReactNode;
 }) {
@@ -24,7 +26,7 @@ export function TurnNarrationRun({
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          title={t(open ? "chat.narration.hide" : "chat.narration.show")}
+          title={title ?? t(open ? "chat.narration.hide" : "chat.narration.show")}
           className="ui-pill"
         >
           <Check size={13} className="text-success" />

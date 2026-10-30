@@ -39,7 +39,10 @@ export interface BrokerFake {
   /** The Composio user of each tool router Session the broker made, in order. */
   sessionUsers: string[];
   /** Each tool router MCP request the broker relayed: the Session's Composio user and the JSON-RPC method and tool. */
-  mcpCalls: Array<{ user: string; method: string; tool?: string }>;
+  /** `slugs`: the app tools a multi-execute call ran, in order. */
+  mcpCalls: Array<{ user: string; method: string; tool?: string; slugs?: string[] }>;
+  /** Google Calendar event resources of a Composio user's primary calendar, as its multi-execute tool answers them. */
+  calendarEvents: Record<string, unknown[]>;
   /** Today's queued count for an installation, set directly, to reach the daily limit without 500 deliveries. */
   setQueuedToday(installationId: string, queued: number): void;
   cloudMachine(installationId: string): string | null;
@@ -68,6 +71,14 @@ export async function startBrokerFake(): Promise<BrokerFake> {
   let sessions = 0;
   const sessionUsers: string[] = [];
   const mcpCalls: BrokerFake["mcpCalls"] = [];
+  const calendarEvents: BrokerFake["calendarEvents"] = {};
+  /** A Google Calendar read for a user with events set, in Composio's multi-execute answer; undefined for anything else. */
+  const calendarAnswer = (user: string, params: { name?: string; arguments?: { tools?: Array<{ tool_slug?: unknown }> } } | undefined) => {
+    const slug = params?.name === "COMPOSIO_MULTI_EXECUTE_TOOL" ? params.arguments?.tools?.[0]?.tool_slug : undefined;
+    if (!calendarEvents[user] || (slug !== "GOOGLECALENDAR_EVENTS_LIST" && slug !== "GOOGLECALENDAR_LIST_CALENDARS")) return undefined;
+    const data = slug === "GOOGLECALENDAR_EVENTS_LIST" ? { items: calendarEvents[user] } : { items: [{ id: "primary", primary: true, accessRole: "owner", selected: true }] };
+    return { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results: [{ tool_slug: slug, response: { successful: true, data, error: null } }] }, error: null }) }] };
+  };
   const sessionUser = (id: string) => sessionUsers[Number(id.replace(/^trs_/, "")) - 1] ?? "";
   const activeAccounts = (user: string) => harness.composio.accounts.filter((account) => account.user_id === user && /^active$/i.test(account.status));
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -76,9 +87,12 @@ export async function startBrokerFake(): Promise<BrokerFake> {
     if (url.hostname === "mcp.composio.dev") {
       const user = sessionUser(url.pathname.slice(1));
       const raw = init?.body instanceof ArrayBuffer || ArrayBuffer.isView(init?.body) ? new TextDecoder().decode(init.body as ArrayBuffer) : String(init?.body ?? "{}");
-      const rpc = JSON.parse(raw) as { id?: unknown; method?: string; params?: { name?: string } };
-      mcpCalls.push({ user, method: rpc.method ?? "", ...(rpc.params?.name ? { tool: rpc.params.name } : {}) });
+      const rpc = JSON.parse(raw) as { id?: unknown; method?: string; params?: { name?: string; arguments?: { tools?: Array<{ tool_slug?: unknown }> } } };
+      const slugs = Array.isArray(rpc.params?.arguments?.tools) ? rpc.params.arguments.tools.map((item) => String(item?.tool_slug ?? "")) : [];
+      mcpCalls.push({ user, method: rpc.method ?? "", ...(rpc.params?.name ? { tool: rpc.params.name } : {}), ...(slugs.length ? { slugs } : {}) });
       const reply = (result: unknown) => Response.json({ jsonrpc: "2.0", id: rpc.id ?? null, result }, { headers: { "mcp-session-id": `mcp-${user}` } });
+      const calendar = rpc.method === "tools/call" ? calendarAnswer(user, rpc.params) : undefined;
+      if (calendar) return reply(calendar);
       if (rpc.method === "tools/call") return reply({ content: [{ type: "text", text: JSON.stringify({ tool: rpc.params?.name, user, accounts: activeAccounts(user).map((account) => account.id) }) }] });
       if (rpc.method === "tools/list") return reply({ tools: [{ name: "COMPOSIO_MULTI_EXECUTE_TOOL", inputSchema: { type: "object" } }, { name: "COMPOSIO_MANAGE_CONNECTIONS", inputSchema: { type: "object" } }] });
       if (!rpc.method?.startsWith("notifications/")) return reply({ protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fake-composio", version: "1" } });
@@ -151,6 +165,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
       "SELECT composio_user_id, shared_user_id FROM installations WHERE id = ?", installationId).map((row) => row.shared_user_id ?? row.composio_user_id)[0] ?? "",
     sessionUsers,
     mcpCalls,
+    calendarEvents,
     setQueuedToday(installationId, queued) {
       harness.d1.db.prepare(
         "INSERT INTO app_event_days (day, installation_id, queued) VALUES (?, ?, ?) ON CONFLICT (day, installation_id) DO UPDATE SET queued = excluded.queued",

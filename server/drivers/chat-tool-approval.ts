@@ -3,6 +3,7 @@ import { newId, type RequestOutcome } from "../contracts.ts";
 import { floorBlockForToolCall, type FloorBlock } from "../safety-floor-gate.ts";
 import type { AskQuestion } from "../../shared/ask-question.ts";
 import type { ChatToolCallView } from "./chat-mcp-tools.ts";
+import { REFUSED_NEXT_STEP } from "../reply-habits.ts";
 
 /** `grant`: what "Always allow this session" would keep allowed; absent when the card can only allow once. */
 interface Ask { id: string; tool: string; summary: string; grant?: string }
@@ -17,7 +18,7 @@ interface Card {
 
 /** The text a refused call hands the model; a floor block also raises its line through `notice`. */
 export function refusal(block: FloorBlock | null, notice: (line: string) => void): string {
-  if (!block) return "Permission denied or expired; the tool was not executed.";
+  if (!block) return `Permission denied or expired; the tool was not executed.${REFUSED_NEXT_STEP}`;
   notice(block.line);
   return block.reason;
 }

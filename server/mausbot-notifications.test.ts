@@ -10,7 +10,7 @@ import type { BotRecord } from "./store.ts";
 
 const NOW = 1_000_000_000;
 const MAUS = { id: "maus", name: "MausBot", defaultBot: {} } as BotRecord;
-const ALL_KINDS = ["approval", "question", "done", "routine-failed", "routine-deferred", "turn-failed", "incident", "sign-in", "delegation-settled", "mention", "spend", "brief"] satisfies NotifyKind[];
+const ALL_KINDS = ["approval", "question", "done", "routine-failed", "routine-deferred", "turn-failed", "incident", "sign-in", "delegation-settled", "mention", "spend", "brief", "wait"] satisfies NotifyKind[];
 const entry = (id: string, kind: string, extra: Partial<NotificationLogEntry> = {}): NotificationLogEntry =>
   ({ id, kind, botId: "pip", botName: "Pip", threadId: `t-${id}`, title: `Title ${id}`, body: `Body ${id}`, at: NOW - 5 * 60_000, read: false, ...extra }) as NotificationLogEntry;
 

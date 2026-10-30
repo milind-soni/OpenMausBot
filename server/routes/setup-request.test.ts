@@ -1,10 +1,11 @@
-// POST and DELETE /api/bots/:id/setup-request: the Set me up press and the chip's x.
+// POST and DELETE /api/bots/:id/setup-request: a pick or Something else on the setup card, and the x on the card or chip.
 import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "../config.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { requiredScope } from "../request-auth.ts";
+import { openSetupOffer, setupTurnText, takeSetupRequest } from "../setup-request.ts";
 import { Store } from "../store.ts";
 import { createSetupRequestRoutes } from "./setup-request.ts";
 import { PASS } from "./table.ts";
@@ -13,13 +14,22 @@ const person: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
 const member = { kind: "session", scopes: ["client"], via: "bearer", session: { id: "s1" } } as unknown as RequestAuth;
 const admin = { kind: "session", scopes: ["admin", "client"], via: "bearer", session: { id: "s2" } } as unknown as RequestAuth;
 
-function setup(refusal: string | null = null, options: { canSetUp?: boolean } = {}) {
+function setup(refusal: string | null = null, options: { canSetUp?: boolean; sendFails?: boolean; hold?: Promise<void> } = {}) {
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }), undefined, undefined, "en");
   const bot = store.createBot({ name: "Ava" });
   let presser: string | undefined;
   let auth = person;
+  const sent: string[] = [];
+  // As the messages route does: the person's line is stored, then its turn reads it as setup or as typed.
+  const send = async (_auth: RequestAuth, botId: string, threadId: string, text: string) => {
+    if (options.sendFails) throw Object.assign(new Error("Ava is busy."), { status: 409 });
+    sent.push(text);
+    await options.hold;
+    const line = store.appendMessage(threadId, { role: "user", kind: "text", text });
+    return { ok: true as const, message: takeSetupRequest(store, { botId, threadId, line, person: true, mounted: true }) ?? line };
+  };
   const route = createSetupRequestRoutes({ store, language: () => "es", sendRefusal: () => refusal, presser: () => presser,
-    canSetUp: () => options.canSetUp ?? true });
+    canSetUp: () => options.canSetUp ?? true, send });
   const as = (who: string | undefined, caller: RequestAuth = member) => { presser = who; auth = caller; };
   const call = async (method: string, body: unknown, botId = bot.id, path = `/api/bots/${botId}/setup-request`) => {
     let answer: { status: number; body: any } | undefined;
@@ -27,7 +37,7 @@ function setup(refusal: string | null = null, options: { canSetUp?: boolean } = 
       json: (_res: unknown, status: number, value: unknown) => { answer = { status, body: value }; }, readBody: async () => body } as never);
     return handled === PASS ? "pass" : answer!;
   };
-  return { store, bot, call, as, waiting: () => store.taskByThread(bot.id, bot.threadId)?.setupRequest };
+  return { store, bot, call, as, sent, waiting: () => store.taskByThread(bot.id, bot.threadId)?.setupRequest };
 }
 
 beforeEach(() => {
@@ -44,11 +54,49 @@ describe("the Set me up route", () => {
     expect(s.store.messagesFor(s.bot.threadId)).toHaveLength(2);
   });
 
-  it("clears the mark on DELETE", async () => {
+  it("clears the mark on DELETE, and closes the card", async () => {
     const s = setup();
     await s.call("POST", { threadId: s.bot.threadId });
     expect(await s.call("DELETE", { threadId: s.bot.threadId })).toEqual({ status: 200, body: { ok: true } });
     expect(s.waiting()).toBeUndefined();
+    expect(s.store.messagesFor(s.bot.threadId)[0]?.setupOffer).toBeUndefined();
+    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toMatchObject({ status: 409 });
+  });
+
+  it("runs a pick at once: its words are sent as the person's line and read as setup, with no line from the bot", async () => {
+    const s = setup();
+    const picked = await s.call("POST", { threadId: s.bot.threadId, text: "  Research and digging into topics " });
+    expect(picked).toMatchObject({ status: 200, body: { ok: true, message: { role: "user", text: "Research and digging into topics", setupRequest: true } } });
+    expect(s.sent).toEqual(["Research and digging into topics"]);
+    expect(setupTurnText(picked === "pass" ? ({} as never) : picked.body.message, false)).toBe("/setup Research and digging into topics");
+    expect(s.store.messagesFor(s.bot.threadId).map((message) => message.role)).toEqual(["bot", "user"]);
+    expect(s.waiting()).toBeUndefined();
+    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Data, spreadsheets and reports" })).toMatchObject({ status: 409 });
+    expect(s.sent).toHaveLength(1);
+  });
+
+  it("sends one message for a double pick, a letter key during sending, or a second tab", async () => {
+    let release!: () => void;
+    const s = setup(null, { hold: new Promise<void>((resolve) => { release = resolve; }) });
+    const first = s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" });
+    await Promise.resolve();
+    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toEqual({ status: 409, body: { error: "That answer is already on its way." } });
+    expect(await s.call("POST", { threadId: s.bot.threadId })).toMatchObject({ status: 409 });
+    release();
+    expect(await first).toMatchObject({ status: 200 });
+    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toMatchObject({ status: 409 });
+    expect(s.sent).toEqual(["Research and digging into topics"]);
+    expect(s.store.messagesFor(s.bot.threadId).filter((message) => message.role === "user")).toHaveLength(1);
+  });
+
+  it("refuses a pick without words or with too many, and stops waiting, card still open, when the words cannot be sent", async () => {
+    const s = setup();
+    for (const text of ["", "   ", 7, "x".repeat(501)]) expect(await s.call("POST", { threadId: s.bot.threadId, text })).toMatchObject({ status: 400 });
+    expect(s.waiting()).toBeUndefined();
+    const busy = setup(null, { sendFails: true });
+    expect(await busy.call("POST", { threadId: busy.bot.threadId, text: "Research and digging into topics" })).toEqual({ status: 409, body: { error: "Ava is busy." } });
+    expect(busy.waiting()).toBeUndefined();
+    expect(openSetupOffer(busy.store, busy.bot.id, busy.bot.threadId)).not.toBeNull();
   });
 
   it("refuses a bad body, an unknown bot or conversation, a set-up bot, and a caller who may not write there", async () => {

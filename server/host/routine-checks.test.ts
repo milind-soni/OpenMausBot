@@ -36,9 +36,11 @@ function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = 
       async thread() { return []; },
     }),
   };
+  const sorted: Array<[string, number]> = [];
   const checks = createRoutineChecks({
     dataDir: dir, reads, now: () => now, mayRead: (_bot, app) => options.may?.(app) ?? true, fenced: () => options.fenced ?? true,
     timeZone: () => "UTC", runs: () => runs, dismissedFrom: () => [], report: (report) => { reports.push(report); },
+    sorted: (routineId, count) => sorted.push([routineId, count]),
   });
   const routine = (extra: Partial<Routine> = {}): Routine => ({
     id: "watch", name: "Keep an eye on my day", prompt: "Check my day.", target: "bot", botId: "chief", runOn: "maus", enabled: true,
@@ -56,7 +58,7 @@ function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = 
     events.push(event);
     return event;
   };
-  return { checks, routine, mail, meeting, failing, calls, runs, reports, inbox, advance: (ms: number) => { now += ms; }, now: () => now, file: join(dir, CHECKS_FILE) };
+  return { checks, routine, mail, meeting, failing, calls, runs, reports, inbox, sorted, advance: (ms: number) => { now += ms; }, now: () => now, file: join(dir, CHECKS_FILE) };
 }
 
 const run = (key: string, status: RoutineRun["status"], deliver?: "brief"): RoutineRun => ({
@@ -166,6 +168,20 @@ describe("a routine's checks", () => {
     s.advance(MINUTE);
     await s.checks.check(s.routine({ checks: ["runs"] }), { manual: false });
     expect(s.reports[1]!.runs).toEqual([]);
+  });
+
+  it("counts the emails a run sorted only once its answer is kept, and never a run that failed", async () => {
+    const s = setup();
+    s.mail("a", 5);
+    s.mail("b", 6);
+    const { run: first } = await s.checks.check(s.routine({ checks: ["mail"] }), { manual: false });
+    expect(s.sorted).toEqual([]);
+    s.checks.release(first!.key);
+    expect(s.sorted).toEqual([]);
+    s.advance(MINUTE);
+    const { run: second } = await s.checks.check(s.routine({ checks: ["mail"] }), { manual: false });
+    s.checks.commit(second!.key);
+    expect(s.sorted).toEqual([["watch", 2]]);
   });
 
   it("a draft may answer only one of its run's threads, to that thread's sender, once", async () => {

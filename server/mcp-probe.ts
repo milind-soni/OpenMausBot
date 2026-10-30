@@ -31,6 +31,8 @@ const UNAUTHORIZED = /unauthori[sz]ed|forbidden|not authenticated|authentication
 export interface McpProbeOptions {
   extension?: boolean;
   observe?(info: { tools: unknown[]; uiExtension: "ok" | "refused" | "unknown" }): void;
+  /** Start a command server as this bot's AI would: in its box where turns are boxed, from its own folder. */
+  asBot?: { id: string; cwd: string };
 }
 
 const MAX_STDOUT_BYTES = MAX_REMOTE_MCP_BYTES;
@@ -157,9 +159,10 @@ function probeStdioMcpServer(
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(server.command, server.args, {
-        cwd: process.cwd(),
+        cwd: options.asBot?.cwd ?? process.cwd(),
         env: probeEnvironment(server),
         stdio: ["pipe", "pipe", "pipe"],
+        ...(options.asBot ? { box: { botId: options.asBot.id, allowEnv: Object.keys(server.env) } } : {}),
       });
     } catch {
       resolve({ ok: false, error: publicProbeError("spawn") });

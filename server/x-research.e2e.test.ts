@@ -11,7 +11,7 @@ import { request } from "../scripts/mcp-server.ts";
 
 interface Seen { method: string; path: string; authorization: string | undefined; tregToken: string | undefined; idempotencyKey: string | undefined; body: unknown }
 const RELAY_PATH = "/api/cloud/services/x", PLAN_TOKEN = "omb_x_e2e_fixture", OWN_KEY = "treg_e2e_own_key";
-const RESEARCH_TOOLS = ["x_search", "x_user_posts", "x_post", "x_profile", "research_search", "research_endpoint", "research_call"];
+const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "research_call"];
 const POSTS = { output: { data: { items: [
   { id: "2107987482155561188", authorUsername: "maus", authorName: "Maus", createdUtc: 1791418354, text: "MausBot searched X", likeCount: 4, viewCount: 120 },
 ], nextCursor: "" } } };
@@ -113,7 +113,7 @@ it("shows no research tools without a treg key or a Cloud plan, even to a bot sw
 }, { plan: false, ownKey: false }), 90_000);
 
 it("with the person's own treg key, every bot has the tools by default and calls go straight to treg, never the relay", async () => withFixture(async (f) => {
-  expect((await f.api("/api/config", undefined, "GET")).treg).toEqual({ configured: true });
+  expect((await f.api("/api/config", undefined, "GET")).treg).toEqual({ configured: true, last4: OWN_KEY.slice(-4) });
   expect(await f.status()).toEqual({ using: "own", ownKey: true, included: false });
   expect(await f.api("/api/keys/test", { provider: "treg" })).toEqual({ ok: true, check: "treg", balanceUsd: 4.25 });
   const bot = await f.newBot("Own key");

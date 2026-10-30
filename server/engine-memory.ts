@@ -22,7 +22,7 @@ const RESERVE_MS = 90_000, SETTLED_MS = 30_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
-  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "customAcp", "piAgent", "antigravityAgent"]);
+  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "customAcp", "piAgent", "antigravityAgent"]);
 
 export interface HostMemory { totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null }
 
@@ -40,8 +40,20 @@ export function readHostMemory(read: (path: string) => string = procText): HostM
     oomKills: number("/proc/vmstat", /^oom_kill (\d+)$/m), fullStall10: number("/proc/pressure/memory", /^full avg10=([\d.]+)/m) };
 }
 
-/** Resident bytes per process group (an engine and the MCP servers it started). Shared pages count once per process, so it
- * errs high. */
+/** A process's proportional set size: each page it shares counts as its share among the processes sharing it. Null where
+ * /proc/<pid>/smaps_rollup can't be read (a kernel before 4.14, another user's process). */
+function pssBytes(pid: string, read: (path: string) => string): number | null {
+  try {
+    const found = /^Pss:\s+(\d+) kB$/m.exec(read(`/proc/${pid}/smaps_rollup`));
+    return found ? Number(found[1]) * 1024 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What each process group takes (an engine and the MCP servers it started): the sum of its processes' proportional set
+ * sizes, so engines of one kind, or MCP servers on one runtime, count the code they share once between them rather than
+ * once each, as resident pages would. A process whose share can't be read counts its resident pages, which err high. */
 export function processGroupBytes(list: () => string[] = () => readdirSync("/proc"), read: (path: string) => string = procText): Map<number, number> {
   const groups = new Map<number, number>();
   let pids: string[];
@@ -53,7 +65,7 @@ export function processGroupBytes(list: () => string[] = () => readdirSync("/pro
     // pid (comm) state ppid pgrp …, rss the 24th: comm may hold spaces and parentheses.
     const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
     const group = Number(fields[2]);
-    groups.set(group, (groups.get(group) ?? 0) + (Number(fields[21]) * PAGE_BYTES || 0));
+    groups.set(group, (groups.get(group) ?? 0) + (pssBytes(pid, read) ?? (Number(fields[21]) * PAGE_BYTES || 0)));
   }
   return groups;
 }

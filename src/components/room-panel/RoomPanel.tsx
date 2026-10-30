@@ -178,7 +178,7 @@ export function RoomPanel({ group, overlay = false }: { group: Group; overlay?: 
         tabIndex={-1}
         data-room-panel
         onKeyDown={onKeyDown}
-        className={sidePanelCls(overlay)}
+        className={sidePanelCls(overlay, true)}
       >
         <div {...dragProps} className={cn("flex h-[52px] shrink-0 items-center justify-end gap-2 px-3.5", padClass)}>
           <RoomMoreMenu group={group} />

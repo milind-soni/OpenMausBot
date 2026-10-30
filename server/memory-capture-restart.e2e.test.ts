@@ -16,7 +16,7 @@ it.skipIf(process.platform === "win32")("captures a turn that was still waiting 
   const scratch = mkdtempSync(join(tmpdir(), "omb-capture-restart-"));
   const routes = join(scratch, "routes.json");
   writeFileSync(routes, JSON.stringify({
-    [CAPTURE_MARKER]: JSON.stringify([{ text: "The person plays the cello on Sundays", kind: "fact", confidence: 0.9 }]),
+    [CAPTURE_MARKER]: JSON.stringify([{ text: "The person plays the cello on Sundays", kind: "fact", evidence: "I play the cello every Sunday morning", confidence: 0.9 }]),
   }));
   const parentEnv = { ...process.env, FAKE_CLAUDE_TEXT_ROUTES: routes };
   const fixture = await launchVerificationServer(parentEnv);

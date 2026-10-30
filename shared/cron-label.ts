@@ -1,3 +1,4 @@
+import { plainTimeZone } from "./plain-time-zone.ts";
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -34,14 +35,15 @@ export function cronPreset(expression: string): CronPreset | null {
 }
 
 function englishPreset(preset: CronPreset): string {
+  const time = preset.time.replace(/^0(?=\d:)/, "");
   switch (preset.kind) {
-    case "everyDay": return `Every day at ${preset.time}`;
-    case "monthlyLastDay": return `Monthly on the last day at ${preset.time}`;
-    case "monthlyDay": return `Monthly on day ${preset.day} at ${preset.time}`;
-    case "yearly": return `Yearly on ${MONTHS[preset.month]} ${preset.day} at ${preset.time}`;
-    case "weekdays": return `Every weekday at ${preset.time}`;
-    case "weekly": return `Weekly on ${WEEKDAYS[preset.weekday]} at ${preset.time}`;
-    case "monthlyNth": return `Monthly on the ${ORDERS[preset.nth]} ${WEEKDAYS[preset.weekday]} at ${preset.time}`;
+    case "everyDay": return `Every day at ${time}`;
+    case "monthlyLastDay": return `Monthly on the last day at ${time}`;
+    case "monthlyDay": return `Monthly on day ${preset.day} at ${time}`;
+    case "yearly": return `Yearly on ${MONTHS[preset.month]} ${preset.day} at ${time}`;
+    case "weekdays": return `Every weekday at ${time}`;
+    case "weekly": return `Weekly on ${WEEKDAYS[preset.weekday]} at ${time}`;
+    case "monthlyNth": return `Monthly on the ${ORDERS[preset.nth]} ${WEEKDAYS[preset.weekday]} at ${time}`;
   }
 }
 
@@ -49,5 +51,5 @@ function englishPreset(preset: CronPreset): string {
  * This is presentation only, never a second parser or source of scheduling truth. */
 export function cronScheduleLabel(schedule: RoutineCronSchedule): string {
   const preset = cronPreset(schedule.expression);
-  return `${preset ? englishPreset(preset) : `Cron ${schedule.expression}`} · ${schedule.timeZone}`;
+  return `${preset ? englishPreset(preset) : `Cron ${schedule.expression}`} ${plainTimeZone(schedule.timeZone)}`;
 }

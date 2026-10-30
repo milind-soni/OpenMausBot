@@ -49,6 +49,21 @@ describe("a thread's live turn", () => {
     expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
   });
 
+  it("carries what a call works on, how it is doing and its last output, and changes only when one of them does", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Bash" } as Partial<RuntimeEvent>);
+    note({ type: "turn.progress", activity: "command", itemId: "c", target: "scrape.py", detail: "python3 scrape.py" } as Partial<RuntimeEvent>);
+    const named = turnLive("t");
+    expect(named.status).toEqual({ activity: "command", itemId: "c", target: "scrape.py", detail: "python3 scrape.py" });
+    note({ type: "turn.progress", activity: "command", itemId: "c", target: "scrape.py", detail: "python3 scrape.py" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toBe(named);
+    note({ type: "turn.progress", activity: "command", itemId: "c", target: "scrape.py", detail: "python3 scrape.py", quiet: { kind: "busy" } } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status).toMatchObject({ quiet: { kind: "busy" } });
+    note({ type: "turn.progress", activity: "command", itemId: "c", target: "scrape.py", quiet: { kind: "output", at: 5 }, tail: ["page 12 of 40"] } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status).toMatchObject({ quiet: { kind: "output", at: 5 }, tail: ["page 12 of 40"] });
+    note({ type: "thread.token-usage.updated", input: 1, output: 1 } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status, "a token count says nothing about the call").toMatchObject({ target: "scrape.py" });
+  });
+
   it("keeps threads apart and returns the same snapshot until something shown changes", () => {
     note({ type: "content.delta", streamKind: "assistant_text", delta: "a" } as Partial<RuntimeEvent>, "x");
     const first = turnLive("x");

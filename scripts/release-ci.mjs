@@ -1,16 +1,19 @@
 // The release's CI gate: ship only a commit whose code passed CI with every
-// vitest job run, on the commit itself, on a commit with the same tree, or (for
-// a version-only bump) on its parent.
+// platform's vitest shards run, on the commit itself, on a commit with the same
+// tree, or (for a version-only bump) on its parent.
 //
-// Main's concurrency group keeps one run going and one waiting, so the release
-// commit's own push run can be skipped; CI then starts on a
-// `release-ci/v<version>` branch no merge on main can touch. A main run is never
-// re-run in place: the re-run would join main's group and cancel the newest
-// merge's waiting run.
+// A push to main or a merge group runs Linux's shards only, so the release
+// commit's own run proves nothing; CI then starts on a `release-ci/v<version>`
+// branch no merge on main can touch, as a manual run of every platform. A main
+// run is never re-run in place: the re-run would join main's group and cancel
+// the newest merge's waiting run.
 import { pathToFileURL } from "node:url";
-import { versionOnlyPackageJson } from "./ci-scope.mjs";
+import { FULL_LANE_EVENTS, VITEST_SHARDS, versionOnlyPackageJson } from "./ci-scope.mjs";
 
-const RELEASE_EVENTS = new Set(["push", "merge_group", "workflow_dispatch"]);
+const RELEASE_EVENTS = new Set(["push", "merge_group", ...FULL_LANE_EVENTS]);
+/** Every platform's every shard, by job name. */
+const FULL_MATRIX = Object.entries(VITEST_SHARDS)
+  .flatMap(([os, shards]) => Array.from({ length: shards }, (_, i) => `vitest (${os}, shard ${i + 1}/${shards})`));
 export const POLL_MS = 60_000;
 export const MAX_WAIT_MS = 170 * 60_000;
 
@@ -23,7 +26,9 @@ const neverStarted = (job) => !(job.steps ?? []).some((step) => step.conclusion 
 
 /**
  * What one finished CI run proves.
- * - "green": the gate passed and every vitest job ran and passed.
+ * - "green": the gate passed and every platform's every vitest shard ran and passed.
+ * - "partial": the gate passed and every vitest job that ran passed, but not every platform's shards ran (a push to
+ *   main or a merge group runs Linux's only).
  * - "scoped": the gate passed but vitest did not run (docs- or version-only).
  * - "runner-lost": the gate failed, and every other failed job never started.
  * - "red": the gate failed for any other reason.
@@ -35,7 +40,8 @@ export function judgeRun(jobs) {
   if (!gate) return "no gate job";
   if (gate.conclusion === "success") {
     const vitest = jobs.filter(isVitestJob);
-    return vitest.length > 0 && vitest.every((job) => job.conclusion === "success") ? "green" : "scoped";
+    if (vitest.length === 0 || !vitest.every((job) => job.conclusion === "success")) return "scoped";
+    return FULL_MATRIX.every((name) => vitest.some((job) => job.name === name)) ? "green" : "partial";
   }
   if (gate.conclusion === "failure") {
     const failed = jobs.filter((job) => job !== gate && !["success", "skipped", "neutral"].includes(job.conclusion ?? ""));
@@ -164,8 +170,10 @@ export async function waitForReleaseCi({ api, sha, version, sleep = (ms) => new 
           else if (result === "red" || (result === "runner-lost" && inLane(run))) return { ok: false, reason: `The CI check on ${sha} failed: run ${run.id}` };
           else if (result === "runner-lost") log(`CI run ${run.id} on ${sha} failed only because jobs never got a runner; it is not re-run in ${run.head_branch}'s queue.`);
         }
-        const live = runs.find((run) => run.status !== "completed");
-        const parentLive = parent && (await runsFor(parent.sha)).find((run) => run.status !== "completed");
+        // Only a run of every platform can prove the commit, so a push's or merge group's run still going is not waited for.
+        const provable = (run) => run.status !== "completed" && FULL_LANE_EVENTS.includes(run.event);
+        const live = runs.find(provable);
+        const parentLive = parent && (await runsFor(parent.sha)).find(provable);
         if (live || rerunning) {
           log(`CI on ${sha} is ${live ? `${live.status} (run ${live.id})` : "re-running"}; waiting.`);
         } else if (parentLive) {

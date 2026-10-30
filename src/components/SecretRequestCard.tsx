@@ -1,22 +1,25 @@
 import { useState, type FormEvent } from "react";
 import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
-import { credentialResumeOutcome, credentialSaveRequest, isConfigCredentialTarget } from "../../shared/credential-request";
+import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget } from "../../shared/credential-request";
 import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
-import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
-import { ASK_FIELD, ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
+import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { productName } from "@/lib/brand";
 
 // Security: the value goes straight to the host's settings, never into the chat.
 
 export function SecretRequestCard({
   botId,
+  color,
   threadId,
   message,
 }: {
   botId: string;
+  color?: Bot["color"];
   threadId: string;
   message: Message;
 }) {
@@ -29,6 +32,7 @@ export function SecretRequestCard({
   const [localError, setLocalError] = useState<string | null>(null);
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
+  const custom = secret.target === CUSTOM_SECRET_TARGET;
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
@@ -43,14 +47,14 @@ export function SecretRequestCard({
       ? t("chat.secret.savedContinuing")
       : t("chat.secret.savedWaiting")
     : declined
-      ? t("chat.secret.declined")
-      : secret.description;
+      ? t("chat.secret.declined", { app: productName() })
+      : custom && secret.reason ? secret.reason : secret.description;
   const footerLabel = stopped
     ? t("chat.secret.stopped")
     : declined
     ? t("chat.secret.declinedFailed")
     : secret.resumed
-      ? t("chat.secret.resumedWithout")
+      ? custom && secret.delivery === "file" ? t("secretCard.resumed") : t("chat.secret.resumedWithout")
       : error
         ? t("chat.secret.resumeFailed")
         : t("chat.secret.waiting");
@@ -80,22 +84,40 @@ export function SecretRequestCard({
     }
   };
 
+  // Kept behind the card on the server, never in Settings; saving it resumes the bot, and no product event names it.
+  const saveCustom = async () => {
+    if (saving || !value.trim()) return;
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: value.trim() }) });
+      setValue("");
+      returnFocusToComposer();
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const save = async (event?: FormEvent) => {
     event?.preventDefault();
+    if (custom) return saveCustom();
     if (saving || (!value.trim() && !savedLocally)) return;
     setSaving(true);
     setLocalError(null);
     const provider = credentialProvider(secret.target);
     let saved = savedLocally;
     try {
-      if (!savedLocally) {
+      if (!savedLocally && secret.target !== CUSTOM_SECRET_TARGET) {
         const next = value.trim();
         const target = secret.target;
         // The 1Password token goes to this server's Logins, which checks it with 1Password first, never the settings file.
         const request = credentialSaveRequest(target, next);
+        const slot = desktopCredentialSlot(target);
         if (isConfigCredentialTarget(target)) {
-          const status: ConfigStatus = window.ogb?.setCredential
-            ? await window.ogb.setCredential(target, next)
+          const status: ConfigStatus = slot && window.ogb?.setCredential
+            ? await window.ogb.setCredential(slot, next)
             : await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
           dispatch({ type: "configStatus", config: status });
         } else await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
@@ -193,23 +215,26 @@ export function SecretRequestCard({
               aria-label={secret.label}
               className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
             />
-            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} className={ASK_PRIMARY_BUTTON}>
+            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>
               {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
               {t(savedLocally ? "chat.secret.continue" : "chat.secret.save")}
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
-              <LockKeyhole size={11} /> {t("chat.secret.storedHint")}
+              <LockKeyhole size={11} />{" "}
+              {!custom ? t("chat.secret.storedHint", { app: productName() }) : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
-            <a
-              href={secret.helpUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-accent-text hover:underline"
-            >
-              {t("chat.secret.whereToGet")} <ExternalLink size={11} />
-            </a>
+            {secret.helpUrl && (
+              <a
+                href={secret.helpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-accent-text hover:underline"
+              >
+                {t("chat.secret.whereToGet")} <ExternalLink size={11} />
+              </a>
+            )}
           </div>
         </form>
       )}

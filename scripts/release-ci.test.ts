@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { VITEST_SHARDS } from "./ci-scope.mjs";
 import { githubApi, judgeRun, waitForReleaseCi } from "./release-ci.mjs";
 
 const SHA = "a".repeat(40);
@@ -17,10 +18,15 @@ type Run = {
 type Commit = { tree: string; parents: string[]; files: string[] };
 
 const started: Step[] = [{ status: "completed", conclusion: "success" }];
-const vitest = (os: string, conclusion: string | null, steps: Step[] = started): Job => ({ name: `vitest (${os}, shard 1/4)`, conclusion, steps });
+const vitest = (os: string, conclusion: string | null, steps: Step[] = started, shard = 1): Job =>
+  ({ name: `vitest (${os}, shard ${shard}/${VITEST_SHARDS[os as keyof typeof VITEST_SHARDS]})`, conclusion, steps });
+const shards = (os: string): Job[] =>
+  Array.from({ length: VITEST_SHARDS[os as keyof typeof VITEST_SHARDS] }, (_, i) => vitest(os, "success", started, i + 1));
 const gate = (conclusion: string | null): Job => ({ name: "CI", conclusion, steps: started });
-/** Every vitest shard ran and passed, and so did the gate. */
-const green = (): Job[] => [gate("success"), vitest("ubuntu-latest", "success"), vitest("macos-latest", "success")];
+/** Every platform's every vitest shard ran and passed, and so did the gate: the full lane. */
+const green = (): Job[] => [gate("success"), ...Object.keys(VITEST_SHARDS).flatMap(shards)];
+/** A push to main or a merge group: the gate and every Linux shard passed, nothing else ran. */
+const mainLane = (): Job[] => [gate("success"), ...shards("ubuntu-latest")];
 /** A docs- or version-only run: the gate passes with vitest skipped. */
 const scoped = (): Job[] => [gate("success"), { name: "vitest (${{ matrix.os }}, shard ${{ matrix.shard }}/4)", conclusion: "skipped", steps: [] }];
 /** A real test failure: the shard started and failed. */
@@ -80,11 +86,17 @@ const versionBump = {
 };
 
 describe("what a CI run proves", () => {
-  it("is green only when the gate passed and every vitest job ran and passed", () => {
+  it("is green only when the gate passed and every platform's every vitest shard ran and passed", () => {
     expect(judgeRun(green())).toBe("green");
     expect(judgeRun(scoped())).toBe("scoped");
     expect(judgeRun([gate("success")])).toBe("scoped");
     expect(judgeRun([gate("success"), vitest("ubuntu-latest", "success"), vitest("windows-latest", "skipped")])).toBe("scoped");
+  });
+
+  it("is partial when only some platforms' shards ran, as on a push to main or in a merge group", () => {
+    expect(judgeRun(mainLane())).toBe("partial");
+    expect(judgeRun(green().filter((job) => job.name !== "vitest (macos-latest, shard 4/4)"))).toBe("partial");
+    expect(judgeRun([...mainLane(), ...shards("windows-latest")])).toBe("partial");
   });
 
   it("tells a runner that never came from a test that failed", () => {
@@ -112,22 +124,23 @@ describe("release CI gate", () => {
     expect(calls).toEqual([]);
   });
 
-  it("waits for a run that is still going, then passes", async () => {
+  it.each(["workflow_dispatch", "schedule"])("waits for a %s run that is still going, then passes", async (event) => {
     const { calls, options } = fakeGitHub([
-      { runs: [run(1, "push", "queued")] },
-      { runs: [run(1, "push", "in_progress")] },
-      { runs: [run(1, "push", "completed")], jobs: { 1: green() } },
+      { runs: [run(1, event, "queued")] },
+      { runs: [run(1, event, "in_progress")] },
+      { runs: [run(1, event, "completed")], jobs: { 1: green() } },
     ]);
     expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 1, via: "commit" });
     expect(calls).toEqual([]);
   });
 
   it("counts a re-run that passed after a failed first attempt", async () => {
-    const { options } = fakeGitHub([
-      { runs: [run(1, "push", "in_progress", "main", 0, { run_attempt: 2 })] },
-      { runs: [run(1, "push", "completed", "main", 0, { run_attempt: 2 })], jobs: { 1: green() } },
+    const { calls, options } = fakeGitHub([
+      { runs: [run(1, "workflow_dispatch", "in_progress", "main", 0, { run_attempt: 2 })] },
+      { runs: [run(1, "workflow_dispatch", "completed", "main", 0, { run_attempt: 2 })], jobs: { 1: green() } },
     ]);
-    expect(await waitForReleaseCi(options)).toMatchObject({ ok: true });
+    expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 1, via: "commit" });
+    expect(calls).toEqual([]);
   });
 
   it("stops on a red gate instead of retrying it", async () => {
@@ -168,8 +181,56 @@ describe("release CI gate", () => {
   });
 
   it("gives up after the wait limit with no verdict", async () => {
-    const { calls, options } = fakeGitHub([{ runs: [run(1, "push", "in_progress")] }]);
+    const { calls, options } = fakeGitHub([{ runs: [run(1, "workflow_dispatch", "in_progress")] }]);
     expect(await waitForReleaseCi(options)).toMatchObject({ ok: false, reason: expect.stringContaining("within 10 minutes") });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("a run of Linux's shards alone is no proof", () => {
+  it.each(["push", "merge_group"])("starts CI in the lane after the commit's green %s run", async (event) => {
+    const { calls, options } = fakeGitHub([
+      { runs: [run(1, event, "completed")], jobs: { 1: mainLane() } },
+      { runs: [run(1, event, "completed"), run(2, "workflow_dispatch", "completed", "release-ci/v0.1.94", 5)], jobs: { 1: mainLane(), 2: green() } },
+    ]);
+    expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 2, via: "commit" });
+    expect(calls).toEqual(LANE);
+  });
+
+  it("starts the lane at once instead of waiting for a push's run that is still going", async () => {
+    const { calls, options } = fakeGitHub([
+      { runs: [run(1, "push", "in_progress")] },
+      { runs: [run(1, "push", "in_progress"), run(2, "workflow_dispatch", "in_progress", "release-ci/v0.1.94", 5)] },
+      { runs: [run(1, "push", "completed"), run(2, "workflow_dispatch", "completed", "release-ci/v0.1.94", 5)], jobs: { 1: mainLane(), 2: green() } },
+    ]);
+    expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 2, via: "commit" });
+    expect(calls).toEqual(LANE);
+  });
+
+  it("still stops on the commit's red push run", async () => {
+    const { calls, options } = fakeGitHub([{ runs: [run(1, "push", "completed")], jobs: { 1: red() } }]);
+    expect(await waitForReleaseCi(options)).toMatchObject({ ok: false, reason: expect.stringContaining("failed: run 1") });
+    expect(calls).toEqual([]);
+  });
+
+  it("fails the release when its own lane ran only some platforms", async () => {
+    const { calls, options } = fakeGitHub([
+      { runs: [] },
+      { runs: [run(2, "workflow_dispatch", "completed", "release-ci/v0.1.94")], jobs: { 2: mainLane() } },
+    ]);
+    expect(await waitForReleaseCi(options)).toMatchObject({ ok: false, reason: expect.stringContaining("release lane did not pass (partial)") });
+    expect(calls).toEqual(LANE);
+  });
+
+  it("passes on the nightly run of a commit with the same tree", async () => {
+    const { calls, options } = fakeGitHub([{
+      runs: [
+        run(1, "push", "completed"),
+        run(8, "schedule", "completed", "main", 0, { head_sha: OTHER, head_commit: { tree_id: TREE } }),
+      ],
+      jobs: { 1: mainLane(), 8: green() },
+    }]);
+    expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 8, via: "tree" });
     expect(calls).toEqual([]);
   });
 });
@@ -241,8 +302,8 @@ describe("a version-only bump reuses its parent's CI", () => {
     expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 6, via: "parent" });
   });
 
-  it("waits for the parent's run that is still going", async () => {
-    const parentRun = (status: string) => run(5, "push", status, "main", 0, { head_sha: PARENT });
+  it("waits for the parent's nightly run that is still going", async () => {
+    const parentRun = (status: string) => run(5, "schedule", status, "main", 0, { head_sha: PARENT });
     const { calls, options } = fakeGitHub([
       { runs: [run(1, "push", "completed"), parentRun("in_progress")], jobs: { 1: scoped() } },
       { runs: [run(1, "push", "completed"), parentRun("in_progress")], jobs: { 1: scoped() } },
@@ -261,6 +322,15 @@ describe("a version-only bump reuses its parent's CI", () => {
       },
     ], versionBump);
     expect(await waitForReleaseCi(options)).toMatchObject({ ok: false, reason: expect.stringContaining("release lane did not pass") });
+    expect(calls).toEqual(LANE);
+  });
+
+  it("never passes on a parent's run of Linux's shards alone", async () => {
+    const { calls, options } = fakeGitHub([
+      { runs: [run(5, "push", "completed", "main", 0, { head_sha: PARENT })], jobs: { 5: mainLane() } },
+      { runs: [run(5, "push", "completed", "main", 0, { head_sha: PARENT }), run(2, "workflow_dispatch", "completed", "release-ci/v0.1.94", 5)], jobs: { 5: mainLane(), 2: green() } },
+    ], versionBump);
+    expect(await waitForReleaseCi(options)).toEqual({ ok: true, runId: 2, via: "commit" });
     expect(calls).toEqual(LANE);
   });
 
@@ -350,7 +420,7 @@ describe("a runner that never came", () => {
     expect(calls).toEqual(LANE);
   });
 
-  it("waits for another run on the commit before starting the lane", async () => {
+  it("waits for another manual run on the commit before starting the lane", async () => {
     const lost = run(1, "push", "completed");
     const { calls, options } = fakeGitHub([
       { runs: [lost, run(3, "workflow_dispatch", "in_progress", "main", 2)], jobs: { 1: runnerLost() } },
@@ -402,13 +472,14 @@ describe("GitHub calls", () => {
     const api = githubApi({ token: "t", repository: "o/r", fetchImpl: fetchImpl as typeof fetch });
     expect(await api.commit(SHA)).toEqual({ tree: TREE, parents: [PARENT], files: ["package.json"] });
     expect(JSON.parse((await api.fileAt("package.json", SHA))!).version).toBe("0.1.94");
-    expect(await api.recentRuns()).toHaveLength(3);
+    expect(await api.recentRuns()).toHaveLength(4);
     await api.rerunFailedJobs(42);
     expect(requests).toEqual([
       `GET /commits/${SHA}`,
       `GET /contents/package.json?ref=${SHA}`,
       "GET /actions/workflows/ci.yml/runs?status=completed&event=push&per_page=100",
       "GET /actions/workflows/ci.yml/runs?status=completed&event=merge_group&per_page=100",
+      "GET /actions/workflows/ci.yml/runs?status=completed&event=schedule&per_page=100",
       "GET /actions/workflows/ci.yml/runs?status=completed&event=workflow_dispatch&per_page=100",
       "POST /actions/runs/42/rerun-failed-jobs",
     ]);

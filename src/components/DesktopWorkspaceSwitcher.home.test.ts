@@ -53,3 +53,12 @@ it("says always on only when My Cloud's verified plan never sleeps, on its pages
     expect(label(), "no plan to read").toBe("My Cloud");
   }
 });
+
+it("in a browser on a team's Cloud names the team, never My Cloud", async () => {
+  delete window.ogb;
+  for (const props of [{ cloudHome: true, place: "Acme Labs" }, { cloudHome: true, inline: true, pill: true, place: "Acme Labs" }]) {
+    flushSync(() => root.render(createElement(DesktopWorkspaceSwitcher, props)));
+    await vi.waitFor(() => expect(host.querySelector("[data-cloud-home-indicator]")?.textContent).toContain("Acme Labs"));
+    expect(host.textContent, JSON.stringify(props)).not.toContain("My Cloud");
+  }
+});

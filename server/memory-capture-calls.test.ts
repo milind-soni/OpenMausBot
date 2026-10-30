@@ -22,6 +22,11 @@ describe("the capture prompt", () => {
     expect(prompt).toContain('A preference counts only when the Person states it as lasting ("always", "from now on", "I prefer").');
     // the example sentence once read like the very note it should not keep
     expect(prompt).not.toContain("prefers short replies");
+    expect(prompt).toContain("Never infer a fact about them from a task, a question, an example or a hypothetical");
+    expect(prompt).toContain("- When the Person asks to forget something, keep nothing about it.");
+    expect(prompt).toContain("- Give every preference and fact its evidence: the words it rests on, copied exactly from what was said to the assistant.");
+    expect(prompt).toContain('"evidence": "the exact words"');
+    expect(parseCandidates(JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "  I'm\n vegetarian " }]), TODAY)[0]!.evidence).toBe("I'm vegetarian");
   });
 
   it("numbers several conversations, marks a group chat, and asks which one each item came from", () => {
@@ -180,7 +185,7 @@ describe("capture calls", () => {
 
   it("reads six chats of one bot that go quiet together in one call, where each used to cost its own", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    answer = () => JSON.stringify([{ from: 3, text: "The person keeps bees on the roof", kind: "fact" }]);
+    answer = () => JSON.stringify([{ from: 3, text: "The person keeps bees on the roof", kind: "fact", evidence: "the person keeps bees on the roof" }]);
     const upkeep = loop();
     for (let i = 1; i <= 6; i += 1) {
       upkeep.noteTurn(LEAD.id, `t${i}`, { person: note(i), bot: ACK });
@@ -234,8 +239,8 @@ describe("capture calls", () => {
   it("files each item under the conversation it came from: its source line and its journal rows", async () => {
     answer = () => JSON.stringify([
       { from: 2, text: "The launch moved to Friday", kind: "decision", confidence: 0.9 },
-      { from: 1, text: "The person is vegetarian", kind: "preference", aboutUser: true, confidence: 0.9 },
-      { from: 2, text: "Asha owns the press kit", kind: "fact", topic: "launch", topicAliases: ["release"], confidence: 0.9 },
+      { from: 1, text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 },
+      { from: 2, text: "Asha owns the press kit", kind: "fact", evidence: "Asha owns the press kit", topic: "launch", topicAliases: ["release"], confidence: 0.9 },
     ]);
     const upkeep = loop();
     upkeep.noteTurn(LEAD.id, "t1", { person: "Just so you know, I'm vegetarian.", bot: ACK });
@@ -255,8 +260,8 @@ describe("capture calls", () => {
 
   it("adds to About me only from the owner's own conversations, also when one call reads both", async () => {
     answer = () => JSON.stringify([
-      { from: 1, text: "The person is vegetarian", kind: "preference", aboutUser: true },
-      { from: 2, text: "The person is allergic to peanuts", kind: "fact", aboutUser: true },
+      { from: 1, text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true },
+      { from: 2, text: "The person is allergic to peanuts", kind: "fact", evidence: "I'm allergic to peanuts", aboutUser: true },
     ]);
     const upkeep = loop();
     upkeep.noteTurn(LEAD.id, "mine", { person: "Just so you know, I'm vegetarian.", bot: ACK });
@@ -271,8 +276,8 @@ describe("capture calls", () => {
 
   it("without a valid from, files an item under the conversation with the most said, and lets a guess reach About me only when every conversation is the owner's", async () => {
     answer = () => JSON.stringify([
-      { text: "The person lives in Lyon", kind: "fact", aboutUser: true },
-      { from: 7, text: "The person has a dog named Biscuit", kind: "fact", aboutUser: true },
+      { text: "The person lives in Lyon", kind: "fact", evidence: "I moved to Lyon", aboutUser: true },
+      { from: 7, text: "The person has a dog named Biscuit", kind: "fact", evidence: "my dog Biscuit", aboutUser: true },
     ]);
     const upkeep = loop();
     upkeep.noteTurn(LEAD.id, "short", { person: "Thanks a lot for that!", bot: ACK, owner: false });
@@ -286,7 +291,7 @@ describe("capture calls", () => {
     // one of the two was another person's, and the guess may be wrong
     expect(aboutMe).toEqual([]);
 
-    answer = () => JSON.stringify([{ text: "The person plays the cello", kind: "fact", aboutUser: true }]);
+    answer = () => JSON.stringify([{ text: "The person plays the cello", kind: "fact", evidence: "I play the cello", aboutUser: true }]);
     upkeep.noteTurn(LEAD.id, "a", { person: "Thanks a lot for that!", bot: ACK });
     upkeep.noteTurn(LEAD.id, "b", { person: "I play the cello every Sunday morning.", bot: ACK });
     upkeep.flushThread("a");
@@ -300,9 +305,9 @@ describe("capture calls", () => {
     answer = () => {
       closed.add("room");
       return JSON.stringify([
-        { from: 1, text: "The person keeps bees", kind: "fact" },
+        { from: 1, text: "The person keeps bees", kind: "fact", evidence: "keeps bees on the roof" },
         { from: 2, text: "The room's launch moved to Friday", kind: "decision" },
-        { text: "The person has an unsure origin", kind: "fact" },
+        { text: "The person has an unsure origin", kind: "fact", evidence: "keeps bees on the roof" },
       ]);
     };
     const upkeep = loop();
@@ -341,7 +346,7 @@ describe("capture calls", () => {
   });
 
   it("holds every chat through a backup and reads them in one call after it", async () => {
-    answer = () => JSON.stringify([{ from: 1, text: "The person likes jazz", kind: "preference" }, { from: 2, text: "The person keeps bees", kind: "fact" }]);
+    answer = () => JSON.stringify([{ from: 1, text: "The person likes jazz", kind: "preference", evidence: "I like jazz" }, { from: 2, text: "The person keeps bees", kind: "fact", evidence: "keeps bees on the roof" }]);
     const upkeep = loop();
     upkeep.pause();
     upkeep.noteTurn(LEAD.id, "t1", { person: "I like jazz, mostly Coltrane.", bot: ACK });
@@ -361,7 +366,7 @@ describe("capture calls", () => {
     const held = gate();
     answer = async () => {
       await held.opened;
-      return JSON.stringify([{ text: "The person likes jazz", kind: "preference" }]);
+      return JSON.stringify([{ text: "The person likes jazz", kind: "preference", evidence: "I like jazz" }]);
     };
     const upkeep = loop();
     upkeep.noteTurn(LEAD.id, "t1", { person: "I like jazz, mostly Coltrane.", bot: ACK });
@@ -405,7 +410,7 @@ describe("capture calls", () => {
       { botId: LEAD.id, threadId: "t3", turnIds: ["turn-3"] },
     ] });
 
-    answer = () => JSON.stringify([{ from: 1, text: "Fact two", kind: "fact" }, { from: 2, text: "Fact three", kind: "fact" }]);
+    answer = () => JSON.stringify([{ from: 1, text: "Fact two", kind: "fact", evidence: "keeps bees on the roof" }, { from: 2, text: "Fact three", kind: "fact", evidence: "keeps bees on the roof" }]);
     const second = loop();
     second.start();
     expect(existsSync(pending)).toBe(false);
@@ -424,7 +429,7 @@ describe("capture calls", () => {
     const held = gate();
     answer = async () => {
       await held.opened;
-      return JSON.stringify([{ text: "The person keeps bees", kind: "fact" }]);
+      return JSON.stringify([{ text: "The person keeps bees", kind: "fact", evidence: "keeps bees on the roof" }]);
     };
     const upkeep = loop();
     upkeep.noteTurn(LEAD.id, "t1", { person: note(1), bot: ACK, turnId: "turn-1" });
@@ -459,7 +464,7 @@ describe("capture calls", () => {
 
   it("goes on to the next call when one never answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    answer = (_prompt, botId) => (botId === LEAD.id ? new Promise<string>(() => undefined) : JSON.stringify([{ text: "The person keeps bees", kind: "fact" }]));
+    answer = (_prompt, botId) => (botId === LEAD.id ? new Promise<string>(() => undefined) : JSON.stringify([{ text: "The person keeps bees", kind: "fact", evidence: "keeps bees on the roof" }]));
     const upkeep = loop();
     const stuck = upkeep.capture({ botId: LEAD.id, threadId: "t1", turns: [{ person: note(1), bot: ACK }] });
     const next = upkeep.capture({ botId: HELPER.id, threadId: "t2", turns: [{ person: note(2), bot: ACK }] });

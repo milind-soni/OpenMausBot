@@ -28,7 +28,7 @@ export function isServerPairingLink(input: string): boolean {
   }
 }
 
-export function RemoteComputerSection() {
+export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhenUnavailable?: boolean }) {
   const bridge = window.ogb?.remoteClient;
   const environments = window.ogb?.environments;
   const [state, setState] = useState<DesktopRemoteClientState>({ active: bridge?.active === true });
@@ -95,6 +95,8 @@ export function RemoteComputerSection() {
       setBusy(false);
     }
   };
+
+  if (!bridge && !environments && hideWhenUnavailable) return null;
 
   return (
     <Card

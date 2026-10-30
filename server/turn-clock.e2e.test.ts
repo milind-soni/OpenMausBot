@@ -11,7 +11,7 @@ import { turnClockLine } from "./turn-clock.ts";
 const ZONE = "Asia/Kolkata";
 // ICU may report the zone by its older alias (Asia/Calcutta), so the test asks the same runtime.
 const REPORTED = new Intl.DateTimeFormat("en-US", { timeZone: ZONE }).resolvedOptions().timeZone;
-const CLOCK = new RegExp(`^Current time when this message was sent: \\w+day, (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}) ${REPORTED.replace("/", "\\/")} \\(UTC\\+05:30\\)\\.\n\n`);
+const CLOCK = new RegExp(`^Current time when this message was sent: \\w+day, (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}) ${REPORTED.replace("/", "\\/")} \\(India time, UTC\\+05:30\\)\\.\n\n`);
 
 const minute = (at: number) => /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.exec(turnClockLine(at, REPORTED))![0];
 

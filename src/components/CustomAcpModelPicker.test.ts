@@ -35,7 +35,7 @@ vi.mock("@/state/store", async (original) => ({
     refreshInstances: vi.fn(() => Promise.resolve()), refreshModels: vi.fn(() => Promise.resolve()) }),
 }));
 const { ModelPicker, ModelVariantRow, modelSelectionForPick } = await import("./ModelPicker");
-const { SimpleModelPane } = await import("./SimpleModelPane");
+const { SimpleModelMenu } = await import("./SimpleModelMenu");
 let nativeDirectory: string;
 let discovered: InstanceInfo["models"];
 beforeAll(async () => {
@@ -91,18 +91,19 @@ it.each(["zcode", "codebuddy", "qoder", "qodercn"])("offers discovered models in
   fixture.instances = [{ ...engine(instanceId), models: discovered }];
   const selected = bot(instanceId, "agent-default");
   const opened = openPicker(selected);
-  const pane = opened.nodes.find((entry) => entry.type === SimpleModelPane) as ReactElement<ComponentProps<typeof SimpleModelPane>>;
-  expect(pane.props.models.map((model) => model.id)).toEqual(expect.arrayContaining(["agent-default", "glm-5.3", "glm-5.3-flash"]));
+  const pane = opened.nodes.find((entry) => entry.type === SimpleModelMenu) as unknown as ReactElement<ComponentProps<typeof SimpleModelMenu>>;
+  const listed = pane.props.menu.groups.flatMap((group) => group.body.kind === "models" ? group.body.rows.map((row) => row.option.id) : []);
+  expect(pane.props.menu.current?.label).toBe("Agent default");
+  expect(listed).toEqual(expect.arrayContaining(["glm-5.3", "glm-5.3-flash"]));
   expect(opened.html).toContain(">GLM-5.3-Flash</span>");
   expect(opened.html).toContain(">GLM-5.3</span>");
-  const modelButton = elements(SimpleModelPane(pane.props)).find((entry) => entry.type === "button" && String(entry.props.title).startsWith("GLM-5.3-Flash"))!;
-  (modelButton.props.onClick as () => void)();
+  pane.props.onPick(fixture.instances[0]!, "glm-5.3-flash");
   expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: selected.id, threadId: selected.threadId,
     updateBotDefault: true, selection: { instanceId, model: "glm-5.3-flash" } });
   const saved = { ...selected, modelSelection: { instanceId, model: "glm-5.3-flash" } };
   const reopened = openPicker(saved);
-  const savedPane = reopened.nodes.find((entry) => entry.type === SimpleModelPane) as ReactElement<ComponentProps<typeof SimpleModelPane>>;
-  const variants = savedPane.props.variantsRow as ReactElement<ComponentProps<typeof ModelVariantRow>>;
+  const savedPane = reopened.nodes.find((entry) => entry.type === SimpleModelMenu) as unknown as ReactElement<ComponentProps<typeof SimpleModelMenu>>;
+  const variants = (savedPane.props.thinking as { variants: ReactElement<ComponentProps<typeof ModelVariantRow>> }).variants;
   expect(variants.type).toBe(ModelVariantRow);
   const nativeRow = ModelVariantRow(variants.props);
   const thinking = elements(nativeRow).find((entry) => entry.type === Select)!;

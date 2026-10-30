@@ -21,8 +21,6 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   journalFile(): string;
   tempRoot(): string;
   lend?(projects: string[]): Promise<unknown>;
-  /** Once this computer is lent: asks the person, at most once, to lend the rest of it too, without being waited for. */
-  offer?(): unknown;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;
   openLocal?(): void;

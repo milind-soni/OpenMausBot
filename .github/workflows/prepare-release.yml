@@ -97,7 +97,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "release/v$VERSION"
           node scripts/tighten-ratchets.mjs
-          git add package.json scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts
+          node scripts/generate-locale.mjs --record-hashes
+          git add package.json scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts src/locales/source-hashes.json
           git commit -m "chore(release): bump version to $VERSION"
           git push --set-upstream origin "release/v$VERSION"
 

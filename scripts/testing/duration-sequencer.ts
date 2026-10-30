@@ -84,7 +84,8 @@ export class DurationSequencer extends BaseSequencer {
       `duration-sequencer: shard ${shard.index}/${shard.count} runs ${mine.length} of ${files.length} files, ` +
       `~${Math.round(loads[shard.index - 1])}s recorded; ${found} of ${listed} weighted files found`,
     );
-    if (process.env.GITHUB_ACTIONS === "true" && found < listed * 0.9) {
+    // A run of a chosen few files (OMB_VITEST_SUBSET: ci.yml's locale and docs tests) finds few by design.
+    if (process.env.GITHUB_ACTIONS === "true" && !process.env.OMB_VITEST_SUBSET && found < listed * 0.9) {
       this.ctx.logger.log(
         `::warning title=duration-sequencer::Only ${found} of ${listed} weighted test files were found, so shards fall ` +
         `back to about equal file counts. Check ${SHARD_WEIGHTS_FILE} against the test file paths.`,

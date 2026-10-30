@@ -19,10 +19,14 @@ The regression fixture emits this result, then asks for WebFetch permission,
 and only finishes the parent after the test releases a file gate.
 
 The small `agents` and `ogb` MCP servers use `alwaysLoad: true` so the first
-prompt includes coordination and approval tools. Other MCP servers retain
-normal deferred loading. This prevents the deferred-lookup dependency; it
-does not magically reconnect a crashed server or override a user's denied
-tool policy.
+prompt includes coordination and approval tools; the browser does too when the
+turn plans to browse. Every other MCP server (connected apps, a bot's own
+servers, data, phone, computer and the rest) loads on demand: each turn's
+private `--settings` file sets `ENABLE_TOOL_SEARCH=true`, unless the person set
+an opt-out such as `false` or `auto:100` in the bot project's or their own
+Claude settings or the environment (`server/drivers/claude-tool-search.ts`).
+This prevents the deferred-lookup dependency; it does not magically reconnect a
+crashed server or override a user's denied tool policy.
 
 Sources:
 
@@ -33,7 +37,7 @@ Sources:
 Regression checks:
 
 ```sh
-pnpm exec vitest run server/drivers/claude.test.ts server/drivers/agents-proxy.test.ts server/harness-mcp-proxy.test.ts
+pnpm exec vitest run server/drivers/claude.test.ts server/drivers/claude-tool-search.test.ts server/drivers/agents-proxy.test.ts server/harness-mcp-proxy.test.ts
 ```
 
 The turn boundary itself — a capability whose owning turn has been replaced

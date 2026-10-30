@@ -5,10 +5,13 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { APPROVAL_CODE_CHIP, toolLabel } from "./ApprovalCard";
+import { toolLabel } from "./ApprovalCard";
+import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskDetail, AskHeader, askPrimary, type Asker } from "./AskCard";
 import { outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { useInboxOrigin } from "./InboxLine";
+import { yourComputerAsk } from "@/lib/your-computer";
 
 interface ApprovalLabels {
   [tool: string]: LocaleKey;
@@ -57,6 +60,8 @@ export function pendingApprovals(messages: Message[]): Pending[] {
 }
 
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {
+  const ask = yourComputerAsk(pending.message.card, requester);
+  if (ask) return `${requester}: ${ask.line}`;
   if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or ${pending.message.card.options[1] ?? "Cancel"}.`;
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
@@ -100,14 +105,7 @@ function label(pending: Pending): string {
   return key ? t(key) : t("approval.label.requested");
 }
 
-export const APPROVAL_CONTROL =
-  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-
 const COMMAND_TOOLS = new Set(["Bash", "shell"]);
-
-function firstLine(text: string): string {
-  return (text.split("\n").find((line) => line.trim()) ?? "").trim();
-}
 
 function isDurable(pending: Pending): boolean {
   const card = pending.message.card;
@@ -115,15 +113,23 @@ function isDurable(pending: Pending): boolean {
     Boolean(card?.teamSetupRequest) || Boolean(card?.modelRequest);
 }
 
-function rowText(pending: Pending, botName?: string): { line: string; inline?: string } {
+/** What will happen, in plain words; the command shown whole when it is what will run, and everything the card holds
+ * behind Details. */
+function approvalWords(pending: Pending, botName?: string): { line: string; summary?: string; inline?: string; detail: string } {
   const card = pending.message.card;
   const outbound = card ? outboundSummary(card) : undefined;
-  if (outbound) return { line: outbound.headline };
-  if (isDurable(pending)) return { line: label(pending) };
-  const detail = firstLine(pending.commandAllowlist?.command ?? pending.detail);
-  if (!botName) return { line: label(pending), inline: detail || undefined };
-  if (COMMAND_TOOLS.has(pending.tool)) return { line: t("approval.compact.wantsToRun", { name: botName }), inline: detail || undefined };
-  return { line: t("approval.card.namedWantsTo", { name: botName, action: toolLabel(pending.tool) }), inline: detail || undefined };
+  const ask = yourComputerAsk(card, botName ?? t("approval.someone"));
+  const detail = (pending.commandAllowlist?.command ?? ask?.detail ?? pending.detail).trim();
+  if (outbound) return { line: outbound.headline, ...(outbound.summary ? { summary: outbound.summary } : {}), detail };
+  if (ask) return { line: ask.line, detail };
+  if (isDurable(pending)) return { line: label(pending), detail };
+  const action = COMMAND_TOOLS.has(pending.tool) ? t("approval.tool.runCommand") : toolLabel(pending.tool);
+  return { line: botName ? t("approval.card.namedWantsTo", { name: botName, action }) : label(pending), inline: detail, detail };
+}
+
+/** An inbox's copy names the conversation it was asked in, as the way back there. */
+function CopyHeader({ message, asker, line }: { message: Message; asker: Asker; line: string }) {
+  return <AskHeader asker={asker} line={line} origin={useInboxOrigin(message)} />;
 }
 
 export const PendingApprovalPanel = memo(function PendingApprovalPanel({
@@ -131,6 +137,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   count,
   index,
   botName,
+  asker,
   actions,
   more,
 }: {
@@ -138,6 +145,8 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   count: number;
   index: number;
   botName?: string;
+  /** The bot that asks, whose face leads the card. */
+  asker?: Asker;
   actions?: ReactNode;
   more?: ReactNode;
   locale?: string;
@@ -147,8 +156,10 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   const heldNote = outbound?.opaque && pending.heldCode === "approval.held.outbound"
     ? t("approval.opaqueCode")
     : tFromServer(pending.heldCode, pending.held);
-  const { line, inline } = rowText(pending, botName);
+  const { line, summary, inline, detail } = approvalWords(pending, botName ?? asker?.name);
   const detailsId = `approval-details-${pending.requestId}`;
+  const hidden = detail && detail !== inline ? detail : "";
+  const skill = pending.message.card?.skillRequest;
   return (
     <div
       role="region"
@@ -161,38 +172,23 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      className="px-3 py-2"
+      data-ask-card="approval"
+      className="px-4 pb-3.5 pt-3"
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-2">
-        <ShieldCheck size={16} className="shrink-0 self-center text-accent" aria-hidden="true" />
-        <div className="flex min-w-0 flex-1 basis-52 items-baseline gap-2" aria-live="polite">
-          <span className="min-w-0 max-w-[60%] shrink-0 truncate text-[13px] font-medium leading-5 text-ink" title={line}>{line}</span>
-          {outbound?.summary && (
-            <span className="min-w-0 shrink-[4] truncate text-[13px] leading-5 text-ink-secondary" title={outbound.summary}>{outbound.summary}</span>
-          )}
-          {inline && (
-            <code className={cn(APPROVAL_CODE_CHIP, "shrink-[4] pb-[3px] pt-[5px]")} title={inline}>
-              <span className="truncate">{inline}</span>
-            </code>
-          )}
-          {heldNote && (outbound ? (
-            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-auto cursor-default items-baseline bg-warning/10 px-2.5 py-1 text-warning")}>
-              <Send size={13} aria-hidden="true" className="self-center" />
-              {t("approval.compact.maySend")}
-            </span>
-          ) : (
-            <span title={heldNote} className="inline-flex shrink-0 self-center text-warning">
-              <TriangleAlert size={14} aria-hidden="true" />
-              <span className="sr-only">{heldNote}</span>
-            </span>
-          ))}
-          {count > 1 && (
-            <span className="shrink-0 rounded-full bg-control px-1.5 text-[11px] leading-5 tabular-nums text-ink-secondary">
-              {t("approval.position", { index: index + 1, count })}
-            </span>
+      <div className="flex min-w-0 items-center gap-2" aria-live="polite">
+        <div className="min-w-0 flex-1">
+          {asker ? pending.message.inbox?.origin ? <CopyHeader message={pending.message} asker={asker} line={line} /> : <AskHeader asker={asker} line={line} /> : (
+            <div className="flex items-center gap-1.5 text-[13px] leading-[18px] text-ink-secondary">
+              <ShieldCheck size={15} className="shrink-0" aria-hidden="true" /><span className="min-w-0 truncate">{line}</span>
+            </div>
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-baseline gap-2">
+        {count > 1 && (
+          <span className="shrink-0 rounded-full bg-ink/[0.06] px-2 text-[12px] leading-5 tabular-nums text-ink-secondary">
+            {t("approval.position", { index: index + 1, count })}
+          </span>
+        )}
+        {(hidden || skill || more) && (
           <button
             type="button"
             aria-expanded={open}
@@ -200,33 +196,34 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             aria-label={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
             title={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
             onClick={() => setOpen((value) => !value)}
-            className={cn(APPROVAL_CONTROL, "w-7 self-center px-0 text-ink-tertiary hover:bg-ink/10 hover:text-ink")}
+            className={cn(ASK_QUIET_BUTTON, "-me-2 w-7 px-0")}
           >
-            <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
+            <ChevronDown size={16} aria-hidden="true" className={cn("motion-safe:transition-transform", open && "rotate-180")} />
           </button>
-          {actions}
-        </div>
-      </div>
-      <div id={detailsId} hidden={!open} className="mt-2 space-y-2 px-0.5">
-        <pre
-          tabIndex={0}
-          aria-label={
-            isSkillApproval(pending)
-              ? t("approval.aria.reviewSkill")
-              : isRoutineApproval(pending)
-                ? t("approval.aria.reviewRoutine")
-                : isProfileApproval(pending)
-                  ? t("approval.aria.reviewProfile")
-                  : t("approval.aria.reviewDetails")
-          }
-          className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
-        >
-          {pending.commandAllowlist?.command ?? pending.detail}
-        </pre>
-        {pending.message.card?.skillRequest && (
-          <SkillRequestPreview request={pending.message.card.skillRequest} />
         )}
-        {heldNote && <div className="text-[12px] text-warning">{heldNote}</div>}
+      </div>
+      {summary && <p dir="auto" className="mt-1.5 break-words text-[15px] font-medium leading-[22px] text-ink">{summary}</p>}
+      {inline && <AskDetail text={inline} mono label={t("approval.aria.reviewDetails")} />}
+      {heldNote && (outbound ? (
+        <p className="mt-2 flex items-center gap-1.5 text-[13px] leading-[18px] text-warning">
+          <Send size={13} aria-hidden="true" className="shrink-0" />
+          <span title={heldNote}>{t("approval.compact.maySend")}</span>
+        </p>
+      ) : (
+        <p className="mt-2 flex items-start gap-1.5 text-[13px] leading-[18px] text-warning">
+          <TriangleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>{heldNote}</span>
+        </p>
+      ))}
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">{actions}</div>
+      <div id={detailsId} hidden={!open} className="mt-3 space-y-2">
+        {hidden && (
+          <pre tabIndex={0} aria-label={t("approval.aria.reviewDetails")}
+            className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-ink/[0.045] px-3 py-2 font-mono text-[12px] leading-[18px] text-ink-secondary">
+            {hidden}
+          </pre>
+        )}
+        {skill && <SkillRequestPreview request={skill} />}
         {more}
       </div>
     </div>
@@ -239,12 +236,15 @@ export function PendingApprovalActions({
   bot,
   onCancelTurn,
   part,
+  tag,
 }: {
   pending: Pending;
   threadId: string;
   bot?: Bot;
   onCancelTurn: () => void;
   part?: "primary" | "more";
+  /** Marks each answer for the surface that shows it, as data-<tag>-action. */
+  tag?: string;
 }) {
   const { dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
@@ -270,6 +270,8 @@ export function PendingApprovalActions({
       rememberCommand: rememberCommand || undefined,
     });
 
+  const allow = askPrimary(bot?.color);
+  const marked = (action: string) => (tag ? { [`data-${tag}-action`]: action } : {});
   const showPrimary = part !== "more";
   const showMore = part !== "primary";
   const always = durableRequest ? null
@@ -281,20 +283,11 @@ export function PendingApprovalActions({
           ? { name: t("approval.action.alwaysAllowSession"), hint: t("approval.action.alwaysAllowSessionHint"), run: () => decide("allow", true) }
           : null;
   const more = showMore && !durableRequest ? [
-    <button key="cancel" type="button" onClick={onCancelTurn} className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-ink-secondary hover:bg-ink/[0.12] hover:text-ink")}>
+    <button key="cancel" type="button" onClick={onCancelTurn} className={ASK_QUIET_ANSWER}>
       {t("approval.action.cancelTurn")}
     </button>,
   ] : [];
   const primary = showPrimary ? [
-    <button
-      key="deny"
-      type="button"
-      onClick={() => decide("deny")}
-      autoFocus={isTeamSetup}
-      className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-danger hover:bg-danger/15")}
-    >
-      {isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
-    </button>,
     always && (
       <button
         key="always"
@@ -302,17 +295,29 @@ export function PendingApprovalActions({
         onClick={always.run}
         aria-label={always.name}
         title={always.hint}
-        className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]")}
+        className={ASK_QUIET_ANSWER}
       >
         {t("approval.action.alwaysAllow")}
       </button>
     ),
     <button
+      key="deny"
+      {...marked("deny")}
+      type="button"
+      onClick={() => decide("deny")}
+      autoFocus={isTeamSetup}
+      className={ASK_SECONDARY_BUTTON}
+    >
+      {isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
+    </button>,
+    <button
       key="allow"
+      {...marked("allow")}
       type="button"
       onClick={() => decide("allow")}
       disabled={isSkillRequest && !reviewedSha256}
-      className={cn(APPROVAL_CONTROL, "bg-accent text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40")}
+      className={allow.className}
+      style={allow.style}
     >
       {isTeamSetup ? pending.message.card?.options[0] : isSkillRequest
         ? pending.message.card?.skillRequest?.action === "update"

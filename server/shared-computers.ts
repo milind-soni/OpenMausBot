@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { DeviceLinks, LinkedComputer } from "./device-links.ts";
 import { awayNotice, deviceWord, lendScreenSteps, LENT_PLATFORMS, type LentComputers } from "./lent-computers.ts";
+import type { LentCopies } from "./lent-copies.ts";
 export { LentComputers } from "./lent-computers.ts";
 
 const folder = z.object({ id: z.string().uuid(), name: z.string().min(1).max(120), write: z.boolean() }).strict();
@@ -72,7 +73,7 @@ export function responseGone(res: { once(event: "close", listener: () => void): 
 export function sharedComputerScopeRefusal(registration: Registration, operation: Pick<Operation, "action" | "folder_id">): string | null {
   switch (operation.action) {
     case "run_command":
-      return registration.terminal ? null : `Terminal is off on ${registration.name}, so it cannot run commands. Terminal is lent per computer: tell the person in one sentence to turn it on in OpenMausBot on ${registration.name}, under Settings \u2192 MausBot Cloud \u2192 Terminal. Only the person can turn it on; do not try to enable it or run the command anywhere else.`;
+      return registration.terminal ? null : `${registration.name} does not lend its terminal, so commands cannot run there. Do not try to run the command another way or anywhere else; use its folders, or tell the person in one sentence what to run themselves.`;
     case "computer_tools":
     case "computer_call":
       return registration.computer ? null : `Apps and screen are not lent to this server. ${lendScreenSteps(deviceWord(registration.platform))}`;
@@ -104,7 +105,11 @@ export class SharedComputers {
   private sessionLive: (id: string) => boolean;
   private lent: LentComputers | undefined;
   private links: Pick<DeviceLinks, "drop"> | undefined;
-  constructor(sessionLive: (id: string) => boolean, lent?: LentComputers, links?: Pick<DeviceLinks, "drop">) { this.sessionLive = sessionLive; this.lent = lent; this.links = links; }
+  /** A Cloud home's copies of lent folders: what a computer that is away still lends (server/lent-copies.ts). */
+  private copies: Pick<LentCopies, "away" | "answer"> | undefined;
+  constructor(sessionLive: (id: string) => boolean, lent?: LentComputers, links?: Pick<DeviceLinks, "drop">, copies?: Pick<LentCopies, "away" | "answer">) {
+    this.sessionLive = sessionLive; this.lent = lent; this.links = links; this.copies = copies;
+  }
   private static key(session: string, id: string) { return `${session}\n${id}`; }
   register(registration: Registration, owner: SharedComputerOwner, secret: string) {
     if (this.closed) throw failure(RESTARTING, 503);
@@ -165,7 +170,8 @@ export class SharedComputers {
   /** For a bot: which known computer is offline and since when, and the sentence to say; nothing while one is online. */
   away(principal: string | null) {
     if (!principal) return {};
-    return awayNotice(this.lent?.list(principal) ?? [], new Set(this.list(principal).map(registration => registration.id)));
+    const online = this.list(principal);
+    return { ...awayNotice(this.lent?.list(principal) ?? [], new Set(online.map(registration => registration.id))), ...this.copies?.away(principal, online) };
   }
   /** For a bot: how the person lends apps and screen, when an online computer of theirs lends neither. */
   screenNotLent(principal: string | null): { screen?: string } {
@@ -274,6 +280,9 @@ export class SharedComputers {
       const known = lent();
       if (known && this.online(known)) break;
       if (!known || Date.now() - known.seen > RECONNECTING_MS || Date.now() >= deadline || !active()) {
+        // Away: its lent folders answer from their copy here, a write to one lent with editing waits for it.
+        const copy = active() ? this.copies?.answer(operation, principal, this.list(principal)) : null;
+        if (copy) return copy;
         throw failure(known && this.sessionLive(known.owner.session)
           ? lentButOffline(known.registration.name, known.seen, deviceWord(known.registration.platform))
           : this.offline(principal, operation.computer_id));

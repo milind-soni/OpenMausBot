@@ -2,6 +2,7 @@ import type { Surface } from "../shared/wire.ts";
 import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
 import { canUseMcpServer } from "../shared/tool-scope.ts";
 import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
+import { PLAIN_WORDS } from "./local-computer-guidance.ts";
 export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
@@ -86,6 +87,11 @@ export function browserIsThePlace(plan: SurfacePlan): boolean {
   return plan.computer === "off" && plan.browser;
 }
 
+/** The conversation's pin as a person chose it: a pin a turn made on its own (auto) is none. */
+export function chosenPin(task: { surface?: Surface; surfaceSource?: "user" | "auto" } | undefined): Surface | null | undefined {
+  return task?.surfaceSource === "auto" ? null : task?.surface;
+}
+
 export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
   if (canWorkOnCloud(engine)) return null;
   return placeUnavailable("cloud", { state: "cc-cannot", params: { bot, model: engine.name }, source });
@@ -124,6 +130,15 @@ export function surfaceLabel(surface: Surface): string {
   }
 }
 
+/** This computer is the person's own: web work goes elsewhere first, and their first-use question is the harness's to ask. */
+const WEB_WORK_ORDER = "For web work such as finding, booking or looking something up, use, in this order:";
+const YOUR_COMPUTER_LAST =
+  " Use their own browser or screen only when the task needs their own signed-in session and nothing else works. Before your first action on it in a request, OpenMausBot asks them once whether you may, at every approval level: do not ask in chat yourself, and if they say no, finish another way. " + PLAIN_WORDS;
+const YOUR_COMPUTER_BESIDE_BROWSER =
+  ` This computer is the person's own: their screen, their apps and the browsers they are signed in to. ${WEB_WORK_ORDER} your built-in browser, a cloud computer if select_computer offers one, a connected app.${YOUR_COMPUTER_LAST}`;
+const YOUR_COMPUTER_ALONE =
+  ` Everything you do on screen happens on this computer, which is the person's own: their screen, their apps and the browsers they are signed in to; there is no built-in browser of yours this turn. ${WEB_WORK_ORDER} web search and fetching pages, a cloud computer if select_computer offers one, a connected app.${YOUR_COMPUTER_LAST} If you need the user to sign in, tell them it is on this computer.`;
+
 const RESTATE_SENTENCE =
   " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
 
@@ -152,7 +167,11 @@ export function surfacePrompt(
   const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
   let text = "";
-  if (computer && mounted.browser) {
+  if (mounted.computer === "local" && !opts.cloudHome) {
+    text = mounted.browser
+      ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
+      : YOUR_COMPUTER_ALONE;
+  } else if (computer && mounted.browser) {
     text =
       ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}.`;
   } else if (computer) {

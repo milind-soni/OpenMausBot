@@ -272,6 +272,8 @@ export interface EnvelopeNames {
   person?: string;
   /** The requester conversation's title, when there is one. */
   thread?: string;
+  /** The tool the assignee asks the person a question with set answers, when its engine has one. */
+  askTool?: string;
 }
 
 /** What the runtime needs from the server. No method may throw into the runtime: a throw is logged and read as "not now". */

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -7,17 +7,22 @@ import { Parser } from "tar";
 
 import { BrowserEvidence, EVIDENCE_LIMITS, imageFileName, type StepRecord } from "./browser-evidence.ts";
 
+const fileOfSize = (path: string, bytes: number) => { writeFileSync(path, ""); truncateSync(path, bytes); };
+
 const posix = process.platform !== "win32";
 const GEN = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
 const GEN2 = "7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function store(options: { free?: number; now?: () => number } = {}) {
+function store(options: { free?: number; now?: () => number; freeFloor?: number } = {}) {
   const root = join(mkdtempSync(join(tmpdir(), "omb-evidence-")), "evidence");
   roots.push(join(root, ".."));
   const free = options.free ?? 100 * 1024 ** 3;
-  return new BrowserEvidence({ root, statfs: async () => ({ bavail: free / 4096, bsize: 4096 }), ...(options.now ? { now: options.now } : {}) });
+  return new BrowserEvidence({
+    root, statfs: async () => ({ bavail: free / 4096, bsize: 4096 }),
+    ...(options.now ? { now: options.now } : {}), ...(options.freeFloor ? { freeFloor: options.freeFloor } : {}),
+  });
 }
 
 function step(evidence: BrowserEvidence, threadId: string, generation = GEN, extra: Partial<StepRecord> = {}): StepRecord {
@@ -85,11 +90,12 @@ describe("the browser step store", () => {
     await low.sweep();
     expect((await shot(low, "thread-1", Buffer.from("x"))).imageSkipped).toBe("disk-low");
     expect(low.list("thread-1").steps).toHaveLength(1);
-    // A quarter of the free space caps the whole store: here, 1.25 GB free allows 320 MB.
-    const small = store({ free: 1.25 * 1024 ** 3 });
+    // A quarter of the free space caps the whole store: here, with the floor scaled down a thousandfold, 1.25 MB free
+    // allows 320 KB. Real sizes would need a 330 MB file, which a Windows runner can take over 40 s to write.
+    const small = store({ free: 1.25 * 1024 ** 2, freeFloor: EVIDENCE_LIMITS.freeFloor / 1024 });
     await small.sweep();
     mkdirSync(join(small.root, "thread-old", GEN), { recursive: true });
-    writeFileSync(join(small.root, "thread-old", GEN, imageFileName(9)), Buffer.alloc(330 * 1024 ** 2));
+    fileOfSize(join(small.root, "thread-old", GEN, imageFileName(9)), 330 * 1024);
     await small.sweep();
     // Over the cap: the oldest other conversation's screenshots go first, its steps stay.
     writeFileSync(join(small.root, "thread-old", GEN, "steps.jsonl"), `${JSON.stringify({ v: 1, step: 9, threadId: "thread-old", generation: GEN, image: imageFileName(9) })}\n`);
@@ -102,7 +108,7 @@ describe("the browser step store", () => {
   it("caps one conversation at 200 MB of screenshots", async () => {
     const evidence = store();
     mkdirSync(join(evidence.root, "thread-1", GEN2), { recursive: true });
-    writeFileSync(join(evidence.root, "thread-1", GEN2, imageFileName(5)), Buffer.alloc(EVIDENCE_LIMITS.threadBytes));
+    fileOfSize(join(evidence.root, "thread-1", GEN2, imageFileName(5)), EVIDENCE_LIMITS.threadBytes);
     expect((await shot(evidence, "thread-1", Buffer.from("x"))).imageSkipped).toBe("thread-cap");
     expect((await shot(evidence, "thread-2", Buffer.from("x"))).image).not.toBeNull();
   });
@@ -127,12 +133,12 @@ describe("the browser step store", () => {
 
   it("never evicts a generation being written now", async () => {
     let now = Date.now();
-    const evidence = store({ free: 1.25 * 1024 ** 3, now: () => now });
+    const evidence = store({ free: 1.25 * 1024 ** 2, now: () => now });
     await shot(evidence, "thread-busy", Buffer.from("live turn"));
-    // The store is over its 320 MB cap, and the busy turn holds most of it.
-    writeFileSync(join(evidence.root, "thread-busy", GEN, imageFileName(500)), Buffer.alloc(300 * 1024 ** 2));
+    // The store is over its 320 KB cap, and the busy turn holds most of it.
+    fileOfSize(join(evidence.root, "thread-busy", GEN, imageFileName(500)), 300 * 1024);
     mkdirSync(join(evidence.root, "thread-idle", GEN2), { recursive: true });
-    writeFileSync(join(evidence.root, "thread-idle", GEN2, imageFileName(7)), Buffer.alloc(40 * 1024 ** 2));
+    fileOfSize(join(evidence.root, "thread-idle", GEN2, imageFileName(7)), 40 * 1024);
     now += 60_000;
     await evidence.sweep();
     expect(readdirSync(join(evidence.root, "thread-busy", GEN)).filter((name) => name.endsWith(".jpg"))).toHaveLength(2);

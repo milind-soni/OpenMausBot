@@ -291,8 +291,13 @@ export class Speaker {
       cancel: () => { if (live()) this.stop(); },
       fail: (error) => {
         if (finished) return;
-        if (live()) this.set({ ...IDLE, error });
+        const wasLive = live();
         controller.abort();
+        if (wasLive) {
+          if (this.settlePlayback) this.settlePlayback(false);
+          else this.teardownAudio();
+          this.set({ ...IDLE, error });
+        }
         if (this.request === controller) this.request = null;
         finish();
       },

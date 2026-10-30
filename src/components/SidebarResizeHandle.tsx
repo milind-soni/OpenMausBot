@@ -11,7 +11,7 @@ import {
 } from "@/lib/sidebar-preferences";
 
 export function sidebarDefaultWidth(density: SidebarDensity, simple: boolean): number {
-  return density === "compact" ? 272 : simple ? 288 : 320;
+  return density === "compact" ? 272 : simple ? 280 : 320;
 }
 
 export type SidebarSizing = ReturnType<typeof useSidebarWidth>;
@@ -24,7 +24,8 @@ export function useSidebarWidth({ simple, density, sidePanelOpen, sidebarRef }: 
 }) {
   const key = simple ? SIMPLE_SIDEBAR_WIDTH_KEY : SIDEBAR_WIDTH_KEY;
   const defaultWidth = sidebarDefaultWidth(density, simple);
-  const maxWidth = sidePanelOpen ? defaultWidth : Math.min(480, window.innerWidth - 320);
+  const cap = simple ? 400 : 480;
+  const maxWidth = sidePanelOpen ? defaultWidth : Math.min(cap, window.innerWidth - 320);
   const [savedWidth, setSavedWidth] = useState<number | null>(() => loadSidebarWidth(undefined, key));
   const widthRef = useRef(savedWidth);
   const [resizing, setResizing] = useState(false);
@@ -34,7 +35,7 @@ export function useSidebarWidth({ simple, density, sidePanelOpen, sidebarRef }: 
     setSavedWidth(width);
   }, [key]);
   const resizeTo = (width: number) => {
-    const next = clampSidebarWidth(width, sidePanelOpen ? defaultWidth + 320 : window.innerWidth);
+    const next = clampSidebarWidth(width, sidePanelOpen ? defaultWidth + 320 : window.innerWidth, cap);
     if (next === Math.round(sidebarRef.current?.getBoundingClientRect().width ?? defaultWidth)) return null;
     widthRef.current = next;
     sidebarRef.current?.style.setProperty("--sidebar-width", `${next}px`);
@@ -49,7 +50,7 @@ export function useSidebarWidth({ simple, density, sidePanelOpen, sidebarRef }: 
     if (widthRef.current !== null) save(widthRef.current);
   };
   return {
-    width: widthRef.current ?? defaultWidth,
+    width: Math.min(widthRef.current ?? defaultWidth, cap),
     defaultWidth,
     maxWidth,
     resizing,

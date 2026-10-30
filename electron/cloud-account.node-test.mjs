@@ -1,77 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import nativeText from "./native-text.cjs";
-import { CHECKOUT_SOURCES, checkoutDestination, cloudMenuSublabel, createCloudAccountClient, createCloudAccountStore, cloudOrigin, cloudPlanSnapshot, CLOUD_ORIGIN } from "./cloud-account.mjs";
+import { accessToken, fixture, until } from "./fixtures/cloud-account.mjs";
+import { cancelSurvey, CHECKOUT_SOURCES, checkoutDestination, cloudMenuSublabel, createCloudAccountStore, cloudOrigin, cloudPlanSnapshot, CLOUD_ORIGIN } from "./cloud-account.mjs";
 
-const accessToken = `omc_${"T".repeat(43)}`;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("Fixture did not reach the expected state"); }
-async function fixture(t, options = {}) {
-  const f = { now: 1_800_000_000_000, requests: [], browsers: [], states: [], saved: null, approved: false, revoked: false,
-    sessionStatus: 200, invalidIdentity: false, invalidEntitlement: false, badUrl: false, failWrite: false, slowToken: null,
-    entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
-    disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, pages: { status: 404, body: { error: "unsupported" } }, sessionPage: null, sessionError: null, tokenPage: null, publicConfig: { status: 404, body: { error: "not_found" } },
-    offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } },
-    upgradePreview: { status: 404, body: { error: "not_found" } }, upgrade: { status: 404, body: { error: "not_found" } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } }, moved: { status: 404, body: { error: "not_found" } }, moveStatus: { status: 404, body: { error: "not_found" } } };
-  const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
-  const server = createServer(async (req, res) => {
-    let body = ""; for await (const chunk of req) body += chunk;
-    f.requests.push({ route: req.url, method: req.method, token: req.headers.authorization, version: req.headers["x-openmausbot-version"], body });
-    const send = (status, data) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(data)); };
-    if (req.url === "/api/cloud/desktop/authorize") return send(201, { cloudContractVersion: 1, deviceCode: "A".repeat(43), userCode: "ABCDE-FGHJK",
-      verificationUriComplete: f.badUrl ? "https://untrusted.example.test" : `${f.origin}/cloud/desktop?code=ABCDE-FGHJK`, expiresIn: f.expiresIn, interval: 5 });
-    if (req.url === "/api/public/config" && req.method === "GET") {
-      f.requests.at(-1).cookie = req.headers.cookie;
-      if (typeof f.publicConfig.body === "string") { res.writeHead(f.publicConfig.status, { "content-type": "text/html" }); return res.end(f.publicConfig.body); }
-      return send(f.publicConfig.status, f.publicConfig.body);
-    }
-    if (req.url === "/api/cloud/desktop/disk" && req.headers.authorization === `Bearer ${accessToken}`) {
-      if (typeof f.disk.body === "string") { res.writeHead(f.disk.status, { "content-type": "text/html" }); return res.end(f.disk.body); }
-      return send(f.disk.status, f.disk.body);
-    }
-    if (req.url === "/api/cloud/desktop/services/x" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.x.status, f.x.body);
-    if (/^\/api\/cloud\/desktop\/teams\/[^/]+\/pairing$/.test(req.url) && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.teamPairing.status, f.teamPairing.body);
-    if (req.url === "/api/cloud/desktop/services/pages" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.pages.status, f.pages.body);
-    if (req.url === "/api/cloud/desktop/moved" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moved.status, f.moved.body);
-    if (req.url === "/api/cloud/desktop/move-status" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moveStatus.status, f.moveStatus.body);
-    for (const [route, answer] of [["/api/cloud/desktop/checkout", f.checkout], ["/api/cloud/desktop/interest", f.interest],
-      ["/api/cloud/desktop/upgrade/preview", f.upgradePreview], ["/api/cloud/desktop/upgrade", f.upgrade]]) {
-      if (req.url !== route || req.method !== "POST" || req.headers.authorization !== `Bearer ${accessToken}`) continue;
-      if (typeof answer.body === "string") { res.writeHead(answer.status, { "content-type": "text/html" }); return res.end(answer.body); }
-      return send(answer.status, answer.body);
-    }
-    if (req.url === "/api/cloud/desktop/token") {
-      if (f.tokenPage) { res.writeHead(f.tokenPage, { "content-type": "text/html" }); return res.end("<!doctype html>Just a moment"); }
-      if (f.slowToken) await f.slowToken;
-      return f.approved ? send(200, { ...identity(), accessToken }) : send(400, { error: "authorization_pending" });
-    }
-    if (req.url === "/api/cloud/desktop/session" && req.headers.authorization === `Bearer ${accessToken}`) {
-      if (req.method === "DELETE") { if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); } if (f.sessionStatus === 503) return send(503, { error: "unavailable" }); f.revoked = true; return send(200, { revoked: true }); }
-      if (f.revoked) return send(401, { error: "invalid_token" });
-      if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); }
-      if (f.sessionError) return send(f.sessionError.status, f.sessionError.body);
-      if (f.sessionStatus !== 200) return send(f.sessionStatus, { error: "unavailable" });
-      return send(200, { ...identity(), ...(f.invalidIdentity ? { account: { id: "someone-else", email: "other@example.test" } } : {}),
-        entitlement: f.invalidEntitlement ? { plan: "pro", status: "active" } : f.entitlement, ...(f.cloud === undefined ? {} : { cloud: f.cloud }),
-        ...(f.offer === undefined ? {} : { offer: f.offer }), ...(f.teams === undefined ? {} : { teams: f.teams }) });
-    }
-    send(404, { error: "not_found" });
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  f.origin = `http://127.0.0.1:${server.address().port}`;
-  f.client = createCloudAccountClient({ origin: f.origin, fixture: true, deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.fixture", now: () => f.now,
-    store: { read: async () => f.saved, write: async value => { if (f.failWrite) throw new Error("fixture storage failure"); f.saved = structuredClone(value); } },
-    openBrowser: async url => { f.browsers.push(url); }, onState: state => f.states.push(state),
-    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; }, ...options });
-  f.tick = () => { const callback = f.timer; assert.ok(callback); f.timer = null; callback(); };
-  f.connect = async () => { await f.client.begin(); f.approved = true; f.tick(); await until(() => f.client.state().status === "connected"); };
-  t.after(async () => { f.client.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
-  return f;
-}
 
 test("Cloud origin is fixed; only explicit fixtures can use loopback", () => {
   assert.equal(cloudOrigin(), CLOUD_ORIGIN);
@@ -891,4 +826,108 @@ test("usage meter: no usage without an active plan, and none from a malformed an
   await f.client.refresh();
   assert.equal(f.client.state().status, "connected");
   assert.equal(f.client.state().usage, undefined);
+});
+
+const MY_CLOUD = "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a5b", TEAM_CLOUD = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", DAY = 86_400_000;
+/** The session's `clouds` as the Admin lists them: a team Cloud this person is only in, and their own primary Cloud on a trial. */
+function renewingClouds(f, renewal = { trial: true, endsAt: null, keptDays: 3 }) {
+  return [{ id: TEAM_CLOUD, name: "Acme", role: "member", teamId: "team-acme", primary: false, renewsAt: null, cancelAtPeriodEnd: false },
+    { id: MY_CLOUD, name: "My Cloud", role: "owner", teamId: null, primary: true, renewsAt: renewal.endsAt === null ? f.now + 5 * DAY : null, cancelAtPeriodEnd: renewal.endsAt !== null, renewal }];
+}
+/** An Admin with the app's Cancel and Keep: each turns the Cloud's renewal off or on, and the next session says so. */
+function renewalAdmin(f) {
+  f.feedback = { status: 201, body: { cloudContractVersion: 1, id: "answer-1" } };
+  f.renewal = (action, cloudId) => {
+    if (cloudId !== MY_CLOUD) return { status: 404, body: { error: "not_found", errorDescription: "There is no such Cloud on your account." } };
+    f.clouds = renewingClouds(f, { trial: true, endsAt: action === "cancel" ? f.now + 5 * DAY : null, keptDays: 3 });
+    return { status: 200, body: { cloudContractVersion: 1, cloud: f.clouds[1] } };
+  };
+}
+const posts = f => f.requests.filter(request => request.method === "POST" && /\/(?:feedback|cancel|keep)$/.test(request.route))
+  .map(request => [request.route.replace("/api/cloud/desktop/", ""), JSON.parse(request.body || "null"), request.token === `Bearer ${accessToken}`]);
+
+test("the plan's renewal comes from the session's own primary Cloud, for display only; the Cloud's id stays in main", async t => {
+  const f = await fixture(t);
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 30 * DAY, version: 2 };
+  f.clouds = renewingClouds(f);
+  await f.connect();
+  assert.deepEqual(f.client.state().renewal, { trial: true, cancelled: false, renewsAt: f.now + 5 * DAY, endsAt: null, keptDays: 3 });
+  assert.equal(JSON.stringify(f.client.state()).includes(MY_CLOUD), false);
+  assert.deepEqual(cloudPlanSnapshot(f.client.state()).renewal, f.client.state().renewal);
+  // Someone in a team Cloud they don't pay for, and an Admin that doesn't say: no renewal, so nothing to cancel.
+  f.clouds = [renewingClouds(f)[0], { ...renewingClouds(f)[1], primary: false }];
+  await f.client.refresh();
+  assert.equal(f.client.state().renewal, undefined);
+  f.clouds = undefined;
+  await f.client.refresh();
+  assert.equal(f.client.state().renewal, undefined);
+  assert.deepEqual(await f.client.cancelPlan({ answer: "price" }), { outcome: "failed", state: f.client.state() });
+  assert.deepEqual(posts(f), [], "nothing is asked without a Cloud the session names");
+});
+
+test("Cancel plan sends the survey first, then the session's own Cloud's cancel; the survey never blocks it, and Keep turns renewal back on", async t => {
+  const f = await fixture(t);
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 30 * DAY, version: 2 };
+  f.clouds = renewingClouds(f);
+  renewalAdmin(f);
+  await f.connect();
+  // The page names no Cloud: a cloudId it sends is never used, and each box is trimmed.
+  const cancelled = await f.client.cancelPlan({ answer: "price", expected: "  To sort my inbox.  ", improve: "", cloudId: TEAM_CLOUD });
+  assert.deepEqual(posts(f), [["feedback", { cloudId: MY_CLOUD, answer: "price", expected: "To sort my inbox." }, true], [`clouds/${MY_CLOUD}/cancel`, {}, true]]);
+  assert.equal(cancelled.outcome, "cancelled");
+  assert.deepEqual(cancelled.renewal, { trial: true, cancelled: true, renewsAt: null, endsAt: f.now + 5 * DAY, keptDays: 3 });
+  assert.equal(cancelled.surveyed, true);
+  assert.deepEqual(f.client.state().renewal, cancelled.renewal, "the session is read again");
+  // Keep my plan: the same Cloud, nothing else sent.
+  f.requests.length = 0;
+  const kept = await f.client.keepPlan();
+  assert.equal(kept.outcome, "kept");
+  assert.deepEqual(posts(f), [[`clouds/${MY_CLOUD}/keep`, {}, true]]);
+  assert.equal(f.client.state().renewal.cancelled, false);
+  // Nothing said: only the cancel. Words without a reason: kept as "other". A refused or failed survey: the cancel goes ahead.
+  for (const [survey, sent] of [[null, null], [{}, null], [{ answer: "keep" }, null], ["price", null], [{ improve: "Tell me sooner." }, { answer: "other", improve: "Tell me sooner." }]]) {
+    f.requests.length = 0;
+    assert.equal((await f.client.cancelPlan(survey)).outcome, "cancelled");
+    assert.deepEqual(posts(f), [...sent ? [["feedback", { cloudId: MY_CLOUD, ...sent }, true]] : [], [`clouds/${MY_CLOUD}/cancel`, {}, true]]);
+    await f.client.keepPlan();
+  }
+  for (const refusal of [{ status: 429, body: { error: "rate_limited", interval: 600 } }, { status: 500, body: { error: "unexpected" } }]) {
+    f.feedback = refusal; f.requests.length = 0;
+    const result = await f.client.cancelPlan({ answer: "setup" });
+    assert.deepEqual([result.outcome, result.surveyed], ["cancelled", false]);
+    assert.deepEqual(posts(f).map(([route]) => route), ["feedback", `clouds/${MY_CLOUD}/cancel`]);
+    await f.client.keepPlan();
+  }
+});
+
+test("an Admin without the app's Cancel and Keep opens the Cloud page's billing; a refusal changes nothing and reads the session again", async t => {
+  const f = await fixture(t);
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 30 * DAY, version: 2 };
+  f.clouds = renewingClouds(f);
+  await f.connect();
+  f.browsers.length = 0;
+  for (const status of [404, 405, 501]) {
+    f.renewal = () => ({ status, body: { error: status === 404 ? "Not found." : "unsupported" } });
+    assert.deepEqual(await f.client.cancelPlan({ answer: "later" }), { outcome: "browser" });
+    assert.deepEqual(await f.client.keepPlan(), { outcome: "browser" });
+  }
+  assert.deepEqual(f.browsers, Array(6).fill(`${f.origin}/cloud/personal/billing`));
+  // The route is there, but refuses: the Cloud isn't this account's (anymore), or there's no plan to change, or Dodo can't be reached.
+  for (const [status, error] of [[404, "not_found"], [403, "forbidden"], [409, "not_renewable"], [502, "provider_error"], [429, "rate_limited"]]) {
+    f.renewal = () => ({ status, body: { error, errorDescription: "Refused." } });
+    const reads = f.requests.filter(request => request.route === "/api/cloud/desktop/session").length;
+    const result = await f.client.cancelPlan(null);
+    assert.equal(result.outcome, "failed", `${status} ${error}`);
+    assert.equal(f.requests.filter(request => request.route === "/api/cloud/desktop/session").length, reads + ([404, 409].includes(status) ? 1 : 0));
+  }
+  assert.equal(f.browsers.length, 6, "only an Admin without the routes opens the browser");
+});
+
+test("the cancel survey as main sends it: one of the reasons, words trimmed and at most 2,000 characters each, never anything else", () => {
+  assert.deepEqual(cancelSurvey({ answer: "broken", expected: " a ", improve: " b " }), { answer: "broken", expected: "a", improve: "b" });
+  assert.deepEqual(cancelSurvey({ answer: null, expected: "only words" }), { answer: "other", expected: "only words" });
+  assert.deepEqual(cancelSurvey({ answer: "later", expected: 7, improve: ["no"] }), { answer: "later" });
+  for (const nothing of [null, undefined, "price", ["price"], {}, { answer: null, expected: "   " }, { answer: "keep" }, { answer: "price", expected: "x".repeat(2_001) },
+    { answer: "price", improve: "y".repeat(2_001) }]) assert.equal(cancelSurvey(nothing), null, JSON.stringify(nothing)?.slice(0, 60));
+  assert.equal(cancelSurvey({ answer: "price", expected: "z".repeat(2_000) }).expected.length, 2_000);
 });

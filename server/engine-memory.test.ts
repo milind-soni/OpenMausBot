@@ -37,6 +37,19 @@ describe("reading the host", () => {
     expect(groups.get(200)).toBe(50_000 * 4096);
   });
 
+  it("counts each process's own share of what it shares, as the kernel splits it, and its resident pages only without one", () => {
+    const stat = (pid: number, pgrp: number, rssPages: number) => `${pid} (node) S 1 ${pgrp} ${pgrp} 0 -1 4194560 ${Array(14).fill(0).join(" ")} ${rssPages} 18446744073709551615`;
+    // Two MCP servers on one runtime: 100 MB resident each, of which 60 MB is the runtime's code they share.
+    const files: Record<string, string> = {
+      "/proc/100/stat": stat(100, 100, 75_000), "/proc/100/smaps_rollup": "00400000-7fff [rollup]\nRss:              300000 kB\nPss:              240000 kB\n",
+      "/proc/101/stat": stat(101, 100, 25_600), "/proc/101/smaps_rollup": "Rss:              102400 kB\nPss:               71680 kB\n",
+      "/proc/102/stat": stat(102, 100, 25_600), "/proc/102/smaps_rollup": "Rss:              102400 kB\nPss:               71680 kB\n",
+      "/proc/103/stat": stat(103, 100, 1_000),
+    };
+    const groups = processGroupBytes(() => ["100", "101", "102", "103"], (path) => files[path] ?? (() => { throw new Error("EACCES"); })());
+    expect(groups.get(100)).toBe((240_000 + 71_680 * 2) * 1024 + 1_000 * 4096);
+  });
+
   it("starts a process with an OOM score of its own and puts this process's back, whatever the spawn does", () => {
     const writes: string[] = [];
     let own = "-800";

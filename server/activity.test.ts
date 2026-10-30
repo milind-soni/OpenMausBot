@@ -72,7 +72,12 @@ describe("describeTool", () => {
       ...["screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec", "computer_exec", "wait_for"].map((tool) => `mcp__computer__${tool}`),
     ];
     const calls = ["apollo.people.search", "crunchbase.companies.lookup", "x.funding.rounds", "newsapi.news.everything", "tikhub.tiktok.user", "g.trends.daily", "serp.google.search", "moz.seo.backlinks", "fal.images.generate", "anyapi.x.search", "people.vendor.thing"];
-    const rows = [...named.map((name) => describedTool(name)), ...calls.map((id) => describedTool("mcp__agents__research_call", { id }))];
+    const untranslated = new Map([
+      ["mcp__agents__delete_trigger", "Delete trigger"], ["mcp__agents__wait_until", "Wait until"],
+      ["mcp__agents__list_waits", "List waits"], ["mcp__agents__cancel_wait", "Cancel wait"],
+    ]);
+    for (const [name, label] of untranslated) expect(describedTool(name)).toEqual({ app: "Team", appKey: "activity.app.team", label });
+    const rows = [...named.filter((name) => !untranslated.has(name)).map((name) => describedTool(name)), ...calls.map((id) => describedTool("mcp__agents__research_call", { id }))];
     for (const row of rows) {
       expect(row.labelKey, row.label).toMatch(/^activity\.tool\./);
       expect(en[row.labelKey!], row.labelKey).toBe(row.label);
@@ -165,6 +170,16 @@ describe("readBotActivity", () => {
     expect(read().map((row) => [row.tool, row.outcome])).toEqual([
       ["WebSearch", "running"],
       ["Bash", "failed"],
+    ]);
+  });
+
+  it("shows each run's step under it, the words the working line used, with the run's turn to open it at", () => {
+    event("t1", "2026-09-07T09:00:00.000Z", { type: "item.started", itemType: "tool", itemId: "i1", title: "Bash",
+      step: { activity: "command", target: "scrape.py", detail: "cd ~/biber && python3 scrape.py --pages 40" } });
+    event("t1", "2026-09-07T09:01:00.000Z", { type: "item.started", itemType: "tool", itemId: "i2", title: "WebFetch", step: { activity: "fetch", target: "linkedin.com" } });
+    expect(read().map((row) => [row.label, row.summary, row.turnId])).toEqual([
+      ["Fetched a page", "linkedin.com", "turn-1"],
+      ["Ran a command", "cd ~/biber && python3 scrape.py --pages 40", "turn-1"],
     ]);
   });
 

@@ -14,6 +14,7 @@ import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
+import { productName } from "@/lib/brand";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error(t("remoteDesktop.noLink"));
@@ -191,7 +192,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         t("computer.viewerTitle", { name: bot.name }),
         bot.id,
       );
-      if (!opened) throw new Error(t("computer.err.openDesktop"));
+      if (!opened) throw new Error(t("computer.err.openDesktop", { app: productName() }));
     } catch (cause) {
       if (tookControl) {
         await api(`/api/bots/${bot.id}/computer/control`, {

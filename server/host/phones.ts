@@ -14,8 +14,8 @@ import { PhoneRegistry } from "../phones/registry.ts";
 import { createPhoneSends } from "../phones/sends.ts";
 import type { LoopbackTrust, RequestAuth } from "../request-auth.ts";
 import type { Routine } from "../routines.ts";
-import { createPhoneRoutes, phoneKey } from "../routes/phones.ts";
-import type { PublicSession } from "../sessions.ts";
+import { createPhoneRoutes, PHONE_ACCESS_CHANGED, phoneKey } from "../routes/phones.ts";
+import type { SessionRegistry } from "../sessions.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { PromptPart } from "../system-prompt.ts";
 
@@ -34,7 +34,7 @@ export interface PhonesDeps {
   loopbackTrust: LoopbackTrust;
   sharedMembership(): boolean;
   store: Pick<Store, "appendMessage" | "bot" | "groupByThread" | "messagesFor">;
-  sessions: { list(): PublicSession[] };
+  sessions: Pick<SessionRegistry, "list" | "isLive" | "onSessionRevoked">;
   routines(): { listRoutines(): Routine[] } | null;
   ownerOrAdmin(auth: RequestAuth): boolean;
   cloudOwnerSession(auth: RequestAuth): boolean;
@@ -60,6 +60,11 @@ export function createPhones(deps: PhonesDeps) {
   const registry = new PhoneRegistry(join(deps.dataDir, "phones.json"));
   const sends = createPhoneSends();
   const jobs = new PhoneJobs((phone, id) => deps.nudge({ kind: "device.job", phone, id }));
+  const unsubscribe = deps.sessions.onSessionRevoked((id) => {
+    const key = `session:${id}`;
+    try { registry.remove(key); } catch {}
+    jobs.drop(key, PHONE_ACCESS_CHANGED);
+  });
   const ownerRoutinesFile = join(deps.dataDir, "owner-routines.json");
   const routineRecordsExisted = existsSync(ownerRoutinesFile);
   /** Off a Cloud home: the routines the desktop owner wrote, so their runs and reports keep the owner's phones. */
@@ -136,7 +141,9 @@ export function createPhones(deps: PhonesDeps) {
     },
     handle: host.handle,
     toolListing: host.toolListing,
-    routes: createPhoneRoutes({ registry, jobs, owner: ownerOf, isAdmin: deps.ownerOrAdmin }),
+    routes: createPhoneRoutes({ registry, jobs, owner: ownerOf, isAdmin: deps.ownerOrAdmin, live: (auth) => auth.kind !== "session" || deps.sessions.isLive(auth.session.id) }),
+    /** How many phones run the phone app here. */
+    paired: (): number => registry.list(null, () => false).length,
     /** Routines written before records were kept are the owner's on a single-person desktop: record them once. */
     adoptRoutines() {
       if (!routineAuthors) return;
@@ -153,6 +160,6 @@ export function createPhones(deps: PhonesDeps) {
       if (!deps.ownerOrAdmin(auth)) routineAuthors.forget(routine.id);
       else if (ownersAgain) routineAuthors.record(routine.id, routine);
     },
-    close: () => jobs.close(),
+    close: () => { unsubscribe(); jobs.close(); },
   };
 }

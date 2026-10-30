@@ -5,6 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../lib/i18n";
 import { ChatMarkdown } from "./ChatMarkdown";
 
+// These are Advanced mode's per-block header controls; Simple mode's plate is tested in ChatMarkdown.test.ts.
+vi.mock("@/lib/interface-mode", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => true,
+  readAdvancedMode: () => true,
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("individual Markdown block actions", () => {
@@ -72,7 +79,7 @@ describe("individual Markdown block actions", () => {
     await act(async () => first!.click());
     expect(first!.getAttribute("aria-label")).toBe("Code copied to clipboard");
     expect(first!.querySelector('[role="status"]')).toBe(status);
-    expect(status?.textContent).toBe("Copied!");
+    expect(status?.textContent).toBe("Copied");
     expect(writeText).toHaveBeenLastCalledWith(plain);
   });
 });

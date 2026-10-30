@@ -24,7 +24,7 @@ import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotPanel } from "./bot-panel/PanelShell";
-import { sidePanelCls } from "./bot-panel/side-panel";
+import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -164,10 +164,11 @@ export function BotSettingsDialog({ bot, overlay = false }: {
     <>
       <aside
         ref={dialogRef}
+        id={simpleView ? BOT_PANEL_ID : undefined}
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={sidePanelCls(overlay)}
+        className={sidePanelCls(overlay, simpleView)}
       >
         {simpleView ? (
           <BotPanel

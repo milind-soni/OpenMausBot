@@ -7,7 +7,7 @@ import { currentTaskBot, useStore, type Action, type Bot } from "@/state/store";
 import { bulkDeleteBody, bulkDeleteOutcome, deleteThreadsInBulk } from "./BulkSelectBar";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
+export function BotDeleteMenuItem({ deleting, onClick, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { deleting: boolean; onClick: () => void; className?: string }) {
   return (
     <button
       type="button"
@@ -16,8 +16,9 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
       onClick={onClick}
       title={deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined}
       className={cn(
-        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger",
-        deleting ? "cursor-default opacity-40" : "hover:bg-raised/70",
+        className,
+        "text-danger",
+        deleting ? "cursor-default opacity-40" : "hover:bg-menu-hover",
       )}
     >
       {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
@@ -40,17 +41,17 @@ export async function deleteAllThreads(bot: Bot, dispatch: Dispatch): Promise<vo
   dispatch({ type: "notice", notice: { kind: "note", botName: null, text: bulkDeleteOutcome(outcome) } });
 }
 
-export function deleteAllThreadsCopy(rows: ReturnType<typeof allThreadRows>) {
+export function deleteAllThreadsCopy(rows: ReturnType<typeof allThreadRows>, simple = false) {
   const ids = new Set(rows.map((row) => row.threadId));
   const startsFresh = rows.every(isTickable);
   return {
-    title: t("task.deleteAllConfirm", { count: rows.length }),
+    title: t(simple ? "task.deleteAllConversationsConfirm" : "task.deleteAllConfirm", { count: rows.length }),
     body: bulkDeleteBody(rows, ids, startsFresh),
     confirmLabel: t("task.bulk.delete", { count: rows.length }),
   };
 }
 
-export function useDeleteAllThreads() {
+export function useDeleteAllThreads(simple = false) {
   const { state, dispatch } = useStore();
   const [botId, setBotId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -60,7 +61,7 @@ export function useDeleteAllThreads() {
     setPending(true);
     void deleteAllThreads(bot, dispatch).finally(() => { setPending(false); setBotId(null); });
   };
-  const dialog = <ConfirmDialog open={bot !== undefined} {...deleteAllThreadsCopy(bot ? allThreadRows(bot) : [])} icon={<Trash2 size={18} />}
+  const dialog = <ConfirmDialog open={bot !== undefined} {...deleteAllThreadsCopy(bot ? allThreadRows(bot) : [], simple)} icon={<Trash2 size={18} />}
     pending={pending} onCancel={() => { if (!pending) setBotId(null); }} onConfirm={run} />;
   return { ask: setBotId, dialog };
 }

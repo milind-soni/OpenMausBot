@@ -33,7 +33,7 @@ An app-event automation runs a bot when something happens in a connected app: a 
 message in a channel, a HubSpot deal changing stage. It uses Composio triggers through the managed service, on
 the desktop, a headless server and a Cloud alike:
 
-1. `create_trigger` (`when: "app_event"`) or the editor saves the automation in `app-triggers.json` in the data
+1. `trigger` (`action: "create"`, `when: "app_event"`) or the editor saves the automation in `app-triggers.json` in the data
    folder and creates its trigger on the service (`POST /v1/triggers`), which checks that the connected account
    belongs to this installation. A Gmail filter (from, subject, label, words) becomes Gmail's own search, so
    other mail never arrives; other apps match the filter as events arrive.
@@ -54,7 +54,7 @@ A Cloud counts as paid once its server presents the Admin's signed grant (`OMB_C
 Events over the limit are not run; the automation shows how many were skipped today and why.
 
 Gmail and other polled apps are checked every 15 minutes, the minimum for Composio-managed sign-ins. A server
-that uses its own Composio project key cannot watch apps yet: `list_trigger_events` and the editor say so, and a
+that uses its own Composio project key cannot watch apps yet: `trigger_info` (`action: "events"`) and the editor say so, and a
 schedule that checks the app, or a webhook, does the job instead.
 
 ## Scoped key permissions
@@ -193,10 +193,12 @@ The workspace-level connections above say which accounts exist. A second, per-bo
 
 A bot with no grant record at all keeps the legacy behavior: every tool on every connected app it can see. Assigning the first grant switches the bot to exact-tool mode — a service not on the list grants nothing, even when the workspace is connected to it.
 
-**Nothing changes until you assign.** Upgrading OpenMausBot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app."
+**Nothing changes until you assign.** Upgrading OpenMausBot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app." The one exception is an app a bot's **Apps** switch turns on (its read or write level) that its tool list leaves out: that app gets all of its tools, so a switch that shows an app on always lets the bot use it.
 
 **Imported bots land with no grants.** Shareable packages and team imports never carry grants — an imported bot starts with connected apps off, and any grants it later gets are chosen by the importing workspace. Grants also never appear in exports; only the workspace's own private team backup keeps them.
 
-**A Chief's new bots start with the Chief's apps.** A bot a Chief of Staff creates (`create_bot`, or a team setup) starts with a copy of the Chief's own connected apps, tools, read or write levels and MCP servers at that moment, never more, and the workspace's default access level. It has the Chief's owner and exactly the Chief's audience; on a Team Cloud, an app each person connects still works only in each person's own private chat, with their own connection. A bot a person creates keeps the defaults above.
+**A Chief's new bots start with the Chief's apps.** A bot a Chief of Staff creates (`create_bot`, or a team setup) starts with a copy of the Chief's own connected apps, tools, read or write levels and MCP servers at that moment, never more, and the workspace's default access level. It has the Chief's owner and exactly the Chief's audience; on a Team Cloud, an app each person connects still works only for the person whose own request the work is, with their own connection. A bot a person creates keeps the defaults above.
+
+**Gmail and Google Calendar by name.** Besides Composio's search-and-run tools, a bot with Gmail or Google Calendar connected and granted gets plain tools for the common reads and writes, the same on every engine: `gmail.search_emails`, `gmail.read_email`, `gmail.read_email_thread`, `gmail.create_draft`, `gmail.send_email`, `googlecalendar.list_events` and `googlecalendar.list_calendars` (writes only where the bot may write). Claude Code finds them by those names (`select:gmail.search_emails`); other engines show them as `gmail_search_emails` behind their own prefix. Each one runs its Composio tool through the multi-execute tool, so its grant, read or write level and approval rules are that tool's. A routine written on one engine keeps working when its bot moves to another.
 
 Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.

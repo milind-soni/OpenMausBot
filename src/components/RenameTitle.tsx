@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { Pencil } from "lucide-react";
 
@@ -12,6 +12,8 @@ export function RenameTitle({
   onEditingChange,
   onActivate,
   showEditButton = false,
+  editRequest = 0,
+  title,
   className,
   editButtonClassName,
   inputClassName,
@@ -21,12 +23,15 @@ export function RenameTitle({
   onEditingChange?: (editing: boolean) => void;
   onActivate?: () => void;
   showEditButton?: boolean;
+  editRequest?: number;
+  title?: string;
   className?: string;
   editButtonClassName?: string;
   inputClassName?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const handledRequest = useRef(editRequest);
 
   useEffect(() => {
     if (!editing) setDraft(value);
@@ -36,6 +41,13 @@ export function RenameTitle({
     setEditing(next);
     onEditingChange?.(next);
   };
+
+  useEffect(() => {
+    if (editRequest === handledRequest.current) return;
+    handledRequest.current = editRequest;
+    setDraft(value);
+    setMode(true);
+  }, [editRequest]);
 
   const finish = (save: boolean) => {
     const next = save ? nextRename(value, draft) : null;
@@ -111,7 +123,7 @@ export function RenameTitle({
   return (
     <span
       className={cn("cursor-text", className)}
-      title={t("rename.doubleClick")}
+      title={title ?? t("rename.doubleClick")}
       tabIndex={0}
       role="button"
       aria-label={t("rename.named", { name: value })}

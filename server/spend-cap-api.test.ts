@@ -40,7 +40,7 @@ describe("spend cap and prices through real turns", () => {
     const routes = join(layerDir, "memory-replies.json");
     const dump = join(layerDir, "memory-call.json");
     writeFileSync(routes, JSON.stringify({
-      [CAPTURE_MARKER]: '[{"text":"Project codename is Bluebird","kind":"fact","confidence":0.9}]',
+      [CAPTURE_MARKER]: '[{"text":"Project codename is Bluebird","kind":"fact","evidence":"project codename is Bluebird","confidence":0.9}]',
       [ORGANIZE_MARKER]: '{"moves":[]}',
       [TIDY_MARKER]: '{"pairs":[]}',
     }));
@@ -75,7 +75,7 @@ describe("spend cap and prices through real turns", () => {
     }
     await expect.poll(rows).toHaveLength(1);
     expect(rows()[0]).toMatchObject({
-      botId: bot.id, botName: bot.name, driverKind: "claudeAgent", model: "claude-haiku-4-5",
+      botId: bot.id, botName: bot.name, driverKind: "claudeAgent", model: "claude-haiku-5-5",
       input: 15, output: 5, cachedInput: 2, costUsd: 0.01, costSource: "reported",
       trigger: { kind: "bot", botId: bot.id }, threadId: expect.stringMatching(/^memory-/),
     });
@@ -115,7 +115,7 @@ describe("spend cap and prices through real turns", () => {
   it.each([
     { name: "missing usage stays unpriced", metadata: {}, costUsd: null, costSource: undefined },
     { name: "reported zero stays reported", metadata: { total_cost_usd: 0 }, costUsd: 0, costSource: "reported" },
-    { name: "tokens without cost are estimated", metadata: { usage: { input_tokens: 10, output_tokens: 5 } }, costUsd: 0.000035, costSource: "estimated" },
+    { name: "tokens without cost are estimated", metadata: { usage: { input_tokens: 10, output_tokens: 5 } }, costUsd: 0.0000035, costSource: "estimated" },
   ])("memory helper accounting: $name", async ({ metadata, costUsd, costSource }) => {
     await session.close();
     session = await launchVerificationServer({ ...process.env,

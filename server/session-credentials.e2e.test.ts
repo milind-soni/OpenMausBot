@@ -52,7 +52,7 @@ async function fixture(test: (f: any) => Promise<void>, { thisComputer = false }
     };
     writeFileSync(configPath, JSON.stringify(config));
     if (thisComputer) {
-      // What the desktop app publishes once its CUA driver is running.
+      // What the desktop app hands its own server once its driver is running.
       mkdirSync(userData, { recursive: true });
       writeFileSync(join(userData, "cua-connection.json"), JSON.stringify({
         mode: "embedded", status: "ready", socketPath: join(dataDir, "cua.sock"),
@@ -60,12 +60,15 @@ async function fixture(test: (f: any) => Promise<void>, { thisComputer = false }
       }), { mode: 0o600 });
     }
     const log = openSync(logPath, "a", 0o600);
-    server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
+    // With this computer, started as the desktop app starts its own server, which hears the driver record over its parent port.
+    server = spawn(process.execPath, ["--experimental-strip-types",
+      ...(thisComputer ? ["--import", pathToFileURL(fileURLToPath(new URL("./testing/desktop-parent.mjs", import.meta.url))).href] : []),
+      fileURLToPath(new URL("./index.ts", import.meta.url))], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: {
         ...verificationServerEnvironment({ FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_RELEASE: release }, dataDir, Number(new URL(url).port)),
         ...(withBrowser ? { OMB_AGENT_BROWSER_PATH: browser } : {}),
-        ...(thisComputer ? { OMB_USER_DATA: userData } : {}),
+        ...(thisComputer ? { OMB_TEST_DESKTOP_CUA_CONNECTION: join(userData, "cua-connection.json") } : {}),
       },
       stdio: ["ignore", log, log],
     });

@@ -103,6 +103,7 @@ export const CHAT_NOTICE = {
   "chat.notice.codexUnsupportedOne": "Codex could not run the tool {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
   "chat.notice.codexUnsupportedMany": "Codex could not run the tools {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
   "chat.notice.codexUnsupportedMore": "Codex could not run the tools {tools} and {count} more (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
+  "chat.notice.toldPerson": "Told {name}",
   "chat.notice.handoffSent": "Sent to {name}",
   "chat.notice.handoffSentRoom": "Sent to {name} · {room}",
   "chat.notice.relayReply": "{name} replied: {message}",

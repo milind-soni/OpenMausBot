@@ -13,23 +13,73 @@ const DISCOVERY_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_MODELS = 128;
+/** The `clientInfo.name` every discovery session is opened with. */
+export const DISCOVERY_CLIENT_NAME = "openmausbot-model-discovery";
+
+export interface AcpDiscoveryOptions {
+  /** A saved id listed first that leaves the native session's model unchanged; it becomes the default. */
+  passthrough?: { id: string; label: string };
+  /** Mark every option `custom: true`, as a custom-only engine's picker lists only those. */
+  custom?: boolean;
+  /** Switch to each model to read its own variants. False stops after session/new. */
+  variants?: boolean;
+  /** The catalog default when the agent offers it; otherwise the session's current model. */
+  default?: string;
+  /** The picker label for an advertised model, given session/new's result verbatim. */
+  label?(model: { id: string; label: string }, sessionNew: unknown): string;
+  /** Close stdin and give the agent this many milliseconds to exit on its own, so it can release what it holds,
+   * before it is killed. Without it the agent is killed at once. */
+  exitGraceMs?: number;
+  /** Remove what the agent kept of the discovery session, once its process has stopped. */
+  forgetSession?(session: { sessionId: string; cwd: string; env: Record<string, string | undefined> }): Promise<void>;
+}
+
+/** The agent answered a discovery request with a JSON-RPC error, so it is reachable. Its own text stays
+ * off `message`, which callers may show. */
+export class AcpDiscoveryRpcError extends Error {
+  readonly code: unknown;
+  readonly rpcMessage: string;
+  constructor(code: unknown, rpcMessage: string) {
+    super("ACP model discovery request was rejected by the agent.");
+    this.code = code;
+    this.rpcMessage = rpcMessage.slice(0, 500);
+  }
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined;
 }
 
-async function closeDiscovery(child: ReturnType<typeof spawnCli> | undefined, cwd: string): Promise<void> {
-  let stopped = !child;
-  try { if (child) stopped = await killCliTree(child, 500); }
-  finally { await rm(cwd, { recursive: true, force: true }); }
-  if (!stopped) throw new Error("The ACP discovery process could not be stopped.");
+/** Stops the agent, first letting it exit on its own when asked to. Returns whether it stopped. */
+async function stopDiscovery(child: ReturnType<typeof spawnCli> | undefined, graceMs: number | undefined): Promise<boolean> {
+  if (!child) return true;
+  if (graceMs !== undefined && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    try { child.stdin.end(); } catch {}
+    await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, graceMs).unref())]);
+  }
+  // A wrapper that exits on EOF must wait for its agent (Copilot CLI 1.0.103's npm-loader does, through spawnSync): once the
+  // direct child is gone, taskkill /T cannot find the tree. Windows stops it through taskkill, which needs seconds.
+  return killCliTree(child, process.platform === "win32" ? 5_000 : 500);
 }
 
-export async function resolveCustomAcpModels(
+const AGENT_DEFAULT = { id: "agent-default", label: "Agent default" };
+
+export function resolveCustomAcpModels(
   env: Record<string, string | undefined>,
   config: Pick<AcpConfig, "cli">,
   _instanceId?: string,
+): Promise<ModelCatalog> {
+  return discoverAcpModels(env, config.cli, [], { passthrough: AGENT_DEFAULT, custom: true });
+}
+
+/** Reads the models an ACP agent advertises in an empty folder, without a prompt, tool, MCP server or permission. */
+export async function discoverAcpModels(
+  env: Record<string, string | undefined>,
+  cli: string,
+  args: string[],
+  discovery: AcpDiscoveryOptions = {},
 ): Promise<ModelCatalog> {
   const cwd = await mkdtemp(join(tmpdir(), "omb-acp-models-"));
   let child: ReturnType<typeof spawnCli> | undefined;
@@ -43,6 +93,8 @@ export async function resolveCustomAcpModels(
   let outputBytes = 0;
   let buffer = "";
   const decoder = new StringDecoder("utf8");
+  let catalog: ModelCatalog | undefined;
+  let thrown: unknown;
   const fail = (message: string) => {
     failure ??= new Error(message);
     for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(failure); }
@@ -80,8 +132,10 @@ export async function resolveCustomAcpModels(
     if (!entry) return;
     pending.delete(message.id);
     clearTimeout(entry.timer);
-    if (message.error !== undefined) entry.reject(new Error("ACP model discovery request was rejected by the agent."));
-    else entry.resolve(message.result);
+    if (message.error !== undefined) {
+      const error = record(message.error);
+      entry.reject(new AcpDiscoveryRpcError(error?.code, typeof error?.message === "string" ? error.message : ""));
+    } else entry.resolve(message.result);
   };
   const request = (method: string, params: unknown): Promise<unknown> => {
     if (failure) return Promise.reject(failure);
@@ -96,7 +150,7 @@ export async function resolveCustomAcpModels(
     });
   };
   try {
-    child = spawnCli(config.cli, [], { cwd, env, stdio: ["pipe", "pipe", "pipe"] }, "bot");
+    child = spawnCli(cli, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] }, "bot");
     child.on("error", () => fail("Could not start the ACP agent for model discovery."));
     child.on("close", () => fail("ACP agent closed during model discovery."));
     child.stdout.on("data", (chunk: Buffer) => {
@@ -115,7 +169,7 @@ export async function resolveCustomAcpModels(
     globalTimer = setTimeout(() => fail("ACP model discovery timed out."), DISCOVERY_TIMEOUT_MS);
     await request("initialize", {
       protocolVersion: 1,
-      clientInfo: { name: "openmausbot-model-discovery", version: "1" },
+      clientInfo: { name: DISCOVERY_CLIENT_NAME, version: "1" },
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
     const initial = await request("session/new", { cwd, mcpServers: [] });
@@ -125,14 +179,16 @@ export async function resolveCustomAcpModels(
     const modelOption = acpModelOption(initial);
     if (!modelOption?.options.length) throw new Error("The ACP agent did not advertise any models. The previous catalog was kept.");
     if (modelOption.options.length > MAX_MODELS) throw new Error("The ACP model catalog exceeded the discovery limit.");
-    const options: ModelCatalog["options"] = [{ id: "agent-default", label: "Agent default", custom: true }];
+    const mark = discovery.custom ? { custom: true } : {};
+    const { passthrough } = discovery;
+    const options: ModelCatalog["options"] = passthrough ? [{ ...passthrough, ...mark }] : [];
     for (const model of modelOption.options) {
-      if (model.id === "agent-default") continue;
+      if (model.id === passthrough?.id) continue;
       if (failure) throw failure;
       let confirmed: unknown;
       if (model.id === modelOption.currentValue) {
         confirmed = initial;
-      } else {
+      } else if (discovery.variants !== false) {
         const previousUpdate = updateSequence;
         try {
           const response = modelOption.configId
@@ -145,13 +201,27 @@ export async function resolveCustomAcpModels(
         }
       }
       const variants = confirmed ? acpVariantOption(confirmed)?.options : undefined;
-      options.push({ ...model, custom: true, ...(variants?.length ? { variants } : {}) });
+      const label = discovery.label ? discovery.label(model, initial) : model.label;
+      options.push({ ...model, label, ...mark, ...(variants?.length ? { variants } : {}) });
     }
     if (failure) throw failure;
-    return { default: "agent-default", options };
+    const preferred = discovery.default && options.some((option) => option.id === discovery.default) ? discovery.default : undefined;
+    catalog = { default: passthrough?.id ?? preferred ?? modelOption.currentValue ?? options[0].id, options };
+  } catch (error) {
+    thrown = error;
   } finally {
     if (globalTimer) clearTimeout(globalTimer);
     fail("ACP model discovery finished.");
-    await closeDiscovery(child, cwd);
+    let stopped = false;
+    try {
+      stopped = await stopDiscovery(child, discovery.exitGraceMs);
+      if (stopped && sessionId) await discovery.forgetSession?.({ sessionId, cwd, env }).catch(() => undefined);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+    // The discovery's own failure says more than a process that would not stop.
+    if (!stopped) thrown ??= new Error("The ACP discovery process could not be stopped.");
   }
+  if (thrown !== undefined) throw thrown;
+  return catalog!;
 }

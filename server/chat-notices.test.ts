@@ -7,7 +7,8 @@ import { heldMemberLine, isHeldMemberLine } from "./room-holds.ts";
 
 describe("chat notices", () => {
   it("the catalog's chat notices are exactly the ones the server writes", () => {
-    const catalog = Object.fromEntries(Object.entries(englishCatalog).filter(([key]) => key.startsWith("chat.notice.")));
+    const clientLabels = new Set(["chat.notice.signIn", "chat.notice.signInHint"]);
+    const catalog = Object.fromEntries(Object.entries(englishCatalog).filter(([key]) => key.startsWith("chat.notice.") && !clientLabels.has(key)));
     expect(catalog).toEqual(CHAT_NOTICE);
   });
 

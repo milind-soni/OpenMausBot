@@ -1,5 +1,5 @@
-import type { Bot, InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
+import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(
   instances: InstanceInfo[],
@@ -23,6 +23,7 @@ export function localComputerSelectable({
   return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
+/** Why a bot can't use this computer, in words for the person: what to do, never the parts underneath. */
 export function localComputerDisabledReason({
   capabilities,
   providerSupportsLocal,
@@ -30,29 +31,17 @@ export function localComputerDisabledReason({
   capabilities: DesktopCapabilities;
   providerSupportsLocal: boolean;
 }): string | null {
-  if (!providerSupportsLocal) {
-    return t("computer.localReason.provider");
-  }
+  if (!providerSupportsLocal) return t("computer.problem.localAiCannot");
   if (capabilities.localComputer.available) return null;
   if (capabilities.host.platform === "linux") {
-    if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
-      return t("computer.localReason.wayland", { place: t("place.local") });
-    }
-    if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") {
-      return t("computer.localReason.compositor");
-    }
-    if (!capabilities.localComputer.enabled) {
-      return t("computer.localReason.beta");
-    }
-    return capabilities.localComputer.message ?? t("computer.localReason.cuaNotReady");
+    if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
+    if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");
+    if (!capabilities.localComputer.enabled) return t("computer.problem.localTurnOn");
+    return capabilities.localComputer.message ?? t("computer.problem.localNotReady");
   }
-  if (capabilities.host.label === "Browser") {
-    return t("computer.localReason.desktopApp");
-  }
-  if (capabilities.host.platform === "win32") {
-    return t("computer.localReason.windows");
-  }
-  return t("computer.localReason.notReady");
+  if (capabilities.host.label === "Browser") return t("computer.problem.localNeedsApp");
+  if (capabilities.host.platform === "win32") return t("computer.problem.localWindows");
+  return t("computer.problem.localMac");
 }
 
 export type BoatPanelAction =
