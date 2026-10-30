@@ -153,7 +153,7 @@ class BrowserClient {
     this.onClose = onClose;
     this.onRequestTimeout = onRequestTimeout;
     this.child = spawnCli(spec.command, spec.args, {
-      env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false,
+      env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false, botWork: true,
     });
     this.child.stderr.resume();
     this.child.stdout.on("data", (chunk: Buffer) => this.read(chunk));

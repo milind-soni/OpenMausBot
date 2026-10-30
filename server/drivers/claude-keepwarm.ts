@@ -174,7 +174,7 @@ export function runForkedPrompt<T>(opts: {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(opts.cli, args, { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true });
+      child = spawnCli(opts.cli, args, { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true, botWork: true });
     } catch (error) {
       cleanup();
       resolve(opts.failed(`the ${what} could not start: ${(error as Error).message}`));
