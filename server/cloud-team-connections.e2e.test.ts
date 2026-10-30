@@ -238,26 +238,35 @@ it("gives work her own message hands to another bot her own Gmail, and never wor
     return row!.tool;
   };
 
+  /** Each chat's bot is resumed with the helper's result and runs its own steps once more: the work it handed on is over
+   * only once its chat shows the resume and everyone stays idle two polls running. */
+  const resumes = async (token: string, threadId: string) => ((await messages(token, threadId)).body.messages as Array<{ tool?: { name?: string } }>)
+    .filter((message) => message.tool?.name?.startsWith("Resumed with")).length;
+  const finished = async (token: string, threadId: string, resumedBefore: number) => {
+    let quiet = false;
+    await expect.poll(async () => {
+      const done = await resumes(token, threadId) > resumedBefore && await idle(token);
+      const steady = done && quiet;
+      quiet = done;
+      return steady;
+    }, { timeout: 90_000, interval: 1_000 }).toBe(true);
+  };
+
   const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
-  const known = helperThreads();
+  const known = helperThreads(), adaResumes = await resumes(ada, adaThread);
   await turn(ada, adaThread, "Have Helper fetch my latest email.", { calls: [handOn("Ada"), gmailCall("own_apps")] });
   const adas = await helperGmail(ada, known);
   expect(adas.ok, adas.output).toBe(true);
   expect(adas.whose, "the step says whose").toEqual({ person: ADA.email, app: "Gmail" });
   expect(gmailCallsBy(adaUser), "her bot and the helper both ran as her").toBeGreaterThanOrEqual(before + 2);
-  // Her bot is then resumed with the helper's result and runs its own step as her once more: count only once all of her
-  // work has finished (everyone idle, and her count the same two polls running).
-  let last = -1;
-  await expect.poll(async () => {
-    const now = gmailCallsBy(adaUser);
-    const steady = now === last && now >= before + 3 && await idle(ada);
-    last = now;
-    return steady;
-  }, { timeout: 90_000, interval: 1_000 }).toBe(true);
+  // Her bot, resumed with the helper's result, runs its step as her once more: count only once all of her work is over.
+  await finished(ada, adaThread, adaResumes);
+  expect(gmailCallsBy(adaUser), "her bot, the helper, and her bot again").toBe(before + 3);
 
-  const adaCalls = gmailCallsBy(adaUser), seen = helperThreads();
+  const adaCalls = gmailCallsBy(adaUser), seen = helperThreads(), cleoResumes = await resumes(cleo, cleoThread);
   await turn(cleo, cleoThread, "Have Helper fetch my latest email.", { calls: [handOn("Cleo"), gmailCall("own_apps")] });
   const cleos = await helperGmail(cleo, seen);
+  await finished(cleo, cleoThread, cleoResumes);
   expect(cleos.ok).toBe(false);
   expect(cleos.output, "Cleo connected nothing, and Ada's is never hers").toContain("no own_apps MCP server was launched for this turn");
   expect(cleos.whose).toBeUndefined();
