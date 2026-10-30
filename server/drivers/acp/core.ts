@@ -58,8 +58,7 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
-import { awaitAcpTeardown, confirmAcpTermination } from "./termination.ts";
-import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
+import { awaitAcpTeardown, confirmAcpTermination } from "./termination.ts"; import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
@@ -431,10 +430,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // session/close or the end of its process stops it, and ending a shared process ends the other sessions' turns too.
       const endUnconfirmed = async (threadId: string, session: AcpSession, why = "cancel-timeout"): Promise<boolean> => {
         const { current } = session;
-        if (current) {
-          current.state.cancelling = true;
-          if (current.interruptTimer) clearTimeout(current.interruptTimer);
-        }
+        if (current) { current.state.cancelling = true; if (current.interruptTimer) clearTimeout(current.interruptTimer); }
         return confirmAcpTermination(session, () => {
           void closeSession(threadId, why);
           return session.closeConfirmed ?? Promise.resolve(false);
@@ -1199,9 +1195,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         };
 
         const stop = async () => {
-          state.stopped = true;
-          const ended = await endUnconfirmed(threadId, session, "stop");
-          settle(threadId, session, ended, ended ? "cancelled" : "stop_failed");
+          state.stopped = true; const ended = await endUnconfirmed(threadId, session, "stop"); settle(threadId, session, ended, ended ? "cancelled" : "stop_failed");
         };
         const interrupt = () => {
           state.stopped = true;
