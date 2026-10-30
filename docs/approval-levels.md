@@ -61,7 +61,7 @@ one, every approval decision OMB makes in that conversation uses it. How far
 that reaches depends on who runs the tools:
 
 - **API engines** (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras,
-  Groq, Meta): OMB's tool gate reads the level before each tool call, so the
+  Groq, Greenference, Meta): OMB's tool gate reads the level before each tool call, so the
   change applies from the next call, up or down.
 - **Engines with their own modes** (Codex, Claude, Cursor, Antigravity, Grok
   Build, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
@@ -270,7 +270,7 @@ multi-question card renders its structured form on current apps instead.
 | Droid | Session mode `normal` (reads only) | not offered | Ask (no reviewer) | Session mode `auto-high`, plus automatic approval of remaining ACP permission requests |
 | Kimi, Hermes, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Pi | Pi's own tools run; computer control and custom MCP tools ask | not offered | Ask (no reviewer) | Custom MCP tools run without asking; computer-control confirms are approved |
-| API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |
+| API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Greenference, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |
 
 These settings apply on each turn, including resumed conversations. Switching
 to a different provider while on Custom requires leaving Custom first;

@@ -41,6 +41,7 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   mistral: CHAT_ROW,
   cerebras: CHAT_ROW,
   groq: CHAT_ROW,
+  greenference: CHAT_ROW,
   meta: CHAT_ROW,
 };
 

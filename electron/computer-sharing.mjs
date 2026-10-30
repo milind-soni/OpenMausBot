@@ -770,7 +770,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     lendTerminal(on) {
       const account = on === true ? signedInAccount() : null;
       if (closed || terminalAccount === account) return;
-      if (on === true && !account) throw new Error("Sign in to your Cloud before lending it the terminal.");
+      if (on === true && !account) throw new Error("Sign in to the Cloud before lending it the terminal.");
       const before = terminalAccount;
       terminalAccount = account;
       try { store(records); } catch (error) { terminalAccount = before; throw error; }
