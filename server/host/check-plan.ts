@@ -150,6 +150,15 @@ export function clashes<T extends CalendarEvent>(meetings: readonly T[], input: 
   return pairs;
 }
 
+/** The person's meetings just before and just after this one on the same day, each at most an hour away. */
+export function neighbours<T extends CalendarEvent>(event: CalendarEvent, meetings: readonly T[], timeZone: string | undefined): { before?: T; after?: T } {
+  const day = localDate(event.start, timeZone);
+  const near = meetings.filter((other) => other.id !== event.id && other.status !== "cancelled" && !other.allDay && !other.selfDeclined && localDate(other.start, timeZone) === day);
+  const before = near.filter((other) => other.end <= event.start && event.start - other.end <= HOUR).sort((a, b) => b.end - a.end)[0];
+  const after = near.filter((other) => other.start >= event.end && other.start - event.end <= HOUR).sort((a, b) => a.start - b.start)[0];
+  return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
+}
+
 /** New mail not yet sorted: the newest batch goes to the AI, older than a day stays quiet, and the rest waits. */
 export function planMail(input: { now: number; emails: readonly EmailHeader[]; judged: ReadonlySet<string> }): { batch: EmailHeader[]; quiet: EmailHeader[]; waiting: EmailHeader[] } {
   const fresh = input.emails.filter((email) => !input.judged.has(email.id));

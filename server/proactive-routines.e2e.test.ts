@@ -16,8 +16,12 @@ const MINUTE = 60_000;
 const MIDDAY_ZONE = (() => { const offset = 12 - new Date().getUTCHours(); return `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`; })();
 const WATCH_REPLY = JSON.stringify({
   important: [{ id: "important-1", why: "Ada needs the Q3 numbers from you by Friday.", needsReply: true }],
-  prep: [{ id: "standup-uid", brief: "Ada leads the standup.\nOpen: the Q3 numbers.\nNext step: bring the draft." }],
+  prep: [
+    { id: "standup-uid", brief: "Ada leads the standup.\nOpen: the Q3 numbers.\nNext step: bring the draft." },
+    { id: "call-uid", brief: "Priya founded Harbour Tax in 2025.\nNext step: bring the setup price." },
+  ],
 });
+const LOOKUP_REPLY = JSON.stringify({ people: [{ email: "priya@harbour.test", facts: [{ text: "Founded Harbour Tax in 2025.", url: "https://www.harbour.test/about" }] }] });
 
 type Fixture = Awaited<ReturnType<typeof launchVerificationServer>>;
 
@@ -54,12 +58,16 @@ describe("MausBot keeps an eye on the day, hidden from the sidebar", () => {
   let chief: { id: string; threadId: string };
   let watch: { id: string };
   const markers = join(tmpdir(), `omb-watch-markers-${process.pid}-${Date.now()}.json`);
+  const searches = join(tmpdir(), `omb-watch-searches-${process.pid}-${Date.now()}.json`);
+  const oneShot = join(tmpdir(), `omb-watch-one-shot-${process.pid}-${Date.now()}.json`);
 
   beforeAll(async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     apps = await startFakeConnectedApps();
     writeFileSync(markers, JSON.stringify({ "Your checks found what is below": WATCH_REPLY }));
-    fixture = await launchVerificationServer({ ...process.env, TZ: MIDDAY_ZONE, OMB_COMPOSIO_BROKER_URL: apps.url, OMB_COMPOSIO_BROKER_TOKEN: apps.token, FAKE_CLAUDE_MARKER_REPLIES: markers });
+    writeFileSync(searches, JSON.stringify({ "Search the web to find out who they are": LOOKUP_REPLY }));
+    fixture = await launchVerificationServer({ ...process.env, TZ: MIDDAY_ZONE, OMB_COMPOSIO_BROKER_URL: apps.url, OMB_COMPOSIO_BROKER_TOKEN: apps.token,
+      FAKE_CLAUDE_MARKER_REPLIES: markers, FAKE_CLAUDE_TEXT_ROUTES: searches, FAKE_CLAUDE_TEXT_DUMP: oneShot, FAKE_CLAUDE_VERSION: "2.1.296" });
     api = client(fixture);
     const bots = (await api("GET", "/api/bots")).bots as any[];
     const found = bots.find((bot) => bot.defaultBot && !bot.defaultBot.person);
@@ -141,6 +149,34 @@ describe("MausBot keeps an eye on the day, hidden from the sidebar", () => {
     const run = await settled((await runNow()).id);
     expect(run).toMatchObject({ status: "completed", report: { state: "quiet" } });
     expect(readFileSync(fixture.fixtureDumpPath, "utf8")).toBe(dump);
+  });
+
+  it("a meeting with someone from outside waits for a web search that knows only who they are; the prep links to what it found", async () => {
+    const now = Date.now();
+    apps.events.push({
+      id: "call-1", iCalUID: "call-uid", status: "confirmed", summary: "Setup call", description: "PRIVATE-INVITE-NOTE",
+      start: { dateTime: new Date(now + 230 * MINUTE).toISOString() }, end: { dateTime: new Date(now + 260 * MINUTE).toISOString() },
+      attendees: [{ email: "me@example.test", self: true, organizer: true, responseStatus: "accepted" }, { email: "priya@harbour.test", displayName: "Priya Raman" }],
+    });
+    const waited = await settled((await runNow()).id);
+    expect(waited).toMatchObject({ status: "completed", report: { state: "quiet" } });
+    await expect.poll(() => existsSync(oneShot), { timeout: 10_000 }).toBe(true);
+    const search = JSON.parse(readFileSync(oneShot, "utf8")) as { argv: string[]; prompt: string };
+    expect(search.argv[search.argv.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(search.argv).toContain("--strict-mcp-config");
+    expect(search.prompt).toContain("name Priya Raman · email priya@harbour.test · company domain harbour.test");
+    expect(search.prompt).not.toMatch(/PRIVATE-INVITE-NOTE|Setup call|ada@example\.test|Q3 numbers/);
+
+    let prepped: any;
+    await expect.poll(async () => {
+      if (!prepped) await settled((await runNow()).id);
+      prepped = (await messages()).find((message) => message.serverCard && message.widget?.root.title === "Prep: Setup call");
+      return Boolean(prepped);
+    }, { timeout: 30_000, interval: 500 }).toBe(true);
+    const prompt = JSON.stringify(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).prompt);
+    expect(prompt).toContain("[Records from a web search about the outside guests.");
+    expect(prompt).toContain("Founded Harbour Tax in 2025. (www.harbour.test)");
+    expect(widgetActions(prepped.widget.root as WidgetRoot).map((entry) => [entry.label, entry.action.payload])).toEqual([["harbour.test", { url: "https://www.harbour.test/about" }]]);
   });
 
   it("Dismiss takes the row away with no AI turn, and the next sort hears about it", async () => {

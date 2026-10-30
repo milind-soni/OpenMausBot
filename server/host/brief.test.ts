@@ -12,6 +12,7 @@ import { Store, type Message } from "../store.ts";
 import { AWAY_MS, createBrief } from "./brief.ts";
 import { briefCard } from "./brief-cards.ts";
 import { ENGLISH_BRIEF } from "./brief-words.ts";
+import type { HandedPrep } from "./routine-checks.ts";
 
 const MINUTE = 60_000;
 const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
@@ -36,7 +37,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
   const notified: string[] = [];
   const failed: Array<[string, string]> = [];
   const kept: string[] = [];
-  const items = new Map<string, { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> }>();
+  const items = new Map<string, { mail: EmailHeader[]; prep: HandedPrep[] }>();
   const runs: RoutineRun[] = [];
   let busy = false;
   const make = () => createBrief({
@@ -219,7 +220,7 @@ describe("the brief", () => {
     const s = setup();
     await s.brief.active("desktop", "UTC");
     s.notified.length = 0;
-    s.items.set("chk-1", { mail: [ada], prep: [{ key: "uid-1", event: { ...standup, start: s.now() + 60 * MINUTE, end: s.now() + 90 * MINUTE } }] });
+    s.items.set("chk-1", { mail: [ada], prep: [{ key: "uid-1", event: { ...standup, start: s.now() + 60 * MINUTE, end: s.now() + 90 * MINUTE }, sources: ["https://www.harbour.test/about", "http://plain.test/"] }] });
     await s.brief.consume(s.watchRun("chk-1", '{"important": [{"id": "m1", "why": "Ada needs the numbers by Friday.", "needsReply": true}], "prep": [{"id": "uid-1", "brief": "Ada runs it."}]}'), "turn-1");
     expect(s.kept).toEqual(["chk-1"]);
     expect(s.shown()).toContain("Ada: Q3 numbers");
@@ -228,6 +229,8 @@ describe("the brief", () => {
     expect(actions).toEqual(expect.arrayContaining([["Draft a reply to Ada", "draft_reply"], ["Dismiss Ada's email", "dismiss_row"], ["Open in Gmail", "open_url"]]));
     const prep = s.rows().find((message) => message.widget?.root.title === "Prep: Standup")!;
     expect(prep.serverCard).toBe(true);
+    expect(widgetActions(prep.widget!.root as WidgetRoot).filter((entry) => entry.label !== "Join").map((entry) => [entry.label, entry.action.payload])).toEqual([["harbour.test", { url: "https://www.harbour.test/about" }]]);
+    expect(JSON.stringify(prep.widget!.root)).toContain('"value":"Sources"');
     expect(s.notified).toEqual(["Prep ready: Standup, Today, 9:00 AM to 9:30 AM", "Your brief: 1 needs you"]);
     await s.brief.refresh();
     expect(s.notified).toHaveLength(2);

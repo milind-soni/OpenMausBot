@@ -52,7 +52,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { runKeepWarmPing, type KeepWarmContract } from "./claude-keepwarm.ts";
-import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts";
+import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall, webSearchCallArgs } from "./claude-background.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts";
@@ -1949,8 +1949,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       return { state: "available", version, ...auth, ...claudeBilling(env, auth.account), ...(update ? { update } : {}), ...(warning ? { warning } : {}) };
     };
 
-    /** One-shot call, prompt on stdin (approval summaries can hold secrets), no tools or MCP servers. */
-    const generateReview = async (prompt: string, signal?: AbortSignal, onUsage?: TextGenerationOptions["onUsage"], timeoutMs?: number, named?: string): Promise<string> => {
+    /** One-shot call, prompt on stdin (approval summaries can hold secrets), no tools or MCP servers; `web` allows web search alone. */
+    const generateReview = async (prompt: string, signal?: AbortSignal, onUsage?: TextGenerationOptions["onUsage"], timeoutMs?: number, named?: string, web = false): Promise<string> => {
       await ensureCliVersion(environment());
       return new Promise((resolve, reject) => {
         if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) {
@@ -1959,7 +1959,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         const model = named ?? config.managedModels?.[0] ?? "claude-haiku-5-5";
         const env = environment(model);
-        const args = backgroundCallArgs({ model, outputFormat: onUsage ? "json" : "text", supports: (flag) => cliVersion !== null && claudeCliSupports(cliVersion, flag), isolated: !inheritsUserConfig(env) });
+        const supports = (flag: Parameters<typeof claudeCliSupports>[1]) => cliVersion !== null && claudeCliSupports(cliVersion, flag);
+        const args = web ? webSearchCallArgs({ model, supports }) : backgroundCallArgs({ model, outputFormat: onUsage ? "json" : "text", supports, isolated: !inheritsUserConfig(env) });
+        if (!args) {
+          reject(new Error("This Claude Code is too old to search the web without its other tools. Update Claude Code."));
+          return;
+        }
         const { child, removeCwd } = spawnBackgroundCall(config.cli, args, env);
         let stdout = "";
         let stderr = "";
@@ -2118,7 +2123,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         },
       },
       generateText: (prompt, options) => generateReview(prompt, options?.signal, options?.onUsage, options?.timeoutMs, options?.model),
-      reviewPermission: generateReview,
+      searchWeb: (prompt, options) => generateReview(prompt, options?.signal, undefined, options?.timeoutMs, options?.model, true),
+      reviewPermission: (prompt, signal) => generateReview(prompt, signal),
       dispose: async () => {
         try {
           await login.dispose();

@@ -29,6 +29,19 @@ export function backgroundCallArgs(input: {
   return args;
 }
 
+/** Security invariant: a web search call carries text from the open web, so it gets the one built-in tool that runs on
+ * Anthropic's side and no MCP servers, settings or hooks of the person's, whatever OMB_CLAUDE_INHERIT_USER_CONFIG says.
+ * WebFetch is left out: it fetches from this computer, so a page could aim it at local addresses. Null when this CLI
+ * can't be held to that. */
+export function webSearchCallArgs(input: { model: string; supports: (flag: BackgroundFlag) => boolean }): string[] | null {
+  if (!input.supports("--tools") || !input.supports("--strict-mcp-config") || !input.supports("--setting-sources")) return null;
+  return [
+    "-p", "--model", input.model, "--output-format", "text", "--settings", BACKGROUND_SETTINGS,
+    "--tools", "WebSearch", "--allowedTools", "WebSearch", "--strict-mcp-config", "--setting-sources", "project",
+    ...(input.supports("--no-session-persistence") ? ["--no-session-persistence"] : []),
+  ];
+}
+
 /** Runs in an empty temp folder so no project settings or files leak in; the caller removes it once settled. */
 export function spawnBackgroundCall(cli: string, args: string[], env: NodeJS.ProcessEnv) {
   const cwd = mkdtempSync(join(tmpdir(), "omb-claude-background-"));

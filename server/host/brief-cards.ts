@@ -84,12 +84,22 @@ function prepLines(prep: string): Node[] {
   return shown.map((line) => text(line));
 }
 
-export function prepCard(input: { event: CalendarEvent; prep: string; timeZone?: string; now: number }): BuiltCard {
+/** The pages a web search about the guests read, each labelled with its site as the address names it, never by the AI. */
+function sourceRow(sources: readonly string[]): Node[] {
+  const links = sources.flatMap((source) => {
+    const link = httpsLink(source);
+    const action = link ? openUrl(link) : undefined;
+    return link && action ? [button(new URL(link).hostname.replace(/^www\./, ""), action)] : [];
+  });
+  return links.length ? [caption("Sources"), ...buttons(links)] : [];
+}
+
+export function prepCard(input: { event: CalendarEvent; prep: string; sources?: readonly string[]; timeZone?: string; now: number }): BuiltCard {
   const { event } = input;
   const when = meetingWhen(event.start, event.end, input.timeZone, input.now);
   const where = event.location && event.location !== event.joinUrl ? ` · ${event.location}` : "";
   return {
-    card: root(`Prep: ${event.title}`, `${when}${where}`, [...prepLines(input.prep), ...buttons(joinButton(event))]),
+    card: root(`Prep: ${event.title}`, `${when}${where}`, [...prepLines(input.prep), ...sourceRow(input.sources ?? []), ...buttons(joinButton(event))]),
     summary: summary(`Prep ready: ${event.title}, ${when}`),
   };
 }

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR, ensureDirs, instanceConfigs, NATIVE_DIR, type AppConfig } from "../config.ts";
 import { TurnAuthenticationRefusedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { BACKGROUND_CALL_TIMEOUT_MS, BACKGROUND_SETTINGS, backgroundCallArgs } from "./claude-background.ts";
+import { BACKGROUND_CALL_TIMEOUT_MS, BACKGROUND_SETTINGS, backgroundCallArgs, webSearchCallArgs } from "./claude-background.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
@@ -3781,6 +3781,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(existsSync(seen.cwd)).toBe(false);
   });
 
+  it("searches the web on the bot's model with web search alone, in an empty folder, and refuses on a CLI too old to confine", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.296" });
+    const dump = join(scratch, "web-search.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await expect(instance.searchWeb!("who is this", { model: "claude-sonnet-5-5" })).resolves.toBe("fake generated text");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; cwd: string };
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude-sonnet-5-5");
+    expect(seen.argv[seen.argv.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toBe("WebSearch");
+    expect(seen.argv).toContain("--strict-mcp-config");
+    expect(existsSync(seen.cwd)).toBe(false);
+
+    await instance.dispose();
+    await create(undefined, { FAKE_CLAUDE_VERSION: "1.0.100" });
+    await expect(instance.searchWeb!("who is this")).rejects.toThrow("too old to search the web");
+  });
+
   it("runs every one-off call on Haiku 5.5 without thinking or hooks, by settings, and leaves a chat turn as it was", async () => {
     await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.296" });
     const dump = join(scratch, "no-thinking.json");
@@ -3832,6 +3849,15 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(backgroundCallArgs({ ...base, supports: cli([1, 0, 100]), isolated: true })).toEqual([
       "-p", "--model", "claude-haiku-5-5", "--output-format", "text", "--settings", BACKGROUND_SETTINGS, "--strict-mcp-config",
     ]);
+  });
+
+  it("lets a web search call search and nothing else, and refuses a CLI that can't be held to that", () => {
+    const cli = (version: [number, number, number]) => (flag: Parameters<typeof claudeCliSupports>[1]) => claudeCliSupports(version, flag);
+    expect(webSearchCallArgs({ model: "claude-sonnet-5-5", supports: cli([2, 1, 296]) })).toEqual([
+      "-p", "--model", "claude-sonnet-5-5", "--output-format", "text", "--settings", BACKGROUND_SETTINGS,
+      "--tools", "WebSearch", "--allowedTools", "WebSearch", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence",
+    ]);
+    expect(webSearchCallArgs({ model: "claude-sonnet-5-5", supports: cli([1, 0, 100]) })).toBeNull();
   });
 
   it("never falls back to personal authentication for API-key-only helper calls", async () => {
