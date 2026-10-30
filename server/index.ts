@@ -591,7 +591,7 @@ import { createInternalSignInRoutes } from "./routes/sign-in.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
-import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts";
+import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts"; import { createInternalFindingRoutes } from "./routes/internal-report-finding.ts"; import { createFoundUpdates } from "./host/found-updates.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
@@ -5669,10 +5669,12 @@ const reviewAnswerThreads = new Set<string>(); const firstHourHooks = createFirs
 let routines: RoutineManager | null = null;
 const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId),
   notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }), { routine: true }) });
+const found = createFoundUpdates({ store, dataDir: DATA_DIR, reported: () => void proactive.brief.refresh() });
 const proactive = createProactive({ store, cfg, composio, registry, dataDir: DATA_DIR, ideas: (botId) => memoryUpkeep.ideas(botId), ...firstHourHooks.proactive, team: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), frozen: moveFreeze.frozen, routines: () => routines, mainThread: botMainThread, threadBusy, notify, helpers: { decider, extractor }, cloud: Boolean(CLOUD_HOME || HOSTED_WORKSPACE || CLOUD_TEAM),
   engineName: (instanceId) => engineName(instanceId), hostTimeZone: () => (CLOUD_HOME ? undefined : hostTimeZone()), decide: (row) => appendDecision(DATA_DIR, row), stale: shouldIgnoreProviderEvent, release: (threadId) => watchdog.setWaitingOnHuman(threadId, false),
   owned: (routine) => { (cloudRoutineAuthors ?? phones.routineAuthors)?.record(routine.id, routine); if (CLOUD_OWNER_KEY) cloudRoutineAuthors?.wrote(routine.id, CLOUD_OWNER_KEY); }, needsYou: () => needsYouNow({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }, { admin: true, thread: () => true, routine: () => true }),
-  done: (since) => todayReport({ bots: store.bots, groups: store.groups, routines, parked: [], engines: [] }, { admin: true, thread: () => true, routine: () => true }, since).lines, answer: async (auth, threadId, requestId, message) => (await respondToCard({ auth, threadId, requestId, behavior: "answer", message })).ok });
+  done: (since) => todayReport({ bots: store.bots, groups: store.groups, routines, parked: [], engines: [] }, { admin: true, thread: () => true, routine: () => true }, since).lines, answer: async (auth, threadId, requestId, message) => (await respondToCard({ auth, threadId, requestId, behavior: "answer", message })).ok,
+  found: (since) => found.recent(since), gotIt: (id) => void found.gotIt(id) });
 let calendarCalls: CalendarCallManager | null = null;
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
 const localVmLeases = new LocalVmLeasePool(30 * 60_000);
@@ -14134,7 +14136,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (await dispatchRoutes([createInternalEscalateRoutes({
         readBody: readInternalBody, requireActive: requireActiveInternalCapability,
         report: (reason) => reportEscalation({ kind: "raised", bot: internalSender, threadId: internalCapability.threadId, gate: RAISED_GATE, reason, alreadyNotified: false }),
-      })], { req, res, url, path, method, auth, json, readBody })) return;
+      }), createInternalFindingRoutes({ readBody: readInternalBody, requireActive: requireActiveInternalCapability, report: (input) => found.report(internalSender,
+        (activeRoutineRunForThread(internalCapability.threadId) && botMainThread(internalSender.id)) || internalCapability.threadId, input) }),
+      ], { req, res, url, path, method, auth, json, readBody })) return;
       // post_to_room appends role "bot", never "user" (which would start a round of real turns), starts no turn, and takes membership from the record.
       if (method === "POST" && path === "/api/internal/post-to-room") {
         const body = await readInternalBody();

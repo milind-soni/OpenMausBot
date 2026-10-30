@@ -1,14 +1,15 @@
 // The agents tools that put something in front of the person: the Watcher's options card, the widget tools, the
-// page tools and raise_escalation.
+// page tools, report_finding and raise_escalation.
 import { agentsCallMember } from "../../shared/agents-tool-names.ts";
 import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
+import { parseFindingInput } from "../../shared/found-update.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
-export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "show_html", "raise_escalation"]);
+export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "show_html", "raise_escalation", "report_finding"]);
 
 const CARD_ROUTE = "/api/internal/options-card";
 
@@ -51,6 +52,13 @@ export async function callCardTool(name: string, args: Json, context: ToolCallCo
       return { text: why, isError: true };
     }
     return { text: `Escalated: ${String(body.message ?? "the Chief of Staff (or the person) was told.")}` };
+  }
+  if (name === "report_finding") {
+    const parsed = parseFindingInput(args);
+    if (!parsed.ok) return { text: parsed.error, isError: true };
+    const { ok, status, body } = await apiResponse("/api/internal/report-finding", { method: "POST", body: JSON.stringify(parsed.value) });
+    if (!ok) return { text: String(body.error ?? `HTTP ${status}`), isError: true };
+    return { text: `Reported as card ${String(body.messageId ?? "")} in your chat; it is in the person's next brief. Do not repeat it in your reply.` };
   }
   if (name === "create_options_card") {
     if (context.botId !== WATCHER_OPTIONS_CARD_BOT_ID) {
