@@ -1797,6 +1797,8 @@
   "sidebar.confirm.archiveBody": "{name} leaves the sidebar, but every conversation is kept. You can restore it any time from Archived bots.",
   "sidebar.confirm.deleteTitle": "Delete {name}?",
   "sidebar.confirm.deleteBody": "This permanently removes {name}, its conversations, files, memory, automations, and any desktop it owns, with that desktop's files and browser sign-ins. Shared department desktops stay. This cannot be undone.",
+  "sidebar.confirm.deleteChiefBody": "{name} is your Chief of Staff, and its chats hold your team's whole setup. Archive it instead to keep every conversation: you can restore it any time. Deleting erases them for good, with its files, memory and automations. Either way it stops being your Chief.",
+  "sidebar.confirm.archiveInstead": "Archive instead",
   "sidebar.archived.title": "Archived bots",
   "sidebar.archived.subtitle": "Conversations are kept until you choose to delete a bot.",
   "sidebar.archived.restoreAll": "Restore all",

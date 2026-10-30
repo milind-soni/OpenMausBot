@@ -416,7 +416,10 @@ inbox here, and more than 10 passes an hour from one conversation (answers from 
 **People.** The composer's @ list offers the teammates after the bots, with their picture and a "Person" tag; the
 sidebar lists the team's people with their pictures: your own row opens your inbox, a teammate's puts their @name in
 the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
-it (`shared/person-mention.ts`). A bot's turn is told the team's people (names and admin roles; not the person it talks
+it (`shared/person-mention.ts`). A tag a bot shares is the person's: "@Bob" reaches Bob even with a bot called Bob, and
+that bot is not told it was named; only a longer bot name ("@Bob Bot") reaches a bot. A bot made or renamed with a
+person's name says so once in its own chat, and the Chief's `create_bot` result warns (`server/host/bot-name-clash.ts`).
+Deleting a Chief of Staff offers to archive it instead, which keeps its chats. A bot's turn is told the team's people (names and admin roles; not the person it talks
 with), that `message_person` reaches their inbox, and that a tag already did. Needs you lists the inbox's messages the
 person has not opened and that still wait (`kind: "message"`); the app opens the inbox on the person's first arrival of
 the day when something waits there. The state is ids, names and short excerpts, in `person-inbox.json`; a member who

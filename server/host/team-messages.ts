@@ -310,6 +310,13 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     },
     pass,
     inbox,
+    /** Each teammate here and the tags that reach them ("@Ada", "@Ada Lovelace"); empty off a team. A bot sharing a tag
+     * is never reached by it: a tie is the person's (shared/person-mention.ts). */
+    people(): Array<{ name: string; tags: readonly string[] }> {
+      if (!team) return [];
+      const tags = new Map(mentionable().map((person) => [person.key, person.names]));
+      return current().map((one) => ({ name: one.name, tags: tags.get(one.key) ?? [] }));
+    },
     /** What a turn here is told about the team's people and message_person; empty off a team or without the tool. */
     prompt(_botId: string, threadId: string, tools: boolean): string {
       if (!team || !tools) return "";

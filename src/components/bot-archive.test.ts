@@ -18,7 +18,8 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
 }));
 
 const { initialState } = await import("@/state/store");
-const { announceArchiveNotice, archiveBotWithNotice, onArchiveNotice } = await import("./bot-archive");
+const { announceArchiveNotice, archivableChief, archiveBotWithNotice, onArchiveNotice } = await import("./bot-archive");
+const { botConfirmCopy } = await import("./ArchivedBotsPanel");
 const { useBotActions } = await import("./bot-panel/bot-actions");
 
 const make = (id: string, extra: Partial<Bot> = {}): Bot => ({
@@ -58,6 +59,20 @@ describe("archiving a bot", () => {
     expect(fixture.dispatch.mock.calls.map(([action]) => action.type)).toEqual(["botPatched"]);
     await archiveBotWithNotice(nova, { bots: [scout, nova], selectedId: "scout", dispatch: fixture.dispatch, showThreads: true, notify });
     expect(notify).toHaveBeenLastCalledWith({ error: true, text: "Server is offline" });
+  });
+
+  it("archives a Chief of Staff, which stops being the Chief, instead of losing its chats to a delete", async () => {
+    const chief = make("chief", { chiefOfStaff: true });
+    const mausbot = make("mausbot", { chiefOfStaff: true, defaultBot: {} });
+    expect(archivableChief([chief, scout], "chief")).toBe(chief);
+    expect(archivableChief([chief], "chief"), "the last active bot stays").toBeUndefined();
+    expect(archivableChief([mausbot, scout], "mausbot"), "the place's own MausBot is never deleted or archived").toBeUndefined();
+    expect(archivableChief([chief, scout], "scout"), "only a Chief is offered this").toBeUndefined();
+    expect(botConfirmCopy("delete", "Chief", true).body).toContain("Archive it instead to keep every conversation");
+    expect(botConfirmCopy("delete", "Scout").body).not.toContain("Archive it instead");
+    fixture.api.mockResolvedValue({ bot: { ...chief, hidden: true, chiefOfStaff: false } });
+    await archiveBotWithNotice(chief, { bots: [chief, scout], selectedId: "scout", dispatch: fixture.dispatch, showThreads: true, notify: vi.fn() });
+    expect(fixture.api).toHaveBeenCalledWith("/api/bots/chief", { method: "PATCH", body: JSON.stringify({ hidden: true, chiefOfStaff: false }) });
   });
 
   it("reaches the sidebar from anywhere, and says when no sidebar is there to hear", () => {
