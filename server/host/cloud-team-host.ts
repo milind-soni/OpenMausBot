@@ -10,6 +10,7 @@ import { personKey } from "../person-key.ts";
 import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.ts";
 import type { EngineHomes } from "../engine-homes/engine-homes.ts";
 import { storeThreads, type StoreBotThreads } from "../engine-homes/migrate.ts";
+import { loadLegacyRelayState } from "./private-delivery-state.ts";
 import { loadPersonInboxState } from "./person-inbox.ts";
 
 export interface CloudTeamHostDeps {
@@ -41,9 +42,10 @@ type MemberSession = { id: string; email?: string };
 export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   const team = deps.team;
   const people: PeopleAbout = createPeopleAbout(deps.dataDir);
-  const inbox = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
-  const evidenceMissing = inbox.unreadable === true;
-  const privateDeliveries = new Set([...Object.values(inbox.homes), ...inbox.items].map((at) => at.threadId));
+  const inbox = team ? loadPersonInboxState(deps.dataDir) : { state: { homes: {}, items: [] }, unreadable: false };
+  const legacy = team ? loadLegacyRelayState(deps.dataDir) : { state: { relays: [] }, unreadable: false };
+  const evidenceMissing = inbox.unreadable || legacy.unreadable;
+  const privateDeliveries = new Set([...Object.values(inbox.state.homes), ...inbox.state.items, ...legacy.state.relays].map((at) => at.threadId));
   const audienceOf = (threadId: string): Audience => {
     const starter = deps.starters.get(threadId);
     let privateThread = false;

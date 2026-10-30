@@ -6,7 +6,6 @@
 // inbox. A question that a fact the person shares with the team answers, their assistant may answer (representative.ts).
 // Security: a line carries only what was addressed to the person, and links its conversation only when they may read
 // it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists.
-import { readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -22,6 +21,7 @@ import type { CloudTeam } from "../cloud-team.ts";
 import { peerStatus, peerStatusWords } from "../peer-roster.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import type { Representative, SharedFacts } from "./representative.ts";
+import { loadLegacyRelayState, loadPrivateDeliveryState } from "./private-delivery-state.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
 export const PERSON_INBOX_FILE = "person-inbox.json";
@@ -116,64 +116,24 @@ export interface PersonInboxDeps {
   now?: () => number;
 }
 
-const INBOX_UNREADABLE_PREFIX = `${PERSON_INBOX_FILE}.unreadable-`;
-
-function inboxAside(dataDir: string): string | undefined {
-  try {
-    return readdirSync(dataDir).find((name) => name.startsWith(INBOX_UNREADABLE_PREFIX));
-  } catch {
-    return undefined;
-  }
-}
-
-function setInboxAside(file: string, problem: string): { homes: {}; items: []; unreadable: true } {
-  const aside = `${file}.unreadable-${Date.now()}`;
-  try {
-    renameSync(file, aside);
-    console.warn(`person inbox: ${file} ${problem}; moved to ${aside}. Threads that cannot be classified without it stay private until it is repaired or removed.`);
-  } catch (error) {
-    console.warn(`person inbox: ${file} ${problem} and could not be moved aside: ${error instanceof Error ? error.message : String(error)}. Threads that cannot be classified without it stay private until it is repaired or removed.`);
-  }
-  return { homes: {}, items: [], unreadable: true };
-}
-
-export function loadPersonInboxState(dataDir: string): Pick<z.infer<typeof fileSchema>, "homes" | "items"> & { unreadable?: boolean } {
-  const file = join(dataDir, PERSON_INBOX_FILE);
-  const aside = inboxAside(dataDir);
-  let raw: string;
-  try {
-    raw = readFileSync(file, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return aside ? { homes: {}, items: [], unreadable: true } : { homes: {}, items: [] };
-    return setInboxAside(file, "is unreadable");
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    return setInboxAside(file, "is not valid JSON");
-  }
-  const parsed = fileSchema.safeParse(json);
-  if (!parsed.success) return setInboxAside(file, "is not an inbox file");
-  if (aside) {
-    console.warn(`person inbox: ${join(dataDir, aside)} still unread; threads that cannot be classified without it stay private until it is repaired or removed.`);
-    return { ...parsed.data, unreadable: true };
-  }
-  return parsed.data;
+export function loadPersonInboxState(dataDir: string) {
+  return loadPrivateDeliveryState(dataDir, PERSON_INBOX_FILE, fileSchema, { version: 1, homes: {}, items: [] });
 }
 
 export function createPersonInbox(deps: PersonInboxDeps) {
   const { team, store } = deps;
   const now = deps.now ?? Date.now;
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
-  let { homes, items } = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
-  store.backfillPrivateTasks([...Object.values(homes), ...items]);
+  const inbox = team ? loadPersonInboxState(deps.dataDir) : { state: { homes: {}, items: [] }, prepareSave: () => true };
+  let { homes, items } = inbox.state;
+  const legacy = team ? loadLegacyRelayState(deps.dataDir).state.relays : [];
+  store.backfillPrivateTasks([...Object.values(homes), ...items, ...legacy]);
   let savePending = false;
   const save = () => {
     savePending = true;
     items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
     // Keep the durable classification evidence until the registry has saved the private flags.
-    if (!store.privateTasksSaved) return;
+    if (!store.privateTasksSaved || !inbox.prepareSave()) return;
     try {
       writeFileAtomic(file, `${JSON.stringify({ version: 1, homes, items })}\n`, { mode: 0o600 });
       savePending = false;

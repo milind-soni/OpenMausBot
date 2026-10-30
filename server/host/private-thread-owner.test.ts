@@ -52,7 +52,7 @@ function fixture() {
   return { ...open(), botId: bot.id, main: bot.threadId, origin, file, ownersDir, open };
 }
 
-function legacyFixture(records: "homes" | "items" | "both" = "both") {
+function legacyFixture(records: "homes" | "items" | "both" | "relays" = "both") {
   const f = fixture();
   f.team.stop();
   f.store.createBot({ name: "Mira" });
@@ -64,10 +64,14 @@ function legacyFixture(records: "homes" | "items" | "both" = "both") {
     bot.tasks!.push({ ...bot.tasks![0]!, threadId, title: "Legacy inbox" });
     return { botId: bot.id, threadId, person: key(`${threadId}@acme.test`) };
   }));
-  const homes = records === "items" ? {} : Object.fromEntries(destinations.map(({ person, botId, threadId }) => [person, { botId, threadId }]));
-  const items = records === "homes" ? [] : destinations.map((at) => ({ ...at, id: at.threadId, kind: "message", from: "Ada", text: "Private date", at: 1 }));
+  const homes = records === "items" || records === "relays" ? {} : Object.fromEntries(destinations.map(({ person, botId, threadId }) => [person, { botId, threadId }]));
+  const items = records === "homes" || records === "relays" ? [] : destinations.map((at) => ({ ...at, id: at.threadId, kind: "message", from: "Ada", text: "Private date", at: 1 }));
   writeFileSync(botsFile, JSON.stringify(bots));
   writeFileSync(join(DATA_DIR, "person-inbox.json"), JSON.stringify({ version: 1, homes, items }));
+  if (records === "relays") writeFileSync(join(DATA_DIR, "team-messages.json"), JSON.stringify({ version: 1,
+    relays: destinations.map(({ botId, threadId, person }) => ({ botId, threadId, originThreadId: f.origin, from: null, fromName: "Scout", to: person, at: 1 })),
+    waiting: [{ id: "shared-mention", person: key(ADA.email), botId: f.botId, threadId: f.main, from: "Scout", text: "Shared update", at: 1 }],
+  }));
   new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
   return { ...f, botsFile, destinations };
 }
@@ -112,7 +116,7 @@ describe("private message ownership", () => {
     expect(f.host.people.read(key(ADA.email))).toBe(owned ? "Existing preference\nThe person is vegetarian" : "Existing preference");
   });
 
-  it.each(["homes", "items", "both"] as const)("backfills many legacy destinations from %s with one registry save and needs no save after restart", (records) => {
+  it.each(["homes", "items", "both", "relays"] as const)("backfills many legacy destinations from %s with one registry save and needs no save after restart", (records) => {
     const f = legacyFixture(records);
     const save = vi.spyOn(atomic, "writeFileAtomicIfChanged");
     const restarted = f.open();
@@ -126,9 +130,103 @@ describe("private message ownership", () => {
     f.open().team.stop();
     expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
     rmSync(join(DATA_DIR, "person-inbox.json"));
+    if (records === "relays") rmSync(join(DATA_DIR, "team-messages.json"));
     const again = f.open();
     for (const at of f.destinations) expect(again.host.audienceOf(at.threadId)).toBe(`member:unowned-${at.threadId}`);
     expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
+  });
+
+  it("classifies old relay destinations before migration and retains their evidence across a failed backfill", () => {
+    const f = legacyFixture("relays");
+    const file = join(DATA_DIR, "team-messages.json");
+    const before = readFileSync(file, "utf8");
+    const write = atomic.writeFileAtomicIfChanged;
+    const save = vi.spyOn(atomic, "writeFileAtomicIfChanged").mockImplementation((file, ...args) => {
+      if (file === f.botsFile) throw new Error("synthetic registry save failure");
+      return write(file, ...args);
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let migrationAudience: string | undefined;
+    const restarted = f.open({ start: ({ audienceOf }) => { migrationAudience = audienceOf(f.destinations[0]!.threadId); } });
+    expect(migrationAudience).toBe(`member:unowned-${f.destinations[0]!.threadId}`);
+    for (const at of f.destinations) for (const person of [ADA, BOB, CARL]) expect(restarted.sees(person.email, at.threadId)).toBe(false);
+    expect(restarted.host.audienceOf(f.main)).toBe("team");
+    expect(restarted.host.audienceOf(f.origin)).toBe(memberAudience(key(ADA.email)));
+    restarted.team.stop();
+    expect(readFileSync(file, "utf8")).toBe(before);
+    save.mockRestore();
+    const again = f.open();
+    expect(again.store.privateTasksSaved).toBe(true);
+    for (const at of f.destinations) expect(again.store.taskByThread(at.botId, at.threadId)?.private).toBe(true);
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it.each(["{not json", "[]", '{"version":1,"relays":[{"threadId":"partial"}],"waiting":[]}'])("keeps the host up and uncertain threads closed over invalid legacy relay evidence (%s)", (contents) => {
+    const f = legacyFixture("relays");
+    const file = join(DATA_DIR, "team-messages.json");
+    writeFileSync(file, contents);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const started = f.open();
+    const asides = readdirSync(DATA_DIR).filter((name) => name.startsWith("team-messages.json.unreadable-"));
+    expect(asides).toHaveLength(1);
+    expect(readFileSync(join(DATA_DIR, asides[0]!), "utf8")).toBe(contents);
+    expect(warn.mock.calls.flat().join(" ")).toContain("team-messages.json");
+    for (const at of f.destinations) expect(started.sees(CARL.email, at.threadId)).toBe(false);
+    expect(started.host.audienceOf(f.main)).toBe("team");
+    started.team.stop();
+    const restarted = f.open();
+    for (const at of f.destinations) expect(restarted.sees(CARL.email, at.threadId)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0).each(["person-inbox.json", "team-messages.json"])("keeps classification closed when the directory containing %s cannot be listed", (name) => {
+    const f = legacyFixture();
+    rmSync(join(DATA_DIR, "person-inbox.json"));
+    writeFileSync(join(DATA_DIR, `${name}.unreadable-1`), "{not json");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
+    chmodSync(DATA_DIR, 0o300);
+    try {
+      const host = createCloudTeamHost({ team: { id: "acme", name: "Acme" }, dataDir: DATA_DIR, store, starters: f.starters, markers: new Set() });
+      expect(host.audienceOf(f.destinations[0]!.threadId)).toBe(`member:unowned-${f.destinations[0]!.threadId}`);
+      expect(host.audienceOf(f.main)).toBe("team");
+    } finally { chmodSync(DATA_DIR, 0o700); }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0).each(["person-inbox.json", "team-messages.json"])("preserves damaged %s evidence when moving it aside fails and a later save succeeds", (name) => {
+    const f = legacyFixture(name === "team-messages.json" ? "relays" : "both");
+    const file = join(DATA_DIR, name);
+    writeFileSync(file, "{not json");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    chmodSync(DATA_DIR, 0o500);
+    let started: ReturnType<typeof f.open>;
+    try { started = f.open(); } finally { chmodSync(DATA_DIR, 0o700); }
+    expect(readFileSync(file, "utf8")).toBe("{not json");
+    expect(started.team.pass(f.botId, f.origin, "Bob", "Private update").status).toBe(200);
+    if (name === "team-messages.json") expect(readFileSync(file, "utf8")).toBe("{not json");
+    started.team.stop();
+    const again = f.open();
+    const asides = readdirSync(DATA_DIR).filter((entry) => entry.startsWith(`${name}.unreadable-`));
+    expect(asides).toHaveLength(1);
+    expect(readFileSync(join(DATA_DIR, asides[0]!), "utf8")).toBe("{not json");
+    for (const at of f.destinations) expect(again.sees(CARL.email, at.threadId)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("keeps unreadable legacy relay bytes aside and carries on with private threads", () => {
+    const f = legacyFixture("relays");
+    const file = join(DATA_DIR, "team-messages.json");
+    const before = readFileSync(file, "utf8");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    chmodSync(file, 0o000);
+    let started: ReturnType<typeof f.open>;
+    try { started = f.open(); } finally {
+      if (existsSync(file)) chmodSync(file, 0o600);
+      for (const name of readdirSync(DATA_DIR).filter((name) => name.startsWith("team-messages.json.unreadable-"))) chmodSync(join(DATA_DIR, name), 0o600);
+    }
+    const asides = readdirSync(DATA_DIR).filter((name) => name.startsWith("team-messages.json.unreadable-"));
+    expect(asides).toHaveLength(1);
+    expect(readFileSync(join(DATA_DIR, asides[0]!), "utf8")).toBe(before);
+    for (const at of f.destinations) expect(started.sees(CARL.email, at.threadId)).toBe(false);
+    expect(started.team.pass(f.botId, f.origin, "Bob", "Private update").status).toBe(200);
   });
 
   it.each(["{not json", "[]"])("starts over an unreadable inbox file, keeps it aside, and keeps the legacy destinations closed until it is dealt with (%s)", (contents) => {
