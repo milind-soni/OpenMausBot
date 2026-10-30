@@ -57,6 +57,7 @@ describe("a Claude turn in the bot box", () => {
     const recorder = recordEvents(instance.adapter);
     const cwd = join(DATA_DIR, "task-workspaces", "bot-a", "t-boxed-ask");
     mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(DATA_DIR, "workspaces", "bot-a"), { recursive: true });
 
     await instance.adapter.sendTurn({ threadId: "t-boxed-ask", botId: "bot-a", text: "Pick the account", approvalMode: "full", cwd });
     const opened = await recorder.until((event) => event.type === "request.opened", 30_000) as { requestId: string; requestType: string };
@@ -68,6 +69,6 @@ describe("a Claude turn in the bot box", () => {
     expect(boxed, "the engine ran in the box").toBeTruthy();
     const socket = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.ogb.args[1] as string;
     expect(visibleInBox(boxed!.plan, join(DATA_DIR, "messages.db")), "the data folder is empty in the box, as on a Cloud").toBe("none");
-    expect(visibleInBox(boxed!.plan, socket), "the question tool's socket is in the box").toBe("rw");
+    expect(visibleInBox(boxed!.plan, socket), "the question tool's socket is in the box, read-only").toBe("ro");
   }, 60_000);
 });
