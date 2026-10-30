@@ -225,6 +225,11 @@ export function Composer({
   const [tall, setTall] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const multiline = simpleDock && (tall || text.includes("\n"));
+  // Advanced: a message past one line takes the composer's full width above the buttons instead of wrapping in the gap
+  // between them. `wrapAt` is the length at which the one-row field wrapped; the field goes back beside the buttons
+  // only below it, so wider text on its own line cannot flip back and forth.
+  const [wrapAt, setWrapAt] = useState<number | null>(null);
+  const stacked = advanced && !singleRow && (text.includes("\n") || (wrapAt !== null && text.length >= wrapAt));
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
@@ -263,6 +268,23 @@ export function Composer({
     observer.observe(shell);
     return () => observer.disconnect();
   }, [simpleDock]);
+  // Width changes (a resized window, a panel opening) can wrap the one-row field too, so watch its size, not just the text.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!advanced || singleRow || stacked || !input || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      // An empty field's height is its placeholder's, which may wrap; that is not a message.
+      if (!input.value) return;
+      const style = getComputedStyle(input);
+      const line = parseFloat(style.lineHeight) || 24;
+      const content = input.scrollHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+      if (content > line * 1.5) setWrapAt(input.value.length);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [advanced, singleRow, stacked, text]);
   const replyToId = replyTo?.id ?? null;
   const focusedReplyRef = useRef(replyToId);
   useEffect(() => {
@@ -806,7 +828,7 @@ export function Composer({
         )}
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
-        <div data-composer-row className={cn("flex items-end", simpleDock ? "gap-1.5" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:flex-wrap")}>
+        <div data-composer-row className={cn("flex items-end", simpleDock ? "gap-1.5" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
           <input
             ref={fileInput}
             type="file"
@@ -846,7 +868,7 @@ export function Composer({
             </div>
           )}
           <MentionTextarea
-          wrapperClassName={singleRow || simpleDock ? undefined : "@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"}
+          wrapperClassName={singleRow || simpleDock ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}
           peers={[...(group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
@@ -945,7 +967,7 @@ export function Composer({
               simpleDock ? "min-h-7 px-0.5 py-1 text-[14px] leading-5" : "min-h-6 py-1 leading-6",
             )}
           />
-          <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto")}>
+          <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
           {(simpleDock ? stoppable : busy) && !locked && (
           <button
             onClick={interruptTurn}
