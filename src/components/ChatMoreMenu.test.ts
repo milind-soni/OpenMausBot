@@ -34,7 +34,7 @@ vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
   },
 }));
 
-const { ChatMoreMenu, ChatHeaderMenu } = await import("./ChatMoreMenu");
+const { ChatMoreMenu, ChatHeaderMenu, ChatShareMenu } = await import("./ChatMoreMenu");
 afterAll(() => vi.unstubAllGlobals());
 
 const task = (threadId: string, title: string, at: number, extra: Partial<Task> = {}): Task => ({
@@ -69,12 +69,14 @@ beforeEach(() => {
 });
 
 describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
-  it("is a round 32px button labelled More", () => {
+  it("is a round 32px button labelled More, on the raised surface in Simple mode", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     expect(menu.ariaLabel).toBe("More");
     expect(menu.placement).toBeUndefined();
     expect(menu.trigger).toContain('data-testid="chat-more"');
-    expect(menu.trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
+    expect(menu.trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-composer\b[^"]*\bring-inset\b/);
+    fixture.advanced = true;
+    expect(menuOf(createElement(ChatMoreMenu, { bot })).trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
   });
 
   it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {
@@ -142,6 +144,13 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
   });
 });
 
+describe("ChatShareMenu, the bot panel's Share", () => {
+  it("copies or downloads the conversation, in those words", () => {
+    const menu = menuOf(createElement(ChatShareMenu, { bot, className: "" }));
+    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["copy", "Copy conversation"], ["download", "Download conversation"]]);
+  });
+});
+
 describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
   it("keeps main's items, trigger and hover menu below the header", () => {
     fixture.advanced = true;
@@ -150,7 +159,7 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
     expect(menu.items.find((item) => item.key === "inspector")).toMatchObject({ separatorBefore: true });
     expect(menu.items.every((item) => !item.disabled && item.heading !== "In Advanced mode")).toBe(true);
     expect(menu).toMatchObject({ placement: "below", openOnHover: true });
-    expect(menu.trigger).toMatch(/data-testid="chat-more" class="flex rounded-md p-1.5 hover:bg-raised/);
+    expect(menu.trigger).toMatch(/data-testid="chat-more" class="flex size-8 items-center justify-center rounded-full /);
   });
 
   it("has no thread items even if rendered by ChatMoreMenu in Advanced mode", () => {

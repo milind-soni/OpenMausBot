@@ -90,7 +90,7 @@ export const DATA_TOOLS = [
   ),
   tool(
     "data_show",
-    "Put a table or chart in Data and an Open in Data link in chat. Give sql (a SELECT) or table (a loaded table). To update an existing result, read it with data_describe then pass its id and new sql; omitted kind and chart settings stay unchanged. For a new result, kind is required; kind \"chart\" also needs chart (the small spec) or vegaLite (a data-free spec). Set kind explicitly to switch between table and chart. For daily/weekly line totals pass agg and/or timeUnit; a line with only y draws the raw series. Aggregate or filter in SQL first: a chart may draw at most 10,000 marks.",
+    "Put a table or chart in Data; in this chat a chart is drawn in full and a table gets an Open in Data link. Give sql (a SELECT) or table (a loaded table). To update an existing result, read it with data_describe then pass its id and new sql; omitted kind and chart settings stay unchanged. For a new result, kind is required; kind \"chart\" also needs chart (the small spec) or vegaLite (a data-free spec). Set kind explicitly to switch between table and chart. For daily/weekly line totals pass agg and/or timeUnit; a line with only y draws the raw series. Aggregate or filter in SQL first: a chart may draw at most 10,000 marks.",
     {
       id: { type: "string", pattern: "^c_[0-9]+$" },
       title: { type: "string", maxLength: 200 },

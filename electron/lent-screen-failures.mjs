@@ -19,3 +19,11 @@ export function cuaUnavailable(reason, platform = process.platform) {
   }
   return "Computer control is not running on this computer. Open OpenMausBot on it, check that computer control is on in Settings, then try again.";
 }
+
+const PANES = Object.freeze(["accessibility", "screen"]);
+/** The macOS permissions computer control lacks, in the order macOS asks for them, from its own start-up failure
+ * ("Accessibility and Screen Recording required"): reading it never asks macOS anything. */
+export function missingPermissions(reason) {
+  const list = typeof reason === "string" ? /((?:Accessibility|Screen Recording)(?: and (?:Accessibility|Screen Recording))?) required\b/iu.exec(reason)?.[1] ?? "" : "";
+  return PANES.filter((pane) => (pane === "screen" ? /Screen Recording/iu : /Accessibility/iu).test(list));
+}

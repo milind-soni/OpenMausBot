@@ -48,7 +48,7 @@ test("consuming a launch action prevents it replaying on a later restart without
 
 test("desktop relaunch accepts every platform once, guards its sender, and preserves consumed arguments and normal shutdown", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
-  const source = main.slice(main.indexOf('ipcMain.handle("desktop:relaunch"'), main.indexOf('ipcMain.handle("speech:start"'))
+  const source = main.slice(main.indexOf('ipcMain.handle("desktop:relaunch"'), main.indexOf("const talk = installTalk("))
     + main.slice(main.indexOf("function requireMainWindowSender("), main.indexOf('ipcMain.handle("desktop-remote:state"'));
   const argv = ["/fixture/OpenMausBot", "--fixture", "openmausbot://organization", "openmausbot://organization?ignored"];
   takeOrganizationDeepLink(argv);

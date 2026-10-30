@@ -144,6 +144,42 @@ reason otherwise; `OMB_UI_E2E=1` forces the verified download. The `ui-smoke`
 job in `.github/workflows/ci.yml` runs it on Ubuntu 24.04 and uploads the
 screenshot; it is not one of the required checks.
 
+## Mobile text and code blocks
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/mobile-code-blocks-ui.e2e.test.ts
+pnpm exec vitest run src/components/ChatMarkdown.block-actions.test.ts src/components/ChatMarkdown.test.ts src/lib/copy-text.test.ts
+```
+
+The browser recipe sends a synthetic reply through a disposable fake-engine
+server and renders it in the real chat. Its five blocks cover plaintext,
+highlighted code, an unknown language, an omitted language, and indented code.
+Copy preserves only the selected block's text, including whitespace; Wrap and
+Unwrap affect only that block and leave the copied source unchanged.
+
+At narrow widths and on coarse-pointer or no-hover devices, the labeled actions
+occupy their own row with at least 44px touch targets. Check 320px and 390px
+portrait, landscape and tablet widths, and a desktop with a fine pointer.
+Long tokens must wrap within the bubble when Wrap is selected; unwrapped code
+can scroll horizontally inside its block without widening the page. Copy keeps
+a stable mobile label while its icon shows success or failure; a persistent
+live region exposes the feedback to assistive technology. Keyboard focus has
+an outline.
+
+A hosted Linux runner has no mouse, so its headless Chrome reports no hover.
+The recipe starts Chrome with a fine, hovering pointer and runs the desktop
+pass before touch emulation starts: once touch emulation is switched on or
+off, Chrome goes back to the host's own pointer.
+
+This is mobile web renderer coverage in an isolated Chromium profile. It does
+not verify the separately maintained native iOS or Android clients, physical
+devices, or Safari. Clipboard permissions are confined to the fixture origin;
+the refusal case replaces only that disposable page's clipboard writer.
+
+| Before: small icon-only actions | After: labeled touch controls |
+| --- | --- |
+| ![Before at 390px](assets/mobile-code-blocks/before-390.png) | ![After at 390px](assets/mobile-code-blocks/after-390.png) |
+
 ## Thinking timer across thread switches
 
 `scripts/testing/thinking-timer-ui.e2e.test.ts` holds the working row's
@@ -187,6 +223,53 @@ checks that the finished reply still moves a following transcript to its end.
 ```sh
 pnpm exec vitest run src/state/store.test.ts src/components/ChatView.follow.test.ts
 ```
+
+## What a bot is doing right now
+
+While a step runs, the working line names it ("Running scrape.py", "Searching the
+web for “Biber Dammbau”", "Reading linkedin.com"), with the whole command on
+hover. Once the step has run past the quiet notice it adds how it is doing: the
+time since its last output, or what its own processes show ("waiting on the
+network", "busy, no output yet", "idle, no output yet"). A click on the line,
+or Enter on it, unfolds the **Now** card: the current ask's steps, a running
+command's last lines of output and **Open activity**, which opens the Activity
+panel at this run. A second click or Escape folds it. A working bot's sidebar
+row shows the same step in place of its last message.
+
+A scripted call with `hold` stays running until `FAKE_CLAUDE_RELEASE` exists;
+`hold: "busy"`, `"idle"` or `"network"` also keeps a stand-in process that
+burns CPU, sleeps or holds a loopback connection, as the call's command would.
+The quiet-status knobs cross into the fixture, so the sign of life shows in
+seconds:
+
+```sh
+OMB_ACP_QUIET_NOTICE_MS=10000 OMB_ACP_QUIET_TICK_MS=2000 FAKE_CLAUDE_RELEASE=/tmp/release \
+node --experimental-strip-types scripts/control-omb.ts ui launch --tool-calls \
+  '[{"name":"WebSearch","input":{"query":"Biber Dammbau"},"ok":true},
+    {"name":"Bash","input":{"command":"cd ~/biber && python3 scrape.py --pages 40"},"hold":"busy"}]'
+```
+
+Expected after a sent message: `Working · 15s · Running scrape.py · busy, no
+output yet`, the button `What Pepper is doing` with `aria-expanded="false"`,
+and, once clicked, a card listing `Searched the web for “Biber Dammbau”` and
+`Running scrape.py`. Claude Code prints a command's output only when it ends,
+so streamed output needs an engine that sends it: `--engine codex` adds the
+fake Codex app-server, and `FAKE_CODEX_COMMAND`, `FAKE_CODEX_COMMAND_OUTPUT`
+(JSON chunks), `FAKE_CODEX_COMMAND_OUTPUT_MS` and `FAKE_CODEX_COMMAND_GATE`
+script its command. A bot moved to the `codex` instance then shows `last
+output just now` and the command's last two lines in the card.
+
+| Before | After |
+| --- | --- |
+| ![Working · 1m 06s · Running a command](evidence/live-step/before-command-advanced-midnight.jpg) | ![Working · 1m 05s · Running scrape.py · busy, no output yet](evidence/live-step/after-command-advanced-midnight.jpg) |
+
+The checks are `server/step-summary.test.ts` (the words and their redaction),
+`server/harness/live-steps.test.ts` and `server/harness/bus.test.ts` (one path
+for every engine, the sign of life, the output's last lines),
+`server/bot-visibility.test.ts` (a step reaches only someone who may see the
+chat), `src/components/TurnPresence.test.ts`,
+`src/components/ChatView.live-status.test.ts` (the line and the card) and
+`src/components/Sidebar.simple-mode.test.ts` (the sidebar row).
 
 ## Bot setup and MCP access recipe
 

@@ -1,48 +1,69 @@
-// Screen 1: what MausBot Cloud is, then the plans the Admin sells now as cards, each with its own button, and the money in one line.
-import { Check, CloudUpload, Lock, Monitor, Moon, Smartphone, type LucideIcon } from "lucide-react";
+// Screen 1: MausBot Cloud in a line, then the plans the Admin sells now as cards that show only what sets each apart,
+// each with its own button; what every plan includes and the money are said once, under them.
+import { useState } from "react";
+import { AudioLines, ChevronDown, CloudUpload, HardDrive, Lock, Monitor, Moon, Power, Smartphone, Timer, type LucideIcon } from "lucide-react";
 import type { CloudOffer, CloudOfferPlan } from "../../../electron/cloud-home.mjs";
 import { cn } from "@/lib/cn";
-import { moneyBackShort, planCards, sharedTrialDays, trialTimeline, type CloudPlanCard } from "@/lib/cloud-plan";
+import { cardRows, moneyBackShort, planCards, sharedTrialDays, trialTimeline, type CloudPlanCard, type CloudPlanCardRow } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { CloudMascotScene } from "./CloudMascotScene";
-import { LINK, PRIMARY_WIDE } from "./parts";
+import { NightCard } from "./NightCard";
+import { LINK, PRIMARY_WIDE, QUIET_WIDE, SCREEN, Tag } from "./parts";
 
-const BENEFITS: ReadonlyArray<readonly [LucideIcon, LocaleKey, LocaleKey]> = [
+const FEATURES: ReadonlyArray<readonly [LucideIcon, LocaleKey, LocaleKey]> = [
   [Moon, "cloudBuy.benefit.awayTitle", "cloudBuy.benefit.away"],
   [Lock, "cloudBuy.benefit.privateTitle", "cloudBuy.benefit.private"],
   [Smartphone, "cloudBuy.benefit.anywhereTitle", "cloudBuy.benefit.anywhere"],
   [Monitor, "cloudBuy.benefit.browserTitle", "cloudBuy.benefit.browser"],
   [CloudUpload, "cloudBuy.benefit.moveTitle", "cloudBuy.benefit.move"],
 ];
+const ROW_ICON: Partial<Record<CloudPlanCardRow["key"], LucideIcon>> = { power: Power, hours: Timer, storage: HardDrive, voice: AudioLines };
 
-/** Cards side by side on a wide sheet, written out for Tailwind to find; four go two by two. */
-const COLUMNS: Record<number, string> = { 1: "md:grid-cols-1", 2: "md:grid-cols-2", 3: "md:grid-cols-3", 4: "md:grid-cols-2" };
+/** Cards side by side on a wide sheet, written out for Tailwind to find. */
+const COLUMNS: Record<number, string> = { 1: "md:grid-cols-1", 2: "md:grid-cols-2", 3: "md:grid-cols-3", 4: "md:grid-cols-2 lg:grid-cols-4" };
 
-/** On a wide sheet the cards share their rows (a subgrid), so every card's button and list start at the same height. */
-function PlanCard({ card, busy, onStart }: { card: CloudPlanCard; busy: boolean; onStart: (tier: string) => void }) {
+const detailsId = (tier: string) => `cloud-plan-details-${tier}`;
+
+/** On a wide sheet the cards share their rows (a subgrid), so every card's price, numbers and button line up. */
+function PlanCard({ card, shown, details, compare, busy, onStart }: {
+  card: CloudPlanCard; shown: CloudPlanCardRow[]; details: CloudPlanCardRow[]; compare: boolean; busy: boolean; onStart: (tier: string) => void;
+}) {
   const nameId = `cloud-plan-${card.tier}`;
   return <li data-plan={card.tier} aria-labelledby={nameId} data-plan-current={card.current ? "" : undefined}
-    className={cn("row-span-6 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-2xl border bg-card p-5", card.popular ? "border-accent" : "border-hairline")}>
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h4 id={nameId} className="text-[16px] font-semibold text-ink">{card.name}</h4>
-      {card.popular && <span data-plan-popular className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold tracking-[0.02em] text-accent-ink">{t("cloudAdd.popular")}</span>}
+    className={cn("grid min-w-0 grid-rows-subgrid gap-y-3 rounded-[14px] border-[0.5px] bg-menu p-4", compare ? "row-span-5" : "row-span-4",
+      card.popular ? "border-ink/25" : "border-ink/10")}>
+    <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+      <h4 id={nameId} className="text-[15px] font-medium leading-[22px] text-ink">{card.name}</h4>
+      {card.popular && <Tag data-plan-popular="">{t("cloudAdd.popular")}</Tag>}
     </div>
-    <p className="flex items-baseline gap-1">
-      <span className="text-[32px] font-bold leading-none tracking-[-0.02em] tabular-nums text-ink">{card.price}</span>
-      <span className="text-[13px] font-medium text-ink-tertiary">{t("cloudBuy.perMonth")}</span>
-    </p>
-    <p data-plan-promise className="text-[13px] leading-snug text-ink-secondary">{card.promise}</p>
-    {card.action
-      ? <button type="button" data-plan-buy={card.tier} aria-describedby={nameId} className={PRIMARY_WIDE} disabled={busy} onClick={() => onStart(card.tier)}>{card.action}</button>
-      : <p data-plan-mine className="grid min-h-11 place-items-center rounded-xl border border-hairline bg-raised text-[14px] font-semibold text-ink-secondary">{t("cloudBuy.card.current")}</p>}
-    <p className="-mt-1.5 text-center text-[12px] leading-snug text-ink-tertiary">{card.terms}</p>
-    <ul className="flex flex-col gap-2 border-t border-hairline/60 pt-3">
-      {card.rows.map(row => <li key={row.key} data-plan-row={row.key} className="grid grid-cols-[14px_minmax(0,1fr)] items-start gap-2 text-[13px] leading-snug text-ink">
-        <Check size={14} aria-hidden="true" className="mt-0.5 text-accent-text" />
-        <span>{row.text}{row.note && <small className="block text-[11px] text-ink-tertiary">{row.note}</small>}</span>
+    <div className="flex flex-col gap-1.5">
+      <p className="flex items-baseline gap-1">
+        <span className="text-[28px] font-semibold leading-8 tracking-[-0.02em] tabular-nums text-ink">{card.price}</span>
+        <span className="text-[13px] text-ink-tertiary">{t("cloudBuy.perMonth")}</span>
+      </p>
+      {card.promise && <p data-plan-promise="" className="text-[13px] leading-[18px] text-ink-secondary">{card.promise}</p>}
+    </div>
+    <ul className="flex flex-col gap-2.5 pt-1">
+      {shown.map(row => {
+        const Icon = ROW_ICON[row.key];
+        return <li key={row.key} data-plan-row={row.key} className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2.5 text-[13px] leading-[18px] text-ink">
+          {Icon ? <Icon size={16} strokeWidth={1.5} aria-hidden="true" className="mt-px text-ink-tertiary" /> : <span />}
+          <span>{row.text}{row.note && <small className="block text-[12px] leading-4 text-ink-tertiary">{row.note}</small>}</span>
+        </li>;
+      })}
+    </ul>
+    <ul id={detailsId(card.tier)} hidden={!compare} className="flex flex-col gap-2 border-t-[0.5px] border-ink/10 pt-4 text-[12px] leading-4 text-ink-secondary">
+      {details.map(row => <li key={row.key} data-plan-row={row.key}>
+        {row.text}{row.note && <small className="block text-[12px] leading-4 text-ink-tertiary">{row.note}</small>}
       </li>)}
     </ul>
+    <div className="flex flex-col gap-2 self-start pt-1">
+      {card.action
+        ? <button type="button" data-plan-buy={card.tier} aria-describedby={nameId} className={card.popular ? PRIMARY_WIDE : QUIET_WIDE} disabled={busy}
+          onClick={() => onStart(card.tier)}>{card.action}</button>
+        : <p data-plan-mine="" className="grid min-h-9 place-items-center rounded-full bg-ink/[0.04] px-4 text-[14px] text-ink-secondary">{t("cloudBuy.card.current")}</p>}
+      {card.terms && <p className="text-center text-[12px] leading-4 text-ink-tertiary">{card.terms}</p>}
+    </div>
   </li>;
 }
 
@@ -53,57 +74,64 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
   now: number; busy: boolean; signedOut: boolean; notice: string | null;
   onStart: (tier: string) => void; onSignIn: () => void;
 }) {
+  const [compare, setCompare] = useState(false);
   const cards = planCards(offer, { current, own });
+  const rows = cardRows(cards);
   const timeline = trialTimeline(offer, now);
   const moneyBack = moneyBackShort(offer);
-  return <div data-cloud-add={offer.plans.some(plan => plan.trialDays) ? "offer-trial" : "offer"} className="flex flex-col">
-    <div className="grid gap-x-6 gap-y-[18px] border-b border-hairline/60 bg-linear-to-b from-accent/15 via-accent/[0.04] to-transparent px-7 pb-5 pt-6 md:grid-cols-[minmax(0,1fr)_minmax(0,300px)] md:items-center">
-      <div>
-        <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-accent-text">{t("pro.name")}</p>
-        <h2 id="cloud-add-title" tabIndex={-1} className="mb-1.5 mt-1 pe-8 text-[27px] font-bold leading-[1.12] tracking-[-0.025em] text-ink outline-none [text-wrap:balance]">{t("cloudBuy.title")}</h2>
-        <p className="max-w-[44ch] text-[14px] leading-relaxed text-ink-secondary">{t("cloudBuy.lede")}</p>
-      </div>
-      <div className="md:me-8 md:mt-4"><CloudMascotScene variant="hero" /></div>
-      <ul aria-label={t("cloudBuy.benefits")} className="grid gap-3 sm:grid-cols-2 md:col-span-2 md:grid-cols-5">
-        {BENEFITS.map(([Icon, title, body]) => <li key={title} className="grid grid-cols-[26px_minmax(0,1fr)] items-start gap-2">
-          <span aria-hidden="true" className="grid size-[26px] place-items-center rounded-[8px] bg-accent/12 text-accent-text"><Icon size={15} /></span>
-          <span><span className="block text-[13px] font-semibold leading-snug text-ink">{t(title)}</span><span className="block text-[12px] leading-snug text-ink-secondary">{t(body)}</span></span>
+  const trial = Boolean(sharedTrialDays(offer));
+  return <div data-cloud-add={offer.plans.some(plan => plan.trialDays) ? "offer-trial" : "offer"} className={SCREEN}>
+    <div className="-mx-4 -mt-3">
+      <NightCard>
+        <h2 id="cloud-add-title" tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] outline-none!">{t("pro.name")}</h2>
+        <p className="mt-0.5 max-w-[440px] text-[14px] leading-5 text-(--cloud-night-ink-quiet) [text-wrap:pretty]">
+          <span className="font-medium text-(--cloud-night-ink)">{t("cloudBuy.title")}</span> {t("cloudBuy.lede")}
+        </p>
+        <button type="button" aria-expanded={compare} aria-controls={cards.map(card => detailsId(card.tier)).join(" ")} onClick={() => setCompare(!compare)}
+          className="-ms-2 mt-2 inline-flex items-center gap-1 self-start rounded-full py-0.5 pe-1.5 ps-2 text-[13px] leading-[18px] text-(--cloud-night-ink-quiet) transition-colors hover:bg-white/10 hover:text-(--cloud-night-ink) motion-reduce:transition-none">
+          {t("pro.seePlans")}<ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", compare && "rotate-180")} />
+        </button>
+      </NightCard>
+    </div>
+    {notice && <p role="status" className="rounded-[12px] bg-ink/[0.04] px-4 py-3 text-[13px] leading-[18px] text-ink">{notice}</p>}
+    <section aria-labelledby="cloud-add-plans">
+      <h3 id="cloud-add-plans" className="sr-only">{t("cloudBuy.choose")}</h3>
+      <ul aria-labelledby="cloud-add-plans" className={cn("grid gap-3", COLUMNS[cards.length] ?? "md:grid-cols-3")}>
+        {cards.map((card, index) => <PlanCard key={card.tier} card={card} shown={rows[index]!.shown} details={rows[index]!.details} compare={compare} busy={busy} onStart={onStart} />)}
+      </ul>
+    </section>
+    <div aria-live="polite" className="flex flex-col gap-1.5 text-[13px] leading-[18px] text-ink-secondary">
+      {timeline.length > 1 && <ol aria-label={t("cloudBuy.timeline")} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {timeline.map((step, index) => <li key={step.when} className="inline-flex items-center gap-1.5">
+          <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", index === 0 ? "bg-ink" : "border border-ink/40")} />
+          <b className="font-medium text-ink">{step.when}</b>{step.text}
+        </li>)}
+      </ol>}
+      {(trial || moneyBack) && <p className="flex flex-wrap gap-x-1.5">
+        {trial && <span>{t("cloudBuy.trialTerms")}</span>}{trial && moneyBack && <span aria-hidden="true">·</span>}{moneyBack && <span>{moneyBack}</span>}
+      </p>}
+    </div>
+    <section aria-labelledby="cloud-add-includes" className="flex flex-col gap-2.5">
+      <h3 id="cloud-add-includes" className="text-[13px] font-medium leading-[18px] text-ink-secondary">{t("cloudBuy.includes")}</h3>
+      <ul className="flex flex-wrap gap-x-5 gap-y-2">
+        {FEATURES.map(([Icon, title, body]) => <li key={title} className="flex text-[13px] leading-[18px] text-ink">
+          <span aria-hidden="true" title={t(body)} className="inline-flex items-center gap-1.5">
+            <Icon size={16} strokeWidth={1.5} className="shrink-0 text-ink-tertiary" />{t(title)}
+          </span>
+          <span className="sr-only">{t(title)}: {t(body)}</span>
         </li>)}
       </ul>
-    </div>
-    <div className="flex min-w-0 flex-col gap-4 px-7 pb-5 pt-5">
-      <h3 id="cloud-add-plans" className="text-[15px] font-semibold text-ink">{t("cloudBuy.choose")}</h3>
-      {notice && <p role="status" className="text-[13px] text-ink">{notice}</p>}
-      <ul aria-labelledby="cloud-add-plans" className={cn("grid gap-3", COLUMNS[cards.length] ?? "md:grid-cols-3")}>
-        {cards.map(card => <PlanCard key={card.tier} card={card} busy={busy} onStart={onStart} />)}
-      </ul>
-      {sharedTrialDays(offer) && <div aria-live="polite" className="flex flex-col gap-2 rounded-xl border border-hairline/70 bg-card/70 px-4 py-3">
-        <p className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudBuy.trialTerms")}</p>
-        {timeline.length > 1 && <ol aria-label={t("cloudBuy.timeline")} className="relative mt-1 grid" style={{ gridTemplateColumns: `repeat(${timeline.length}, minmax(0, 1fr))` }}>
-          <span aria-hidden="true" className="absolute inset-x-1.5 top-[6px] h-0.5 bg-hairline" />
-          {timeline.map((step, index) => {
-            const last = index === timeline.length - 1, first = index === 0;
-            return <li key={step.when} className={cn("relative min-w-0 pt-[18px] text-[12px] leading-snug text-ink-secondary", !first && !last && "text-center", last && "text-end")}>
-              <span aria-hidden="true" className={cn("absolute top-px size-3 rounded-full border-2", first ? "start-0 border-accent bg-accent" : "border-ink-tertiary bg-panel",
-                !first && !last && "start-[calc(50%-6px)]", last && "end-0")} />
-              <b className="block text-[12px] font-semibold text-ink">{step.when}</b>{step.text}
-            </li>;
-          })}
-        </ol>}
-      </div>}
-      <div className="flex flex-col items-center gap-1.5 text-center text-[12px] text-ink-tertiary">
-        <p className="flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1">
-          <span className="inline-flex items-center gap-1.5"><Lock size={13} aria-hidden="true" />{t("cloudBuy.secure")}</span>
-          <span role="img" aria-label={t("cloudBuy.wallets")} className="inline-flex gap-1">
-            {[t("cloudBuy.applePay"), t("cloudBuy.googlePay"), t("cloudBuy.card")].map(mark => <span key={mark} aria-hidden="true"
-              className="rounded-[5px] border border-hairline px-[5px] py-px text-[11px] font-semibold text-ink-secondary">{mark}</span>)}
-          </span>
-        </p>
-        <p className="flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1">
-          <span>{t("cloudBuy.cancelEasy")}</span>{moneyBack && <span>{moneyBack}</span>}
-        </p>
-        {signedOut && <button type="button" className={LINK} onClick={onSignIn}>{t("cloudBuy.haveAccount")}</button>}
-      </div>
+    </section>
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t-[0.5px] border-ink/10 pt-4 text-[12px] leading-4 text-ink-tertiary">
+      <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span className="inline-flex items-center gap-1.5"><Lock size={13} strokeWidth={1.5} aria-hidden="true" />{t("cloudBuy.secure")}</span>
+        <span role="img" aria-label={t("cloudBuy.wallets")} className="inline-flex gap-1">
+          {[t("cloudBuy.applePay"), t("cloudBuy.googlePay"), t("cloudBuy.card")].map(mark => <span key={mark} aria-hidden="true"
+            className="rounded-[5px] border-[0.5px] border-ink/20 px-1.5 py-px text-[11px] font-medium text-ink-secondary">{mark}</span>)}
+        </span>
+        <span aria-hidden="true">·</span><span>{t("cloudBuy.cancelEasy")}</span>
+      </p>
+      {signedOut && <button type="button" className={LINK} onClick={onSignIn}>{t("cloudBuy.haveAccount")}</button>}
     </div>
   </div>;
 }

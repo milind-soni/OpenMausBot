@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Check, Crown, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import type { DesktopNoticesBridge, DesktopNoticesState } from "../../electron/desktop-prefs.mjs";
 import { analyticsChoiceKnown, identifyEmail, track } from "@/lib/analytics";
+import { cn } from "@/lib/cn";
 import { buyOfferAllowed, cloudIntroView, cloudPlanLabel, cloudPlanLine, cloudPlanView, moneyBackLine, trialRunning, usd, type CloudPlanView, type CloudSource } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { cloudPlanFromAccount, cloudPlanFromSnapshot, type CloudPlanFacts } from "@/lib/usage-snapshot";
+import { NightCard } from "./cloud-buy/NightCard";
+import { CLOSE, ON_NIGHT, PRIMARY, QUIET, SHEET, Tag, TAG_ON_NIGHT } from "./cloud-buy/parts";
 import { NotNowButton } from "./NoticeCard";
 import { UPDATES_CONSENT_POPUP } from "./UpdatesConsent";
 
@@ -113,7 +116,7 @@ const OTHER_DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"
 
 /** Any dialog on screen counts, modal or not, and the card that says a new Cloud is set up; never the queue's own popups. */
 export function otherDialogOpen(): boolean {
-  return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(`${POPUP}, ${UPDATES_CONSENT_POPUP}`) && element.checkVisibility());
+  return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(`${POPUP}, ${UPDATES_CONSENT_POPUP}, [data-simple-mode-prompt]`) && element.checkVisibility());
 }
 
 export function useOtherDialogOpen(watch: boolean): boolean {
@@ -127,8 +130,6 @@ export function useOtherDialogOpen(watch: boolean): boolean {
 }
 
 const focusLost = (focus: Element | null) => !focus || focus === document.body || !focus.isConnected;
-
-const PRIMARY = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink hover:opacity-90 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 export function CloudProPopup({ view, onPrimary, onSeePlans, onNotNow, onClose }: {
   view: CloudProPopupView; onPrimary: () => void; onSeePlans: () => void; onNotNow: () => void; onClose: () => void;
@@ -159,34 +160,34 @@ export function CloudProPopup({ view, onPrimary, onSeePlans, onNotNow, onClose }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+  return <div className="ui-scrim fixed inset-0 z-50 flex items-center justify-center p-6" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div role="dialog" aria-modal="true" aria-labelledby={TITLE} aria-describedby="cloud-pro-popup-body" data-cloud-pro-popup={view.plan} tabIndex={-1}
-      className="relative max-h-full w-full max-w-[440px] overflow-y-auto rounded-2xl border border-hairline/50 bg-panel p-6 text-ink shadow-2xl outline-none">
-      <div className="flex items-center gap-2.5 pe-8">
-        <Crown size={18} className="shrink-0 text-accent-text" aria-hidden="true" />
-        <h2 id={TITLE} tabIndex={-1} className="text-[17px] font-semibold outline-none">{t("cloudProPopup.title")}</h2>
+      className={cn(SHEET, "group/sheet animate-pop-in relative max-h-full w-full max-w-[440px] overflow-y-auto px-6 pb-4 pt-5 outline-none")}>
+      <div className="-mx-4 -mt-3">
+        <NightCard small>
+          <h2 id={TITLE} tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] outline-none!">{t("cloudProPopup.title")}</h2>
+          {view.badge && <Tag className={cn("mt-1.5 self-start", TAG_ON_NIGHT)}>{view.badge}</Tag>}
+        </NightCard>
       </div>
-      {view.badge && <p className="mt-3 inline-flex rounded-full bg-accent/15 px-2 py-0.5 text-[12px] font-medium text-accent-text">{view.badge}</p>}
-      <div id="cloud-pro-popup-body">
-        <p className="mt-3 text-[14px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}</p>
-        <ul className="mt-3 flex flex-col gap-2 text-[13px]">
-          {view.points.map(point => <li key={point} className="flex items-start gap-2"><Check size={15} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />{point}</li>)}
+      <div id="cloud-pro-popup-body" className="mt-4 flex flex-col gap-4">
+        <p className="text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{t("cloudIntro.body")}</p>
+        <ul className="flex flex-col gap-2 text-[14px] leading-5">
+          {view.points.map(point => <li key={point} className="flex items-start gap-2.5"><Check size={16} strokeWidth={1.5} className="mt-0.5 shrink-0 text-ink-tertiary" aria-hidden="true" />{point}</li>)}
         </ul>
-        {view.current && <p className="mt-3 text-[13px] font-medium">{view.current}</p>}
-        {view.price && <p className="mt-3 text-[13px] text-ink-secondary">{view.price}</p>}
-        {view.moneyBack && <p className="text-[13px] text-ink-secondary">{view.moneyBack}</p>}
+        {view.current && <p className="text-[14px] font-medium leading-5">{view.current}</p>}
+        {(view.price || view.moneyBack) && <p className="flex flex-col text-[13px] leading-[18px] text-ink-secondary">
+          {view.price && <span>{view.price}</span>}{view.moneyBack && <span>{view.moneyBack}</span>}
+        </p>}
       </div>
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button type="button" className={PRIMARY} onClick={onPrimary}>{view.primary.label}</button>
-        {view.seePlans && <button type="button" className="inline-flex items-center gap-1 py-2 text-[13px] text-ink-secondary underline underline-offset-2 hover:text-ink" onClick={onSeePlans}>
-          {t("pro.seePlans")}
-        </button>}
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <button type="button" className={cn(PRIMARY, "ui-button-lg")} onClick={onPrimary}>{view.primary.label}</button>
+        {view.seePlans && <button type="button" className={cn(QUIET, "ui-button-lg")} onClick={onSeePlans}>{t("pro.seePlans")}</button>}
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-[12px] text-ink-secondary">{t("pro.disclaimer")}</p>
+      <div className="mt-4 flex items-center justify-between gap-3 border-t-[0.5px] border-ink/10 pt-2">
+        <p className="min-w-0 flex-1 text-[12px] leading-4 text-ink-tertiary">{t("pro.disclaimer")}</p>
         <NotNowButton onClick={onNotNow} />
       </div>
-      <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className="ui-icon-button absolute end-4 top-4"><X size={16} /></button>
+      <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className={cn(CLOSE, ON_NIGHT, "absolute end-4 top-4")}><X size={16} /></button>
     </div>
   </div>;
 }

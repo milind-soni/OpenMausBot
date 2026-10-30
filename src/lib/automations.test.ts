@@ -172,16 +172,18 @@ describe("order and the grey line", () => {
     expect(orderAutomations([...paused, ...working, ...failing]).map((item) => item.id)).toEqual(["f", "b", "a", "p"]);
   });
 
-  it("reads Working · last ran · next, and says when it hasn't run yet", () => {
-    expect(statusLine(automation([run("completed", at(0, 9, 2))]), NOW)).toBe("Working · last ran today 9:02 AM · next: Monday 9:00 AM");
-    expect(statusLine(automation([]), NOW)).toBe("Working · hasn't run yet · next: Monday 9:00 AM");
+  it("reads On · last ran · next, and says when an automation that hasn't run yet first will", () => {
+    expect(statusLine(automation([run("completed", at(0, 9, 2))]), NOW)).toBe("On · last ran today 9:02 AM · next: Monday 9:00 AM");
+    expect(statusLine(automation([]), NOW)).toBe("First run Monday 9:00 AM");
+    expect(statusLine(automation([], { nextRunAt: at(1, 9) }), NOW)).toBe("First run tomorrow 9:00 AM");
+    expect(statusLine(automation([], { enabled: false }), NOW)).toBe("Paused · hasn't run yet");
     expect(statusLine(automation([run("completed", at(-1, 9))], { enabled: false }), NOW)).toBe("Paused · last ran yesterday");
   });
 
   it("a routine with checks says when it last checked and found nothing new, that it reads and drafts only, and a failed read needs you", () => {
     const watch = { checks: ["calendar", "mail"] as Routine["checks"], access: "read-and-draft" as const, nextRunAt: at(0, 12, 15) };
-    expect(statusLine(automation([run("completed", at(0, 9, 2))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("Working · checked today 11:45 AM, nothing new · next: today 12:15 PM · reads and drafts only");
-    expect(statusLine(automation([run("completed", at(0, 11, 50))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("Working · last ran today 11:50 AM · next: today 12:15 PM · reads and drafts only");
+    expect(statusLine(automation([run("completed", at(0, 9, 2))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("On · checked today 11:45 AM, nothing new · next: today 12:15 PM · reads and drafts only");
+    expect(statusLine(automation([run("completed", at(0, 11, 50))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("On · last ran today 11:50 AM · next: today 12:15 PM · reads and drafts only");
     const trouble = automation([], { ...watch, checkTrouble: "Couldn't read Gmail. Reconnect it in Connected apps." });
     expect(automationStatus(trouble, NOW)).toEqual({ state: "needs-you", reason: "Couldn't read Gmail. Reconnect it in Connected apps.", fix: "reconnect" });
   });

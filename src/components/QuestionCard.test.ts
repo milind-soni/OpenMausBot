@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import type { Bot, Message } from "@/state/store";
+import type { Message } from "@/state/store";
 import type { AskQuestion, QuestionRequestCardData } from "../../shared/ask-question";
 import { formatQuestionAnswers } from "../../shared/ask-question";
 
@@ -15,10 +15,11 @@ const fixture = vi.hoisted(() => {
 });
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
-  useStore: () => ({ state: {}, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { bots: [] }, dispatch: fixture.dispatch }),
 }));
+vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 
-const { QuestionCard, choiceIndexForKey, choiceKey, settledQuestionLine } = await import("./QuestionCard");
+const { QuestionCard, cardQuestions, isQuestionCard, settledQuestionLine } = await import("./QuestionCard");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -41,51 +42,76 @@ const questionRequest: QuestionRequestCardData = {
   ],
 };
 
-const bot = { id: "bot-1", name: "Hazelnut" } as Bot;
+const biber = { name: "Biber", color: "teal" as const };
+const CHOICES = ["Ja, nur den Abschlusstext", "Ja, auch den Einladungstext", "Nein"];
 
-function message(card: Partial<Message["card"]> = {}): Message {
+function message(card: Partial<NonNullable<Message["card"]>> = {}, extra: Partial<Message> = {}): Message {
   return {
     id: "m-1",
     role: "bot",
     kind: "options",
-    at: "2026-09-08T10:00:00.000Z",
+    at: 1,
     card: {
       title: "Your bot has a question",
       subtitle: "Which model should Hazelnut run on by default?",
       options: [],
       requestId: "req-1",
+      requestType: "question",
       questionRequest,
       ...card,
     },
+    ...extra,
   } as unknown as Message;
 }
 
-const render = (m: Message) =>
-  renderToStaticMarkup(createElement(QuestionCard, { threadId: "thread-1", bot, message: m }));
+/** ask_user's own shape: one question, the bot's own choices as the card's options. */
+const asked = (card: Partial<NonNullable<Message["card"]>> = {}, extra: Partial<Message> = {}) =>
+  message({ subtitle: "Soll ich den Fix für die Sondervariante umsetzen?", options: CHOICES, questionRequest: undefined, ...card }, extra);
 
-describe("QuestionCard", () => {
-  it("offers the full question when the ask is long", () => {
-    const question = "Quick onboarding check. ".repeat(20);
-    const markup = render(message({
-      questionRequest: {
-        version: 1,
-        questions: [{ question, options: [] }],
-      },
-    }));
-    expect(markup).toContain("Show full question");
-    expect(markup).toContain("line-clamp-4");
-    expect(markup).toContain(question);
+const render = (m: Message, props: Record<string, unknown> = {}) =>
+  renderToStaticMarkup(createElement(QuestionCard, { threadId: "thread-1", asker: biber, message: m, ...props }));
+
+describe("one card for every question", () => {
+  it("is what a bot's question card is, whichever engine asked it, and nothing else", () => {
+    expect(isQuestionCard(asked().card)).toBe(true);
+    expect(isQuestionCard(message().card)).toBe(true);
+    expect(isQuestionCard(message({ requestType: undefined }).card), "a structured set without a type").toBe(true);
+    expect(isQuestionCard(message({ tool: "Bash", requestType: "permission", questionRequest: undefined }).card)).toBe(false);
+    expect(isQuestionCard(message({ requestId: undefined }).card), "a first-run quiz").toBe(false);
+    expect(isQuestionCard(asked({ requestType: undefined }).card), "an offer such as a quota switch").toBe(false);
   });
 
-  it("shows the model's own question and options instead of an approval", () => {
+  it("reads ask_user's question and choices as one question", () => {
+    expect(cardQuestions(asked().card!)).toEqual([{ question: "Soll ich den Fix für die Sondervariante umsetzen?", options: CHOICES.map((label) => ({ label })) }]);
+    expect(cardQuestions(asked({ fixedOptions: true }).card!)[0]!.custom).toBe(false);
+    expect(cardQuestions(asked({ options: [] }).card!)).toEqual([{ question: "Soll ich den Fix für die Sondervariante umsetzen?", options: [] }]);
+  });
+});
+
+describe("QuestionCard", () => {
+  it("leads with the bot that asks, then the question in clear ink, then one button per German choice", () => {
+    const html = render(asked());
+    expect(html).toContain("Biber asks");
+    expect(html).toMatch(/text-ink"><bdi dir="auto">Soll ich den Fix für die Sondervariante umsetzen\?</);
+    for (const choice of CHOICES) expect(html).toContain(`>${choice}</span>`);
+    expect(html.match(/data-ask-choice=""/g)).toHaveLength(3);
+    expect(html).not.toContain("aria-keyshortcuts");
+    expect(html).toContain('placeholder="Something else…"');
+    expect(html).not.toContain("Submit");
+  });
+
+  it("asks an open question with a reply field and a send button in the bot's colour, no choices", () => {
+    const html = render(asked({ options: [], subtitle: "Welche Formulierung soll der neue Abschlusstext bekommen?" }));
+    expect(html).not.toContain("data-ask-choice");
+    expect(html).toContain('placeholder="Type your answer"');
+    expect(html).toMatch(/<button type="submit"[^>]*class="[^"]*bot-button/);
+  });
+
+  it("shows the model's own question and options, with their descriptions", () => {
     const markup = render(message());
-    expect(markup).toContain("Hazelnut has a question");
-    expect(markup).toContain("Which model should Hazelnut run on by default?");
     expect(markup).toContain("Claude Opus 5");
     expect(markup).toContain("What the bot had before.");
-    expect(markup).not.toContain("Always allow");
     expect(markup).not.toContain("Allow once");
-    expect(markup).not.toContain(">Deny<");
   });
 
   it("badges an agent-composed ask, and only one", () => {
@@ -93,12 +119,12 @@ describe("QuestionCard", () => {
     expect(render(message())).not.toContain("Agent-composed question");
   });
 
-  it("gives every question a tab and offers free text as well", () => {
+  it("gives every question of a set a tab, counts the answers, and waits for all of them", () => {
     const markup = render(message());
     expect(markup).toContain("Model");
     expect(markup).toContain("Style");
     expect(markup).toContain("0 of 2 answered");
-    expect(markup).toContain('placeholder="Type your own answer"');
+    expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Submit answers</);
   });
 
   it("offers no free text on an options-only question", () => {
@@ -106,89 +132,68 @@ describe("QuestionCard", () => {
       questionRequest: { version: 1, questions: [{ question: "Which article?", custom: false, options: [{ label: "Machines of Loving Grace" }, { label: "Reasoning models" }] }] },
     }));
     expect(markup).toContain("Machines of Loving Grace");
-    expect(markup).not.toContain(">Other<");
+    expect(markup).not.toContain("Something else");
   });
 
-  it("cannot be submitted before every question is answered", () => {
-    expect(render(message())).toContain("disabled");
-  });
-
-  it("is a radio group per question, and a checkbox group when multiSelect", () => {
+  it("is a radio group per question, and a checkbox group with a Done button when several may be picked", () => {
     expect(render(message())).toContain('role="radiogroup"');
-    const multi = message({
-      questionRequest: {
-        version: 1,
-        questions: [{ question: "Which stores?", multiSelect: true, options: [{ label: "Instamart" }] }],
-      },
-    });
-    expect(render(multi)).toContain('role="checkbox"');
+    const multi = render(message({ questionRequest: { version: 1, questions: [{ question: "Which stores?", multiSelect: true, options: [{ label: "Instamart" }] }] } }));
+    expect(multi).toContain('role="checkbox"');
+    expect(multi).toContain(">Done<");
   });
 
-  it("shows what was answered once the card is settled, not the buttons again", () => {
-    const markup = render(
-      message({ answered: "answer", answeredText: "The user answered your questions.\n\nQ: Which model?\nA: Claude Opus 5" }),
-    );
-    expect(markup).toContain("A: Claude Opus 5");
-    expect(markup).not.toContain('role="radiogroup"');
+  it("offers the full question when a long one leads the card", () => {
+    const question = "Quick onboarding check. ".repeat(20);
+    const markup = render(message({ questionRequest: { version: 1, questions: [{ question, options: [] }] } }));
+    expect(markup).toContain("Show full question");
+    expect(markup).toContain("line-clamp-4");
   });
 
-  it("makes a short single question the title, in plain ink", () => {
-    const single = message({ questionRequest: { version: 1, questions: [questionRequest.questions[1]!] } });
-    const markup = render(single);
-    expect(markup).toMatch(/text-\[15px\] font-semibold leading-6 text-ink"><bdi dir="auto">Which style should it write in\?</);
-    expect(markup).not.toContain("text-accent-text\"><bdi");
+  it("recedes once the person writes past it, and still answers", () => {
+    const quiet = render(asked(), { typedPast: true });
+    expect(quiet).toContain('data-quiet="true"');
+    expect(quiet).not.toMatch(/<button[^>]*data-ask-choice[^>]* disabled=""/);
   });
 
-  it("puts the options in one rounded group, each keyed by a letter", () => {
-    const question = { question: "Which article?", options: [{ label: "A new analytical piece on reasoning models and what they change" }, { label: "Chip race" }, { label: "Blackwell" }] };
-    const markup = render(message({ questionRequest: { version: 1, questions: [question] } }));
-    expect(markup).toContain("divide-y divide-ink/[0.12] overflow-hidden rounded-2xl border border-ink/[0.12]");
-    expect(markup).toMatch(/role="radio" aria-checked="false" aria-keyshortcuts="A" class=/);
-    expect(markup).toMatch(/aria-keyshortcuts="C"/);
-    expect(markup).toMatch(/rounded-md text-\[12px\] font-medium[^"]*">A</);
-    expect(markup).toMatch(/break-words text-\[15px\] leading-6 text-ink \[unicode-bidi:plaintext\]">A new analytical piece/);
-    expect(markup).not.toContain("rounded-full border-");
-    expect(markup).toContain('placeholder="Type your own answer"');
+  it("says where an inbox's copy was asked, as a link back there, in its own header", () => {
+    const copy = render(asked({}, { inbox: { kind: "ask", from: { name: "Biber", botId: "biber" }, origin: { botId: "biber", threadId: "work", title: "Sondervariante: Fix" } } }));
+    expect(copy).toMatch(/<button[^>]*aria-label="Open Sondervariante: Fix"[^>]*>· in Sondervariante: Fix<\/button>/);
+  });
+});
+
+describe("a settled question", () => {
+  it("folds a pick into one calm line: You chose, with a check", () => {
+    const html = render(asked({ answered: "answer", answeredText: CHOICES[0] }));
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain("You chose:");
+    expect(html).toContain(CHOICES[0]);
+    expect(html).not.toContain("data-ask-choice");
   });
 
-  it("maps letter keys to options and ignores anything else", () => {
-    expect([0, 1, 2, 25].map(choiceKey)).toEqual(["A", "B", "C", "Z"]);
-    expect(choiceIndexForKey("a", 3)).toBe(0);
-    expect(choiceIndexForKey("C", 3)).toBe(2);
-    expect(choiceIndexForKey("d", 3)).toBe(-1);
-    expect(choiceIndexForKey("Enter", 3)).toBe(-1);
-    expect(choiceIndexForKey("1", 3)).toBe(-1);
+  it("says You answered for the person's own words", () => {
+    expect(render(asked({ answered: "answer", answeredText: "Erst morgen" }))).toContain("You answered:");
   });
 
-  it("offers no free text on an options-only question", () => {
-    const markup = render(message({
-      questionRequest: { version: 1, questions: [{ question: "Which article?", custom: false, options: [{ label: "Machines of Loving Grace" }, { label: "Reasoning models" }] }] },
-    }));
-    expect(markup).toContain("Machines of Loving Grace");
-    expect(markup).not.toContain("Type your own answer");
-  });
-
-  it("folds an answered card into one line, with the full answer behind Details", () => {
+  it("folds a set into one line, with the full answer behind Details", () => {
     const markup = render(message({
       answered: "answer",
       answeredText: "The user answered your questions.\n\nQ: Which model should Hazelnut run on by default?\nA: Claude Opus 5\n\nQ: Which style should it write in?\nA: Terse",
     }));
-    expect(markup).toContain('data-ask-card="settled"');
     expect(markup).toContain("Model: Claude Opus 5 · Style: Terse");
     expect(markup).toContain("Details");
-    expect(markup).not.toContain("Submit");
     expect(markup).not.toContain("The user answered your questions.");
   });
 
-  it("says a question nobody answered was closed, not answered", () => {
-    const markup = render(message({ answered: "unavailable" }));
-    expect(markup).toContain("Closed without an answer");
-    expect(markup).not.toContain('role="radiogroup"');
-    expect(markup).not.toContain("Details");
+  it("has its own calm line when Stop ended the work that asked, when it expired, and when it closed unanswered", () => {
+    expect(render(asked({ answered: "unavailable", dismissed: true, stopped: true }))).toMatch(/data-tone="stopped"[\s\S]*Stopped before you answered/);
+    expect(render(asked({ expired: true }))).toMatch(/data-tone="expired"[\s\S]*Expired before anyone answered/);
+    const closed = render(asked({ answered: "unavailable" }));
+    expect(closed).toContain("Closed without an answer");
+    expect(closed).not.toContain("Details");
   });
 
-  it("renders nothing for a card that carries no questions", () => {
-    expect(render(message({ questionRequest: undefined }))).toBe("");
+  it("renders nothing for a card that asks nothing", () => {
+    expect(render(message({ questionRequest: undefined, subtitle: "", title: "" }))).toBe("");
   });
 });
 

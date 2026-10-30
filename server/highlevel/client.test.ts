@@ -8,9 +8,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { HIGHLEVEL_TOOL_NAMES } from "../../shared/highlevel.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { FAKE_LOCATION_ID, startFakeHighLevel, startFakeRelay, type FakeHighLevel, type FakeRelay } from "../testing/fake-highlevel.ts";
-import { BUDGET_CALLS, FORBIDDEN_PATHS, HIGHLEVEL_CONVERSATIONS_VERSION, HIGHLEVEL_VERSION, HighLevelClient, HighLevelError, assertAllowedPath, isScopeRefusal, lookupLocation, plainError, redactSecrets } from "./client.ts";
+import { BUDGET_CALLS, FORBIDDEN_PATHS, HIGHLEVEL_CONVERSATIONS_VERSION, HIGHLEVEL_VERSION, HighLevelClient, HighLevelError, assertAllowedPath, type HighLevelClientOptions, isScopeRefusal, lookupLocation, plainError, redactSecrets } from "./client.ts";
 import { HIGHLEVEL_NOT_CONNECTED_TEXT, HIGHLEVEL_SIGNED_OUT_TEXT } from "./instructions.ts";
-import { createHighLevelRelay } from "./relay.ts";
+import { HighLevelRelayError, createHighLevelRelay, type RelayTokens } from "./relay.ts";
 import { HIGHLEVEL_FILE, HIGHLEVEL_KEY_FILE, HighLevelStore } from "./store.ts";
 import { HIGHLEVEL_TOOLS, runHighLevelTool } from "./tools.ts";
 
@@ -28,7 +28,7 @@ afterAll(async () => { await hl.close(); await relay.close(); });
 beforeEach(() => { hl.calls.length = 0; hl.overrides.length = 0; hl.pathOverrides.clear(); slept.length = 0; hl.tokens.clear(); relay.refreshes = 0; });
 afterEach(async () => { for (const dir of dirs.splice(0)) await removeTempDir(dir); });
 
-function harness(connection: Partial<Parameters<HighLevelStore["put"]>[0]> & { kind?: "oauth" | "token" } = {}) {
+function harness(connection: Partial<Parameters<HighLevelStore["put"]>[0]> & { kind?: "oauth" | "token" } = {}, options: Partial<HighLevelClientOptions> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-highlevel-client-"));
   dirs.push(dir);
   const store = new HighLevelStore({ dataDir: dir, now: () => clock });
@@ -37,11 +37,20 @@ function harness(connection: Partial<Parameters<HighLevelStore["put"]>[0]> & { k
   relay.refreshTokens.add("hl_refresh_seed");
   store.put({ kind: "oauth", accessToken, refreshToken: "hl_refresh_seed", expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, locationName: "Example Profiles", scopes: "contacts.write", ...connection });
   const upstream = createHighLevelRelay(relay.url);
-  const client = new HighLevelClient({ store, refresh: (token) => upstream.refresh(token), apiUrl: hl.url, now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms; } });
+  const client = new HighLevelClient({ store, refresh: (token) => upstream.refresh(token), apiUrl: hl.url, now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms; }, ...options });
   return { dir, store, client };
 }
 
 const last = () => hl.calls.at(-1)!;
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("HighLevelStore", () => {
   it("rests encrypted under its own 0600 key file and reads back the same connection", () => {
@@ -56,9 +65,12 @@ describe("HighLevelStore", () => {
     const again = new HighLevelStore({ dataDir: dir });
     expect(again.get()).toMatchObject({ kind: "oauth", accessToken: "hl_access_seed", refreshToken: "hl_refresh_seed", locationId: FAKE_LOCATION_ID, locationName: "Example Profiles", state: "signed-in" });
     expect(again.secretValues()).toEqual(["hl_access_seed", "hl_refresh_seed"]);
-    again.rotate({ accessToken: "hl_access_2", refreshToken: "hl_refresh_2", expiresAt: 5 });
+    expect(again.rotate({ accessToken: "hl_access_x", refreshToken: "hl_refresh_x" }, { ...again.get()!, accessToken: "hl_access_spent" })).toBeNull();
+    again.rotate({ accessToken: "hl_access_2", refreshToken: "hl_refresh_2", expiresAt: 5 }, again.get()!);
     expect(new HighLevelStore({ dataDir: dir }).get()).toMatchObject({ accessToken: "hl_access_2", refreshToken: "hl_refresh_2", expiresAt: 5, state: "signed-in" });
-    again.markNeedsSignIn("revoked");
+    again.markNeedsSignIn("stale", { ...again.get()!, accessToken: "hl_access_seed" });
+    expect(new HighLevelStore({ dataDir: dir }).get()).toMatchObject({ state: "signed-in" });
+    again.markNeedsSignIn("revoked", again.get()!);
     expect(new HighLevelStore({ dataDir: dir }).get()).toMatchObject({ state: "needs-sign-in", problem: "revoked" });
     again.clear();
     expect(new HighLevelStore({ dataDir: dir }).get()).toBeNull();
@@ -104,6 +116,16 @@ describe("HighLevelClient requests", () => {
     ] });
     expect(out).toMatchObject({ total: 1, page: 2 });
     expect(out.contacts[0]).toMatchObject({ id: "contact_1", email: "ada@fixture.test" });
+  });
+
+  it("passes page numbers past the page-size limit through unchanged", async () => {
+    const { client } = harness();
+    expect(await client.searchContacts({ query: "ada", page: 51, limit: 50 })).toMatchObject({ page: 51 });
+    expect(hl.calls.find((call) => call.path === "/contacts/search")!.body).toMatchObject({ page: 51, pageLimit: 50 });
+    expect(await client.searchOpportunities({ page: 1000, limit: 80 })).toMatchObject({ page: 1000 });
+    expect(last().query).toMatchObject({ page: "1000", limit: "50" });
+    const page = HIGHLEVEL_TOOLS.find((tool) => tool.name === "HIGHLEVEL_SEARCH_CONTACTS")!.inputSchema.properties.page;
+    expect(page).toMatchObject({ minimum: 1, maximum: 1000 });
   });
 
   it("creates and updates contacts with the location id and custom fields mapped from names to ids", async () => {
@@ -170,6 +192,59 @@ describe("HighLevelClient requests", () => {
 });
 
 describe("HighLevelClient resilience", () => {
+  it("starts no OAuth refresh when the first 401 arrives after Stop", async () => {
+    const received = deferred();
+    const respond = deferred();
+    const { client, store, dir } = harness({}, { fetch: async (...args) => {
+      const response = await fetch(...args);
+      received.resolve();
+      await respond.promise;
+      return response;
+    } });
+    hl.tokens.delete("hl_access_seed");
+    const saved = store.get();
+    const relayCalls = relay.calls.length;
+    const stopped = Object.assign(new Error("turn ended"), { status: 409 });
+    let active = true;
+    const pending = client.withActiveCall(() => { if (!active) throw stopped; },
+      () => client.request("GET", "/contacts/contact_1")).catch((error: unknown) => error);
+    await received.promise;
+    active = false;
+    respond.resolve();
+    expect(await pending).toBe(stopped);
+    expect(hl.calls).toHaveLength(1);
+    expect(relay.refreshes).toBe(0);
+    expect(relay.calls).toHaveLength(relayCalls);
+    expect(new HighLevelStore({ dataDir: dir }).get()).toEqual(saved);
+  });
+
+  it("keeps and stores a shared refresh started by another call after Stop", async () => {
+    const refreshed = deferred();
+    const resume = deferred();
+    const upstream = createHighLevelRelay(relay.url);
+    const { client, dir } = harness({ expiresAt: clock + 30_000 }, { refresh: async (token) => {
+      const tokens = await upstream.refresh(token);
+      refreshed.resolve();
+      await resume.promise;
+      return tokens;
+    } });
+    const live = client.request("GET", "/contacts/contact_1");
+    await refreshed.promise;
+    const stopped = Object.assign(new Error("turn ended"), { status: 409 });
+    const pending = client.withActiveCall(() => {
+      expect(new HighLevelStore({ dataDir: dir }).get()?.accessToken).toBe(relay.issued.at(-1));
+      throw stopped;
+    }, () => client.request("GET", "/contacts/contact_2")).catch((error: unknown) => error);
+    resume.resolve();
+    await expect(live).resolves.toMatchObject({ contact: { id: "contact_1" } });
+    expect(await pending).toBe(stopped);
+    expect(relay.refreshes).toBe(1);
+    expect(hl.calls).toHaveLength(1);
+    expect(new HighLevelStore({ dataDir: dir }).get()).toMatchObject({
+      accessToken: relay.issued.at(-1), state: "signed-in",
+    });
+  });
+
   it("refreshes once through the relay on a 401, retries with the new token and keeps the rotated pair", async () => {
     const { client, store, dir } = harness();
     hl.tokens.delete("hl_access_seed");
@@ -190,6 +265,154 @@ describe("HighLevelClient resilience", () => {
     await client.getContact("contact_1");
     expect(relay.refreshes).toBe(2);
     expect(relay.calls.at(-1)).toEqual({ path: "/v1/highlevel/refresh", body: { refreshToken: saved.refreshToken } });
+  });
+
+  it("drops a refresh that finishes after another account was connected, keeping that account's credentials", async () => {
+    const pending = deferred<RelayTokens>();
+    let asked = 0;
+    const { client, store } = harness({ expiresAt: clock + 30_000 }, { refresh: () => { asked++; return pending.promise; } });
+    const call = client.listPipelines();
+    await settle();
+    expect(asked).toBe(1);
+    hl.tokens.add("pit-account-b-token");
+    store.put({ kind: "token", accessToken: "pit-account-b-token", locationId: "loc_account_b", locationName: "Account B", scopes: "" });
+    pending.resolve({ accessToken: "hl_access_late", refreshToken: "hl_refresh_late", expiresIn: 86_400, scope: "", locationId: FAKE_LOCATION_ID });
+    await expect(call).rejects.toMatchObject({ signedOut: false, message: expect.stringMatching(/connection changed/u) });
+    expect(store.get()).toMatchObject({ kind: "token", accessToken: "pit-account-b-token", locationId: "loc_account_b", state: "signed-in" });
+    expect(store.get()?.refreshToken).toBeUndefined();
+    expect(hl.calls.filter((call) => call.path === "/opportunities/pipelines")).toHaveLength(0);
+  });
+
+  it("does not sign out an account connected while the previous account's refresh was being rejected", async () => {
+    const pending = deferred<RelayTokens>();
+    const { client, store } = harness({ expiresAt: clock + 30_000 }, { refresh: () => pending.promise });
+    const call = client.listPipelines();
+    await settle();
+    hl.tokens.add("pit-account-b-token");
+    store.put({ kind: "token", accessToken: "pit-account-b-token", locationId: "loc_account_b", scopes: "" });
+    pending.reject(new HighLevelRelayError(401, "highlevel_refresh_rejected", "rejected"));
+    await expect(call).rejects.toMatchObject({ signedOut: false, message: expect.stringMatching(/connection changed/u) });
+    expect(store.get()).toMatchObject({ accessToken: "pit-account-b-token", state: "signed-in" });
+    expect(store.get()?.problem).toBeUndefined();
+  });
+
+  it("retries a call for the same location with the new sign-in when it changed during the refresh", async () => {
+    const pending = deferred<RelayTokens>();
+    const { client, store } = harness({ expiresAt: clock + 30_000 }, { refresh: () => pending.promise });
+    const call = client.listPipelines();
+    await settle();
+    hl.tokens.add("hl_access_reconnected");
+    store.put({ kind: "oauth", accessToken: "hl_access_reconnected", refreshToken: "hl_refresh_reconnected", expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, scopes: "" });
+    pending.resolve({ accessToken: "hl_access_late", refreshToken: "hl_refresh_late", expiresIn: 86_400, scope: "", locationId: FAKE_LOCATION_ID });
+    expect((await call).pipelines).toHaveLength(1);
+    expect(last().headers.authorization).toBe("Bearer hl_access_reconnected");
+    expect(store.get()).toMatchObject({ accessToken: "hl_access_reconnected", refreshToken: "hl_refresh_reconnected", state: "signed-in" });
+  });
+
+  it("reuses the tokens another call already refreshed when a stale 401 arrives late", async () => {
+    const gate = deferred();
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        const bearer = new Headers(init?.headers).get("authorization");
+        if (String(url).includes("/contacts/contact_slow") && bearer === "Bearer hl_access_seed") await gate.promise;
+        return fetch(url, init);
+      },
+    });
+    hl.tokens.delete("hl_access_seed");
+    const slow = client.getContact("contact_slow");
+    await settle();
+    expect((await client.getContact("contact_fast")).id).toBe("contact_fast");
+    expect(relay.refreshes).toBe(1);
+    const refreshed = store.get()!;
+    gate.resolve();
+    expect((await slow).id).toBe("contact_slow");
+    expect(relay.refreshes).toBe(1);
+    expect(store.get()).toMatchObject({ accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken, state: "signed-in" });
+    const bearers = hl.calls.filter((call) => call.path === "/contacts/contact_slow").map((call) => call.headers.authorization);
+    expect(bearers).toEqual(["Bearer hl_access_seed", `Bearer ${refreshed.accessToken}`]);
+  });
+
+  it("does not sign out a refreshed connection when a stale 401 for the old token arrives after the retry", async () => {
+    const { client, store } = harness({ kind: "token", accessToken: "pit-old-token-123", refreshToken: undefined, expiresAt: undefined }, {
+      fetch: async (url, init) => {
+        if (String(url).includes("/contacts/contact_slow")) {
+          hl.tokens.add("pit-new-token-456");
+          store.put({ kind: "token", accessToken: "pit-new-token-456", locationId: FAKE_LOCATION_ID, scopes: "" });
+        }
+        return fetch(url, init);
+      },
+    });
+    hl.tokens.delete("pit-old-token-123");
+    expect((await client.getContact("contact_slow")).id).toBe("contact_slow");
+    expect(store.get()).toMatchObject({ accessToken: "pit-new-token-456", state: "signed-in" });
+  });
+
+  it("still refreshes a same-location connection adopted while a call waited, when its token is dead too", async () => {
+    let adopted = false;
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        if (!adopted) {
+          adopted = true;
+          hl.tokens.delete("hl_access_seed");
+          relay.refreshTokens.add("hl_refresh_adopted");
+          store.put({ kind: "oauth", accessToken: "hl_access_adopted", refreshToken: "hl_refresh_adopted", expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, scopes: "" });
+        }
+        return fetch(url, init);
+      },
+    });
+    expect((await client.listPipelines()).pipelines).toHaveLength(1);
+    expect(relay.refreshes).toBe(1);
+    expect(relay.calls.at(-1)).toEqual({ path: "/v1/highlevel/refresh", body: { refreshToken: "hl_refresh_adopted" } });
+    expect(store.get()).toMatchObject({ accessToken: relay.issued.at(-1), state: "signed-in" });
+  });
+
+  it("stops with the changed-connection error when another location is connected after the refresh", async () => {
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        const bearer = new Headers(init?.headers).get("authorization");
+        if (bearer === `Bearer ${relay.issued.at(-1)}` && store.get()?.kind === "oauth") {
+          hl.tokens.delete(relay.issued.at(-1)!);
+          hl.tokens.add("pit-account-b-token");
+          store.put({ kind: "token", accessToken: "pit-account-b-token", locationId: "loc_account_b", scopes: "" });
+        }
+        return fetch(url, init);
+      },
+    });
+    hl.tokens.delete("hl_access_seed");
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 409, signedOut: false, message: expect.stringMatching(/connection changed/u) });
+    expect(relay.refreshes).toBe(1);
+    expect(store.get()).toMatchObject({ accessToken: "pit-account-b-token", state: "signed-in" });
+  });
+
+  it("gives up when the sign-in keeps changing under a call, without signing the newest one out", async () => {
+    let dispatched = 0;
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        if (++dispatched > 20) throw new Error("fixture cutoff");
+        hl.tokens.clear();
+        store.put({ kind: "oauth", accessToken: `hl_access_churn_${dispatched}`, refreshToken: `hl_refresh_churn_${dispatched}`, expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, scopes: "" });
+        return fetch(url, init);
+      },
+    });
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 503, signedOut: false, message: expect.stringMatching(/kept changing/u) });
+    expect(dispatched).toBeLessThanOrEqual(4);
+    expect(relay.refreshes).toBe(0);
+    expect(store.get()?.state).toBe("signed-in");
+  });
+
+  it("reports the changed location even after the call followed the sign-in as often as it may", async () => {
+    let dispatched = 0;
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        dispatched++;
+        hl.tokens.clear();
+        const elsewhere = dispatched === 4;
+        store.put({ kind: "oauth", accessToken: `hl_access_churn_${dispatched}`, refreshToken: `hl_refresh_churn_${dispatched}`, expiresAt: clock + 3_600_000, locationId: elsewhere ? "loc_account_b" : FAKE_LOCATION_ID, scopes: "" });
+        return fetch(url, init);
+      },
+    });
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/connection changed/u) });
+    expect(dispatched).toBe(4);
   });
 
   it("refreshes ahead of expiry without waiting for a 401", async () => {
@@ -236,6 +459,85 @@ describe("HighLevelClient resilience", () => {
     expect((await client.getContact("contact_1")).id).toBe("contact_1");
     hl.overrides.push({ status: 502 }, { status: 502 });
     await expect(client.getContact("contact_1")).rejects.toThrow("HighLevel is having trouble (502); try again in a minute.");
+  });
+
+  it("never replays a create after a 5xx: HighLevel may have saved it", async () => {
+    const { client } = harness();
+    const posts = (path: string) => hl.calls.filter((call) => call.method === "POST" && call.path === path).length;
+    hl.overrides.push({ status: 502 });
+    await expect(client.addNote("contact_1", "Left voicemail")).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/may have been saved anyway/u) });
+    expect(posts("/contacts/contact_1/notes")).toBe(1);
+    hl.overrides.push({ status: 500 });
+    await expect(client.addTask("contact_1", { title: "Follow up", dueDate: "2026-03-12T09:00:00.000Z" })).rejects.toThrow(/task.+may have been saved anyway/u);
+    expect(posts("/contacts/contact_1/tasks")).toBe(1);
+    hl.overrides.push({ status: 503 });
+    await expect(client.createOpportunity({ pipelineId: "pipe_1", contactId: "contact_1", name: "Deal" })).rejects.toThrow(/opportunity.+may have been saved anyway/u);
+    expect(posts("/opportunities/")).toBe(1);
+    // A search and adding tags are safe to send twice, so they still retry.
+    hl.overrides.push({ status: 503 });
+    expect((await client.searchContacts({ query: "ada" })).contacts).toHaveLength(1);
+    expect(posts("/contacts/search")).toBe(2);
+    hl.overrides.push({ status: 503 });
+    expect((await client.addTags("contact_1", ["a"])).tags).toEqual(["a"]);
+    expect(posts("/contacts/contact_1/tags")).toBe(2);
+  });
+
+  it("says a create may have been saved when HighLevel's answer is lost", async () => {
+    const { client } = harness({}, { fetch: async () => { throw new TypeError("socket hang up"); } });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
+    await expect(client.getContact("contact_1")).rejects.toThrow("HighLevel did not answer (the request timed out or the network failed); try again in a minute.");
+  });
+
+  it("refuses an answer over 4 MB counted in bytes, and stops reading it there", async () => {
+    const wide = harness({}, { fetch: async () => new Response(JSON.stringify({ contact: { id: "contact_1", name: "é".repeat(2_500_000) } }), { status: 200 }) });
+    await expect(wide.client.getContact("contact_1")).rejects.toThrow("HighLevel's answer was too large to read; narrow the request.");
+    let pulled = 0;
+    let cancelled = false;
+    const endless = harness({}, { fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled > 20) controller.close(); else controller.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 200 }) });
+    await expect(endless.client.getContact("contact_1")).rejects.toThrow(/too large to read/u);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(10);
+  });
+
+  it("says a create may have been saved when HighLevel fails with an answer over 4 MB, without reading it", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const { client } = harness({}, { fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled > 20) controller.close(); else controller.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 502 }) });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/may have been saved anyway/u) });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(2);
+  });
+
+  it("retries a read once when HighLevel fails with an answer over 4 MB, without reading it", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    let calls = 0;
+    const { client } = harness({}, { fetch: async (input, init) => ++calls > 1 ? fetch(input, init) : new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled > 20) controller.close(); else controller.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 502 }) });
+    expect((await client.getContact("contact_1")).id).toBe("contact_1");
+    expect(hl.calls.filter((call) => call.path === "/contacts/contact_1")).toHaveLength(1);
+    expect(slept).toEqual([1_000]);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(2);
+  });
+
+  it("says a create may have been saved when HighLevel's answer breaks off after the headers", async () => {
+    let status = 201;
+    const broken = () => new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError("terminated")); } }), { status });
+    const { client } = harness({}, { fetch: async () => broken() });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
+    status = 502;
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/may have been saved anyway/u) });
+    status = 200;
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 503, message: "HighLevel did not answer (the request timed out or the network failed); try again in a minute." });
   });
 
   it("keeps under 90 calls per 10 s per location", async () => {

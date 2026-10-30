@@ -98,8 +98,8 @@ export function approvalModeFor(bot: {
 }
 
 /** A private late-grant recovery may revoke an elevated mode even after a
- * turn began. It can only move to the fail-closed Ask mode; ordinary changes
- * remain blocked while the bot is working. */
+ * turn began. It can only move to the fail-closed Ask mode, and it also stops
+ * the running turn, which a native engine would otherwise finish elevated. */
 export function isEmergencyApprovalDowngrade(
   current: ApprovalMode,
   next: ApprovalMode,

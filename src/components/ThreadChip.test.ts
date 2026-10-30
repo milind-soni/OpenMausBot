@@ -46,6 +46,15 @@ describe("ThreadChip", () => {
     expect(markup).toContain('data-thread-chip="qa-245"');
   });
 
+  it("says in the person's words that work addressed into a room went to a bot outside it directly", () => {
+    const sent = (sentDirectly: Message["sentDirectly"]) => renderToStaticMarkup(createElement(ThreadChip, {
+      message: { ...receipt(), tool: { name: "server English", ok: true }, sentDirectly },
+    }));
+    expect(sent({ name: "Scout" })).toContain("Sent to Scout directly: it isn&#x27;t in this room.");
+    expect(sent({ name: "Scout", room: "Sales" })).toContain("Sent to Scout directly: it isn&#x27;t in Sales.");
+    expect(sent({ name: "Scout" })).not.toContain("server English");
+  });
+
   it("renders nothing without a thread reference", () => {
     expect(renderToStaticMarkup(createElement(ThreadChip, { message: { ...receipt(), threadRef: undefined } }))).toBe("");
   });
@@ -83,5 +92,14 @@ describe("ThreadChip", () => {
       { type: "select", id: "scout" },
       { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
     ]);
+  });
+
+  it("marks the receipt when the work in that thread failed", () => {
+    const failed = renderToStaticMarkup(createElement(ThreadChip, {
+      message: { ...receipt(), tool: { name: "Scout — cancelled: stopped by the person", ok: false } },
+    }));
+    expect(failed).toContain("Scout — cancelled: stopped by the person");
+    expect(failed).toMatch(/<button[^>]*class="[^"]*text-danger/);
+    expect(renderToStaticMarkup(createElement(ThreadChip, { message: receipt() }))).not.toContain("text-danger");
   });
 });

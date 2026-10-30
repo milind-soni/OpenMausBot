@@ -1,11 +1,13 @@
 // A config written by a newer or differently built app must load as an unavailable shadow, never crash the fleet.
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModelCatalog } from "../contracts.ts";
-import { resetPathCacheForTests } from "../env-path.ts";
+import type { ModelCatalog, StandaloneRelease } from "../contracts.ts";
+import { standalonePlatformKey } from "../engine-standalone.ts";
+import { findCliCandidates, registerFallbackPathDir, registerPathDir, resetPathCache, resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
@@ -494,6 +496,141 @@ process.exit(0);
     expect(calls[0]).toEqual(["install", "-g", "--prefix", join(scratch, "data", "tools", "npm"), "--loglevel=error", "--include=optional", "--allow-scripts=fake-engine", "fake-engine@latest"]);
     expect(existsSync(join(scratch, "data", "tools", "npm", "bin", "fakebin"))).toBe(true);
     expect(await registry.installRuntime("missing")).toBe(false);
+  });
+
+  function standaloneRelease(platform: string): StandaloneRelease {
+    return {
+      name: "Fake Engine",
+      engine: "fake-engine",
+      version: "2.0.0",
+      hosts: ["downloads.example.test"],
+      assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), executableSha256: "b".repeat(64), archive: "raw", executable: "fakebin", approxBytes: 70_000_000 } },
+    };
+  }
+
+  it("installs the vendor's own build without npm, and shows it as available", async () => {
+    withFakeNpm(false);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    const release = standaloneRelease(standalonePlatformKey());
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine" }, needsNode: true, standalone: release } });
+    const installs: unknown[][] = [];
+    const registry = new ProviderRegistry([fake.driver], {
+      enginesBaseDir: join(scratch, "data"),
+      npmAvailable: () => false,
+      installStandalone: async (...args) => {
+        installs.push(args);
+        return { version: "2.0.0", executablePath: join(scratch, "data", "tools", "standalone", "fake-engine", "bin", "fakebin"), binDir: "" };
+      },
+    });
+    await registry.load({ a: { driver: "fake" } });
+    const [described] = await registry.describe();
+    expect(described.install?.server).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 } });
+    // The pins stay on the server.
+    expect(described.install).not.toHaveProperty("standalone");
+    expect(await registry.installRuntime("a")).toBe(true);
+    expect(installs).toEqual([[release, { baseDir: join(scratch, "data") }]]);
+    expect(existsSync(process.env.FAKE_NPM_LOG!)).toBe(false);
+  });
+
+  it("installs with npm when the vendor has no build for this platform", async () => {
+    withFakeNpm(true);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine" }, standalone: standaloneRelease("plan9-x64") } });
+    const installs: unknown[] = [];
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), installStandalone: async (release) => {
+      installs.push(release);
+      return { version: "2.0.0", executablePath: "", binDir: "" };
+    } });
+    await registry.load({ a: { driver: "fake" } });
+    expect((await registry.describe())[0].install?.server).toEqual({ package: "fake-engine" });
+    expect(await registry.installRuntime("a")).toBe(true);
+    expect(installs).toEqual([]);
+    expect(readFileSync(process.env.FAKE_NPM_LOG!, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("drops the terminal sign-in command when the CLI is the app's own copy, which the person's terminal cannot reach", async () => {
+    const own = withFakeNpm(false);
+    const base = join(scratch, "data");
+    const bin = join(base, "tools", "standalone", "fake-engine", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
+    registerFallbackPathDir(bin);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { signInCommand: "fakebin auth login", standalone: standaloneRelease(standalonePlatformKey()) } });
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: base, npmAvailable: () => false });
+    await registry.load({ a: { driver: "fake" } });
+    expect((await registry.describe())[0].install?.signInCommand).toBeUndefined();
+    // So Settings can offer the in-app way to finish setting it up instead.
+    expect((await registry.describe())[0].install?.appCopy).toBe(true);
+    // A copy npm put in the app's folder earlier ranks behind the app's own build for such an engine.
+    mkdirSync(join(base, "tools", "npm", "bin"), { recursive: true });
+    writeFileSync(join(base, "tools", "npm", "bin", "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
+    registerPathDir(join(base, "tools", "npm", "bin"));
+    expect((await registry.describe())[0].install?.signInCommand).toBeUndefined();
+    // A copy the person installed comes first on PATH and keeps its sign-in command.
+    writeFileSync(join(own, "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
+    resetPathCache();
+    expect((await registry.describe())[0].install?.signInCommand).toBe("fakebin auth login");
+    expect((await registry.describe())[0].install?.appCopy).toBeUndefined();
+  });
+
+  it("points the engine at the app's own copy when the copy its CLI finds does not start", async () => {
+    const own = withFakeNpm(false);
+    writeFileSync(join(own, "fakebin"), "#!/bin/sh\necho 'Error: Cannot find module' >&2\nexit 1\n", { mode: 0o755 });
+    const base = join(scratch, "data");
+    const bin = join(base, "tools", "standalone", "fake-engine", "bin");
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { standalone: standaloneRelease(standalonePlatformKey()) } });
+    const registry = new ProviderRegistry([fake.driver], {
+      enginesBaseDir: base,
+      npmAvailable: () => false,
+      installStandalone: async () => {
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(join(bin, "fakebin"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
+        registerFallbackPathDir(bin);
+        return { version: "2.0.0", executablePath: join(bin, "fakebin"), binDir: bin };
+      },
+    });
+    await registry.load({ a: { driver: "fake" } });
+    // The engine's status runs its CLI, as the real drivers do.
+    Object.assign(registry.get("a")!, {
+      snapshot: async () => {
+        try {
+          execFileSync(findCliCandidates("fakebin")[0]!, ["--version"], { stdio: "pipe" });
+          return { state: "available" };
+        } catch {
+          return { state: "unavailable", reason: "fakebin does not start" };
+        }
+      },
+    });
+    expect(await registry.installRuntime("a")).toEqual({ useCli: join(bin, "fakebin") });
+    // A CLI the person chose with Set CLI is theirs to change, even when it does not start.
+    await registry.load({ b: { driver: "fake", config: { cli: join(own, "fakebin") } } });
+    Object.assign(registry.get("b")!, { snapshot: async () => ({ state: "unavailable", reason: "fakebin does not start" }) });
+    expect(await registry.installRuntime("b")).toBe(true);
+    // A working copy of the person's own is left alone.
+    writeFileSync(join(own, "fakebin"), "#!/bin/sh\necho 1.0.0\n", { mode: 0o755 });
+    expect(await registry.installRuntime("a")).toBe(true);
+  });
+
+  it("lets a driver's own installer go first", async () => {
+    withFakeNpm(false);
+    const fake = makeFakeDriver();
+    Object.assign(fake.driver, { install: { standalone: standaloneRelease(standalonePlatformKey()) } });
+    const installs: unknown[] = [];
+    let own = 0;
+    const registry = new ProviderRegistry([fake.driver], { npmAvailable: () => false, installStandalone: async (release) => {
+      installs.push(release);
+      return { version: "2.0.0", executablePath: "", binDir: "" };
+    } });
+    await registry.load({ a: { driver: "fake" } }, (instance) => Object.assign(instance, { installRuntime: async () => { own += 1; } }));
+    expect(await registry.installRuntime("a")).toBe(true);
+    expect(own).toBe(1);
+    expect(installs).toEqual([]);
   });
 
   it("offers nothing without npm, for a curl installer, or for a managed engine", async () => {

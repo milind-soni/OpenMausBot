@@ -94,6 +94,7 @@ function desktopMain({ offered = true, page = event => event.page, config = () =
     localConfig: () => config(),
     languageChanged: (language, sender) => told.push([language, sender]),
     now: () => now,
+    systemName: async () => "Ada Lovelace",
   });
   const ask = (channel, page, ...args) => handlers.get(channel)({ page, sender: `${page}-page` }, ...args);
   const answer = channel => page => { const event = { page }; listeners.get(channel)(event); return event.returnValue; };
@@ -102,7 +103,7 @@ function desktopMain({ offered = true, page = event => event.page, config = () =
 
 test("every page of this desktop's window reads and records the same notices; nothing else is answered", async () => {
   const main = desktopMain();
-  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-analytics:set", "desktop-language:set"]);
+  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-profile:system-name", "desktop-analytics:set", "desktop-language:set"]);
   for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true });
   assert.equal(await main.ask("desktop-notices:shown", "server", POPUP), true);
   assert.equal(await main.ask("desktop-notices:shown", "local", POPUP), false, "once a day for the desktop, not per page");
@@ -110,6 +111,12 @@ test("every page of this desktop's window reads and records the same notices; no
   assert.deepEqual(await main.ask("desktop-notices:state", "local"), { seen: [POPUP], cloud: true });
   for (const channel of main.channels) assert.throws(() => main.ask(channel, null, POPUP), /only available in this app's window/, channel);
   assert.deepEqual((await desktopMain({ offered: false }).ask("desktop-notices:state", "server")).cloud, false);
+});
+
+test("a first run's default name for the profile goes to this computer's own page only", async () => {
+  const main = desktopMain();
+  assert.equal(await main.ask("desktop-profile:system-name", "local"), "Ada Lovelace");
+  for (const page of ["cloud", "server"]) assert.throws(() => main.ask("desktop-profile:system-name", page), /only available in this app's window/, page);
 });
 
 test("This computer's own record counts on every page before its page loads on this build: an earlier close or the welcome's Cloud beat", async () => {
@@ -262,7 +269,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /for \(const port of DESKTOP_PORTS\)/, "main tries the ports this module names, in order");
   assert.deepEqual([...DESKTOP_PORTS], [8799, 18799, 28799]);
-  const start = main.indexOf("  updatesConsent = registerDesktopPrefs({"), end = main.indexOf("\n", main.indexOf("page:", start));
+  const start = main.indexOf("  desktopPrefs = createDesktopPrefs("), end = main.indexOf("\n", main.indexOf("page:", start));
   assert.ok(start >= 0 && end > start, "main.mjs registers the desktop prefs");
   let options = null;
   const localFrame = { url: `${LOCAL}/` }, serverFrame = { url: `${VPS}/` };
@@ -273,12 +280,12 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const windows = [window("team"), window("home"), window("closed")];
   let switched = async id => { calls.push(["switch", id]); }, loads = true;
   const context = vm.createContext({
-    registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
+    registerDesktopPrefs: value => { options = value; }, createDesktopPrefs: store => ({ store }), jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
     navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow: { webContents: contents }, environmentsState: { environments: [{ id: "vps", name: "VPS", origin: VPS }], activeId: "vps" },
-    BrowserWindow: { getAllWindows: () => windows },
+    appWindows: () => windows, BrowserWindow: { getAllWindows: () => windows }, chromeRail: { send: (...told) => sent.push(["rail", ...told]) },
     rendererOrigin: () => LOCAL, cloudAccountRestored: async () => calls.push("restored"), cloudOffersReady: async () => { calls.push("offers"); return true; },
     cloudPageAsking: event => event.verifiedCloud ? "cloud" : null,
     serverReady: true, LOCAL_ID: "local", switchEnvironment: id => switched(id),
@@ -286,7 +293,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
     workspaceMenuAction: async action => { try { await action(); } catch { calls.push("dialog"); } },
   });
   vm.runInContext(main.slice(start, end), context);
-  assert.equal(options.read(), "/user-data/desktop-prefs.json");
+  assert.equal(options.prefs.store.read(), "/user-data/desktop-prefs.json");
   assert.equal(options.localConfig(), "/home/.openmausbot/config.json", "This computer's own workspace, whichever server the window shows");
   assert.equal(options.page({ sender: { mainFrame: localFrame }, senderFrame: localFrame }), "local");
   assert.equal(options.page({ sender: contents, senderFrame: serverFrame }), "server");
@@ -298,9 +305,59 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   assert.equal(await options.cloudOffered(), true);
   assert.deepEqual(calls, ["restored", "offers"]);
   options.languageChanged("en", windows[0].webContents);
-  assert.deepEqual(sent, [["home", "desktop-language:changed", "en"]], "every other open window hears the pick");
+  assert.deepEqual(sent, [["home", "desktop-language:changed", "en"], ["rail", "desktop-language:changed", "en"]], "every other open window hears the pick, and the window's rail");
   const navigate = main.slice(main.indexOf("function navigateMainWindow(url) {"), main.indexOf("\n}\n", main.indexOf("function navigateMainWindow(url) {")) + 3);
   const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });
   assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");
   assert.equal(await vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: null })(`${LOCAL}/`), false, "no window");
+});
+
+test("the window's rail of places is shown until the person hides it, and the choice survives a restart", () => {
+  let saved = null, writes = 0;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); writes++; } });
+  assert.equal(prefs.railHidden(), false);
+  prefs.setRailHidden(false);
+  assert.equal(writes, 0, "showing a rail that shows writes nothing");
+  prefs.setRailHidden(true);
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).railHidden(), true);
+  prefs.setRailHidden("no");
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).railHidden(), false, "only true hides it");
+  assert.equal(createDesktopPrefs({ read: () => ({ railHidden: "yes" }), write: () => {} }).railHidden(), false);
+});
+
+test("the talk shortcut is on with ⌃⌥Space until changed, and the choice survives a restart", () => {
+  let saved = null;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  assert.equal(prefs.talkShortcut(), true);
+  assert.equal(prefs.talkKey(), "ctrl-opt-space");
+  prefs.setTalkShortcut(false);
+  assert.equal(prefs.setTalkKey("opt-shift-space"), true);
+  for (const key of ["cmd-space", "__proto__", "toString", 7]) assert.equal(prefs.setTalkKey(key), false);
+  const restarted = createDesktopPrefs({ read: () => saved, write: () => {} });
+  assert.equal(restarted.talkShortcut(), false);
+  assert.equal(restarted.talkKey(), "opt-shift-space");
+  const junk = createDesktopPrefs({ read: () => ({ talkShortcut: "off", talkKey: "toString" }), write: () => {} });
+  assert.equal(junk.talkShortcut(), true);
+  assert.equal(junk.talkKey(), "ctrl-opt-space");
+});
+
+test("each server keeps its own Quick asks chat; nothing malformed is read back", () => {
+  let saved = null;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  prefs.setQuickAsksChat("/Users/a/.openmausbot", { botId: "bot-1", threadId: "t-1" });
+  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.openmausbot"), { botId: "bot-1", threadId: "t-1" });
+  assert.equal(prefs.quickAsksChat("/Users/a/.openmausbot-aprs"), null);
+  const broken = createDesktopPrefs({ read: () => ({ quickAsks: { a: { botId: "../x", threadId: "t" }, b: "t-1", c: { botId: "b", threadId: "t", extra: 1 } } }), write: () => {} });
+  assert.equal(broken.quickAsksChat("a"), null);
+  assert.equal(broken.quickAsksChat("b"), null);
+  assert.deepEqual(broken.quickAsksChat("c"), { botId: "b", threadId: "t" });
+});
+
+test("registerDesktopPrefs works on the store main hands it", async () => {
+  const prefs = createDesktopPrefs({ read: () => null, write: () => {} });
+  const handlers = new Map();
+  registerDesktopPrefs({ prefs, ipcMain: { handle: (c, h) => handlers.set(c, h), on: () => {} }, read: () => null, write: () => {},
+    page: () => "local", cloudOffered: async () => false });
+  await handlers.get("desktop-analytics:set")({}, false);
+  assert.equal(prefs.analytics(), false);
 });

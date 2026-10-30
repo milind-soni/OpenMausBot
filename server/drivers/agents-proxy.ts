@@ -6,6 +6,7 @@
 //   OMB_TURN_DEPTH  this turn's comms depth (the harness refuses recursion)
 //   OMB_EXTERNAL_RUNTIME  "1" for a standing process: oversized results are cut instead of cached
 //   OMB_CHIEF_OF_STAFF  "1" for a Chief of Staff, the only bot shown the Chief-only tools
+//   OMB_MAUSBOT  "1" for the person's MausBot, the only bot shown its notification tools
 //   OMB_AGENTS_TOOL_BRIDGE  "1" lists a few tools and puts the rest behind find_tool and use_tool
 // scripts/bundle-server.mjs inlines agents-mcp and agents-catalog/-call/-client/-bridge into this file, which the harness spawns.
 import readline from "node:readline";

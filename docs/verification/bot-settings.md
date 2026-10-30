@@ -79,31 +79,32 @@ load never shows another agent's link.
 
 ## Creation drafts and defaults
 
-The same isolated fixture also exposes **Configure new bot** and **New bot
-defaults → Edit**. Check that both open immediately, keep a fixed size while
+The same isolated fixture also exposes **New bot** and **New bot defaults →
+Edit**. **New bot** makes a bot at once from the saved defaults, with no
+dialog. The defaults editor must open immediately, keep a fixed size while
 switching sections, and retain edits between sections. Identity → View full
-must appear above the creation dialog; Escape closes only that inner layer.
+must appear above it; Escape closes only that inner layer.
 
-In a creation draft, click both random-name buttons repeatedly. Each suggestion
-must replace the editable name, avoid an immediate repeat and existing names,
-and survive switching away from Identity and back. Type a custom name, then
-randomize again. Cancelling must leave the server unchanged. These buttons
-also appear in defaults but not in an existing bot's profile. Dataset provenance
+In the defaults editor, click both random-name buttons repeatedly. Each
+suggestion must replace the editable name, avoid an immediate repeat and
+existing names, and survive switching away from Identity and back. Type a
+custom name, then randomize again. Cancelling must leave the server
+unchanged. These buttons also appear in a ready-made bot's review (Templates →
+Add) but not in an existing bot's profile. Dataset provenance
 and licenses are in `src/data/given-names/`; `src/lib/random-bot-name.test.ts`
 checks the pools and selection behavior without a network or model request.
 
 Save defaults containing a title, model, memory topic, skill, and paused
 routine. Read the fixture API to confirm no bot or live routine was created.
-Open a creation draft, confirm inheritance, clear selected values, and cancel:
-the server's bots and defaults must remain unchanged. Reopen and create;
-confirm only the explicitly retained settings and files were applied. Edit
-the existing bot afterward to verify that its settings still save normally.
+Press **New bot** and confirm the new bot carries those settings and files
+and its routine stays paused. Edit the bot afterward to verify that its
+settings still save normally.
 Use only the fixture's harmless skills and routines.
 
 Automated coverage:
 
 ```sh
-pnpm exec vitest run server/new-bot-defaults.test.ts server/new-bot-defaults.e2e.test.ts src/lib/bot-creation-draft.test.ts src/lib/create-configured-bot.test.ts src/components/NewBotDialog.test.ts
+pnpm exec vitest run server/new-bot-defaults.test.ts server/new-bot-defaults.e2e.test.ts src/lib/bot-creation-draft.test.ts src/lib/create-configured-bot.test.ts src/lib/new-bot.test.ts src/state/bot-creation.test.ts src/components/NewBotDialog.test.ts
 node --test electron/approval-trusted-mode.node-test.mjs
 ```
 
@@ -115,16 +116,20 @@ native permission rejection, cleanup, and post-creation activation warnings.
 Browser fixtures do not prove packaged operating-system grants or real model
 execution; those require the native approval verification separately.
 
-Companion connections retain the single-request Create bot flow: they cannot
-read host defaults or patch host settings. `companion/test/proxy.test.ts` checks
-creation succeeds while those routes remain blocked. The dialog tests also
-check that a caller's synchronous exception or rejected promise after creation
-is reported without leaving a retryable creation dialog open.
+Companion connections make the bot with a single request: they cannot read
+host defaults or patch host settings, so the host applies its defaults.
+`companion/test/proxy.test.ts` checks creation succeeds while those routes
+remain blocked, and `src/lib/new-bot.test.ts` that a paired device sends only
+that request. The dialog tests also check that a caller's synchronous
+exception or rejected promise after creation is reported without leaving a
+retryable creation dialog open.
 
 In the renderer fixture, open **App settings → General → Defaults for new bots → Edit**.
-The full creation dialog retains upstream's **Who can see it** selection for
-browser admins. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts` selects
-**Admins only**, creates a bot, and verifies its stored audience. The initial
+A ready-made bot's review (Templates → Add) retains upstream's **Who can see
+it** selection for browser admins; **New bot** makes a bot everyone sees,
+changed later in its settings. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts`
+selects **Admins only** in that review, creates the bot, and verifies its
+stored audience. The initial
 POST carries that audience; it is not widened temporarily during later setup.
 The fixture injects the native select's change event for cross-platform
 headless reliability; it does not verify the operating system's select popup.

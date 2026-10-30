@@ -27,7 +27,7 @@ export const LOCAL_HOSTS: LocalHost[] = [
 export const INJECT_SEP = "::";
 
 const HOST_BY_ID = new Map(LOCAL_HOSTS.map((host) => [host.id, host]));
-const MODEL_ID = /^[\w][\w./:+-]*$/;
+const MODEL_ID = /^[\w][\w./:+@-]*$/;
 
 export interface InjectedModel {
   id: string;
@@ -286,6 +286,45 @@ function loadedProbeUrl(host: LocalHost): string | null {
   return null;
 }
 
+function finiteContext(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** LM Studio 0.4 lists downloaded models at GET /api/v1/models; the chat id is `key`. */
+export function lmStudioV1Catalog(
+  payload: unknown,
+): { ids: string[]; loaded: Set<string>; windows: Map<string, number> } | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const models = (payload as { models?: unknown }).models;
+  if (!Array.isArray(models)) return null;
+  const ids: string[] = [];
+  const loaded = new Set<string>();
+  const windows = new Map<string, number>();
+  for (const row of models) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as { type?: unknown; key?: unknown; loaded_instances?: unknown; max_context_length?: unknown };
+    if (item.type !== "llm" || typeof item.key !== "string" || !MODEL_ID.test(item.key)) continue;
+    const instances = Array.isArray(item.loaded_instances) ? item.loaded_instances : [];
+    let contextWindow: number | undefined;
+    for (const instance of instances) {
+      if (!instance || typeof instance !== "object") continue;
+      const config = (instance as { config?: unknown }).config;
+      const length = config && typeof config === "object"
+        ? finiteContext((config as { context_length?: unknown }).context_length)
+        : null;
+      if (length !== null) contextWindow = contextWindow === undefined ? length : Math.min(contextWindow, length);
+    }
+    if (contextWindow === undefined) {
+      const max = finiteContext(item.max_context_length);
+      if (max !== null) contextWindow = max;
+    }
+    ids.push(item.key);
+    if (instances.length > 0) loaded.add(item.key);
+    if (contextWindow !== undefined) windows.set(item.key, contextWindow);
+  }
+  return { ids, loaded, windows };
+}
+
 export async function probeLocalInjects(
   env: Record<string, string | undefined> = process.env,
   fetchImpl: typeof fetch = fetch,
@@ -302,10 +341,14 @@ export async function probeLocalInjects(
     hosts.map(async (host) => {
       const catalogUrl = `${host.baseUrl.replace(/\/$/, "")}/models`;
       const extraUrl = loadedProbeUrl(host);
-      const [catalog, extra] = await Promise.all([
+      const v1Url = host.id === "lmstudio" ? `${anthropicBaseUrl(host)}/api/v1/models` : null;
+      const [catalog, extra, nativePayload] = await Promise.all([
         timedJson(catalogUrl, env, host, fetchImpl),
         extraUrl ? timedJson(extraUrl, env, host, fetchImpl) : Promise.resolve(null),
+        v1Url ? timedJson(v1Url, env, host, fetchImpl) : Promise.resolve(null),
       ]);
+      const native = host.id === "lmstudio" ? lmStudioV1Catalog(nativePayload) : null;
+      if (native) return { host, ids: native.ids, loaded: native.loaded, windows: native.windows };
       const catalogIds = catalog ? idsFromModelsPayload(catalog) : [];
       const extraIds = extra ? idsFromModelsPayload(extra) : [];
       const loaded = loadedIdsFromPayloads(host, catalog ?? extra, extra);

@@ -334,8 +334,8 @@ export function markNotificationLogRead(ids: readonly string[]): void {
 }
 
 /** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
-export function markThreadNotificationLogRead(threadId: string): string[] {
-  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 RETURNING id").all(threadId) as Array<{ id: string }>;
+export function markThreadNotificationLogRead(threadId: string, includeSpend = true): string[] {
+  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 AND (? OR kind != 'spend') RETURNING id").all(threadId, includeSpend ? 1 : 0) as Array<{ id: string }>;
   return rows.map((row) => row.id);
 }
 
@@ -499,6 +499,17 @@ export function workingGoalRunMessages(): Array<{ threadId: string; message: Mes
   return rows.map((row) => ({ threadId: row.thread_id, message: JSON.parse(row.json) as Message }));
 }
 
+/** First-reply rescue rows that never settled or ended: at boot, every one of them belongs to a turn that is gone. */
+export function openRescueMessages(): Array<{ threadId: string; message: Message }> {
+  const rows = db()
+    .prepare(
+      "SELECT thread_id, json FROM messages WHERE kind = 'activity' AND json_extract(json, '$.tool.rescue') IS NOT NULL " +
+      "AND json_extract(json, '$.tool.rescue.settled') IS NULL AND json_extract(json, '$.tool.rescue.over') IS NULL",
+    )
+    .all() as Array<{ thread_id: string; json: string }>;
+  return rows.map((row) => ({ threadId: row.thread_id, message: JSON.parse(row.json) as Message }));
+}
+
 const MULTI_EXECUTE_INPUT = "CASE WHEN json_extract(json, '$.tool.name') LIKE '%MULTI\\_EXECUTE%' ESCAPE '\\' THEN json_extract(json, '$.tool.input') END AS input";
 
 /** One tool call or turn summary in a time window, with only the fields the Today page reads. JSON booleans read as 1 or 0. */
@@ -552,7 +563,7 @@ export function attentionRows(since: number): AttentionRow[] {
   return db().prepare(
     `${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND at >= ? ` +
     "AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
-    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL AND json_extract(json, '$.inbox') IS NULL " +
     `UNION ALL ${columns} FROM messages INDEXED BY messages_failed_at WHERE ${FAILED_CALL} AND at >= ? AND json_extract(json, '$.tool.ok') = 0 ` +
     `UNION ALL ${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'digest' AND at >= ? ` +
     "AND json_extract(json, '$.turnSucceeded') = 1 ORDER BY at",

@@ -9,12 +9,16 @@
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
+import { cloudMachine, cloudState, otherOwnClouds } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import { awayIn, parseJournal } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
 export const LOOK_MS = 2_500;
+/** A place whose page hasn't loaded this long after the window went there (it answered the look, then nothing) is the
+ * offline screen, with Try again: never an endless spinner. */
+export const OPEN_MS = 30_000;
 export const RETRY_MS = Object.freeze([2_000, 4_000, 8_000, 15_000, 30_000]);
 /** A brand-new Cloud's name can be missing for minutes after the Admin says it is ready: a resolver that was asked while
  * it was set up keeps that "no such name" (RFC 2308 negative caching; Chromium's own host cache does too). For a Cloud
@@ -45,6 +49,8 @@ export function splashText(status, name = null) {
   return name ? `${status === "waking" ? "Waking" : "Opening"} ${name}…` : SPLASH_TEXT[status];
 }
 const PLAN_PROBLEMS = new Set(["stopped", "payment-problem", "failed"]);
+/** The screens of a listed Cloud that isn't running (`cloudScreen`): nothing to look again for, the session's word moves them. */
+const NOT_RUNNING = new Set(["ended", "checkout", "payment"]);
 const MOVING = new Set(["freeze", "final", "check"]);
 const DEFAULT_TIMERS = {
   set: (work, ms) => { const timer = setTimeout(work, ms); timer.unref?.(); return timer; },
@@ -75,15 +81,42 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
   return { kind: "cloud", origin };
 }
 
+/** A place besides My Cloud: a team's Cloud, or another Cloud of the person's own (`own`), each the session's. */
+export const otherPlace = (place) => place?.kind === "team" || place?.kind === "own";
+
 /**
- * The place a window is asked for. `ask`: "cloud" for My Cloud, `{ team }` for a team's Cloud, or nothing for the place
- * remembered from last time (`remembered`). A team is read from the verified session (`state.teams`); one the connected
- * session no longer lists is gone, and the answer is My Cloud with the team's name in `left`, so the window can say so
- * once. While the Admin can't be asked, a remembered team opens as it was saved, on the window's own session.
- * @returns {{ kind: "cloud", left?: string | null } | { kind: "team", id: string, name: string, role: string | null, origin: string | null, machine: any }}
+ * This computer's screen for a Cloud the session's list says isn't running, so its address is never looked up: it has ended
+ * (stopped too; `deleteAt`, when its kept files are deleted), its checkout wasn't finished, or its payment has a problem, each
+ * named and with Remove from list while its owner may (`removable`); or its setup's step. Null for one that opens.
+ */
+export function cloudScreen(cloud) {
+  const state = cloudState(cloud);
+  if (!state) return null;
+  if (state === "setup") return { screen: "setup", ...(cloud.setup?.step ? { step: cloud.setup.step } : {}) };
+  return { screen: state, name: cloud.name, ...(state === "ended" && cloud.deleteAfter ? { deleteAt: cloud.deleteAfter } : {}), ...(cloud.removable ? { removable: true } : {}) };
+}
+
+/** Another Cloud of the person's own, asked for (`{ cloud }`) or remembered: the session's word, as placeOf reads a team. One
+ * the connected session no longer lists is simply My Cloud again; while the Admin can't be asked it opens as it was saved. */
+function ownPlaceOf(asked, remembered, state) {
+  const id = asked.cloud, cloud = otherOwnClouds(state?.clouds).find((entry) => entry.id === id) ?? null;
+  if (cloud) return { kind: "own", id, name: cloud.name, role: cloud.role, origin: cloud.origin, machine: cloudMachine(cloud) };
+  if (state?.status === "connected") return { kind: "cloud" };
+  const kept = remembered?.cloud === id ? remembered : asked;
+  return kept?.origin ? { kind: "own", id, name: kept.name ?? "the Cloud", role: null, origin: kept.origin, machine: null } : { kind: "cloud" };
+}
+
+/**
+ * The place a window is asked for. `ask`: "cloud" for My Cloud, `{ team }` for a team's Cloud, `{ cloud }` for another
+ * Cloud of the person's own, or nothing for the place remembered from last time (`remembered`). A team is read from the
+ * verified session (`state.teams`); one the connected session no longer lists is gone, and the answer is My Cloud with
+ * the team's name in `left`, so the window can say so once. While the Admin can't be asked, a remembered team opens as
+ * it was saved, on the window's own session.
+ * @returns {{ kind: "cloud", left?: string | null } | { kind: "team" | "own", id: string, name: string, role: string | null, origin: string | null, machine: any }}
  */
 export function placeOf({ ask = null, remembered = null, state = null }) {
   const asked = ask ?? remembered;
+  if (asked && asked !== "cloud" && typeof asked.cloud === "string") return ownPlaceOf(asked, remembered, state);
   const id = asked && asked !== "cloud" && typeof asked.team === "string" ? asked.team : null;
   if (!id) return { kind: "cloud" };
   const team = (Array.isArray(state?.teams) ? state.teams : []).find((entry) => entry?.id === id) ?? null;
@@ -132,7 +165,7 @@ export function routeOf(url, origin) {
  * @param {{
  *   journal(): unknown,
  *   frozen(): Promise<{ frozen: boolean, cloud?: string } | null>,
- *   account(): { state(): any, power(): any, wakeHome(): Promise<unknown>, setWaking(on: boolean): void, pairHome(): Promise<{ origin: string, code: string, expiresAt: number }>,
+ *   account(): { state(): any, power(): any, wakeHome(): Promise<unknown>, setWaking(on: boolean): void, pairHome(cloudId?: string | null): Promise<{ origin: string, code: string, expiresAt: number }>,
  *     pairTeam?(teamId: string): Promise<{ origin: string, code: string, expiresAt: number }>, signInAgain(): Promise<unknown>, begin(): Promise<unknown> } | null,
  *   restored?(): Promise<unknown>,
  *   window(): { isDestroyed(): boolean, webContents: { id: number, getURL(): string, reload(): void } } | null,
@@ -140,15 +173,16 @@ export function routeOf(url, origin) {
  *   localOrigin(): string,
  *   cookieFetch: typeof fetch,
  *   power: { asleep(): boolean, hold(): void, woke(): void },
- *   go(url: string, origin: string | null, place: { kind: "cloud", origin: string } | { kind: "team", id: string, name: string, role: string | null, origin: string } | null): Promise<unknown>,
+ *   go(url: string, origin: string | null, place: { kind: "cloud", origin: string } | { kind: "team" | "own", id: string, name: string, role: string | null, origin: string } | null): Promise<unknown>,
  *   showLocal(leaving: boolean): unknown,
- *   remembered?(): { team: string, name?: string, origin?: string } | null,
- *   remember?(place: { team: string } | null): void,
+ *   remembered?(): ({ team: string } | { cloud: string }) & { name?: string, origin?: string } | null,
+ *   remember?(place: { team: string } | { cloud: string } | null): void,
  *   left?(name: string): void,
- *   drop?(place: { id: string, name: string }): void,
+ *   drop?(place: { kind: "team" | "own", id: string, name: string }): void,
  *   splash?(): { status(text: string): void } | null,
  *   lastInput?(): number,
  *   publish?(view: unknown): void,
+ *   rehomed?(home: { kind: string, origin?: string }): void,
  *   versionEveryMs?: number,
  *   quietMs?: number,
  *   now?(): number,
@@ -161,14 +195,15 @@ export function routeOf(url, origin) {
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
  * `frozen()`: this computer's server's freeze marker. `splash()`: the startup screen while it is up. `remembered()`: the
- * team shown last time, with its name and origin as saved; `remember(place)`: what to open next time; `left(name)`: the
- * team shown is no longer this person's, so the window says so once; `drop(place)`: the Admin said so (404 on its team
- * pairing), so the team leaves the switcher now, with that line.
+ * team or other Cloud shown last time, with its name and origin as saved; `remember(place)`: what to open next time;
+ * `left(name)`: the team shown is no longer this person's, so the window says so once; `drop(place)`: the Admin said so
+ * (404 on its pairing), so the team (with that line) or the Cloud leaves the switcher now. `rehomed(home)`: home as worked
+ * out changed.
  */
 export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
-    remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { left(place.name); remember(null); },
-    splash = () => null, lastInput = () => 0, publish = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
+    remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
+    splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, log = () => {} } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
@@ -182,12 +217,15 @@ export function createHomeWindow(deps) {
   const state = () => account()?.state() ?? null;
   const wanted = (token) => token === opens;
   const cloudOrigin = () => (home.kind === "cloud" ? home.origin : null);
+  /** The Cloud at `origin` sleeps now: My Cloud by its gate (the Admin's word and its own answer), any other of the
+   * person's Clouds by the Admin's word in the Clouds list. A request to a sleeping one would wake it. */
+  const asleepAt = (origin) => (origin && origin === cloudOrigin() ? power.asleep() : account()?.powerOf?.(origin)?.state === "asleep");
   /** The origin of the place on screen, or on its way: a team's Cloud while one is shown, else My Cloud. */
-  const placeOrigin = () => (shown?.kind === "team" ? (signedOut() ? null : shown.origin) : cloudOrigin());
-  const teamName = () => (opening?.kind === "team" ? opening.name : null);
-  const pair = (place) => (place.kind === "team" ? account()?.pairTeam?.(place.id) : account()?.pairHome());
-  /** The same team still the place on screen (a newer show() replaces the object, not the team). */
-  const still = (place) => shown?.kind === "team" && shown.id === place.id && shown.origin === place.origin;
+  const placeOrigin = () => (otherPlace(shown) ? (signedOut() ? null : shown.origin) : cloudOrigin());
+  const teamName = () => (otherPlace(opening) ? opening.name : null);
+  const pair = (place) => (place.kind === "team" ? account()?.pairTeam?.(place.id) : place.kind === "own" ? account()?.pairHome(place.id) : account()?.pairHome());
+  /** The same place still the one on screen (a newer show() replaces the object, not the place). */
+  const still = (place) => shown?.kind === place.kind && shown.id === place.id && shown.origin === place.origin;
   const clearRenewal = () => { if (renewal) timers.clear(renewal); renewal = null; };
 
   async function refresh() {
@@ -199,7 +237,11 @@ export function createHomeWindow(deps) {
       if (marker?.frozen) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
     }
     if (frozenCloud || awayIn(kept)) await restored();
+    const before = home;
     home = homeOf({ journal: kept, frozenCloud, state: state() });
+    if (home.kind !== before.kind || home.origin !== before.origin) {
+      try { rehomed(home); } catch {}
+    }
     return home;
   }
 
@@ -252,7 +294,7 @@ export function createHomeWindow(deps) {
   /** The place didn't answer: this computer's screen says so, with the Admin's reason for My Cloud, and looks again by itself. */
   function offline(token) {
     if (!wanted(token)) return;
-    const reason = opening?.kind === "team" ? null : cloudUnreachableText(state(), cloudOrigin());
+    const reason = otherPlace(opening) ? null : cloudUnreachableText(state(), cloudOrigin());
     toScreen({ screen: "offline", ...(reason ? { reason } : {}) });
     later();
   }
@@ -289,6 +331,19 @@ export function createHomeWindow(deps) {
   const signInNeeded = () => ["reauth-required", "signed-out"].includes(state()?.status);
   /** This device has no MausBot Cloud sign-in to pair a team with (homeOf's rule for My Cloud). */
   const signedOut = () => { const current = state(); return !current?.account?.id || ["signed-out", "connecting"].includes(current.status); };
+  /** The session's list's word for My Cloud (the account's primary Cloud), else null: an older Admin, or one it doesn't list. */
+  const myListed = () => { const current = state(); return current?.status === "connected" && Array.isArray(current.clouds) ? current.clouds.find((cloud) => cloud.primary) ?? null : null; };
+  /** My Cloud's own screen while the session says it isn't running: its list's word (`cloudScreen`) when the Admin sends a list
+   * (none for a My Cloud off it: its owner removed it from their list), else its machine's (an older Admin). Null while it
+   * runs or is set up: those open as before. */
+  function myCloudScreen() {
+    const current = state();
+    if (current?.status !== "connected") return null;
+    if (Array.isArray(current.clouds)) { const listed = cloudScreen(myListed()); return listed && listed.screen !== "setup" ? listed : null; }
+    return current.machine && PLAN_PROBLEMS.has(current.machine.status) ? { screen: "plan", machine: current.machine.status } : null;
+  }
+  /** The session says My Cloud isn't running (its screen says so, or it was removed from the list): never looked up then. */
+  const notRunning = () => Boolean(myCloudScreen()) || (state()?.status === "connected" && PLAN_PROBLEMS.has(state().machine?.status));
 
   async function answers(origin) {
     try {
@@ -340,7 +395,7 @@ export function createHomeWindow(deps) {
   function gone(place) {
     drop(place);
     clearRenewal();
-    if (shown?.kind === "team" && shown.id === place.id) shown = null;
+    if (shown?.kind === place.kind && shown.id === place.id) shown = null;
     return show({ place: "cloud" });
   }
 
@@ -356,7 +411,10 @@ export function createHomeWindow(deps) {
     clearRetry();
     opening = place;
     const client = account();
-    const machine = place.kind === "team" ? place.machine : state()?.status === "connected" ? state().machine : null;
+    const machine = otherPlace(place) ? place.machine : state()?.status === "connected" ? state().machine : null;
+    // My Cloud the session's list says isn't running: its own screen, never its address, and nothing to look again for.
+    const listed = place.kind === "cloud" ? cloudScreen(myListed()) : null;
+    if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
     if (machine && (PLAN_PROBLEMS.has(machine.status) || (place.kind === "team" && machine.hold))) {
       toScreen({ screen: "plan", machine: PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped" }); later(); return;
     }
@@ -374,7 +432,7 @@ export function createHomeWindow(deps) {
         if (naming) await forgetNames();
         const look = await answers(origin);
         if (look === "no") return unreachable(place, token);
-        if (look === "asleep" && place.kind === "team") return offline(token);
+        if (look === "asleep" && otherPlace(place)) return offline(token);
         if (look === "asleep") { power.hold(); asleep = true; say("waking"); }
       }
       let session = null;
@@ -386,7 +444,7 @@ export function createHomeWindow(deps) {
       if (!signedIn) {
         try { grant = await pair(place); } catch (error) {
           if (error?.gone && wanted(token)) return gone(place);
-          log(`home: no sign-in code for ${place.kind === "team" ? place.name : "My Cloud"} (${error?.message ?? error})`);
+          log(`home: no sign-in code for ${otherPlace(place) ? place.name : "My Cloud"} (${error?.message ?? error})`);
         }
         if (!wanted(token)) return;
         if (!grant) {
@@ -395,11 +453,17 @@ export function createHomeWindow(deps) {
         }
       }
       // My Cloud opened before the move made it home is a saved server the window shows, as the Server menu opens one.
-      const asHome = place.kind === "team" || home.kind !== "computer";
+      const asHome = otherPlace(place) || home.kind !== "computer";
       screen = null; status = null; tries = 0; away = asHome; shown = asHome ? place : null;
-      await go(cloudHomeConnectUrl({ origin, grant }, now(), open === "phone" ? "phone" : null), origin, place);
+      // A page that never finishes loading is the offline screen after OPEN_MS, which looks again by itself and has Try again.
+      let slow = null;
+      const loaded = await Promise.race([Promise.resolve(go(cloudHomeConnectUrl({ origin, grant }, now(), open === "phone" ? "phone" : null), origin, place)).then(() => true, () => true),
+        new Promise((done) => { slow = timers.set(() => done(false), OPEN_MS); })]);
+      timers.clear(slow);
+      if (!loaded) { log(`home: ${otherPlace(place) ? place.name : "My Cloud"} didn't load in ${OPEN_MS / 1000} s`); return offline(token); }
       if (place.kind === "cloud") { clearRenewal(); power.woke(); }
-      else renewLater(place, grant || !session?.expiresAt ? TEAM_RENEW_MS : session.expiresAt - now() - TEAM_RENEW_EARLY_MS);
+      else if (place.kind === "team") renewLater(place, grant || !session?.expiresAt ? TEAM_RENEW_MS : session.expiresAt - now() - TEAM_RENEW_EARLY_MS);
+      else clearRenewal();
       tell();
     } finally {
       if (handoff) timers.clear(handoff);
@@ -407,19 +471,23 @@ export function createHomeWindow(deps) {
   }
 
   /** Shows the window onto the person's home. `open: "phone"` opens My Cloud's Settings on its phone pairing. `place`:
-   * "cloud" for My Cloud, `{ team }` for a team's Cloud, else the place remembered from last time. */
+   * "cloud" for My Cloud, `{ team }` for a team's Cloud, `{ cloud }` for another of the person's own, else the place
+   * remembered from last time. */
   async function show({ open = null, place = null } = {}) {
     const token = ++opens;
     const current = await refresh();
     if (!wanted(token)) return;
     const target = placeOf({ ask: place, remembered: remembered(), state: state() });
     if (target.kind === "cloud" && target.left) { left(target.left); remember(null); }
-    if (target.kind === "team") {
+    if (otherPlace(target)) {
       ensureWindow();
       opening = target;
-      // Chosen is remembered at once, so the screen's own retry (and the next launch) asks for the same team.
-      remember({ team: target.id });
+      // Chosen is remembered at once, so the screen's own retry (and the next launch) asks for the same place.
+      remember(target.kind === "own" ? { cloud: target.id } : { team: target.id });
       if (signedOut()) { clearRetry(); return toScreen({ screen: "signin" }); }
+      // Another Cloud of their own that the session's list says isn't running: its own screen, never its address.
+      const listed = target.kind === "own" ? cloudScreen(otherOwnClouds(state()?.clouds).find((cloud) => cloud.id === target.id)) : null;
+      if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
       const setup = machineSetup(target.machine);
       if (setup) { clearRetry(); return toScreen({ screen: "setup", ...setup }); }
       if (!target.origin) { toScreen({ screen: "plan", machine: target.machine?.status ?? "stopped" }); later(); return; }
@@ -429,10 +497,12 @@ export function createHomeWindow(deps) {
     opening = null;
     clearRenewal();
     if (current.kind === "computer" && asked) {
-      const setup = cloudSetupOf(state()), mine = readyCloudOrigin(state());
-      if (setup || mine) ensureWindow();
+      const setup = cloudSetupOf(state()), mine = readyCloudOrigin(state()), stopped = setup || mine ? null : myCloudScreen();
+      if (setup || mine || stopped) ensureWindow();
       if (setup) { clearRetry(); return toScreen({ screen: "setup", ...setup }); }
       if (mine) return connect({ kind: "cloud", origin: mine }, token, open ?? asked.open);
+      // Not running (it ended, its checkout wasn't finished, a payment problem): its own screen, never its address.
+      if (stopped) { clearRetry(); return toScreen(stopped); }
       asked = null; naming = null;
     }
     if (current.kind === "computer") {
@@ -459,7 +529,7 @@ export function createHomeWindow(deps) {
       let grant = null;
       try { grant = await pair(place); } catch (error) {
         if (error?.gone) return gone(place);
-        log(`home: could not sign in to ${place.kind === "team" ? place.name : "My Cloud"} again (${error?.message ?? error})`);
+        log(`home: could not sign in to ${otherPlace(place) ? place.name : "My Cloud"} again (${error?.message ?? error})`);
       }
       if (placeOrigin() !== origin) return;
       if (!grant) return signInNeeded() ? toScreen({ screen: "signin" }) : offline(++opens);
@@ -476,10 +546,10 @@ export function createHomeWindow(deps) {
       return typeof body?.version === "string" ? body.version : null;
     } catch { return null; }
   }
-  /** A newer page reloads at a quiet moment; an asleep My Cloud is never asked (that would start it). */
+  /** A newer page reloads at a quiet moment; a Cloud asleep is never asked (that would start it). */
   async function watchVersion() {
     const origin = placeOrigin();
-    if (!origin || !shows(origin) || (shown?.kind !== "team" && power.asleep())) return;
+    if (!origin || !shows(origin) || asleepAt(origin)) return;
     const current = await version(origin);
     if (!current) return;
     if (!loaded) { loaded = current; return; }
@@ -501,9 +571,24 @@ export function createHomeWindow(deps) {
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
       if ((await refresh()).kind !== "computer") return show({ place: "cloud", open });
-      if (!cloudSetupOf(state()) && !readyCloudOrigin(state())) throw new Error("My Cloud is not ready to connect yet.");
+      if (!cloudSetupOf(state()) && !readyCloudOrigin(state()) && !notRunning()) throw new Error("My Cloud is not ready to connect yet.");
       asked = { open };
       return show({ place: "cloud", open });
+    },
+    /** Remove from list, from this computer's screen (its own button, once the person said yes there): the Cloud the screen
+     * shows leaves their list on the Admin (cloud-account.mjs hideCloud), and the window goes where it would without it.
+     * Answers the outcome; nothing is asked of a Cloud the session doesn't say is `removable`. */
+    async remove() {
+      const own = opening?.kind === "own" ? opening : null, cloudId = own ? own.id : myListed()?.id ?? null;
+      const cloud = cloudId ? (state()?.clouds ?? []).find((entry) => entry.id === cloudId) ?? null : null;
+      if (!cloud?.removable || !screen?.removable) return "unsupported";
+      const client = account();
+      const outcome = client?.hideCloud ? (await client.hideCloud(cloudId).catch(() => ({ outcome: "failed" }))).outcome : "unsupported";
+      if (outcome !== "removed" && outcome !== "gone") return outcome;
+      if (own) { if (opening === own) opening = null; drop(own); } else { asked = null; naming = null; }
+      screen = null; status = null; clearRetry();
+      await show({ place: "cloud" });
+      return outcome;
     },
     /** My Cloud is asked for and not open yet: the window shows this computer's screen for it. */
     asking: () => Boolean(asked),
@@ -511,11 +596,13 @@ export function createHomeWindow(deps) {
     view,
     /** My Cloud's origin while it is home, else null. */
     cloudOrigin,
+    /** Whether the Cloud at `origin` sleeps now (see `asleepAt`): nothing in the background asks it then. */
+    asleepAt,
     /** The origin of the place the window shows (a team's Cloud, or My Cloud), else null. */
     placeOrigin,
     /** Home as last worked out. */
     current: () => home,
-    /** The place the window was last sent to: My Cloud, or a team's Cloud (`{ kind: "team", id, name, origin }`). */
+    /** The place the window was last sent to: My Cloud, or a team's or another own Cloud (`{ kind: "team" | "own", id, name, origin }`). */
     shown: () => shown,
     /** The person asked again (the screen's timer, back online, or the window focused). */
     retry: () => show(),
@@ -554,7 +641,7 @@ export function createHomeWindow(deps) {
         else if (!(at === localOrigin() && new URL(url).pathname === HOME_SCREEN_PATH)) letAskGo();
       }
       // The window went to another server (the Server menu): the team it showed is no longer the place on screen.
-      if (shown?.kind === "team" && ![shown.origin, localOrigin()].includes(originOf(url))) { shown = null; clearRenewal(); }
+      if (otherPlace(shown) && ![shown.origin, localOrigin()].includes(originOf(url))) { shown = null; clearRenewal(); }
       const origin = placeOrigin();
       if (!origin || originOf(url) !== origin) return;
       const at = new URL(url);
@@ -569,7 +656,7 @@ export function createHomeWindow(deps) {
       if (!at || (at !== place && (home.kind !== "computer" || at !== mine))) return false;
       if (at !== place) asked ??= { open: null };
       const token = ++opens;
-      void unreachable(shown?.kind === "team" && at === place ? shown : { kind: "cloud", origin: at }, token, nameNotFound(code));
+      void unreachable(otherPlace(shown) && at === place ? shown : { kind: "cloud", origin: at }, token, nameNotFound(code));
       return true;
     },
     /** `event` came from the shown place's own page in this window (My Cloud's while it is home, or a team's Cloud's). */
@@ -602,7 +689,8 @@ export function installHomeWindowIpc({ ipcMain, homeWindow, cloudPage }) {
   const screenPage = (event) => homeWindow.screenPage(event);
   ipcMain.handle("home:state", from("home:state", screenPage, () => homeWindow.view()));
   ipcMain.handle("home:retry", from("home:retry", screenPage, () => homeWindow.retry().then(() => homeWindow.view())));
-  ipcMain.handle("home:sign-in", from("home:sign-in", (event) => screenPage(event) || cloudPage(event) === "cloud", () => homeWindow.signIn()));
+  ipcMain.handle("home:remove", from("home:remove", screenPage, () => homeWindow.remove()));
+  ipcMain.handle("home:sign-in", from("home:sign-in", (event) => screenPage(event) || cloudPage(event) === "cloud" || (homeWindow.homePage(event) && homeWindow.shown()?.kind === "own"), () => homeWindow.signIn()));
   ipcMain.handle("home:repair", from("home:repair", (event) => homeWindow.homePage(event), () => homeWindow.repair()));
   ipcMain.on("home:page", (event) => { try { event.returnValue = homeWindow.homePage(event); } catch { event.returnValue = false; } });
   ipcMain.on("home:updating", (event) => { try { event.returnValue = homeWindow.updating(event); } catch { event.returnValue = false; } });

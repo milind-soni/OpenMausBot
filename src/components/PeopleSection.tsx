@@ -10,7 +10,7 @@ import { readMembership, type Membership } from "../lib/membership";
 import { readSessionState, type SessionState } from "../lib/session";
 import { canPairDevices } from "./ServerPairingCard";
 import { normalizeAccessEntry, withEntry, withoutEntry, type SignInLists } from "./SignInAccessCard";
-import { Card } from "./SettingsPrimitives";
+import { Card, SettingRow } from "./SettingsPrimitives";
 import { Select } from "./Select";
 
 export type Role = "admin" | "member";
@@ -177,7 +177,9 @@ export function PortalPeople({ peopleUrl, people }: { peopleUrl: string | null; 
   );
 }
 
-export function PeopleSection() {
+export function PeopleSection({ simple = false, startOpen = false }: { simple?: boolean; startOpen?: boolean }) {
+  const [open, setOpen] = useState(startOpen);
+  const [tried, setTried] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
   const [lists, setLists] = useState<SignInLists | null>(null);
@@ -242,6 +244,7 @@ export function PeopleSection() {
   };
 
   const invite = async () => {
+    setTried(true);
     if (!lists || busy) return;
     const entry = normalizeAccessEntry(draft);
     if (!entry) {
@@ -254,10 +257,10 @@ export function PeopleSection() {
   };
 
   if (!canPairDevices(session)) return null;
-  if (membership?.authority === "portal") return <PortalPeople peopleUrl={membership.peopleUrl} people={people} />;
-  return (
-    <Card title={t("people.title")} subtitle={t("people.subtitle")}>
-      {emailOffered === false && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[13px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
+  const portal = membership?.authority === "portal" ? <PortalPeople peopleUrl={membership.peopleUrl} people={people} /> : null;
+  const content = (
+    <>
+      {emailOffered === false && (!simple || tried) && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[13px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
       <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void invite(); }}>
         <input
           value={draft}
@@ -288,7 +291,20 @@ export function PeopleSection() {
           onLink={(person) => setLink(inviteLink(base, person.entry))}
         />
       </div>
-      <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("people.note")}</p>
-    </Card>
+      {!simple && <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("people.note")}</p>}
+    </>
   );
+  if (simple) {
+    return (
+      <div data-people-summary="">
+        <SettingRow title={t("people.title")} subtitle={t("settings.simple.people")}>
+          <button type="button" aria-expanded={open} className="ui-button" onClick={() => setOpen(!open)}>
+            {open ? t("common.done") : t("settings.simple.people.invite")}
+          </button>
+        </SettingRow>
+        {open && <div className="px-3.5 pb-3.5 pt-1">{portal ?? content}</div>}
+      </div>
+    );
+  }
+  return portal ?? <Card title={t("people.title")} subtitle={t("people.subtitle")}>{content}</Card>;
 }

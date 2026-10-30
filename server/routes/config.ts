@@ -40,6 +40,7 @@ import { parseSkillMd } from "../skills.ts";
 import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import * as vps from "../vps-computer.ts";
+import type { Postiz } from "../postiz/service.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -97,6 +98,8 @@ export interface ConfigRouteDeps {
   reloadProviders(before: Record<string, unknown>): Promise<void>;
   broadcast(payload: Record<string, unknown>): void;
   drainQueuedSends(): void;
+  /** Postiz: a key is checked at its address before it is saved, and the `postiz` server follows the saved key. */
+  postiz?: Pick<Postiz, "configCheck" | "configSaved">;
 }
 
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
@@ -106,7 +109,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
-    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile,
+    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     // API keys are never echoed back: booleans only.
@@ -361,6 +364,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           patch.composio = { ...patch.composio, apiKey: "", sessionId: "" };
         }
       }
+      const postizRefusal = await postiz?.configCheck(patch);
+      if (postizRefusal) return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code });
       const newBoatToken = patch.box?.token;
       if (newBoatToken?.trim()) {
         const check = await boat.verifyToken(newBoatToken);
@@ -526,6 +531,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
           if (persisted.treg?.key !== undefined) persisted.treg.key = "";
+          if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);
@@ -549,6 +555,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         throw error;
       }
       for (const key of resetKeys) if (key) forgetKey(key);
+      postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
       registry.forgetSnapshots();
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {

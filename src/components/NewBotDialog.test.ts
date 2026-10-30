@@ -1,9 +1,9 @@
-import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode, type KeyboardEvent } from "react";
+import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), api: vi.fn(), create: vi.fn(), setDraft: vi.fn(), ready: false, hook: 0, admin: false,
-  profile: {} as Record<string, unknown>, track: vi.fn(), advanced: true, appSettingsOpen: false, openBot: vi.fn() }));
+  profile: {} as Record<string, unknown>, track: vi.fn(), advanced: true, appSettingsOpen: false, openBot: vi.fn(), close: vi.fn() }));
 vi.mock("@/state/thread-navigation", async importOriginal => ({
   ...await importOriginal<typeof import("@/state/thread-navigation")>(), openBot: fixture.openBot,
 }));
@@ -31,12 +31,12 @@ vi.mock("@/state/store", async importOriginal => {
   const store = await importOriginal<typeof import("@/state/store")>();
   return { ...store, api: fixture.api, BotEditorStore: () => null, useStore: () => ({ state: { ...store.initialState, appSettingsOpen: fixture.appSettingsOpen }, dispatch: fixture.dispatch }) };
 });
-import { LocalNewBotDialog as NewBotDialog, CompanionNewBotDialog, NewBotDialog as RoutedNewBotDialog } from "./NewBotDialog";
+import { NewBotDialog } from "./NewBotDialog";
 import { setTeamChats } from "@/state/team-chats";
 import { Select } from "./Select";
 import type { BotCreationDraft } from "@/lib/bot-creation-draft";
 
-type Node = ReactElement<{ children?: ReactNode; role?: string; "aria-label"?: string; onClick?: () => void; onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void; disabled?: boolean }>;
+type Node = ReactElement<{ children?: ReactNode; role?: string; "aria-label"?: string; onClick?: () => void; disabled?: boolean }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
   const node = value as Node;
@@ -57,7 +57,7 @@ function chooseStartingRole(dialog: Node[], value: string) {
 }
 function render(defaultsMode = false, onCreated?: () => void | Promise<void>) {
   let tree!: ReturnType<typeof NewBotDialog>;
-  function Capture() { fixture.hook = 0; tree = NewBotDialog({ defaultsMode, onCreated }); return tree; }
+  function Capture() { fixture.hook = 0; tree = NewBotDialog({ defaultsMode, onCreated, onClose: fixture.close }); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
@@ -68,6 +68,7 @@ beforeEach(() => {
   fixture.track.mockReset();
   fixture.appSettingsOpen = false;
   fixture.openBot.mockReset();
+  fixture.close.mockReset();
   fixture.api.mockReturnValue(new Promise(() => {}));
 });
 afterEach(() => { vi.unstubAllGlobals(); setTeamChats(null); });
@@ -92,7 +93,7 @@ describe("bot draft dialog", () => {
     const failed = () => { throw new Error("Caller failed"); };
     const result = render(false, asyncFailure ? async () => failed() : failed);
     result.nodes.filter(node => node.type === "button").at(-1)!.props.onClick!();
-    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleNewBot", open: false }));
+    await vi.waitFor(() => expect(fixture.close).toHaveBeenCalledOnce());
     expect(fixture.create).toHaveBeenCalledTimes(1);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botAdded", bot, preserveSelection: false });
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "error", message: "Caller failed" });
@@ -111,34 +112,6 @@ describe("bot draft dialog", () => {
     await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botAdded", bot, preserveSelection: false }));
   });
 
-  it("keeps initial backward keyboard navigation inside the companion dialog", () => {
-    let tree!: ReturnType<typeof CompanionNewBotDialog>;
-    function Capture() { tree = CompanionNewBotDialog(); return tree; }
-    renderToStaticMarkup(createElement(Capture));
-    const first = { focus: vi.fn() }, last = { focus: vi.fn() };
-    const root = { querySelectorAll: () => [first, last] };
-    vi.stubGlobal("document", { activeElement: root });
-    const preventDefault = vi.fn();
-    nodes(tree).find(node => node.props.role === "dialog")!.props.onKeyDown!({
-      key: "Tab", shiftKey: true, currentTarget: root, preventDefault,
-    } as unknown as KeyboardEvent<HTMLDivElement>);
-    expect(preventDefault).toHaveBeenCalledOnce();
-    expect(last.focus).toHaveBeenCalledOnce();
-    expect(first.focus).not.toHaveBeenCalled();
-  });
-  it("keeps companion creation on its permitted single-request path", () => {
-    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
-    const routed = RoutedNewBotDialog();
-    expect(routed.type).toBe(CompanionNewBotDialog);
-    let tree!: ReturnType<typeof CompanionNewBotDialog>;
-    function Capture() { tree = CompanionNewBotDialog(); return tree; }
-    const html = renderToStaticMarkup(createElement(Capture));
-    expect(html).toContain("Create bot");
-    const create = nodes(tree).filter(node => node.type === "button").at(-1)!;
-    create.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newBot", onCreated: expect.any(Function) });
-    expect(fixture.api).not.toHaveBeenCalled();
-  });
   it("steps aside while App settings, opened from inside it, is on top", () => {
     expect(render().html).not.toMatch(/^<div[^>]* hidden/);
     fixture.appSettingsOpen = true;
@@ -186,7 +159,8 @@ describe("bot draft dialog", () => {
   it("can cancel a loading draft without creating or deleting a bot", () => {
     const result = render();
     result.nodes.find(node => node.type === "button" && node.props["aria-label"] === "Close")!.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleNewBot", open: false });
+    expect(fixture.close).toHaveBeenCalledOnce();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
     expect(fixture.api).not.toHaveBeenCalled();
   });
 
@@ -201,7 +175,7 @@ describe("bot draft dialog", () => {
     const dialog = render().nodes;
     for (const value of choices) chooseStartingRole(dialog, value);
     dialog.filter(node => node.type === "button").at(-1)!.props.onClick!();
-    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleNewBot", open: false }));
+    await vi.waitFor(() => expect(fixture.close).toHaveBeenCalledOnce());
     expect(fixture.track.mock.calls).toEqual([["bot_created", props]]);
   });
 
@@ -235,7 +209,7 @@ describe("bot draft dialog", () => {
     chooseStartingRole(dialog, "coder");
     (dialog.find(named("DraftSection"))!.props as unknown as { draft: BotCreationDraft }).draft.choosePreset({ id: "My secret preset", skills: [], notes: [] });
     dialog.filter(node => node.type === "button").at(-1)!.props.onClick!();
-    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleNewBot", open: false }));
+    await vi.waitFor(() => expect(fixture.close).toHaveBeenCalledOnce());
     expect(fixture.track.mock.calls).toEqual([["bot_created", { source: "preset" }]]);
   });
 
@@ -249,17 +223,6 @@ describe("bot draft dialog", () => {
     await vi.waitFor(() => expect(fixture.create).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fixture.track).not.toHaveBeenCalled();
-  });
-
-  it("reports a bot made from a paired companion as blank, once it exists", () => {
-    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
-    let tree!: ReturnType<typeof CompanionNewBotDialog>;
-    function Capture() { tree = CompanionNewBotDialog(); return tree; }
-    renderToStaticMarkup(createElement(Capture));
-    nodes(tree).filter(node => node.type === "button").at(-1)!.props.onClick!();
-    expect(fixture.track).not.toHaveBeenCalled();
-    fixture.dispatch.mock.calls[0]![0].onCreated({ id: "created" });
-    expect(fixture.track.mock.calls).toEqual([["bot_created", { source: "blank" }]]);
   });
 
   it("uses the same section editor for default templates", () => {

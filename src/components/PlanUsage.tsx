@@ -3,7 +3,8 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
-import { Card } from "./SettingsPrimitives";
+import { Card, SIMPLE_CARD } from "./SettingsPrimitives";
+import { UsageSummaryCard } from "./CloudUsageMeter";
 
 interface PlanWindow {
   available: boolean;
@@ -144,7 +145,7 @@ function WindowRow({
   );
 }
 
-export function PlanUsage() {
+function usePlanUsage() {
   const [report, setReport] = useState<PlanUsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -181,6 +182,37 @@ export function PlanUsage() {
     for (const deadline of due) refreshedDeadlines.current.add(deadline);
     void load(true);
   }, [report, now, load]);
+
+  return { report, loading, error, now, load };
+}
+
+export function busiestWeekly(report: Pick<PlanUsageReport, "providers"> | null): { provider: PlanProvider; used: number } | null {
+  let busiest: { provider: PlanProvider; used: number } | null = null;
+  for (const provider of report?.providers ?? []) {
+    const used = provider.ok && provider.weekly.available ? provider.weekly.usedPercent : null;
+    if (used !== null && (!busiest || used > busiest.used)) busiest = { provider, used };
+  }
+  return busiest;
+}
+
+export function PlanUsageSummary() {
+  const { report, now } = usePlanUsage();
+  if (!report) return null;
+  const busiest = busiestWeekly(report);
+  if (!busiest) {
+    return <section data-usage-summary="own-ai" className={cn(SIMPLE_CARD, "px-4 py-3.5 text-[14px] leading-5 text-ink-secondary")}>{t("settings.simple.billing.ownAi")}</section>;
+  }
+  const percent = Math.round(Math.min(100, Math.max(0, busiest.used)));
+  const when = formatResetDistance(busiest.provider.weekly.resetsAt, now);
+  const name = providerLabel(busiest.provider);
+  return (
+    <UsageSummaryCard kind="plan" title={t("settings.simple.billing.weekly", { provider: name })} percent={percent} label={`${name}: ${t("planUsage.used", { used: percent })}`}
+      note={when ? t("planUsage.resetsIn", { when }) : null} />
+  );
+}
+
+export function PlanUsage() {
+  const { report, loading, error, now, load } = usePlanUsage();
 
   return (
     <Card title={t("planUsage.title")} subtitle={t("planUsage.subtitle")}>

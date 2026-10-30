@@ -165,3 +165,21 @@ it("gives a bot its scoped tools, records writes without contact data, refreshes
   expect(hl.calls.at(-1)?.headers.authorization).toBe("Bearer pit-e2e-token-12345");
   expect(relay.refreshes).toBe(2);
 }, 40_000);
+
+it("does not create a note after Stop during a rate-limit wait, and allows the next turn", async () => {
+  const bot = (await api("POST", "/api/bots", { name: "Stopped CRM writer" })).body.bot;
+  hl.tokens.add("pit-stop-fixture-12345");
+  expect((await api("POST", "/api/highlevel/token", { token: "pit-stop-fixture-12345", locationId: FAKE_LOCATION_ID })).status).toBe(200);
+  const token = await mint(bot.id, bot.threadId);
+  hl.calls.length = 0;
+  hl.overrides.push({ status: 429, headers: { "retry-after": "3" } });
+  const pending = call(token, "HIGHLEVEL_ADD_NOTE", { contactId: "contact_1", body: "Stopped fixture note" });
+  await expect.poll(() => hl.calls.length, { timeout: 2_000, interval: 10 }).toBe(1);
+  expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
+  expect((await pending).status).toBe(401);
+  expect(hl.calls.filter((row) => row.method === "POST" && row.path.endsWith("/notes"))).toHaveLength(1);
+  const messages = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=100`)).body.messages as any[];
+  expect(messages.filter((row) => row.tool?.name === "mcp__highlevel__HIGHLEVEL_ADD_NOTE")).toEqual([]);
+  const next = await call(await mint(bot.id, bot.threadId), "HIGHLEVEL_ADD_NOTE", { contactId: "contact_1", body: "Next fixture note" });
+  expect(next.body.result.structuredContent).toMatchObject({ note: { id: "note_new" } });
+}, 20_000);

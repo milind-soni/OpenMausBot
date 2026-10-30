@@ -213,6 +213,15 @@ export function planCards(offer: CloudOffer, { current = null, own = null }: { c
   return plans.map(plan => planCard(plan, offer.recommended, current));
 }
 
+const WEIGHED: ReadonlySet<CloudPlanCardRow["key"]> = new Set(["hours", "storage", "voice"]);
+/** What each card shows itself: the numbers a person weighs up, and whether it sleeps when the plans differ there. The
+ * rest of its rows are its details, for Compare plans. */
+export function cardRows(cards: readonly CloudPlanCard[]): Array<{ shown: CloudPlanCardRow[]; details: CloudPlanCardRow[] }> {
+  const power = new Set(cards.flatMap(card => card.rows.filter(row => row.key === "power").map(row => row.text)));
+  const shown = (row: CloudPlanCardRow) => WEIGHED.has(row.key) || (row.key === "power" && power.size > 1);
+  return cards.map(card => ({ shown: card.rows.filter(shown), details: card.rows.filter(row => !shown(row)) }));
+}
+
 const DAY_MS = 86_400_000;
 /** The free trial's days when every plan on sale has the same ones, so one timeline is true of all of them. */
 export function sharedTrialDays(offer: CloudOffer): number | null {
@@ -228,18 +237,6 @@ export function trialTimeline(offer: CloudOffer, now: number): Array<{ when: str
   const reminder = offer.reminderDays && offer.reminderDays < days
     ? [{ when: shortDate(charge - offer.reminderDays * DAY_MS), text: t("cloudBuy.timeline.reminder") }] : [];
   return [today, ...reminder, { when: shortDate(charge), text: t("cloudBuy.timeline.firstPayment") }];
-}
-
-/** The welcome's Cloud beat: the Admin's offer in one line (trial days and the lowest price, the credit, money-back) and
- * its one action, Start free trial, or See plans without a trial. No number is the app's own. */
-export function cloudBeatTerms(offer: CloudOffer): { trial: boolean; line: string; action: string } {
-  const days = offerTrialDays(offer);
-  const priced = days ? offer.plans.filter(plan => plan.trialDays) : offer.plans;
-  const price = usd(Math.min(...priced.map(plan => plan.amount)) / 100);
-  const line = [days ? t("onboarding.cloud.trial", { days, price }) : t("onboarding.cloud.price", { price }),
-    days && offer.creditUsd ? t("onboarding.cloud.credit", { credit: usd(offer.creditUsd) }) : null,
-    offer.refundDays ? t("onboarding.cloud.moneyBack", { days: offer.refundDays }) : null].filter(Boolean).join(" ");
-  return { trial: Boolean(days), line, action: days ? t("cloudIntro.start") : t("onboarding.cloud.seePlans") };
 }
 
 /** The plan picked before signing in costs and starts the same for this account (its session's own offer); otherwise

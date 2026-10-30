@@ -39,6 +39,13 @@ it("an Admin, who also sees members' private chats, gets only one the server say
   expect(ownChatOf(bot, MEMBER), "a Member sees only their own: their newest").toBe("ada-chat");
 });
 
+it("opens the person's inbox, their chat with their Chief where everything for them arrives, before a newer chat", () => {
+  const bot = scout([{ threadId: "inbox", private: true, inbox: true, createdAt: 2 }, { threadId: "newer", private: true, createdAt: 3, updatedAt: 9 }]);
+  expect(ownChatOf(bot, MEMBER)).toBe("inbox");
+  expect(ownChatOf(bot, { ...ADMIN, opened: ["newer"] }), "made after the session was read").toBe("inbox");
+  expect(ownChatOf(scout([{ threadId: "inbox", private: true, inbox: true, archivedAt: 4 }, { threadId: "newer", private: true, createdAt: 3 }]), MEMBER)).toBe("newer");
+});
+
 it("with none yet, a click makes one through the server's new-conversation route, opens it and keeps it; a second click while it is made makes no second", async () => {
   setTeamChats({ teamId: "team-gamma", member: false });
   const dispatch = vi.fn();

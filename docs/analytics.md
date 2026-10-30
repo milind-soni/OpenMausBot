@@ -56,8 +56,8 @@ Properties are counts, `true` or `false`, or words from fixed lists in the app's
 
 | List | Values |
 | --- | --- |
-| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg` |
-| Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `meta`, `muse_code` |
+| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg`, `postiz` |
+| Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `meta`, `muse_code`, `deepseek`, `copilot` |
 | App | The 24 apps Connected apps lists by default: `slack`, `github`, `gmail`, `googlecalendar`, `googlesheets`, `googledocs`, `googledrive`, `notion`, `linear`, `sentry`, `posthog`, `discord`, `twitter`, `reddit`, `zapier`, `hubspot`, `salesforce`, `jira`, `asana`, `trello`, `dropbox`, `airtable`, `figma`, `stripe`. Every other app is `other`. |
 | Starting role | `assistant`, `inbox`, `research`, `coder`, `community`, `ops` |
 | Cloud plan | `starter`, `personal`, `pro`, `max` |
@@ -132,14 +132,12 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | --- | --- | --- |
 | `app_first_open` | The first time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
-| `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser` |
+| `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser`; `mode`: `simple`, `advanced`, the look this app page is in when it counts the day |
 | `$identify` | PostHog's own event, sent before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
-| `email_skipped` | You chose Maybe later on the first-run screen. A name you typed is kept in this computer's profile only | none |
-| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `engines`, `import`, `permissions`, `cloud`; `replay`: true/false |
-| `onboarding_completed` | The first-run tour ends | `reason`: `completed`, `skipped`; `at`: the step it ended on; `replay`: true/false |
-| `setup_import_applied` | You bring in the skills and MCP servers the first-run tour found from other AI tools on this computer | `skills`, `tools`: how many were added. Never their names or where they came from |
-| `setup_import_skipped` | You skip that step | `skills`, `tools`: how many it found |
-| `onboarding_cloud` | You answer the first-run tour's MausBot Cloud step | `action`: `start_trial` (Start free trial, or See plans when the offer has no trial), `not_now`; `trial`: true/false, with `start_trial`: the offer has a free trial |
+| `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
+| `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
+| `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import | `skills`, `tools`: how many were added. Never their names or where they came from |
+| `onboarding_cloud` | You tap Try Cloud under MausBot's first messages, which opens Add a Cloud | `action`: `start_trial` |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
 | `call_started` | You start a call with a bot | `driver`: engine; `mode`: `turns`, `live` |
 | `group_call_started` | You start a call with a room | `memberCount`: count |
@@ -147,9 +145,9 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `room_members_changed` | You change who is in a room | `members`, `added`, `removed`: counts |
 | `team_imported` | You import a team | `members`: count; `source`: `library`, `file`, `github`, `organization`, `scout`; `mode`: `add`, `project`; `format`: `team`, `package`, `backup` |
 | `team_scouted` | The app suggests a team for a project folder | `signals`: count |
-| `bot_created` | You create a bot in the New bot dialog | `source`: `blank`, `template` (a starting role), `preset`; `template`: starting role, only when `source` is `template` |
-| `api_key_saved` | You save a key in Settings → API keys, in the Screen panel, on the X card in Apps, from a bot's request in a chat, or by adding an OpenAI-compatible server | `provider`: key provider; `via`: `settings`, `computer_panel`, `apps`, `chat_request`; `result`: `ok` (the provider accepted it), `rejected` (the provider refused it), `unverified` (saved, not checked), `error` (not saved) |
-| `api_key_removed` | You clear a key of your own in Settings → API keys, the Screen panel or the X card in Apps | `provider`: key provider; `via`: `settings`, `computer_panel`, `apps` |
+| `bot_created` | You create a bot with New bot, or from a ready-made bot in Templates | `source`: `blank` (New bot), `template` (a starting role), `preset`; `template`: starting role, only when `source` is `template` |
+| `api_key_saved` | You save a key in Settings → API keys, in the Screen panel, in the model picker, on the X card in Apps, from a bot's request in a chat, or by adding an OpenAI-compatible server | `provider`: key provider; `via`: `settings`, `computer_panel`, `model_picker`, `apps`, `chat_request`; `result`: `ok` (the provider accepted it), `rejected` (the provider refused it), `unverified` (saved, not checked), `error` (not saved) |
+| `api_key_removed` | You clear a key of your own in Settings → API keys, the Screen panel, the model picker or the X card in Apps | `provider`: key provider; `via`: `settings`, `computer_panel`, `model_picker`, `apps` |
 | `engine_signed_in` | You finish signing in to an engine inside the app | `engine`: `claude`, `codex`, `grok`; `method`: `code`, `device_code`, `browser` |
 | `connector_connect` | A Connect you started in Connected apps ends | `app`: app; `result`: `connected` (the account it added works), `failed` or `expired` (that account failed or expired), `timed_out` (neither within two minutes) |
 | `app_snapshot` | Once a day, as described above | The properties in the snapshot table |
@@ -157,16 +155,20 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_card_action` | You act on the MausBot Cloud card | `action`: `start`, `howto`, `signin`, `not_now`, `close` |
 | `cloud_pro_popup` | The Cloud Pro popup (once on each desktop after an update, on whichever page its window shows) is shown, counted at most once a day on that desktop until it is closed, or you choose one of its buttons. On this computer's page, signed in to MausBot Cloud, `upgrade`, `manage` or `see_plans` first ties your events to your Cloud account's email (`$identify`); `shown`, `continue`, `not_now`, `close` and anything counted on a server's page never do. A server's page counts its main button there as `continue`: Manage plan on My Cloud's page, or Continue on this computer on a page that is not told your plan (a saved server's other than My Cloud's, or My Cloud's while it reads no plan). It switches the window to this computer, whose page counts what it opens there, with `via` naming the page clicked: `manage` for Manage plan; for Continue on this computer, from the plan this computer knows, `upgrade` with no plan, and `manage` with one or when its sign-in or plan is not known in time | `action`: `shown`, `upgrade` (Start free trial, Upgrade to Cloud Pro, or Continue on this computer with no plan), `manage` (Manage plan, or Continue on this computer with a plan), `see_plans` (Compare plans), `continue` (the main button on a server's page), `not_now`, `close` (the X, Escape or a click outside); `plan`: `none`, `trial`, `starter`, `personal`, `pro`, `max`, `other` (a plan newer than the app), `unknown` (the sign-in ended or is not known yet, or a page that is not told the plan); `signed_in`: true/false, signed in to MausBot Cloud in the app (false on a page that is not told); `page`: where it was counted: `local` (this computer's page), `my_cloud`, `server` (another saved server's); `via`: on this computer's page, the page whose click it finishes: `my_cloud`, `server` |
 | `cloud_howto` | The "Show me how" tip ends | `result`: `no_button`, `skipped`, `closed` |
-| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `update_popup` (the Cloud Pro popup), `app_onboarding` (the first-run tour's MausBot Cloud step); `view`: the dialog's first screen |
+| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `update_popup` (the Cloud Pro popup), `app_onboarding` (Try Cloud under MausBot's first messages); `view`: the dialog's first screen |
 | `cloud_dialog_view` | The Add a Cloud dialog reaches a step | `view`: `received`, `starting`, `ready` |
 | `cloud_signin` | Signing in to MausBot Cloud inside the Add a Cloud dialog takes a step | `step`: `code_sent` (a sign-in code was emailed), `signed_in`, `browser` (Continue in browser); `source`: as for `cloud_dialog_shown` |
 | `cloud_checkout_opened` | A Cloud checkout opens in the browser | `plan`: Cloud plan; `trial`: true/false; `source`: as for `cloud_dialog_shown` |
+| `cloud_add_another` | Buying another Cloud, for someone who has one, takes a step | `step`: `plan` (a plan chosen), `checkout_opened`, `ready`; `plan`: Cloud plan, for `plan` and `checkout_opened` |
+| `rail_place_opened` | You open a place from the rail of Clouds at the window's left edge | `kind`: `computer`, `cloud`, `team`, `server` |
+| `rail_add` | You use the rail's ＋ | `step`: `opened` (its sheet opened), `cloud` (Buy a Cloud, on this computer's own sheet), `link` (Paste pairing link), `address` (Enter its address instead), `organization` (a new organization added on the Team plan) |
 | `cloud_setup_started` | A new Cloud starts its first job | none |
 | `cloud_intent_submitted` | You tell a new Cloud what to do first | `idea`: `digest`, `watch`, `research`, `plan`, or none for your own words; `edited`: true/false |
 | `cloud_intent_skipped` | You skip that question | none |
 | `cloud_welcome_step` | A step of a new Cloud's welcome is shown | `step`: `bring`, `engine`, `files`, `done` |
 | `cloud_welcome_ended` | A new Cloud's welcome ends | `reason`: `done`, `skipped`; `at`: the step it ended on |
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
+| `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
 
 `api_key_saved` reports `ok` for a key the server checks with its provider before saving it (Boat, Composio,
 ElevenLabs, Fish Audio), and for a model provider key whose test passed right after saving. A key nothing checks before

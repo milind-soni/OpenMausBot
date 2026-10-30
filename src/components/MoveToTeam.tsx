@@ -82,7 +82,7 @@ export function MovedBotRows({ bots }: { bots: readonly Bot[] }) {
   return <div className="flex flex-col px-2 pb-1" data-moved-bots>
     {moved.map((bot) => <button key={bot.id} type="button" data-moved-bot={bot.id} disabled={!page?.openTeam}
       onClick={() => { void page?.openTeam?.(bot.movedTo!.team.id).catch(() => {}); }}
-      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-secondary enabled:hover:bg-raised/70 enabled:hover:text-ink">
+      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-secondary enabled:hover:bg-menu-hover enabled:hover:text-ink">
       <ArrowRightLeft size={14} aria-hidden="true" className="shrink-0" />
       <span className="truncate" dir="auto">{t("teamMove.pointer", { bot: bot.name, team: bot.movedTo!.team.name })}</span>
     </button>)}

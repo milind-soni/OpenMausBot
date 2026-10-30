@@ -107,20 +107,22 @@ export class HighLevelSignIn {
   private async poll(): Promise<void> {
     const flow = this.flow;
     if (!flow || flow.cancelled) return;
+    const live = () => this.flow === flow && !flow.cancelled;
     if (this.now() >= flow.expiresAt) return this.finish("expired", "The sign-in took longer than 10 minutes. Start again.");
     let claimed: RelayTokens | "pending" | "claimed";
     try {
       claimed = await this.options.relay.claim(flow.state);
     } catch (error) {
+      if (!live()) return;
       // A relay hiccup is not a failed sign-in; keep polling until the flow expires.
       if (error instanceof HighLevelRelayError && error.status < 500 && error.status !== 503) return this.finish("failed", error.message);
       return this.schedule(this.options.pollMs ?? SIGN_IN_POLL_MS);
     }
-    if (this.flow !== flow || flow.cancelled) return;
+    if (!live()) return;
     if (claimed === "pending") return this.schedule(this.options.pollMs ?? SIGN_IN_POLL_MS);
     if (claimed === "claimed") return this.finish("failed", "This sign-in was already used. Start again.");
     const locationName = await this.options.lookupLocationName(claimed.accessToken, claimed.locationId).catch(() => undefined);
-    if (this.flow !== flow || flow.cancelled) return;
+    if (!live()) return;
     this.options.store.put({
       kind: "oauth", accessToken: claimed.accessToken, refreshToken: claimed.refreshToken, expiresAt: this.now() + claimed.expiresIn * 1000,
       locationId: claimed.locationId, ...(claimed.companyId ? { companyId: claimed.companyId } : {}), ...(claimed.userId ? { userId: claimed.userId } : {}),

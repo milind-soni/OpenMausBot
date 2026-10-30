@@ -10,6 +10,7 @@ import { Readable } from "node:stream";
 
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 import { createMoveSession } from "./move-session.mjs";
+import { createMoveStatusReport, moveStatus } from "./move-status.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { awayIn, createOneHome, parseJournal, underWay } from "./one-home.mjs";
 import { teamPlan } from "./cloud-team-plan.mjs";
@@ -79,7 +80,6 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
- *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -90,13 +90,16 @@ async function answer(response) {
  *   openTeam?(team: { id: string, name: string }): void,
  *   teamJournal?: { read(): unknown, write(value: unknown): void },
  *   keep?: { read(): unknown, write(value: unknown): void },
+ *   reportTimers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
  * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
  * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default; `keep`: the
  * person's choice to keep this computer's bots here, one-home-keep.json beside it by default. `openTeam`:
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
- * `teamJournal`, team-moves.json beside this one by default). The rest are installCloudSend's.
+ * `teamJournal`, team-moves.json beside this one by default). `reportTimers`: the waits of the move's report to the Admin
+ * (move-status.mjs), setTimeout's by default. The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
+  reportTimers, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -111,6 +114,15 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);
   const keep = keptChoice ?? jsonFile(() => join(dirname(journalFile()), "one-home-keep.json"));
+  const status = () => moveStatus({ journal: parseJournal(journal.read()), state: account()?.state(), kept: home.keeps(), facts: home.facts(), now: Date.now(), version });
+  const report = createMoveStatusReport({
+    status,
+    // A sign-in the Admin has ended (or that expired) only gets 401s until the person signs in again.
+    signIn: () => { const state = account()?.state(); return state?.status === "reauth-required" ? null : state?.deviceId ?? null; },
+    send: async (body) => (await account()?.reportMoveStatus?.(body)) === true,
+    log,
+    ...(reportTimers ? { timers: reportTimers } : {}),
+  });
   /** When the person last typed or clicked in the window. */
   const typed = () => {
     const win = sendDeps.window?.();
@@ -196,7 +208,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     },
     session: () => moveSession.open(target()),
     release: () => moveSession.end(),
-    lend, offer, phone, openHome, openLocal, restart, version, log,
+    lend, phone, openHome, openLocal, restart, version, log,
     again,
     keep,
     keepHome,
@@ -210,7 +222,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
       return Boolean(client?.reportKept && mine && await client.reportKept({ installation: mine }));
     },
     lastInput: typed,
-    onChange: () => send.publish(),
+    onChange: () => { send.publish(); report.changed(); },
   });
 
   /** The switch "Keep this computer's bots on this computer": `shown` only to someone with a Cloud of their own the move
@@ -240,12 +252,14 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */
     away: () => home.away(),
     view: () => home.view(),
-    close: () => { teamMove.close(); home.close(); void moveSession.end(); },
+    close: () => { teamMove.close(); home.close(); report.close(); void moveSession.end(); },
     /** A bot moving from My Cloud into a team (team-move-main.mjs). */
     teamMove,
     oneHome: home,
     /** The journal as it is on disk. */
     journal: () => journal.read(),
+    /** Where the move stands as the Admin is told it (move-status.mjs), and that report sent now if it is due. */
+    moveStatus: { read: status, flush: () => report.flush() },
     /** This computer's server's freeze marker: `{ frozen, cloud? }`. */
     marker: () => local.json("/api/move/freeze"),
     lastInput: typed,

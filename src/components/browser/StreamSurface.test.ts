@@ -272,6 +272,7 @@ describe("who has the browser", () => {
     expect(controlPill(true, control("agent"), "")).toBe("bot");
     expect(controlPill(true, control("you"), "")).toBe("yours");
     expect(controlPill(true, control("another-viewer"), "")).toBe("elsewhere");
+    expect(controlPill(true, control("agent", { owned: true }), "")).toBe("held");
     expect(controlPill(true, control("agent"), "pending")).toBe("taking");
     expect(controlPill(true, control("agent"), "slow")).toBe("waiting");
   });

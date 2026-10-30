@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { MEMORY_MAX_LINES, readMemoryFile, readMemoryTopic, updateMemory, writeMemoryFile } from "../workspace.ts";
+import { createAboutMe } from "../about-me.ts";
+import { botMemoryUpdate } from "../memory-forget.ts";
+import { isForgotten } from "../profile-learned.ts";
+import { MEMORY_MAX_LINES, readMemoryFile, readMemoryTopic, writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
 import { callTool, type ToolCallContext } from "./agents-call.ts";
 
 function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
@@ -19,11 +22,12 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
 
 describe("send_voice_note", () => {
   it("refuses a missing or blank note with the shape a retry needs", async () => {
-    for (const args of [{}, { text: "" }, { text: "   " }]) {
+    for (const args of [{}, { text: "   " }]) {
       const result = await callTool("send_voice_note", args, context());
       expect(result.isError, JSON.stringify(args)).toBe(true);
       expect(result.text).toContain("send_voice_note needs text");
     }
+    expect(await callTool("send_voice_note", { text: "" }, context())).toEqual({ text: "send_voice_note was not run: text must not be empty. Fix these and call it again.", isError: true });
   });
 
   it("refuses a note over 1000 characters and reports the length", async () => {
@@ -176,13 +180,15 @@ describe("propose_profile", () => {
 });
 
 describe("memory_update", () => {
-  // The harness route, in process: the real updateMemory behind the tool.
+  // The harness route, in process: the real write behind the tool, and an About me held in memory.
+  const profile = { aboutMe: "" };
+  const aboutMe = createAboutMe({ read: () => profile.aboutMe, write: (text) => { profile.aboutMe = text; }, changed: () => undefined, today: () => "2026-10-27" });
   const harness = (botId: string): ToolCallContext["client"] => ({
     api: async () => ({}),
     apiResponse: async (_path, init) => {
       const body = JSON.parse(String(init?.body));
-      const result = updateMemory(botId, { action: body.action, text: body.text, oldText: body.oldText }, { source: 'chat "Turn"' });
-      return { ok: result.ok, status: result.ok ? 200 : result.code === "conflict" ? 409 : 400, body: result };
+      const result = botMemoryUpdate(botId, body, { source: 'chat "Turn"', aboutMe });
+      return { ok: result.ok, status: result.ok ? 200 : "code" in result && result.code === "conflict" ? 409 : 400, body: result };
     },
   });
 
@@ -198,7 +204,7 @@ describe("memory_update", () => {
       const result = await callTool("memory_update", { action: "append", text: `note ${i}` }, ctx);
       expect(result.isError, result.text).toBeFalsy();
       expect(result.text).toMatch(new RegExp(`^Memory updated\\. Entry: - \\d{4}-\\d{2}-\\d{2} · from chat "Turn" · note ${i}\\n`));
-      expect(result.text).toMatch(new RegExp(`\\nTo stay within what loads each session, moved 1 older entry to memory/archive\\.md \\(session_search finds them\\):\\n- 2026-09-01 · old ${i}$`));
+      expect(result.text).toMatch(new RegExp(`\\nTo stay within what loads each session, moved 1 older entry to your archive \\(session_search finds them\\):\\n- 2026-09-01 · old ${i}$`));
     }
     const text = readMemoryFile(bot).text;
     for (let i = 0; i < 10; i += 1) expect(text).toContain(` · note ${i}\n`);
@@ -214,7 +220,7 @@ describe("memory_update", () => {
     const result = await callTool("memory_update", { action: "append", text: "one more" }, context({ botId: bot, client: harness(bot) }));
     expect(result.isError).toBeFalsy();
     expect(result.text.split("\nTo stay")[1]).toBe(
-      " within what loads each session, moved 401 older entries to memory/archive.md (session_search finds them):\n" +
+      " within what loads each session, moved 401 older entries to your archive (session_search finds them):\n" +
       "- 2026-08-01 · Deploy command:\n- 2026-09-01 · old 1\n- 2026-09-01 · old 2\n- 2026-09-01 · old 3\n- 2026-09-01 · old 4\n…and 396 more",
     );
     expect(readMemoryTopic(bot, "archive.md")).toContain("- 2026-08-01 · Deploy command: · moved");
@@ -225,8 +231,44 @@ describe("memory_update", () => {
     writeMemoryFile(bot, Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- note ${i}\n`).join(""));
     const result = await callTool("memory_update", { action: "append", text: "kept anyway" }, context({ botId: bot, client: harness(bot) }));
     expect(result.isError).toBeFalsy();
-    expect(result.text).toMatch(/^Memory updated\. Entry: - \d{4}-\d{2}-\d{2} · from chat "Turn" · kept anyway\nSaved, but the lines that never move out of MEMORY\.md \(hand-written ones, health and safety facts\) fill what loads each session, so the newest entries do not load\. Ask the person to trim MEMORY\.md in Settings\.$/);
+    expect(result.text).toMatch(/^Memory updated\. Entry: - \d{4}-\d{2}-\d{2} · from chat "Turn" · kept anyway\nSaved, but the lines that never move out of MEMORY\.md \(hand-written ones, health and safety facts\) fill what loads each session, so the newest entries do not load\. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel\.$/);
     expect(readMemoryFile(bot).text).toContain(" · kept anyway\n");
+  });
+
+  it("forgets a fact everywhere it was kept, says so without naming a file, and keeps it from being learned again", async () => {
+    const bot = "bot-memory-forget";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    expect((await callTool("memory_update", { action: "append", text: "The person prefers short answers" }, ctx)).isError).toBeFalsy();
+    await callTool("memory_update", { action: "append", text: "The person is in India (IST)" }, ctx);
+    writeMemoryTopic(bot, "work.md", "---\ntitle: work\naliases: [job, short answers]\n---\n- 2026-10-27 · from chat \"Remember: short answers\" (noticed) · The person wants short answers at work\n- 2026-10-27 · The person works on OpenMausBot\n");
+    profile.aboutMe = "I live in Pune.\n- 2026-10-27 · learned by Scout · The person prefers short answers";
+
+    const forgot = await callTool("memory_update", { action: "forget", old_text: "short answers" }, ctx);
+    expect(forgot.isError).toBeFalsy();
+    expect(forgot.text).toBe('Forgotten everywhere it was saved, About me included, which all their bots read: "The person prefers short answers", "The person wants short answers at work". Confirm to the person in one plain line what you forgot.');
+    expect(forgot.text).not.toMatch(/MEMORY\.md|memory\/|\.md\b/);
+    expect(readMemoryFile(bot).text).not.toContain("short answers");
+    expect(readMemoryFile(bot).text).toContain("The person is in India (IST)");
+    const work = readMemoryTopic(bot, "work.md")!;
+    expect(work).toContain("aliases: [job, short answers]");
+    expect(work).not.toContain("wants short answers");
+    expect(work).toContain("The person works on OpenMausBot");
+    expect(profile.aboutMe).toBe("I live in Pune.");
+    expect(isForgotten("The person likes short answers")).toBe(true);
+
+    expect((await callTool("memory_update", { action: "forget", old_text: "short answers" }, ctx)).text).toMatch(/^Nothing saved mentions "short answers": not in your notes, not in About me\./);
+    expect(await callTool("memory_update", { action: "forget", old_text: "ab" }, ctx)).toMatchObject({ isError: true });
+    expect(await callTool("memory_update", { action: "forget" }, ctx)).toMatchObject({ isError: true });
+
+    await callTool("memory_update", { action: "append", text: "The person prefers short answers again" }, ctx);
+    expect(isForgotten("The person likes short answers")).toBe(false);
+  });
+
+  it("removes a whole dated entry when only its fact is named, never leaving a note with a date and no text", async () => {
+    const bot = "bot-memory-remove";
+    writeMemoryFile(bot, '- 2026-10-27 · from chat "Remember" (noticed) · The person prefers short answers\n- Keep this unique fact.\n');
+    expect((await callTool("memory_update", { action: "remove", old_text: "The person prefers short answers" }, context({ botId: bot, client: harness(bot) }))).isError).toBeFalsy();
+    expect(readMemoryFile(bot).text).toBe("- Keep this unique fact.\n");
   });
 });
 

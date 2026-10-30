@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { windowChromeOptions } from "./window-chrome.mjs";
+import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
 
 describe("window chrome", () => {
   it("uses inset traffic lights on macOS", () => {
@@ -18,5 +18,10 @@ describe("window chrome", () => {
 
   it("keeps Linux window chrome native", () => {
     expect(windowChromeOptions("linux")).toEqual({});
+  });
+
+  it("paints the light or dark canvas before the renderer loads", () => {
+    expect(windowBackground(true)).toBe("#121212");
+    expect(windowBackground(false)).toBe("#fcfcfc");
   });
 });

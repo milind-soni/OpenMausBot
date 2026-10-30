@@ -1,7 +1,7 @@
 // macOS auto-update requires a signed app, so this runs only when packaged. electron-updater is vendored
 // because the packaged app ships no node_modules.
 import { app, clipboard, ipcMain } from "electron";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
@@ -14,6 +14,9 @@ import { canInstallElevated, installPackageElevated } from "./elevated-install.m
 import { releaseSingleInstanceLock } from "./single-instance.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { createQuietInstall, installFailed, launchAfter, LOOK_EVERY_MS, updateSeen } from "./update-when-quiet.mjs";
+
+export { quietSignals } from "./update-when-quiet-main.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -22,6 +25,47 @@ let win = null;
 let state = { status: "idle" };
 let updaterCoordinator = null;
 let pageAllowed = () => false;
+let quiet = null;
+let launch = null;
+/** Where these updaters install without asking anything: Squirrel.Mac, and the per-user NSIS installer run silently. */
+const QUIET_PLATFORMS = new Set(["darwin", "win32"]);
+
+function quietRecord() {
+  const file = join(app.getPath("userData"), "update-when-quiet.json");
+  return {
+    read: () => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } },
+    write: (value) => {
+      try {
+        writeFileSync(`${file}.tmp`, JSON.stringify(value ?? null), { mode: 0o600 });
+        renameSync(`${file}.tmp`, file);
+      } catch {
+      }
+    },
+  };
+}
+
+function launched() {
+  launch ??= app.isPackaged && QUIET_PLATFORMS.has(process.platform)
+    ? launchAfter(quietRecord(), { version: app.getVersion() })
+    : { hidden: false, updated: null };
+  return launch;
+}
+
+/** This launch is a quiet install's reopening while the window was closed: it stays closed. macOS activates the app it
+ * reopens, so the app hands the focus back at once. */
+export function reopenedOutOfSight() {
+  const { hidden } = launched();
+  if (hidden && process.platform === "darwin") app.hide();
+  return hidden;
+}
+
+function view() {
+  return {
+    ...state,
+    ...(quiet && state.status === "downloaded" ? { installsByItself: quiet.promises(state.version) } : {}),
+    ...(launch?.updated ? { updated: launch.updated } : {}),
+  };
+}
 
 function updaterLogger() {
   const directory = app.getPath("logs");
@@ -66,9 +110,10 @@ function relaunchAfterInstall() {
 
 function setState(patch) {
   state = { ...state, ...patch };
+  if (quiet && patch.status === "error") installFailed(quietRecord());
   try {
     const contents = win?.webContents;
-    if (contents && pageAllowed({ sender: contents, senderFrame: contents.mainFrame })) contents.send("update:state", state);
+    if (contents && pageAllowed({ sender: contents, senderFrame: contents.mainFrame })) contents.send("update:state", view());
   } catch {
   }
 }
@@ -83,9 +128,15 @@ export function registerUpdaterIpc({ pageAllowed: allowed }) {
     if (!pageAllowed(event)) throw new Error(`${channel} is only available in this app's window`);
     return handler();
   };
-  ipcMain.handle("update:get-state", guarded("update:get-state", () => state));
+  ipcMain.handle("update:get-state", guarded("update:get-state", view));
   ipcMain.handle("update:check", guarded("update:check", () => updaterCoordinator?.check(true)));
   ipcMain.handle("update:install", guarded("update:install", () => updaterCoordinator?.install()));
+  ipcMain.handle("update:seen", guarded("update:seen", () => {
+    if (!launch?.updated) return;
+    updateSeen(quietRecord());
+    launch = { ...launch, updated: null };
+    setState({});
+  }));
 }
 
 // macOS keeps the process (and updater) alive after its window closes, so each new window is retargeted here.
@@ -93,7 +144,8 @@ export function attachUpdaterWindow(mainWindow) {
   win = mainWindow;
 }
 
-export function startUpdater() {
+/** `signals` (quietSignals): what tells a quiet moment; without them a downloaded update installs only on Restart or quit. */
+export function startUpdater(signals = null) {
   if (!app.isPackaged) {
     updaterCoordinator = null;
     setState({ status: "idle" });
@@ -123,6 +175,14 @@ export function startUpdater() {
     relaunch: elevated ? relaunchAfterInstall : null,
     nativeStaging: process.platform === "darwin",
   });
+  if (signals && QUIET_PLATFORMS.has(process.platform)) {
+    launched();
+    quiet = createQuietInstall({ updater: updaterCoordinator, signals, record: quietRecord(), version: app.getVersion(),
+      log: (line) => autoUpdater.logger?.info?.(line) });
+    setInterval(() => void quiet?.look(), LOOK_EVERY_MS).unref?.();
+    signals.watch(() => quiet?.look());
+    setState({});
+  }
 
   setTimeout(() => void updaterCoordinator?.check(), 15_000).unref?.();
   setInterval(() => void updaterCoordinator?.check(), 60 * 60 * 1000).unref?.();

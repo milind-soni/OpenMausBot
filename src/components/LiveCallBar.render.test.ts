@@ -104,6 +104,20 @@ describe("LiveCallBar", () => {
     expect(markup).not.toContain(`aria-label="${other}"`);
   });
 
+  it("offers Open System Settings with a microphone this computer refused", async () => {
+    const permOpenSettings = vi.fn(async () => {});
+    vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}), permOpenSettings } });
+    configureLiveMedia({
+      getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+      capabilities: () => ({ dictation: { available: true, engine: "none", onDevice: false } }) as unknown as DesktopCapabilities,
+      pageMicrophone: async () => undefined,
+    });
+    await startLiveCall({ botId: bot.id, threadId: bot.threadId });
+    const markup = render(createElement(LiveCallBar, { bot }));
+    expect(markup).toContain('data-open-system-settings="mic"');
+    expect(markup).toContain("Open System Settings");
+  });
+
   it("names the keyboard chords on the mute and hang-up buttons", () => {
     vi.stubGlobal("window", { ogb: { platform: "darwin", speechStop: vi.fn(async () => {}) } });
     configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });

@@ -3,6 +3,9 @@ import { useCallback, useLayoutEffect, useRef, type RefObject, type TextareaHTML
 import { type MentionPeer } from "@/lib/mentions";
 import { MentionText } from "./MentionText";
 
+const TEXT_LAYOUT = ["font-family", "font-size", "font-weight", "font-style", "font-stretch", "font-feature-settings", "font-variation-settings",
+  "letter-spacing", "word-spacing", "line-height", "text-indent", "tab-size", "padding-top", "padding-right", "padding-bottom", "padding-left"] as const;
+
 export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   wrapperClassName?: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -14,6 +17,8 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     const input = inputRef.current;
     const mirror = mirrorRef.current;
     if (!input || !mirror) return;
+    const style = getComputedStyle(input);
+    for (const property of TEXT_LAYOUT) mirror.style.setProperty(property, style.getPropertyValue(property));
     mirror.style.width = `${input.clientWidth}px`;
     mirror.scrollTop = input.scrollTop;
     mirror.scrollLeft = input.scrollLeft;
@@ -28,7 +33,7 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     input.scrollTop = scrollTop;
     sync();
   }, [inputRef, sync]);
-  useLayoutEffect(resize, [props.value, resize]);
+  useLayoutEffect(resize, [props.value, props.className, resize]);
   useLayoutEffect(() => {
     let width = inputRef.current?.clientWidth;
     const observer = new ResizeObserver(() => {

@@ -6,7 +6,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { xResearchAction } from "@/lib/cloud-plan";
 import { keyRemoved, keySaved, keySaveFailure, keyTestResult } from "@/lib/product-events";
 import { isXConnectorStatus, type XConnectorStatus, type XIncludedUsage } from "../../shared/x-connector";
-import { looksLikeKey, saveCredential, tregVerdict } from "./ApiKeys";
+import { looksLikeKey, saveCredential, tregVerdict } from "./keys/key-save";
 import { useCloudPlan } from "./ProIntroduction";
 
 const TREG_URL = "https://treg.to";

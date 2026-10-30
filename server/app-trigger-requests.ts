@@ -110,7 +110,7 @@ export class AppTriggerRequestService {
 
   private owned(triggerId: string, owner: string): AppTrigger {
     const trigger = this.options.triggers.get(triggerId);
-    if (!trigger || trigger.botId !== owner) throw new AppTriggerError("No automation with that id belongs to this bot. Call list_triggers and copy its id.", 404);
+    if (!trigger || trigger.botId !== owner) throw new AppTriggerError("No automation with that id belongs to this bot. Call trigger_info and copy its id.", 404);
     return trigger;
   }
 

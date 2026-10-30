@@ -52,11 +52,17 @@ Notas permanentes que este bot mantiene entre tareas. Las primeras ${MEMORY_MAX_
 se cargan al inicio de cada sesión — mantén este archivo corto y organizado.
 Las notas más largas van en memory/<tema>.md y se leen cuando es necesario.
 `,
+  ko: `# 메모리
+
+이 봇이 작업 사이에 계속 보관하는 메모예요. 처음 ${MEMORY_MAX_LINES}줄은
+세션을 시작할 때마다 불러와요 — 이 파일은 짧고 잘 정리된 상태로 유지하세요.
+더 긴 메모는 memory/<주제>.md 파일에 두고, 필요할 때 읽어요.
+`,
 };
 
 const MEMORY_SEED_VALUES = new Set(Object.values(MEMORY_SEEDS));
 
-function isMemorySeed(text: string): boolean {
+export function isMemorySeed(text: string): boolean {
   return MEMORY_SEED_VALUES.has(text);
 }
 
@@ -64,6 +70,7 @@ function memorySeedFor(language?: string): string {
   const normalized = (language?.trim() || Intl.DateTimeFormat().resolvedOptions().locale).toLowerCase().replaceAll("_", "-");
   if (normalized === "pt" || normalized.startsWith("pt-")) return MEMORY_SEEDS["pt-br"];
   if (normalized === "es" || normalized.startsWith("es-")) return MEMORY_SEEDS.es;
+  if (normalized === "ko" || normalized.startsWith("ko-")) return MEMORY_SEEDS.ko;
   return MEMORY_SEEDS[normalized] ?? MEMORY_SEEDS.en;
 }
 
@@ -268,6 +275,7 @@ export function memoryDate(now: Date = new Date()): string {
 const SEP = " · ";
 const DATED_ENTRY = /^(- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?)(.*)$/;
 const UPDATED_MARK = / · updated \d{4}-\d{2}-\d{2}$/;
+const ENTRY_MARKS = / · (?:updated|confirmed|until|expired|superseded|moved) \d{4}-\d{2}-\d{2}/g;
 const TYPED_PREFIX = /^\s*- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?/;
 const BULLET = /^(?:[-*•]|\d+[.)])\s+/;
 
@@ -346,7 +354,11 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
     const line = current.slice(span.start, span.end);
     const parsed = oldText.includes("\n") ? null : parseEntry(line);
     const replaceLine = (replacement: string) => current.slice(0, span.start) + replacement + current.slice(span.end);
-    if (update.action === "remove") {
+    const left = parsed && parseEntry(line.slice(0, index - span.start) + line.slice(index - span.start + oldText.length));
+    if (update.action === "remove" && left && !left.body.replace(ENTRY_MARKS, "").replace(/~~/g, "").trim()) {
+      // Only a date and a source would be left: that entry is gone, not a blank note.
+      next = current.slice(0, span.start) + current.slice(current[span.end] === "\n" ? span.end + 1 : span.end);
+    } else if (update.action === "remove") {
       next = current.slice(0, index) + current.slice(index + oldText.length);
       const atLineStart = index === 0 || next[index - 1] === "\n";
       if (atLineStart && next[index] === "\n") next = next.slice(0, index) + next.slice(index + 1);
@@ -538,6 +550,10 @@ export function memoryTopicIndex(botId: string): string {
   return renderTopicIndex(listMemoryTopics(botId).map((topic) => ({ name: topic.name, header: parseTopicHeader(readTopicHead(join(dir, topic.name))) })));
 }
 
+export const REMEMBER_AND_FORGET =
+  " When the person asks you to remember something, save it now with memory_update append, one fact per call, as a plain statement about them, then confirm in one short line of their words what you will do (\"Got it: short answers, and times in India time.\")." +
+  " When they ask you to forget something, call memory_update with action forget and a few words that name it, once per thing: it removes it from your notes, your topic notes and About me, and it is not learned again. Then confirm in one plain line what you forgot.";
+
 const NOTES_IN_RESULT =
   " Notes cannot be saved from this conversation: on this Cloud only a conversation that only its owner writes in may change memory, and another bot or person wrote here." +
   " Do not call memory_update or memory_log or edit memory files. Put any fact worth keeping in your reply; for work another bot handed you, in your result to that bot.";
@@ -555,7 +571,7 @@ export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolea
     return `${lead}\n\nYour memory (MEMORY.md):\n${memory.text}${memory.truncated ? " [Only the initial memory excerpt is visible.]" : ""}${topicIndexBlock(botId, opts.fileTools !== false)}`;
   }
   const writeGuidance = opts.managedWrites
-    ? " Change MEMORY.md only with memory_update" + (opts.fileTools === false ? "; on a conflict, find the current passage with session_search." : ".")
+    ? " Change MEMORY.md only with memory_update" + (opts.fileTools === false ? "; on a conflict, find the current passage with session_search." : ".") + REMEMBER_AND_FORGET
     : " Keep MEMORY.md short and curated. When you learn something worth keeping, update it with your file tools; remove notes that turn out to be wrong.";
   const guidance =
     ` Your private long-term memory file is ${JSON.stringify(memoryFile)}.` +

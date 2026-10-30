@@ -10,7 +10,7 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) removeTempDir(dir); });
 
 function folders() {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "omb-upload-")));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-upload-")));
   dirs.push(base);
   const attachments = join(base, "attachments"), workspace = join(base, "workspace"), outside = join(base, "outside");
   for (const dir of [attachments, workspace, outside]) mkdirSync(dir);
@@ -48,10 +48,10 @@ describe("files a page may receive", () => {
 });
 
 describe("the name a page sees", () => {
-  it("gives an attachment the person's own name, and leaves every other file as it is", () => {
+  it("gives an attachment the person's own name, and leaves every other file as it is", async () => {
     const { base, attachments, workspace } = folders();
     const stored = join(attachments, "cv.pdf"), report = join(workspace, "report.csv");
-    const [named, same, unnamed, unsafe] = namedUploadPaths([
+    const [named, same, unnamed, unsafe] = await namedUploadPaths([
       { file: stored, name: "Jane Doe CV.pdf" }, { file: report, name: "report.csv" }, { file: report, name: null }, { file: stored, name: "../escape.pdf" },
     ], join(base, "uploads"));
     expect(basename(named!)).toBe("Jane Doe CV.pdf");
@@ -60,33 +60,53 @@ describe("the name a page sees", () => {
     expect([same, unnamed, unsafe]).toEqual([report, report, stored]);
   });
 
-  it("removes named copies a day old", () => {
+  it("removes named copies a day old", async () => {
     const { base, attachments } = folders();
     const folder = join(base, "uploads");
-    const [old] = namedUploadPaths([{ file: join(attachments, "cv.pdf"), name: "old.pdf" }], folder);
+    const [old] = await namedUploadPaths([{ file: join(attachments, "cv.pdf"), name: "old.pdf" }], folder);
     const day = 24 * 60 * 60 * 1000;
     utimesSync(dirname(old!), new Date(Date.now() - day - 1000), new Date(Date.now() - day - 1000));
-    const [fresh] = namedUploadPaths([{ file: join(attachments, "cv.pdf"), name: "new.pdf" }], folder);
+    const [fresh] = await namedUploadPaths([{ file: join(attachments, "cv.pdf"), name: "new.pdf" }], folder);
     expect(existsSync(old!)).toBe(false);
     expect(existsSync(fresh!)).toBe(true);
+  });
+
+  it.each([0, 3, 1024 * 1024 + 7])("keeps %i copied bytes independent of later writes to the source", async (size) => {
+    const { base, workspace } = folders();
+    const file = join(workspace, "report.csv");
+    writeFileSync(file, Buffer.alloc(size, 0x61));
+    const [staged] = await namedUploadPaths([{ file, name: "Report.csv" }], join(base, "uploads"));
+    writeFileSync(file, "changed");
+    expect(readFileSync(staged!).equals(Buffer.alloc(size, 0x61))).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a file replaced by a symlink after the allowlist check", async () => {
+    const { base, workspace, outside, roots } = folders();
+    const file = join(workspace, "report.csv");
+    const checked = uploadableFiles([file], roots);
+    expect(checked).toEqual({ files: [file] });
+    if ("error" in checked) throw new Error(checked.error);
+    rmSync(file);
+    symlinkSync(join(outside, "secret.txt"), file);
+    await expect(namedUploadPaths(checked.files.map((file) => ({ file, name: null })), join(base, "uploads"), Date.now(), { everyFile: true })).rejects.toThrow();
   });
 });
 
 describe("the files a boxed browser is given", () => {
-  it("links every file into the one folder the box shows Chrome, under the person's name or its own", () => {
-    const root = mkdtempSync(join(tmpdir(), "omb-boxed-upload-"));
+  it("copies every file into the one folder the box shows Chrome, under the person's name or its own", async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-boxed-upload-")));
     const source = join(root, "work", "report.txt"), stored = join(root, "attachments", "a1b2.pdf");
     mkdirSync(dirname(source), { recursive: true });
     mkdirSync(dirname(stored), { recursive: true });
     writeFileSync(source, "report");
     writeFileSync(stored, "pdf");
     const folder = join(root, "profile", "omb-uploads");
-    const linked = namedUploadPaths([{ file: source, name: null }, { file: stored, name: "Invoice.pdf" }], folder, Date.now(), { everyFile: true });
+    const linked = await namedUploadPaths([{ file: source, name: null }, { file: stored, name: "Invoice.pdf" }], folder, Date.now(), { everyFile: true });
     expect(linked.every((path) => path.startsWith(folder + sep))).toBe(true);
     expect(linked.map((path) => basename(path))).toEqual(["report.txt", "Invoice.pdf"]);
     expect(readFileSync(linked[0]!, "utf8")).toBe("report");
     // Unboxed, a file already under its own name is given as it is.
-    expect(namedUploadPaths([{ file: source, name: null }], folder)).toEqual([source]);
+    expect(await namedUploadPaths([{ file: source, name: null }], folder)).toEqual([source]);
     rmSync(root, { recursive: true, force: true });
   });
 });

@@ -57,11 +57,29 @@ it("sits level with the sidebar's top, below a strip shown above the app, at any
   flushSync(() => root.render(createElement(Harness, { onToggle: vi.fn() })));
   await new Promise((resolve) => setTimeout(resolve, 0));
   const bump = document.querySelector<HTMLButtonElement>("[data-sidebar-edge-toggle]")!;
-  expect(bump.style.top).toBe("7px");
+  expect(bump.style.top).toBe("14px");
   // My Cloud's two-line strip pushes the sidebar 58px down, and the sidebar is at its narrowest.
   top = 58; right = 240;
   flushSync(() => resized!());
-  expect(bump.style.top).toBe("65px");
+  expect(bump.style.top).toBe("72px");
   expect(bump.style.left).toBe("240px");
 });
 
+
+it("stays out of sight until the sidebar or the bump is hovered, and reports the hover", async () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ left: 0, top: 0, width: 280, height: 900, right: 280, bottom: 900, x: 0, y: 0, toJSON() {} }) as DOMRect);
+  const onHover = vi.fn();
+  function Hidden({ shown }: { shown: boolean }) {
+    const aside = useRef<HTMLElement>(null);
+    return createElement("aside", { ref: aside }, createElement(SidebarEdgeToggle, { collapsed: false, shown, onHover, onToggle: () => {}, anchorRef: aside }));
+  }
+  flushSync(() => root.render(createElement(Hidden, { shown: false })));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const bump = () => document.querySelector<HTMLButtonElement>("[data-sidebar-edge-toggle]")!;
+  expect(bump().className).toContain("opacity-0");
+  expect(bump().className).toContain("focus-visible:opacity-100");
+  flushSync(() => bump().dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+  expect(onHover).toHaveBeenCalledWith(true);
+  flushSync(() => root.render(createElement(Hidden, { shown: true })));
+  expect(bump().className).toContain("opacity-100");
+});

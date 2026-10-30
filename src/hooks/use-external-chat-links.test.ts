@@ -58,7 +58,7 @@ describe("useExternalChatLinks", () => {
     vi.stubGlobal("window", {});
     fixture.link = "openmausbot://bot/scout";
     const dispatch = vi.fn();
-    render({ ...loaded, appSettingsOpen: true, shortcutsOpen: true, newBotOpen: true }, dispatch);
+    render({ ...loaded, appSettingsOpen: true, shortcutsOpen: true }, dispatch);
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
       { type: "toggleAppSettings", open: false },
       { type: "toggleShortcuts", open: false },

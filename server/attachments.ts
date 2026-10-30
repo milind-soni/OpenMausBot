@@ -11,14 +11,13 @@ import {
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
+import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
 
+export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-
-/** Below Cloudflare's transport ceiling; a local inbox, not unbounded storage. */
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 export const DEFAULT_ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
 /** A person's own Cloud is the only home of everything their computers held, on a volume a move grows to fit. */

@@ -6,7 +6,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { accountActions } from "./EngineAccounts";
 import { AntigravityFreeSpace, formatDiskSize } from "./AntigravityFreeSpace";
 
-const fixture = vi.hoisted(() => ({ instances: [] as InstanceInfo[], bots: [] as Bot[] }));
+const fixture = vi.hoisted(() => ({ instances: [] as InstanceInfo[], bots: [] as Bot[], config: undefined as Record<string, unknown> | undefined }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   useStore: () => ({ state: fixture, refreshInstances: async () => {}, refreshModels: async () => {} }),
@@ -231,7 +231,7 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
   });
 
-  it("keeps an API-key engine listed after its key is saved and links to changing the key", () => {
+  it("keeps an API-key engine listed after its key is saved, with the key masked and Replace beside it", () => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("navigator", { userAgent: "Linux" });
     fixture.bots = [];
@@ -242,25 +242,29 @@ describe("Settings → Engines → setup cards", () => {
     fixture.instances = [openai({ state: "unavailable", reason: "No API key" })];
     const before = renderToStaticMarkup(createElement(EnginesSettings));
     expect(before).toContain("OpenAI needs an API key");
-    expect(before).toContain("Open API keys");
-    expect(before).not.toContain("Change key");
+    expect(before).toContain('data-key-row="openai"');
+    expect(before).toContain('placeholder="sk-…"');
+    expect(before).not.toContain("data-key-replace");
 
     fixture.instances = [openai({ state: "available", authenticated: true, version: null })];
+    fixture.config = { openai: { configured: true, last4: "a1b2" } };
     const saved = renderToStaticMarkup(createElement(EnginesSettings));
     expect(saved).toContain('data-engine-card="openai"');
     expect(saved).toContain('data-engine-setup-api-key="configured"');
     expect(saved).toContain("OpenAI uses your API key");
-    expect(saved).toContain("Change key");
+    expect(saved).toContain("••••••••a1b2");
+    expect(saved).toContain("data-key-replace");
     expect(saved).not.toContain("OpenAI needs an API key");
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(remote).toContain("open Settings → API keys on the computer running OpenMausBot");
-    expect(remote).not.toContain("Change key");
+    expect(remote).toContain("open Settings → API keys on the computer running MausBot");
+    expect(remote).not.toContain("data-key-row");
 
     vi.stubGlobal("window", {});
     fixture.instances = [{ ...openai({ state: "available", authenticated: true, version: null }), managed: { organizationId: "org", organizationName: "Acme" } }];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Change key");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-key-row");
+    fixture.config = undefined;
   });
 });
 
@@ -374,4 +378,38 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(html).toContain("Needs setup");
   });
 
+});
+
+describe("Settings → AI in Simple mode", () => {
+  const engine = (instanceId: string, driverKind: string, authenticated: boolean, extra: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId, driverKind, displayName: instanceId, cliDefault: instanceId,
+    snapshot: { state: "available", authenticated }, models: { default: "model", options: [] }, ...extra,
+  });
+  const simple = (open = false) => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    return renderToStaticMarkup(createElement(EnginesSettings, { simple: true, more: { id: "ai-more", open, onToggle: () => {} } }));
+  };
+  const rows = (html: string) => [...html.matchAll(/data-simple-engine="([^"]+)"/g)].map((match) => match[1]);
+
+  it("lists each ready provider, and each one signed in by subscription, as a row with Manage or Set up", () => {
+    fixture.instances = [
+      engine("claude", "claudeAgent", true),
+      engine("codex", "codexAgent", false, { authentication: { method: "device-code" } }),
+      engine("kimi", "kimiAgent", false),
+    ];
+    const html = simple();
+    expect(html).toContain(">Your AI</h3>");
+    expect(rows(html)).toEqual(["claude", "codex"]);
+    expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
+    expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
+    expect(html).not.toContain("Model providers and accounts");
+  });
+
+  it("folds every other provider under More AI providers, with the count", () => {
+    fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More AI providers \(2\)/);
+    expect(simple(true)).toContain('data-engine-card="kimi"');
+  });
 });

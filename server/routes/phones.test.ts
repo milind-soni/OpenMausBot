@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as atomic from "../atomic.ts";
 import { json, readBody } from "../harness/http.ts";
 import { PhoneJobs } from "../phones/jobs.ts";
 import { PhoneRegistry } from "../phones/registry.ts";
@@ -16,6 +17,7 @@ import { dispatchRoutes } from "./table.ts";
 const servers: Server[] = [];
 const dirs: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
   await Promise.all(dirs.splice(0).map(removeTempDir));
 });
@@ -31,19 +33,20 @@ const registration = {
 };
 const fromPhone = (device = "d1") => ({ "x-openmausbot-companion": "1", "x-openmausbot-companion-device": device });
 
-async function setup(options: { auth?: RequestAuth; owner?: () => string | null } = {}) {
+async function setup(options: { auth?: RequestAuth; owner?: () => string | null; live?: () => boolean; afterBody?: () => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "phones-routes-"));
   dirs.push(dir);
   const registry = new PhoneRegistry(join(dir, "phones.json"));
   const jobs = new PhoneJobs();
   const auth = options.auth ?? ADMIN;
   const routes = [createPhoneRoutes({
-    registry, jobs, owner: options.owner ?? (() => "owner"), isAdmin: (a) => a.scopes.includes("admin"),
+    registry, jobs, owner: options.owner ?? (() => "owner"), isAdmin: (a) => a.scopes.includes("admin"), live: options.live ?? (() => true),
   })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody });
+      const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json,
+        readBody: async (request, max) => { const body = await readBody(request, max); options.afterBody?.(); return body; } });
       if (!handled) json(res, 404, { from: "inline routes" });
     } catch (error) {
       // index.ts turns an error carrying a status into JSON.
@@ -61,7 +64,7 @@ async function setup(options: { auth?: RequestAuth; owner?: () => string | null 
     });
     return { status: response.status, body: (await response.json()) as any };
   };
-  return { registry, jobs, call };
+  return { registry, jobs, call, dir };
 }
 
 describe("phone routes", () => {
@@ -161,6 +164,27 @@ describe("phone routes", () => {
     expect((await call("GET", "/api/phones/self/jobs", undefined, fromPhone("d1"))).status).toBe(404);
   });
 
+  it.each(["/api/phones/self", "/api/phones/companion%3Ad1"])("reports a failed removal save at %s and still drops jobs", async (path) => {
+    const { call, jobs, registry, dir } = await setup({ auth: companion("d1") });
+    try {
+      await call("PUT", "/api/phones/self", registration);
+      const pending = jobs.request("companion:d1", "PHONE_LIST_EVENTS", {}, { active: () => true, timeoutMs: 10_000, offlineText: "offline", online: () => true });
+      const job = (await call("GET", "/api/phones/self/jobs")).body.job;
+      expect((await call("POST", `/api/phones/self/jobs/${job.id}/lease`)).body).toEqual({ active: true });
+      const fault = Object.assign(new Error("fixture permission denied"), { code: "EACCES" });
+      const write = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw fault; });
+      expect((await call("DELETE", path)).status).toBe(500);
+      expect(registry.get("companion:d1")).toBeUndefined();
+      expect(jobs.busy("companion:d1")).toBe(false);
+      expect(await pending).toMatchObject({ ok: false, code: "denied" });
+      write.mockRestore();
+      expect((await call("DELETE", path)).status).toBe(200);
+      const reloaded = new PhoneRegistry(join(dir, "phones.json"));
+      expect(reloaded.get("companion:d1")).toBeUndefined();
+      expect(reloaded.blocked("companion:d1")).toBe(path !== "/api/phones/self");
+    } finally { jobs.close(); }
+  });
+
   it("an open poll answers empty when its phone is removed", async () => {
     const { call, jobs } = await setup({ auth: companion("d1") });
     await call("PUT", "/api/phones/self", registration, fromPhone("d1"));
@@ -168,6 +192,26 @@ describe("phone routes", () => {
     await vi.waitFor(() => expect(jobs.polling("companion:d1")).toBe(true));
     jobs.drop("companion:d1", "This phone's access changed.");
     expect(await poll).toEqual({ status: 200, body: { job: null } });
+  });
+
+  it("rechecks the session before returning a pending poll's job", async () => {
+    let live = true;
+    const { call, jobs } = await setup({ auth: clientSession("s1"), live: () => live });
+    try {
+      await call("PUT", "/api/phones/self", registration);
+      const poll = call("GET", "/api/phones/self/jobs");
+      await vi.waitFor(() => expect(jobs.polling("session:s1")).toBe(true));
+      live = false;
+      void jobs.request("session:s1", "PHONE_CREATE_EVENT", { title: "Private appointment" }, { active: () => true, timeoutMs: 10_000, offlineText: "offline", online: () => true });
+      expect(await poll).toMatchObject({ status: 401, body: { error: expect.any(String) } });
+    } finally { jobs.close(); }
+  });
+
+  it("does not register a phone if its session ends while reading the body", async () => {
+    let live = true;
+    const { call, registry } = await setup({ auth: clientSession("s1"), live: () => live, afterBody: () => { live = false; } });
+    expect((await call("PUT", "/api/phones/self", registration)).status).toBe(401);
+    expect(registry.get("session:s1")).toBeUndefined();
   });
 
   it("a team Cloud offers no phones", async () => {

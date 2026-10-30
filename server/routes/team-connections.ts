@@ -4,7 +4,7 @@
 //   POST /api/team/my-connections/apps/:slug/connect            → { url }   their own sign-in to the app (a new tab)
 //   DELETE /api/team/my-connections/apps/:slug
 //   POST /api/team/my-connections/mcp/:name/sign-in             → { auth }  their own sign-in to the server (a new tab)
-//   PUT /api/team/my-connections/mcp/:name/key { value }                    their own key, never read back
+//   PUT /api/team/my-connections/mcp/:name/key { value, url? }              their own key, never read back
 //   DELETE /api/team/my-connections/mcp/:name
 // The Admin's Cloud page calls these with a session it opened for the person asking (a User's is a client session).
 // Every one acts on the session's own person only, and none answers with a key, a token or a path of an address.
@@ -146,8 +146,11 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         const body = await readBody(req, 4096);
         const value = typeof body?.value === "string" ? body.value.trim() : "";
         if (value.length < 8 || value.length > 512 || !/^[\x21-\x7e]+(?: [\x21-\x7e]+)?$/.test(value)) return json(res, 400, { error: "Paste the key alone." });
-        const headerKeys = Object.keys(stored.headers);
-        deps.host.people.putKey(person, email, name, { url: stored.url, ...personKeyHeader(headerKeys, value) });
+        if (body?.url !== undefined && (typeof body.url !== "string" || !body.url)) return json(res, 400, { error: "Send the MCP server address as text." });
+        const current = server(name);
+        if (!current || !isRemoteMcpServer(current) || (body?.url !== undefined && current.url !== body.url)) return json(res, 409, { error: "The MCP server address changed. Reload the server and try again." });
+        const headerKeys = Object.keys(current.headers);
+        deps.host.people.putKey(person, email, name, { url: current.url, ...personKeyHeader(headerKeys, value) });
         return json(res, 200, { ok: true });
       }
       if (!mcp[2] && method === "DELETE") {

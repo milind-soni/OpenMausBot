@@ -3,14 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
-import { setTeamPeople, type TeamPeople } from "@/state/team-people";
+import { departmentOwner, setTeamPeople, type TeamPeople } from "@/state/team-people";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 import { BotListItem, botRowProps, TeamMenuItems } from "./Sidebar";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { MentionMenu, teammateChoices } from "./MentionMenu";
-import { AskingLine, departmentOwner, NeedsYouButton, NeedsYouTitle, PersonFace } from "./TeamOwner";
+import { AskingLine, NeedsYouButton, NeedsYouTitle, PersonFace } from "./TeamOwner";
 import { TeammateChip } from "./TeammateChip";
 
 const ADA = { email: "ada@acme.test", name: "Ada", role: "admin" };

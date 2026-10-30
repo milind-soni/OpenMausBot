@@ -122,9 +122,15 @@ export function useFocusMessage(threadId: string, ready: boolean) {
       const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
       target.scrollIntoView({ block: "center", behavior: reducedMotion ? "auto" : "smooth" });
       target.classList.add(...FLASH_CLASSES);
-      const textRoots = target.querySelectorAll<HTMLElement>(".chat-md, .chat-text");
-      const textRoot = textRoots.item(textRoots.length - 1) ?? target;
-      const range = matchRange(textRoot, focus.matchText ?? "");
+      // A reply split into bubbles and table cards has several text roots; a quoted reply's text is not the message's.
+      const found = target.querySelectorAll<HTMLElement>(".chat-md, .chat-text");
+      const textRoots: HTMLElement[] = [];
+      for (let index = 0; index < found.length; index++) {
+        const root = found.item(index);
+        if (root && !root.closest?.("[data-reply-quote]")) textRoots.push(root);
+      }
+      let range: Range | null = null;
+      for (const root of textRoots.length ? textRoots : [target]) if ((range = matchRange(root, focus.matchText ?? ""))) break;
       if (range && CSS.highlights) {
         highlight = new Highlight(range);
         CSS.highlights.set("search-result-text", highlight);

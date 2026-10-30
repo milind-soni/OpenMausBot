@@ -2,6 +2,7 @@ import { AlertTriangle, Loader2, RefreshCw, Server, Trash2 } from "lucide-react"
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Card } from "./SettingsPrimitives";
+import { KeysLink } from "./keys/KeysLink";
 import {
   computerStateLabel,
   vpsComputerInventoryStateKind,
@@ -41,7 +42,7 @@ export function VpsComputersCard({
           {configured === true
             ? t("vm.vps.sshHost", { alias: aliases.join(", ") || t("vm.vps.configuredFallback") })
             : configured === false
-              ? t("vm.vps.needsAlias")
+              ? <>{t("vm.vps.needsAlias")} <KeysLink id="vps" /></>
               : t("vm.vps.refreshHint")}
         </div>
         <button

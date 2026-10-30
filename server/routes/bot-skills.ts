@@ -5,7 +5,7 @@ import type { AppConfig } from "../config.ts";
 import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
-import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
+import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
 import {
   installSkill, listBotSkillsWithOrigin, listStagedSkillWrites, parseSkillMd, removeSkill, scanSkillText, setSkillEnabled,
   type SkillListing, type StagedSkillWrite,
@@ -113,6 +113,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
           description: listing.description,
           source: listing.source,
           enabled: listing.enabled,
+          everyBot: index[listing.name]?.everyBot === true,
           tags: listing.tags ?? [],
           version: index[listing.name]?.package?.release ?? null,
           importedAt: listing.importedAt,
@@ -120,7 +121,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
           ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
           warnings: listing.warnings,
           assignedBots: store.bots
-            .filter((bot) => bot.assignedSkills?.includes(listing.name))
+            .filter((bot) => index[listing.name]?.everyBot === true || bot.assignedSkills?.includes(listing.name))
             .map((bot) => ({ id: bot.id, name: bot.name })),
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -154,9 +155,12 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
     }
     if (m && method === "PATCH") {
       if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
-      const parsed = z.object({ enabled: z.boolean() }).safeParse(await readBody(req));
-      if (!parsed.success) return json(res, 400, { error: "enabled must be true or false" });
-      const result = setLibrarySkillReviewState(m[1]!, parsed.data.enabled ? "approved" : "disabled");
+      const parsed = z.object({ enabled: z.boolean().optional(), everyBot: z.boolean().optional() })
+        .refine((body) => (body.enabled !== undefined) !== (body.everyBot !== undefined)).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "enabled or everyBot must be true or false" });
+      const result = parsed.data.enabled !== undefined
+        ? setLibrarySkillReviewState(m[1]!, parsed.data.enabled ? "approved" : "disabled")
+        : setLibrarySkillEveryBot(m[1]!, parsed.data.everyBot!);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { skill: result });
     }

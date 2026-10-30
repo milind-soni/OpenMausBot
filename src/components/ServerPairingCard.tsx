@@ -8,7 +8,9 @@ import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/sess
 import { readMembership } from "../lib/membership";
 import { lastSeen, minutesLeft } from "../lib/pairing-time";
 import { revealPhonePairing } from "../lib/phone-pairing";
-import { Card } from "./SettingsPrimitives";
+import { Card, SettingRow, SIMPLE_CARD } from "./SettingsPrimitives";
+import { Select } from "./Select";
+import { cn } from "@/lib/cn";
 import { TeamPhoneCard } from "./TeamPhoneCard";
 
 export interface PairingOffer {
@@ -47,7 +49,7 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
 const button = "ui-button ui-button-primary";
 const quiet = "ui-button";
 
-export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string }) {
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, simple = false }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; simple?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [scope, setScope] = useState<"admin" | "client">("admin");
@@ -143,26 +145,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     if (result !== "empty") setCopied(result);
   }
 
-  return (
-    <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
-    <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
-      {pairingCodes && cloudHome ? <p data-server-pairing-personal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.cloudPersonal")}</p> : null}
-      {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
-        {cloudHome ? null : <>
-          <label className="flex items-center gap-1.5 text-[13px] text-ink">
-            <input type="radio" name="server-pairing-scope" checked={scope === "admin"} onChange={() => setScope("admin")} />
-            {t("remote.serverPairing.scope.admin")}
-          </label>
-          <label className="flex items-center gap-1.5 text-[13px] text-ink">
-            <input type="radio" name="server-pairing-scope" checked={scope === "client"} onChange={() => setScope("client")} />
-            {t("remote.serverPairing.scope.client")}
-          </label>
-        </>}
-        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className={button}>
-          {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
-        </button>
-      </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
-      {pairingCodes && offer ? (
+  const offerPanel = pairingCodes && offer ? (
         <div className="mt-4 rounded-lg border border-hairline/40 bg-inset p-4">
           {expired ? (
             <p className="text-[13px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
@@ -190,7 +173,71 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             </div>
           )}
         </div>
-      ) : null}
+  ) : null;
+  const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
+
+  if (simple) {
+    return (
+      <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-1.5 focus:outline-none">
+        <div data-settings-rows="" className={cn(SIMPLE_CARD, "flex flex-col")}>
+          <SettingRow title={t("settings.simple.computer.pair")} subtitle={pairingCodes ? cloudHome ? t("remote.serverPairing.cloudPersonal") : undefined : t("remote.serverPairing.portal")}>
+            {pairingCodes ? (
+              <div className="flex items-center gap-2">
+                {cloudHome ? null : (
+                  <Select variant="ghost" value={scope} aria-label={t("remote.serverPairing.title")} onChange={(event) => setScope(event.target.value === "client" ? "client" : "admin")}>
+                    <option value="admin">{t("remote.serverPairing.scope.admin")}</option>
+                    <option value="client">{t("remote.serverPairing.scope.client")}</option>
+                  </Select>
+                )}
+                <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className="ui-button">
+                  {busy ? t("remote.serverPairing.creating") : t("settings.simple.computer.createCode")}
+                </button>
+              </div>
+            ) : null}
+          </SettingRow>
+          {offerPanel ? <div className="px-4 pb-2.5 [&>div]:mt-0">{offerPanel}</div> : null}
+          {listed.length === 0 ? (
+            <p className="px-4 py-2.5 text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
+          ) : listed.map((device) => (
+            <div key={device.id} className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5">
+              <span className="min-w-[min(100%,15rem)] flex-1 text-[14px] leading-5 text-ink">
+                {device.label}
+                <span className="text-ink-secondary">
+                  {" · "}{scopeName(device)}{" · "}{t("remote.serverPairing.seen", { when: lastSeen(device.lastSeenAt, now) })}
+                  {device.id === current ? ` · ${t("remote.serverPairing.thisBrowser")}` : ""}
+                </span>
+              </span>
+              {device.id === current ? null : (
+                <button type="button" onClick={() => void signOut(device.id)} className="ui-button ml-auto shrink-0">{t("remote.serverPairing.signOut")}</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {error ? <p className="pl-4 text-[12px] leading-4 text-danger">{error}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
+    <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
+      {pairingCodes && cloudHome ? <p data-server-pairing-personal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.cloudPersonal")}</p> : null}
+      {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
+        {cloudHome ? null : <>
+          <label className="flex items-center gap-1.5 text-[13px] text-ink">
+            <input type="radio" name="server-pairing-scope" checked={scope === "admin"} onChange={() => setScope("admin")} />
+            {t("remote.serverPairing.scope.admin")}
+          </label>
+          <label className="flex items-center gap-1.5 text-[13px] text-ink">
+            <input type="radio" name="server-pairing-scope" checked={scope === "client"} onChange={() => setScope("client")} />
+            {t("remote.serverPairing.scope.client")}
+          </label>
+        </>}
+        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className={button}>
+          {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
+        </button>
+      </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
+      {offerPanel}
       <div className="mt-5 text-[13px] font-medium text-ink">{t(pairingCodes ? "remote.serverPairing.devices" : "remote.serverPairing.portalDevices")}</div>
       {listed.length === 0 ? (
         <p className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>

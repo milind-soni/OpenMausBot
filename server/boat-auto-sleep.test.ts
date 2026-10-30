@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostTimeout } from "./testing/host-timeout.ts";
+
 const INCLUDED = "box_omb_included-relay-token";
 const OWN = "boat_own-key";
 const botId = "auto-sleep-test";
@@ -18,7 +20,7 @@ let stopStatus = 200;
 const requests: Array<{ method: string; path: string; auth: string; command?: string; at: number }> = [];
 
 const stops = () => requests.filter(request => request.method === "POST" && request.path.endsWith("/stop"));
-const waitFor = async (accept: () => boolean, ms = 5_000) => {
+const waitFor = async (accept: () => boolean, ms = hostTimeout(5_000)) => {
   const end = Date.now() + ms;
   while (!accept()) {
     if (Date.now() > end) throw new Error(`timed out: ${JSON.stringify(requests)}`);
@@ -139,7 +141,8 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     expect(requests).toEqual([]);
     busy = false;
     state = "archived";
-    await new Promise(resolve => setTimeout(resolve, 1_800));
+    // The first quiet look starts a full window; the look after it finds the computer asleep and lets its timer go.
+    await waitFor(() => !power.awake());
     expect(stops()).toEqual([]);
     expect(requests.map(request => request.method)).toEqual(["GET"]);
   });
@@ -148,7 +151,7 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     stopStatus = 503;
     await powerFor({});
     power.used(botId);
-    await waitFor(() => stops().length === 3 && logs.length === 3, 10_000);
+    await waitFor(() => stops().length === 3 && logs.length === 3, hostTimeout(10_000));
     for (const line of logs) {
       expect(line).toBe("cloud computer auto-sleep-test: could not go to sleep, retrying in 1 min: boat sleep failed: Cloud computers are not available right now.");
     }

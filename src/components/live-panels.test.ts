@@ -45,8 +45,10 @@ async function mount(panel: typeof InspectorPanel | typeof ActivityPanel) {
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(panel, { bot }) })));
+  const render = (next: Bot) => flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(panel, { bot: next }) })));
+  render(bot);
   await settle();
+  return render;
 }
 
 beforeEach(() => {
@@ -99,6 +101,15 @@ describe("Activity on the app's live stream", () => {
     await settle();
     expect(fetched).toEqual(["/api/bots/bot/activity?limit=300", "/api/bots/bot/activity?limit=300"]);
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("still reloads when the bot changes while a settled turn waits", async () => {
+    const render = await mount(ActivityPanel);
+    frame(runtime("e5", { type: "turn.completed", ok: true }));
+    render({ ...bot, unread: true, tasks: [...bot.tasks!] });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await settle();
+    expect(fetched).toHaveLength(2);
   });
 
   it("reloads when the stream missed frames it could not replay", async () => {

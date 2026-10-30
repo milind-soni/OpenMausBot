@@ -105,7 +105,7 @@ describe("OverviewSection", () => {
       createElement(OverviewSection, { overview: sentences, refreshError: true, prompt, onOpen: vi.fn() }),
     );
 
-    expect(markup).toContain("Couldn’t refresh — showing the last loaded overview.");
+    expect(markup).toContain("Couldn’t refresh. Showing the last loaded overview.");
     for (const line of sentences.wont) {
       expect(markup).toContain(line);
     }

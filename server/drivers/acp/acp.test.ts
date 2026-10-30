@@ -227,6 +227,7 @@ describe("ACP turns (fake CLI)", () => {
 
   afterEach(async () => {
     delete process.env.FAKE_ACP_MODE;
+    delete process.env.FAKE_ACP_AUTH_METHOD;
     delete process.env.FAKE_ACP_DUMP;
     delete process.env.FAKE_ACP_RPC_DUMP;
     delete process.env.FAKE_ACP_RPC_APPEND_FILE;
@@ -245,6 +246,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_ASK_ANSWER;
     delete process.env.FAKE_ACP_ASK_TIMING;
     delete process.env.FAKE_ACP_HOLD_ON_CANCELLED;
+    delete process.env.FAKE_ACP_CANCEL_STOP_REASON;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CLINE_API_KEY;
@@ -1851,6 +1853,29 @@ describe("ACP turns (fake CLI)", () => {
     },
   );
 
+  it("sends Grok session/set_model only when the session runs another model", async () => {
+    await create(GrokAgentDriver);
+    process.env.FAKE_ACP_SESSION_MODELS = "grok-4.7|Grok 4.7,grok-4.6|Grok 4.6";
+    try {
+      const configCalls = async (threadId: string, model: string) => {
+        const dump = join(scratch, `${threadId}.json`);
+        process.env.FAKE_ACP_DUMP = dump;
+        const { turnId } = await instance.adapter.sendTurn({
+          threadId, text: "use a skill", model, approvalMode: "auto",
+          integrations: { agents: { command: "node", args: ["/fixture/agents-proxy.mjs"], env: {} } },
+        });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        return existsSync(`${dump}.config.json`) ? JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) : [];
+      };
+      expect(await configCalls("t-grok-same-model", "grok-4.7")).toEqual([]);
+      expect(await configCalls("t-grok-other-model", "grok-4.6")).toEqual([
+        { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "grok-4.6" } },
+      ]);
+    } finally {
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
   it.each([
     ["ask", true, "default"],
     ["full", true, "bypassPermissions"],
@@ -1897,7 +1922,14 @@ describe("ACP turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
-  it("grok fails closed when the CLI advertises no cached_token (needs login)", async () => {
+  it("grok accepts the grok.com authentication method offered by current CLI versions", async () => {
+    process.env.FAKE_ACP_AUTH_METHOD = "grok.com";
+    await create(GrokAgentDriver);
+    await instance.adapter.sendTurn({ threadId: "t-grok-current-auth", text: "go" });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("grok fails closed when the CLI advertises no supported authentication method", async () => {
     await create(GrokAgentDriver, "no-auth");
     await instance.adapter.sendTurn({ threadId: "t-auth", text: "go" });
     const done = await recorder.until((e) => e.type === "turn.completed");
@@ -1965,6 +1997,30 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ type: "turn.completed" });
   });
 
+  it("a Stop the agent answers with end_turn is the person's stop, never a lost turn", async () => {
+    // OpenCode answers session/cancel by ending the prompt with end_turn, not cancelled.
+    process.env.FAKE_ACP_CANCEL_STOP_REASON = "end_turn";
+    const rpc = join(scratch, "rpc.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpc;
+    await create(GrokAgentDriver, "hang");
+    await instance.adapter.sendTurn({ threadId: "t-stop-end-turn", text: "go" });
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(rpc, "utf8"))).toContain("session/prompt"));
+    await instance.adapter.interruptTurn("t-stop-end-turn");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+  });
+
+  it("a Stop before the prompt is sent ends quietly, with no error", async () => {
+    await create(GrokAgentDriver, "hang-initialize");
+    await instance.adapter.sendTurn({ threadId: "t-stop-startup", text: "go" });
+    await recorder.until((e) => e.type === "turn.started");
+    await instance.adapter.interruptTurn("t-stop-startup");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+  });
+
   it("an exit before result becomes runtime.error + failed turn", async () => {
     await create(GrokAgentDriver, "exit-early");
     await instance.adapter.sendTurn({ threadId: "t-crash", text: "go" });
@@ -2006,6 +2062,25 @@ describe("ACP turns (fake CLI)", () => {
     expect(progress[0]).toMatchObject({ activity: "command", itemId: "tc-slow" });
     expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
     expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.completed"));
+  });
+
+  it("shows a running tool's output and names the agent process while the tool runs", async () => {
+    const gate = join(scratch, "slow-tool-done");
+    Object.assign(process.env, { FAKE_ACP_TOOL_GATE: gate, FAKE_ACP_TOOL_OUTPUT: "Collecting 12 items\npage 3 of 40" });
+    try {
+      await create(QwenAgentDriver, "slow-tool");
+      await instance.adapter.sendTurn({ threadId: "t-slow-output", text: "go" });
+      expect(await recorder.until(e => e.type === "item.output")).toMatchObject({ itemId: "tc-slow", text: "Collecting 12 items\npage 3 of 40", whole: true });
+      const pid = instance.adapter.enginePid?.("t-slow-output");
+      expect(pid).toEqual(expect.any(Number));
+      expect(() => process.kill(pid!, 0)).not.toThrow();
+      writeFileSync(gate, "done");
+      await recorder.until(e => e.type === "turn.completed");
+      expect(instance.adapter.enginePid?.("t-slow-output")).toBeUndefined();
+    } finally {
+      delete process.env.FAKE_ACP_TOOL_GATE;
+      delete process.env.FAKE_ACP_TOOL_OUTPUT;
+    }
   });
 
   it.each([GrokAgentDriver, QwenAgentDriver])("still fails $driverKind when it goes silent once its tool has finished", async (driver) => {
@@ -2133,7 +2208,9 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "rpc_error" });
     const err = recorder.events.find((e) => e.type === "runtime.error");
     expect(err?.message).toMatch(/no tool running/i);
-    expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    // Plain words for the person: no setting names.
+    expect(err?.message).toMatch(/Send the message again to retry\.$/);
+    expect(err?.message).not.toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
     expect(err).toMatchObject({ stalled: true });
     expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);
     expect(instance.adapter.hasSession("t-stall")).toBe(false);
@@ -2144,8 +2221,19 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-empty", text: "go" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
-    expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
-      .toMatch(/no reply, image, or tool result/);
+    const message = recorder.events.find((e) => e.type === "runtime.error")?.message;
+    // The person reads the AI's name in plain words, never the internal id.
+    expect(message).toBe("Grok finished without replying.");
+    expect(message).not.toContain("grokAgent");
+  });
+
+  it("names the AI, never its internal id, when it exits before answering", async () => {
+    await create(GrokAgentDriver, "exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-exit-name", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const errors = recorder.events.filter((e) => e.type === "runtime.error").map((e) => (e as { message: string }).message);
+    expect(errors.length).toBeGreaterThan(0);
+    for (const message of errors) expect(message).not.toContain("grokAgent");
   });
 
   it("reasoning with no answer is a lost turn, not a success", async () => {
@@ -2156,7 +2244,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "content.delta" && (e as any).streamKind === "reasoning_text")).toBe(true);
     expect(recorder.events.some((e) => e.type === "item.completed")).toBe(false);
     expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
-      .toMatch(/no reply, image, or tool result/);
+      .toBe("Grok finished without replying.");
   });
 
   it("preserves ACP error codes for provider setup classification", async () => {
@@ -2850,7 +2938,9 @@ describe("ACP turns (fake CLI)", () => {
         await stopping;
         await instance.adapter.interruptTurn("qwen-stop");
         release();
-        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: false });
+        // The person's Stop ends the turn as a stop, never as an error.
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true, stopReason: "cancelled" });
+        expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === second.turnId)).toEqual([]);
         const calls = readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
         expect(calls.filter((method) => method === "initialize")).toHaveLength(1);
         expect(calls.filter((method) => method === "session/load")).toHaveLength(0);
@@ -2907,7 +2997,8 @@ describe("ACP turns (fake CLI)", () => {
           await startedStopping;
           if (reason === "Stop") await instance.adapter.interruptTurn("qwen-retry");
           else release();
-          expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: false });
+          expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId))
+            .toMatchObject(reason === "Stop" ? { ok: true, stopReason: "cancelled" } : { ok: false });
           if (rejectCleanup) {
             expect(recorder.events.find((e) => e.type === "runtime.error" && e.turnId === second.turnId))
               .toMatchObject({ message: expect.stringMatching(/could not close its previous tool session/) });

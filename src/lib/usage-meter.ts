@@ -16,6 +16,10 @@ export function meterPercent(meter: Pick<CloudUsageMeter, "used" | "max" | "used
   return Math.min(99, Math.floor((meter.used / meter.max) * 100));
 }
 
+export function includedUsePercent(usage: Pick<CloudUsage, "meters">): number {
+  return usage.meters.reduce((most, meter) => Math.max(most, meterPercent(meter)), 0);
+}
+
 export function meterBand(percent: number): MeterBand {
   return percent >= 100 ? "full" : percent >= NEAR_LIMIT_PERCENT ? "near" : "ok";
 }

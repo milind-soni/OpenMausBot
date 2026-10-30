@@ -72,3 +72,67 @@ it.each(["stream", "text", "text-fallback"])("%s capture stays complete while an
     await removeTempDir(home);
   }
 });
+
+it("keeps the server's connection check out of every turn and one-shot capture, logging it on its own", async () => {
+  const home = mkdtempSync(join(tmpdir(), "omb-claude-dump-"));
+  const dump = join(home, "capture.json");
+  const textDump = join(home, "text.json");
+  const textLog = join(home, "text.jsonl");
+  const checkLog = join(home, "checks.jsonl");
+  const check = async (extra: Record<string, string> = {}) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "-p", "--output-format", "text"], {
+      cwd: home,
+      env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_TEXT_DUMP: textDump,
+        FAKE_CLAUDE_TEXT_LOG: textLog, FAKE_CLAUDE_CHECK_LOG: checkLog, FAKE_CLAUDE_TEXT_FILE: join(home, "missing"), ...extra },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout!.on("data", chunk => { stdout += chunk; });
+    child.stdin!.end("This is a connection check. Reply with the single word OK.");
+    await waitForExit(child);
+    return { code: child.exitCode, stdout };
+  };
+  try {
+    expect(await check()).toEqual({ code: 0, stdout: "OK" });
+    expect(await check({ FAKE_CLAUDE_CHECK: "fail" })).toEqual({ code: 1, stdout: "" });
+    for (const file of [dump, textDump, textLog]) expect(existsSync(file), file).toBe(false);
+    expect(readFileSync(checkLog, "utf8").trim().split("\n")).toHaveLength(2);
+  } finally {
+    await removeTempDir(home);
+  }
+});
+
+it("keeps a new bot's setup answers out of every turn and one-shot capture, failing at once without a reply file, and holds the reply back on request", async () => {
+  const home = mkdtempSync(join(tmpdir(), "omb-claude-dump-"));
+  const dump = join(home, "capture.json");
+  const textDump = join(home, "text.json");
+  const textLog = join(home, "text.jsonl");
+  const setupDump = join(home, "setup.json");
+  const setupFile = join(home, "setup.txt");
+  const prompt = "You write the answer options for the first message of a new bot in OpenMausBot.";
+  const ask = async (extra: Record<string, string> = {}) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "-p", "--output-format", "text"], {
+      cwd: home,
+      env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_TEXT_DUMP: textDump,
+        FAKE_CLAUDE_TEXT_LOG: textLog, FAKE_CLAUDE_TEXT_FILE: join(home, "missing"), FAKE_CLAUDE_SETUP_DUMP: setupDump, FAKE_CLAUDE_SETUP_FILE: setupFile, ...extra },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout!.on("data", chunk => { stdout += chunk; });
+    child.stdin!.end(prompt);
+    await waitForExit(child);
+    return { code: child.exitCode, stdout };
+  };
+  try {
+    expect(await ask()).toEqual({ code: 1, stdout: "" });
+    writeFileSync(setupFile, '["Sort my receipts"]');
+    expect(await ask()).toEqual({ code: 0, stdout: '["Sort my receipts"]' });
+    for (const file of [dump, textDump, textLog]) expect(existsSync(file), file).toBe(false);
+    expect(JSON.parse(readFileSync(setupDump, "utf8")).prompt).toBe(prompt);
+    const started = Date.now();
+    expect(await ask({ FAKE_CLAUDE_SETUP_DELAY_MS: "1500" })).toEqual({ code: 0, stdout: '["Sort my receipts"]' });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
+  } finally {
+    await removeTempDir(home);
+  }
+});

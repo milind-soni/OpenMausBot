@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { SendTurnInput } from "./contracts.ts";
 import { mountChatTools, type ChatToolSession } from "./drivers/chat-mcp-tools.ts";
-import { buildMcpServers } from "./drivers/pi.ts";
+import { buildMcpServers } from "./drivers/pi-mcp-servers.ts";
 import { turnStdioMcpServers } from "./drivers/turn-mcp.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "./mcp-gate-config.ts";
 import type { McpAppReport } from "./mcp-app-observer.ts";

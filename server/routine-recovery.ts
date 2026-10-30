@@ -1,24 +1,31 @@
-// What an unattended routine run's failure turns into: a passing failure starts the run once more after a short wait, a
-// busy target is waited for, a usage limit with a known reset is waited out, and what only the owner can fix fails at
-// once and is told to them once per bot and cause, until one of that bot's runs completes.
+// What an unattended routine run's failure turns into: a failure starts the run once more after a short wait, unless a
+// second start could only repeat or undo it (a stall the turn watchdog stopped, a stop someone pressed or typed, a
+// refusal, a spent cap); a busy target is waited for, a usage limit with a known reset is waited out, and what only the
+// owner can fix fails at once and is told to them once per bot and cause, until one of that bot's runs completes.
+// A teammate's failed thread takes the same verdict (host/chief-notices.ts).
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import type { RoutineRetryCause } from "../shared/routines.ts";
 import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import type { RoutineRun } from "./routines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
+import { classifyContinuable } from "./turn-continuation.ts";
 
 export type RoutineOwnerCause = "signed_out" | "credits" | "usage_limit" | "setup";
 
 /** What is known about a failure besides its words: a cause the server words itself, and the engine's own flags. */
 export interface RoutineFailureFacts {
-  cause?: "stalled" | "busy";
+  /** stalled: the turn watchdog stopped it; cap: a spend or turn cap (or the repeat guard) ended it; refused: the server
+   * would not start it, or its start failed before the turn began (judged by its words, never retried as a crash). */
+  cause?: "stalled" | "busy" | "cap" | "refused";
   stopReason?: string | null;
   setup?: boolean;
   stalled?: boolean;
   trialCredit?: string;
   limitResetsAt?: number;
-  /** A backup engine takes over from one whose usage limit refused the run. */
+  /** A usage limit refused it (the runtime error's `limit`). */
+  limit?: "engine" | "model" | "credits";
+  /** A backup engine takes over from one whose usage limit refused the run, or that is signed out. */
   backupReady?: boolean;
 }
 
@@ -45,29 +52,41 @@ const AFTER_RESET_MS = 60_000;
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 /** startTurn's codes for a bot or thread that is busy for now. */
 const BUSY_CODES = new Set(["thread_busy", "thread_limit", "workspace_busy", "settling"]);
+/** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop", a settings change that cut it short), the AI
+ * declined, or a tool call the person denied or that failed after its corrective rounds: a second start would undo or
+ * repeat it. */
+const NOT_RETRIED_STOPS = new Set(["cancelled", "interrupted", "refusal", "tool_error"]);
+/** What the provider answered for a reason a second start would meet again. */
+const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count"]);
 const OWNER_CAUSES = new Set<RoutineOwnerCause>(["signed_out", "credits", "usage_limit", "setup"]);
 
 const OWNER_ACTION: Record<Exclude<RoutineOwnerCause, "setup">, string> = {
-  signed_out: "This bot's AI is signed out. Sign in again in Settings → Model providers.",
+  signed_out: "This bot's AI is signed out. Sign in again in Settings → AI.",
   credits: "This bot's AI account is out of credit. Add credit with the provider, or choose another AI for this bot.",
   usage_limit: "This bot's AI reached its usage limit. Its routines work again once it resets, or choose another AI for this bot now.",
 };
 const TRIAL_ACTION = "The trial Claude credit can't run this. Sign in with your own Claude or ChatGPT account, or add an API key.";
 const RETRY_WHY: Record<Exclude<RoutineRetryCause, "usage_limit">, string> = {
   stalled: "the AI stalled", restarted: "OpenMausBot restarted while it ran", rate_limited: "a rate limit", provider: "a temporary error",
+  failed: "a failure",
 };
 const FIRST_START: Record<RoutineRetryCause, string> = {
   stalled: "stopped when its AI stalled", restarted: "was cut off when OpenMausBot restarted", rate_limited: "was stopped by a rate limit",
-  provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit",
+  provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit", failed: "failed",
 };
 
+/** Any failure gets one automatic retry, except a stall the turn watchdog stopped (its Chief hears instead), a
+ * stop someone pressed or typed, a refusal, and a spent cap. Routine runs and teammate threads both judge by this. */
 export function classifyRoutineFailure(failure: string, facts: RoutineFailureFacts = {}): RoutineFailureClass {
   if (facts.cause === "busy") return { kind: "busy" };
-  if (facts.cause === "stalled" || facts.stalled) return { kind: "retry", cause: "stalled" };
+  if (facts.cause === "stalled" || facts.cause === "cap") return { kind: "final" };
+  if (facts.stopReason && NOT_RETRIED_STOPS.has(facts.stopReason)) return { kind: "final" };
+  if (classifyContinuable(facts.stopReason, failure) === "cap") return { kind: "final" };
+  if (facts.stalled) return { kind: "retry", cause: "stalled" };
   const engine = engineFailureKind(failure);
   const { reason, transient } = classifyError({ text: failure });
-  if (facts.trialCredit || engine === "credits") return { kind: "owner", cause: "credits" };
-  if (facts.limitResetsAt || facts.stopReason === "quota" || engine === "usage_limit") {
+  if (facts.trialCredit || (engine === "credits" && !facts.limit)) return { kind: "owner", cause: "credits" };
+  if (facts.limit || facts.limitResetsAt || facts.stopReason === "quota" || engine === "usage_limit") {
     return { kind: "owner", cause: "usage_limit", ...(facts.limitResetsAt ? { resetsAt: facts.limitResetsAt } : {}) };
   }
   if (facts.stopReason === "auth_required" || reason === "auth") return { kind: "owner", cause: "signed_out" };
@@ -75,16 +94,26 @@ export function classifyRoutineFailure(failure: string, facts: RoutineFailureFac
   if (facts.setup || facts.stopReason === "update_required" || facts.stopReason === "setup_required") return { kind: "owner", cause: "setup" };
   if (engine === "rate_limit" || reason === "rate_limited") return { kind: "retry", cause: "rate_limited" };
   if (engine === "overloaded" || engine === "server" || transient) return { kind: "retry", cause: "provider" };
-  return { kind: "final" };
+  // A failure nothing above names (a crash, an exit before the result): one more start. A refused start or a named refusal never.
+  return reason === "unknown" && facts.cause !== "refused" && !(engine && REFUSED_KINDS.has(engine)) ? { kind: "retry", cause: "failed" } : { kind: "final" };
 }
 
+/** Why startTurn would not start a run: busy for now, the workspace spend cap, or any other refusal. A start that threw
+ * without a status or code (an engine that would not spawn) is a failure like any other. */
 export function dispatchRefusal(error: unknown): RoutineFailureFacts {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" && BUSY_CODES.has(code) ? { cause: "busy" } : {};
+  const { code, status } = (error ?? {}) as { code?: unknown; status?: unknown };
+  if (typeof code === "string" && BUSY_CODES.has(code)) return { cause: "busy" };
+  if (code === "spend_cap") return { cause: "cap" };
+  return typeof code === "string" || (typeof status === "number" && status >= 400 && status < 500) ? { cause: "refused" } : {};
 }
 
-export function engineFacts({ setup, stalled, trialCredit, limitResetsAt }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {
-  return { setup, stalled, trialCredit, limitResetsAt };
+/** Whether OpenMausBot runs a failed teammate thread once more by itself before its Chief hears of it. */
+export function retriesTeammateThread(failure: string, facts: RoutineFailureFacts = {}): boolean {
+  return classifyRoutineFailure(failure, facts).kind === "retry";
+}
+
+export function engineFacts({ setup, stalled, trialCredit, limitResetsAt, limit }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {
+  return { setup, stalled, trialCredit, limitResetsAt, limit };
 }
 
 /** Host-local, with its zone: on a Cloud home the host's zone need not be the reader's. */
@@ -141,6 +170,11 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   if (verdict.kind === "final") return { queued: false, error: again };
   if (verdict.cause === "usage_limit" && facts.backupReady && requeueOnce(run, "usage_limit", failure, now, now + RETRY_MS)) {
     run.attention = "Starting again on the backup AI: this bot's AI reached its usage limit";
+    return { queued: true };
+  }
+  // A signed-out AI's run starts again on the backup the person chose; its start there says once that it needs signing in.
+  if (verdict.cause === "signed_out" && facts.backupReady && requeueOnce(run, "failed", failure, now, now + RETRY_MS)) {
+    run.attention = "Starting again on the backup AI: this bot's AI is signed out";
     return { queued: true };
   }
   const first = firstNotice(notices, run.botId, verdict.cause, now);

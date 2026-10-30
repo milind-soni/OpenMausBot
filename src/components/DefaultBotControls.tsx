@@ -1,5 +1,6 @@
 import { EyeOff } from "lucide-react";
 
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bot";
 import { useStore, type Action, type Bot } from "@/state/store";
@@ -12,7 +13,7 @@ export function showDefaultBot(dispatch: (action: Action) => void, bot: Pick<Bot
   if (!shown) dispatch({ type: "notice", notice: { kind: "note", botName: null, text: t("defaultBot.hidden", { name: bot.name }) } });
 }
 
-export function HideDefaultBotItem({ bot, onDone }: { bot: Bot; onDone: () => void }) {
+export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { bot: Bot; onDone: () => void; className?: string }) {
   const { dispatch } = useStore();
   return (
     <button
@@ -21,7 +22,7 @@ export function HideDefaultBotItem({ bot, onDone }: { bot: Bot; onDone: () => vo
       data-default-bot-hide=""
       onClick={() => { showDefaultBot(dispatch, bot, false); onDone(); }}
       title={t("defaultBot.hideHint")}
-      className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+      className={cn(className, "text-ink hover:bg-menu-hover")}
     >
       <EyeOff size={16} className="text-ink-secondary" />
       {t("defaultBot.hide")}
@@ -30,13 +31,13 @@ export function HideDefaultBotItem({ bot, onDone }: { bot: Bot; onDone: () => vo
 }
 
 /** Settings → General: whether the viewer's own MausBot has a row in the sidebar. */
-export function DefaultBotSidebarRow() {
+export function DefaultBotSidebarRow({ simple = false }: { simple?: boolean }) {
   const { state, dispatch } = useStore();
   const bot = myDefaultBot(state.bots, useViewerEmail());
   if (!bot) return null;
   const shown = !bot.sidebarHidden;
   return (
-    <SettingRow title={t("defaultBot.show.title", { name: bot.name || DEFAULT_BOT_NAME })} subtitle={t("defaultBot.show.subtitle")}>
+    <SettingRow title={t("defaultBot.show.title", { name: bot.name || DEFAULT_BOT_NAME })} subtitle={t(simple ? "settings.simple.defaultBot" : "defaultBot.show.subtitle")}>
       <Switch
         checked={shown}
         data-default-bot-shown=""

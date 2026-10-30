@@ -485,7 +485,7 @@ describe("ApprovalCard expired proposals", () => {
 
   it("marks a dead proposal as expired instead of waiting for an answer", () => {
     const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: expiredMessage() }));
-    expect(html).toContain("Expired — ask for a fresh proposal");
+    expect(html).toContain("Expired. Ask for a fresh proposal.");
     expect(html).not.toContain("Waiting for your confirmation below");
     expect(html).not.toContain("data-tour=\"approval\"");
   });
@@ -737,10 +737,10 @@ describe("one approval, one card", () => {
     expect(line).not.toContain("<button");
 
     const [pending] = pendingApprovals([command()]);
-    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev" }));
+    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev", more: "Cancel turn" }));
     const row = visibleRow(panel);
-    expect(row).toContain("Dev wants to run");
-    expect(row).toMatch(/<code[^>]*><span class="truncate">git status<\/span><\/code>/);
+    expect(row).toContain("Dev wants to run a command");
+    expect(row).toMatch(/font-mono[^"]*"[^>]*>git status<\/div>/);
     expect(panel).toContain('aria-label="Pending approval"');
     expect(panel).not.toContain("Command approval requested");
     expect(row).not.toContain("<pre");
@@ -775,7 +775,7 @@ describe("one approval, one card", () => {
     expect(row).toContain("Run code on Composio?");
     expect(row).not.toContain("code_to_execute");
     expect(row).toContain('aria-label="Details"');
-    expect(row).toContain(">May send</span>");
+    expect(row).toMatch(/>May send<\/span>/);
     expect(row).toContain('title="This runs code that could send or change things in your apps, so it always asks first."');
     expect(panel).not.toContain("This sends something");
     expect(panel.slice(panel.indexOf('id="approval-details-'))).toContain("code_to_execute");
@@ -788,5 +788,27 @@ describe("one approval, one card", () => {
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0 }));
     expect(panel).toContain("Send to Slack?");
     expect(panel).toContain("{&quot;text&quot;:&quot;hi&quot;}");
+  });
+
+  it("shows a wait with a follow-up as one line with Cancel, and says how it ended with no Cancel and no Undone after", () => {
+    const message = (settled?: "fired" | "expired" | "cancelled"): Message => ({
+      id: "m1", at: 1, role: "bot", kind: "options",
+      card: {
+        title: "Waiting: the build", subtitle: "Then Pepper will: Deploy it.",
+        options: [], answered: "allow", dismissed: true, autoApplied: true, requestId: "w1", tool: "wait_until",
+        ...(settled === "cancelled" ? { undone: true } : {}),
+        waitRequest: { waitId: "w1", label: "the build", followUp: "Deploy it.", ...(settled ? { settled } : {}) },
+      },
+    });
+    const render = (settled?: "fired" | "expired" | "cancelled") =>
+      renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Pepper" }, message: message(settled), threadId: "t1" })).replace(/&#x27;/g, "'");
+    const open = render();
+    expect(open).toContain("Pepper is waiting for the build");
+    expect(open).toContain(">Cancel<");
+    for (const [settled, line] of [["fired", "Pepper finished waiting for the build"], ["expired", "Pepper stopped waiting for the build"], ["cancelled", "Pepper's wait for the build was cancelled"]] as const) {
+      const ended = render(settled);
+      expect(ended, settled).toContain(line);
+      expect(ended, settled).not.toMatch(/>Cancel<|is waiting for|Undone/);
+    }
   });
 });

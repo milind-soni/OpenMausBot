@@ -27,13 +27,14 @@ export async function createConfiguredBot(
   reportsTo?: string,
 ): Promise<{ bot: Bot; warnings: string[] }> {
   const template = await preparedBotTemplate(draft);
-  const { chiefOfStaff, managedSections, toolScope, ...profile } = template.profile;
+  const { chiefOfStaff, managedSections, toolScope, modelSelection, ...profile } = template.profile;
   if (!profile.name?.trim()) throw new Error("Give the bot a name");
   const preset = draft.preset;
+  const chosenAi = modelSelection?.instanceId && modelSelection.model ? { modelSelection, requireAvailableModel: true } : {};
   const response = await request<{ bot: Bot }>("/api/bots", {
     method: "POST", body: JSON.stringify({ name: profile.name, title: profile.title,
-      description: profile.description, modelSelection: profile.modelSelection, section: profile.section,
-      requireAvailableModel: true, useDefaults: false, ...(visibility !== undefined ? { visibility } : {}), ...(reportsTo ? { reportsTo } : {}),
+      description: profile.description, ...chosenAi, section: profile.section,
+      useDefaults: false, ...(visibility !== undefined ? { visibility } : {}), ...(reportsTo ? { reportsTo } : {}),
       ...(Object.hasOwn(template.profile, "toolScope") ? { settings: { toolScope } } : {}),
       ...(preset ? { preset: preset.id } : {}) }),
   });
@@ -41,8 +42,7 @@ export async function createConfiguredBot(
   const routines: Array<{ id: string; enabled: boolean }> = [];
   const warnings: string[] = [];
   try {
-    // The create endpoint already validated the model and effort defaults; never overwrite them with the raw draft.
-    const patched = await update(bot.id, { ...profile, modelSelection: bot.modelSelection, ...draft.consent }, new AbortController().signal,
+    const patched = await update(bot.id, { ...profile, ...draft.consent }, new AbortController().signal,
       request, approvals, bot);
     bot = { ...bot, ...patched };
     if (profile.approvalMode === "full" || profile.approvalMode === "custom") {

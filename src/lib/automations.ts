@@ -282,8 +282,17 @@ export function orderAutomations<T extends Automation>(automations: readonly T[]
     .map(({ automation }) => automation);
 }
 
-/** The grey line under a sentence: "Working · last ran today 9:02 AM · next Monday 9:00 AM". */
+/** Before an automation has ever run, what a person wants to know is when it first will: "First run Monday 9:00 AM". */
+export function firstRunLine(automation: Automation, now = Date.now()): string | null {
+  if (automation.nextRunAt == null || automation.appTrigger || automation.checkedAt !== undefined) return null;
+  if (automationStatus(automation, now).state !== "working" || automation.runs.some((run) => run.status !== "queued")) return null;
+  return t("automations.firstRun", { when: nextWhen(automation.nextRunAt, now) });
+}
+
+/** The grey line under a sentence: "On · last ran today 9:02 AM · next Monday 9:00 AM", or "First run Monday 9:00 AM". */
 export function statusLine(automation: Automation, now = Date.now()): string {
+  const first = firstRunLine(automation, now);
+  if (first) return automation.readsAndDrafts ? `${first} · ${t("automations.readsAndDrafts")}` : first;
   const status = automationStatus(automation, now);
   const latest = automation.runs.find((run) => run.status !== "queued");
   const parts = [t(STATUS_WORD[status.state])];
@@ -365,4 +374,11 @@ export function lastReceived(webhook: Pick<WebhookTrigger, "id" | "verificationS
     .reduce<WebhookAttempt | null>((newest, attempt) => (!newest || attempt.receivedAt > newest.receivedAt ? attempt : newest), null);
   if (latest) return { at: latest.receivedAt, preview: latest.preview! };
   return webhook.verificationSample?.preview ? { at: webhook.verificationSample.receivedAt, preview: webhook.verificationSample.preview } : null;
+}
+
+/** Under an automation's name: when it runs and which bot runs it, or its whole sentence when it waits on an app. */
+export function automationSubtitle(automation: Automation, botName: string): string {
+  return automation.kind === "schedule" && automation.schedule
+    ? `${plainWhen(automation.schedule)} · ${botName}`
+    : automationSentence(automation, botName);
 }

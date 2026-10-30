@@ -9,9 +9,12 @@ import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { createAcpDriver, type AccountErrorCode, type AcpSupport } from "./core.ts";
+import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
+import { OPENCODE_STANDALONE } from "./opencode-release.ts";
+import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { acpModelOption, acpVariantOption, offeredModels } from "./config-options.ts";
-import type { ModelCatalog, ModelVariantOption, ProviderErrorCode } from "../../contracts.ts";
+import { parseOpenCodeLogLine } from "./quiet-status.ts";
+import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli, killCliTree, spawnCli } from "../../procs.ts";
 
@@ -573,6 +576,11 @@ export function ensureOpenCodeInjectModel(
   return native;
 }
 
+/** OpenCode 1.18 appends every process's log to one file under its xdg data folder. */
+export function openCodeLogPath(env: Record<string, string | undefined>): string {
+  return join(env.XDG_DATA_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".local", "share"), "opencode", "log", "opencode.log");
+}
+
 /** The CLI is xdg-flavoured on every platform (`opencode auth list` on macOS prints
  * `~/.local/share/opencode/auth.json`), so the xdg path comes first. */
 function storedAuthPaths(env: Record<string, string | undefined>): string[] {
@@ -611,6 +619,22 @@ function hasStoredOpenCodeAuth(env: Record<string, string | undefined>) {
       return false;
     }
   });
+}
+
+/** A login, a key or a provider key of the person's own: what makes OpenCode more than Zen's free models. */
+function ownOpenCodeAccess(env: Record<string, string | undefined>): boolean {
+  return Boolean(env.OPENCODE_API_KEY) || hasStoredOpenCodeAuth(env) || OPENCODE_PROVIDER_ENV.some((key) => Boolean(env[key]?.trim()));
+}
+
+/** OpenCode's own providers: Zen (some models free without a login) and Go (a subscription). */
+const OPENCODE_OWN_MODEL = /^opencode(?:-go)?\//u;
+
+/** Ready only through Zen's free no-login models: no access of the person's own and no other provider's model. A local
+ * model the app found (`custom`) is not the person signing OpenCode in to anything. An empty catalog is no fallback: it
+ * offers nothing to run. */
+export function openCodeFreeFallback(ownAccess: boolean, models: ModelCatalog): boolean {
+  return !ownAccess && models.options.length > 0
+    && models.options.every((option) => option.custom === true || OPENCODE_OWN_MODEL.test(option.id));
 }
 
 function withinFolder(path: string, folder: string): boolean {
@@ -791,7 +815,8 @@ function openCodeLoginsFingerprint(env: Record<string, string | undefined>): str
   }).join("|");
 }
 
-const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
+/** `ownAccess` hears, per instance, whether its last sign-in read found access of the person's own. */
+const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string, boolean>()): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
   models: NO_MODELS,
@@ -807,8 +832,13 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     docsUrl: "https://opencode.ai/docs/",
     signInCommand: "opencode auth login",
     needsNode: true,
+    standalone: OPENCODE_STANDALONE,
   },
   spawnArgs: () => ["acp"],
+  statusLog: { path: openCodeLogPath, parse: parseOpenCodeLogLine, shared: true },
+  // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
+  // shares: a connection check or memory upkeep would show up in their history there.
+  oneShotFolder: discoveryDirectory,
   shareProcess: true,
   credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
   selectModel: { configId: "model" },
@@ -822,7 +852,10 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
   engineTools: 24,
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
-  transformEnv: withholdProviderKeysWhenManaged,
+  transformEnv: (env, config, instanceId, instanceEnvironment) => {
+    withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
+    applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
+  },
   spawnFingerprint: openCodeLoginsFingerprint,
   applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
     if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
@@ -839,11 +872,12 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   },
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: async (env, config) => (
-    Boolean(env.OPENCODE_API_KEY)
-    || hasStoredOpenCodeAuth(env)
-    || await canRunOpenCode(env, config.cli, loadCatalog)
-  ),
+  isAuthenticated: async (env, config, instanceId) => {
+    ownAccess.set(instanceId, ownOpenCodeAccess(env));
+    return Boolean(env.OPENCODE_API_KEY)
+      || hasStoredOpenCodeAuth(env)
+      || await canRunOpenCode(env, config.cli, loadCatalog);
+  },
   classifyError: classifyOpenCodeError,
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config) => mergeLocalInject(
@@ -885,8 +919,24 @@ export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undef
 
 export const classifyOpenCodeGoError = classifyOpenCodeError;
 
-export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels) {
-  return createAcpDriver(support(loadCatalog));
+/** Its status says `freeFallback` while only Zen's free no-login models make it ready (contracts.ts). */
+export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels): ProviderDriver<AcpConfig> {
+  const ownAccess = new Map<string, boolean>();
+  const driver = createAcpDriver(support(loadCatalog, ownAccess));
+  return {
+    ...driver,
+    async create(input) {
+      const instance = await driver.create(input);
+      const read = instance.snapshot.bind(instance);
+      instance.snapshot = async () => {
+        const snapshot = await read();
+        const own = ownAccess.get(input.instanceId);
+        return snapshot.state === "available" && snapshot.authenticated === true && own !== undefined
+          && openCodeFreeFallback(own, instance.models) ? { ...snapshot, freeFallback: true } : snapshot;
+      };
+      return instance;
+    },
+  };
 }
 
 export const createOpenCodeGoDriver = createOpenCodeDriver;

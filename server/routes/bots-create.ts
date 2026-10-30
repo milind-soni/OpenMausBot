@@ -1,4 +1,5 @@
 import type { WireBot } from "../../shared/wire.ts";
+import { freshLook } from "../bot-look.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { parseVisibility } from "../bot-visibility.ts";
@@ -41,6 +42,8 @@ export interface BotCreateRouteDeps {
   wireBot(bot: BotRecord): WireBot;
   /** A Team Cloud: a new bot records who created it, and may name who it reports to. */
   team?: { name: string; people: Pick<TeamPeople, "has"> } | null;
+  /** Starts writing personal answers for a new bot's setup card; never awaited. */
+  personaliseSetupCard?(bot: BotRecord): void;
 }
 
 const OWN_ID = /^[\w-]{8,128}$/;
@@ -182,8 +185,10 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (created && !created.ok) return json(res, 400, { error: created.error });
       // Checked again beside the synchronous write: an await above let another request take the same id.
       if (kept.id && "error" in keptBotIds(kept, store)) return json(res, 409, { error: "a bot with this id already exists here" });
+      // A bot moved in from another computer keeps its own look; a new one named no look starts in a fresh one.
+      const look = kept.id || settings.color || settings.mascotBody ? undefined : freshLook(store.bots);
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
-        toolScope: settings.toolScope ?? undefined,
+        toolScope: settings.toolScope ?? undefined, color: settings.color ?? look?.color, mascotBody: settings.mascotBody ?? look?.mascotBody,
         ...(deps.team && creator ? { createdBy: creator } : {}), ...(reportsTo ? { reportsTo } : {}),
         ...(created?.ok ? { visibility: created.visibility } : {}) }, kept.id ? { ...kept, seedMessages: false } : {});
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
@@ -249,6 +254,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
         try { routines!.update(routine.id, { enabled: true }); }
         catch { warnings.push(`Bot created; routine ${routine.id} could not be activated.`); }
       }
+      deps.personaliseSetupCard?.(bot);
       return json(res, 201, {
         ...(warnings.length ? { warnings } : {}),
         bot: {

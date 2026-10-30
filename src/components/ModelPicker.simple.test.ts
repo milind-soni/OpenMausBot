@@ -4,6 +4,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
+import type { MenuGroup, SimpleMenu } from "@/lib/simple-model-menu";
+import type { SimpleThinking } from "./SimpleModelMenu";
 import { Select } from "./Select";
 
 // Hook-by-call-order harness: the picker's own state survives between renders, effects never run, and handlers are read
@@ -36,7 +38,7 @@ vi.mock("react", async (original) => ({
   },
   useEffect: () => {},
 }));
-vi.mock("./MenuMotion", () => ({ useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "" }) }));
+vi.mock("./MenuMotion", () => ({ useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }) }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("@/state/store", async (importOriginal) => ({
@@ -49,10 +51,10 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
 }));
 
-const { ClaudeAccountSelect, FollowBotModelRow, ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
-const { SimpleModelPane } = await import("./SimpleModelPane");
+const { ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
+const { FollowBotModelRow, ModelEngineRail, ModelRow } = await import("./ModelPickerFull");
+const { SimpleModelMenu } = await import("./SimpleModelMenu");
 const { EngineSetup } = await import("./EngineSetup");
-const { InstanceProviderMark } = await import("./ProviderIcons");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -131,14 +133,23 @@ function open(forBot: Bot, options: { contained?: boolean; thread?: boolean } = 
   return render(forBot, options);
 }
 
-const pane = (rendered: ReturnType<typeof render>) =>
-  rendered.nodes.find((node) => node.type === SimpleModelPane) as ReactElement<ComponentProps<typeof SimpleModelPane>> | undefined;
+type Rendered = ReturnType<typeof render>;
+const pane = (rendered: Rendered) =>
+  rendered.nodes.find((node) => node.type === SimpleModelMenu) as ReactElement<ComponentProps<typeof SimpleModelMenu>> | undefined;
+const list = (rendered: Rendered): SimpleMenu => pane(rendered)!.props.menu;
 const menu = (html: string) => html.slice(html.indexOf("data-model-picker-content"));
-const inside = (rendered: ReturnType<typeof render>) => nodes(SimpleModelPane(pane(rendered)!.props));
 const region = (html: string, marker: string, next?: string) =>
   html.slice(html.indexOf(marker), next ? html.indexOf(next) : undefined);
-const labels = (rendered: ReturnType<typeof render>) => pane(rendered)!.props.models.map((option) => option.label);
-const click = (node: Node | undefined) => (node!.props.onClick as () => void)();
+const group = (rendered: Rendered, instanceId: string): MenuGroup | undefined =>
+  list(rendered).groups.find((entry) => entry.instance.instanceId === instanceId);
+const labels = (rendered: Rendered, instanceId = "claude") => {
+  const body = group(rendered, instanceId)?.body;
+  return body?.kind === "models" ? body.rows.map((row) => row.label) : [];
+};
+const instance = (instanceId: string) => fixture.instances.find((entry) => entry.instanceId === instanceId)!;
+const toggle = (rendered: Rendered, instanceId = "claude") => pane(rendered)!.props.onToggle(instance(instanceId));
+const thinking = (rendered: Rendered) => pane(rendered)!.props.thinking as Extract<SimpleThinking, { levels: readonly EffortLevel[] }>;
+const click = (node: Node | undefined) => (node!.props.onClick as (event: { detail: number }) => void)({ detail: 1 });
 
 beforeEach(() => {
   fixture.advanced = false;
@@ -155,272 +166,274 @@ beforeEach(() => {
 });
 
 describe("the model picker in Simple mode", () => {
-  it("opens on providers, model names and plain effort steps instead of the rail", () => {
+  it("opens one calm list: the current model on top, its provider's other models below, then Thinking and a way to accounts", () => {
     const opened = open(bot("high"));
     const html = menu(opened.html);
-    expect(pane(opened)).toBeDefined();
     expect(opened.nodes.some((node) => node.type === ModelEngineRail)).toBe(false);
-    expect(html).toContain("Claude");
-    expect(html).toContain("Opus 5.5");
-    for (const step of ["Low", "Medium", "High", "X-High", "Max"]) expect(html).toContain(`>${step}</button>`);
+    const current = html.indexOf("data-current-model");
+    const provider = html.indexOf('data-simple-provider="claude"');
+    const band = html.indexOf("data-simple-effort-band");
+    expect(current).toBeGreaterThan(-1);
+    expect(provider).toBeGreaterThan(current);
+    expect(band).toBeGreaterThan(provider);
+    expect(region(html, "data-current-model", 'data-simple-provider="claude"')).toContain(">Opus 5.5</span>");
+    expect(labels(opened)).toEqual(["Sonnet 5.5", "Haiku 4.5"]);
+    const bottom = region(html, "data-simple-effort-band");
+    for (const step of ["Low", "Medium", "High", "X-High", "Max"]) expect(bottom).toContain(`>${step}</button>`);
+    expect(bottom).toContain(">Thinking</span>");
+    expect(bottom).toContain("Manage AI accounts");
     expect(html).not.toContain(">Quick</button>");
     expect(html).not.toContain("new chats too");
   });
 
-  it("is a narrow popover, and the full picker keeps its own width", () => {
-    expect(SIMPLE_POPOVER_WIDTH).toBe(380);
+  it("is a 300px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
+    expect(SIMPLE_POPOVER_WIDTH).toBe(300);
     fixture.instances = [claude(false)];
     const forBot = bot();
     const opened = open(forBot);
-    expect(menu(opened.html)).toContain("width:380px");
-    click(inside(opened).find((node) => node.props["data-simple-set-up"] !== undefined));
+    const content = opened.nodes.find((node) => node.props["data-model-picker-content"] !== undefined)!;
+    expect(String(content.props.className)).toContain("menu-surface");
+    expect(String(content.props.className)).not.toMatch(/\bborder\b|shadow-2xl|rounded-2xl/);
+    expect(menu(opened.html)).toContain("width:300px");
+    pane(opened)!.props.onSetUp(instance("claude"), false);
     expect(menu(render(forBot).html)).toContain("width:420px");
   });
 
-  it("lays providers out in a column, models beside them, and effort along the bottom", () => {
-    const html = menu(open(bot("high")).html);
-    const providers = html.indexOf("data-simple-providers");
-    const models = html.indexOf("data-simple-models");
-    const band = html.indexOf("data-simple-effort-band");
-    expect(providers).toBeGreaterThan(-1);
-    expect(models).toBeGreaterThan(providers);
-    expect(band).toBeGreaterThan(models);
-
-    const column = region(html, "data-simple-providers", "data-simple-models");
-    expect(column).toContain(">Claude</span>");
-    expect(column).not.toContain("Opus 5.5");
-
-    const list = region(html, "data-simple-models", "data-simple-effort-band");
-    expect(list).toContain("Opus 5.5");
-    expect(list).toContain("Sonnet 5.5");
-    expect(list).not.toContain(">High</button>");
-
-    const bottom = region(html, "data-simple-effort-band");
-    expect(bottom).toContain(">High</button>");
-    expect(bottom).not.toContain("new chats too");
-    expect(bottom).toContain("Manage AI accounts");
-  });
-
-  it("lists every provider it knows: sign-ins, then API keys, then local engines", () => {
-    fixture.instances = [claude(), codex, grok, cursor, openaiKey, claudeKey, local];
+  it("lists every ready provider at once: the current one first, then sign-ins, API keys and local engines", () => {
+    fixture.instances = [codex, grok, cursor, openaiKey, claudeKey, local, claude()];
     const opened = open(bot());
-    expect(pane(opened)!.props.providers.map((provider) => provider.label))
-      .toEqual(["Claude", "OpenAI", "Grok", "Cursor", "OpenAI", "Claude (API key)", "pi"]);
-    const column = region(menu(opened.html), "data-simple-providers", "data-simple-models");
-    for (const name of ["Claude", "OpenAI", "Grok", "Cursor", "pi"]) expect(column).toContain(`>${name}</span>`);
-    expect(column.match(/data-simple-key/g)).toHaveLength(2);
-    expect(column).not.toContain("(API key)");
-
-    const rows = inside(opened).filter((node) => node.props["data-simple-provider"] !== undefined);
-    const byId = (id: string) => rows.find((node) => node.props["data-simple-provider"] === id)!;
-    const hasKey = (id: string) => nodes(byId(id).props.children).some((node) => node.props["data-simple-key"] !== undefined);
-    expect(byId("openai").props["aria-label"]).toBe("OpenAI · API key");
-    expect(byId("openai").props.title).toContain("Runs on your API key");
-    expect(byId("claudeApi").props["aria-label"]).toBe("Claude · API key");
-    expect(hasKey("openai")).toBe(true);
-    expect(hasKey("claudeApi")).toBe(true);
-    expect(byId("codex").props["aria-label"]).toBeUndefined();
-    expect(hasKey("codex")).toBe(false);
-    expect(hasKey("pi")).toBe(false);
+    expect(list(opened).groups.map((entry) => entry.label))
+      .toEqual(["Claude", "OpenAI", "Grok", "Cursor", "OpenAI · API key", "Claude · API key", "pi"]);
+    const html = menu(opened.html);
+    for (const name of ["OpenAI", "Grok", "Cursor", "OpenAI · API key", "Claude · API key", "pi"]) expect(html).toContain(`>${name}</span>`);
+    expect(html).not.toContain("data-simple-key");
+    expect(html).not.toContain("(API key)");
+    expect(labels(opened, "codex")).toEqual(["GPT-5.6"]);
+    expect(labels(opened, "pi")).toEqual(["Llama 4", "Gemma 4", "Qwen 3"]);
   });
 
-  it("puts the key on the provider mark, so the name keeps the row's width", () => {
-    fixture.instances = [claude(), openaiKey];
-    const row = inside(open(bot())).find((node) => node.props["data-simple-provider"] === "openai")!;
-    const [mark, name] = Children.toArray(row.props.children).filter(isValidElement) as Node[];
-    const onMark = Children.toArray(mark.props.children).filter(isValidElement) as Node[];
-    expect(onMark.map((node) => node.type)).toEqual([InstanceProviderMark, "span"]);
-    expect(onMark[1].props["data-simple-key"]).toBeDefined();
-    expect(String(onMark[1].props.className)).toContain("absolute");
-    expect(name.props.children).toBe("OpenAI");
-  });
-
-  it("has no More row: there is nothing past the providers and models", () => {
+  it("has no More row: the full picker opens only from a provider that needs setting up", () => {
     fixture.instances = [claude(), codex, grok, cursor, openaiKey, local];
     const opened = open(bot());
     const html = menu(opened.html);
     expect(html).not.toContain("data-simple-model-more");
-    expect(html).not.toMatch(/>More</);
-    expect(html).not.toContain("All models, API keys, local models");
+    expect(html).not.toMatch(/>More( options)?</);
+    expect(html).not.toContain("data-simple-set-up");
     expect(pane(opened)!.props).not.toHaveProperty("onMore");
   });
 
+  it("names a model in short under its provider, and in full on the chip, in the tooltip and to a screen reader", () => {
+    const named: Option[] = [{ id: "sonnet-5", label: "Claude Sonnet 5" }, { id: "opus-5-5", label: "Claude Opus 5.5" }];
+    fixture.instances = [{ ...claude(true, named), models: { default: "sonnet-5", options: named } }];
+    const forBot = bot(undefined, "claude", "sonnet-5");
+    const opened = open(forBot);
+    expect(labels(opened)).toEqual(["Opus 5.5"]);
+    const html = menu(opened.html);
+    expect(html).toContain('aria-label="Claude Opus 5.5"');
+    expect(html).toContain(">Opus 5.5</span>");
+    expect(region(html, "data-current-model", "data-simple-provider")).toContain(">Claude Sonnet 5</span>");
+    const chip = render(forBot).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(chip.props.title)).toContain("Claude · Claude Sonnet 5");
+    expect(renderToStaticMarkup(chip)).toContain(">Claude Sonnet 5</span>");
+  });
+
   it("names models without a second line; a blurb is only the row's tooltip", () => {
-    const opened = open(bot());
-    const blurb = "Smartest. Best for hard, long jobs.";
-    expect(menu(opened.html)).not.toContain(`>${blurb}<`);
-    expect(inside(opened).some((node) => node.props.children === blurb)).toBe(false);
-    const opus = inside(opened).find((node) => node.type === "button" && node.props.title === `Opus 5.5 · ${blurb}`);
-    expect(opus).toBeDefined();
-    expect(nodes(opus!.props.children).map((node) => node.props.children)).toContain("Opus 5.5");
+    const html = menu(open(bot()).html);
+    const blurb = "Fast and smart. Good for most work.";
+    expect(html).not.toContain(`>${blurb}<`);
+    expect(html).toContain(`title="Sonnet 5.5 · ${blurb}"`);
   });
 
-  it("marks the browsed provider and switches provider from its row", () => {
-    const opened = open(bot());
-    const rows = inside(opened).filter((node) => node.type === "button" && node.props["aria-pressed"] !== undefined);
-    const claudeRow = rows.find((node) => nodes(node.props.children).some((child) => child.props.children === "Claude"))!;
-    expect(claudeRow.props["aria-pressed"]).toBe(true);
-    const onProvider = vi.fn();
-    const own = SimpleModelPane({ ...pane(opened)!.props, onProvider });
-    const row = nodes(own).find((node) => node.props["aria-pressed"] === true && nodes(node.props.children).some((child) => child.props.children === "Claude"))!;
-    (row.props.onClick as () => void)();
-    expect(onProvider).toHaveBeenCalledWith(expect.objectContaining({ instanceId: "claude" }));
-  });
-
-  it("opens a long list in place with Show all, and a search box once it is very long", () => {
+  it("opens a provider's long list in place with Show all, and offers a search once the menu holds more than twelve models", () => {
     fixture.instances = [claude(true, many(15))];
     const forBot = bot(undefined, "claude", "model-1");
     const opened = open(forBot);
     const suggested = labels(opened);
-    expect(suggested).toHaveLength(5);
-    expect(pane(opened)!.props.showAll!.count).toBe(15);
-    expect(pane(opened)!.props.search).toBeUndefined();
-    expect(region(menu(opened.html), "data-simple-models", "data-simple-effort-band")).toContain("Show all 15 models");
-
-    click(inside(opened).find((node) => node.props["data-simple-show-all"] !== undefined));
-    const all = render(forBot);
-    expect(labels(all)).toHaveLength(15);
-    expect(labels(all).slice(0, 5)).toEqual(suggested);
-    expect(pane(all)!.props.showAll).toMatchObject({ count: 15, open: true });
-    expect(menu(all.html)).not.toContain("Show all 15 models");
-    expect(menu(all.html)).toContain('aria-expanded="true"');
-    expect(menu(all.html)).toContain("Show suggested only");
-    const html = region(menu(all.html), "data-simple-models", "data-simple-effort-band");
-    expect(html.indexOf("data-simple-model-search")).toBeLessThan(html.indexOf("Model 1<"));
+    expect(suggested).toEqual(["Model 2", "Model 3", "Model 4", "Model 5"]);
+    expect(group(opened, "claude")!.body).toMatchObject({ toggle: "more", total: 15 });
+    expect(list(opened).search).toBe(true);
+    const html = menu(opened.html);
+    expect(html).toContain("Show all 15 models");
+    expect(html).not.toContain("scroll-pt-8");
+    expect(html.indexOf("data-simple-model-search")).toBeLessThan(html.indexOf("data-current-model"));
     expect(html).toContain('aria-label="Search models"');
 
-    const search = pane(all)!.props.search as ReactElement<{ onChange: (value: string) => void }>;
-    search.props.onChange("model 1");
-    expect(labels(render(forBot))).toEqual(["Model 1", "Model 10", "Model 11", "Model 12", "Model 13", "Model 14", "Model 15"]);
-    search.props.onChange("zzz");
+    toggle(opened);
+    const all = render(forBot);
+    expect(labels(all)).toHaveLength(14);
+    expect(labels(all).slice(0, 4)).toEqual(suggested);
+    expect(menu(all.html)).toContain('aria-expanded="true"');
+    expect(menu(all.html)).toContain("Show suggested only");
+    expect(menu(all.html)).toContain("sticky bottom-0");
+    expect(menu(all.html)).toMatch(/data-simple-models="true" class="[^"]*scroll-pt-8 scroll-pb-12/);
+    expect(menu(all.html).match(/data-simple-models="true" class="([^"]*)"/)![1]).not.toMatch(/(^|\s)p[tbxy]?-/);
+    expect(menu(all.html)).not.toContain("before:");
+
+    pane(all)!.props.onQuery("model 1");
+    const searched = render(forBot);
+    expect(list(searched).current).toBeNull();
+    expect(labels(searched)).toEqual(["Model 1", "Model 10", "Model 11", "Model 12", "Model 13", "Model 14", "Model 15"]);
+    expect(menu(searched.html)).toContain("7 results");
+    pane(searched)!.props.onQuery("zzz");
     const none = render(forBot);
-    expect(labels(none)).toEqual([]);
+    expect(list(none).groups).toEqual([]);
     expect(menu(none.html)).toContain("Nothing matches “zzz”");
   });
 
-  it("folds an opened list back from the same button", () => {
-    fixture.instances = [claude(true, many(15))];
-    const forBot = bot(undefined, "claude", "model-1");
-    pane(open(forBot))!.props.showAll!.onToggle();
-    const search = pane(render(forBot))!.props.search as ReactElement<{ onChange: (value: string) => void }>;
-    search.props.onChange("model 1");
-    expect(pane(render(forBot))!.props.showAll).toBeNull();
-    search.props.onChange("");
-    const opened = pane(render(forBot))!;
-    expect(opened.props.showAll).toMatchObject({ open: true });
-
-    opened.props.showAll!.onToggle();
-    const folded = render(forBot);
-    expect(labels(folded)).toHaveLength(5);
-    expect(pane(folded)!.props.showAll).toMatchObject({ count: 15, open: false });
-    expect(pane(folded)!.props.search).toBeUndefined();
-    expect(menu(folded.html)).toContain('aria-expanded="false"');
-    pane(folded)!.props.showAll!.onToggle();
-    expect(labels(render(forBot))).toHaveLength(15);
-  });
-
-  it("opens a shorter list in place without a search box", () => {
+  it("folds an opened list back from the same row", () => {
     fixture.instances = [claude(true, many(8))];
     const forBot = bot(undefined, "claude", "model-1");
-    click(inside(open(forBot)).find((node) => node.props["data-simple-show-all"] !== undefined));
-    const all = render(forBot);
-    expect(labels(all)).toHaveLength(8);
-    expect(pane(all)!.props.search).toBeUndefined();
-    expect(menu(all.html)).not.toContain("data-simple-model-search");
+    toggle(open(forBot));
+    const opened = render(forBot);
+    expect(labels(opened)).toHaveLength(7);
+    toggle(opened);
+    const folded = render(forBot);
+    expect(labels(folded)).toHaveLength(4);
+    expect(group(folded, "claude")!.body).toMatchObject({ toggle: "more", total: 8 });
+    expect(menu(folded.html)).toContain('aria-expanded="false"');
+    expect(list(folded).search).toBe(false);
+    expect(menu(folded.html)).not.toContain("data-simple-model-search");
   });
 
-  it("lists a local engine's models the same way, loaded ones first", () => {
+  it("lists a local engine's models the same way, loaded ones first, and picks one", () => {
     fixture.instances = [claude(), local];
     const forBot = bot();
-    pane(open(forBot))!.props.onProvider(local);
-    const browsed = render(forBot);
-    expect(pane(browsed)!.props.needsSetup).toBeNull();
-    expect(labels(browsed)).toEqual(["Llama 4", "Gemma 4", "Qwen 3", "Mistral Small", "Phi 4"]);
-    expect(pane(browsed)!.props.showAll!.count).toBe(7);
-    pane(browsed)!.props.showAll!.onToggle();
-    expect(labels(render(forBot))).toEqual(["Llama 4", "Gemma 4", "Qwen 3", "Mistral Small", "Phi 4", "DeepSeek R2", "Granite 4"]);
-    pane(render(forBot))!.props.onPick("granite");
+    const opened = open(forBot);
+    expect(labels(opened, "pi")).toEqual(["Llama 4", "Gemma 4", "Qwen 3"]);
+    toggle(opened, "pi");
+    expect(labels(render(forBot), "pi")).toEqual(["Llama 4", "Gemma 4", "Qwen 3", "Mistral Small", "Phi 4", "DeepSeek R2", "Granite 4"]);
+    pane(render(forBot))!.props.onPick(local, "granite");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", selection: expect.objectContaining({ instanceId: "pi", model: "granite" }),
     }));
   });
 
-  it("keeps a provider's local models reachable after its own", () => {
+  it("keeps a provider's local models after its own, under a quiet Local models label", () => {
     const own = many(6);
     const onThisMac: Option[] = [{ id: "ollama::qwen3", label: "qwen3 (Ollama)", custom: true }, { id: "ollama::llama4", label: "llama4 (Ollama)", custom: true, loaded: true }];
     fixture.instances = [claude(true, [...own, ...onThisMac])];
     const forBot = bot(undefined, "claude", "model-1");
-    const opened = open(forBot);
-    expect(labels(opened)).toEqual(["Model 1", "Model 2", "Model 3", "Model 4", "Model 5"]);
-    pane(opened)!.props.showAll!.onToggle();
-    expect(labels(render(forBot))).toEqual([...own.map((option) => option.label), "llama4 (Ollama)", "qwen3 (Ollama)"]);
+    toggle(open(forBot));
+    const all = render(forBot);
+    expect(labels(all)).toEqual(["Model 2", "Model 3", "Model 4", "Model 5", "Model 6", "llama4 (Ollama)", "qwen3 (Ollama)"]);
+    expect(group(all, "claude")!.body).toMatchObject({ localFrom: 5 });
+    const html = region(menu(all.html), 'data-simple-provider="claude"', "data-simple-effort-band");
+    expect(html.indexOf(">Local models</div>")).toBeGreaterThan(html.indexOf(">Model 6</span>"));
+    expect(html.indexOf(">Local models</div>")).toBeLessThan(html.indexOf(">llama4 (Ollama)</span>"));
   });
 
-  it("lists only local models on a signed-out engine whose bot runs one", () => {
+  it("keeps a signed-out engine's local model on top, with a way to sign in for its own", () => {
     fixture.instances = [claude(false, [...claudeModels, { id: "ollama::qwen3", label: "qwen3 (Ollama)", custom: true }])];
-    const opened = open(bot(undefined, "claude", "ollama::qwen3"));
-    expect(pane(opened)!.props.needsSetup).toBeNull();
-    expect(labels(opened)).toEqual(["qwen3 (Ollama)"]);
-  });
-
-  it("keeps a signed-out engine's local list when its row is clicked again, with a way to sign in", () => {
-    const signedOut = claude(false, [...claudeModels, { id: "ollama::qwen3", label: "qwen3 (Ollama)", custom: true }]);
-    fixture.instances = [signedOut, grok];
     const forBot = bot(undefined, "claude", "ollama::qwen3");
     const opened = open(forBot);
-    expect(pane(opened)!.props.signIn).toEqual({ name: "Claude" });
+    expect(list(opened).current).toMatchObject({ label: "qwen3 (Ollama)", warning: false });
+    expect(group(opened, "claude")!.body).toMatchObject({ kind: "models", rows: [], signInForOwn: true });
+    const html = menu(opened.html);
+    expect(html).toContain("Sign in for Claude&#x27;s own models");
+    expect(html).not.toContain(">Opus 5.5<");
 
-    pane(opened)!.props.onProvider(signedOut);
-    const again = render(forBot);
-    expect(pane(again)!.props.needsSetup).toBeNull();
-    expect(labels(again)).toEqual(["qwen3 (Ollama)"]);
-    pane(again)!.props.onProvider(grok);
-    pane(render(forBot))!.props.onProvider(signedOut);
-    const back = render(forBot);
-    expect(pane(back)!.props.needsSetup).toBeNull();
-    expect(labels(back)).toEqual(["qwen3 (Ollama)"]);
-
-    const list = region(menu(back.html), "data-simple-models", "data-simple-effort-band");
-    expect(list).toContain("Sign in for Claude&#x27;s own models");
-    click(inside(back).find((node) => node.props["data-simple-sign-in"] !== undefined));
+    pane(opened)!.props.onSetUp(instance("claude"), false);
     const full = render(forBot);
     expect(pane(full)).toBeUndefined();
-    const setup = full.nodes.find((node) => node.type === EngineSetup);
-    expect(setup?.props).toMatchObject({ intent: "cloud" });
+    expect(full.nodes.find((node) => node.type === EngineSetup)?.props).toMatchObject({ intent: "cloud" });
   });
 
   it("offers no sign-in row on a signed-in engine", () => {
-    expect(pane(open(bot()))!.props.signIn).toBeNull();
     expect(menu(open(bot()).html)).not.toContain("data-simple-sign-in");
   });
 
-  it("spans the effort steps across the whole bottom band, with no question above them", () => {
-    const opened = open(bot("high"));
-    const tree = inside(opened);
-    const band = tree.find((node) => node.props["data-simple-effort-band"] !== undefined)!;
-    const steps = Children.toArray(band.props.children).filter(isValidElement) as Node[];
-    const effort = steps.find((node) => node.props["data-simple-effort"] !== undefined)!;
-    expect(effort).toBeDefined();
-    expect(String(effort.props.className)).toContain("w-full");
-    expect(effort.props.role).toBe("group");
-    expect(effort.props["aria-label"]).toBe("Reasoning effort");
-    const html = menu(opened.html);
-    expect(html).not.toContain("How hard should");
-    expect(region(html, "data-simple-effort-band")).toContain('aria-label="Reasoning effort"');
+  it("offers every level the engine reports in the provider's own names, presses the chosen one, and goes back to Default", () => {
+    const opened = open(bot("xhigh"));
+    expect(thinking(opened).levels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    const bottom = region(menu(opened.html), "data-simple-effort-band");
+    expect(bottom).toMatch(/aria-pressed="true"[^>]*>X-High<\/button>/);
+    expect(bottom).toContain('role="group" aria-labelledby=');
+    expect(bottom).toMatch(/data-simple-effort="true"[^>]*class="[^"]*rounded-full bg-ink\/\[0.05\] p-\[3px\]/);
+    expect(bottom).toContain('title="High thinking. Higher is slower but more careful."');
+    expect(bottom).toMatch(/title="The model decides how hard to think."[^>]*>Use default<\/button>/);
+    thinking(opened).onReset();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
+      selection: { instanceId: "claude", model: "claude-opus-5-5" },
+    });
+    fixture.values = [];
+    const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
+    expect(atDefault).not.toContain('aria-pressed="true"');
+    expect(atDefault).not.toContain("Use default");
+    expect(atDefault).toContain('title="The model decides how hard to think." class="text-[12px] leading-4 text-ink-tertiary">Default</span>');
   });
 
-  it("names the effort by the provider's own level on the header chip", () => {
-    expect(render(bot("high")).html).toContain("· High");
+  it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
+    const chip = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
+    const markup = renderToStaticMarkup(chip);
+    expect(markup).not.toContain("data-model-effort");
+    expect(markup.replace(/title="[^"]*"/, "")).not.toContain("High");
+    expect(String(chip.props.title)).toContain("High thinking");
+    expect(String(chip.props.title)).not.toContain("effort");
+    expect(String(chip.props.className)).toContain("h-8");
+    expect(String(chip.props.className)).toContain("rounded-full");
+    expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
+    expect(markup).not.toContain("@max-4xl/chathead");
+    expect(markup).toContain('<span class="min-w-0 max-w-[160px] truncate">Opus 5.5</span>');
+    expect(markup).toContain("opacity-60");
     fixture.advanced = true;
-    expect(render(bot("high")).html).toContain("· High");
+    const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(renderToStaticMarkup(advanced)).toContain("· High");
+    expect(String(advanced.props.title)).toContain("High effort");
+  });
+
+  it("puts the header chip on an opaque surface, so scrolled transcript text cannot read through it", () => {
+    const classes = () => String(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!.props.className);
+    expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
+    expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    fixture.advanced = true;
+    try {
+      expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "shadow-(--shadow-float)"]));
+      expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    } finally {
+      fixture.advanced = false;
+    }
+  });
+
+  it("leaves a contained picker on its settings row unchanged, with no floating surface", () => {
+    const chip = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(chip.props.className)).not.toContain("bg-composer");
+    expect(String(chip.props.className)).not.toContain("shadow-(--shadow-float)");
+  });
+
+  it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
+    const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
+    const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(loose.props.className)).toContain("shrink-0");
+    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
+  });
+
+  it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
+    fixture.instances = [claude(), cursor];
+    const forBot = bot(undefined, "cursor", "auto");
+    const chip = render(forBot).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(renderToStaticMarkup(chip)).toContain(">Cursor Auto</span>");
+    expect(String(chip.props.title)).toContain("Cursor · Auto");
+    const opened = open(forBot);
+    expect(list(opened).current).toMatchObject({ label: "Cursor Auto", title: "Cursor · Auto" });
+    expect(region(menu(opened.html), "data-current-model", "data-simple-provider")).toContain(">Cursor Auto</span>");
+  });
+
+  it("marks the chip when its engine cannot run, and says why in its tooltip", () => {
+    fixture.instances = [claude(false)];
+    const chip = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(renderToStaticMarkup(chip)).toContain("data-model-attention");
+    expect(String(chip.props.title).split("\n")).toContain("Sign-in required");
+    fixture.instances = [claude()];
+    expect(renderToStaticMarkup(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!)).not.toContain("data-model-attention");
   });
 
   it("makes every pick the bot's default too, so new threads start on it, with no checkbox", () => {
-    const forBot = bot();
-    const opened = open(forBot);
-    expect(menu(opened.html)).not.toContain("new chats too");
+    const opened = open(bot());
     expect(opened.html).not.toContain('type="checkbox"');
-    pane(opened)!.props.onPick("claude-sonnet-5-5");
+    pane(opened)!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: expect.objectContaining({ instanceId: "claude", model: "claude-sonnet-5-5" }),
@@ -432,12 +445,12 @@ describe("the model picker in Simple mode", () => {
     fixture.cloudHome = cloudHome;
     fixture.ownerOrAdmin = ownerOrAdmin;
     const opened = open(bot());
-    pane(opened)!.props.onPick("claude-sonnet-5-5");
+    pane(opened)!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", threadId: "thread-scout", updateBotDefault: false,
       selection: expect.objectContaining({ model: "claude-sonnet-5-5" }),
     }));
-    pane(opened)!.props.effort!.onPick("high");
+    thinking(opened).onPick("high");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout",
       selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
@@ -447,9 +460,9 @@ describe("the model picker in Simple mode", () => {
   it("still updates defaults for the Cloud owner", () => {
     fixture.cloudHome = true;
     const opened = open(bot());
-    pane(opened)!.props.onPick("claude-sonnet-5-5");
+    pane(opened)!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: true }));
-    pane(opened)!.props.effort!.onPick("high");
+    thinking(opened).onPick("high");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: true }));
   });
 
@@ -461,7 +474,7 @@ describe("the model picker in Simple mode", () => {
     const full = open(forBot);
     click(full.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
     fixture.advanced = false;
-    pane(render(forBot))!.props.onPick("claude-sonnet-5-5");
+    pane(render(forBot))!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: false }));
   });
 
@@ -470,7 +483,7 @@ describe("the model picker in Simple mode", () => {
     fixture.ownerOrAdmin = ownerOrAdmin;
     const variants = [{ id: "default", label: "Default" }, { id: "high", label: "High" }];
     fixture.instances = [{ ...claude(true, [{ id: "claude-opus-5-5", label: "Opus 5.5", variants }]), capabilities: { modelVariants: true } }];
-    const row = pane(open(bot()))!.props.variantsRow as ReactElement<ComponentProps<typeof ModelVariantRow>>;
+    const row = (pane(open(bot()))!.props.thinking as { variants: ReactElement<ComponentProps<typeof ModelVariantRow>> }).variants;
     const select = nodes(ModelVariantRow(row.props)).find((node) => node.type === Select)!;
     (select.props.onChange as (event: unknown) => void)({ target: { value: "1" } });
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
@@ -487,25 +500,38 @@ describe("the model picker in Simple mode", () => {
     expect(opened.html).toContain("Only this thread");
   });
 
-  it("shows the Simple pane inline for the bot panel's Default model and edits the bot's default", () => {
-    const forBot = bot();
-    const opened = open(forBot, { contained: true });
+  it("opens the same floating menu from bot settings' Default model, without a second Thinking control, and edits the bot's default", () => {
+    const opened = open(bot(), { contained: true });
     const simple = pane(opened)!;
-    expect(simple).toBeDefined();
     expect(opened.html).toContain("Default model");
+    expect(simple.props.thinking).toBeNull();
+    expect(menu(opened.html)).not.toContain('data-simple-effort="true"');
     const content = opened.nodes.find((node) => node.props["data-model-picker-content"] !== undefined)!;
-    expect(String(content.props.className)).toContain("relative");
-    expect(String(content.props.className)).not.toContain("absolute");
-    simple.props.onPick("claude-haiku-4-5-20251001");
+    expect(String(content.props.className)).toContain("menu-surface");
+    expect(String(content.props.className)).not.toContain("relative");
+    simple.props.onPick(instance("claude"), "claude-haiku-4-5-20251001");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: expect.objectContaining({ model: "claude-haiku-4-5-20251001" }),
     }));
-    simple.props.effort!.onPick("max");
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({
-      type: "setModel", botId: "scout", threadId: undefined,
-      selection: expect.objectContaining({ effort: "max" }),
-    });
+  });
+
+  it("lets a contained Antigravity picker return a named variant to the session setting", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "high",
+    } };
+    const opened = open(forBot, { contained: true });
+    const simple = pane(opened)!;
+    expect(opened.html).toContain("Use session setting");
+    expect((simple.props as { onResetVariant?: () => void }).onResetVariant).toBeTypeOf("function");
+    (simple.props as { onResetVariant: () => void }).onResetVariant();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: { instanceId: "antigravity", model: "gemini-3.8-flash" },
+    }));
   });
 
   it.each([[true, true], [false, false], [null, false]] as const)(
@@ -514,70 +540,109 @@ describe("the model picker in Simple mode", () => {
       fixture.cloudHome = true;
       fixture.ownerOrAdmin = ownerOrAdmin;
       const simple = pane(open(bot(), { contained: true, thread: true }))!;
-      simple.props.onPick("claude-haiku-4-5-20251001");
+      expect(simple.props.thinking).toBeNull();
+      simple.props.onPick(instance("claude"), "claude-haiku-4-5-20251001");
       expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
         type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: updatesDefault,
       }));
-      simple.props.effort!.onPick("max");
-      expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", threadId: "thread-scout" }));
-      expect((fixture.dispatch as ReturnType<typeof vi.fn>).mock.lastCall![0].updateBotDefault).toBe(updatesDefault ? true : undefined);
     },
   );
 
   it("writes the picked effort level", () => {
-    pane(open(bot()))!.props.effort!.onPick("high");
+    thinking(open(bot())).onPick("high");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
     });
   });
 
-  it("offers every level the engine reports, none hidden", () => {
-    expect(pane(open(bot("xhigh")))!.props.effort!.levels).toEqual(["low", "medium", "high", "xhigh", "max"]);
-  });
-
-  it("sends a provider that needs sign-in to the full picker's setup", () => {
-    fixture.instances = [claude(false)];
-    const opened = open(bot());
-    const simple = pane(opened)!;
-    expect(simple.props.needsSetup).toEqual({ name: "Claude" });
-    const html = menu(opened.html);
-    const list = region(html, "data-simple-models", "data-simple-effort-band");
-    expect(list).toContain("Claude needs to be set up before you can use it.");
-    expect(list).toContain(">Set up</button>");
-    expect(list).not.toContain("Opus 5.5");
-    expect(region(html, "data-simple-providers", "data-simple-models")).toContain(">Claude</span>");
-  });
-
-  it("opens the full picker in the same popover from Set up", () => {
+  it("sends a provider that needs sign-in to the full picker's setup, with a way back to the list", () => {
     fixture.instances = [claude(false)];
     const forBot = bot();
-    click(inside(open(forBot)).find((node) => node.props["data-simple-set-up"] !== undefined));
+    const opened = open(forBot);
+    expect(list(opened).current).toMatchObject({ label: "Opus 5.5", meta: "Sign-in required", warning: true });
+    expect(group(opened, "claude")!.body).toEqual({ kind: "signIn" });
+    const html = menu(opened.html);
+    expect(html).toContain('title="Claude needs to be set up before you can use it."');
+    expect(html).toContain(">Sign in</span>");
+    expect(html).not.toContain(">Sonnet 5.5<");
+
+    pane(opened)!.props.onSetUp(instance("claude"), false);
     const full = render(forBot);
     expect(pane(full)).toBeUndefined();
     expect(full.nodes.some((node) => node.type === ModelEngineRail)).toBe(true);
+    const back = full.nodes.find((node) => node.props["data-model-back"] !== undefined)!;
+    expect(menu(full.html)).toContain(">Back</span>");
+    click(back);
+    expect(pane(render(forBot))).toBeDefined();
   });
+
+  it("sets up a missing engine from its row", () => {
+    const missing: InstanceInfo = { ...cursor, snapshot: { state: "unavailable", reason: "`cursor-agent` isn't installed" } };
+    fixture.instances = [claude(), missing];
+    const forBot = bot(undefined, "cursor", "auto");
+    const opened = open(forBot);
+    expect(list(opened).current).toMatchObject({ meta: "Setup required", warning: true });
+    expect(list(opened).groups.map((entry) => [entry.label, entry.body.kind])).toEqual([["Cursor", "setUp"], ["Claude", "models"]]);
+    const html = region(menu(opened.html), 'data-simple-provider="cursor"', 'data-simple-provider="claude"');
+    expect(html).toContain(">Set up</span>");
+    expect(html).toContain("data-simple-set-up");
+    pane(opened)!.props.onSetUp(missing, false);
+    const full = render(forBot);
+    expect(full.nodes.find((node) => node.type === EngineSetup)?.props).toMatchObject({ instance: missing, quiet: true });
+  });
+
+  it("opens setup from the checked row when its engine cannot run, and closes from it otherwise, writing nothing", () => {
+    const missing: InstanceInfo = { ...cursor, snapshot: { state: "unavailable", reason: "`cursor-agent` isn't installed" } };
+    fixture.instances = [claude(), missing];
+    const forBot = bot(undefined, "cursor", "auto");
+    const currentRow = (rendered: Rendered) =>
+      nodes(SimpleModelMenu(pane(rendered)!.props)).find((node) => node.props["data-current-model"] !== undefined)!;
+    click(currentRow(open(forBot)));
+    const full = render(forBot);
+    expect(pane(full)).toBeUndefined();
+    expect(full.nodes.find((node) => node.type === EngineSetup)?.props).toMatchObject({ instance: missing });
+
+    fixture.values = [];
+    fixture.instances = [claude()];
+    click(currentRow(open(bot())));
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(render(bot()).html).not.toContain("data-model-picker-content");
+  });
+
+  it.each([[true, true], [false, false], [null, false]] as const)(
+    "keeps the list's rule for a pick in the full picker behind Set up (owner: %s)", (ownerOrAdmin, updatesDefault) => {
+      fixture.ownerOrAdmin = ownerOrAdmin;
+      const missing: InstanceInfo = { ...cursor, snapshot: { state: "unavailable", reason: "`cursor-agent` isn't installed" } };
+      fixture.instances = [claude(), missing];
+      const forBot = bot();
+      pane(open(forBot))!.props.onSetUp(missing, false);
+      fixture.instances = [claude(), cursor];
+      const full = render(forBot);
+      expect(menu(full.html)).toContain(updatesDefault ? "every thread that uses the bot&#x27;s model" : "This thread only.");
+      (full.nodes.find((node) => node.type === ModelRow)!.props.onPick as () => void)();
+      expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+        type: "setModel", threadId: "thread-scout", updateBotDefault: updatesDefault,
+        selection: expect.objectContaining({ instanceId: "cursor", model: "auto" }),
+      }));
+    },
+  );
 
   it("starts over in the Simple view the next time it opens", () => {
     fixture.instances = [claude(false)];
     const forBot = bot();
-    pane(open(forBot))!.props.onSetUp();
+    pane(open(forBot))!.props.onSetUp(instance("claude"), false);
     const trigger = render(forBot).nodes.find((node) => node.props["data-tour"] === "model")!;
     (trigger.props.onClick as () => void)();
     expect(pane(open(forBot))).toBeDefined();
   });
 
-  it("says so when the browsed provider has no models to list", () => {
-    const html = renderToStaticMarkup(createElement(SimpleModelPane, { ...pane(open(bot()))!.props, models: [] }));
-    const list = region(html, "data-simple-models", "data-simple-effort-band");
-    expect(list).toContain("No models to show here yet.");
-    expect(list).not.toContain("More");
-  });
-
-  it("says so when there is no provider at all", () => {
+  it("says so when there is no provider at all, and still names the bot's model", () => {
     fixture.instances = [];
-    const html = menu(open(bot()).html);
-    expect(region(html, "data-simple-models", "data-simple-effort-band")).toContain("No model providers are available.");
+    const opened = open(bot());
+    expect(list(opened).current).toMatchObject({ label: "claude-opus-5-5", meta: "Unavailable", warning: true });
+    expect(menu(opened.html)).toContain("No model providers are available.");
+    expect(menu(opened.html)).toContain("Manage AI accounts");
   });
 
   it("asks a provider with nothing to list to check again", async () => {
@@ -585,185 +650,157 @@ describe("the model picker in Simple mode", () => {
       ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", []),
       snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
     };
-    fixture.instances = [plan];
-    const opened = open(bot(undefined, "chatgpt", "gpt-5.6"));
-    const list = region(menu(opened.html), "data-simple-models", "data-simple-effort-band");
-    expect(list).toContain("No models to show here yet.");
-    expect(list).toContain(">Check again</button>");
-    click(inside(opened).find((node) => node.props["data-simple-refresh"] !== undefined));
+    fixture.instances = [claude(), plan];
+    const opened = open(bot());
+    const html = region(menu(opened.html), 'data-simple-provider="chatgpt"', "data-simple-effort-band");
+    expect(html).toContain("No models to show here yet.");
+    expect(html).toContain(">Check again</span>");
+    pane(opened)!.props.onCheckAgain(plan);
     await vi.waitFor(() => expect(fixture.refreshModels).toHaveBeenCalledWith("chatgpt"));
     expect(fixture.refreshInstances).toHaveBeenCalled();
   });
 
-  it("reaches every Claude account from the one Claude row, through a select above its models", () => {
-    const work: InstanceInfo = { ...claude(true, [{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" }]), instanceId: "claude-work", displayName: "Work" };
-    fixture.instances = [claude(), work];
+  it("says it is loading a provider's models while it asks for them, and holds every other Check again until then", async () => {
+    let arrive!: () => void;
+    fixture.refreshModels = vi.fn(() => new Promise<void>((resolve) => { arrive = resolve; }));
+    const plan: InstanceInfo = {
+      ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", []),
+      snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
+    };
+    const work: InstanceInfo = { ...plan, instanceId: "chatgpt-work", displayName: "Work plan" };
+    fixture.instances = [claude(), plan, work];
+    const forBot = bot();
+    const other = (html: string) => region(html, 'data-simple-provider="chatgpt-work"', "data-simple-effort-band");
+    expect(other(menu(open(forBot).html))).not.toMatch(/data-simple-refresh="true"[^>]* disabled=""/);
+    pane(render(forBot))!.props.onCheckAgain(plan);
+    await vi.waitFor(() => expect(fixture.refreshModels).toHaveBeenCalledWith("chatgpt"));
+    const reading = menu(render(forBot).html);
+    const html = region(reading, 'data-simple-provider="chatgpt"', 'data-simple-provider="chatgpt-work"');
+    expect(html).toContain("Loading OpenAI models…");
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain("Check again");
+    expect(other(reading)).toMatch(/data-simple-refresh="true"[^>]* disabled=""/);
+    expect(other(reading)).toContain("animate-spin");
+    arrive();
+    await vi.waitFor(() => expect(region(menu(render(forBot).html), 'data-simple-provider="chatgpt"', 'data-simple-provider="chatgpt-work"')).toContain("Check again"));
+    expect(other(menu(render(forBot).html))).not.toMatch(/data-simple-refresh="true"[^>]* disabled=""/);
+  });
+
+  it("lists each ready Claude account as its own provider, and a signed-out one as one to sign in", () => {
+    const work: InstanceInfo = { ...claude(true, [{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" }, { id: "claude-fable", label: "Fable 5" }]), instanceId: "claude-work", displayName: "Work" };
+    const home: InstanceInfo = { ...claude(false), instanceId: "claude-home", displayName: "Home" };
+    fixture.instances = [claude(), work, home];
     const forBot = bot();
     const opened = open(forBot);
-    expect(pane(opened)!.props.providers.map((provider) => provider.label)).toEqual(["Claude"]);
-    const account = pane(opened)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>;
-    expect(account.type).toBe(ClaudeAccountSelect);
-    expect(account.props.accounts.map((instance) => instance.instanceId)).toEqual(["claude", "claude-work"]);
-    expect(account.props.selectedId).toBe("claude");
-    const html = region(menu(opened.html), "data-simple-models", "data-simple-effort-band");
-    expect(html.indexOf("data-simple-account")).toBeGreaterThan(-1);
-    expect(html.indexOf("data-simple-account")).toBeLessThan(html.indexOf("Opus 5.5<"));
-    expect(html).toContain('<option value="claude-work">Work</option>');
-
-    account.props.onSelect(work);
-    const browsed = render(forBot);
-    expect(labels(browsed)).toEqual(["Sonnet 5.5"]);
-    expect((pane(browsed)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>).props.selectedId).toBe("claude-work");
-    expect(pane(browsed)!.props.providers[0].selected).toBe(true);
-    pane(browsed)!.props.onPick("claude-sonnet-5-5");
+    expect(list(opened).groups.map((entry) => [entry.label, entry.body.kind]))
+      .toEqual([["Claude", "models"], ["Claude · Work", "models"], ["Claude · Home", "signIn"]]);
+    expect(list(opened).current!.meta).toBe("Claude");
+    pane(opened)!.props.onPick(work, "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", selection: expect.objectContaining({ instanceId: "claude-work", model: "claude-sonnet-5-5" }),
     }));
+    fixture.values = [];
+    pane(open(forBot))!.props.onSetUp(home, false);
+    const full = render(forBot);
+    expect(full.html).toContain('<option value="claude-home" selected="">Home</option>');
   });
 
-  it("shows no account select for a provider with one account", () => {
-    fixture.instances = [claude(), codex, grok];
-    const opened = open(bot());
-    expect(pane(opened)!.props.account).toBeUndefined();
-    expect(menu(opened.html)).not.toContain("data-simple-account");
-  });
-
-  it("reaches Codex and the ChatGPT plan from the one OpenAI row", () => {
+  it("lists Codex and the ChatGPT plan each under OpenAI", () => {
     const plan: InstanceInfo = {
       ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", [{ id: "gpt-5.6-plan", label: "GPT-5.6 (plan)" }]),
       snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
     };
     fixture.instances = [claude(), codex, plan];
-    const forBot = bot();
-    const opened = open(forBot);
-    const openai = pane(opened)!.props.providers.filter((provider) => provider.label === "OpenAI");
-    expect(openai).toHaveLength(1);
-    pane(opened)!.props.onProvider(openai[0].target);
-    const browsed = render(forBot);
-    expect(labels(browsed)).toEqual(["GPT-5.6"]);
-    const account = pane(browsed)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>;
-    expect(account.props.accounts.map((instance) => instance.displayName)).toEqual(["Codex", "ChatGPT plan"]);
-
-    account.props.onSelect(plan);
-    const onPlan = render(forBot);
-    expect(labels(onPlan)).toEqual(["GPT-5.6 (plan)"]);
-    pane(onPlan)!.props.onPick("gpt-5.6-plan");
+    const opened = open(bot());
+    expect(list(opened).groups.map((entry) => entry.label)).toEqual(["Claude", "OpenAI · Codex", "OpenAI · ChatGPT plan"]);
+    expect(labels(opened, "chatgpt")).toEqual(["GPT-5.6 (plan)"]);
+    pane(opened)!.props.onPick(plan, "gpt-5.6-plan");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", selection: expect.objectContaining({ instanceId: "chatgpt", model: "gpt-5.6-plan" }),
     }));
   });
 
-  it("opens a sign-in family on an account that is ready, not on a signed-out first one", () => {
-    const signedOutCodex: InstanceInfo = { ...codex, snapshot: { ...codex.snapshot, authenticated: false } };
-    const plan: InstanceInfo = {
-      ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", [{ id: "gpt-5.6-plan", label: "GPT-5.6 (plan)" }]),
-      snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
-    };
-    fixture.instances = [claude(), signedOutCodex, plan];
-    const forBot = bot();
-    const opened = open(forBot);
-    const openai = pane(opened)!.props.providers.find((provider) => provider.label === "OpenAI")!;
-    expect(openai.target.instanceId).toBe("chatgpt");
-    pane(opened)!.props.onProvider(openai.target);
-    const browsed = render(forBot);
-    expect(pane(browsed)!.props.needsSetup).toBeNull();
-    expect(labels(browsed)).toEqual(["GPT-5.6 (plan)"]);
-
-    (pane(browsed)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>).props.onSelect(signedOutCodex);
-    const onCodex = render(forBot);
-    expect(pane(onCodex)!.props.needsSetup).toEqual({ name: "Codex" });
-    expect(region(menu(onCodex.html), "data-simple-models", "data-simple-effort-band")).toContain("data-simple-account");
-  });
-
-  it("dims a provider its organisation blocks and says why, with no setup to offer", () => {
+  it("says who manages a provider its organisation blocks, with nothing to pick or set up", () => {
     const blocked: InstanceInfo = { ...openaiKey, policy: { organizationName: "Acme", reason: "Acme allows only company models." } };
     fixture.instances = [claude(), blocked];
-    const forBot = bot();
-    const opened = open(forBot);
-    const rows = inside(opened).filter((node) => node.props["data-simple-provider"] !== undefined);
-    const row = rows.find((node) => node.props["data-simple-provider"] === "openai")!;
-    expect(row.props["aria-label"]).toBe("OpenAI · API key · Managed by Acme");
-    expect(row.props.title).toBe("OpenAI · Managed by Acme");
-    expect(String(row.props.className)).toContain("opacity-40");
-    expect(String(rows.find((node) => node.props["data-simple-provider"] === "claude")!.props.className)).not.toContain("opacity-40");
-
-    pane(opened)!.props.onProvider(blocked);
-    const list = region(menu(render(forBot).html), "data-simple-models", "data-simple-effort-band");
-    expect(list).toContain("Managed by Acme");
-    expect(list).toContain("Bots cannot use this model provider while this computer is connected to Acme.");
-    expect(list).not.toContain("needs to be set up");
-    expect(list).not.toContain("data-simple-set-up");
-    expect(fixture.refreshModels).not.toHaveBeenCalled();
+    const opened = open(bot());
+    expect(group(opened, "openai")!.body).toEqual({ kind: "policy", organization: "Acme" });
+    const html = region(menu(opened.html), 'data-simple-provider="openai"', "data-simple-effort-band");
+    expect(html).toContain("Managed by Acme");
+    expect(html).toContain("Bots cannot use this model provider while this computer is connected to Acme.");
+    expect(html).not.toContain("data-simple-set-up");
+    expect(html).not.toContain("GPT-5.6");
+    pane(opened)!.props.onPick(blocked, "gpt-5.6");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("tells same-named models apart by their route, even with a twin behind Show all", () => {
+  it("tells same-named models apart by their route", () => {
     fixture.instances = [engine("pi", "piAgent", "pi", "custom", [
       { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },
       { id: "openai/gpt-5.6", label: "GPT-5.6", custom: true, provider: "openai" },
       { id: "openai/gpt-5.6-mini", label: "GPT-5.6 mini", custom: true, provider: "openai" },
       { id: "google/gemini-3", label: "Gemini 3", custom: true, provider: "google" },
-      { id: "xai/grok-5", label: "Grok 5", custom: true, provider: "xai" },
       { id: "amazon-bedrock/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
     ])];
-    const forBot = bot(undefined, "pi", "openai/gpt-5.6");
-    const row = (rendered: ReturnType<typeof render>, name: string) =>
-      inside(rendered).find((node) => node.type === "button" && node.props["aria-label"] === name)!;
-    const route = (node: Node) => nodes(node.props.children).find((child) => child.props["data-simple-route"] !== undefined)?.props.children;
-
-    const opened = open(forBot);
-    expect(labels(opened)).not.toContain("amazon-bedrock");
-    expect(route(row(opened, "Claude Sonnet 4.5 · anthropic"))).toBe("anthropic");
-    expect(route(row(opened, "GPT-5.6 · openai"))).toBeUndefined();
-    expect(row(opened, "GPT-5.6 · openai").props.title).toContain("openai");
-
-    pane(opened)!.props.showAll!.onToggle();
-    const all = render(forBot);
-    expect(route(row(all, "Claude Sonnet 4.5 · amazon-bedrock"))).toBe("amazon-bedrock");
-    expect(row(all, "Claude Sonnet 4.5 · amazon-bedrock").props.title).toContain("amazon-bedrock");
+    const opened = open(bot(undefined, "pi", "openai/gpt-5.6"));
+    const html = menu(opened.html);
+    expect(html).toContain('aria-label="Claude Sonnet 4.5 · anthropic"');
+    expect(html).toMatch(/data-simple-route="true"[^>]*>anthropic</);
+    expect(html).toMatch(/data-simple-route="true"[^>]*>amazon-bedrock</);
+    expect(html).not.toMatch(/data-simple-route="true"[^>]*>openai</);
   });
 
-  it("looks for local models again when it browses to a provider that runs them or opens its whole list", () => {
+  it("renders a model's route on its own line in a row that may grow", () => {
+    fixture.instances = [engine("pi", "piAgent", "pi", "custom", [
+      { id: "amazon-bedrock/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
+      { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },
+    ])];
+    const html = menu(open(bot(undefined, "pi", "amazon-bedrock/claude-sonnet-4-5")).html);
+    const row = html.split("<button").find((part) => part.includes("data-simple-route") && part.includes("anthropic"));
+    expect(row).toBeDefined();
+    const lines = row!.slice(row!.indexOf("data-simple-model-text"));
+    expect(lines).toMatch(/data-simple-model-text="true" class="[^"]*\bflex-col\b/);
+    expect(lines).toMatch(/<span class="truncate">Claude Sonnet 4\.5<\/span>/);
+    expect(lines).toMatch(/data-simple-route="true" class="[^"]*\btruncate\b[^"]*">anthropic</);
+    expect(row).toContain("min-h-[30px]");
+    expect(row).not.toMatch(/\sh-\[30px\]/);
+    expect(row).not.toContain("max-w-[45%]");
+  });
+
+  it("looks for local models only when asked, on Show all where a provider offers them, never just for opening", () => {
     const codexMany = engine("codex", "codex", "Codex", "subscription", many(8));
     fixture.instances = [claude(true, many(8)), codexMany, grok, local];
     const forBot = bot(undefined, "claude", "model-1");
     const opened = open(forBot);
     expect(fixture.refreshModels).not.toHaveBeenCalled();
-    pane(opened)!.props.showAll!.onToggle();
-    expect(fixture.refreshModels).toHaveBeenLastCalledWith("claude");
-
-    pane(render(forBot))!.props.onProvider(grok);
-    pane(render(forBot))!.props.onProvider(codexMany);
-    pane(render(forBot))!.props.showAll!.onToggle();
-    expect(fixture.refreshModels).toHaveBeenCalledTimes(1);
-
-    pane(render(forBot))!.props.onProvider(local);
+    toggle(opened, "codex");
+    expect(fixture.refreshModels).not.toHaveBeenCalled();
+    toggle(render(forBot));
+    expect(fixture.refreshModels).toHaveBeenCalledExactlyOnceWith("claude");
+    toggle(render(forBot), "pi");
     expect(fixture.refreshModels).toHaveBeenLastCalledWith("pi");
     expect(fixture.refreshModels).toHaveBeenCalledTimes(2);
   });
 
-  it("opens AI accounts from the bottom band", () => {
-    const opened = open(bot());
-    const manage = inside(opened).find((node) => node.props["data-simple-manage"] !== undefined)!;
-    (manage.props.onClick as () => void)();
+  it("opens AI accounts from the footer", () => {
+    const manage = open(bot()).nodes.find((node) => node.type === SimpleModelMenu)!;
+    (manage.props.onManage as () => void)();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleAppSettings", open: true, section: "engines" });
   });
 
-  it("puts a full-width named-variants control in the band in place of the effort steps", () => {
+  it("puts a quiet named-variants select beside Thinking in place of the effort steps", () => {
     const variants = [{ id: "default", label: "Default" }, { id: "high", label: "High" }];
     fixture.instances = [{ ...claude(true, [{ id: "claude-opus-5-5", label: "Opus 5.5", variants }]), capabilities: { modelVariants: true } }];
     const opened = open(bot());
-    const row = pane(opened)!.props.variantsRow as ReactElement<ComponentProps<typeof ModelVariantRow>>;
+    const row = (pane(opened)!.props.thinking as { variants: ReactElement<ComponentProps<typeof ModelVariantRow>> }).variants;
     expect(row.type).toBe(ModelVariantRow);
-    expect(row.props).toMatchObject({ compact: true, wide: true });
+    expect(row.props).toMatchObject({ compact: true, quiet: true });
     const bottom = region(menu(opened.html), "data-simple-effort-band");
-    const field = bottom.slice(bottom.lastIndexOf("<div", bottom.indexOf("<select")), bottom.indexOf(">", bottom.indexOf("<select")));
-    expect(field).toContain('aria-label="Reasoning variant"');
-    expect(field).toContain("flex-1");
-    expect(field).not.toContain("max-w-[65%]");
-    expect(bottom.indexOf(">Reasoning</span>")).toBeGreaterThan(-1);
-    expect(bottom.indexOf(">Reasoning</span>")).toBeLessThan(bottom.indexOf("<select"));
-    expect(bottom).not.toContain(">Quick</button>");
-    expect(bottom).not.toContain("How hard should");
+    expect(bottom).toContain('aria-label="Reasoning variant"');
+    expect(bottom.indexOf(">Thinking</span>")).toBeGreaterThan(-1);
+    expect(bottom.indexOf(">Thinking</span>")).toBeLessThan(bottom.indexOf("<select"));
+    expect(bottom).toContain("bg-ink/[0.05]");
+    expect(bottom).not.toContain("data-simple-effort=");
   });
 
   it("offers an OpenCode Copilot model's efforts from its catalog, and nothing for a model without them", () => {
@@ -784,6 +821,7 @@ describe("the model picker in Simple mode", () => {
     const plain = band("github-copilot/gemini-3.8-flash");
     expect(plain).toContain("data-simple-effort-band");
     expect(plain).not.toContain("<select");
+    expect(plain).not.toContain("data-simple-thinking");
   });
 
   it("leaves Advanced mode on the full picker", () => {
@@ -791,6 +829,7 @@ describe("the model picker in Simple mode", () => {
     const opened = open(bot());
     expect(pane(opened)).toBeUndefined();
     expect(opened.nodes.some((node) => node.type === ModelEngineRail)).toBe(true);
+    expect(opened.html).not.toContain("data-model-back");
   });
 });
 
@@ -805,46 +844,68 @@ describe("a thread's picker and its bot's model", () => {
     fixture.bots = [profile];
     return { ...profile, modelSelection: threadModel ?? opus };
   }
-  const followRow = (rendered: ReturnType<typeof render>) => rendered.nodes.find((node) => node.type === FollowBotModelRow);
-  const pickFollow = (rendered: ReturnType<typeof render>) => (followRow(rendered)!.props.onPick as () => void)();
 
-  it("offers the bot's model to a thread on its own, and picking it is a thread-only pick of the bot's model", () => {
+  it("offers the bot's model to a thread on its own in one row, and picking it is a thread-only pick of the bot's model", () => {
     const opened = open(scout(haiku));
-    expect(followRow(opened)!.props.follows).toBe(false);
-    expect(menu(opened.html)).toContain("Use Scout&#x27;s model");
-    expect(menu(opened.html)).toContain("Claude · Opus 5.5");
-    expect(menu(opened.html)).toContain('data-follow-bot-model="true" aria-pressed="false"');
-    expect(inside(opened).some((node) => node.props["data-bot-model"] !== undefined)).toBe(true);
-    pickFollow(opened);
+    expect(list(opened).follow).toBe(true);
+    const html = menu(opened.html);
+    expect(html).toContain("Use Scout&#x27;s model");
+    expect(html).toContain('title="Claude · Opus 5.5"');
+    expect(html).toContain('data-follow-bot-model="true" aria-pressed="false"');
+    expect(region(html, "data-follow-bot-model", 'role="separator"')).toContain(">Opus 5.5</span>");
+    expect(labels(opened)).toEqual(["Sonnet 5.5"]);
+    expect(html).not.toContain("data-bot-model");
+    pane(opened)!.props.onFollowBot();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: false, selection: opus,
     });
   });
 
-  it("shows a thread that follows its bot as following, with the bot's model marked", () => {
+  it("says on the current model that a thread follows its bot, with no follow row to click", () => {
     const opened = open(scout(null));
-    expect(followRow(opened)!.props.follows).toBe(true);
-    expect(pane(opened)!.props.botModelId).toBe("claude-opus-5-5");
-    expect(region(menu(opened.html), "data-simple-models")).toContain("(bot&#x27;s model)");
+    expect(list(opened).follow).toBe(false);
+    expect(list(opened).current!.meta).toBe("Scout's model");
+    expect(menu(opened.html)).not.toContain("data-follow-bot-model");
     expect(render(scout(null)).nodes.find((node) => node.props["data-tour"] === "model")!.props.title).toContain("Uses Scout's model");
-    pickFollow(opened);
+  });
+
+  it("keeps the full picker's follow row for Advanced", () => {
+    fixture.advanced = true;
+    const opened = open(scout(null));
+    const row = opened.nodes.find((node) => node.type === FollowBotModelRow)!;
+    expect(row.props.follows).toBe(true);
+    (row.props.onPick as () => void)();
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
   it("offers nothing a server too old to say whether a thread follows its bot could not do", () => {
     fixture.bots = [];
     const opened = open(bot());
-    expect(followRow(opened)).toBeUndefined();
-    expect(menu(opened.html)).not.toContain("(bot&#x27;s model)");
+    expect(list(opened).follow).toBe(false);
+    expect(menu(opened.html)).not.toContain("data-follow-bot-model");
+    expect(labels(opened)).toEqual(["Sonnet 5.5", "Haiku 4.5"]);
+    expect(list(opened).current!.meta).toBeUndefined();
+  });
+
+  it("closes from the checked row without a write, so it never changes the bot's model or says threads keep their own", () => {
+    const forBot = scout(null, [{ threadId: "kept", model: haiku }]);
+    const simple = pane(open(forBot))!;
+    const row = nodes(SimpleModelMenu(simple.props)).find((node) => node.props["data-current-model"] !== undefined)!;
+    (row.props.onClick as (event: { detail: number }) => void)({ detail: 0 });
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    const closed = render(forBot).html;
+    expect(closed).not.toContain("data-model-picker-content");
+    expect(closed).not.toContain("data-thread-models-notice");
   });
 
   it("right after a pick changes the bot's model, says how many threads keep their own, until it opens again", () => {
     const forBot = scout(null, [{ threadId: "kept", model: haiku }, { threadId: "follows", model: null }]);
     const opened = open(forBot);
-    pane(opened)!.props.onPick("claude-sonnet-5-5");
+    pane(opened)!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: true }));
     const closed = render(forBot);
     expect(closed.html).toContain("data-thread-models-notice");
+    expect(closed.html).toContain("menu-surface");
     expect(closed.html).toContain("1 thread uses its own model.");
     expect(closed.html).toContain("Switch it too");
     open(forBot);
@@ -853,7 +914,96 @@ describe("a thread's picker and its bot's model", () => {
 
   it("says nothing after a bot model change when every thread follows the bot", () => {
     const forBot = scout(null, [{ threadId: "follows", model: null }]);
-    pane(open(forBot))!.props.onPick("claude-sonnet-5-5");
+    pane(open(forBot))!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(render(forBot).html).not.toContain("data-thread-models-notice");
+  });
+});
+
+describe("every capability of the picker stays reachable", () => {
+  const withLocal = claude(true, [...claudeModels, { id: "ollama::qwen3", label: "qwen3 (Ollama)", custom: true }]);
+  const updated: InstanceInfo = { ...withLocal, snapshot: { ...withLocal.snapshot, update: { title: "Update Claude", message: "A newer CLI is out.", command: "claude update" } } };
+  const missing: InstanceInfo = { ...cursor, snapshot: { state: "unavailable", reason: "`cursor-agent` isn't installed" } };
+  const managed: InstanceInfo = { ...openaiKey, policy: { organizationName: "Acme", reason: "Company models only." } };
+  const signedOutWork: InstanceInfo = { ...claude(false), instanceId: "claude-work", displayName: "Work" };
+  const plan: InstanceInfo = { ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", []), snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true } };
+  const rich = () => [updated, signedOutWork, missing, managed, plan, local];
+  function followed(): Bot {
+    const profile: Bot = { ...bot("high"), tasks: [{ threadId: "thread-scout", title: "This one", createdAt: 1,
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5-5" }, followsBotModel: false }] };
+    fixture.bots = [profile];
+    return { ...profile, modelSelection: { instanceId: "claude", model: "claude-sonnet-5-5", effort: "high" } };
+  }
+  const missingFrom = (checks: Record<string, boolean>) => Object.entries(checks).filter(([, reached]) => !reached).map(([name]) => name);
+
+  it("in Simple mode, from the chip, its menu and the full picker behind Set up", () => {
+    fixture.instances = rich();
+    const forBot = followed();
+    const chip = render(forBot).nodes.find((node) => node.props["data-tour"] === "model")!;
+    const opened = open(forBot);
+    const html = menu(opened.html);
+    const simple = list(opened);
+    const body = (id: string) => group(opened, id)?.body.kind;
+    const props = pane(opened)!.props;
+    const before = {
+      "chip names the model, says it opens a dialog, and carries model, effort and follow in its tooltip":
+        chip.props["aria-haspopup"] === "dialog" && String(chip.props.title).includes("High thinking") && String(chip.props.title).includes("This thread's own model"),
+      "current model with its check": html.includes("data-current-model") && simple.current?.label === "Sonnet 5.5",
+      "use the bot's model": simple.follow && html.includes("Use Scout&#x27;s model"),
+      "the follow row carries the bot's model, once": region(html, "data-follow-bot-model", 'role="separator"').includes(">Opus 5.5</span>") && !labels(opened, "claude").includes("Opus 5.5"),
+      "every ready provider's models at once": labels(opened, "claude").length > 0 && labels(opened, "pi").length > 0,
+      "local models beside a provider's own": html.includes(">Local models</div>") && labels(opened, "claude").includes("qwen3 (Ollama)"),
+      "show every model of a provider": html.includes("data-simple-show-all"),
+      "a signed-out account signs in": body("claude-work") === "signIn",
+      "a managed provider says who manages it": body("openai") === "policy" && html.includes("Managed by Acme"),
+      "a provider with nothing listed checks again": body("chatgpt") === "empty" && html.includes("data-simple-refresh"),
+      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Use default</button>"),
+      "AI accounts in Settings": html.includes("data-simple-manage"),
+    };
+    expect(missingFrom(before)).toEqual([]);
+
+    props.onToggle(local);
+    expect(labels(render(forBot), "pi").length).toBeGreaterThan(labels(opened, "pi").length);
+    props.onSetUp(signedOutWork, false);
+    const full = render(forBot);
+    const fullHtml = menu(full.html);
+    const behind = {
+      "the full picker opens in place, with a way back": pane(full) === undefined && fullHtml.includes("data-model-back"),
+      "engine rail with API keys": full.nodes.some((node) => node.type === ModelEngineRail) && fullHtml.includes(">API keys<"),
+      "this thread or the bot's default": fullHtml.includes("Only this thread") && fullHtml.includes("Thread + bot default"),
+      "engine status and refresh": fullHtml.includes("Sign-in required") && fullHtml.includes("data-model-refresh"),
+      "the account select": fullHtml.includes('<option value="claude-work" selected="">Work</option>'),
+      "install and sign-in help": full.nodes.some((node) => node.type === EngineSetup),
+      "providers and accounts, and API keys": fullHtml.includes("Model providers and accounts") && fullHtml.includes("data-model-add-api-keys"),
+    };
+    expect(missingFrom(behind)).toEqual([]);
+
+    fixture.values = [];
+    const onMissing = open({ ...forBot, modelSelection: { instanceId: "cursor", model: "auto" } });
+    expect(group(onMissing, "cursor")?.body.kind).toBe("setUp");
+    expect(list(onMissing).current).toMatchObject({ meta: "Setup required", warning: true });
+  });
+
+  it("in Advanced mode, from the chip and the full picker", () => {
+    fixture.advanced = true;
+    fixture.instances = [updated, signedOutWork, codex, plan, managed, local];
+    const forBot = followed();
+    const chipHtml = renderToStaticMarkup(render(forBot).nodes.find((node) => node.props["data-tour"] === "model")!);
+    const opened = open(forBot);
+    const html = menu(opened.html);
+    const checks = {
+      "chip shows account, model and effort": chipHtml.includes("data-model-account") && chipHtml.includes("data-model-effort"),
+      "use the bot's model, checked while following": opened.nodes.some((node) => node.type === FollowBotModelRow),
+      "engine rail with Cloud, API keys and Local, and a way to add keys": html.includes(">Cloud<") && html.includes(">API keys<") && html.includes(">Local<") && html.includes("data-rail-add-api-key"),
+      "a managed engine stays on the rail, dimmed": html.includes("Managed by Acme") && html.includes("opacity-40"),
+      "this thread or the bot's default": html.includes("Only this thread"),
+      "engine name, refresh and version": html.includes("data-model-refresh") && html.includes("2.1.300"),
+      "the Claude account select": html.includes('aria-label="Account"'),
+      "the engine's update notice": html.includes("Update Claude"),
+      "suggested models, the default and the bot's model tagged": html.includes(">Suggested<") && html.includes("(bot&#x27;s model)"),
+      "effort select": html.includes('aria-label="Reasoning effort"'),
+      "local models": html.includes("data-model-local-entry") && html.includes("1 available"),
+      "providers and accounts, and API keys": html.includes("Model providers and accounts") && html.includes("data-model-add-api-keys"),
+    };
+    expect(missingFrom(checks)).toEqual([]);
   });
 });

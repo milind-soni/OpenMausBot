@@ -8,11 +8,10 @@ const css = readFileSync(join(here, "../styles.css"), "utf8");
 const body = css.match(/body\s*\{([^}]*)\}/)?.[1] ?? "";
 
 describe("crisp rendering", () => {
-  it("does not force greyscale font smoothing", () => {
-    // `antialiased` greyscale smoothing draws stems lighter than the system UI on a Retina Mac.
-    expect(body).not.toMatch(/-webkit-font-smoothing:\s*antialiased/);
-    expect(body).toMatch(/-webkit-font-smoothing:\s*auto/);
-    expect(body).toMatch(/-moz-osx-font-smoothing:\s*auto/);
+  it("uses greyscale font smoothing", () => {
+    // Chromium on macOS thickens every stem under `auto`, so regular text reads close to semibold.
+    expect(body).toMatch(/-webkit-font-smoothing:\s*antialiased/);
+    expect(body).toMatch(/-moz-osx-font-smoothing:\s*grayscale/);
   });
 
   it("does not pin Chromium to an sRGB color profile", () => {

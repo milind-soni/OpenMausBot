@@ -107,6 +107,50 @@ describe("skills library store", () => {
     expect(events).toContainEqual({ kind: "review-state", name: "triage" });
   });
 
+  it("makes a reviewed library skill available to every bot, including bots without an assignment", () => {
+    const name = `universal-${Math.random().toString(36).slice(2, 10)}`;
+    const universal = library.installLibrarySkill({ name, instructions: SKILL(name), source: "lib", reviewState: "approved" });
+    expect("error" in universal).toBe(false);
+    expect(library.setLibrarySkillEveryBot(name, true)).toMatchObject({ everyBot: true });
+    try {
+      expect(skills.resolveBotSkills(`universal-${Math.random()}`, [])).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name, enabled: true }),
+      ]));
+      // No assignment list means the library is off: an every-bot skill stays out too.
+      expect(skills.resolveBotSkills(`universal-${Math.random()}`, undefined).map((skill) => skill.name)).not.toContain(name);
+      // The bot's Skills page lists it as the bot's own library skill, not as one still to assign.
+      const page = skills.listBotSkillsWithOrigin(`universal-${Math.random()}`, undefined);
+      expect(page.skills.map((skill) => skill.name)).toContain(name);
+      expect(page.library.map((skill) => skill.name)).not.toContain(name);
+    } finally {
+      expect(library.setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
+    }
+  });
+
+  it("lists an every-bot skill in the turn index of a bot with no assignments, only while the library is on", async () => {
+    const { createSkillsLibraryHost } = await import("./host/skills-library.ts");
+    const name = `everyone-${Math.random().toString(36).slice(2, 10)}`;
+    library.installLibrarySkill({ name, instructions: SKILL(name), source: "lib", reviewState: "approved" });
+    library.setLibrarySkillEveryBot(name, true);
+    try {
+      const record = { id: bot, threadId: "main" } as import("./store.ts").BotRecord;
+      const hostWith = (cfg: AppConfig) => createSkillsLibraryHost({
+        store: { bot: () => record, messagesFor: () => [], taskByThread: () => undefined } as unknown as import("./store.ts").Store,
+        cfg,
+        appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
+      });
+      const on = hostWith({ features: { skillsLibrary: true } } as AppConfig);
+      expect(on.skillsIndex(record, "main")).toContain(name);
+      expect(on.skillsIndex(record, undefined)).toContain(name);
+      expect(on.expandSkillCommand(record, "main", `/${name}`)).toContain(`ran your ${name} skill`);
+      const off = hostWith({} as AppConfig);
+      expect(off.skillsIndex(record, "main")).not.toContain(name);
+      expect(off.expandSkillCommand(record, "main", `/${name}`)).toBe(`/${name}`);
+    } finally {
+      library.setLibrarySkillEveryBot(name, false);
+    }
+  });
+
   it("defaults the feature flag off and switches on only via features.skillsLibrary", () => {
     expect(library.skillsLibraryEnabled({} as AppConfig)).toBe(false);
     expect(library.skillsLibraryEnabled({ features: {} } as AppConfig)).toBe(false);

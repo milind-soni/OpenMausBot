@@ -9,7 +9,7 @@ export const DATA_INSTRUCTIONS =
   "Read files directly: read_csv('a.csv'), read_parquet('dir/*.parquet'), read_json_auto('x.ndjson'), read_xlsx('b.xlsx', sheet='S'); " +
   "SUMMARIZE tbl, DESCRIBE tbl and SHOW TABLES describe what is loaded. " +
   "Run data_describe before writing SQL against a table; aggregate or filter in SQL before charting; one statement per call. " +
-  "To present your answer, call data_show: it publishes one result in Data and a compact Open in Data link in this conversation. Earlier results remain in History. " +
+  "To present your answer, call data_show: it publishes one result in Data; in this conversation a chart is drawn in full and a table gets a compact Open in Data link. Earlier results remain in History. " +
   "To discuss or edit a saved query, call data_describe with its id, or with no arguments for the latest saved result and the result/table catalog. Latest does not identify the person's selected result; use the supplied id or clarify when ambiguous. " +
   "Update that result with data_show id and sql; omitted kind and chart settings stay unchanged. The person's SQL is visible below the result. Use these tools, not computer/UI automation, to read or change SQL. Never guess fields listed as omitted in a bounded result. " +
   "You can clean data with Python using your existing tools, save CSV/Parquet/JSON, then data_load and data_show; write no dashboard or chart JavaScript unless the person asks for a dashboard page.";

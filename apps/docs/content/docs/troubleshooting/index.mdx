@@ -15,6 +15,27 @@ Most OpenMausBot failures come from one of four layers: the desktop app, a local
   <Card title="Google sign-in in a cloud browser" href="/docs/troubleshooting/google-sign-in-cloud-browser" description="A passkey sign-in stops at “Verifying it’s you” in a bot’s browser." />
 </Cards>
 
+## Report a bug from any chat: @devs
+
+In any chat with a bot, on the desktop app or on the Cloud, type `@devs` (it is
+the last entry in the @ list) and a few words about what went wrong, then send.
+Typing it is the decision to send: there is nothing else to press.
+
+The bot answering the message adds a short summary: what you said went wrong,
+what it saw itself in the conversation, and steps to reproduce. OpenMausBot adds
+its own facts: the app version, the computer's system, whether it runs on the
+desktop or the Cloud, the bot's engine and model, recent errors in that
+conversation, the server's latest warnings and errors, and the conversation's
+ids. Keys, passwords, tokens, cookies and the parameters of web addresses are
+masked first. The rest of the conversation is never sent, and neither is any file.
+
+A line in the chat says where it went, for example *Sent to the MausBot team
+(report …). Milind and Omkar get it by email and will reply to you@example.com.*
+The reply address is the email you signed in with, or the one in your profile.
+If the report cannot go yet (no connection, or too many reports in the last
+hour), the line says so: the report is saved and sent on its own later, so there
+is no need to send it again.
+
 ## Collect useful evidence
 
 Before opening an issue, record:

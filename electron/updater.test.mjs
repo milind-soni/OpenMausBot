@@ -7,17 +7,19 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cloudTarget } from "./cloud-account.mjs";
 import { myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin } from "./cloud-home.mjs";
 import { cloudPageSenderAllowed } from "./cloud-home.mjs";
+import { otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 
 const LOCAL = "http://127.0.0.1:8799";
 const CLOUD = "https://home-7f3k2.fly.dev";
 const OTHER = "https://bots.example.test";
+const OWN = "https://omb-c-a.fly.dev";
 
 const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map() }));
 
 vi.mock("electron", () => ({
-  app: { isPackaged: true, getPath: () => "/unused-updater-test-log" },
+  app: { isPackaged: true, getPath: () => "/unused-updater-test-log", getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
   ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
 }));
@@ -44,11 +46,11 @@ function mainRule() {
   const signIn = { options: null, state: { status: "signed-out", message: "restoring" } };
   const context = vm.createContext({
     ipcMain: { handle: () => {}, on: (channel, listener) => listeners.set(channel, listener) },
-    senderIsLocal: localOriginModule.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, myCloudOrigin,
+    senderIsLocal: localOriginModule.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, myCloudOrigin, otherOwnClouds,
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: window,
     environmentsState: { environments: [], activeId: environments.LOCAL_ID },
-    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }) },
+    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }), isOwnCloud: () => false },
     rememberedHome: null, savedCloudHomeOrigin, cloudSignInRestored: true,
     // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
@@ -61,6 +63,7 @@ function mainRule() {
       return {
         homeTarget: () => (signIn.state.status === "connected" ? { origin: signIn.state.machine.origin } : null),
         state: () => signIn.state,
+        isOwnCloud: (origin) => signIn.state.status === "connected" && (signIn.state.clouds ?? []).some(cloud => ownCloud(cloud) && cloud.origin === origin),
       };
     },
   });
@@ -68,7 +71,8 @@ function mainRule() {
   const show = (shown, activeId = environments.LOCAL_ID) => {
     window.webContents = shown.webContents;
     context.environmentsState = {
-      environments: [{ id: "cloud", name: "My Cloud", origin: CLOUD }, { id: "vps", name: "VPS", origin: OTHER }],
+      environments: [{ id: "cloud", name: "My Cloud", origin: CLOUD }, { id: "vps", name: "VPS", origin: OTHER },
+        { id: "own", name: "Client A", origin: OWN, cloud: { id: "c-a", role: "owner" } }],
       activeId,
     };
   };
@@ -149,7 +153,7 @@ function bridgeFor(origin, { clicked = false, rule = null } = {}) {
 
 it("My Cloud's page gets the update bridge, and it restarts the app only on the person's click", async () => {
   const local = bridgeFor(LOCAL);
-  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState"]);
+  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
   expect(local.asked, "this computer's page has the whole bridge without asking").toEqual([]);
   await local.bridge.updater.install();
   expect(local.invoked).toEqual([["update:install"]]);
@@ -157,7 +161,7 @@ it("My Cloud's page gets the update bridge, and it restarts the app only on the 
   const rule = mainRule();
   rule.show(page(CLOUD), "cloud");
   const cloud = bridgeFor(CLOUD, { rule });
-  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState"]);
+  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
   await expect(cloud.bridge.updater.install()).rejects.toThrow(/Restart to update/);
   await cloud.bridge.updater.check();
   cloud.bridge.updater.onState(() => {});
@@ -195,6 +199,22 @@ it("another server's page never gets the update bridge; My Cloud's does, even wh
   expect("updater" in bridgeFor(CLOUD).bridge).toBe(false);
 });
 
+it("another Cloud of the person's own gets the update bridge as My Cloud's page does; a server only signed in with their account does not", () => {
+  const rule = mainRule();
+  const has = (origin, activeId) => {
+    rule.show(page(origin), activeId);
+    return "updater" in bridgeFor(origin, { rule }).bridge;
+  };
+  rule.show(page(CLOUD), "cloud");
+  rule.launching();
+  const cloud = (over) => ({ id: "c-a", name: "Client A", color: null, role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: OWN, teamId: null, primary: false, managed: true, ...over });
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" }, clouds: [cloud({ id: "c-home", origin: CLOUD, primary: true }), cloud()] });
+  expect(has(OWN, "own")).toBe(true);
+  expect(has(OTHER, "vps")).toBe(false);
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" }, clouds: [cloud({ id: "c-home", origin: CLOUD, primary: true }), cloud({ runsOn: "server", managed: false })] });
+  expect(has(OWN, "own")).toBe(false);
+});
+
 it("a downloaded update installs when the app quits, except a system package, which is the person's to install", async () => {
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   const resourcesPath = process.resourcesPath;
@@ -218,6 +238,45 @@ it("a downloaded update installs when the app quits, except a system package, wh
       updater.startUpdater();
       expect(autoUpdater.autoInstallOnAppQuit, `${os} ${marker ?? image ?? ""}`).toBe(installsOnQuit);
       expect(autoUpdater.autoDownload).toBe(false);
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.resourcesPath = resourcesPath;
+    if (appImage === undefined) delete process.env.APPIMAGE;
+    else process.env.APPIMAGE = appImage;
+    rmSync(resources, { recursive: true, force: true });
+  }
+});
+
+it("a downloaded update installs by itself at a quiet moment on macOS and Windows, and Linux installs stay the person's", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const resourcesPath = process.resourcesPath;
+  const appImage = process.env.APPIMAGE;
+  const resources = mkdtempSync(join(tmpdir(), "omb-updater-quiet-"));
+  const quiet = { locked: () => true, idleMs: () => 0, typedAt: () => 0, shown: () => true, busy: () => null, work: async () => null, watch: () => {} };
+  try {
+    for (const [os, marker, image, installs] of [
+      ["darwin", null, null, true],
+      ["win32", null, null, true],
+      ["linux", null, "/home/a/OpenMausBot.AppImage", false],
+      ["linux", "deb", null, false],
+      ["linux", "rpm", null, false],
+    ]) {
+      Object.defineProperty(process, "platform", { ...platform, value: os });
+      process.resourcesPath = resources;
+      rmSync(join(resources, "package-type"), { force: true });
+      if (marker) writeFileSync(join(resources, "package-type"), marker);
+      if (image) process.env.APPIMAGE = image;
+      else delete process.env.APPIMAGE;
+      const { updater, autoUpdater, handlers } = await load(() => true);
+      updater.startUpdater(quiet);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await settle();
+      expect(autoUpdater.quitAndInstall, `${os} ${marker ?? image ?? ""} waits for a quiet moment`).not.toHaveBeenCalled();
+      expect((await handlers.get("update:get-state")({})).installsByItself, os).toBe(installs ? true : undefined);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settle();
+      expect(autoUpdater.quitAndInstall.mock.calls, `${os} ${marker ?? image ?? ""}`).toEqual(installs ? [[true, true]] : []);
     }
   } finally {
     Object.defineProperty(process, "platform", platform);
@@ -280,17 +339,17 @@ it("downloads an update by itself: the first check after launch starts it, and n
 it("My Cloud's page reads and drives the update channels, and another server's page is refused", async () => {
   const rule = mainRule();
   const { handlers } = await load(rule.pageAllowed);
-  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install"]);
+  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install", "update:seen"]);
 
   const cloud = page(CLOUD);
   rule.show(cloud, "cloud");
   for (const channel of handlers.keys()) expect(() => handlers.get(channel)(cloud.event), channel).not.toThrow();
-  rule.context.cloudAccount = { homeTarget: () => null, state: () => ({ status: "unavailable", account: { id: "a1" } }) };
+  rule.context.cloudAccount = { homeTarget: () => null, state: () => ({ status: "unavailable", account: { id: "a1" } }), isOwnCloud: () => false };
   rule.context.rememberedHome = { accountId: "a1", origin: CLOUD };
   expect(() => handlers.get("update:get-state")(cloud.event)).not.toThrow();
   rule.context.rememberedHome = { accountId: "someone-else", origin: CLOUD };
   expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
-  rule.context.cloudAccount = { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }) };
+  rule.context.cloudAccount = { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }), isOwnCloud: () => false };
 
   rule.context.desktopRemoteAccess = { endpoint: "https://companion.example.test" };
   for (const channel of handlers.keys()) expect(() => handlers.get(channel)(cloud.event), channel).toThrow(/only available/);

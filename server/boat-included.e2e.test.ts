@@ -128,7 +128,7 @@ it("once they are gone, the own key wins; clearing it falls back to the included
   writeFileSync(journal, JSON.stringify({ version: 1, requests: [] }));
   const added = await api("PUT", "/api/config", { box: { token: OWN } });
   expect(added.status, JSON.stringify(added.body)).toBe(200);
-  expect(added.body.box).toEqual({ configured: true });
+  expect(added.body.box).toEqual({ configured: true, last4: OWN.slice(-4) });
   const cleared = await api("PUT", "/api/config", { box: { token: "" } });
   expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
   expect(cleared.body.box).toEqual({ configured: true, included: true });

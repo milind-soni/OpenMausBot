@@ -1,7 +1,9 @@
-// Set me up, under a new bot's greeting. The press is answered here, with no model: the bot's own line, the button
-// gone, and the conversation marked as waiting (on its task, so a reload or another device sees it). The person's next
-// line there then runs exactly as `/setup <their words>` would (server/setup-mode.ts), while the chat shows their
-// words. Setup stays explicit: only the press, or a typed /setup, ever starts it.
+// The setup card under a new bot's greeting: "What should I help you with first?" with a few answers. Picking one
+// marks the conversation and sends its words, which run exactly as `/setup <words>` would (server/setup-mode.ts) while
+// the chat shows the words. "Something else" is answered here, with no model: the bot's own line, and the
+// conversation marked as waiting (on its task, so a reload or another device sees it); the person's next line there
+// then runs as setup. Anything else the person writes runs as typed, and the card settles. Setup stays explicit: only
+// a pick, the line after Something else, or a typed /setup ever starts it.
 import { dataContextPrompt } from "../shared/data-context.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import { linePersonKey } from "./host/thread-person.ts";
@@ -18,8 +20,8 @@ export function blankBot(bot: Pick<BotRecord, "soul" | "description">): boolean 
   return !bot.soul?.trim() && !bot.description?.trim();
 }
 
-/** The greeting whose Set me up is live in this conversation: its first line, while the bot is blank and nothing has
- * been written there yet, by anyone. The press and the person's first line also take the flag off (takeSetupRequest). */
+/** The greeting whose setup card is open in this conversation: its first line, while the bot is blank and nothing has
+ * been written there yet, by anyone. */
 export function openSetupOffer(store: SetupRequestStore, botId: string, threadId: string): Message | null {
   const bot = store.bot(botId);
   if (!bot || !blankBot(bot) || !store.taskByThread(botId, threadId)) return null;
@@ -32,6 +34,7 @@ export function openSetupOffer(store: SetupRequestStore, botId: string, threadId
 export type SetupAsk =
   | { ok: true; message: Message }
   | { ok: true; already: true }
+  | { ok: true; picked: true }
   | { ok: false; status: 404 | 409; error: string };
 
 const HAS_INSTRUCTIONS = "This bot already has instructions. To change its job, type /setup and what you'd like it to do.";
@@ -45,8 +48,10 @@ export function setupPresser(shared: boolean, auth: RequestAuth, sender: Resolve
 }
 
 /** The press. A second press by the same person while the conversation waits changes nothing, so a double click says
- * the line once; anyone else's is refused. `by`: who pressed (setupPresser); only their next line takes the mark. */
-export function askForSetup(store: SetupRequestStore, botId: string, threadId: string, language: string | undefined, by?: string): SetupAsk {
+ * the line once; anyone else's is refused. `by`: who pressed (setupPresser); only their next line takes the mark.
+ * `picked`: a choice on the card, whose words the caller sends next, so the bot's own line is not said. */
+export function askForSetup(store: SetupRequestStore, botId: string, threadId: string, language: string | undefined, by?: string,
+  picked = false): SetupAsk {
   const bot = store.bot(botId);
   const task = bot ? store.taskByThread(botId, threadId) : null;
   if (!bot || !task) return { ok: false, status: 404, error: "There is no such conversation." };
@@ -55,19 +60,25 @@ export function askForSetup(store: SetupRequestStore, botId: string, threadId: s
   }
   const offer = openSetupOffer(store, botId, threadId);
   if (!offer) return { ok: false, status: 409, error: blankBot(bot) ? STARTED : HAS_INSTRUCTIONS };
-  store.patchMessage(threadId, offer.id, { setupOffer: undefined });
+  if (picked) {
+    store.patchTask(botId, threadId, { setupRequest: { at: Date.now(), ...(by ? { by } : {}) } });
+    return { ok: true, picked: true };
+  }
   const message = store.appendMessage(threadId, { role: "bot", kind: "text", text: setupRequestLine(language) });
   store.patchTask(botId, threadId, { setupRequest: { at: message.at, ...(by ? { by } : {}) } });
   return { ok: true, message };
 }
 
-/** The x on the chip: the conversation stops waiting. Where a presser is recorded, only they or an owner or admin may. */
+/** The x on the chip or on the card: the conversation stops waiting and the card closes, so lines run as typed. Where
+ * a presser is recorded, only they or an owner or admin may. */
 export function cancelSetupRequest(store: SetupRequestStore, botId: string, threadId: string, by?: string,
   options: { admin?: boolean } = {}): "cleared" | "refused" | "unknown" {
   const task = store.bot(botId) ? store.taskByThread(botId, threadId) : null;
   if (!task) return "unknown";
   if (task.setupRequest?.by && task.setupRequest.by !== by && !options.admin) return "refused";
   if (task.setupRequest) store.patchTask(botId, threadId, { setupRequest: undefined });
+  const greeting = store.messagesFor(threadId)[0];
+  if (greeting?.setupOffer) store.patchMessage(threadId, greeting.id, { setupOffer: undefined });
   return "cleared";
 }
 
@@ -113,8 +124,6 @@ export function takeSetupRequest(store: SetupRequestStore, turn: SetupTurn): Mes
     return command(line) || (author && editor && author !== editor) ? null : mark(store, threadId, line, turn.mounted);
   }
   if (!turn.person || line.relayed) return null;
-  const greeting = store.messagesFor(threadId)[0];
-  if (greeting?.setupOffer) store.patchMessage(threadId, greeting.id, { setupOffer: undefined });
   const waiting = store.taskByThread(botId, threadId)?.setupRequest;
   if (!waiting) return null;
   // Someone else in a shared place: their line runs as typed and the presser's request keeps waiting.

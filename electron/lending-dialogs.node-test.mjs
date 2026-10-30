@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-import { sharedCuaConnection } from "./shared-cua-connection.mjs";
-import { installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
 import { createLendingDialogs, serverAccessDetail } from "./lending-dialogs.mjs";
 
 function fakeDialog({ response = 1, picked = { canceled: true, filePaths: [] } } = {}) {
@@ -80,23 +78,6 @@ test("a server's computer access is allowed only by the dialog's own Allow, and 
   assert.match(quiet[2], /^Computer control: can view your screen/);
 });
 
-test("Apps and screen is lent only by the dialog's own button, and never with no window to ask in", async () => {
-  for (const window of [() => null, () => ({ isDestroyed: () => true })]) {
-    const { dialog, calls } = fakeDialog({ response: 0 });
-    assert.equal(await createLendingDialogs({ dialog, window, validate: named }).confirmScreen(), false);
-    assert.equal(calls.length, 0);
-  }
-  for (const response of [0, 1, -1]) {
-    const win = liveWindow(), { dialog, calls } = fakeDialog({ response });
-    const { confirmScreen } = createLendingDialogs({ dialog, window: () => win, validate: named });
-    assert.equal(await confirmScreen(), response === 0);
-    const [[, parent, options]] = calls;
-    assert.equal(parent, win);
-    assert.equal(options.message, "Let your bots on My Cloud use your apps and screen?");
-    assert.deepEqual([options.type, options.buttons, options.defaultId, options.cancelId], ["warning", ["Lend apps and screen", "Cancel"], 1, 1]);
-  }
-});
-
 const MAIN = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 function mainSection(start, end) {
   const from = MAIN.indexOf(start), to = MAIN.indexOf(end, from);
@@ -104,43 +85,31 @@ function mainSection(start, end) {
   return MAIN.slice(from, to);
 }
 
-function mainLending({ response }) {
+function mainSharing({ response }) {
   const handlers = new Map(), saved = [], win = liveWindow();
   const { dialog, calls } = fakeDialog({ response, picked: { canceled: false, filePaths: ["/Users/me/Plans"] } });
-  const cloud = { id: "cloud", name: "My Cloud", origin: "https://cloud.example.test" };
   const team = { id: "team", name: "Team server", origin: "https://team.example.test" };
-  let cloudState = { enabled: true, connected: true, folders: [], screen: false, internet: true };
-  const passThrough = (_channel, handler) => handler;
   const context = vm.createContext({
-    createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, sharedCuaConnection, isHomeFolder: async () => false,
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: passThrough, cloudPageAsking: () => "cloud",
-    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua", mcpArgs: ["mcp"] }), localComputerReady: () => false, process: { platform: "darwin" },
-    stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" },
-    sharingController: () => ({
-      identity: async () => ({ id: "info" }),
-      save: async (env, grant, info) => { saved.push(["server", env.id, grant, info]); },
-      saveCloud: async (env, choice) => { saved.push(["cloud", env.id, choice]); cloudState = { ...cloudState, ...choice }; },
-      cloudState: () => cloudState, activity: () => [],
-    }),
+    createLendingDialogs, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: (_channel, handler) => handler,
+    requireSharedComputers: async () => {}, savedWorkspace: () => team,
+    sharingController: () => ({ identity: async () => ({ id: "info" }), save: async (env, grant, info) => { saved.push([env.id, grant, info]); } }),
   });
   vm.runInContext(mainSection("const lendingDialogs = createLendingDialogs(", 'ipcMain.handle("sharing:revoke"')
     + mainSection('ipcMain.handle("sharing:save"', "const cloudSync = installCloudFiles("), context);
   return { handlers, saved, calls };
 }
 
-test("main asks in its own dialog before a server or My Cloud's page gets this computer, and Cancel saves nothing", async () => {
-  const cancelled = mainLending({ response: 1 });
+test("main asks in its own dialog before a server gets this computer, and Cancel saves nothing", async () => {
+  const cancelled = mainSharing({ response: 1 });
   assert.equal(await cancelled.handlers.get("sharing:save")({}, "team", { folders: [{ path: "/Users/me/Plans", write: true }], terminal: true }), null);
-  assert.equal(await cancelled.handlers.get("cloud-lending:screen")({}, true).then((page) => page.screen), false);
-  assert.deepEqual(cancelled.calls.map(([kind, , options]) => [kind, options.message]), [["message", "Allow computer access for Team server?"], ["message", "Let your bots on My Cloud use your apps and screen?"]]);
+  assert.deepEqual(cancelled.calls.map(([kind, , options]) => [kind, options.message]), [["message", "Allow computer access for Team server?"]]);
   assert.deepEqual(cancelled.saved, []);
 
-  const allowed = mainLending({ response: 0 });
+  const allowed = mainSharing({ response: 0 });
   await allowed.handlers.get("sharing:save")({}, "team", { folders: [{ path: "/Users/me/Plans", write: true }], terminal: true });
-  assert.equal(await allowed.handlers.get("cloud-lending:screen")({}, true).then((page) => page.screen), true);
-  assert.deepEqual(allowed.saved.map(([where, id]) => [where, id]), [["server", "team"], ["cloud", "cloud"]]);
-  assert.deepEqual(JSON.parse(JSON.stringify(allowed.saved[0][2])), { folders: [{ path: "/Users/me/Plans", write: true, name: "Plans" }], terminal: true, computer: false });
-  assert.equal(allowed.saved[1][2].screen, true);
+  assert.deepEqual(allowed.saved.map(([id]) => id), ["team"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(allowed.saved[0][1])), { folders: [{ path: "/Users/me/Plans", write: true, name: "Plans" }], terminal: true, computer: false });
   const folder = await allowed.handlers.get("sharing:folder")({});
   assert.deepEqual({ path: folder.path, write: folder.write }, { path: "/Users/me/Plans", write: false });
   assert.equal(allowed.calls.at(-1)[2].title, "Choose a folder or drive to share");

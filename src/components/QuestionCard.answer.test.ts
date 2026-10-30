@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, type Message, type useStore } from "@/state/store";
 import type { AskQuestion } from "../../shared/ask-question";
-import { answersInOneTap, initialDraft, QuestionCard } from "./QuestionCard";
+import { answersInOneTap, QuestionCard } from "./QuestionCard";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,21 +17,18 @@ let host: HTMLDivElement;
 let root: Root;
 const dispatch = vi.fn();
 
-function mount(questions: AskQuestion[]) {
-  const message = {
-    id: "m1", role: "bot", kind: "options", at: 1,
-    card: { title: "Your bot has a question", subtitle: questions[0]!.question, options: [], requestId: "req-1", questionRequest: { version: 1, questions } },
-  } as unknown as Message;
-  const store = { state: {}, dispatch } as unknown as ReturnType<typeof useStore>;
-  act(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(QuestionCard, { threadId: "t1", bot: { name: "Dev" }, message }) })));
+const card = (questions: AskQuestion[], over: Partial<NonNullable<Message["card"]>> = {}) => ({
+  id: "m1", role: "bot", kind: "options", at: 1,
+  card: { title: "Your bot has a question", subtitle: questions[0]!.question, options: [], requestId: "req-1", requestType: "question", questionRequest: { version: 1, questions }, ...over },
+}) as unknown as Message;
+
+function mount(message: Message) {
+  const store = { state: { bots: [] }, dispatch } as unknown as ReturnType<typeof useStore>;
+  act(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(QuestionCard, { threadId: "t1", asker: { name: "Dev", color: "teal" }, message }) })));
 }
 
-// An option row reads "A" (its key badge) then the label, so match the label at the end.
-const button = (label: string) =>
-  Array.from(host.querySelectorAll("button")).find((element) => {
-    const text = element.textContent?.trim() ?? "";
-    return text === label || (element.hasAttribute("data-ask-choice") && text.slice(1) === label);
-  })!;
+const button = (label: string) => Array.from(host.querySelectorAll("button")).find((element) => element.textContent?.trim() === label);
+const choice = (label: string) => Array.from(host.querySelectorAll<HTMLButtonElement>("[data-ask-choice]")).find((element) => element.textContent?.trim() === label)!;
 
 function type(field: HTMLTextAreaElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
@@ -66,48 +63,51 @@ describe("answersInOneTap", () => {
     expect(answersInOneTap([checks])).toBe(false);
     expect(answersInOneTap([name])).toBe(false);
   });
-
-  it("opens the text field from the start only for a question with nothing to pick", () => {
-    expect(initialDraft(name).other).toBe(true);
-    expect(initialDraft(plan).other).toBe(false);
-  });
 });
 
 describe("QuestionCard answered in one step", () => {
-  it("sends a single pick right away and folds into one line", () => {
-    mount([plan]);
+  it("sends a pick at once, shows it on its way while the others wait, and settles when it lands", () => {
+    mount(card([plan]));
     expect(button("Submit answer")).toBeUndefined();
-    act(() => button("Pro").click());
+    act(() => choice("Pro").click());
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch.mock.calls[0]![0]).toMatchObject({ type: "decideRequest", requestId: "req-1", behavior: "answer" });
+    expect(dispatch.mock.calls[0]![0]).toMatchObject({ type: "decideRequest", threadId: "t1", requestId: "req-1", behavior: "answer" });
     expect(dispatch.mock.calls[0]![0].message).toContain("A: Pro");
-    expect(host.querySelector('[data-ask-card="settled"]')?.textContent).toContain("Choose a plan · Pro");
+    expect(choice("Pro").getAttribute("aria-busy")).toBe("true");
+    expect(choice("Free").disabled).toBe(true);
+    act(() => choice("Free").click());
+    expect(dispatch, "one answer at a time").toHaveBeenCalledTimes(1);
+    mount(card([plan], { answered: "answer", answeredText: "The user answered your questions.\n\nQ: Which plan should the workspace use?\nA: Pro" }));
+    expect(host.querySelector('[data-ask-card="settled"]')?.textContent).toContain("You chose: Pro");
   });
 
-  it("sends a single pick from its letter key too", () => {
-    mount([plan]);
+  it("takes no letter key: a choice is pressed", () => {
+    mount(card([plan]));
     press(host.querySelector('[role="radio"]')!, { key: "b" });
-    expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch.mock.calls[0]![0].message).toContain("A: Pro");
+    press(host.querySelector('[data-ask-card="pending"]')!, { key: "a" });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("waits for Submit or Enter when they type their own answer", () => {
-    mount([plan]);
+  it("sends the person's own words from Something else on Enter", () => {
+    mount(card([plan]));
     const field = host.querySelector("textarea")!;
     type(field, "Enterprise");
     expect(dispatch).not.toHaveBeenCalled();
-    act(() => button("Submit answer").click());
+    press(field, { key: "Enter" });
     expect(dispatch.mock.calls[0]![0].message).toContain("A: Enterprise");
   });
 
-  it("does not send a multi-select pick on its own", () => {
-    mount([checks]);
-    act(() => button("Lint").click());
+  it("collects several picks and sends them with Done", () => {
+    mount(card([checks]));
+    act(() => choice("Lint").click());
+    act(() => choice("Unit tests").click());
     expect(dispatch).not.toHaveBeenCalled();
+    act(() => button("Done")!.click());
+    expect(dispatch.mock.calls[0]![0].message).toContain("A: Lint, Unit tests");
   });
 
   it("answers an open question in a text field: Shift+Enter breaks the line, Enter sends", () => {
-    mount([name]);
+    mount(card([name]));
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
     const field = host.querySelector("textarea")!;
     expect(field.getAttribute("dir")).toBe("auto");
@@ -120,31 +120,38 @@ describe("QuestionCard answered in one step", () => {
   });
 
   it("sends nothing from an empty open question", () => {
-    mount([name]);
+    mount(card([name]));
     press(host.querySelector("textarea")!, { key: "Enter" });
     expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("keeps options-only questions one-tap without a text field", () => {
-    mount([{ ...plan, custom: false }]);
+    mount(card([{ ...plan, custom: false }]));
     expect(host.querySelector("textarea, input")).toBeNull();
-    act(() => button("Pro").click());
+    act(() => choice("Pro").click());
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch.mock.calls[0]![0].message).toContain("A: Pro");
   });
 
-  it("restores the choices after a failed answer so it can be retried", () => {
-    mount([plan]);
-    act(() => button("Pro").click());
+  it("says when an answer did not go, and takes another", () => {
+    mount(card([plan]));
+    act(() => choice("Pro").click());
     act(() => dispatch.mock.calls[0]![0].onError());
-    expect(host.querySelector('[data-ask-card="pending"]')).not.toBeNull();
-    act(() => button("Free").click());
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Couldn't send your answer. Try again.");
+    expect(choice("Free").disabled).toBe(false);
+    act(() => choice("Free").click());
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(dispatch.mock.calls[1]![0].message).toContain("A: Free");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("sends ask_user's plain pick as the label itself", () => {
+    mount(card([plan], { questionRequest: undefined, subtitle: "Soll ich?", options: ["Ja, nur den Abschlusstext", "Nein"] }));
+    act(() => choice("Ja, nur den Abschlusstext").click());
+    expect(dispatch.mock.calls[0]![0]).toMatchObject({ type: "decideRequest", behavior: "answer", message: "Ja, nur den Abschlusstext" });
   });
 
   it("does not send Enter while an IME composition is active", () => {
-    mount([name]);
+    mount(card([name]));
     const field = host.querySelector("textarea")!;
     type(field, "新项目");
     press(field, { key: "Enter", isComposing: true });
