@@ -353,11 +353,11 @@ inbox is unread.
 
 | What | Line | It answers back to |
 |---|---|---|
-| `message_person` ("tell Marco that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |
-| @Marco in a teammate's line, anywhere (only their words travel) | the line or paragraph, `"message"` | the teammate's own inbox |
-| @Marco in a bot's settled reply, where Marco can see it | the same | that bot, in that conversation |
-| a question or approval routed to Marco (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
-| a routine's report or a failure routed to Marco | the report, `"result"` / `"notice"` | nothing |
+| `message_person` ("tell Ben that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |
+| @Ben in a teammate's line, anywhere (only their words travel) | the line or paragraph, `"message"` | the teammate's own inbox |
+| @Ben in a bot's settled reply, where Ben can see it | the same | that bot, in that conversation |
+| a question or approval routed to Ben (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
+| a routine's report or a failure routed to Ben | the report, `"result"` / `"notice"` | nothing |
 
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
@@ -370,9 +370,9 @@ person types while the bot waits on its own question card answers that card, as 
 card or to its copy.
 
 **Answering is replying.** A reply to a line (the chat's Reply) goes back as the table says, and the inbox's bot takes no
-turn for it; the line records the answer and a "Told Philipp" chip follows it. A bot that asked carries on: its
-conversation gets a line from the inbox's bot, "Marco replied to your message ("…"): …" (`relay.kind: "reply"`), which
-starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Philipp yes") works
+turn for it; the line records the answer and a "Told Cleo" chip follows it. A bot that asked carries on: its
+conversation gets a line from the inbox's bot, "Ben replied to your message ("…"): …" (`relay.kind: "reply"`), which
+starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Cleo yes") works
 too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line. A 👍
 or 👎 on a line answers it the same way, with that emoji.
 
@@ -397,7 +397,7 @@ newest line that needed the person (`InboxView.anchor`) and updates in place. Th
 `inboxChangedAt`, which moves whenever the list changes; a client showing the list reads it again then.
 
 **The representative.** When a message asks something a fact the person already shares with the team answers, their
-inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Marco's
+inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Ben's
 assistant answered …" (`relay.kind: "assistant"`), and the line shows the question, the answer and that a reply corrects
 it, with the one notification saying so. What it reads is built by the server, never chosen by a model:
 
@@ -412,7 +412,7 @@ It has **no tools**: one text call on its bot's engine (`SideJob` `"representati
 process). Its answer must be JSON `{"answer"}` or `{"wait": true}`; anything else waits. Code holds back what only the
 person can say, before any model call: anything not a question, and a question that decides, approves, agrees, promises,
 commits, books, sends or shares, reaches outside the team, or asks about something private (English and German words);
-and after it, an answer that speaks for the person's will ("Marco will…", "approved"). Asks and approvals never reach it,
+and after it, an answer that speaks for the person's will ("Ben will…", "approved"). Asks and approvals never reach it,
 nor tags of the person in a teammate's words that are not a question.
 
 **Refused, in words a bot repeats:** someone who left ("Carl has left Acme…"), nobody of that name (the people are
