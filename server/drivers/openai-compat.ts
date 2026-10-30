@@ -1,6 +1,7 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
@@ -16,6 +17,17 @@ const idleTimeoutMs = () => {
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= 1_000 && value <= 2_147_483_647 ? value : DEFAULT_IDLE_TIMEOUT_MS;
 };
+const LIVENESS_EVERY_MS = 30_000;
+const livenessEveryMs = () => {
+  const value = Number(process.env.OPENMAUS_OPENAI_COMPAT_PROBE_MS);
+  return Number.isSafeInteger(value) && value >= 100 ? value : LIVENESS_EVERY_MS;
+};
+/** Ollama, LM Studio or llama.cpp on this machine or a home or office network: asking it for its models is free. */
+export function onThisNetwork(url: string): boolean {
+  let host: string;
+  try { host = new URL(url).hostname.replace(/^\[|\]$/g, ""); } catch { return false; }
+  return isLoopback(host) || host.endsWith(".local") || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) || /^f[cd][0-9a-f]{2}:/i.test(host);
+}
 const DEFAULT_MODELS: ModelCatalog = {
   default: "meta-llama/llama-3.3-70b-instruct",
   options: [
@@ -286,6 +298,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
+      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs() } : {}),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,

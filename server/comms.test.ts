@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
@@ -101,6 +101,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
   let gateFile = "";
+  // While it exists the plain helper holds every prompt unanswered (FAKE_ACP_HOLD_FILE).
+  let holdFile = "";
   let stderr = "";
   // A loopback OpenAI-compatible engine under the workspace key: a request hangs until the engine is replaced ("hang"),
   // answers "ping from fake", loops on tool calls ("steps"), or is rate-limited ("limit").
@@ -190,6 +192,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-comms-test-"));
     gateFile = join(home, "helper-gate");
+    holdFile = join(home, "helper-hold");
     const antigravityDirectory = join(home, "fake-antigravity");
     const antigravityCli = join(antigravityDirectory, "agy_acp_server.ts");
     const antigravityHarness = join(
@@ -250,7 +253,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
           // Plain helpers: a helper that consulted in turn would recurse until the depth limit.
           helper: {
             driver: "grokAgent",
-            environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: join(home, "helper.json"), FAKE_ACP_DUMP_PROMPT: "1" },
+            environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: join(home, "helper.json"), FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_HOLD_FILE: holdFile },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // a helper that lists the tools of every MCP server its turn was
@@ -382,6 +385,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     expect((await api("PATCH", `/api/bots/${starter.id}`, { name: "Comms fixture starter" })).status).toBe(200);
   }, 30_000);
 
+  afterEach(() => rmSync(holdFile, { force: true }));
+
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
     compat.closeAllConnections();
@@ -405,6 +410,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const helper = await named("Helper", { modelSelection: HELPER });
       const asker = await named("Asker", { modelSelection: ASKER });
 
+      // The helper answers at once, and the run's wait could end between two looks: it holds its answer until the wait is seen.
+      writeFileSync(holdFile, "hold");
       const send = await startRoutine(asker.id, "hey @Helper ping");
       expect(send.status).toBe(201);
       const run = send.body.run;
@@ -423,6 +430,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const [consult] = assignments(helper.id, asker.id);
       expect(consult).toMatchObject({ mode: "consult", reply: "resume", text: "ping from fake" });
       expect(rows().find((node) => node.id === consult.parentId)).toMatchObject({ threadId: run.threadId, botId: asker.id });
+      expect((await runState(run.id)).status).toBe("waiting");
+      rmSync(holdFile);
 
       await waitUntil(async () => {
         askerBot = await bot(asker.id);

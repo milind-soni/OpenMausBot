@@ -70,7 +70,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
           </>
         ) : (
           <>
-            <textarea autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={3} placeholder={t("automations.newBox.placeholder")}
+            <textarea autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={3} aria-label={t("automations.newBox.title")} placeholder={t("automations.newBox.placeholder")}
               onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }}
               className="mt-4 w-full resize-none rounded-xl border border-hairline/60 bg-inset px-3.5 py-3 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" />
             {bots.length === 0 && <p className="mt-2 text-[13px] text-warning">{t("automations.newBox.noBots")}</p>}

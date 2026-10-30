@@ -100,7 +100,7 @@ describe("the organization library in the real renderer", () => {
     await evidence("org-library-shelf.png");
 
     await click("Details of Sales desk");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Included skills — switched on");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Included skills (switched on)");
     expect(await snapshot()).toContain("Skills arrive switched on and routines paused");
     await evidence("org-library-preview.png");
     await click("Back to templates");
