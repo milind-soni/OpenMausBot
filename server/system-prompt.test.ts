@@ -108,6 +108,8 @@ describe("buildSystemPrompt", () => {
     expect(built.text).toContain("@Fig");
 
     expect(built.stable).toBe(`You are Kiwi. Search past sessions.${REPLY_HABITS_PROMPT}`);
+    // A German person once read "Now the edits." between a bot's German lines: every line they see is in their language.
+    expect(REPLY_HABITS_PROMPT).toContain("in the language they use with you, including a short note between steps and a message you pass on for them");
     expect(built.volatile).toContain("likes tea");
     expect(built.volatile).toContain("@Fig");
     expect(built.volatile).toContain("today 20:48");
