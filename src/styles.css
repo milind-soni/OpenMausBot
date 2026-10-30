@@ -228,8 +228,9 @@
 :root {
   --code-color-scheme: dark;
   /* ink carried by a filled accent / danger surface (see the rule at the
-     bottom of this file, which is what makes them take effect) */
-  --color-accent-ink: #ffffff;
+     bottom of this file, which is what makes them take effect). Midnight's
+     values: dark ink on the #1084fe fill, 5.17:1 (white was 3.65:1) */
+  --color-accent-ink: #111111;
   --color-danger-ink: #ffffff;
   /* ink carried by the user's own bubble. A hex rather than the ink token so
      the contrast check can measure it; every dark skin repeats its ink here. */
@@ -246,10 +247,11 @@
    (rather than relying on the `@theme` defaults) so that a `[data-skin]`
    subtree can switch *back* to it — the picker needs that.
 
-   Two upstream contrast gaps are preserved deliberately, because this skin's
-   job is to be the original: white on the accent fill measures 3.65:1 and
-   white on the danger fill 3.32:1, both short of AA for the 13–15px labels
-   they carry. Atelier and Foundry fix this via --color-accent-ink.
+   This skin's job is to be the original, so its colors stay upstream's. Its
+   accent fill keeps the upstream blue and carries dark ink (5.17:1; white
+   measured 3.65:1), the way Foundry fixes its brass fill via
+   --color-accent-ink. One upstream gap is preserved deliberately: white on
+   the danger fill, 3.10:1.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="midnight"] {
   --code-color-scheme: dark;
@@ -272,7 +274,7 @@
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
   --color-accent-text: #7fc0ff;
-  --color-accent-ink: #ffffff;
+  --color-accent-ink: #111111;        /* 5.17:1 on the blue fill; white was 3.65:1 */
   --color-bubble-user: #5a5a5a;
   --color-bubble-user-ink: #f5f5f5;   /* = ink: unchanged */
   --color-success: #38d591;
@@ -2501,10 +2503,24 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
    rules out any skin whose accent is meant to glow. Rather than edit twenty
    components, the ink is taken from a token here; `text-white` and this rule
    have equal specificity, and this file is loaded after Tailwind's utilities.
-   Midnight sets the token to #ffffff, so its rendering is unchanged.
+   Midnight sets the token to dark ink (5.17:1 on its upstream blue).
    ───────────────────────────────────────────────────────────────────────── */
 .bg-accent {
   color: var(--color-accent-ink);
+}
+/* The accent as TEXT (`text-accent`, ~140 call sites: links, senders, pills,
+   "Voltar") reads the accent's text tone. The accent is a fill colour: on the
+   dark skins it sank to 2.6–4.1:1 as text on panels and cards (Graphite,
+   Dusk, Midnight's card), while --color-accent-text clears 4.5:1 on app,
+   panel and card in every skin (pnpm check:contrast). One rule instead of
+   140 edits, same mechanism as the fills above. */
+.text-accent {
+  color: var(--color-accent-text);
+}
+@media (hover: hover) {
+  .hover\:text-accent:hover {
+    color: var(--color-accent-text);
+  }
 }
 .bg-danger {
   color: var(--color-danger-ink);
