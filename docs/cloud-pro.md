@@ -582,9 +582,12 @@ the person's own uses this computer by itself while the desktop app runs and is
 signed in as them (`lendAutomatically` in `electron/computer-sharing.mjs`): My
 Cloud and each other Cloud the verified session lists as theirs
 (`createLendingTarget` in `electron/lending-target.mjs`), never a Team Cloud and
-never a server that only signed in with their account. Other users (desktop only,
-self-hosted, hosted team workspaces) keep computer sharing exactly as before: off
-unless a maintainer sets `features.sharedComputers` by hand.
+never a server that only signed in with their account. A server of the person's
+own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
+is lent the same way, last, once the move is done and while that server says it
+is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
+keep computer sharing exactly as before: off unless a maintainer sets
+`features.sharedComputers` by hand.
 
 ### What each Cloud gets
 

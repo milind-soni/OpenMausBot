@@ -34,6 +34,9 @@ export interface RailPlace {
   ended?: true;
   /** Its owner may take this Cloud off their list (it ended, or was never paid for): its menu offers Remove from list. */
   removable?: true;
+  /** A server of the person's own, theirs alone by its own word, that this computer's bots may move to: its menu offers
+   * Make … my home. */
+  makeHome?: true;
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings, and
  * a new organization on the Team plan this account pays for (absent from an older app's main). */
@@ -65,5 +68,5 @@ export type AddCloudView =
   };
 export declare const RAIL_MIN_PLACES: number;
 /** main's own circles: each as the page sees it, plus the Cloud main acts on for it (never sent to a page). */
-export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown }): Array<RailPlace & { cloudId?: string }>;
+export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean }): Array<RailPlace & { cloudId?: string }>;
 export declare function addCloudView(state: unknown, offer: import("./cloud-home.mjs").CloudOffer | null): AddCloudView;
