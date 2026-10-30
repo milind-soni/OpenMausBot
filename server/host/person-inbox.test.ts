@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Notification } from "../../shared/notification.ts";
-import { ADA, key, MARCO, PHILIPP, session, teamInbox } from "../testing/team-inbox-fixture.ts";
+import { ADA, key, BEN, CLEO, session, teamInbox } from "../testing/team-inbox-fixture.ts";
 import { PERSON_INBOX_FILE } from "./person-inbox.ts";
 
 const fixtures: Array<ReturnType<typeof teamInbox>> = [];
@@ -15,13 +15,13 @@ const ask = (botId: string, botName: string, threadId: string, kind: Notificatio
 const card = (requestId: string) => ({ title: "Run a command?", subtitle: "rm -rf ./build", options: ["Allow", "Deny"], requestId, tool: "Bash", requestType: "permission" as const });
 
 describe("asks routed to a person", () => {
-  it("copies an approval Marco owns into his inbox, sends the one notification from there, and answers the copy where it was asked", () => {
+  it("copies an approval Ben owns into his inbox, sends the one notification from there, and answers the copy where it was asked", () => {
     const f = fixture();
     f.bots.find((bot) => bot.id === "reporter")!.tasks.push({ threadId: "rep-shared", title: "Weekly numbers" });
     const asked = f.store.appendMessage("rep-shared", { role: "bot", kind: "options", text: "Run a command?", card: card("req-1") });
     const sent = f.team.route(ask("reporter", "Reporter", "rep-shared"));
-    const inbox = f.inboxOf(MARCO);
-    expect(sent).toEqual({ kind: "approval", botId: "marcos-chief", botName: "Marco's Chief", threadId: inbox.threadId, title: "Reporter needs approval", body: "Run: rm -rf ./build", forPerson: key(MARCO.email) });
+    const inbox = f.inboxOf(BEN);
+    expect(sent).toEqual({ kind: "approval", botId: "bens-chief", botName: "Ben's Chief", threadId: inbox.threadId, title: "Reporter needs approval", body: "Run: rm -rf ./build", forPerson: key(BEN.email) });
     const copy = f.lines(inbox.threadId)[0]!;
     expect(copy).toMatchObject({ kind: "options", card: card("req-1"), inbox: { kind: "ask", from: { name: "Reporter", botId: "reporter" }, origin: { threadId: "rep-shared", title: "Weekly numbers" } } });
     expect(f.team.inbox.answeredIn(inbox.threadId, "req-1")).toBe("rep-shared");
@@ -35,7 +35,7 @@ describe("asks routed to a person", () => {
 
   it("leaves an ask in the person's own chat where they are, an Admins' ask and anything not an ask as they are", () => {
     const f = fixture();
-    const own = ask("scout", "Scout", "marco-private");
+    const own = ask("scout", "Scout", "ben-private");
     expect(f.team.route(own)).toBe(own);
     const mainChief = { id: "nobodys", name: "Nobody's", color: "silver" as const, threadId: "n-main", tasks: [{ threadId: "n-main", title: "Nobody's" }] };
     f.bots.push(mainChief);
@@ -43,27 +43,27 @@ describe("asks routed to a person", () => {
     expect(f.team.route(admins)).toBe(admins);
     const done: Notification = { kind: "done", botId: "scout", botName: "Scout", threadId: "scout-main", title: "Scout finished", body: "Done." };
     expect(f.team.route(done)).toBe(done);
-    expect(f.team.inbox.home(key(MARCO.email))).not.toBeNull();
-    expect(f.lines(f.inboxOf(MARCO).threadId)).toEqual([]);
+    expect(f.team.inbox.home(key(BEN.email))).not.toBeNull();
+    expect(f.lines(f.inboxOf(BEN).threadId)).toEqual([]);
   });
 
   it("brings a routine's report and its failures, even from the person's own chat, and labels where they came from", () => {
     const f = fixture();
-    const report: Notification = { kind: "done", botId: "scout", botName: "Scout", threadId: "marco-private", title: "Scout finished", body: "Daily digest: 3 new leads." };
+    const report: Notification = { kind: "done", botId: "scout", botName: "Scout", threadId: "ben-private", title: "Scout finished", body: "Daily digest: 3 new leads." };
     const sent = f.team.route(report, { routine: true });
-    const inbox = f.inboxOf(MARCO);
-    expect(sent).toMatchObject({ kind: "done", threadId: inbox.threadId, forPerson: key(MARCO.email), title: "Scout finished" });
-    expect(f.lines(inbox.threadId)[0]).toMatchObject({ text: "Daily digest: 3 new leads.", inbox: { kind: "result", origin: { threadId: "marco-private", title: "Marco and Scout" } } });
+    const inbox = f.inboxOf(BEN);
+    expect(sent).toMatchObject({ kind: "done", threadId: inbox.threadId, forPerson: key(BEN.email), title: "Scout finished" });
+    expect(f.lines(inbox.threadId)[0]).toMatchObject({ text: "Daily digest: 3 new leads.", inbox: { kind: "result", origin: { threadId: "ben-private", title: "Ben and Scout" } } });
     f.team.route({ kind: "routine-failed", botId: "reporter", botName: "Reporter", threadId: "rep-main", title: "Reporter's routine failed", body: "Timed out" });
     expect(f.lines(inbox.threadId)[1]).toMatchObject({ inbox: { kind: "notice", from: { name: "Reporter" } } });
   });
 
-  it("brings work handed on from Marco's chat that waits on him, though it runs in a chat of his own", () => {
-    const f = fixture({ handed: { "marco-private": "mc-main" } });
-    const sent = f.team.route(ask("scout", "Scout", "marco-private", "question"));
-    const inbox = f.inboxOf(MARCO);
-    expect(sent).toMatchObject({ kind: "question", threadId: inbox.threadId, forPerson: key(MARCO.email) });
-    expect(f.lines(inbox.threadId)[0]).toMatchObject({ inbox: { kind: "ask", from: { name: "Scout" }, origin: { threadId: "marco-private" } } });
+  it("brings work handed on from Ben's chat that waits on him, though it runs in a chat of his own", () => {
+    const f = fixture({ handed: { "ben-private": "mc-main" } });
+    const sent = f.team.route(ask("scout", "Scout", "ben-private", "question"));
+    const inbox = f.inboxOf(BEN);
+    expect(sent).toMatchObject({ kind: "question", threadId: inbox.threadId, forPerson: key(BEN.email) });
+    expect(f.lines(inbox.threadId)[0]).toMatchObject({ inbox: { kind: "ask", from: { name: "Scout" }, origin: { threadId: "ben-private" } } });
   });
 
   it("does nothing off a team", () => {
@@ -89,8 +89,8 @@ describe("what still waits on the person", () => {
     f.store.patchTask = (botId, threadId, patch) => { if (patch.unread) counted.push(f.team.inbox.openAsks(threadId)); return patchTask(botId, threadId, patch); };
     const approval = asked(f, "rep-shared", "req-1");
     const choice = asked(f, "rep-weekly", "req-2", question("req-2"));
-    const inbox = f.inboxOf(MARCO).threadId;
-    expect(counted, "the inbox goes out to Marco with each new ask already counted").toEqual([1, 2]);
+    const inbox = f.inboxOf(BEN).threadId;
+    expect(counted, "the inbox goes out to Ben with each new ask already counted").toEqual([1, 2]);
     expect(f.team.inbox.openAsks(inbox)).toBe(2);
     expect(f.team.inbox.wire(inbox)).toEqual({ inbox: true, openAsks: 2, inboxChangedAt: expect.any(Number) });
     f.store.patchMessage("rep-shared", approval.id, { card: { ...card("req-1"), answered: "allow" } });
@@ -105,10 +105,10 @@ describe("what still waits on the person", () => {
 
   it("never counts what is only news: a message, a routine's report or a failure", () => {
     const f = fixture();
-    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
-    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "marco-private", title: "Scout finished", body: "Daily digest: 3 new leads." }, { routine: true });
+    f.team.pass("scout", "cleo-private", "Ben", "Can you review the deck?");
+    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "ben-private", title: "Scout finished", body: "Daily digest: 3 new leads." }, { routine: true });
     f.team.route({ kind: "routine-failed", botId: "reporter", botName: "Reporter", threadId: "rep-main", title: "Reporter's routine failed", body: "Timed out" });
-    const inbox = f.inboxOf(MARCO).threadId;
+    const inbox = f.inboxOf(BEN).threadId;
     expect(f.lines(inbox)).toHaveLength(3);
     expect(f.team.inbox.openAsks(inbox)).toBe(0);
   });
@@ -119,7 +119,7 @@ describe("what still waits on the person", () => {
     asked(f, "rep-weekly", "req-2");
     f.store.patchMessage("rep-shared", settled.id, { card: { ...card("req-1"), answered: "deny", dismissed: true } });
     f.restart();
-    const inbox = f.inboxOf(MARCO).threadId;
+    const inbox = f.inboxOf(BEN).threadId;
     expect(f.team.inbox.openAsks(inbox)).toBe(1);
     f.store.patchMessage("rep-weekly", f.lines("rep-weekly")[0]!.id, { card: { ...card("req-2"), answered: "allow" } });
     expect(f.team.inbox.openAsks(inbox), "the copy still follows the card after the restart").toBe(0);
@@ -129,7 +129,7 @@ describe("what still waits on the person", () => {
   it("closes the copy of an ask whose conversation is gone, so nothing in the inbox waits on a card no one can answer", () => {
     const f = fixture();
     asked(f, "rep-shared", "req-1");
-    const inbox = f.inboxOf(MARCO).threadId;
+    const inbox = f.inboxOf(BEN).threadId;
     f.deleteThread("rep-shared");
     expect(f.lines(inbox)[0]!.card).toMatchObject({ answered: "unavailable", dismissed: true });
     expect(f.team.inbox.openAsks(inbox)).toBe(0);
@@ -138,19 +138,19 @@ describe("what still waits on the person", () => {
 
   it("lets a message answered where it came from leave Needs you and what the Chief is told waits, through a restart", () => {
     const f = fixture();
-    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "@Marco can you confirm the Q4 numbers?", turnId: "t1" });
+    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "@Ben can you confirm the Q4 numbers?", turnId: "t1" });
     f.store.patchMessage("scout-main", reply.id, { turnSucceeded: true });
-    const inbox = f.inboxOf(MARCO).threadId;
-    expect(f.team.needsYou(session(MARCO.email))).toEqual([expect.objectContaining({ kind: "message", from: "Scout", threadId: inbox })]);
-    expect(f.team.prompt("marcos-chief", inbox, true)).toContain('Waiting on "Marco"\'s answer');
-    f.said("scout-main", "Philipp here, I'll leave it to Marco.", PHILIPP);
-    expect(f.team.needsYou(session(MARCO.email)), "someone else's line answers nothing for Marco").toHaveLength(1);
-    f.said("scout-main", "Confirmed, the numbers are right.", MARCO);
-    expect(f.team.needsYou(session(MARCO.email))).toEqual([]);
+    const inbox = f.inboxOf(BEN).threadId;
+    expect(f.team.needsYou(session(BEN.email))).toEqual([expect.objectContaining({ kind: "message", from: "Scout", threadId: inbox })]);
+    expect(f.team.prompt("bens-chief", inbox, true)).toContain('Waiting on "Ben"\'s answer');
+    f.said("scout-main", "Cleo here, I'll leave it to Ben.", CLEO);
+    expect(f.team.needsYou(session(BEN.email)), "someone else's line answers nothing for Ben").toHaveLength(1);
+    f.said("scout-main", "Confirmed, the numbers are right.", BEN);
+    expect(f.team.needsYou(session(BEN.email))).toEqual([]);
     expect(f.team.inbox.waiting(inbox)).toEqual([]);
-    expect(f.team.prompt("marcos-chief", inbox, true)).not.toContain("Waiting on");
+    expect(f.team.prompt("bens-chief", inbox, true)).not.toContain("Waiting on");
     f.restart();
-    expect(f.team.needsYou(session(MARCO.email))).toEqual([]);
+    expect(f.team.needsYou(session(BEN.email))).toEqual([]);
     expect(f.team.inbox.waiting(inbox)).toEqual([]);
   });
 });
@@ -164,18 +164,18 @@ describe("the inbox as its panel lists it", () => {
     f.team.route(ask("reporter", "Reporter", threadId));
     return asked;
   };
-  const tabs = (f: ReturnType<typeof fixture>) => Object.fromEntries((f.team.inbox.view(key(MARCO.email))?.rows ?? []).map((row) => [row.text, row.tab]));
+  const tabs = (f: ReturnType<typeof fixture>) => Object.fromEntries((f.team.inbox.view(key(BEN.email))?.rows ?? []).map((row) => [row.text, row.tab]));
 
   it("puts an open ask under Needs you, news under For your info, and what is settled or done under Done", () => {
     const f = fixture();
-    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
-    f.team.pass("reporter", "rep-main", "Marco", "The Q4 draft is ready.");
-    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "marco-private", title: "Scout finished", body: "Daily digest: 3 new leads." }, { routine: true });
+    f.team.pass("scout", "cleo-private", "Ben", "Can you review the deck?");
+    f.team.pass("reporter", "rep-main", "Ben", "The Q4 draft is ready.");
+    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "ben-private", title: "Scout finished", body: "Daily digest: 3 new leads." }, { routine: true });
     const approval = askOf(f, "rep-shared", approve("req-1"));
     askOf(f, "rep-weekly", approve("req-2"));
-    const inbox = f.inboxOf(MARCO).threadId;
-    const view = f.team.inbox.view(key(MARCO.email))!;
-    expect(view).toMatchObject({ botId: "marcos-chief", threadId: inbox });
+    const inbox = f.inboxOf(BEN).threadId;
+    const view = f.team.inbox.view(key(BEN.email))!;
+    expect(view).toMatchObject({ botId: "bens-chief", threadId: inbox });
     expect(view.rows.map((row) => row.at)).toEqual(view.rows.map((row) => row.at).sort((a, b) => b - a));
     expect(view.rows[0]).toMatchObject({ kind: "ask", tab: "needs-you", unread: true, card: { requestId: "req-2", tool: "Bash" }, from: { name: "Reporter" } });
     expect(view.anchor, "the card in the chat sits under the newest ask").toBe(view.rows[0]!.id);
@@ -187,12 +187,12 @@ describe("the inbox as its panel lists it", () => {
 
     f.store.patchMessage("rep-shared", approval.id, { card: { ...approve("req-1"), answered: "allow" } });
     const deck = view.rows.find((row) => row.text === "Can you review the deck?")!;
-    f.team.replyIn(session(MARCO.email), inbox, deck.id, "Tonight.", {});
+    f.team.replyIn(session(BEN.email), inbox, deck.id, "Tonight.", {});
     const report = view.rows.find((row) => row.text === "Daily digest: 3 new leads.")!;
-    expect(f.team.inbox.markDone(key(MARCO.email), report.id)).toBe("done");
-    expect(f.team.inbox.markDone(key(MARCO.email), view.rows[0]!.id), "an open ask is settled by answering it").toBe("an ask");
-    expect(f.team.inbox.markDone(key(PHILIPP.email), report.id), "only its own person").toBe("unknown");
-    const after = f.team.inbox.view(key(MARCO.email))!.rows;
+    expect(f.team.inbox.markDone(key(BEN.email), report.id)).toBe("done");
+    expect(f.team.inbox.markDone(key(BEN.email), view.rows[0]!.id), "an open ask is settled by answering it").toBe("an ask");
+    expect(f.team.inbox.markDone(key(CLEO.email), report.id), "only its own person").toBe("unknown");
+    const after = f.team.inbox.view(key(BEN.email))!.rows;
     expect(after.filter((row) => row.tab === "needs-you").map((row) => row.card?.requestId)).toEqual(["req-2"]);
     expect(after.filter((row) => row.tab === "info").map((row) => row.text)).toEqual(["The Q4 draft is ready."]);
     expect(after.filter((row) => row.tab === "done")).toHaveLength(3);
@@ -201,26 +201,26 @@ describe("the inbox as its panel lists it", () => {
 
   it("marks one line read, and tells the person's client each time what it lists changes", () => {
     const f = fixture();
-    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
-    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "@Marco can you confirm the numbers?", turnId: "t1" });
+    f.team.pass("scout", "cleo-private", "Ben", "Can you review the deck?");
+    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "@Ben can you confirm the numbers?", turnId: "t1" });
     f.store.patchMessage("scout-main", reply.id, { turnSucceeded: true });
-    const inbox = f.inboxOf(MARCO).threadId;
-    const [deck, tag] = f.team.inbox.view(key(MARCO.email))!.rows.slice().reverse();
+    const inbox = f.inboxOf(BEN).threadId;
+    const [deck, tag] = f.team.inbox.view(key(BEN.email))!.rows.slice().reverse();
     const stamps = () => f.team.inbox.wire(inbox).inboxChangedAt ?? 0;
     const before = stamps();
-    expect(f.team.inbox.markRead(key(MARCO.email), deck!.id)).toBe(true);
-    expect(f.team.inbox.view(key(MARCO.email))!.rows.find((row) => row.id === deck!.id)!.unread).toBe(false);
-    expect(f.team.inbox.view(key(MARCO.email))!.rows.find((row) => row.id === tag!.id)!.unread).toBe(true);
+    expect(f.team.inbox.markRead(key(BEN.email), deck!.id)).toBe(true);
+    expect(f.team.inbox.view(key(BEN.email))!.rows.find((row) => row.id === deck!.id)!.unread).toBe(false);
+    expect(f.team.inbox.view(key(BEN.email))!.rows.find((row) => row.id === tag!.id)!.unread).toBe(true);
     expect(stamps()).toBeGreaterThan(before);
     f.changed.length = 0;
-    f.said("scout-main", "Confirmed.", MARCO);
+    f.said("scout-main", "Confirmed.", BEN);
     expect(f.changed, "answered where it came from").toEqual([inbox]);
-    expect(tabs(f)["@Marco can you confirm the numbers?"]).toBe("done");
+    expect(tabs(f)["@Ben can you confirm the numbers?"]).toBe("done");
     f.changed.length = 0;
-    f.team.inbox.markDone(key(MARCO.email), deck!.id);
-    f.team.inbox.markRead(key(MARCO.email), deck!.id);
+    f.team.inbox.markDone(key(BEN.email), deck!.id);
+    f.team.inbox.markRead(key(BEN.email), deck!.id);
     expect(f.changed, "a second mark changes nothing").toEqual([inbox]);
-    expect(f.team.inbox.view(key(PHILIPP.email))?.rows ?? [], "Philipp's inbox holds nothing of Marco's").toEqual([]);
+    expect(f.team.inbox.view(key(CLEO.email))?.rows ?? [], "Cleo's inbox holds nothing of Ben's").toEqual([]);
     expect(f.team.inbox.view(key(ADA.email)), "no Chief, no MausBot: no inbox").toBeNull();
   });
 });
@@ -228,24 +228,24 @@ describe("the inbox as its panel lists it", () => {
 describe("the inbox itself", () => {
   it("becomes the chat the person's brief was in, and moves when they crown another Chief", () => {
     const f = fixture();
-    const chief = f.bots.find((bot) => bot.id === "marcos-chief")!;
+    const chief = f.bots.find((bot) => bot.id === "bens-chief")!;
     chief.tasks.push({ threadId: "brief-chat", title: "Brief" });
-    f.starters.set("brief-chat", key(MARCO.email));
-    expect(f.inboxOf(MARCO)).toMatchObject({ threadId: "brief-chat" });
+    f.starters.set("brief-chat", key(BEN.email));
+    expect(f.inboxOf(BEN)).toMatchObject({ threadId: "brief-chat" });
     expect(chief.tasks.find((task) => task.threadId === "brief-chat")!.title).toBe("Inbox");
-    expect(f.team.inbox.personOf("brief-chat")).toBe(key(MARCO.email));
+    expect(f.team.inbox.personOf("brief-chat")).toBe(key(BEN.email));
     chief.chiefOfStaff = false;
     f.bots.find((bot) => bot.id === "reporter")!.chiefOfStaff = true;
     expect(f.team.inbox.personOf("brief-chat")).toBeNull();
-    expect(f.inboxOf(MARCO).bot.id).toBe("reporter");
-    expect(JSON.parse(readFileSync(join(f.dataDir, PERSON_INBOX_FILE), "utf8")).homes[key(MARCO.email)].botId).toBe("reporter");
+    expect(f.inboxOf(BEN).bot.id).toBe("reporter");
+    expect(JSON.parse(readFileSync(join(f.dataDir, PERSON_INBOX_FILE), "utf8")).homes[key(BEN.email)].botId).toBe("reporter");
   });
 
   it("forgets a person who left, and a deleted inbox", () => {
     const f = fixture();
-    f.team.pass("scout", "scout-main", "Marco", "Hi");
-    f.team.inbox.forget(key(MARCO.email));
-    expect(f.team.inbox.unseen(key(MARCO.email))).toEqual([]);
-    expect(f.team.inbox.personOf(f.inboxOf(PHILIPP).threadId)).toBe(key(PHILIPP.email));
+    f.team.pass("scout", "scout-main", "Ben", "Hi");
+    f.team.inbox.forget(key(BEN.email));
+    expect(f.team.inbox.unseen(key(BEN.email))).toEqual([]);
+    expect(f.team.inbox.personOf(f.inboxOf(CLEO).threadId)).toBe(key(CLEO.email));
   });
 });
