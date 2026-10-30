@@ -144,10 +144,17 @@ coordinates and work on backgrounded/hidden windows.
 ### Policy: CUA is the only computer-use path
 
 No axstream, no cliclick, no robotjs/nut.js, no Python computer-server. If a
-capability is missing (e.g. OCR-anchored clicking, macro record/replay), it is
-added to cua-driver upstream or requested as a driver tool — never bolted on
-beside it. This keeps one TCC identity, one binary to sign/notarize, and one
-behavior contract.
+capability is missing (e.g. OCR-anchored clicking), it is added to cua-driver
+upstream or requested as a driver tool — never bolted on beside it. This keeps
+one TCC identity, one binary to sign/notarize, and one behavior contract.
+
+[Saved steps](superpowers/specs/2026-10-27-saved-steps-design.md) repeats a
+bot's earlier run on this computer by re-issuing the driver's own recorded tool
+calls through the same gated bridge (`server/local-computer-proxy.ts`), each
+target looked up fresh by app, window title and accessibility label, never by
+pixel: it adds no input route, binary or permission identity beside cua-driver.
+It replays only at Full access where the person picked this computer as the
+place, so a replay never skips the one-time question above.
 
 ## Browser use: three tiers
 
@@ -183,5 +190,5 @@ app doesn't embed it).
    click-ref / type / screenshot) exposed as the "Browser" plugin.
 4. Packaging: extraResources + re-sign + notarize; wire
    `EmbeddedCuaDriverHost` for production.
-5. Later: axstream-style macro teach/replay, extension bridge, playwright-mcp
-   tier.
+5. Later: extension bridge, playwright-mcp tier. (Macro record/replay shipped
+   as [saved steps](superpowers/specs/2026-10-27-saved-steps-design.md).)

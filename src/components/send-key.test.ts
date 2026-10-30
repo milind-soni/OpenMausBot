@@ -220,9 +220,9 @@ describe("the send key in hints", () => {
 
     type(textarea(), "");
     render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-    expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter sends this into the running turn");
+    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter sends this into the running turn");
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
-    expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter queues your message");
+    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter queues your message");
   });
 
   it("names the key in Japanese hints too", () => {
