@@ -822,7 +822,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
+  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   const advanced = useAdvancedMode();
@@ -1098,7 +1098,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         <div
           data-chathead-controls
           className={cn("flex shrink-0 items-center gap-2", !phone && "@max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
-          style={controlsShiftStyle}
         >
           {!simpleHead && (bot.busy || bot.waitingForTeammates) && (
             <button
