@@ -328,9 +328,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (edits) supportsEdits.add(env.id); else supportsEdits.delete(env.id);
     return info;
   };
+  /** A server of the person's own their bots moved to: lent as their Clouds are, to its one owner's sign-in alone, at the
+   * server the move chose (lending-target.mjs `own:<environment id>`). */
+  const ownHomeId = env => { const current = cloud(env); return current?.origin === env.origin && current.accountId?.startsWith("own:") ? current.accountId.slice(4) : null; };
   const cloudIdentity = async env => {
     const { auth, info, details, link, chrome: takesChrome, timeouts, edits } = await describe(env);
-    if (auth.cloudHome !== true || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
+    const own = ownHomeId(env);
+    if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error("This server is not your bots' home any more"), { problem: "not-cloud" });
+    if ((own === null && auth.cloudHome !== true) || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
     if (details) supportsDetails.add(env.id); else supportsDetails.delete(env.id);
     if (link) supportsLink.add(env.id); else supportsLink.delete(env.id);
     if (takesChrome) supportsChrome.add(env.id); else supportsChrome.delete(env.id);
@@ -585,7 +590,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     run(env, grant);
     changed();
   };
-  const automaticPass = async projects => {
+  const automaticPass = async (projects, target) => {
     if (closed || paused || !ownClouds().some(verifiedCloud)) return;
     const [[homeFolder = null], screenLent, projectFolders] = await Promise.all([
       lendable([{ id: randomUUID(), path: home, write: true, home: true }]),
@@ -596,7 +601,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       const kept = records[env.id], current = verifiedCloud(env);
       if (closed || paused || !current) continue;
       const keptFolders = kept?.cloud?.accountId === current.accountId && Array.isArray(kept.folders) ? await lendable(kept.folders) : [];
-      const wanted = automaticGrant({ kept: keptFolders, home: homeFolder, screen: screenLent, projects: env.id === myCloud()?.id ? projectFolders : [], terminal: terminalAccount === current.accountId });
+      const wanted = automaticGrant({ kept: keptFolders, home: homeFolder, screen: screenLent, projects: env.id === (target ?? myCloud())?.id ? projectFolders : [],
+        terminal: terminalAccount === current.accountId });
       if (closed || paused || records[env.id] !== kept) continue;
       if (!lendsAsWanted(kept, wanted)) lendNow(env, current, kept, wanted);
       else if (!running.has(env.id) && validRecord(kept) && cloudLendingVerdict(kept.cloud, cloud(env), env).allow) run(env, kept);
@@ -606,10 +612,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const lentAutomatically = () => new Set(ownClouds().map(env => env.id));
   /** One pass at a time: a change while one runs asks for one more after it. */
   let passing = Promise.resolve(), passQueued = false;
-  const lendAutomatically = (projects = []) => {
+  const lendAutomatically = (projects = [], target = null) => {
     if (passQueued && !projects.length) return passing;
     passQueued = true;
-    passing = passing.then(() => { passQueued = false; return automaticPass(projects); }).catch(() => {});
+    passing = passing.then(() => { passQueued = false; return automaticPass(projects, target); }).catch(() => {});
     return passing;
   };
   return {
@@ -652,12 +658,13 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
     busy: () => summary().busy !== null,
     saveCloud,
-    /** The move's project folders, lent to My Cloud with editing on top of the rest. It throws while lending to My Cloud
-     * can't take them yet (paused, or not signed in there), so the move tries again later. */
-    async lendProjects(paths) {
-      const env = myCloud();
-      if (paused || !env || !verifiedCloud(env)) throw new Error("Lending to My Cloud waits until it is signed in and not paused.");
-      await lendAutomatically(Array.isArray(paths) ? paths.filter(where => typeof where === "string") : []);
+    /** The move's project folders, lent to the home it went to (My Cloud unless `place` names a server of the person's own)
+     * with editing on top of the rest. It throws while lending there can't take them yet (paused, or not signed in there),
+     * so the move tries again later. */
+    async lendProjects(paths, place = null) {
+      const env = place ?? myCloud();
+      if (paused || !env || !verifiedCloud(env)) throw new Error("Lending to your bots' home waits until it is signed in and not paused.");
+      await lendAutomatically(Array.isArray(paths) ? paths.filter(where => typeof where === "string") : [], env);
       if (records[env.id]?.enabled !== true) throw new Error("Lending to My Cloud did not start.");
     },
     paused: () => paused,

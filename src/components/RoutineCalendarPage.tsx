@@ -542,7 +542,7 @@ export function EventEditor({
     && (kind === "call"
       ? botIds.length > 0
       : routineTarget === "room-goal"
-        ? botIds[0] && roomMembers.some((bot) => bot.id === botIds[0])
+        ? (!groupId || selectedRoom) && botIds[0] && roomMembers.some((bot) => bot.id === botIds[0])
         : botIds.length > 0)
     && !intervalInvalid
     && !intervalDaysInvalid
@@ -923,7 +923,7 @@ export function EventEditor({
                   <div>
                     <label htmlFor="routine-goal-room" className="mb-2 block text-[13px] font-medium text-ink">{t("routines.editor.goalWhere")}</label>
                     <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
-                      <option value="">{t("routines.editor.goalOneOnOne")}</option>
+                      {groupId && !selectedRoom && <option value={groupId} disabled>Room no longer exists. Choose another.</option>}<option value="">{t("routines.editor.goalOneOnOne")}</option>
                       {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
                     </Select>
                   </div>
@@ -1319,7 +1319,7 @@ export function EventDetails({
     : submittedRun && (state.routineRuns.find((candidate) => candidate.id === submittedRun.id) ?? submittedRun);
   const call = item.kind === "call" ? item.call : null;
   const isRoomGoal = !isCall && (run?.target ?? routine?.target) === "room-goal";
-  const goalGroupId = isRoomGoal ? run?.groupId ?? routine?.groupId : undefined;
+  const goalGroupId = isRoomGoal ? (run ? run.groupId : routine?.groupId) : undefined;
   const goalGroup = state.groups.find((group) => group.id === goalGroupId);
   const executionThreadId = run?.executionThreadId ?? run?.threadId;
   const botIds = call?.botIds ?? [run?.botId ?? routine?.botId ?? ""];

@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
@@ -409,6 +409,175 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     const rework = send(w, chief, "gen-1", undefined, builder, "Build it", { rework: true });
     expect(rework.duplicate).toBe(false);
     expect(rework.node.id).not.toBe(first.node.id);
+  });
+});
+
+describe("RuntimeCoordinator: one answer to the same request from two teammates", () => {
+  const lead: RoomAddress = { botId: "lead", threadId: "lead-chat" };
+  const builderForLead: RoomAddress = { botId: "builder", threadId: "builder-work-2" };
+  const ASK = "How many days would the database migration to the new hosting provider take, roughly?";
+  const ASKED_AGAIN = "How many days would the database migration to the new hosting provider take roughly";
+  const sharing = (w: World, joined: Array<{ node: string; first: string }> = []) => {
+    w.host.shareAnswer = () => true;
+    w.host.joined = (node, first) => { joined.push({ node: node.id, first: first.id }); };
+    return joined;
+  };
+  const settledChild = async (w: World, id: string) => {
+    await vi.waitFor(() => expect(w.coordinator.node(id)?.status).toBe("completed"), { timeout: 5_000, interval: 50 });
+    return w.coordinator.node(id)!;
+  };
+
+  it("gives the second teammate the first one's answer while the bot works on it: one turn, one answer, both resumed", async () => {
+    const w = world(hold);
+    const joined = sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    const second = send(w, lead, "gen-2", undefined, builderForLead, ASKED_AGAIN);
+    expect(second.duplicate).toBe(false);
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs.filter((run) => run.node.botId === "builder").map((run) => run.node.id)).toEqual([first.node.id]);
+    expect(joined).toEqual([{ node: second.node.id, first: first.node.id }]);
+    await w.host.release(first.node.id, { ok: true, text: "About 15 days." });
+    w.coordinator.tick(); await flush();
+    const answered = await settledChild(w, second.node.id);
+    expect(answered.result).toBe("Another teammate asked this a moment ago, so it was answered once, for both of you:\nAbout 15 days.");
+    expect(w.coordinator.node(first.node.id)?.result).toBe("About 15 days.");
+    expect(w.host.runs.filter((run) => run.node.botId === "builder")).toHaveLength(1);
+    expect(w.host.reports.map((report) => report.child.id).sort()).toEqual([first.node.id, second.node.id].sort());
+  });
+
+  it("gives the answer at once when it came while the second request waited for its turn", async () => {
+    const w = world(hold);
+    sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    w.coordinator.tick(); await flush();
+    w.host.busyAnswer = (node) => node.id !== first.node.id;
+    await sleep(2);
+    const second = send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(second.node.id)?.status).toBe("queued");
+    await sleep(2);
+    await w.host.release(first.node.id, { ok: true, text: "About 15 days." });
+    w.host.busyAnswer = () => false;
+    w.coordinator.tick(); await flush();
+    expect((await settledChild(w, second.node.id)).result).toContain("About 15 days.");
+    expect(w.host.runs.filter((run) => run.node.botId === "builder")).toHaveLength(1);
+  });
+
+  it("keeps the request that waits for the answer out of the stall window", async () => {
+    const w = world(hold, { turnStallMs: 1_500 });
+    sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    const second = send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    w.coordinator.tick(); await flush();
+    for (let waited = 0; waited < 2_500; waited += 100) {
+      w.coordinator.progress(builder.threadId);
+      w.coordinator.tick();
+      await sleep(100);
+    }
+    expect(w.coordinator.node(second.node.id)?.status).toBe("running");
+    await w.host.release(first.node.id, { ok: true, text: "About 15 days." });
+    expect((await settledChild(w, second.node.id)).result).toContain("About 15 days.");
+  });
+
+  it("stops waiting when its work is stopped, while the first goes on", async () => {
+    const w = world(hold);
+    sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    const second = send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    w.coordinator.tick(); await flush();
+    w.coordinator.cancelDirect(builderForLead.threadId);
+    await flush();
+    expect(w.coordinator.node(second.node.id)?.status).toBe("cancelled");
+    expect(w.coordinator.node(first.node.id)?.status).toBe("running");
+    await w.host.release(first.node.id, { ok: true, text: "About 15 days." });
+    expect(w.coordinator.node(first.node.id)).toMatchObject({ status: "completed", result: "About 15 days." });
+    expect(w.coordinator.node(second.node.id)?.status).toBe("cancelled");
+  });
+
+  it("never reuses an answer given before the request was asked: things may have changed since", async () => {
+    const w = world();
+    sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(first.node.id)?.status).toBe("completed");
+    await sleep(2);
+    const second = send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    w.coordinator.tick(); await flush();
+    expect((await settledChild(w, second.node.id)).result).toBe("builder done");
+    expect(w.host.runs.filter((run) => run.node.botId === "builder")).toHaveLength(2);
+  });
+
+  it.each<[string, (w: World) => void]>([
+    ["a different request", (w) => {
+      send(w, chief, "gen-1", undefined, builder, ASK);
+      send(w, lead, "gen-2", undefined, builderForLead, "How many days would the database migration to the new hosting provider cost, roughly?");
+    }],
+    ["a requester who may not read the first answer", (w) => {
+      w.host.shareAnswer = () => false;
+      send(w, chief, "gen-1", undefined, builder, ASK);
+      send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    }],
+    ["a short request, which two conversations can mean two ways", (w) => {
+      send(w, chief, "gen-1", undefined, builder, "Any update on this one?");
+      send(w, lead, "gen-2", undefined, builderForLead, "Any update on this one?");
+    }],
+    ["a request asked at another approval level", (w) => {
+      w.host.levelOf = (_target, source) => ({ level: source?.botId === "lead" ? "full" : "ask" });
+      send(w, chief, "gen-1", undefined, builder, ASK);
+      send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    }],
+    ["a request with another finish line", (w) => {
+      send(w, chief, "gen-1", undefined, builder, ASK);
+      begun(w, lead, "gen-2");
+      w.coordinator.enqueue(lead, "gen-2", undefined, builderForLead, ASK, { doneWhen: "A number of days, with the reason." });
+    }],
+    ["the requester's own second ask, which may mean to ask again", (w) => {
+      send(w, chief, "gen-1", undefined, builder, ASK);
+      send(w, chief, "gen-1", undefined, builderForLead, ASKED_AGAIN);
+    }],
+    ["a request in a room to one outside it", (w) => {
+      send(w, chief, "gen-1", undefined, builder, ASK);
+      send(w, lead, "gen-2", undefined, inRoom("builder"), ASK);
+    }],
+    ["a request outside a room to one in it", (w) => {
+      send(w, chief, "gen-1", undefined, inRoom("builder"), ASK);
+      send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    }],
+  ])("never joins %s: the bot works on each", async (_name, ask) => {
+    const w = world(hold);
+    sharing(w);
+    ask(w);
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs.filter((run) => run.node.botId === "builder")).toHaveLength(2);
+  });
+
+  it("works on the request itself when the first one ends without an answer", async () => {
+    const w = world(hold);
+    sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    const second = send(w, lead, "gen-2", undefined, builderForLead, ASK);
+    w.coordinator.tick(); await flush();
+    await w.host.release(first.node.id, { ok: false, text: "The provider failed." });
+    w.coordinator.tick(); await flush();
+    await vi.waitFor(() => expect(w.host.runs.map((run) => run.node.id)).toContain(second.node.id), { timeout: 5_000, interval: 50 });
+  });
+
+  it("never waits on a request still to be answered in its own conversation, which could only go on after it", async () => {
+    const w = world((node) => node.botId === "tester" ? "hold" : undefined);
+    sharing(w);
+    const first = send(w, chief, "gen-1", undefined, builder, ASK);
+    w.coordinator.tick();
+    const check = send(w, builder, "gen-1", first.node.id, tester, "Check the database size for the estimate.").node;
+    await flush();
+    expect(w.coordinator.node(first.node.id)?.status).toBe("waiting");
+    const second = send(w, lead, "gen-2", undefined, builder, ASK);
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs.map((run) => run.node.id)).toContain(second.node.id);
+    await w.host.release(check.id, { ok: true, text: "About 40 GB." });
+    await vi.waitFor(() => {
+      w.coordinator.tick();
+      expect(w.coordinator.node(first.node.id)?.status).toBe("completed");
+    }, { timeout: 5_000, interval: 50 });
   });
 });
 
