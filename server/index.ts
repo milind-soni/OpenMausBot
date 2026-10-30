@@ -2953,14 +2953,14 @@ try {
 // Replay only after the secondary write above is durable.
 if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
-let threadAwaitingAnswer = (_threadId: string): boolean => false;
+let threadsAwaitingTypedAnswers = (): ReadonlySet<string> => new Set<string>();
 let threadsAwaitingTeammates = (): ReadonlySet<string> => new Set<string>();
 let cacheKeepWarmStatus = (_threadId: string): KeepWarmStatus | undefined => undefined;
-const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threadsAwaitingTeammates()): WireTask => {
+const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threadsAwaitingTeammates(), typedAnswers = threadsAwaitingTypedAnswers()): WireTask => {
   // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
   const { snoozedUntil, ...base } = toWireTask(task, botModel);
   const keepWarm = cacheKeepWarmStatus(task.threadId);
-  const coordinated = { ...base, activity: threadAwaitingAnswer(task.threadId) ? "waiting-on-you" as const : base.activity, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}), ...teamMessages.inbox.wire(task.threadId) };
+  const coordinated = { ...base, activity: typedAnswers.has(task.threadId) ? "waiting-on-you" as const : base.activity, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}), ...teamMessages.inbox.wire(task.threadId) };
   const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
   return asleep ? { ...coordinated, snoozedUntil } : coordinated;
 };
@@ -2972,10 +2972,11 @@ const wireBot = (bot: BotRecord): WireBot => {
   const visible = approvalGrant && !approvalGrant.threadOnly
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : { ...rest, approvalMode: approvalModeFor(rest) };
-  const awaiting = threadsAwaitingTeammates();
-  return { ...visible, activity: threadAwaitingAnswer(bot.threadId) ? "waiting-on-you" : visible.activity, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
+  const awaiting = threadsAwaitingTeammates(), typedAnswers = threadsAwaitingTypedAnswers();
+  const wiredTasks = tasks?.map((task) => wireTask(task, bot.modelSelection, awaiting, typedAnswers));
+  return { ...visible, activity: wiredTasks?.some(task => task.activity === "waiting-on-you") ? "waiting-on-you" : visible.activity, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
     mainThreadId: botMainThread(bot.id),
-    avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
+    avatarUrl: visible.avatarUrl ?? null, ...(wiredTasks ? { tasks: wiredTasks } : {}) };
 };
 
 function toolScopeForTurn(botId: string) {
@@ -2988,8 +2989,9 @@ function toolScopeForTurn(botId: string) {
 
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, ...rest } = bot;
-  const awaiting = threadsAwaitingTeammates();
-  return { ...rest, approvalMode: approvalModeFor(rest), mainThreadId: botMainThread(bot.id), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
+  const awaiting = threadsAwaitingTeammates(), typedAnswers = threadsAwaitingTypedAnswers();
+  const wiredTasks = tasks?.map((task) => wireTask(task, bot.modelSelection, awaiting, typedAnswers));
+  return { ...rest, activity: wiredTasks?.some(task => task.activity === "waiting-on-you") ? "waiting-on-you" : rest.activity, approvalMode: approvalModeFor(rest), mainThreadId: botMainThread(bot.id), avatarUrl: rest.avatarUrl ?? null, ...(wiredTasks ? { tasks: wiredTasks } : {}) };
 };
 
 function previewSystemPrompt(bot: BotRecord) {
@@ -3567,8 +3569,8 @@ const storedAvatarExists = (avatarUrl: string): boolean =>
   attachmentExists(avatarUrl.slice("/api/attachments/".length));
 
 const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const wired = wireBot(bot), tasks = store.tasks(bot.id);
-  return { ...wired, ...messagePage(bot.threadId, DEFAULT_PAGE), tasks: tasks === bot.tasks && wired.tasks ? wired.tasks : tasks.map((task) => wireTask(task, bot.modelSelection)) };
+  const wired = wireBot({ ...bot, tasks: store.tasks(bot.id) });
+  return { ...wired, ...messagePage(bot.threadId, DEFAULT_PAGE) };
 };
 const publicBotQueuedMessages = () => queuedSteerSnapshot((botId, threadId) => Boolean(store.taskByThread(botId, threadId)));
 
@@ -4161,7 +4163,7 @@ const coordinator: Coordinator = createCoordinator({
     joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "notice: Another teammate asked the same a moment ago, so this gets that answer instead of a second one.", ok: true } }); },
   },
 });
-threadAwaitingAnswer = (threadId) => coordinator.awaitingTypedAnswer(threadId);
+threadsAwaitingTypedAnswers = () => coordinator.awaitingTypedAnswerThreads();
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
 const groupUsageReader = new GroupUsageReader(DATA_DIR);
 try { groupUsageReader.refresh(); } catch {}

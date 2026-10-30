@@ -362,6 +362,10 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
   const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId));
   if (kept.length !== tasks.length) {
     out = { ...record, tasks: kept };
+    if (record.activity === "waiting-on-you") {
+      const activities = kept.map(task => (task as { activity?: unknown } | null)?.activity);
+      out.activity = ["waiting-on-you", "no-signal", "working", "dead"].find(activity => activities.includes(activity)) ?? "idle";
+    }
     if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
   }
   const main = typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId) ? record.mainThreadId : teamConversation(kept);

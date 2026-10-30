@@ -72,7 +72,12 @@ it.each(["direct mention", "standing handoff", "new handoff", "one-way handoff",
         return state.bots.find((bot: any) => bot.id === ledger.id).tasks.find((task: any) => task.threadId === work).activity;
       }, { timeout: hostTimeout(10_000) }).toBe("waiting-on-you");
     }
-    if (route === "open question handoff") expect(card.card.options).toEqual([]);
+    if (route === "open question handoff") {
+      const waitingBot = state.bots.find((bot: any) => bot.id === ledger.id);
+      expect(waitingBot.threadId).not.toBe(work);
+      expect(waitingBot.activity).toBe("waiting-on-you");
+      expect(card.card.options).toEqual([]);
+    }
     const before = state;
     await api(`/api/threads/${work}/respond`, { requestId: card.card.requestId, behavior: "answer", message: "Short footer" });
     await expect.poll(async () => (await api(`/api/threads/${work}/messages`)).messages.some((message: any) => message.text === "I used Short footer"), { timeout: hostTimeout(30_000) }).toBe(true);
@@ -89,5 +94,6 @@ it.each(["direct mention", "standing handoff", "new handoff", "one-way handoff",
     }, { timeout: hostTimeout(30_000) }).toBe(true);
     const after = await api("/api/bots");
     if (!roomRoute) expect(after.bots.find((bot: any) => bot.id === ledger.id).tasks.find((task: any) => task.threadId === work).activity).not.toBe("waiting-on-you");
+    if (route === "open question handoff") expect(after.bots.find((bot: any) => bot.id === ledger.id).activity).not.toBe("waiting-on-you");
     evidence.push({ route, source: text, work, card, before, messages, after });
   }, hostTimeout(90_000));

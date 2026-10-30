@@ -381,6 +381,21 @@ describe("a Team Cloud's audiences", () => {
     expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub" });
   });
 
+  it.each(["idle", "working", "waiting-on-you"])("hides a private question's waiting marker while preserving visible %s work", (activity) => {
+    const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub", activity: "waiting-on-you",
+      tasks: [{ threadId: "t-pub", activity }, { threadId: "t-pub-2", activity: "waiting-on-you", private: true }] };
+    const ada = new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY });
+    const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    expect(memberBot(bot, ada).activity).toBe("waiting-on-you");
+    for (const viewer of [ben, admin]) {
+      const sent = memberBot(bot, viewer);
+      expect(sent.tasks).toEqual([{ threadId: "t-pub", activity }]);
+      expect(sent.activity).toBe(activity);
+      expect((memberBody({ bot }, viewer) as { bot: typeof bot }).bot.activity).toBe(activity);
+    }
+  });
+
   it("a main chat named as another person's private chat is replaced by a conversation the viewer reads, never sent", () => {
     const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
     const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub-2", tasks: [{ threadId: "t-pub-2" }, { threadId: "t-pub" }] };

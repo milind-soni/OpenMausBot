@@ -702,6 +702,31 @@ describe("RuntimeCoordinator: stops", () => {
 });
 
 describe("RuntimeCoordinator: read models", () => {
+  it("collects typed-question threads with one live-assignment read and excludes cards, roots and settled work", async () => {
+    const w = world(node => node.botId === "builder" || node.botId === "tester"
+      ? { ok: true, text: "NEEDS INPUT: Which footer?" }
+      : node.botId === "cards" ? { ok: true, text: "", cards: { question: "Connect", ids: ["card-1"] } } : undefined);
+    try {
+      send(w, chief, "gen-1", undefined, builder, "Build it");
+      send(w, chief, "gen-1", undefined, tester, "Test it");
+      send(w, chief, "gen-1", undefined, { botId: "cards", threadId: "cards-work" }, "Connect it");
+      send(w, chief, "gen-1", undefined, { botId: "done", threadId: "done-work" }, "Finish it");
+      w.coordinator.tick(); await flush();
+      w.coordinator.beginTurn({ id: "gen-2", address: { botId: "root", threadId: "root-chat" }, brief: "Connect", level: "ask", origin: userOrigin });
+      w.coordinator.endTurn("gen-2", { ok: true, text: "", cards: { question: "Sign in", ids: ["sign-in"] } });
+      expect(w.coordinator).toHaveProperty("awaitingTypedAnswerThreads");
+      const read = vi.spyOn(w.coordinator["store"], "all");
+      const threads = w.coordinator.awaitingTypedAnswerThreads();
+      expect(threads).toEqual(new Set(["builder-work", "tester-work"]));
+      expect(["builder-work", "tester-work", "cards-work", "root-chat", "chief-chat", "done-work", "elsewhere"].map(thread => threads.has(thread)))
+        .toEqual([true, true, false, false, false, false, false]);
+      expect(read).toHaveBeenCalledTimes(1);
+      read.mockRestore();
+      w.coordinator.answer("builder-work", "Short");
+      expect(w.coordinator.awaitingTypedAnswerThreads()).toEqual(new Set(["tester-work"]));
+    } finally { w.coordinator.close(); }
+  });
+
   it("awaitingTeammateThreads answers, for every thread at once, what outstandingDirect and the parked roots answer per thread", async () => {
     const w = world(hold);
     const threads = ["chief-chat", "builder-work", "tester-work", "room-1", "ops-work", "elsewhere"];
