@@ -17,8 +17,7 @@ import type { WebhookRequestCardData } from "./webhook-request.ts"; import type 
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
-import type { ModelRequestCardData } from "./model-request.ts";
-import type { ThreadModelRequestCardData } from "./thread-model-request.ts";
+import type { ModelRequestCardData } from "./model-request.ts"; import type { ThreadModelRequestCardData } from "./thread-model-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
@@ -699,8 +698,7 @@ export interface OptionCardData extends WaitCardField {
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */
-  modelRequest?: ModelRequestCardData;
-  threadModelRequest?: ThreadModelRequestCardData;
+  modelRequest?: ModelRequestCardData; threadModelRequest?: ThreadModelRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
