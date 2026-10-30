@@ -8,6 +8,7 @@ import { PLACE_STATES } from "../shared/place-view.ts";
 import type { RoutineRunStatus } from "../shared/routines.ts";
 import { trialCreditKind } from "../shared/trial-credit.ts";
 import type { BoxReport } from "./bot-box/box.ts";
+import type { RoomReport } from "./engine-memory.ts";
 import type { FirstHourReport } from "./host/first-hour.ts";
 import type { ValueReport } from "./host/value-ledger.ts";
 import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
@@ -42,6 +43,7 @@ const ROWLESS_STOPS = new Set(["shutdown_timeout", "auth_required", "update_requ
 /** Causes the server writes itself, by fixed code. */
 const FIXED_CAUSES: ReadonlyArray<[RegExp, string]> = [
   [/ran out of memory while \d+ tasks? ran at once/, "out_of_memory"],
+  [/^Ran out of room, so I (closed the browser|stopped this task) to keep everything else running\./, "out_of_memory"],
   [/^no activity for \d+ minutes — the turn was stopped$/, "stalled"],
   [/^turn interrupted — OpenMausBot restarted$/, "restart"],
   [/could not start — /, "could_not_start"],
@@ -249,6 +251,8 @@ export interface CloudHealthDeps {
   box?: () => BoxReport;
   /** A personal Cloud's milestones since its first boot, and the work its Chief did: times and counts only. */
   firstHour?: () => { firstHour?: FirstHourReport; value?: ValueReport };
+  /** The last day's memory pressure (engine-memory.ts), where this home watches it. */
+  room?: () => RoomReport;
   now?: () => number;
 }
 
@@ -295,7 +299,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null,
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null,
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
       };
       let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;

@@ -44,7 +44,7 @@
     },
     {
       "name": "shared_computer",
-      "description": "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant and stops after timeout_seconds (default 120, at most 240): run longer jobs in the background with output to a file, then read it. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+      "description": "Use a desktop the user explicitly shared. Get computer_id and folder_id from list_shared_computers. File actions stay in chosen folders; paths are relative. read_file returns sha256, needed as expected_sha256 to overwrite or delete_file. edit_file swaps old_text (once) for new_text; append_file adds content. Binary files: base64 encoding. run_command requires a SEPARATE unrestricted terminal grant and stops after timeout_seconds (default 120, at most 240): run longer jobs in the background with output to a file, then read it. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried: inspect an uncertain outcome before retrying.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -58,6 +58,9 @@
               "list_files",
               "read_file",
               "write_file",
+              "edit_file",
+              "append_file",
+              "delete_file",
               "run_command",
               "computer_tools",
               "computer_call"
@@ -80,6 +83,12 @@
             ]
           },
           "expected_sha256": {
+            "type": "string"
+          },
+          "old_text": {
+            "type": "string"
+          },
+          "new_text": {
             "type": "string"
           },
           "command": {
@@ -787,6 +796,7 @@
               "mistralApiKey",
               "cerebrasApiKey",
               "groqApiKey",
+              "greenferenceApiKey",
               "metaApiKey",
               "deepseekApiKey"
             ]
