@@ -274,6 +274,51 @@
       }
     },
     {
+      "name": "watch_list",
+      "description": "Keep an eye on something for the person until it settles: a reply you are waiting for, a delivery, a deadline, a fix to check again. Your open items are in your instructions on every turn. action=track adds one (title, note, optional source and check_after); update records where it stands now (id, note, optional check_after); resolve closes it with its outcome. Tell the person about a change they would want to know with report_finding.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "track",
+              "update",
+              "resolve"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "update or resolve: the item's id from your watch list."
+          },
+          "title": {
+            "type": "string",
+            "description": "track: what you are watching, in one line."
+          },
+          "note": {
+            "type": "string",
+            "description": "track or update: where it stands now."
+          },
+          "source": {
+            "type": "string",
+            "description": "track: a link or id to look at again."
+          },
+          "check_after": {
+            "type": "string",
+            "description": "When to look again: a date, or a date and time."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "resolve: how it settled."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
       "name": "list_bots",
       "description": "List every other bot (agent) you can contact, in every department, with its department, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
       "inputSchema": {

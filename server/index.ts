@@ -591,7 +591,7 @@ import { createInternalSignInRoutes } from "./routes/sign-in.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
-import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts"; import { createInternalFindingRoutes } from "./routes/internal-report-finding.ts"; import { createFoundUpdates } from "./host/found-updates.ts";
+import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts"; import { createInternalFindingRoutes } from "./routes/internal-report-finding.ts"; import { createInternalWatchRoutes } from "./routes/internal-watch-list.ts"; import { createWatchList } from "./host/watch-list.ts"; import { createFoundUpdates } from "./host/found-updates.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
@@ -5669,7 +5669,7 @@ const reviewAnswerThreads = new Set<string>(); const firstHourHooks = createFirs
 let routines: RoutineManager | null = null;
 const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId),
   notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }), { routine: true }) });
-const found = createFoundUpdates({ store, dataDir: DATA_DIR, reported: () => void proactive.brief.refresh() });
+const found = createFoundUpdates({ store, dataDir: DATA_DIR, reported: () => void proactive.brief.refresh() }), watchList = createWatchList({ dataDir: DATA_DIR });
 const proactive = createProactive({ store, cfg, composio, registry, dataDir: DATA_DIR, ideas: (botId) => memoryUpkeep.ideas(botId), ...firstHourHooks.proactive, team: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), frozen: moveFreeze.frozen, routines: () => routines, mainThread: botMainThread, threadBusy, notify, helpers: { decider, extractor }, cloud: Boolean(CLOUD_HOME || HOSTED_WORKSPACE || CLOUD_TEAM),
   engineName: (instanceId) => engineName(instanceId), hostTimeZone: () => (CLOUD_HOME ? undefined : hostTimeZone()), decide: (row) => appendDecision(DATA_DIR, row), stale: shouldIgnoreProviderEvent, release: (threadId) => watchdog.setWaitingOnHuman(threadId, false),
   owned: (routine) => { (cloudRoutineAuthors ?? phones.routineAuthors)?.record(routine.id, routine); if (CLOUD_OWNER_KEY) cloudRoutineAuthors?.wrote(routine.id, CLOUD_OWNER_KEY); }, needsYou: () => needsYouNow({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }, { admin: true, thread: () => true, routine: () => true }),
@@ -8516,7 +8516,7 @@ async function startTurn(
         }),
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
         { id: "assignment", label: "Teammate task", text: coordinationNode?.parentId ? `\n${coordinationSystemInstructions()}` : "" },
-        { id: "outstanding", label: "Outstanding teammate work", text: outstandingAssignmentsPrompt(threadId) },
+        { id: "outstanding", label: "Outstanding teammate work", text: outstandingAssignmentsPrompt(threadId) }, { id: "watching", label: "Watch list", text: integrations.agents ? watchList.prompt(bot.id) : "" },
         { id: "credential", label: "Credentials", text: credentialPrompt },
         { id: "recall", label: "Recall", text: recallPrompt },
         { id: "routine", label: "Routines", text: routinePrompt },
@@ -14138,6 +14138,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         report: (reason) => reportEscalation({ kind: "raised", bot: internalSender, threadId: internalCapability.threadId, gate: RAISED_GATE, reason, alreadyNotified: false }),
       }), createInternalFindingRoutes({ readBody: readInternalBody, requireActive: requireActiveInternalCapability, report: (input) => found.report(internalSender,
         (activeRoutineRunForThread(internalCapability.threadId) && botMainThread(internalSender.id)) || internalCapability.threadId, input) }),
+      createInternalWatchRoutes({ readBody: readInternalBody, requireActive: requireActiveInternalCapability, apply: (input) => watchList.apply(internalSender.id, input) }),
       ], { req, res, url, path, method, auth, json, readBody })) return;
       // post_to_room appends role "bot", never "user" (which would start a round of real turns), starts no turn, and takes membership from the record.
       if (method === "POST" && path === "/api/internal/post-to-room") {
