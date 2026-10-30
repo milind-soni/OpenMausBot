@@ -145,6 +145,9 @@ const bridge = {
     // The colour of a place the window's rail lists, from a click on the rail's own page (main refuses any other page).
     recolor: (id, swatch) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:recolor", String(id), swatch === null ? null : String(swatch)) : Promise.reject(new Error("Choose a color.")),
+    // Remove from list, for a Cloud the window's rail lists as removable, from a click on the rail's own page (main refuses any other page).
+    remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:remove", String(id)) : Promise.reject(new Error("Choose Remove from list.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
@@ -530,6 +533,7 @@ const bridge = {
       return () => ipcRenderer.removeListener("home:state-changed", handler);
     },
     retry: () => ipcRenderer.invoke("home:retry"),
+    remove: () => ipcRenderer.invoke("home:remove"),
     signIn: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     repair: () => ipcRenderer.invoke("home:repair"),
