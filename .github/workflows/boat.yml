@@ -3,7 +3,9 @@
 # shard, so one VM per shard): lint and typecheck on one boat-large VM, each vitest shard on its own boat-large VM (8 vCPU, 16 GB: GitHub's
 # ubuntu-latest has 16 GB, and typecheck runs out of heap on 8 GB).
 # Runs only while the repository variable BOAT_CI is "on", and only for this repository's own branches (a fork's pull
-# request never runs on Boat; Boat also refuses runs by anyone outside its allow-list). ci.yml is unchanged.
+# request never runs on Boat). Boat runs a public repository's job only when the run's author and whoever started it
+# are both on its allow-list (`boat ci public`: the repository owner), and a job it refuses waits for a runner that
+# never comes, so runs anyone else authored or started stay off Boat. ci.yml is unchanged.
 name: Boat
 
 on:
@@ -21,7 +23,11 @@ permissions:
 jobs:
   static:
     name: Lint and typecheck (Boat)
-    if: vars.BOAT_CI == 'on' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: >-
+      vars.BOAT_CI == 'on'
+      && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+      && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository
+        && github.event.pull_request.user.login == github.repository_owner))
     runs-on: boat-large
     timeout-minutes: 20
     steps:
@@ -39,13 +45,27 @@ jobs:
 
   vitest:
     name: Linux vitest (Boat, shard ${{ matrix.shard }}/8)
-    if: vars.BOAT_CI == 'on' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: >-
+      vars.BOAT_CI == 'on'
+      && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+      && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository
+        && github.event.pull_request.user.login == github.repository_owner))
     runs-on: boat-large
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      # Boat's image sets en_US.UTF-8, whose collation is Intl's default; GitHub's runners use C.UTF-8 and UTC.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      TZ: UTC
+    defaults:
+      run:
+        # Boat's runner gives every process cap_dac_read_search as an ambient capability, so a test can still read a
+        # file it set to mode 000, and Boat's desktop sets DISPLAY. GitHub's runners have neither.
+        shell: setpriv --inh-caps=-all --ambient-caps=-all -- env -u DISPLAY -u XAUTHORITY bash --noprofile --norc -eo pipefail {0}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -54,6 +74,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Remove the coding agents Boat installs
+        # The server starts an engine it finds on PATH: Boat's Hermes then downloads its own Python, Node and tools into
+        # each test's home, about nine seconds for every test that adds a bot. GitHub's runners have none of these.
+        run: sudo rm -f /usr/local/bin/{agent,claude,codex,cua-driver,cursor-agent,hermes,hermes-acp,hermes-agent,kimi,openclaw,opencode,pi,prime-agent,vibe,vibe-acp}
+      - name: Prepare Electron test runtime
+        # As in ci.yml: Electron downloads its runtime on first import, which must not use up a test's timeout.
+        run: node --input-type=commonjs -e "require('electron')"
       - name: vitest shard ${{ matrix.shard }}/8 (every e2e file, as ci.yml's Linux shards)
         env:
           OMB_VITEST_E2E: all
