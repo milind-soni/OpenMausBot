@@ -14,9 +14,11 @@ working folder, files, access settings or native resume cursor.
   `scope: bot_default`, and includes the caller's task receipt for a self change.
 - A selection mutation never dispatches, resumes or cancels a turn. A busy task
   accepts a **next-turn-only** change; the running execution keeps its captured
-  selection. Only an explicitly requested `retry_thread {bot_id, thread_id}` or
-  a new message starts work. Retry refuses an unavailable pinned task engine
-  rather than silently running on the bot default.
+  selection. Only an explicitly requested `retry_thread {bot_id, thread_id}`,
+  OpenMausBot's one automatic retry of a failed teammate thread, or a new
+  message starts work. Both retries refuse an unavailable pinned task engine
+  rather than silently running on the bot default; an automatic retry refused
+  this way is reported to the Chief as not retried.
 
 Task control requires Chief authority. Chiefs can control their own tasks and
 bot-opened tasks they manage. Another bot's person-started task, an automation

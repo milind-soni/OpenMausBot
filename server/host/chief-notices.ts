@@ -17,6 +17,8 @@ type PeerAsk = NonNullable<Message["peerAsk"]>;
 
 export type EscalationOutcome = "chief" | "person" | "muted" | "off" | "skipped" | "failed";
 
+export const THREAD_MODEL_UNAVAILABLE = "The selected task engine is unavailable; explicitly select an available model before retrying. Nothing ran.";
+
 export interface ChiefNoticeDeps {
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath">;
   assignerOf(threadId: string): unknown;
@@ -35,6 +37,8 @@ export interface ChiefNoticeDeps {
   /** Security invariant: a read-and-draft run's prompt and reply carry mail and invite text, so its failures and
    * questions never reach a Chief as a notice. */
   quietThread?(botId: string, threadId: string): boolean;
+  /** The thread's selected task engine is unavailable: a retry would fall back to the bot default, so none starts. */
+  threadModelUnavailable?(botId: string, threadId: string): boolean;
   /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
   privateThread?(threadId: string): boolean;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
@@ -63,6 +67,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     if (reportedAt !== undefined && store.activePath(threadId).some((line) => line.turnSucceeded === true && line.at > reportedAt)) {
       return "that thread has finished a run since it was reported — there is nothing to retry; read what it did before deciding anything else";
     }
+    if (deps.threadModelUnavailable?.(botId, threadId)) return THREAD_MODEL_UNAVAILABLE;
     return null;
   }
 

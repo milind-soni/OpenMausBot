@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
-import { createChiefNotices, type ChiefNoticeDeps } from "./chief-notices.ts";
+import { createChiefNotices, THREAD_MODEL_UNAVAILABLE, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   const bots = [
@@ -56,6 +56,22 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
       const f = fixture();
       f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity for 20 minutes" });
       expect(f.notices.retryRefusal("ada", "ada-job")).toBeNull();
+      vi.setSystemTime(2_000);
+      f.store.appendMessage("ada-job", { role: "bot", kind: "text", text: "Done.", turnSucceeded: true });
+      expect(f.notices.retryRefusal("ada", "ada-job")).toMatch(/^that thread has finished a run since it was reported/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a thread whose selected task engine is unavailable, after the running and finished checks", () => {
+    const unavailable = { threadModelUnavailable: (botId: string, threadId: string) => botId === "ada" && threadId === "ada-job" };
+    expect(fixture(unavailable).notices.retryRefusal("ada", "ada-job")).toBe(THREAD_MODEL_UNAVAILABLE);
+    expect(fixture({ ...unavailable, threadBusy: () => true }).notices.retryRefusal("ada", "ada-job")).toBe(RETRY_BLOCKED.running);
+    vi.useFakeTimers({ now: 1_000 });
+    try {
+      const f = fixture(unavailable);
+      f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity for 20 minutes" });
       vi.setSystemTime(2_000);
       f.store.appendMessage("ada-job", { role: "bot", kind: "text", text: "Done.", turnSucceeded: true });
       expect(f.notices.retryRefusal("ada", "ada-job")).toMatch(/^that thread has finished a run since it was reported/);
@@ -130,6 +146,17 @@ describe("OpenMausBot's one automatic retry of a teammate's failed thread", () =
     await new Promise((resolve) => setImmediate(resolve));
     expect(f.turnsOf("ada")).toEqual([]);
     expect(f.turnsOf("chief")[0]!.text).toContain(`OpenMausBot did not retry it: its retry could not start (${RETRY_BLOCKED.running}).`);
+  });
+
+  it("never runs a thread whose selected task engine is unavailable on another model: the Chief hears why it was not retried", async () => {
+    const f = fixture({ threadModelUnavailable: () => true });
+    f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: CRASH });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(f.startTurn.mock.calls.filter(([botId]) => botId === "ada")).toEqual([]);
+    expect(f.turnsOf("chief")[0]!.text).toContain(`OpenMausBot did not retry it: its retry could not start (${THREAD_MODEL_UNAVAILABLE}).`);
+    await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true }))
+      .rejects.toThrow(THREAD_MODEL_UNAVAILABLE);
+    expect(f.turnsOf("ada")).toEqual([]);
   });
 
   it("tells the Chief, without retrying, when someone wrote in the thread since it failed", () => {

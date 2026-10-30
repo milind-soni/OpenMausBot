@@ -7001,6 +7001,7 @@ const { reportIncident, reportEscalation, incidentRefused, retryThread } = creat
   store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId),
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
+  threadModelUnavailable: (botId, threadId) => threadModelGivingWay(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   escalationsEnabled: () => chiefEscalationsEnabled(cfg), ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),
 });
@@ -14121,9 +14122,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (store.groupByThread(threadId)) return json(res, 400, { error: "that is a room thread — use coordinate_bots in the room instead" });
         const task = store.taskByThread(target.id, threadId);
         if (!task || (CLOUD_TEAM && !teamHost.readableFrom(fromThreadId)(threadId))) return json(res, 404, { error: "no such thread on that bot" });
-        if (threadModelGivingWay(target.id, threadId)) {
-          return json(res, 409, { error: "The selected task engine is unavailable; explicitly select an available model before retrying. Nothing ran." });
-        }
         requireActiveInternalCapability();
         try {
           await retryThread({ chief: from, bot: target, threadId, note, unattended: isUnattended(from.id, fromThreadId) });
