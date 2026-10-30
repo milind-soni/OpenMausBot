@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,19 +45,46 @@ export function lanesFor(plan, retryLog) {
   ];
 }
 
+/** Puts a lane in a network namespace of its own with only its loopback up, so no two lanes' servers meet on a port
+ * or an abstract socket. An unprivileged user namespace makes it without root (`unshare --keep-caps` hands its
+ * capabilities to `ip`); the lane itself runs as the same user, every capability dropped. */
+export const ISOLATE = ["unshare", "--user", "--map-current-user", "--keep-caps", "--net", "--", "sh", "-c",
+  'ip link set lo up && exec setpriv --inh-caps=-all --ambient-caps=-all --bounding-set=-all -- bash -eo pipefail -c "$1"', "lane"];
+
+/** How a lane starts: its program, arguments and environment, with its own home, temporary and runtime folders
+ * under `dir` when isolated. */
+export function laneCommand(lane, { isolate, dir }) {
+  const script = lane.commands.join("\n");
+  if (!isolate) return { file: "bash", args: ["-eo", "pipefail", "-c", script], env: lane.env };
+  return {
+    file: ISOLATE[0],
+    args: [...ISOLATE.slice(1), script],
+    env: { ...lane.env, HOME: join(dir, "home"), TMPDIR: join(dir, "tmp"), XDG_RUNTIME_DIR: join(dir, "run") },
+  };
+}
+
+/** Why this machine cannot isolate a lane, or null when it can: one throwaway namespace, its loopback brought up. */
+export function isolationRefusal() {
+  const probe = spawnSync(ISOLATE[0], [...ISOLATE.slice(1), "true"], { encoding: "utf8", timeout: 10_000 });
+  return probe.status === 0 ? null : (probe.stderr || probe.error?.message || `exit ${probe.status}`).trim();
+}
+
 const minutes = (ms) => `${Math.floor(ms / 60_000)}m${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`;
 
 /** Runs the lanes at once and prints each one's log whole when it ends. Resolves to the lanes that failed. */
-export async function runLanes(lanes, { dir, timeoutMs, heartbeatMs = 60_000, log = console.log, summary = () => {} }) {
+export async function runLanes(lanes, { dir, timeoutMs, isolate = false, heartbeatMs = 60_000, log = console.log, summary = () => {} }) {
   mkdirSync(dir, { recursive: true });
   const started = Date.now();
   const rows = [];
   const running = new Map();
   const finished = lanes.map((lane, index) => new Promise((done) => {
     const file = join(dir, `${index + 1}.log`);
+    const own = join(dir, String(index + 1));
+    for (const folder of ["home", "tmp", "run"]) mkdirSync(join(own, folder), { recursive: true, mode: 0o700 });
     const out = openSync(file, "w");
-    const child = spawn("bash", ["-eo", "pipefail", "-c", lane.commands.join("\n")], {
-      env: { ...process.env, ...lane.env }, stdio: ["ignore", out, out], detached: true,
+    const command = laneCommand(lane, { isolate, dir: own });
+    const child = spawn(command.file, command.args, {
+      env: { ...process.env, ...command.env }, stdio: ["ignore", out, out], detached: true,
     });
     running.set(lane.name, child);
     // Each lane has its own process group, so a timeout or a cancelled job ends its servers and fake CLIs too.
@@ -93,8 +120,15 @@ export async function runLanes(lanes, { dir, timeoutMs, heartbeatMs = 60_000, lo
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const plan = JSON.parse(process.env.OMB_CI_LINUX_LANES ?? "");
   const temp = process.env.RUNNER_TEMP ?? "/tmp";
+  const isolate = process.env.OMB_CI_ISOLATE_LANES === "1";
+  const refused = isolate ? isolationRefusal() : null;
+  if (refused) {
+    console.log(`::error title=Linux lanes::cannot give each lane a network namespace of its own here: ${refused}`);
+    process.exit(1);
+  }
   const failed = await runLanes(lanesFor(plan, join(temp, "vitest-retries.jsonl")), {
     dir: join(temp, "linux-lanes"),
+    isolate,
     timeoutMs: Number(process.env.OMB_CI_LANE_TIMEOUT_MINUTES ?? 30) * 60_000,
     summary: (markdown) => process.env.GITHUB_STEP_SUMMARY && appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown),
   });

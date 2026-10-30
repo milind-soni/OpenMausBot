@@ -125,6 +125,9 @@ jobs:
         if: steps.scope.outputs.linux_lanes
         env:
           OMB_CI_LINUX_LANES: ${{ steps.scope.outputs.linux_lanes }}
+          # Each lane in a network namespace of its own, with its own home and temporary folder: side by side, two
+          # lanes' servers picked the same port (EADDRINUSE on 127.0.0.1).
+          OMB_CI_ISOLATE_LANES: "1"
           # Boat's image sets en_US.UTF-8, whose collation is Intl's default; GitHub's runners use C.UTF-8 and UTC.
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
