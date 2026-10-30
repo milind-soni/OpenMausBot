@@ -13722,7 +13722,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           role: "bot",
           kind: "activity",
           from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: recallCrossingLabel(bot.name, crossing.count, threadLanguage(threadId)), ok: true },
+          tool: { name: recallCrossingLabel(bot.name, crossing.count, threadLanguage(roomThreadId)), ok: true },
         });
       };
       if (method === "GET" && path === "/api/internal/session-search") {
