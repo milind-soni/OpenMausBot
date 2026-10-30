@@ -15,6 +15,7 @@ import { outOfBounds } from "./agents-schema.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
+import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
@@ -211,6 +212,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
   if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context);
+  if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };

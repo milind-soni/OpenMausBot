@@ -34,7 +34,7 @@ import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
 import { SignInBanner } from "./SignInRequestCard";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
-import { MacLocalControl } from "./MacLocalControl";
+import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
   busyBoatView,
@@ -1677,7 +1677,7 @@ export function ComputerPanel({
         {phase !== "team-boat" && (bot.computer !== undefined || computerStatusCurrent) && <>
           <LocalScreenPreview />
           <LinuxLocalControl />
-          <MacLocalControl />
+          <MacLocalControl /><WindowsLocalControl />
         </>}
 
         {advanced ? <>

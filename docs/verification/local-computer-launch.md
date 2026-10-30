@@ -78,6 +78,42 @@ custom `CUA_DRIVER_PATH` executables. An explicit override remains untouched;
 an incomplete installed package reports a missing-driver error rather than
 silently falling back to the console binary.
 
+`pnpm smoke:cua-win-lend`, which CI's Windows CUA job runs after that smoke,
+copies Electron under the installed app's name, so `app.isPackaged` is true,
+and places the staged files where `electron-builder.yml` puts them. In
+Electron's main process it runs `electron/cua.mjs`'s packaged start unchanged,
+then a Cloud's first look at the PC through the lend path: the tool list, the
+screen's size and the list of apps, over the proxy a lent screen starts with
+the environment it gets. It sends no input. It prints computer control's mode,
+the reason Windows gave when it did not start, and whether apps and screen
+would be lent.
+
+### When a Cloud can't use this computer
+
+The icon's menu says what the person's own Clouds can't use and why, with the
+one fix ("Screen control isn't running on this PC" and Start screen control).
+A Cloud's bot that needs the computer then calls `ask_for_computer`: one card
+in the chat with a one-tap Turn on, the same ask in this app's own prompt, and
+the request goes on by itself once the computer lends what was needed. Only on
+the person's own Cloud, never a Team Cloud.
+
+```sh
+node --test electron/screen-status.node-test.mjs electron/computer-asks.node-test.mjs
+pnpm exec vitest run electron/capabilities.test.mjs server/computer-asks.test.ts \
+  server/host/computer-asks-host.test.ts shared/computer-ask.test.ts src/components/ComputerAskCard.test.ts
+pnpm exec vitest run server/cloud-lending.e2e.test.ts -t "paused, the PC still hears"
+```
+
+The last one boots a real Cloud home and lends to it through the real
+connector: paused, the computer hears the bot's ask, Turn on on the card
+resumes it, and the bot's waiting call returns the computer.
+
+`node --experimental-strip-types scripts/verify-windows-lend.ts --shots <dir>`
+photographs the taskbar icon's menu as the real module builds it, the card in
+the real chat (`computer-ask-preview.html`) and the PC's own screen-control
+status, in a light and a dark look; `docs/verification/evidence/windows-lend/`
+holds the current set.
+
 ### Foreground typing and menu clicks
 
 The bundled Windows driver (0.28.2) sends a foreground `type_text` as one burst

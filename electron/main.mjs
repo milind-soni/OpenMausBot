@@ -39,6 +39,7 @@ import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createLendingDialogs } from "./lending-dialogs.mjs";
 import { createActivityWindow } from "./lending-activity-window.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
+import { createScreenControl } from "./screen-control.mjs"; import { createAskPrompt } from "./ask-prompt.mjs";
 let startupScreen = null;
 let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
@@ -88,7 +89,7 @@ import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
-import { createComputerSharing, isHomeFolder, sharedCuaConnection, validateSharedFolders } from "./computer-sharing.mjs";
+import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
 import { createHostScreenLease } from "./host-screen-lease.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { switchLocalEnvironment } from "./environment-switch.mjs";
@@ -115,7 +116,7 @@ import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 import { installServerSessions, reportOwnListeners } from "./server-session.mjs";
 
-const { desktopCapabilities, localComputerReady, nativeDesktopActions } = capabilitiesModule;
+const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
 const require = createRequire(import.meta.url);
 const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource } = require(
@@ -1459,7 +1460,8 @@ function sharingController() {
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
     enabled: refreshSharedComputersAllowed,
-    cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, ownClouds: lendingTarget.places, screen: lendsScreen, askForScreen, power: cloudPower, cloudPower: origin => cloudAccount?.powerOf?.(origin) ?? null, reconnect: reconnectCloud,
+    cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, ownClouds: lendingTarget.places, screen: screenControl.now, askForScreen, power: cloudPower, cloudPower: origin => cloudAccount?.powerOf?.(origin) ?? null, reconnect: reconnectCloud,
+    prompt: createAskPrompt({ dialog, window: () => mainWindow, idleSeconds: () => powerMonitor.getSystemIdleState(1) === "unknown" ? null : powerMonitor.getSystemIdleTime() }), startScreen: screenControl.start, confirmTerminal: () => lendingDialogs.lendTerminal(true, () => sharingController().lendTerminal(true)), log: slog,
     linkHeaders: async env => ({ cookie: (await session.defaultSession.cookies.get({ url: env.origin })).map(cookie => `${cookie.name}=${cookie.value}`).join("; ") }),
     onChange: summary => { lendingIndicator().update(summary); loginItem.follow(summary.lending.length > 0); },
     cuaConnection: () => cuaReady, screenLocked: () => powerMonitor.getSystemIdleState(1) === "locked", idleSeconds: () => powerMonitor.getSystemIdleState(1) === "unknown" ? null : powerMonitor.getSystemIdleTime(),
@@ -1469,14 +1471,7 @@ function sharingController() {
 }
 
 const lendingTarget = createLendingTarget({ account: () => cloudAccount, environments: () => environmentsState.environments });
-/** Apps and screen are lent once computer control works here, or on a Mac that lacks only macOS's permissions, which
- * macOS is asked for the first time a Cloud's bot needs them; read from computer control's running state. */
-async function lendsScreen() {
-  if (desktopRemoteAccess) return false;
-  const connection = await cuaReady.catch(() => null);
-  return (sharedCuaConnection(connection) !== null && localComputerReady(process.platform, connection))
-    || (process.platform === "darwin" && missingPermissions(connection?.reason).length > 0);
-}
+const screenControl = createScreenControl({ connection: () => cuaReady, remote: () => Boolean(desktopRemoteAccess), request: requestComputerUse, log: slog });
 let screenAskedAt = -Infinity;
 /** Computer control starts again, as Settings' Retry does, which asks macOS for what it never asked; at most every 10 minutes. */
 function askForScreen(connection) {
@@ -1515,7 +1510,7 @@ let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
     Tray, Menu, nativeImage, iconPath: APP_ICON, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
-    onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)),
+    onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)), onStartScreen: () => void screenControl.start(),
     onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
   return lendingTray;
@@ -2880,6 +2875,7 @@ async function broadcastDesktopCapabilities() {
 }
 
 setCuaStateListener((connection) => {
+  screenControl.changed(connection);
   cuaReady = Promise.resolve(connection);
   void computerSharing?.screenChanged();
   void broadcastDesktopCapabilities().catch((error) => {

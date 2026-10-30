@@ -490,7 +490,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   expect(away.computers).toEqual([]);
   expect(away.offline).toEqual([expect.objectContaining({ device, lent: true })]);
   expect(away.say).toMatch(new RegExp(`^Their ${device} .+ is shared with the Cloud but offline \\(last online \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d UTC\\)`, "u"));
-  expect(away.say).toContain(`Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`);
+  expect(away.say, "on the person's own Cloud the bot asks with a card instead of explaining the fix").toContain("If the request needs it, call ask_for_computer");
   const refused = await call("shared_computer", { computer_id: id, action: "list_files", folder_id: randomUUID(), path: "." });
   expect(refused.isError).toBe(true);
   expect(JSON.stringify(refused)).toContain(`is offline: OpenMausBot on that ${device} is closed, or the ${device} is asleep or off.`);
@@ -562,3 +562,45 @@ it("a Mac signed in to My Cloud is lent by itself, its home folder with editing,
   await expect.poll(async () => (await lentNow()).computers.length, { timeout: 8000 }).toBe(1);
   rmSync(macHome, { recursive: true, force: true });
 }, hostTimeout(60_000));
+
+it("paused, the PC still hears a bot that needs it: one card in the chat, the app's own prompt once, and Turn on on the card turns it on so the bot's call carries on", async () => {
+  const env = { id: "my-cloud", name: "My Cloud", origin: base };
+  connector?.close();
+  const pcHome = realpathSync(mkdtempSync(join(tmpdir(), "omb-asks-home-")));
+  rmSync(join(home, "desktop-profile"), { recursive: true, force: true });
+  const prompts: string[] = [];
+  connector = createComputerSharing({
+    file: join(home, "desktop-profile", "computer-sharing.json"), environments: () => [env], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null, enabled: async () => false,
+    cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: pcHome,
+    screen: () => ({ ready: true, lent: true, reason: null, fix: null }),
+    prompt: async (_env: unknown, ask: { id: string }) => { prompts.push(ask.id); return null; },
+    fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, authorization: `Bearer ${owner}`, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` } }),
+    linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" }),
+  });
+  const lending = connector;
+  lending.start();
+  const lentNow = async () => (await api("GET", "/api/shared-computers", { token: owner })).body;
+  await expect.poll(async () => (await lentNow()).computers[0]?.scopes.screen, { timeout: 8000 }).toBe(true);
+  lending.pause();
+  await expect.poll(async () => (await lentNow()).computers.length, { timeout: 5000 }).toBe(0);
+
+  const bot = (await api("POST", "/api/bots", { token: owner, body: { name: "Asker", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } })).body.bot;
+  const call = await proxyFor(async () => {
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text: "Open the invoice in Excel on my computer." } })).status).toBe(202);
+  }, bot.id);
+  const asked = call("ask_for_computer", { need: "screen", why: "Open the invoice in Excel" });
+  const card = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages ?? [])
+    .find((message: { card?: { computerAsk?: unknown } }) => message.card?.computerAsk)?.card;
+  await expect.poll(async () => (await card())?.computerAsk?.reason, { timeout: 15_000 }).toBe("paused");
+  expect(await card()).toMatchObject({ options: ["Turn on", "Not now"], requestType: "permission", tool: "turn_on_your_computer" });
+  await expect.poll(() => prompts.length, { timeout: 8000 }).toBe(1);
+
+  const { requestId } = await card();
+  expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { token: owner, body: { requestId, behavior: "allow" } })).status).toBe(200);
+  const answer = await asked;
+  expect(answer.content[0].text).toContain("lends what you need now: computer_id");
+  expect(lending.paused()).toBe(false);
+  expect(await card()).toMatchObject({ answered: "allow", answeredBy: expect.any(Object), computerAsk: { state: "on" } });
+  expect(prompts, "the app's own prompt came up once").toHaveLength(1);
+  rmSync(pcHome, { recursive: true, force: true });
+}, hostTimeout(90_000));

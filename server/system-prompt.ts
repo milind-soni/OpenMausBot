@@ -147,14 +147,19 @@ function theirComputer(lent: ReadonlyArray<{ name: string; platform: "darwin" | 
   return { theirs: `their ${device} (${name})`, device };
 }
 
+/** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
-  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = []): string {
+  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = [], asks = false): string {
   const { theirs, device } = theirComputer(lent);
+  const unavailable = asks
+    ? ` If it isn't online, or doesn't lend what you need (its apps and screen, its files, running commands), call ask_for_computer with what you want to do and why: it shows them one card with a one-tap Turn on, and you carry on once it's on. Don't explain the fix yourself, and never do it on their cloud computer or in the built-in browser instead unless they ask you to.`
+    : ` If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise ask them to open OpenMausBot on that ${device}, signed in to MausBot Cloud: it shares that ${device} with you by itself.`;
   return ` You run on ${CLOUD_HOME_PLACE}.` + (sharedComputerTools
-    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows. If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise ask them to open OpenMausBot on that ${device}, signed in to MausBot Cloud: it shares that ${device} with you by itself.${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
+    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows.${unavailable}${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
       + ` While that ${device} is away, each folder it lends that the Cloud keeps a copy of still works from that copy: list_shared_computers lists them under away_computers (copy null means a folder only on the ${device}), every read says how fresh the copy is, and a write to a folder lent with editing is saved here and reaches the ${device} when it's on (tell them so in a few words). A file or folder that isn't in the copy is only on the ${device}: say you'll get it when it's on.`
     : ` You cannot see or use ${theirs}, its screen or its files from here. If they ask for something on it, say so in one sentence.`)
-    + " Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
+    + (asks ? " For work that doesn't need their own computer, use what works here:" : " Offer what works here:")
+    + " the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
     + syncedFoldersPrompt(synced);
 }
 

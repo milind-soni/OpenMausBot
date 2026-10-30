@@ -74,6 +74,8 @@ const MAUSBOT_TOOLS = ["list_unread_notifications", "mark_notifications_read"];
 /** MausBot's tools may make its list at most this much longer than the same Chief's without them. */
 const MAUSBOT_ADDS = 0.02;
 const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "research_call"];
+/** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
+const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
 const FULL = "skills+shared+voice+escalations+x+team";
 
@@ -95,8 +97,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice+non-chief": 50156,
   "skills+shared+non-chief": 51580,
   "skills+shared+voice+non-chief": 52345,
-  "skills+shared+voice+cloud-home": 60444,
-  "skills+shared+voice+non-chief+cloud-home": 51445,
+  "skills+shared+voice+cloud-home": 62226,
+  "skills+shared+voice+non-chief+cloud-home": 53169,
   "default+legacy-switches": 55532,
   "default+mausbot": 56183,
   "skills+shared+voice+mausbot": 62014,
@@ -206,7 +208,7 @@ describe("agents proxy tools/list golden", () => {
     const full = new Map(toolsOf(wires[FULL]!).map((tool) => [tool.name, JSON.stringify(tool)]));
     for (const [name, profile] of Object.entries(PROFILES)) {
       for (const tool of toolsOf(wires[name]!)) {
-        if (profile.env.OMB_CLOUD_HOME === "1" && tool.name === "select_computer") continue;
+        if (profile.env.OMB_CLOUD_HOME === "1" && (tool.name === "select_computer" || OWN_CLOUD_TOOLS.includes(tool.name))) continue;
         if (profile.env.OMB_CHIEF_OF_STAFF === "0" && CHIEF_TARGET_TOOLS.includes(tool.name)) continue;
         if (profile.env.OMB_MAUSBOT === "1" && MAUSBOT_TOOLS.includes(tool.name)) continue;
         expect(JSON.stringify(tool), `${name}: ${tool.name}`).toBe(full.get(tool.name));
@@ -247,6 +249,15 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
+  it("mounts ask_for_computer only on a person's own Cloud that is lent their computer, never a Team Cloud", () => {
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      expect(toolsOf(wires[name]!).some((tool) => tool.name === "ask_for_computer"), name)
+        .toBe(profile.env.OMB_CLOUD_HOME === "1" && profile.env.OMB_SHARED_COMPUTERS_ENABLED === "1" && profile.env.OMB_TEAM_PEOPLE !== "1");
+    }
+    const team = catalogProfileFromEnv({ ...PROFILES["skills+shared+voice+cloud-home"]!.env, OMB_TEAM_PEOPLE: "1", OMB_BOT_ID: "bot-golden" });
+    expect(availableTools(team).map((tool) => tool.name)).not.toContain("ask_for_computer");
+  });
+
   it("ignores the switches that once picked a catalog profile", () => {
     expect(wires["default+legacy-switches"]).toBe(wires.default);
     const profile = catalogProfileFromEnv({ OMB_BOT_ID: "bot-golden", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" });
@@ -265,7 +276,8 @@ describe("agents proxy tools/list golden", () => {
     for (const name of cloudHome) {
       const desktop = wires[name.slice(0, -"+cloud-home".length)]!;
       const names = toolsOf(wires[name]!).map((tool) => tool.name);
-      expect(names).toEqual(toolsOf(desktop).map((tool) => tool.name).filter((tool) => tool !== "vm_exec"));
+      expect(names).toEqual(expect.arrayContaining(OWN_CLOUD_TOOLS));
+      expect(names.filter((tool) => !OWN_CLOUD_TOOLS.includes(tool))).toEqual(toolsOf(desktop).map((tool) => tool.name).filter((tool) => tool !== "vm_exec"));
       expect(select(desktop).inputSchema.properties.surface.enum).toEqual(["auto", "cloud", "vm", "local", "browser"]);
       expect(toolsOf(desktop).map((tool) => tool.name)).toContain("vm_exec");
       const surface = select(wires[name]!).inputSchema.properties.surface;
