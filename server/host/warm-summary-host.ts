@@ -32,7 +32,7 @@ type CompactFn = (threadId: string, options: { instructions: string; session?: s
 
 export interface WarmSummaryHostDeps {
   store: Pick<Store, "taskByThread" | "botByThread" | "groupByThread" | "activePath" | "appendMessage" | "setResumeCursor" | "setHandedMessages">;
-  instance(instanceId: string): { adapter: { cacheKeepWarm?: { compact?: CompactFn; hold(threadId: string, until: number | null): boolean } } } | undefined;
+  instance(instanceId: string): { adapter: { cacheKeepWarm?: { compact?: CompactFn; hold(threadId: string, until: number | null): boolean } } } | null | undefined;
   /** Off with `context.autoCompact: false` or OMB_WARM_SUMMARY=0. */
   enabled(): boolean;
   /** Where the engine summarizes by itself, in tokens (Claude Code's --autocompact); undefined when OpenMausBot set none. */
