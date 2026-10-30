@@ -37,6 +37,11 @@ export function routineScheduleState(routine: Routine): string {
   return routine.enabled ? t("routines.activeSchedule") : t("routines.pausedSchedule");
 }
 
+/** Why OpenMausBot keeps this routine paused, while it does (its owner left: shared/routines.ts RoutineHoldCause). */
+export function routineHeldNote(routine: Routine): string | null {
+  return routine.heldFor ? t(`routines.heldFor.${routine.heldFor}`) : null;
+}
+
 export function routineNextLabel(routine: Routine): string {
   if (!routine.enabled) return routineScheduleState(routine);
   return routine.nextRunAt == null ? t("routines.noNextRun") : t("routines.nextRun", { time: routineDateTime(routine.nextRunAt) });
