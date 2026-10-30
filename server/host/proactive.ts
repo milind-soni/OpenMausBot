@@ -90,6 +90,8 @@ export interface ProactiveDeps {
   morning?: MorningDeps;
   done?: BriefDeps["done"];
   answer?: BriefDeps["answer"];
+  found?: BriefDeps["found"];
+  gotIt?: BriefDeps["gotIt"];
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -136,6 +138,8 @@ export function createProactive(deps: ProactiveDeps) {
     ...(deps.morning ? { morning: deps.morning } : {}),
     ...(deps.done ? { done: deps.done } : {}),
     ...(deps.answer ? { answer: deps.answer } : {}),
+    ...(deps.found ? { found: deps.found } : {}),
+    ...(deps.gotIt ? { gotIt: deps.gotIt } : {}),
   });
   const inbox = deps.helpers ? createInboxTriage({ ...deps.helpers, config: () => cfg }) : undefined;
   const suggestion = createHelperSuggestion({

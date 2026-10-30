@@ -248,6 +248,17 @@ const TOOL_DEFINITIONS = [
     }, required: ["reason"] },
   },
   {
+    name: "report_finding",
+    description: "Report something you found on your own that the person would want to know (news, a change, a problem), with its source. It becomes a card in your chat and in MausBot's daily brief; in an automation run report each finding here, then reply NOTHING NEW if that was all. A key you reported in the last 60 days is refused, so nobody is told twice. Not for answers, questions or progress.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      title: { type: "string", description: "The news, in one line." },
+      details: { type: "string", description: "Why it matters to the person, and anything you did about it." },
+      source: { type: "string", description: "Where you found it: an app, a site or a feed." },
+      links: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, properties: { label: { type: "string" }, url: { type: "string" } }, required: ["label", "url"] } },
+      key: { type: "string", description: "The same id on every run: a URL, an email or issue id." },
+    }, required: ["title", "details", "key"] },
+  },
+  {
     name: "list_bots",
     description:
       "List every other bot (agent) you can contact, in every department, with its department, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
@@ -867,7 +878,7 @@ const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
 /** Refused in a room's thread (chat-widgets.ts, chat-apps.ts, routes/waits.ts), and list_waits, since a room holds no wait. */
-const ROOM_REFUSED_TOOL_NAMES = new Set(["show_widget", "show_html", ...WAIT_TOOL_NAMES]);
+const ROOM_REFUSED_TOOL_NAMES = new Set(["show_widget", "show_html", "report_finding", ...WAIT_TOOL_NAMES]);
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",

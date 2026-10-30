@@ -1,5 +1,5 @@
-// The morning brief's own words: the greeting, what the bots finished overnight, how long a question has waited and the
-// morning time, in the language set in Settings rather than from the app's packs.
+// The morning brief's own words: the greeting, what the bots found and finished overnight, how long a question has
+// waited and the morning time, in the language set in Settings rather than from the app's packs.
 import { byLanguage } from "../language.ts";
 
 type Count = (count: number) => string;
@@ -19,6 +19,9 @@ export interface MorningWords {
   onItsOwn: string;
   waiting: { today: Name; yesterday: Name; earlier: Name };
   notNow: string;
+  found: Count;
+  foundTitle: string;
+  gotIt: string;
   answered: (bot: string, answer: string) => string;
   morningAt: Name;
   morningOff: string;
@@ -39,6 +42,9 @@ const en: MorningWords = {
   onItsOwn: "Started on its own",
   waiting: { today: (clock) => `Waiting since ${clock}`, yesterday: (clock) => `Waiting since yesterday ${clock}`, earlier: (date) => `Waiting since ${date}` },
   notNow: "Not now",
+  found: (n) => `${n} found for you`,
+  foundTitle: "Found for you",
+  gotIt: "Got it",
   answered: (bot, answer) => `Answered ${bot}: ${answer}`,
   morningAt: (clock) => `Morning brief at ${clock}`,
   morningOff: "Morning brief is off",
@@ -59,6 +65,9 @@ const ptBr: MorningWords = {
   onItsOwn: "Começou por conta própria",
   waiting: { today: (clock) => `Aguardando desde ${clock}`, yesterday: (clock) => `Aguardando desde ontem, ${clock}`, earlier: (date) => `Aguardando desde ${date}` },
   notNow: "Agora não",
+  found: (n) => (n === 1 ? `${n} novidade para você` : `${n} novidades para você`),
+  foundTitle: "Encontrado para você",
+  gotIt: "Entendi",
   answered: (bot, answer) => `Respondido para ${bot}: ${answer}`,
   morningAt: (clock) => `Resumo da manhã às ${clock}`,
   morningOff: "O resumo da manhã está desligado",
@@ -79,6 +88,9 @@ const es: MorningWords = {
   onItsOwn: "Empezó por su cuenta",
   waiting: { today: (clock) => `Esperando desde las ${clock}`, yesterday: (clock) => `Esperando desde ayer a las ${clock}`, earlier: (date) => `Esperando desde el ${date}` },
   notNow: "Ahora no",
+  found: (n) => (n === 1 ? `${n} hallazgo para ti` : `${n} hallazgos para ti`),
+  foundTitle: "Encontrado para ti",
+  gotIt: "Entendido",
   answered: (bot, answer) => `Respondiste a ${bot}: ${answer}`,
   morningAt: (clock) => `Resumen de la mañana a las ${clock}`,
   morningOff: "El resumen de la mañana está desactivado",
@@ -99,6 +111,9 @@ const de: MorningWords = {
   onItsOwn: "Von selbst gestartet",
   waiting: { today: (clock) => `Wartet seit ${clock}`, yesterday: (clock) => `Wartet seit gestern ${clock}`, earlier: (date) => `Wartet seit ${date}` },
   notNow: "Nicht jetzt",
+  found: (n) => `${n} für dich gefunden`,
+  foundTitle: "Für dich gefunden",
+  gotIt: "Verstanden",
   answered: (bot, answer) => `${bot} geantwortet: ${answer}`,
   morningAt: (clock) => `Morgenüberblick um ${clock}`,
   morningOff: "Der Morgenüberblick ist aus",
@@ -119,6 +134,9 @@ const fr: MorningWords = {
   onItsOwn: "Lancé tout seul",
   waiting: { today: (clock) => `En attente depuis ${clock}`, yesterday: (clock) => `En attente depuis hier ${clock}`, earlier: (date) => `En attente depuis le ${date}` },
   notNow: "Pas maintenant",
+  found: (n) => (n === 1 ? `${n} trouvaille pour vous` : `${n} trouvailles pour vous`),
+  foundTitle: "Trouvé pour vous",
+  gotIt: "Compris",
   answered: (bot, answer) => `Réponse à ${bot} : ${answer}`,
   morningAt: (clock) => `Point du matin à ${clock}`,
   morningOff: "Le point du matin est désactivé",
@@ -139,6 +157,9 @@ const ja: MorningWords = {
   onItsOwn: "自動で開始",
   waiting: { today: (clock) => `${clock}から待機中`, yesterday: (clock) => `昨日${clock}から待機中`, earlier: (date) => `${date}から待機中` },
   notNow: "あとで",
+  found: (n) => `あなた向けの発見${n}件`,
+  foundTitle: "あなた向けの発見",
+  gotIt: "了解",
   answered: (bot, answer) => `${bot}に回答: ${answer}`,
   morningAt: (clock) => `朝のブリーフィング: ${clock}`,
   morningOff: "朝のブリーフィングはオフです",
@@ -159,6 +180,9 @@ const zh: MorningWords = {
   onItsOwn: "自动开始",
   waiting: { today: (clock) => `从 ${clock} 起等待`, yesterday: (clock) => `从昨天 ${clock} 起等待`, earlier: (date) => `从 ${date} 起等待` },
   notNow: "稍后",
+  found: (n) => `为你发现 ${n} 项`,
+  foundTitle: "为你发现",
+  gotIt: "知道了",
   answered: (bot, answer) => `已回答 ${bot}：${answer}`,
   morningAt: (clock) => `晨间简报时间：${clock}`,
   morningOff: "晨间简报已关闭",
@@ -179,6 +203,9 @@ const zhTw: MorningWords = {
   onItsOwn: "自動開始",
   waiting: { today: (clock) => `從 ${clock} 起等待`, yesterday: (clock) => `從昨天 ${clock} 起等待`, earlier: (date) => `從 ${date} 起等待` },
   notNow: "稍後",
+  found: (n) => `為你發現 ${n} 項`,
+  foundTitle: "為你發現",
+  gotIt: "知道了",
   answered: (bot, answer) => `已回答 ${bot}：${answer}`,
   morningAt: (clock) => `晨間簡報時間：${clock}`,
   morningOff: "晨間簡報已關閉",
@@ -199,6 +226,9 @@ const hi: MorningWords = {
   onItsOwn: "अपने-आप शुरू हुआ",
   waiting: { today: (clock) => `${clock} से इंतज़ार में`, yesterday: (clock) => `कल ${clock} से इंतज़ार में`, earlier: (date) => `${date} से इंतज़ार में` },
   notNow: "अभी नहीं",
+  found: (n) => `आपके लिए ${n} नई जानकारी`,
+  foundTitle: "आपके लिए मिली जानकारी",
+  gotIt: "ठीक है",
   answered: (bot, answer) => `${bot} को जवाब दिया: ${answer}`,
   morningAt: (clock) => `सुबह का सारांश ${clock} बजे`,
   morningOff: "सुबह का सारांश बंद है",
@@ -219,6 +249,9 @@ const uk: MorningWords = {
   onItsOwn: "Розпочато самостійно",
   waiting: { today: (clock) => `Чекає з ${clock}`, yesterday: (clock) => `Чекає з учора, ${clock}`, earlier: (date) => `Чекає з ${date}` },
   notNow: "Не зараз",
+  found: (n) => `${n} знайдено для вас`,
+  foundTitle: "Знайдено для вас",
+  gotIt: "Зрозуміло",
   answered: (bot, answer) => `Відповідь для ${bot}: ${answer}`,
   morningAt: (clock) => `Ранковий огляд о ${clock}`,
   morningOff: "Ранковий огляд вимкнено",
@@ -239,6 +272,9 @@ const vi: MorningWords = {
   onItsOwn: "Tự bắt đầu",
   waiting: { today: (clock) => `Đang chờ từ ${clock}`, yesterday: (clock) => `Đang chờ từ hôm qua lúc ${clock}`, earlier: (date) => `Đang chờ từ ${date}` },
   notNow: "Để sau",
+  found: (n) => `${n} điều tìm thấy cho bạn`,
+  foundTitle: "Tìm thấy cho bạn",
+  gotIt: "Đã hiểu",
   answered: (bot, answer) => `Đã trả lời ${bot}: ${answer}`,
   morningAt: (clock) => `Bản tóm tắt buổi sáng lúc ${clock}`,
   morningOff: "Bản tóm tắt buổi sáng đang tắt",
@@ -259,6 +295,9 @@ const tr: MorningWords = {
   onItsOwn: "Kendiliğinden başladı",
   waiting: { today: (clock) => `${clock} saatinden beri bekliyor`, yesterday: (clock) => `Dün ${clock} saatinden beri bekliyor`, earlier: (date) => `${date} tarihinden beri bekliyor` },
   notNow: "Şimdi değil",
+  found: (n) => `senin için ${n} bulgu`,
+  foundTitle: "Senin için bulunanlar",
+  gotIt: "Anladım",
   answered: (bot, answer) => `${bot} yanıtlandı: ${answer}`,
   morningAt: (clock) => `Sabah özeti saat ${clock}`,
   morningOff: "Sabah özeti kapalı",
@@ -279,6 +318,9 @@ const ko: MorningWords = {
   onItsOwn: "자동으로 시작",
   waiting: { today: (clock) => `${clock}부터 대기 중`, yesterday: (clock) => `어제 ${clock}부터 대기 중`, earlier: (date) => `${date}부터 대기 중` },
   notNow: "나중에",
+  found: (n) => `발견한 소식 ${n}건`,
+  foundTitle: "발견한 소식",
+  gotIt: "확인",
   answered: (bot, answer) => `${bot}에 답함: ${answer}`,
   morningAt: (clock) => `아침 브리핑 ${clock}`,
   morningOff: "아침 브리핑이 꺼져 있어요",

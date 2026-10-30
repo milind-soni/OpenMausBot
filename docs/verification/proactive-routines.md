@@ -94,8 +94,10 @@ cap, busy bots, and Run now. The others:
   its owner;
 - `server/host/brief-morning.test.ts` and `server/host/brief-overnight.test.ts`:
   the morning time and its controls, who is waiting and since when, Not now,
-  answering a question on the brief, distinct labels, and the Done overnight
-  card;
+  answering a question on the brief, distinct labels, the Done overnight card,
+  and Found for you with Got it;
+- `server/host/found-updates.test.ts`: `report_finding`'s arguments, the card it
+  posts, the 60-day key ledger across a restart, rooms, and its internal route;
 - `server/connected-reads.test.ts` and `server/records-block.test.ts`: the
   readers and the sanitiser;
 - `server/read-and-draft.test.ts`: the fence;

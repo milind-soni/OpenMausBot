@@ -111,6 +111,7 @@ export const DRAFT_ACTION = "draft_reply";
 export const ANSWER_ACTION = "answer_row";
 export const LATER_ACTION = "not_now";
 export const MORNING_ACTION = "morning_time";
+export const GOT_IT_ACTION = "got_it";
 /** The morning times the brief offers, "HH:MM" in the person's zone. */
 export const MORNING_CHOICES = ["06:00", "07:00", "08:00", "09:00", "10:00"] as const;
 export const MORNING_OFF = "off";
@@ -124,6 +125,8 @@ export interface BriefRow { text: string; note: string; open?: OpenTarget; page?
 export type NeedRow = BriefRow & { key: string; ref?: string; bot?: string; since?: number; choices?: string[] };
 /** A piece of work a bot finished while the person was away. */
 export interface DoneRow { text: string; note: string; open?: OpenTarget }
+/** Something a bot found on its own and shared; `ref` is what Got it names. The text is the bot's own, shown as plain text. */
+export interface FoundRow { ref: string; bot: string; title: string; details: string; source?: string; links: Array<{ label: string; url: string }>; at: number; open?: OpenTarget }
 export interface BriefMeeting { title: string; start: number; joinUrl?: string }
 export interface BriefFacts {
   now: number;
@@ -151,6 +154,8 @@ export interface BriefFacts {
   morning?: { at?: string; choosing: boolean };
   /** Questions answered from this card today, as receipts under Needs you. */
   answered?: Array<{ bot: string; answer: string }>;
+  /** What the bots found on their own and the person has not marked Got it. */
+  found?: FoundRow[];
 }
 
 const BRIEF_TEXT = { line: 120, note: 160, sender: 40, label: 32, link: 600 } as const;
@@ -226,6 +231,18 @@ function needRow(row: NeedRow, facts: BriefFacts, w: BriefWords, m: MorningWords
   ]);
 }
 
+const FOUND_DETAILS = 280;
+
+function foundRow(row: FoundRow, facts: BriefFacts, w: BriefWords, m: MorningWords, label: ReturnType<typeof distinctLabels>): Node {
+  const links = row.links.flatMap((one) => { const link = httpsLink(one.url), open = link ? openUrl(link) : undefined; return open ? [button(one.label, open)] : []; });
+  const note = [row.bot, row.source, clockTime(row.at, facts.timeZone, facts.language)].filter(Boolean).join(" · ");
+  return { type: "Col", gap: 1, children: [
+    ...rowLines(row.title, note),
+    text(clip(row.details, FOUND_DETAILS)),
+    ...buttons([...links, ...openButton(row.open, w), button(label(m.gotIt, oneLine(row.bot, 24)), { type: GOT_IT_ACTION, payload: { update: row.ref } })]),
+  ] };
+}
+
 function partOfDay(at: number, timeZone: string | undefined): keyof MorningWords["greeting"] {
   const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: zoneOf(timeZone), hour: "2-digit", hourCycle: "h23" }).format(new Date(at)));
   return hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
@@ -276,8 +293,10 @@ export function briefCard(facts: BriefFacts): BuiltCard {
   const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)]));
   const ideaRows = (facts.ideas ?? []).map((row) => rowBeside(row.text, row.note, []));
   const done = facts.doneOvernight ?? 0;
+  const foundRows = (facts.found ?? []).map((row) => foundRow(row, facts, w, m, label));
   const parts = [
     needRows.length && w.summary.needs(needRows.length),
+    foundRows.length && m.found(foundRows.length),
     done && m.done(done),
     facts.meetings && facts.meetings.length && w.summary.meetings(facts.meetings.length),
     important.length && w.summary.emails(important.length),
@@ -291,6 +310,7 @@ export function briefCard(facts: BriefFacts): BuiltCard {
     ...section(w.needsYou, needRows, w, w.nothingNeedsYou, (facts.answered ?? []).map((one) => caption(m.answered(one.bot, one.answer)))),
     ...(facts.meetings === null ? [] : section(w.yourDay, meetingRows, w, w.noMoreMeetings)),
     ...(importantRows.length || waitingNotice.length ? section(w.importantEmails, importantRows, w, undefined, waitingNotice) : []),
+    ...(foundRows.length ? section(m.foundTitle, foundRows, w) : []),
     ...(routineRows.length ? section(w.routines, routineRows, w) : []),
     ...(ideaRows.length ? section(w.ideas, ideaRows, w) : []),
     ...(facts.morning ? [{ type: "Divider" }, ...morningRow(facts.morning, language, m, label)] : []),

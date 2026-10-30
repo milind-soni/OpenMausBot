@@ -79,31 +79,31 @@ const FULL = "skills+shared+voice+escalations+x+team";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 55532,
-  "voice": 56313,
-  "shared": 57632,
-  "shared+voice": 58413,
-  "skills": 58351,
-  "skills+voice": 59132,
-  "skills+shared": 60451,
-  "skills+shared+voice": 61232,
-  "non-chief": 46628,
-  "voice+non-chief": 47394,
-  "shared+non-chief": 48686,
-  "shared+voice+non-chief": 49452,
-  "skills+non-chief": 49391,
-  "skills+voice+non-chief": 50156,
-  "skills+shared+non-chief": 51449,
-  "skills+shared+voice+non-chief": 52214,
-  "skills+shared+voice+cloud-home": 60313,
-  "skills+shared+voice+non-chief+cloud-home": 51314,
-  "default+legacy-switches": 55532,
-  "default+mausbot": 56183,
-  "skills+shared+voice+mausbot": 61883,
-  "skills+shared+voice+escalations": 62062,
-  "skills+shared+voice+escalations+x": 65901,
-  "skills+shared+voice+escalations+x+team": 66533,
-  "default+no-computer-pick": 54320,
+  "default": 57703,
+  "voice": 58484,
+  "shared": 59803,
+  "shared+voice": 60584,
+  "skills": 60522,
+  "skills+voice": 61303,
+  "skills+shared": 62622,
+  "skills+shared+voice": 63403,
+  "non-chief": 48646,
+  "voice+non-chief": 49427,
+  "shared+non-chief": 50746,
+  "shared+voice+non-chief": 51527,
+  "skills+non-chief": 51465,
+  "skills+voice+non-chief": 52246,
+  "skills+shared+non-chief": 53565,
+  "skills+shared+voice+non-chief": 54346,
+  "skills+shared+voice+cloud-home": 62484,
+  "skills+shared+voice+non-chief+cloud-home": 53427,
+  "default+legacy-switches": 57703,
+  "default+mausbot": 58354,
+  "skills+shared+voice+mausbot": 64054,
+  "skills+shared+voice+escalations": 64233,
+  "skills+shared+voice+escalations+x": 68072,
+  "skills+shared+voice+escalations+x+team": 68704,
+  "default+no-computer-pick": 56491,
   "default+room": 48473,
   "non-chief+room": 39416,
 };
@@ -304,11 +304,12 @@ describe("agents proxy tools/list golden", () => {
     const names = (name: string) => toolsOf(wires[name]!).map((tool) => tool.name);
     expect(names("default+no-computer-pick")).toEqual(names("default").filter((tool) => tool !== "select_computer"));
     for (const name of ["default", "non-chief"]) {
-      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "show_widget", "show_html", "wait_until", "list_waits", "cancel_wait"].includes(tool)));
+      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "show_widget", "show_html", "report_finding", "wait_until", "list_waits", "cancel_wait"].includes(tool)));
     }
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(name).includes("select_computer"), name).toBe(profile.env.OMB_COMPUTER_SELECTION === "1");
       expect(names(name).includes("show_widget"), name).toBe(profile.env.OMB_ROOM !== "1");
+      expect(names(name).includes("report_finding"), name).toBe(profile.env.OMB_ROOM !== "1");
       expect(names(name).includes("wait_until"), name).toBe(profile.env.OMB_ROOM !== "1");
     }
   });
