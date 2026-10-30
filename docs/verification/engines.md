@@ -67,6 +67,23 @@ Groq model in the bot's picker, send a fixture turn, then clear the key and
 confirm the engine is unavailable. Never use the live app or a real key for
 this recipe.
 
+## Greenference API setup
+
+```sh
+pnpm exec vitest run server/drivers/greenference.test.ts server/provider-key-check.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://llm.eu.greenference.com/v1`. They check
+the preset endpoint, that the server's key never goes to another host, the
+model list (ready models that call tools, short names, image input from
+`input_modalities`), streaming with reasoning and usage, and that a refused key
+never shows in events. Greenference's model list is public, but a wrong key
+gets 401 there, so Settings' Test proves the key. They never call Greenference.
+
+Checked against the live public list on 2026-10-30: 10 models, of which 5 call
+tools (GLM 5.3 Flash, Qwen3.6 27B, Gemma 4 31B, GLM 4.7 Flash, Qwen3 14B), and
+chat without a key answers 401. A real chat turn needs a real key.
+
 ## Meta Muse: Model API and Muse Code
 
 ```sh
