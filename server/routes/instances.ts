@@ -306,7 +306,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory or boolean tools setting." });
+      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes." });
       const body = parsed.data;
       const instanceId = instancePatch[1];
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
@@ -328,6 +328,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
             return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API, Mistral API, Cerebras API, Groq API and Meta API instances only." });
           }
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
+        }
+        if (body.replyWaitMinutes !== undefined) {
+          if (entry.driver !== "openai-compat") return json(res, 400, { error: "The reply wait is available for OpenAI-compatible servers only." });
+          const { replyWaitMinutes: _previous, ...rest } = entry.config as Record<string, unknown>;
+          entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {

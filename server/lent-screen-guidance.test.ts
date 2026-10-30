@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LENT_BROWSER_NO_ENDPOINT, LENT_SCREEN_BACKGROUND, LENT_SCREEN_BROWSING, lentScreenResult } from "./lent-screen-guidance.ts";
 import { omittedFromErrorNote } from "./mcp-error-result.ts";
+import { CLICK_SENT_UNCONFIRMED } from "./unconfirmed-click.ts";
 
 const call = (tool_name: string) => ({ action: "computer_call", tool_name });
 const failed = (text: string) => ({ content: [{ type: "text", text }], isError: true });
@@ -41,6 +42,17 @@ describe("a lent screen's answers carry the fix", () => {
     expect(texts(lentScreenResult(call("click"), failed("Computer control is unavailable. Enable it in the local app and grant OS permissions first.")))[0]).toMatch(/^Computer control is not running on this computer\./);
     expect(texts(lentScreenResult(call("click"), failed("fetch failed")))[0]).toMatch(/restart OpenMausBot on that computer/);
   });
+  it("answers a click that was sent but whose after-check failed as sent; the same words from typing stay a failure", () => {
+    const after = failed("foreground_unavailable: exact target HWND 0x30a5c or a verified same-process post-action window was not foreground after the click (actual foreground HWND 0x1f00)");
+    for (const tool of ["click", "double_click", "right_click"]) {
+      const answer = lentScreenResult(call(tool), after) as { isError?: boolean };
+      expect(texts(answer)).toEqual([CLICK_SENT_UNCONFIRMED]);
+      expect(answer.isError).toBeUndefined();
+    }
+    // type_text focuses a field with this click and then types nothing.
+    expect(lentScreenResult(call("type_text"), after)).toEqual(after);
+  });
+
   it("passes a lent screen's error on as text only, and its successful screenshots unchanged", () => {
     const image = { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" };
     const refused = { content: [{ type: "text", text: "refused" }, image], isError: true };

@@ -258,7 +258,7 @@ describe("Settings → Engines → setup cards", () => {
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(remote).toContain("open Settings → API keys on the computer running OpenMausBot");
+    expect(remote).toContain("open Settings → API keys on the computer running MausBot");
     expect(remote).not.toContain("data-key-row");
 
     vi.stubGlobal("window", {});

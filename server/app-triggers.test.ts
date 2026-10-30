@@ -308,7 +308,7 @@ describe("instructions in the person's words", () => {
     const { availableTools, catalogProfileFromEnv } = await import("./drivers/agents-catalog.ts");
     const { eventPrompt } = await import("./app-events.ts");
     expect(TRIGGER_PROMPT).toContain('in the plain words the person would use ("draft a reply", "add the lead to the sheet"): never "event data", "payload", "webhook" or "trigger"');
-    const create = availableTools(catalogProfileFromEnv({})).find((tool) => tool.name === "create_trigger")!;
+    const create = availableTools(catalogProfileFromEnv({})).find((tool) => tool.name === "trigger")!;
     expect(create.description).toContain("write name and instructions as they would say them");
     expect((create.inputSchema.properties as Record<string, { description?: string }>).instructions!.description)
       .toContain("in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\"");

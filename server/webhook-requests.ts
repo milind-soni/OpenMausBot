@@ -128,7 +128,7 @@ export class WebhookRequestService {
   private owned(webhookId: string, owner: string): WebhookTrigger {
     const webhook = this.options.webhooks.list().find((candidate) => candidate.id === webhookId);
     if (!webhook || webhook.botId !== owner) {
-      throw new WebhookRequestError("No webhook trigger with that id belongs to this bot. Call list_triggers and copy its id.", 404);
+      throw new WebhookRequestError("No webhook trigger with that id belongs to this bot. Call trigger_info and copy its id.", 404);
     }
     return webhook;
   }
@@ -150,7 +150,7 @@ export class WebhookRequestService {
       const duplicate = webhooks.list().find((webhook) => webhook.botId === owner && webhook.enabled &&
         webhook.name === operation.webhook.name && webhook.prompt === operation.webhook.instructions);
       if (duplicate) {
-        throw new WebhookRequestError(`An enabled webhook trigger with the same name and instructions already exists (${duplicate.id}). Use list_triggers to review it, then change that one instead.`, 409);
+        throw new WebhookRequestError(`An enabled webhook trigger with the same name and instructions already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
       }
     }
     if (args.canCommit && !args.canCommit()) throw new WebhookRequestError("The requesting turn ended before this change could be saved", 401);

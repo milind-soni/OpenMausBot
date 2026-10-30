@@ -62,8 +62,10 @@ Use only mapped, tested commands:
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Computer panel focus hand-off](computer-panel-focus.md)
 - [Taking control of a bot's computer](take-control.md)
+- [Saved steps: repeating a computer task without AI](saved-steps.md)
 - [Native dictation retention and send-to-stop](dictation.md)
 - [Proactive routines and the brief](proactive-routines.md)
+- [Waits: tell me when, with no AI while waiting](waits.md)
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
 - [Reactions](reactions.md)
@@ -72,6 +74,7 @@ Use only mapped, tested commands:
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
+- [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
 - [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Cline engine and native loopback qualification](cline.md)
@@ -129,6 +132,12 @@ The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
 
+The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
+category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
+bot's turn getting the `postiz` tools with the token kept out of every answer,
+transcript and log, plain refusals, revocation and disconnect, against loopback
+stand-ins for Postiz.
+
 The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
 included calls with the month's use, the person's own treg key (saved, tested,
 removed, used first) and a used-up month, against loopback stand-ins for treg
@@ -152,8 +161,8 @@ The [personal Cloud account smoke](cloud-account.md) checks optional browser
 sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
 
 The [rail of Clouds](cloud-rail.md) checks the session's list of Clouds, which
-pages may read the rail, opening a place by its id, and buying another Cloud,
-with a loopback Admin and the real app in a disposable preview.
+pages may read the rail, opening a place by its id, hiding the rail, and buying
+another Cloud, with a loopback Admin and the real app in a disposable preview.
 
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
@@ -219,7 +228,8 @@ roles and device revocation through the real HTTP API with a stubbed email
 service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
-default focus, keyboard wrapping and focus return against two disposable bots.
+default focus, keyboard wrapping and focus return against two disposable bots;
+its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
 Active Threads popover's width and inset at each expanded sidebar density in a

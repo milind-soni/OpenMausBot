@@ -42,7 +42,7 @@ export function webhookAddress(webhooks: Pick<WebhookManager, "currentSecret">, 
   };
 }
 
-/** The address for a create_trigger result or a list_triggers request: the address, or why this turn does not get it. */
+/** The address for a trigger create result or a trigger_info request: the address, or why this turn does not get it. */
 export function addressFor(ask: AddressAsk, webhooks: Pick<WebhookManager, "currentSecret">, id: string, baseUrl: string):
   { address: WebhookAddress } | { addressRefused: string } | Record<string, never> {
   const refused = addressRefusal(ask);

@@ -56,7 +56,7 @@ Properties are counts, `true` or `false`, or words from fixed lists in the app's
 
 | List | Values |
 | --- | --- |
-| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg` |
+| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg`, `postiz` |
 | Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `meta`, `muse_code`, `deepseek`, `copilot` |
 | App | The 24 apps Connected apps lists by default: `slack`, `github`, `gmail`, `googlecalendar`, `googlesheets`, `googledocs`, `googledrive`, `notion`, `linear`, `sentry`, `posthog`, `discord`, `twitter`, `reddit`, `zapier`, `hubspot`, `salesforce`, `jira`, `asana`, `trello`, `dropbox`, `airtable`, `figma`, `stripe`. Every other app is `other`. |
 | Starting role | `assistant`, `inbox`, `research`, `coder`, `community`, `ops` |
@@ -161,7 +161,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_checkout_opened` | A Cloud checkout opens in the browser | `plan`: Cloud plan; `trial`: true/false; `source`: as for `cloud_dialog_shown` |
 | `cloud_add_another` | Buying another Cloud, for someone who has one, takes a step | `step`: `plan` (a plan chosen), `checkout_opened`, `ready`; `plan`: Cloud plan, for `plan` and `checkout_opened` |
 | `rail_place_opened` | You open a place from the rail of Clouds at the window's left edge | `kind`: `computer`, `cloud`, `team`, `server` |
-| `rail_add` | You use the rail's ＋ | `step`: `opened` (its sheet opened), `cloud` (Buy a Cloud, on this computer's own sheet), `link` (Paste pairing link), `address` (Enter its address instead) |
+| `rail_add` | You use the rail's ＋ | `step`: `opened` (its sheet opened), `cloud` (Buy a Cloud, on this computer's own sheet), `link` (Paste pairing link), `address` (Enter its address instead), `organization` (a new organization added on the Team plan) |
 | `cloud_setup_started` | A new Cloud starts its first job | none |
 | `cloud_intent_submitted` | You tell a new Cloud what to do first | `idea`: `digest`, `watch`, `research`, `plan`, or none for your own words; `edited`: true/false |
 | `cloud_intent_skipped` | You skip that question | none |

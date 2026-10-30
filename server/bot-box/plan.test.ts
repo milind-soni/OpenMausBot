@@ -26,6 +26,7 @@ linuxBox("the box plan", () => {
     const plan = turn();
     expect(plan.botId).toBe("bot-a");
     expect(visibleInBox(plan, cwd)).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "bots", "bot-a", "SOUL.md")), "its own standing instructions, never writable").toBe("ro");
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a", "MEMORY.md"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "perm-abc.sock"))).toBe("rw");
     expect(visibleInBox(plan, "/data/.claude/settings.json")).toBe("rw");
@@ -34,7 +35,8 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/app/dist-server/index.js")).toBe("ro");
     expect(visibleInBox(plan, "/usr/local/bin/claude")).toBe("ro");
     for (const hidden of ["messages.db", "config.json", "logins.json", "providers/x", "tools/y", "box/egress.sock",
-      "workspaces/bot-b/MEMORY.md", "task-workspaces/bot-b/thread-9/notes.md", "task-workspaces/bot-a/thread-2/notes.md"]) {
+      "workspaces/bot-b/MEMORY.md", "task-workspaces/bot-b/thread-9/notes.md", "task-workspaces/bot-a/thread-2/notes.md",
+      "bots/bot-b/SOUL.md", "bots/bot-a/other.json"]) {
       expect(visibleInBox(plan, join(dataDir, hidden)), hidden).toBe("none");
     }
     expect(visibleInBox(plan, "/tmp/other-turn/mcp.json")).toBe("none");

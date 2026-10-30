@@ -64,7 +64,7 @@ import {
   phonePairingManualCodeMode,
 } from "../lib/companion-state";
 import { ConnectionDetail } from "./ConnectionDetail";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 
 export interface PhoneDevice {
   id: string;
@@ -910,7 +910,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
           <Smartphone size={26} />
         </div>
-        <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: brand().name })}</h2>
+        <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: productName() })}</h2>
         <p className="mt-1.5 max-w-[460px] text-[14px] leading-relaxed text-ink-secondary">
           {t("phone.intro.detail")}
         </p>

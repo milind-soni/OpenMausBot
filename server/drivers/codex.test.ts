@@ -15,7 +15,7 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
 import * as codexProcess from "./codex-process.ts";
-import { CODEX_SIGN_IN_EXPIRED, codexNotSignedIn, codexSignInRefused, codexUserError } from "./codex-errors.ts";
+import { CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, codexSignInRefused, codexUserError } from "./codex-errors.ts";
 import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
@@ -3313,6 +3313,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(codexUserError("You've hit your usage limit.", "own")).not.toContain("resets at");
     expect(codexUserError("Quota reached.", "own", "usageLimitExceeded")).toContain(CODEX_USAGE_LIMIT_REACHED);
     expect(codexUserError(plus, "other")).toBe(plus);
+    expect(codexLimitFacts(plus, "own"), "the account's limit, with its reset on Codex's own sign-in").toEqual({ limit: "engine", limitResetsAt: expect.any(Number) });
+    expect(codexLimitFacts(plus, "plan")).toEqual({ limit: "engine" });
+    expect(codexLimitFacts("You've hit your usage limit for gpt-6.1-sol. Switch to another model now, or try again at Oct 17th, 2026 5:23 PM.", "own"))
+      .toEqual({ limit: "model", limitResetsAt: new Date(2026, 9, 17, 17, 23, 0).getTime() });
+    expect(codexLimitFacts("Quota reached.", "own", "usageLimitExceeded")).toEqual({ limit: "engine" });
+    expect(codexLimitFacts(`${"x".repeat(40)}subscription_sharing_usage_limit_exceeded`, "plan")).toEqual({ limit: "engine" });
+    expect(codexLimitFacts("stream disconnected before completion", "own")).toEqual({});
     const noBearer = "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses";
     expect(codexUserError(noBearer, "own")).toBe(codexNotSignedIn());
     expect(codexUserError(noBearer, "other")).toBe(noBearer);

@@ -1,3 +1,6 @@
+/** Remove from list's answer: done (`removed`), refused by the Admin now, the Cloud no longer theirs (`gone`), an Admin
+ * without it (`unsupported`), or no answer (`failed`). */
+export type CloudRemoveOutcome = "removed" | "refused" | "gone" | "unsupported" | "failed";
 export interface CloudAccountState {
   status: "signed-out" | "connecting" | "connected" | "reauth-required" | "unavailable";
   message?: string;
@@ -26,6 +29,8 @@ export interface CloudAccountState {
   clouds?: import("./cloud-list.mjs").CloudListEntry[];
   /** With `clouds`: whether the Admin opens another Cloud's checkout now, and why not. */
   addCloud?: { canAdd: true } | { canAdd: false; blocked: CloudAddBlock };
+  /** With `clouds`, for the account a Team plan with organizations is billed to: whether ＋ may add one to it now. */
+  organizations?: import("./cloud-list.mjs").CloudOrganizations;
   /** The newest OpenMausBot release the Admin knows, while it follows releases (with `clouds`); absent otherwise. */
   latestVersion?: string;
   /** Another Cloud this app is buying (in the last 24 hours): its id, name, swatch and plan, when its checkout opened,
@@ -89,6 +94,12 @@ export type CloudAddResult =
   | { outcome: "opened"; state: CloudAccountState }
   | { outcome: "unsupported" | "failed" }
   | { outcome: "blocked"; blocked: CloudAddBlock };
+/** What adding an organization did: `added` (its Cloud is being set up), `taken` (another of the plan's has that name),
+ * `blocked` with the Admin's reason, `unsupported` (an Admin without organizations), or `failed` (nothing was added). */
+export type OrganizationAddResult =
+  | { outcome: "added"; cloudId?: string }
+  | { outcome: "taken" | "unsupported" | "failed" }
+  | { outcome: "blocked"; blocked: import("./cloud-list.mjs").OrganizationBlock };
 /** What opening a checkout did: `opened` in the browser; `signing-in` (signed
  * out, the browser signs in first); `conflict` (the account changed, now read
  * again); `rate-limited`; or `failed` (nothing was opened). */
@@ -267,8 +278,12 @@ export interface CloudAccountClient {
   isOwnCloud(origin: string | null | undefined): boolean;
   /** Buys another Cloud (POST /api/cloud/desktop/clouds): its checkout opens in the browser. */
   addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<CloudAddResult>;
+  /** A new organization on the Team plan this account pays for (POST /api/cloud/desktop/organizations): no checkout. */
+  addOrganization(input: { name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<OrganizationAddResult>;
   /** A Cloud's colour on the Admin (PATCH /api/cloud/desktop/clouds/:id), for its owner or its team's Super admin and Admins. */
   setCloudColor(cloudId: string, color: import("./cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "saved" | "refused" | "unsupported" | "failed" }>;
+  /** Remove from list: one of the person's own Clouds the session says is `removable` leaves their list on the Admin. */
+  hideCloud(cloudId: string): Promise<{ outcome: CloudRemoveOutcome }>;
   /** That checkout's page again (never a new one); false when none is kept. */
   reopenAdd(): Promise<boolean>;
   /** Main only (the clipboard): that checkout's page, or null. */

@@ -18,6 +18,7 @@ import type { Handoffs } from "../delta-context.ts";
 import type { OneOnOneGoals } from "../host/one-on-one-goals.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { spokenLineFields } from "../live-call-record.ts";
+import { messageTextRefusal } from "../message-text.ts";
 import { stopReachesLiveTurn } from "../person-stops.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
 import type { ReplyTarget } from "../replies.ts";
@@ -131,6 +132,8 @@ export interface BotMessageRouteDeps {
   /** A Team Cloud: the person's reply to a line in their own inbox goes back where that line came from, with no turn
    * here; null for any other message. */
   inboxReply?(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender }): { status: number; message?: Message; error?: string } | null;
+  /** A typed line that answers a bot's question card; null sends it as usual. */
+  typedCardAnswer?(auth: RequestAuth, threadId: string, text: string, target: Message | undefined, line: { sendId?: string; sender?: ResolvedSender }): Promise<{ status: number; message?: Message; error?: string } | null>;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -198,6 +201,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (guardedBody?.data?.reaction !== undefined && (!reactionAnswer(relayed) || !body.replyToId || !guardedBody.data.onBehalfOf)) {
         return json(res, 400, { error: "a relayed reaction is a 👍 or 👎 on the message in replyToId, made by the person in onBehalfOf" });
       }
+      const textRefused = pressed || fromAnApp ? null : messageTextRefusal(body.text);
+      if (textRefused) return json(res, 400, { error: textRefused });
       const typed = pressed || fromAnApp ? "" : relayed ?? String(body.text ?? "").trim();
       if (!pressed && !fromAnApp && !typed) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
@@ -247,7 +252,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
       const passedBack = !guarded && !press && !appSent && !pointed && target ? deps.inboxReply?.(auth, threadId, target.id, text, { sendId, sender: messageSender(auth) }) : null;
-      if (passedBack) return json(res, passedBack.status, passedBack.message ? { ok: true, threadId, message: passedBack.message } : { error: passedBack.error });
+      const typedAnswer = passedBack || guarded || press || appSent || pointed ? null : await deps.typedCardAnswer?.(auth, threadId, text, target, { sendId, sender: messageSender(auth) });
+      const answeredBack = passedBack ?? typedAnswer;
+      if (answeredBack) return json(res, answeredBack.status, answeredBack.message ? { ok: true, threadId, message: answeredBack.message } : { error: answeredBack.error });
       // Only a real press or reaction, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
       const records = press && target ? pressRecords(bot, press.action) : null;
       const replyTo: ReplyTarget | undefined = press && target ? { ...target, widgetPress: { label: press.label, action: press.action, ...(records ? { records } : {}) } }
@@ -442,6 +449,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const bot = requestedTaskBot(m[1], body.threadId);
       const notYours = cloudThreadRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
+      const textRefused = messageTextRefusal(body.text);
+      if (textRefused) return json(res, 400, { error: textRefused });
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
       const threadMessages = store.messagesFor(bot.threadId);

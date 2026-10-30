@@ -35,6 +35,7 @@ import {
 } from "@/lib/local-vm-workspace";
 import { z } from "zod";
 import { Select } from "./Select";
+import { productName } from "@/lib/brand";
 
 const SLOT_CONTEXTS = ["local-vm-workspace:left", "local-vm-workspace:right"] as const;
 
@@ -678,7 +679,7 @@ export function LocalVmWorkspace({
       setControlledBotId(null);
       return true;
     } catch {
-      setControlError("OpenMausBot could not hand control back. The view stayed open.");
+      setControlError(`${productName()} could not hand control back. The view stayed open.`);
       return false;
     } finally {
       controlBusyRef.current = false;
@@ -776,7 +777,7 @@ export function LocalVmWorkspace({
           onClick={() => void closeWorkspace()}
           disabled={controlPending}
           className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-          aria-label="Close Local VM view"
+          aria-label="Close private desktop view"
         >
           <X size={18} />
         </button>

@@ -1126,7 +1126,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
         state.lastError = message;
         state.lastErrorSetup ||= setup;
-        emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route) });
+        emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
       };
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};

@@ -58,6 +58,7 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     if (!boat.boatConfigured(cfg) || hasPendingBoatDeletionForBot(owner)) return forget(owner);
     if (boatCreateRecoverySnapshot().some((entry) => entry.botId === owner && !entry.resolved)) return "busy";
     const machine = await boat.findBoat(cfg, owner);
+    if (closed) return;
     const state = typeof machine?.state === "string" ? machine.state : null;
     if (!state || boat.SLEEPING_BOAT_STATES.has(state)) return forget(owner);
     if (boat.boatTurnLifecycleAction(state) !== "attach" || busy(owner)) return "busy";

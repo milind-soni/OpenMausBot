@@ -7,7 +7,7 @@ export const APP_PROTOCOL_VERSION = "2026-01-26";
 export const APP_EXTENSION_KEY = "io.modelcontextprotocol/ui";
 
 export const APP_LIMITS = {
-  /** show_html / update_html `html` or `jsx`, UTF-8 bytes after trimming. */
+  /** show_html `html` or `jsx`, UTF-8 bytes after trimming. */
   htmlBytes: 256 * 1024,
   title: 80,
   fallback: 1_500,
@@ -72,7 +72,7 @@ export interface AppPayload {
   /** Content id of the stored document; a new value means the frame must reload. Empty when nothing
    * could be stored (`blocked`): the row then shows only its text. */
   doc: string;
-  /** 0, bumped by update_html. */
+  /** 0, bumped each time show_html replaces the page. */
   rev: number;
   /** Content ids of the versions before `doc`, oldest first, at most APP_PAGE_VERSIONS - 1: the last one is
    * rev - 1. */
@@ -275,7 +275,7 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
 }
 
 export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlInput> {
-  if (!isRecord(input)) return { ok: false, error: "update_html needs {app_id, html, jsx or path, title?}." };
+  if (!isRecord(input)) return { ok: false, error: "Replacing a page needs {app_id, html, jsx or path, title?}." };
   if (typeof input.app_id !== "string" || !/^[\w-]{1,128}$/.test(input.app_id.trim())) {
     return { ok: false, error: "app_id: is required, the id show_html returned." };
   }

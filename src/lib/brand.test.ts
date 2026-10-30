@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, iconType, luminance } from "./brand";
+import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, iconType, luminance, productName } from "./brand";
 
 describe("brand", () => {
   it("derives readable ink for light and dark accents", () => {
@@ -36,6 +36,15 @@ describe("brand", () => {
       new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
     expect((await bootstrapBrand(hangs, 20)).brand).toEqual(DEFAULT_BRAND);
     expect(brand()).toEqual(DEFAULT_BRAND);
+  });
+
+  it("names the product MausBot, or a white-label brand file by its own name", () => {
+    applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    expect(productName()).toBe("MausBot");
+    expect(brand().name).toBe("OpenMausBot");
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/data/brand.json" });
+    expect(productName()).toBe("Acme Bots");
+    applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
   });
 
   it("applies a served brand without a DOM", async () => {

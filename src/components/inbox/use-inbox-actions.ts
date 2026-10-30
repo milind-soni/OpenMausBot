@@ -12,11 +12,11 @@ export function useInboxActions(view: InboxView | null) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
 
-  const answer = useCallback((row: InboxRow, response: CardResponse) => {
+  const answer = useCallback((row: InboxRow, response: CardResponse, failed?: () => void) => {
     if (!view?.threadId || !row.card?.requestId) return;
     readInboxRow(row);
     dispatch({ type: "decideRequest", threadId: view.threadId, requestId: row.card.requestId, behavior: response.behavior, ...(response.message ? { message: response.message } : {}),
-      onError: () => { void refreshInbox(); } });
+      onError: () => { failed?.(); void refreshInbox(); } });
   }, [view, dispatch]);
 
   const openInChat = useCallback((row: InboxRow) => {
@@ -36,5 +36,9 @@ export function useInboxActions(view: InboxView | null) {
     else { readInboxRow(row); openInbox({ reading: row.id }); }
   }, [answer, openInChat]);
 
-  return { run, answer, openInChat };
+  /** The bot a line is from: its face leads the line's card and its colour is on the card's answer. None for a teammate's line. */
+  const askerOf = (row: InboxRow) => (row.from.botId ? state.bots.find((bot) => bot.id === row.from.botId) : undefined);
+  const colorOf = (row: InboxRow) => askerOf(row)?.color;
+
+  return { run, answer, openInChat, colorOf, askerOf };
 }

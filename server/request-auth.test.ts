@@ -188,9 +188,21 @@ describe("scopes", () => {
     expect(clientBotPatchViolation({ xResearch: true })).toBe("xResearch");
     expect(clientBotPatchViolation({ recordBrowserSteps: true })).toBe("recordBrowserSteps");
     expect(clientBotPatchViolation([])).toBe("body");
+    // A Team Cloud member changes no team bot's look, which everyone sees; their own MausBot's they do.
+    expect(clientBotPatchViolation({ color: "blue" }, false, true)).toBe("color");
+    expect(clientBotPatchViolation({ avatarUrl: null }, false, true)).toBe("avatarUrl");
+    expect(clientBotPatchViolation({ mascotBody: "cursor" }, false, true)).toBe("mascotBody");
+    expect(clientBotPatchViolation({ unread: false, pinned: true }, false, true)).toBeNull();
+    expect(clientBotPatchViolation({ color: "blue", name: "Mine" }, true, true)).toBeNull();
     expect(clientGroupPatchViolation({ name: "Ops", unread: false, turnTimeoutMinutes: 30 })).toBeNull();
     expect(clientGroupPatchViolation({ cwd: "/tmp" })).toBe("cwd");
     expect(clientGroupPatchViolation({ memberIds: [] })).toBe("memberIds");
+  });
+
+  it("refuses a session without the admin scope a bot's move into or out of a department", () => {
+    expect(clientBotPatchViolation({ section: "Work" }, false, true)).toBe("section");
+    expect(clientBotPatchViolation({ section: "" }, false, true)).toBe("section");
+    for (const method of ["POST", "PUT"]) expect(requiredScope(method, "/api/sidebar-sections"), method).toBe("admin");
   });
 
   it("lets a bot's maker without the admin scope say who it is and how it looks, never what it may do or whom it directs", () => {

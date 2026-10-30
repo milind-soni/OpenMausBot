@@ -143,9 +143,9 @@ const __APP_VERSION__: string;
         cancel(): Promise<void>;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
-      /** The window's own rail of places (its page at /rail): a sheet of its own covers the window while open; the skin
-       * of the page beside it comes from main. */
-      rail?: { expand(on: boolean): Promise<void>; onSkin(callback: (skin: string) => void): () => void };
+      /** The window's own rail of places: its page at /rail (a sheet of its own covers the window while open; the skin of
+       * the page beside it comes from main), and the button on the page beside it that hides and shows it. */
+      rail?: import("../../electron/chrome-rail.mjs").ChromeRailBridge;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
          * home is this Cloud, so there is nothing to switch to. */
@@ -159,16 +159,20 @@ const __APP_VERSION__: string;
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
         open?: (id: string) => Promise<unknown>;
-        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), paste a server's pairing link, or type its address. */
-        add?: (choice: "cloud" | "link" | "address") => Promise<unknown>;
-        /** The colour of the place this page is, and whether it can be changed here (null on this computer's page).
-         * Absent on an older app. */
+        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
+         * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
+        add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
+        /** The colour of the place this page is (This computer's too), and whether it can be changed here. Absent on an
+         * older app. */
         look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
         /** That place's colour, from the person's click: one of the six swatches, or null for none. */
         color?: (swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
         /** The colour of a place the window's rail lists, by its circle's id, from the person's click on the rail's own
          * page (refused on any other page). */
         recolor?: (id: string, swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
+        /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
+         * the rail's own page (refused on any other page). Absent on an older app. */
+        remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
       };
@@ -184,6 +188,9 @@ const __APP_VERSION__: string;
         interest(): Promise<void>;
         /** The sheet is open on this page (main then says "ready" here, not with a notification). */
         sheet(open: boolean): Promise<void>;
+        /** A new organization on the Team plan this account pays for, of this name and swatch: no checkout; only from the person's click. */
+        organization?(name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "added" | "taken" | "unsupported" | "failed" }
+          | { outcome: "blocked"; blocked: import("../../electron/cloud-list.mjs").OrganizationBlock }>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
@@ -386,7 +393,7 @@ const __APP_VERSION__: string;
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates

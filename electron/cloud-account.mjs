@@ -1,6 +1,6 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
-import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, releaseVersion } from "./cloud-list.mjs";
+import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
@@ -258,6 +258,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
       const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null;
       const clouds = parseCloudList(result.clouds), more = clouds ? addOffer(result) : null, latest = clouds ? releaseVersion(result.latestVersion) : null;
+      const organizations = clouds ? parseOrganizations(result.organizations) : null;
       const { cloudId: renewingCloud = null, ...renewal } = parseCloudRenewal(result.clouds) ?? {};
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
       if (next.expiresAt !== previous.expiresAt) {
@@ -287,7 +288,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), ...(renewingCloud ? { renewal } : {}),
-        ...(clouds ? { clouds, addCloud: more } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
+        ...(clouds ? { clouds, addCloud: more } : {}), ...(organizations ? { organizations } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
       const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
       const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase) || otherOwnClouds(clouds).some(cloud => cloud.status === "setting_up");
       const added = adding ? clouds?.find(cloud => cloud.id === adding.cloudId) ?? null : null;
@@ -584,6 +585,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     homeTarget,
     /** The Admin's last verified word on a Cloud whose plan sleeps, kept while a re-check fails; null for any other. */
     power: () => (value.status === "connected" ? value.machine?.power ?? null : null),
+    /** The same for the Cloud at `origin`: My Cloud's `cloud.power`, or another's from the Clouds list (contract v1, Oct 30). */
+    powerOf: origin => {
+      if (value.status !== "connected" || typeof origin !== "string" || !origin) return null;
+      if (value.machine?.origin === origin) return value.machine.power ?? null;
+      return (value.clouds ?? []).find(cloud => cloud.origin === origin)?.power ?? null;
+    },
     /** Starts a sleeping Cloud through the Admin (`awake` once started, `waking` if it is still starting), then reads the
      *  session again so Files and lending resume. Null when there is nothing to wake or the Admin can't say. */
     async wakeHome() {
@@ -696,6 +703,27 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       schedule(refresh, WATCH_REFRESH_MS);
       return { outcome: "opened", state: state() };
     },
+    /** A new organization on the Team plan this account pays for (POST organizations, contract v1): its name and swatch, and
+     * no checkout. `added` once the Admin made it (the session is read again, so the rail shows it being set up); `blocked`
+     * with the Admin's reason; `taken` when another of the plan's has that name; `unsupported` from an Admin without it. */
+    async addOrganization({ name, color = null } = {}) {
+      const cleanName = cleanCloudListName(name);
+      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid organization to add.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.organizations) return { outcome: "unsupported" };
+      let result;
+      try { result = await request("organizations", { method: "POST", body: { name: cleanName, ...(color ? { color } : {}) }, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && ORGANIZATION_BLOCKS.includes(error?.blocked)) return { outcome: "blocked", blocked: error.blocked };
+        if (!error?.opaque && error?.code === "name_taken") return { outcome: "taken" };
+        if (!error?.opaque && error?.status === 429) return { outcome: "blocked", blocked: "rate" };
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "added", ...(typeof result?.cloud?.id === "string" && CLOUD_ID.test(result.cloud.id) ? { cloudId: result.cloud.id } : {}) };
+    },
     /** A Cloud's colour (PATCH clouds/:id, contract v1), which only its owner or its team's Super admin and Admins
      * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
      * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
@@ -712,6 +740,26 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       if (grant === signedIn) await refresh().catch(() => {});
       return { outcome: "saved" };
+    },
+    /** Remove from list (POST clouds/:id/hide, contract v1): one of the person's own Clouds the verified session says they may
+     * take off their list (`removable`: it ended, or was never paid for). Only the list changes on the Admin; its files still go
+     * when they were going to. `removed` once the Admin did (the session is read again, so every list here follows); `refused`
+     * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
+     * Remove from list (whose session never says `removable`). */
+    async hideCloud(cloudId) {
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };
+      try { await request(`clouds/${encodeURIComponent(cloudId)}/hide`, { method: "POST", body: {}, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && error?.code === "not_removable") { await refresh().catch(() => {}); return { outcome: "refused" }; }
+        if (!error?.opaque && error?.code === "not_found") { await refresh().catch(() => {}); return { outcome: "gone" }; }
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "removed" };
     },
     /** The Cloud being bought's checkout, again: the same page while it is kept here; false when there is none. */
     async reopenAdd() {
