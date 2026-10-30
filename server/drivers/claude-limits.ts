@@ -57,6 +57,14 @@ export function claudeEngineReset(limit: ClaudeLimit | null | undefined): { limi
   return { limitResetsAt: limit.resetsAt * 1000 };
 }
 
+/** The runtime error's facts for a usage limit: what it refuses, and when that resets when Claude said. A model's own
+ * window resets that model alone; extra usage credits name only the billing period's end, which is no countdown. */
+export function claudeLimitFacts(limit: ClaudeLimit | null | undefined): { limit: "engine" | "model" | "credits"; limitResetsAt?: number } {
+  if (limit?.credits) return { limit: "credits" };
+  if (modelWindow(limit?.window)) return { limit: "model", ...(limit?.resetsAt ? { limitResetsAt: limit.resetsAt * 1000 } : {}) };
+  return { limit: "engine", ...claudeEngineReset(limit) };
+}
+
 export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now = Date.now(), timeZone = hostTimeZone()): string {
   if (limit?.credits) {
     return "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. " +

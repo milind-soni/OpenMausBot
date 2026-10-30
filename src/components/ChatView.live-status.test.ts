@@ -9,11 +9,12 @@ import type { ModelPicker } from "./ModelPicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const dispatch = vi.hoisted(() => vi.fn());
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
     state: { ...original.initialState, config: null, instances: [{ instanceId: "test", driverKind: "claudeAgent", displayName: "Test" } as InstanceInfo] },
-    dispatch: vi.fn(),
+    dispatch,
   }) };
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
@@ -41,6 +42,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (_props: Compon
 
 const { ChatView } = await import("./ChatView");
 const { noteTurnEvent, resetTurnLive } = await import("@/state/turn-status");
+const { useActivityFocus } = await import("@/lib/activity-focus");
 
 const THREAD = "selected";
 const started = Date.UTC(2026, 9, 23, 12, 0, 0);
@@ -186,5 +188,57 @@ describe("the mascot and its status line through a long turn", () => {
     engine({ type: "turn.started", turnId: "t2" } as Partial<RuntimeEvent>);
     engine({ type: "content.delta", turnId: "t2", streamKind: "reasoning_text", delta: "Plan the chart" } as Partial<RuntimeEvent>);
     expect(statusLine()).toBe("Working · 1m 12s · Thinking");
+  });
+});
+
+describe("what the bot is doing right now", () => {
+  const search: Message = { id: "search", role: "bot", kind: "activity", at: started + 4_000, turnId: "t1",
+    tool: { name: "WebSearch", itemId: "s1", ok: true, step: { activity: "web", target: "Biber Dammbau" } } };
+  const bash: Message = { id: "bash", role: "bot", kind: "activity", at: started + 6_000, turnId: "t1",
+    tool: { name: "Bash", itemId: "b1", step: { activity: "command", target: "scrape.py", detail: "python3 scrape.py --pages 40" } } };
+  const toggle = () => host.querySelector<HTMLButtonElement>(".turn-presence button[aria-expanded]");
+  const steps = () => [...host.querySelectorAll("[data-now-step]")].map((step) => `${step.getAttribute("data-now-step")}: ${step.querySelector("[dir=auto]")?.textContent}`);
+
+  it("names the step, says how it is doing, and unfolds the ask's steps with a way into the Activity panel at this run", () => {
+    engine({ type: "turn.started" });
+    engine({ type: "item.started", itemType: "tool", itemId: "b1", title: "Bash" } as Partial<RuntimeEvent>);
+    engine({ type: "turn.progress", activity: "command", itemId: "b1", target: "scrape.py", detail: "python3 scrape.py --pages 40", quiet: { kind: "busy" } } as Partial<RuntimeEvent>);
+    render(busyBot([ask, search, bash]));
+    expect(statusLine()).toBe("Working · 1m 12s · Running scrape.py · busy, no output yet");
+    expect(host.querySelector("[data-turn-now]")?.getAttribute("title")).toBe("python3 scrape.py --pages 40");
+    expect(toggle()?.getAttribute("aria-label")).toBe("What Pepper is doing");
+    expect(host.querySelector("[data-now-card]")).toBeNull();
+
+    act(() => toggle()!.click());
+    expect(steps()).toEqual(["done: Searched the web for “Biber Dammbau”", "now: Running scrape.py"]);
+    const seen: Array<ReturnType<typeof useActivityFocus>> = [];
+    const probe = createRoot(document.createElement("div"));
+    act(() => probe.render(createElement(() => { seen.push(useActivityFocus("bot")); return null; })));
+    act(() => [...host.querySelectorAll<HTMLButtonElement>("[data-now-card] button")].find((button) => button.textContent === "Open activity")!.click());
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleActivity", open: true });
+    expect(seen.at(-1)).toEqual({ botId: "bot", threadId: THREAD, turnId: "t1" });
+    act(() => probe.unmount());
+  });
+
+  it("shows a running command's last lines of output in the card, and the time since they came on the line", () => {
+    engine({ type: "turn.started" });
+    engine({ type: "item.started", itemType: "tool", itemId: "b1", title: "Bash" } as Partial<RuntimeEvent>);
+    engine({ type: "turn.progress", activity: "command", itemId: "b1", target: "scrape.py", quiet: { kind: "output", at: started + 72_000 - 125_000 },
+      tail: ["page 39 of 40", "page 40 of 40"] } as Partial<RuntimeEvent>);
+    render(busyBot([ask, bash]));
+    expect(statusLine()).toBe("Working · 1m 12s · Running scrape.py · last output 2 min ago");
+    act(() => toggle()!.click());
+    expect(host.querySelector("[data-now-output]")?.textContent).toBe("page 39 of 40\npage 40 of 40");
+  });
+
+  it("is the same calm line in Simple mode, where the card unfolds too", () => {
+    mode.advanced = false;
+    engine({ type: "turn.started" });
+    engine({ type: "item.started", itemType: "tool", itemId: "b1", title: "Bash" } as Partial<RuntimeEvent>);
+    engine({ type: "turn.progress", activity: "command", itemId: "b1", target: "scrape.py", quiet: { kind: "idle" } } as Partial<RuntimeEvent>);
+    render(busyBot([ask, search, bash]));
+    expect(statusLine()).toBe("Running scrape.py · idle, no output yet");
+    act(() => toggle()!.click());
+    expect(steps()).toEqual(["done: Searched the web for “Biber Dammbau”", "now: Running scrape.py"]);
   });
 });

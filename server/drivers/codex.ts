@@ -47,7 +47,7 @@ import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
-import { CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, codexSignInExpired, codexSignInRefused, codexUserError, type CodexRoute } from "./codex-errors.ts";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -60,30 +60,11 @@ import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-app
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
-import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts"; import { codexPatchProgress } from "./tool-progress.ts";
+import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts"; import { codexCommandOutput, codexPatchProgress } from "./tool-progress.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
 const DRIVER_KIND = "codex";
-
-class CodexRpcError extends Error {
-  code: unknown;
-
-  constructor(error: { code?: unknown; message?: string }) {
-    super(error.message ?? JSON.stringify(error));
-    this.code = error.code;
-  }
-}
-
-function missingNativeCodexThread(error: unknown, cursor: string): boolean {
-  // Codex's local thread/resume rejection, verified with an empty native home; unknown versions fail closed.
-  return error instanceof CodexRpcError && error.code === -32600 &&
-    error.message === `no rollout found for thread id ${cursor}`;
-}
-
-/** Codex refuses to resume an archived session: "session <id> is archived. Run `codex unarchive <id>` to unarchive it first." */
-const archivedNativeCodexThread = (error: unknown, cursor: string): boolean =>
-  error instanceof CodexRpcError && error.message.includes(cursor) && /\bis archived\b/.test(error.message);
 
 export interface CodexConfig {
   cli: string;
@@ -589,6 +570,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       steer?: (text: string) => Promise<SteerOutcome>;
       turnId: string;
       asks: Map<string, CodexAsk>;
+      pid?: number;
     }
     const active = new Map<string, Turn>();
 
@@ -1144,7 +1126,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
         state.lastError = message;
         state.lastErrorSetup ||= setup;
-        emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route) });
+        emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
       };
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
@@ -1214,6 +1196,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             break;
           }
           case "item/fileChange/patchUpdated": { const draft = codexPatchProgress(p); if (draft) emit({ ...base(threadId, turnId), ...draft }); break; }
+          case "item/commandExecution/outputDelta": { const output = codexCommandOutput(p); if (output) emit({ ...base(threadId, turnId), ...output }); break; }
           case "item/started": {
             const item = p.item ?? {};
             const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)
@@ -1432,7 +1415,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         void settle(false, "exit_before_result");
       });
 
-      active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn });
+      active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn, pid: child.pid });
       if (attempt === 0 && !announced) emit({ ...base(threadId, turnId), type: "turn.started" });
 
       try {
@@ -1808,6 +1791,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ?? (decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected");
       },
       hasSession: (threadId) => active.has(threadId),
+      enginePid: (threadId) => active.get(threadId)?.pid,
       stopAll: async () => {
         await Promise.all([...active.values()].map(({ stop }) => stop()));
       },

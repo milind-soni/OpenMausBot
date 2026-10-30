@@ -8,6 +8,7 @@ import {
   augmentedPath,
   findCliCandidates,
   harnessHome,
+  registerFallbackPathDir,
   registerPathDir,
   resetPathCache,
   resetPathCacheForTests,
@@ -646,6 +647,62 @@ describe("registerPathDir", () => {
       expect(augmentedPath().split(delimiter)[0]).toBe(missing);
       registerPathDir(missing);
       expect(augmentedPath().split(delimiter).filter((d) => d === missing)).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("registerFallbackPathDir", () => {
+  let originalPath: string | undefined;
+  afterEach(() => {
+    process.env.PATH = originalPath;
+    resetPathCacheForTests();
+  });
+
+  posixIt("keeps an app-installed directory last even when the inherited PATH already lists it first", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-fallback-path-"));
+    originalPath = process.env.PATH;
+    try {
+      const own = join(dir, "own-bin");
+      const fallback = join(dir, "app-bin");
+      mkdirSync(own);
+      mkdirSync(fallback);
+      process.env.PATH = [fallback, own].join(delimiter);
+      resetPathCacheForTests();
+      registerFallbackPathDir(fallback);
+      const path = augmentedPath().split(delimiter);
+      expect(path.at(-1)).toBe(fallback);
+      expect(path.filter((entry) => entry === fallback)).toHaveLength(1);
+      expect(path.indexOf(own)).toBeLessThan(path.indexOf(fallback));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  posixIt("puts an app-installed directory after PATH and the vendors' own folders, so a person's copy wins", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-fallback-path-"));
+    originalPath = process.env.PATH;
+    try {
+      const own = join(dir, "own-bin");
+      const fallback = join(dir, "app-bin");
+      mkdirSync(own);
+      mkdirSync(fallback);
+      for (const folder of [own, fallback]) writeFileSync(join(folder, "fake-tool"), "#!/bin/sh\n", { mode: 0o755 });
+      process.env.PATH = own;
+      resetPathCacheForTests();
+      registerFallbackPathDir(fallback);
+      const path = augmentedPath().split(delimiter);
+      expect(path.at(-1)).toBe(fallback);
+      expect(path.indexOf(own)).toBeLessThan(path.indexOf(fallback));
+      expect(findCliCandidates("fake-tool")).toEqual([join(own, "fake-tool"), join(fallback, "fake-tool")]);
+      // A vendor default folder (~/.opencode/bin) also comes first.
+      const vendor = join(homedir(), ".opencode", "bin");
+      mkdirSync(vendor, { recursive: true });
+      resetPathCache();
+      const rescanned = augmentedPath().split(delimiter);
+      expect(rescanned.indexOf(vendor)).toBeLessThan(rescanned.indexOf(fallback));
+      rmSync(join(homedir(), ".opencode"), { recursive: true, force: true });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -695,7 +695,8 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const target = directoryTool ? directoryCallTarget(toolName, params) : toolName;
             if (scope !== undefined && (enforcementFailed
-              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target })))) {
+              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target },
+                (directoryTool && toolName === CALL_TOOL ? (params as { arguments?: unknown } | undefined)?.arguments : params) ?? {})))) {
               throw new Error("Tool selection excludes this tool");
             }
             // Host tools ask first through pi's native card (ctx.ui.confirm → extension_ui_request).

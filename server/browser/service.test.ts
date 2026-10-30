@@ -219,7 +219,7 @@ describe("a person and the bot sharing one browser", () => {
     await call("agent_browser_open", { url: "https://example.com/form" });
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
-    expect(service.heldBy("bot-a")).toBe(viewer.id);
+    expect(service.heldBy("bot-a")).toBe("local-owner");
     for (const name of ["agent_browser_status", "agent_browser_snapshot", "agent_browser_click", "agent_browser_eval", "agent_browser_dialog"]) {
       await expect(call(name, name === "agent_browser_click" ? { ref: "e2" } : name === "agent_browser_eval" ? { expression: "1" } : name === "agent_browser_dialog" ? { accept: true } : {})).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
     }
@@ -237,10 +237,10 @@ describe("a person and the bot sharing one browser", () => {
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     const taking = viewer.input({ type: "takeControl" });
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(service.heldBy("bot-a")).toBe(viewer.id);
-    expect(service.canControl("bot-a", viewer.id)).toBe(false);
+    expect(service.heldBy("bot-a")).toBe("local-owner");
+    expect(viewer.controlState().controlling).toBe(false);
     await taking;
-    expect(service.canControl("bot-a", viewer.id)).toBe(true);
+    expect(viewer.controlState().controlling).toBe(true);
     expect(service.interrupted("bot-a")).toBe(false);
     expect(String(await snapshot)).toContain(BROWSER_CONTROL_REFUSAL);
   });
@@ -253,7 +253,7 @@ describe("a person and the bot sharing one browser", () => {
     await sleep(20);
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
-    expect(service.canControl("bot-a", viewer.id)).toBe(true);
+    expect(viewer.controlState().controlling).toBe(true);
     expect(service.interrupted("bot-a")).toBe(true);
     await viewer.input({ type: "releaseControl" });
     expect(service.heldBy("bot-a")).toBeNull();

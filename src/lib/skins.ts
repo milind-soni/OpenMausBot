@@ -125,6 +125,14 @@ function followSystem(follow: boolean): void {
   }
 }
 
+/** Wears a skin another page chose, without keeping it as this page's own choice or telling the app (the window's rail
+ * wearing the skin of the page beside it). */
+export function wearSkin(value: unknown): void {
+  if (!isSkinId(value)) return;
+  document.documentElement.dataset.skin = value;
+  for (const listener of listeners) listener();
+}
+
 export function applySkinChoice(choice: SkinChoice): void {
   try {
     getStore()?.setItem(KEY, choice);

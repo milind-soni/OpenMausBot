@@ -2536,6 +2536,14 @@ describe("activity panel", () => {
     expect(reducer(suggested, { type: "showFiles", suggest: [] }).filesSuggest).toBeNull();
     expect(reducer(suggested, { type: "showTeamMap" })).toMatchObject({ activeView: "team-map", filesSuggest: null });
   });
+
+  it("a pinned web panel replaces the main view like the team map, and chat comes back", () => {
+    const open = { ...initialState, activityOpen: true, computerOpen: true, settingsOpen: true };
+    const panel = reducer(open, { type: "showWebPanel", id: "panel-1" });
+    expect(panel).toMatchObject({ activeView: "web-panel", webPanelId: "panel-1", activityOpen: false, computerOpen: false, settingsOpen: false });
+    expect(reducer(panel, { type: "showTeamMap" })).toMatchObject({ activeView: "team-map", webPanelId: "panel-1" });
+    expect(reducer(panel, { type: "showChat" }).activeView).toBe("chat");
+  });
 });
 
 describe("live config frames", () => {

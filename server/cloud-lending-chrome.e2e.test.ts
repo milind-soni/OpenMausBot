@@ -85,7 +85,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 `, { mode: 0o755 });
   chmodSync(cli, 0o755);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ instances: {
-    ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])),
+    ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])),
     claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
   } }));
   const port = await freePortBlock([0, 1]);
@@ -392,7 +392,7 @@ lines.on("close", () => process.exit(0));
     call = await ownersTurn(c, bot, "Check my order in my Chrome.");
     const notLent = await call("agent_browser_get_title");
     expect(notLent.isError).toBe(true);
-    expect(said(notLent)).toContain("turn on Your Chrome");
+    expect(said(notLent)).toContain("which lends its Chrome by itself");
     expect(fake.seen).toEqual([]);
 
     await connector.saveCloud(env, { folders: [], screen: false, chrome: true });
@@ -465,7 +465,7 @@ lines.on("close", () => process.exit(0));
     expect(await doorAnswer(doorUrl())).toBe("HTTP/1.1 503 Service Unavailable");
     const off = await call("agent_browser_get_title");
     expect(off.isError).toBe(true);
-    expect(said(off)).toContain("turn on Your Chrome");
+    expect(said(off)).toContain("which lends its Chrome by itself");
     expect(fake.seen).toHaveLength(seen);
     expect(fake.live.size).toBe(0);
   }, hostTimeout(60_000));

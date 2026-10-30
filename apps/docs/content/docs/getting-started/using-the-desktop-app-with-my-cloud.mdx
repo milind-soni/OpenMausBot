@@ -1,6 +1,6 @@
 ---
 title: One assistant, everywhere
-description: With MausBot Cloud, your bots live on My Cloud and the desktop app is a window onto it, like your phone. How your bots get there by themselves, letting them use your Mac, passkey sign-ins, and where the logs are.
+description: With MausBot Cloud, your bots live on My Cloud and the desktop app is a window onto it, like your phone. How your bots get there by themselves, how your Mac works for them, passkey sign-ins, and where the logs are.
 ---
 
 With MausBot Cloud, **My Cloud is where your bots live**: their memory, chats, routines, logins and connected apps. It keeps working when your computer is off.
@@ -33,31 +33,37 @@ Your Claude, ChatGPT, Gemini and Grok sign-ins stay on the computer where you ma
 
 The desktop app wakes My Cloud by itself (*Waking My Cloud…*) and signs in to it again by itself when it needs to. If My Cloud can't be reached, for example with no internet, the window says *Can't reach My Cloud right now. It comes back by itself when it answers.* and keeps trying. The only button is **Sign in**, for when this computer's MausBot Cloud sign-in itself has ended.
 
-## Let your bots use your Mac
+## Your Mac works for your Clouds
 
-**Let my bots use this Mac** (**this PC** on Windows) is one switch in **Settings → MausBot Cloud**.
+There is nothing to switch on. While the desktop app is open and signed in to MausBot Cloud, each Cloud of your own (My Cloud and any other Cloud you own, never a team's Cloud) can use this computer by itself:
 
-**Your internet connection is shared by default.** As soon as the desktop app is signed in to MausBot Cloud, it shares this computer's internet connection with My Cloud by itself, with no question and nothing to click. Only the connection, and only with your own My Cloud, never a team's Cloud: no folders, no apps and screen, no terminal. Your bots on My Cloud then open the websites that turn away data centres, such as Instagram, YouTube and Google sign-in, through your home connection; every other website loads straight from My Cloud, which is faster. The line under the switch reads **Internet connection: on** (or **connecting…** for a moment). It needs no permission from your Mac or PC, and keeps working after the app restarts and after My Cloud wakes from sleep.
+- **Your files**: your home folder, to read and edit. The places that hold keys, passwords and sign-ins, such as `.ssh`, your shell's start-up files and git's settings, always stay private, and nothing changes the hidden files, Library or AppData in your home folder.
+- **Your internet connection**, for the websites that turn away data centres, such as Instagram, YouTube and Google sign-in. Every other website loads straight from My Cloud, which is faster.
+- **Your Chrome**, for bots whose browser profile is **My Chrome**. Chrome asks you to allow the connection.
+- **Your apps and screen**, once your Mac allows OpenMausBot Accessibility and Screen Recording. macOS asks the first time a bot needs them. On Windows they work right away.
 
-It stays your choice. To stop sharing the connection, untick **Internet connection** under **Choose what's lent**, or turn the switch off: the app never turns it back on by itself. If you turned the switch off before, it stays off.
+Commands never run on your computer.
 
-To let your bots on My Cloud run commands on your Mac, tick **Terminal** under **Let my bots use this Mac**. The app asks first, because a command can do anything you can. It turns off again whenever you stop sharing.
+Only your own conversations and routines can use it. A conversation someone else wrote in can't, and neither can a bot whose memory was changed in a conversation you didn't write, until you review it in Memory. Each bot still asks first or just does it, as you set it for that bot.
 
 Group chats can use your Mac too, when you started them and only you write in them. The bot that answers you, and the bots it mentions, can use it. If a group chat came from your computer before this worked, start a new thread in it.
 
-After the move to My Cloud the switch also lends your Desktop, Documents and Downloads read only, each bot's own project folder with editing, and your apps and screen if your bots could already use them before the move (the question below then doesn't come). In your own conversations and routines they can read the lent folders while this computer is awake and the app is open. The line under the switch says what is lent.
+After the move to My Cloud, each bot's own project folder is lent with editing too, so My Cloud keeps a copy of it for when this computer is away.
 
-**The app asks once to let your bots use the rest.** When the app is connected to My Cloud and you're not in the middle of something (no welcome, setup or other window open, and you're not typing), it asks once: **Let your bots use this Mac?** Your bots on My Cloud can then read your Desktop, Documents and Downloads and use your apps and screen. Choose **Use my Mac** (**Use my PC** on Windows) and everything is turned on with that one press. If your Mac asks you to allow OpenMausBot for Accessibility or Screen Recording, allow it: apps and screen turn on as soon as they work (Screen Recording sometimes needs OpenMausBot to restart first). Permissions you already gave are used as they are. Choose **Not now** and the app doesn't ask again; you can still turn it on any time with the switch in **Settings → MausBot Cloud**. If you turned the switch off yourself, the app doesn't ask. When a bot needs your computer later, it gives you a **Use my Mac** link that opens the same question.
+**The menu bar** (the taskbar on Windows) shows when a Cloud is using this computer, for example *Client A is using this Mac*. Its menu has two things:
 
-While the switch is on, the app opens by itself when you log in, out of sight, so the connection is there after a restart too. Its icon in the menu bar or taskbar says what is shared (**Your bots can use this Mac's internet connection** when that is all) and reads **In use** while your bots use the computer. When the computer is away, those websites open from My Cloud's own connection and may turn your bots away. Reddit stays off either way.
+- **Pause** stops every Cloud from using this computer at once, until you choose **Resume**. A pause lasts across restarts.
+- **See activity** lists what your Clouds did on this computer, refused requests too.
 
-To lend apps and screen, tick **Apps and screen** under the switch. The app asks you to confirm in a window of its own first. To lend folders, let bots edit them, or stop sharing the internet connection, open **Choose what's lent**. With apps and screen turned on, a bot on My Cloud can also open websites in your computer's own browser, where your usual sign-ins and passkeys work. Turn it off at any time, from the switch or from the app's icon in the menu bar or taskbar.
+If you had turned sharing off, or the internet connection, in an earlier version, the app starts paused: choose **Resume** when you want your Clouds to use this computer.
+
+While a Cloud can use it, the app opens by itself when you log in, out of sight. When this computer is away, asleep or with the app closed, those websites open from My Cloud's own connection and may turn your bots away. Reddit stays off either way.
 
 ## Signing in to Google and other passkey sites
 
 A passkey lives on your own phone or computer, so a browser on My Cloud can't use it. What works:
 
-1. **Lend your computer** (above, with apps and screen) and ask the bot to use your computer's browser for that site. Approve the passkey on your computer when it asks.
+1. **Use your computer's own browser**: with apps and screen working (above), ask the bot to use your computer's browser for that site. Approve the passkey on your computer when it asks.
 2. **Try another way**: in the bot's browser, on the passkey step, choose **Try another way**, then your password and a code from your authenticator app, a text message or a backup code.
 3. **For Gmail, Calendar and Drive**, connect them under **Connected apps** on My Cloud instead. The bot then doesn't need a browser sign-in at all.
 

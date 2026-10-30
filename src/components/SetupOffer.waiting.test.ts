@@ -101,3 +101,67 @@ describe("the setup card while its answers are written", () => {
     expect(fixture.api).toHaveBeenCalledWith("/api/bots/b1/setup-request", { method: "POST", body: JSON.stringify({ threadId: "t1", text: FIXED[2] }) });
   });
 });
+
+describe("the setup card while a rename rewrites its answers", () => {
+  const buttons = () => [...container.querySelectorAll<HTMLButtonElement>("[data-ask-choice]")];
+  const rewriting = () => container.querySelector("[data-setup-updating]") !== null;
+  const picked = (text: string) => ["/api/bots/b1/setup-request", { method: "POST", body: JSON.stringify({ threadId: "t1", text }) }];
+
+  it("keeps the answers on screen, quiet, takes no letter or click, then swaps the new ones in at once", () => {
+    show(greeting());
+    show(greeting({ setupChoicesUpdating: Date.now() }));
+    expect(rewriting()).toBe(true);
+    expect(card()!.getAttribute("aria-busy")).toBe("true");
+    expect(labels()).toEqual([...FIXED, "Something else"]);
+    expect(buttons().every((button) => button.disabled)).toBe(true);
+    press("a");
+    press("f");
+    act(() => buttons()[1]!.click());
+    expect(fixture.api).not.toHaveBeenCalled();
+    show(greeting({ setupChoices: PERSONAL }));
+    expect(rewriting()).toBe(false);
+    expect(card()!.getAttribute("aria-busy")).toBeNull();
+    expect(labels()).toEqual([...PERSONAL, "Something else"]);
+    press("b");
+    expect(fixture.api).toHaveBeenCalledWith(...picked(PERSONAL[1]!));
+  });
+
+  it("keeps its answers and takes picks again when the rewrite ends without new ones, also when first drawn mid-rewrite", () => {
+    show(greeting({ setupChoices: PERSONAL, setupChoicesUpdating: Date.now() }));
+    expect(rewriting()).toBe(true);
+    expect(labels()).toEqual([...PERSONAL, "Something else"]);
+    show(greeting({ setupChoices: PERSONAL }));
+    expect(rewriting()).toBe(false);
+    expect(buttons().some((button) => button.disabled)).toBe(false);
+    press("c");
+    expect(fixture.api).toHaveBeenCalledWith(...picked(PERSONAL[2]!));
+  });
+
+  it("takes picks again 8 s after it first saw a rewrite, never swaps answers in after that, and ignores one older than 20 s", () => {
+    const stamp = Date.now();
+    show(greeting());
+    show(greeting({ setupChoicesUpdating: stamp }));
+    act(() => void vi.advanceTimersByTime(7_999));
+    expect(rewriting()).toBe(true);
+    act(() => void vi.advanceTimersByTime(1));
+    expect(rewriting()).toBe(false);
+    show(greeting({ setupChoices: PERSONAL }));
+    expect(labels()).toEqual([...FIXED, "Something else"]);
+    show(greeting({ setupChoicesUpdating: Date.now() }));
+    expect(rewriting(), "a later rename waits again").toBe(true);
+    act(() => root!.unmount());
+    root = createRoot(container);
+    show(greeting({ setupChoicesUpdating: Date.now() - 20_000 }));
+    expect(rewriting()).toBe(false);
+    press("a");
+    expect(fixture.api).toHaveBeenCalledWith(...picked(FIXED[0]!));
+  });
+
+  it("never shows a rewrite on a settled card", () => {
+    const message = greeting({ setupChoicesUpdating: Date.now() });
+    show(message, [message, { id: "u1", role: "user", kind: "text", at: Date.now(), text: "help me hire" } as Message]);
+    expect(rewriting()).toBe(false);
+    expect(card()!.getAttribute("aria-busy")).toBeNull();
+    expect(buttons().every((button) => button.disabled)).toBe(true);
+  });
+});

@@ -102,7 +102,7 @@ it("keeps the server's connection check out of every turn and one-shot capture, 
   }
 });
 
-it("keeps a new bot's setup answers out of every turn and one-shot capture, failing at once without a reply file", async () => {
+it("keeps a new bot's setup answers out of every turn and one-shot capture, failing at once without a reply file, and holds the reply back on request", async () => {
   const home = mkdtempSync(join(tmpdir(), "omb-claude-dump-"));
   const dump = join(home, "capture.json");
   const textDump = join(home, "text.json");
@@ -110,11 +110,11 @@ it("keeps a new bot's setup answers out of every turn and one-shot capture, fail
   const setupDump = join(home, "setup.json");
   const setupFile = join(home, "setup.txt");
   const prompt = "You write the answer options for the first message of a new bot in OpenMausBot.";
-  const ask = async () => {
+  const ask = async (extra: Record<string, string> = {}) => {
     const child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "-p", "--output-format", "text"], {
       cwd: home,
       env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_TEXT_DUMP: textDump,
-        FAKE_CLAUDE_TEXT_LOG: textLog, FAKE_CLAUDE_TEXT_FILE: join(home, "missing"), FAKE_CLAUDE_SETUP_DUMP: setupDump, FAKE_CLAUDE_SETUP_FILE: setupFile },
+        FAKE_CLAUDE_TEXT_LOG: textLog, FAKE_CLAUDE_TEXT_FILE: join(home, "missing"), FAKE_CLAUDE_SETUP_DUMP: setupDump, FAKE_CLAUDE_SETUP_FILE: setupFile, ...extra },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -129,6 +129,9 @@ it("keeps a new bot's setup answers out of every turn and one-shot capture, fail
     expect(await ask()).toEqual({ code: 0, stdout: '["Sort my receipts"]' });
     for (const file of [dump, textDump, textLog]) expect(existsSync(file), file).toBe(false);
     expect(JSON.parse(readFileSync(setupDump, "utf8")).prompt).toBe(prompt);
+    const started = Date.now();
+    expect(await ask({ FAKE_CLAUDE_SETUP_DELAY_MS: "1500" })).toEqual({ code: 0, stdout: '["Sort my receipts"]' });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
   } finally {
     await removeTempDir(home);
   }

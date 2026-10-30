@@ -26,6 +26,13 @@ describe("Simple mode's working line", () => {
     expect(friendlyNowPhrases(null, running("Bash", { spoken: "running a command" })).phrases).toEqual(["Running a few commands"]);
   });
 
+  it("says the command, search or page the server could name, as Advanced does, and still no file names", () => {
+    expect(friendlyNowPhrases({ activity: "command", itemId: "x", target: "scrape.py" }).phrases).toEqual(["Running scrape.py"]);
+    expect(friendlyNowPhrases({ activity: "web", itemId: "s", target: "Biber Dammbau" }).phrases).toEqual(["Searching the web for “Biber Dammbau”"]);
+    expect(friendlyNowPhrases(null, running("WebFetch", { step: { activity: "fetch", target: "linkedin.com" } })).phrases).toEqual(["Reading linkedin.com"]);
+    expect(friendlyNowPhrases(null, running("Write", { step: { activity: "write", target: "report.md" } })).phrases).toEqual(["Writing some code"]);
+  });
+
   it("says which outside service the bot is working in", () => {
     expect(toolService("mcp__notion__search")).toBe("Notion");
     expect(toolService("mcp__composio__GMAIL_SEND_EMAIL")).toBe("Gmail");

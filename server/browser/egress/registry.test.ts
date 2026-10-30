@@ -194,7 +194,8 @@ describe("one gate per browser session", () => {
       expect(cloud.takeNotice("bot-1"), "a site that loads from My Cloud anyway: nothing to say").toBeNull();
       await socksCode(port, "www.instagram.com", 443);
       expect(cloud.takeNotice("bot-1")).toBe(UNSHARED_NOTICE);
-      expect(UNSHARED_NOTICE).toContain("[Use this computer](openmausbot://use-my-computer)");
+      expect(UNSHARED_NOTICE).toContain("these sites open through their own computer's internet connection while OpenMausBot is open on it, signed in to MausBot Cloud");
+      expect(UNSHARED_NOTICE).not.toContain("use-my-computer");
       await socksCode(port, "www.instagram.com", 443);
       expect(cloud.takeNotice("bot-1"), "said once while none shares").toBeNull();
       device = { away: "PC" };

@@ -273,6 +273,29 @@ describe("who holds the browser", () => {
     expect(socket.sent.at(-1)).toEqual({ type: "releaseControl" });
   });
 
+  it("says what keeping the browser means while the person has it", async () => {
+    const socket = await streaming("agent");
+    await act(async () => pill().click());
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(pill().title).toBe(t("browser.control.keptHint", { name: "Pepper" }));
+    expect(pill().title).toContain("5 minutes");
+  });
+
+  it("shows the person their hold from another of their views, and hands it back from here", async () => {
+    const socket = await streaming("agent");
+    await act(async () => socket.control("agent", { owned: true }));
+    await flush();
+    expect(pill().dataset.pill).toBe("held");
+    expect(pill().textContent).toContain("Pepper is paused for you");
+    expect(pill().textContent).toContain(t("browser.control.handBack"));
+    expect(pill().disabled).toBe(false);
+    expect(host.textContent).not.toContain(BROWSER_HELD_ELSEWHERE);
+    await act(async () => pill().click());
+    await flush();
+    expect(socket.sent).toEqual([{ type: "releaseControl" }]);
+  });
+
   it("takes the browser on the first click and then sends that click, once", async () => {
     const socket = await streaming("unclaimed");
     const canvas = host.querySelector("canvas")!;

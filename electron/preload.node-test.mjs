@@ -74,6 +74,15 @@ test("browser control forwards a separate per-device capability, not the cloud g
   ]);
 });
 
+test("the talk bridge asks main over its own channels with only what it understands", async () => {
+  const before = invocations.length;
+  await exposed.api.talkShortcut.state();
+  await exposed.api.talkShortcut.set({ enabled: false, key: "ctrl-shift-space", extra: "x" });
+  await exposed.api.callActive(true);
+  await exposed.api.callActive("yes");
+  assert.deepEqual(invocations.slice(before), [["talk-shortcut:state"], ["talk-shortcut:set", { enabled: false, key: "ctrl-shift-space" }], ["call:active", true], ["call:active", false]]);
+});
+
 test("account prepare asks for the secure address over its own channel and sends nothing from the page", async () => {
   const before = invocations.length;
   await exposed.api.companionAccount.prepare({ endpoint: "https://evil.example.test" });

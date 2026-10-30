@@ -9,6 +9,12 @@ export const MENU_HEADING = "px-2 pb-1 pt-2 text-[12px] font-medium leading-4 te
 export const MENU_ROW =
   "group flex h-[30px] w-full min-w-0 shrink-0 items-center gap-2 rounded-md px-2 text-left text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06] active:bg-ink/[0.08] disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent touch:h-10";
 
+/** Simple mode's rows pair a model name with a second line, so they grow with it instead of clipping at 30px. */
+export const SIMPLE_MENU_ROW =
+  "group flex min-h-[30px] w-full min-w-0 shrink-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06] active:bg-ink/[0.08] disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent touch:min-h-10";
+
+export const SIMPLE_MENU_META = "min-w-0 max-w-full truncate text-[12px] leading-4 text-ink-tertiary";
+
 export const MENU_LINE = "flex h-[30px] w-full min-w-0 shrink-0 items-center gap-2 px-2 text-[13px] leading-[18px] touch:h-10";
 
 export const MENU_GUTTER = "flex size-4 shrink-0 items-center justify-center";

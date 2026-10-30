@@ -6,6 +6,7 @@ import { mentionablePeople } from "../../shared/person-mention";
 import type { NeedsYouItem } from "../../shared/today";
 import { api } from "./api";
 import { teamOfConfig } from "./team-chats";
+import { openAsksOf } from "@/lib/bot-unread";
 import { readSessionState } from "@/lib/session";
 
 /** `pictureUrl`: their picture, served to the team's members only; absent when they have none. */
@@ -64,6 +65,14 @@ export function departmentOwner(bots: ReadonlyArray<{ createdBy?: string; report
   return first && owners.every((owner) => owner?.email === first.email) ? first : null;
 }
 
+/** A teammate's MausBot named for its person ("MausBot · Ada"); any other bot, and the viewer's own MausBot, by its name. */
+export function teamBotName(bot: { name: string; defaultBot?: { person?: string } }, team: Pick<TeamPeople, "people" | "me"> | null): string {
+  const person = bot.defaultBot?.person?.trim().toLowerCase();
+  if (!person || !team || team.me?.email.toLowerCase() === person) return bot.name;
+  const owner = team.people.find((candidate) => candidate.email.toLowerCase() === person);
+  return `${bot.name} · ${owner?.name || nameFromEmail(person)}`;
+}
+
 export function mayChangeOwner(bot: { createdBy?: string; reportsTo?: string; defaultBot?: { person?: string } }, team: TeamPeople | null): boolean {
   return Boolean(team && !bot.defaultBot?.person && (team.admin || (team.me && botOwner(bot) === team.me.email)));
 }
@@ -95,11 +104,11 @@ export function refreshNeedsYou(): void {
   }, 800);
 }
 
-type VersionedBot = { id: string; reportsTo?: string; activity?: string; tasks?: ReadonlyArray<{ activity?: string; unread?: boolean }> };
+type VersionedBot = { id: string; reportsTo?: string; activity?: string; tasks?: ReadonlyArray<{ activity?: string; unread?: boolean; openAsks?: number }> };
 /** Changes whenever something may have reached or left this person's Needs you: an owner, a bot's work, a conversation
- * read or not, a notification. */
+ * read or not, an ask in their inbox answered or closed, a notification. */
 export function needsYouVersion(bots: readonly VersionedBot[], groups: ReadonlyArray<{ unread?: boolean }>, notifications: ReadonlyArray<{ read: boolean }>): string {
-  const bot = (one: VersionedBot) => `${one.id}:${one.reportsTo ?? ""}:${one.activity ?? ""}:${(one.tasks ?? []).filter((task) => task.activity === "waiting-on-you").length}:${(one.tasks ?? []).filter((task) => task.unread).length}`;
+  const bot = (one: VersionedBot) => `${one.id}:${one.reportsTo ?? ""}:${one.activity ?? ""}:${(one.tasks ?? []).filter((task) => task.activity === "waiting-on-you").length}:${(one.tasks ?? []).filter((task) => task.unread).length}:${openAsksOf(one)}`;
   return `${bots.map(bot).join("|")}|${groups.filter((group) => group.unread).length}|${notifications.length}:${notifications.filter((entry) => !entry.read).length}`;
 }
 

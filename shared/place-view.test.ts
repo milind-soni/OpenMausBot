@@ -61,7 +61,8 @@ describe("U1: one line and at most one action for every state", () => {
   });
 
   it("keeps jargon out of what subscribers read", () => {
-    const boatAllowed = new Set<PlaceState>(["cc-needs-key", "cc-provider"]);
+    // Boat is named where its account is needed, and credited (our sponsor) where a bot first gets its cloud desktop.
+    const boatAllowed = new Set<PlaceState>(["cc-needs-key", "cc-provider", "cc-new"]);
     for (const state of PLACE_STATES) {
       const view = placeViewOf(state, { ...PARAMS, words: "x" }, { role: "admin", server: "my-cloud" });
       const words = `${view.short} ${view.line} ${view.action?.label ?? ""}`;

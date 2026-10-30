@@ -1,11 +1,15 @@
 // The TTS provider is a loopback Chatterbox stub, so no external service is reached.
+import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { listSystemVoices } from "./tts/system-voices.ts";
+
+const execFileAsync = promisify(execFile);
 
 const MP3 = Buffer.from("ID3 fake mp3 for the voice note fixture");
 
@@ -154,13 +158,17 @@ it("delivers a WAV voice note from a provider that answers in WAV", async () => 
   expect((await sendWavNote(f)).equals(wav)).toBe(true);
 }), 60_000);
 
-it.runIf(process.platform === "darwin")("delivers a voice note spoken by the built-in Mac voices", async () => withVoiceFixture(async (f) => {
-  const [voice] = await listSystemVoices();
-  await f.api("/api/config", { tts: { provider: "system", voice: voice!.id } }, "PUT");
-  const served = await sendWavNote(f);
-  expect(served.subarray(0, 4).toString("latin1")).toBe("RIFF");
-  expect(served.subarray(8, 12).toString("latin1")).toBe("WAVE");
-}), 60_000);
+it.runIf(process.platform === "darwin")("delivers a voice note spoken by the built-in Mac voices", async ({ skip }) => {
+  // A cold CI Mac can take longer than the app's 5 s to list its voices, and some runner images have none.
+  const [voice] = await listSystemVoices((file, args) => execFileAsync(file, args, { timeout: 30_000 }));
+  if (!voice) return skip("this Mac lists no system voices");
+  await withVoiceFixture(async (f) => {
+    await f.api("/api/config", { tts: { provider: "system", voice: voice.id } }, "PUT");
+    const served = await sendWavNote(f);
+    expect(served.subarray(0, 4).toString("latin1")).toBe("RIFF");
+    expect(served.subarray(8, 12).toString("latin1")).toBe("WAVE");
+  });
+}, 60_000);
 
 it("keeps a voice-only reply's words on the attachment as its transcript when the turn writes no reply", async () => withVoiceFixture(async (f) => {
   const baseUrl = await f.serveTts();

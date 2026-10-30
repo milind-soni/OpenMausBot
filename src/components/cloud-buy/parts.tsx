@@ -7,6 +7,10 @@ import { t } from "@/lib/i18n";
 
 export const SHEET = "rounded-2xl border-[0.5px] border-ink/10 bg-app text-ink";
 export const SCREEN = "flex flex-col gap-5 px-6 pb-6 pt-5";
+/** The close button over a night card: light ink on the sky. */
+export const ON_NIGHT = "group-has-[[data-night-card]]/sheet:[color-scheme:var(--code-color-scheme)] group-has-[[data-night-card]]/sheet:text-(--cloud-night-ink-quiet) group-has-[[data-night-card]]/sheet:hover:bg-white/15 group-has-[[data-night-card]]/sheet:hover:text-(--cloud-night-ink)";
+/** A tag on a night card: a faint wash of the card's own ink. */
+export const TAG_ON_NIGHT = "bg-white/12 text-(--cloud-night-ink-quiet)";
 export const CLOSE = "flex size-8 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none";
 /** A neutral ink pill in Midnight and Daylight, the skin's accent elsewhere. */
 export const PRIMARY = "ui-button ui-button-primary ui-button-pill";
@@ -18,12 +22,9 @@ export const LINK = "rounded-sm text-[13px] font-medium text-ink underline decor
 export const FIELD = "h-9 w-full rounded-[10px] border border-ink/15 bg-transparent px-3 text-[14px] text-ink outline-none transition-[border-color] duration-150 placeholder:text-ink-tertiary disabled:opacity-60 motion-reduce:transition-none";
 const TAG = "inline-flex min-h-5 items-center gap-1 rounded-full bg-ink/[0.06] px-2 text-[12px] font-medium leading-4 text-ink-secondary";
 
-export function Heading({ title, sub, mark }: { title: string; sub?: ReactNode; mark?: ReactNode }) {
+export function Heading({ title, sub }: { title: string; sub?: ReactNode }) {
   return <div className="flex flex-col gap-1 pe-10">
-    <div className="flex items-center gap-2.5">
-      {mark}
-      <h2 id="cloud-add-title" tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] text-ink outline-none! [text-wrap:balance]">{title}</h2>
-    </div>
+    <h2 id="cloud-add-title" tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] text-ink outline-none! [text-wrap:balance]">{title}</h2>
     {sub && <p className="text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{sub}</p>}
   </div>;
 }

@@ -145,7 +145,6 @@ export function arrivedCounts(here, there) {
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   release?(): Promise<void>,
  *   lend?(projects: string[]): Promise<unknown>,
- *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -331,9 +330,8 @@ export function createOneHome(deps) {
     return null;
   }
 
-  /** Once home is My Cloud: this computer is lent to it and offers the rest of itself (`offer`, which asks the person at
-   * most once, without waiting for the answer), its own phone link stops, and the Admin is told it moved, once per
-   * sign-in (tried again at most hourly while the Admin can't take it). */
+  /** Once home is My Cloud: the bots' project folders are lent to it with this computer, its own phone link stops, and
+   * the Admin is told it moved, once per sign-in (tried again at most hourly while the Admin can't take it). */
   async function settle(journal, cloud = deps.cloud()) {
     let next = journal;
     if (deps.reportMove && cloud?.signIn && next.reported !== cloud.signIn && now() - reportFailedAt >= HOUR) {
@@ -350,7 +348,6 @@ export function createOneHome(deps) {
         next = write({ ...next, lent: true });
       } catch (error) { log(`one home: this computer is lent later (${error?.message ?? error})`); }
     }
-    if (next.lent) void Promise.resolve().then(() => deps.offer?.()).catch(() => {});
     if (!next.phoneStopped) {
       try {
         if (next.phone) await deps.phone?.stop();

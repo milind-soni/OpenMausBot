@@ -38,6 +38,7 @@ import {
   AntigravityDriver,
   STATIC_ANTIGRAVITY_MODELS,
   antigravityPermissionMode,
+  normalizeAntigravityTurn,
 } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
@@ -74,11 +75,17 @@ afterEach(async () => {
 describe("official Antigravity catalog", () => {
   it("uses current Gemini 3.8 variants as the offline fallback", () => {
     expect(STATIC_ANTIGRAVITY_MODELS).toEqual({
-      default: "gemini-3.8-flash-high",
+      default: "gemini-3.8-flash",
       options: [
-        { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" },
-        { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)" },
-        { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)" },
+        {
+          id: "gemini-3.8-flash",
+          label: "Gemini 3.8 Flash",
+          variants: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+          ],
+        },
       ],
     });
   });
@@ -717,9 +724,10 @@ describe("Antigravity driver over shared ACP", () => {
         GEMINI_API_KEY: "must-not-leak",
         GOOGLE_API_KEY: "also-must-not-leak",
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
-        FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low",
+        FAKE_ACP_MODELS: "gemini-3.8-flash",
         FAKE_ACP_VARIANTS: JSON.stringify({
-          "gemini-3.8-flash-low": {
+          "gemini-3.8-flash": {
+            id: "thinking_level",
             currentValue: "medium",
             options: [
               { value: "low", name: "Low" },
@@ -743,8 +751,9 @@ describe("Antigravity driver over shared ACP", () => {
       text: "hello",
       approvalMode,
       resumeCursor: "fake-acp-session",
-      model: "gemini-3.8-flash-low",
-      variant: "high",
+      // Existing bots can have the pre-variant fallback ID saved. The official
+      // runtime only accepts the base model plus its thinking-level option.
+      model: "gemini-3.8-flash-high",
       integrations: {
         custom: { docs: { command: "docs-mcp", args: ["serve"], env: { TOKEN: "scoped" } } },
       },
@@ -762,15 +771,85 @@ describe("Antigravity driver over shared ACP", () => {
     expect(dumpState.env.AGY_ACP_DEFAULT_MODEL).toBeUndefined();
     const calls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
     expect(calls).toEqual([
-      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "model", value: "gemini-3.8-flash-low" } },
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "mode", value: approvalMode === "full" ? "yolo" : approvalMode === "edits" ? "auto_edit" : "default" } },
-      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "effort", value: "high" } },
+      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "thinking_level", value: "high" } },
     ]);
     const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
     expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);
     // Checked on every OS, so the macOS and Linux runs prove the dump carries TEMP.
     const expectedTemp = process.platform === "win32" ? antigravityTempDir(DATA_DIR, instanceId) : fake.directory;
     expect([dumpState.env.TEMP, dumpState.env.TMP]).toEqual([expectedTemp, expectedTemp]);
+  });
+
+  const legacyPickTurn = async (instanceId: string, sessionModels: string, model: string) => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const dump = join(fake.directory, "dump.json");
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity",
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: sessionModels,
+        FAKE_ACP_VARIANTS: JSON.stringify({
+          "gemini-3.8-flash": {
+            id: "thinking_level",
+            currentValue: "high",
+            options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
+          },
+        }),
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
+        FAKE_ACP_DUMP: dump,
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-legacy-pick", text: "hello", approvalMode: "ask", model, cwd: fake.directory });
+    const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    const events = recorder.events.filter((event) => event.turnId === turnId);
+    expect(events.filter((event) => event.type === "runtime.error")).toEqual([]);
+    expect(done).toMatchObject({ ok: true });
+    return {
+      events,
+      calls: JSON.parse(readFileSync(`${dump}.config.json`, "utf8")),
+      selection: JSON.parse(readFileSync(`${dump}.selection.json`, "utf8")),
+    };
+  };
+
+  it("runs a saved Gemini 3.8 Flash (Medium) pick as the base model at Medium thinking when the runtime offers only the base", async () => {
+    const { events, calls, selection } = await legacyPickTurn("antigravity-legacy-medium", "gemini-3.8-flash", "gemini-3.8-flash-medium");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash", variant: "medium" });
+    // The session already runs the base model, so only the thinking level is set; never the retired id.
+    expect(calls.filter((call: any) => call.params.configId !== "mode")).toEqual([
+      { method: "session/set_config_option", params: { sessionId: selection.sessionId, configId: "thinking_level", value: "medium" } },
+    ]);
+    expect(events.find((event) => event.type === "session.started")).toMatchObject({ model: "gemini-3.8-flash" });
+    // Thought options are still reported under the bot's saved pick, which the picker matches on.
+    expect(events.filter((event) => event.type === "session.model-variants").at(-1)).toMatchObject({
+      model: "gemini-3.8-flash-medium",
+      variants: { currentValue: "medium" },
+    });
+  });
+
+  it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
+    const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
+    expect(calls.filter((call: any) => call.params.configId !== "mode")).toEqual([
+      { method: "session/set_config_option", params: { sessionId: selection.sessionId, configId: "model", value: "gemini-3.8-flash-medium" } },
+    ]);
+  });
+
+  it("maps only a retired suffixed id the session lacks, and never overrides a chosen thinking level", () => {
+    const turn = { threadId: "t", text: "hi", model: "gemini-3.8-flash-low" };
+    expect(normalizeAntigravityTurn(turn, ["gemini-3.8-flash"])).toEqual({ ...turn, model: "gemini-3.8-flash", variant: "low" });
+    expect(normalizeAntigravityTurn(turn, ["gemini-3.8-flash", "gemini-3.8-flash-low"])).toBe(turn);
+    expect(normalizeAntigravityTurn(turn, ["gemini-3.7-flash"])).toBe(turn);
+    expect(normalizeAntigravityTurn({ ...turn, variant: "high" }, ["gemini-3.8-flash"])).toMatchObject({ model: "gemini-3.8-flash-low", variant: "high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-3.8-pro-high" }, ["gemini-3.8-flash", "gemini-3.8-pro"])).toMatchObject({ model: "gemini-3.8-pro-high" });
   });
 
   it("keeps one process across approval and model changes, starting on OMB's model", async () => {

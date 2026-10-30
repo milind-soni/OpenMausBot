@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CONTROL_REFUSAL_PLAIN, CONTROL_UNCONFIRMED, CONTROL_WAITED, type ControlState } from "./control-client.ts";
 import {
+  createChildCalls,
   createGateInterceptor,
   createInactivityWatchdog,
   createLineSplitter,
   createMcpBridgeInterceptor,
+  createReplyQueue,
   runLivenessProbe,
 } from "./mcp-bridge.ts";
 
@@ -160,7 +162,7 @@ describe("createGateInterceptor", () => {
     const refused: string[] = [];
     const intercept = createGateInterceptor({
       check,
-      forward: (line) => forwarded.push(line),
+      forward: (line) => { forwarded.push(line); },
       refuse: (line) => refused.push(line),
     });
     return { forwarded, refused, intercept };
@@ -264,7 +266,7 @@ describe("createGateInterceptor", () => {
       const refused: string[] = [];
       const intercept = createGateInterceptor({
         check: () => new Promise<ControlState>((resolve) => checks.push(resolve)),
-        forward: (line) => forwarded.push(line),
+        forward: (line) => { forwarded.push(line); },
         refuse: (line) => refused.push(line),
         actWithinMs: 1_000,
       });
@@ -288,6 +290,67 @@ describe("createGateInterceptor", () => {
       vi.useRealTimers();
     }
   });
+
+  it("checks the next call only once a relayed one has acted, so the agent's calls act in order", async () => {
+    const order: string[] = [];
+    let finishRelay!: () => void;
+    const relayed = new Promise<void>((resolve) => (finishRelay = resolve));
+    const intercept = createGateInterceptor({
+      check: async (checked: any) => { order.push(`check:${checked.id}`); return free; },
+      forward: (line) => {
+        const id = JSON.parse(line).id;
+        order.push(`fwd:${id}`);
+        return id === 1 ? relayed.then(() => { order.push("relayed:1"); }) : undefined;
+      },
+      refuse: (line) => order.push(`ref:${JSON.parse(line).id}`),
+    });
+    const first = intercept(frame("tools/call", 1));
+    const second = intercept(frame("tools/call", 2));
+    await drain();
+    expect(order).toEqual(["check:1", "fwd:1"]);
+    finishRelay();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["check:1", "fwd:1", "relayed:1", "check:2", "fwd:2"]);
+  });
+});
+
+describe("createChildCalls", () => {
+  it("calls the child under ids of its own with the agent's metadata, and keeps those answers from the agent", async () => {
+    const written: any[] = [];
+    const children = createChildCalls((line) => written.push(JSON.parse(line)));
+    const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} };
+    const typed = children.forCall(meta).call("type_text", { text: "a" });
+    const plain = children.forCall(undefined).call("list_windows", {});
+    expect(written).toEqual([
+      { jsonrpc: "2.0", id: "omb-bridge-1", method: "tools/call", params: { name: "type_text", arguments: { text: "a" }, _meta: meta } },
+      { jsonrpc: "2.0", id: "omb-bridge-2", method: "tools/call", params: { name: "list_windows", arguments: {} } },
+    ]);
+    expect(children.take(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [] } }))).toBe(false);
+    expect(children.take(JSON.stringify({ jsonrpc: "2.0", id: "omb-bridge-1", result: { content: [{ type: "text", text: "typed" }] } }))).toBe(true);
+    expect(children.take(JSON.stringify({ jsonrpc: "2.0", id: "omb-bridge-2", error: { code: -32602, message: "Missing required per-request MCP metadata" } }))).toBe(true);
+    await expect(typed).resolves.toEqual({ content: [{ type: "text", text: "typed" }] });
+    await expect(plain).resolves.toEqual({ content: [{ type: "text", text: "Missing required per-request MCP metadata" }], isError: true });
+    expect(children.take(JSON.stringify({ jsonrpc: "2.0", id: "omb-bridge-1", result: {} }))).toBe(false);
+  });
+
+  it("learns the driver's version from its initialize answer or its per-request metadata", () => {
+    const legacy = createChildCalls(() => {});
+    expect(legacy.forCall(undefined).driverVersion).toBeUndefined();
+    expect(legacy.take(JSON.stringify({ jsonrpc: "2.0", id: 0, result: { serverInfo: { name: "cua-driver", version: "0.28.2" } } }))).toBe(false);
+    expect(legacy.forCall(undefined).driverVersion).toBe("0.28.2");
+    const modern = createChildCalls(() => {});
+    modern.take(JSON.stringify({ jsonrpc: "2.0", id: 3, result: { tools: [], _meta: { "io.modelcontextprotocol/serverInfo": { name: "cua-driver", version: "0.38.0" } } } }));
+    expect(modern.forCall(undefined).driverVersion).toBe("0.38.0");
+  });
+
+  it("ends every waiting call, and any later one, when the child is gone", async () => {
+    const children = createChildCalls(() => {});
+    const waiting = children.forCall(undefined).call("type_text", { text: "a" });
+    children.close();
+    const closed = { content: [{ type: "text", text: "Computer-control transport closed" }], isError: true };
+    await expect(waiting).resolves.toEqual(closed);
+    await expect(children.forCall(undefined).call("type_text", { text: "b" })).resolves.toEqual(closed);
+  });
 });
 
 describe("createMcpBridgeInterceptor", () => {
@@ -299,7 +362,7 @@ describe("createMcpBridgeInterceptor", () => {
     const answered: string[] = [];
     const intercept = createMcpBridgeInterceptor({
       answer: (line) => answered.push(line),
-      forward: (line) => forwarded.push(line),
+      forward: (line) => { forwarded.push(line); },
     });
     intercept(frame("ping", 1));
     expect(answered).toEqual(['{"jsonrpc":"2.0","id":1,"result":{}}']);
@@ -311,7 +374,7 @@ describe("createMcpBridgeInterceptor", () => {
     const answered: string[] = [];
     const intercept = createMcpBridgeInterceptor({
       answer: (line) => answered.push(line),
-      forward: (line) => forwarded.push(line),
+      forward: (line) => { forwarded.push(line); },
     });
     intercept(JSON.stringify({ jsonrpc: "2.0", method: "ping", params: {} }));
     expect(answered).toEqual([]);
@@ -323,7 +386,7 @@ describe("createMcpBridgeInterceptor", () => {
     const answered: string[] = [];
     const intercept = createMcpBridgeInterceptor({
       answer: (line) => answered.push(line),
-      forward: (line) => forwarded.push(line),
+      forward: (line) => { forwarded.push(line); },
     });
     for (const line of [frame("initialize", 1), frame("tools/list", 2), "not json"]) {
       expect(intercept(line)).toBeUndefined();
@@ -337,7 +400,7 @@ describe("createMcpBridgeInterceptor", () => {
     const answered: string[] = [];
     const intercept = createMcpBridgeInterceptor({
       answer: (line) => answered.push(line),
-      forward: (line) => forwarded.push(line),
+      forward: (line) => { forwarded.push(line); },
       gate: { check: async () => ({ held: true, helpOpen: false, reason: "person" }) },
     });
     intercept(frame("ping", 1));
@@ -355,12 +418,40 @@ describe("createMcpBridgeInterceptor", () => {
     const answered: string[] = [];
     const intercept = createMcpBridgeInterceptor({
       answer: (line) => answered.push(line),
-      forward: (line) => forwarded.push(line),
+      forward: (line) => { forwarded.push(line); },
       gate: { check: async () => ({ held: true, helpOpen: false, reason: "person" }) },
     });
     intercept(frame("tools/list", 1));
     await drain();
     expect(answered).toEqual([]);
     expect(forwarded).toEqual([frame("tools/list", 1)]);
+  });
+});
+
+describe("createReplyQueue", () => {
+  it("writes synchronously without a tap", () => {
+    const written: string[] = [];
+    createReplyQueue(null, (line) => written.push(line))("raw", "out");
+    expect(written).toEqual(["out"]);
+  });
+
+  it("keeps replies in order and still writes them when the tap rejects or throws", async () => {
+    const written: string[] = [];
+    const seen: string[] = [];
+    const tap = {
+      response: (raw: string): Promise<void> => {
+        seen.push(raw);
+        if (raw === "a") return Promise.reject(new Error("tap failed"));
+        if (raw === "b") throw new Error("tap threw");
+        return new Promise((resolve) => setTimeout(resolve, 10));
+      },
+    };
+    const reply = createReplyQueue(tap, (line) => written.push(line));
+    reply("a", "A");
+    reply("b", "B");
+    reply("c", "C");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(seen).toEqual(["a", "b", "c"]);
+    expect(written).toEqual(["A", "B", "C"]);
   });
 });

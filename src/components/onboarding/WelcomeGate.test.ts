@@ -142,7 +142,7 @@ describe("who gets the welcome flow", () => {
   it("gives a hosted member a note instead, and nothing that writes the workspace config", async () => {
     const { tree, html } = gate({ hosted: true, canSave: false });
     expect(tree?.type).toBe(SharedWorkspaceHint);
-    expect(html).toContain("Your team&#x27;s shared OpenMausBot");
+    expect(html).toContain("Your team&#x27;s shared MausBot");
     expect(html).not.toContain("role=\"dialog\"");
     fixture.values = [];
     const hint = render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() }));
@@ -159,10 +159,10 @@ describe("who gets the welcome flow", () => {
     fixture.values = [];
     expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toBe("");
     fixture.values = [];
-    expect(render(() => SharedWorkspaceHint({ replay: true, onClose: vi.fn() })).html).toContain("shared OpenMausBot");
+    expect(render(() => SharedWorkspaceHint({ replay: true, onClose: vi.fn() })).html).toContain("shared MausBot");
     vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
     fixture.values = [];
-    expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toContain("shared OpenMausBot");
+    expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toContain("shared MausBot");
   });
 
   it("never opens the flow for a hosted member, even when the admin has not finished it", () => {

@@ -152,7 +152,8 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   /** A failed teammate run gets one retry from OpenMausBot before its Chief hears; the Chief then hears how that retry ended.
    * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread,
    * from the failure's words and `facts`), a run that answered a retry, and a thread whose asks are not the Chief's person's. */
-  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; facts?: RoutineFailureFacts }): void {
+  /** `notified`: the person already heard of it another way (a usage limit's own notice), so only the Chief is told. */
+  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; facts?: RoutineFailureFacts; notified?: boolean }): void {
     const { bot, threadId } = input;
     if (deps.quietThread?.(bot.id, threadId)) return;
     const task = store.taskByThread(bot.id, threadId);
@@ -173,7 +174,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const report = (retry?: IncidentRetry): void => void deliver({
       chief, title: INCIDENTS_THREAD_TITLE, bot, threadId,
       chip: incidentChip(incident), text: incidentText(incident, count, retry),
-      alreadyNotified: input.kind === "could-not-start" || input.kind === "routine-failed",
+      alreadyNotified: input.notified === true || input.kind === "could-not-start" || input.kind === "routine-failed",
     });
     if (!chief || group || !reachesChief(chief, bot, threadId)) return report();
     const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";

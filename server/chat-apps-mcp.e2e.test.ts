@@ -39,7 +39,8 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
     await api("POST", "/api/mcp/servers", { name: "board", command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", FAKE_APP], env: { FAKE_APP_LOG: frames } }, 201);
     await api("PATCH", "/api/mcp/servers/board", { enabled: true });
     expect(await api("POST", "/api/mcp/servers/board/test")).toMatchObject({ ok: true });
-    expect(logged().find((frame) => frame.method === "initialize").params.capabilities.extensions).toHaveProperty(APP_EXTENSION_KEY);
+    // The Test button's connection offers the apps extension; the automatic start checks need not.
+    expect(logged().filter((frame) => frame.method === "initialize").some((frame) => Object.hasOwn(frame.params.capabilities.extensions ?? {}, APP_EXTENSION_KEY))).toBe(true);
     const catalog = JSON.parse(readFileSync(join(fixture.info.dataDir, "mcp-app-catalog.json"), "utf8"));
     expect(catalog.servers.board).toMatchObject({ apps: true, uiExtension: "ok", tools: { show_board: { resourceUri: BOARD_URI } } });
     expect((await api("GET", "/api/mcp/servers")).servers.find((server: any) => server.name === "board")).toMatchObject({ enabled: true, apps: true });

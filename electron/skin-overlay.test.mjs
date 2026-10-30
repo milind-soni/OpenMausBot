@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin } = require("./skin-overlay.cjs");
+const { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin, skinIsLight } = require("./skin-overlay.cjs");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "../src/styles.css"), "utf8");
@@ -28,6 +28,13 @@ describe("skin overlay chrome", () => {
   it("matches each skin's --color-app (the header strip is bg-app)", () => {
     for (const [skin, chrome] of Object.entries(SKIN_CHROME)) {
       expect(chrome.color.toLowerCase()).toBe(cssToken(skin, "--color-app"));
+    }
+  });
+
+  it("tells light skins from dark ones as the renderer's --code-color-scheme does", () => {
+    for (const skin of Object.keys(SKIN_CHROME)) {
+      const scheme = css.match(new RegExp(`\\[data-skin="${skin}"\\]\\s*\\{[^}]*--code-color-scheme:\\s*(light|dark)`))?.[1];
+      expect(skinIsLight(skin) ? "light" : "dark", skin).toBe(scheme);
     }
   });
 

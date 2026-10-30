@@ -74,10 +74,11 @@ describe("the v1 view in the stream's words", () => {
     }
   });
 
-  it("names who holds the browser as v2 does", () => {
-    expect(liveControl({ held: true, owned: true, controlling: true }, 3)).toEqual({ canOperate: true, controller: "you", generation: 3, dialog: null });
-    expect(liveControl({ held: true, owned: true, controlling: false }, 1).controller).toBe("agent");
+  it("names who holds the browser as v2 does, and that the person holds it from another view of theirs", () => {
+    expect(liveControl({ held: true, owned: true, controlling: true }, 3)).toEqual({ canOperate: true, controller: "you", generation: 3, dialog: null, owned: true });
+    expect(liveControl({ held: true, owned: true, controlling: false }, 1)).toMatchObject({ controller: "agent", owned: true });
     expect(liveControl({ held: true, owned: false }, 1).controller).toBe("another-viewer");
+    expect(liveControl({ held: true, owned: false }, 1)).not.toHaveProperty("owned");
     expect(liveControl({ held: false }, 1).controller).toBe("unclaimed");
     expect(liveControl({ held: true, owned: true, controlling: true, dialog: { type: "confirm", message: "Leave?", defaultValue: "" } }, 1).dialog)
       .toEqual({ type: "confirm", message: "Leave?", defaultValue: "" });

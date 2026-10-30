@@ -210,7 +210,8 @@ describe("LentChromeDoors", () => {
     expect(text).toContain("open OpenMausBot on that Mac");
     expect(lentChromeGuidance("no-chrome", null)).toContain("chrome://inspect/#remote-debugging");
     const notLent = lentChromeGuidance("not-lent", null);
-    expect(notLent, "an older desktop has no switch").toContain("updating OpenMausBot there if the switch is missing");
+    expect(notLent, "the app lends its Chrome by itself, and an older one needs updating").toContain("open OpenMausBot on their Mac or PC, which lends its Chrome by itself (updating OpenMausBot there if it is an older version)");
+    expect(notLent, "no switch to send the person to").not.toMatch(/turn on|Settings → MausBot Cloud/u);
     expect(notLent, "or the way back to the built-in browser").toContain("switch this profile to Built-in under Settings → Browser profiles");
   });
 });

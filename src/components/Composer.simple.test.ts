@@ -10,6 +10,7 @@ import type { Bot, Group } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { setCallMode } from "@/lib/call-mode";
 import { userBubbleTone } from "@/lib/user-bubble-tone";
+import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
@@ -67,6 +68,17 @@ const click = (element: Element | null) => {
   if (!element) throw new Error("nothing to click");
   flushSync(() => (element as HTMLElement).click());
 };
+/** The bot's own button: its bubble's fill and ink, with the darker hover and press steps. */
+function expectBotButton(button: HTMLElement | null, color: Bot["color"]) {
+  const tone = botButtonTone(color);
+  expect(button?.className.split(" ")).toContain(BOT_BUTTON);
+  expect(button?.style.getPropertyValue("--bot-button")).toBe(tone.fill);
+  expect(button?.style.getPropertyValue("--bot-button-ink")).toBe(tone.ink);
+  expect(button?.style.getPropertyValue("--bot-button-hover")).toBe(tone.hover);
+  expect(button?.style.getPropertyValue("--bot-button-pressed")).toBe(tone.pressed);
+}
+const sendButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]');
+
 function openPlus() {
   click(plus());
   expect(menu()).not.toBeNull();
@@ -173,10 +185,13 @@ describe("the Simple composer in a bot chat", () => {
   it("turns its round button into Send while there is text, in the bot's colour", () => {
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "hello", attachments: [] });
     render({ bot });
-    const send = container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!;
+    const send = sendButton()!;
     expect(send.className.split(" ")).toContain("size-7");
-    expect(send.style.backgroundColor).not.toBe("");
+    expectBotButton(send, "purple");
+    expect(send.className).not.toMatch(/\bbg-accent\b|brightness/);
     expect(fixture.call).toBeNull();
+    render({ bot: { ...bot, color: "yellow" } });
+    expectBotButton(sendButton(), "yellow");
   });
 
   it("turns its round button into Stop while the bot works, and keeps a quiet Stop beside Send while you type", () => {
@@ -184,7 +199,7 @@ describe("the Simple composer in a bot chat", () => {
     render({ bot: busy });
     const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
     expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
-    expect(slot.style.backgroundColor).not.toBe("");
+    expectBotButton(slot, "purple");
     expect(fixture.call).toBeNull();
     click(slot);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
@@ -244,6 +259,14 @@ describe("the Simple composer in a group chat", () => {
     expect(container.querySelector("[data-goal-chip]")).toBeNull();
     expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Launch planning");
     expect(fixture.groupCall).toMatchObject({ group: { id: "room" }, placement: "composer", fill: "var(--color-accent)", ink: "var(--color-accent-ink)" });
+    restoreComposerDraft(`group:${room.id}:${room.threadId}`, { text: "hello room", attachments: [] });
+    render({ group: room, members: [bot, peer] });
+    const send = sendButton()!;
+    expect(send.className.split(" ")).not.toContain(BOT_BUTTON);
+    expect(send.style.backgroundColor).toBe("var(--color-accent)");
+    expect(send.style.color).toBe("var(--color-accent-ink)");
+    restoreComposerDraft(`group:${room.id}:${room.threadId}`, { text: "", attachments: [] });
+    render({ group: room, members: [bot, peer] });
     openPlus();
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach"]);
     click(item("goal"));
@@ -258,7 +281,7 @@ describe("the Simple composer in a group chat", () => {
 
   it("keeps the room's @ hint only when the room answers to mentions", () => {
     render({ group: { ...room, defaultResponder: { kind: "mentions" } }, members: [bot, peer] });
-    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Launch planning — @ to bring a bot in");
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Launch planning (@ to bring a bot in)");
   });
 });
 
@@ -273,6 +296,20 @@ describe("the Advanced composer", () => {
     expect(fixture.call).toMatchObject({ placement: "composer" });
     expect(fixture.call?.fill).toBeUndefined();
     expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
+  });
+
+  it("sends with the bot's own button too, and keeps the accent in a room", () => {
+    fixture.advanced = true;
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "hello", attachments: [] });
+    render({ bot: { ...bot, color: "teal" } });
+    const send = sendButton()!;
+    expect(send.className.split(" ")).toContain("size-8");
+    expectBotButton(send, "teal");
+    expect(send.className).not.toMatch(/\bbg-accent\b|text-white/);
+    restoreComposerDraft(`group:${room.id}:${room.threadId}`, { text: "hello room", attachments: [] });
+    render({ group: room, members: [bot, peer] });
+    expect(sendButton()!.className.split(" ")).not.toContain(BOT_BUTTON);
+    expect(sendButton()!.style.backgroundColor).toBe("var(--color-accent)");
   });
 
   it("keeps the room's Goal chip and its header call button", () => {

@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { BotAvatar } from "./Avatar";
 import { InstanceProviderMark } from "./ProviderIcons";
-import { MENU_GUTTER, MENU_ICON, MENU_LABEL, MENU_LINE, MENU_META, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
+import { MENU_GUTTER, MENU_ICON, MENU_LABEL, MENU_LINE, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING, SIMPLE_MENU_META, SIMPLE_MENU_ROW } from "./menu-recipe";
 import { effortLabel } from "./ModelPicker";
 
 export type SimpleThinking =
@@ -39,6 +39,16 @@ export interface SimpleModelMenuProps extends SimpleMenuActions {
 const Gutter = ({ children }: { children?: ReactNode }) => <span className={MENU_GUTTER}>{children}</span>;
 const Forward = () => <ChevronRight size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />;
 
+/** A model's name and its secondary label, each on its own line so a long name never eats the label beside it. */
+function RowLines({ label, children }: { label: ReactNode; children?: ReactNode }) {
+  return (
+    <span data-simple-model-text className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate">{label}</span>
+      {children}
+    </span>
+  );
+}
+
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
   return (
@@ -50,11 +60,12 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       title={[option.label, option.provider, modelBlurb(option)].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
-      className={MENU_ROW}
+      className={SIMPLE_MENU_ROW}
     >
       <Gutter />
-      <span className="min-w-0 flex-1 truncate">{row.label}</span>
-      {row.route && <span data-simple-route className={MENU_META}>{row.route}</span>}
+      <RowLines label={row.label}>
+        {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
+      </RowLines>
       {row.current && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
     </button>
   );
@@ -221,25 +232,27 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
                 if (setUp) props.onSetUp(setUp, event.detail === 0);
                 else props.onPickCurrent();
               }}
-              className={MENU_ROW}
+              className={SIMPLE_MENU_ROW}
             >
               <Gutter>
                 {current.instance
                   ? <InstanceProviderMark instance={current.instance} size={14} subtle />
                   : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
               </Gutter>
-              <span className="min-w-0 flex-1 truncate">{current.label}</span>
+              <RowLines label={current.label}>
+                {current.meta && <span className={cn(SIMPLE_MENU_META, current.warning && "text-warning")}>{current.meta}</span>}
+              </RowLines>
               {current.pending && <Loader2 size={14} className="shrink-0 animate-spin text-ink-tertiary" aria-hidden="true" />}
-              {current.meta && <span className={cn(MENU_META, current.warning && "text-warning")}>{current.meta}</span>}
               <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />
             </button>
           )}
           {menu.follow && (
             <button type="button" data-menu-row data-follow-bot-model aria-pressed="false" tabIndex={-1} title={props.botModel.title}
-              onClick={props.onFollowBot} className={MENU_ROW}>
+              onClick={props.onFollowBot} className={SIMPLE_MENU_ROW}>
               <Gutter><BotAvatar bot={props.bot} size={16} state="happy" animated={false} label="" /></Gutter>
-              <span className="min-w-0 flex-1 truncate">{t("model.useBotModel", { name: props.bot.name })}</span>
-              <span className={MENU_META}>{props.botModel.label}</span>
+              <RowLines label={t("model.useBotModel", { name: props.bot.name })}>
+                <span className={SIMPLE_MENU_META}>{props.botModel.label}</span>
+              </RowLines>
             </button>
           )}
           {top && menu.groups.length > 0 && <div role="separator" className={MENU_SEPARATOR} />}

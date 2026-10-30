@@ -75,5 +75,18 @@ it("never opens a local terminal to install on a paired remote server", () => {
   mount(createElement(EngineSetup, { instance: engine }));
   expect(host.textContent).not.toContain("Open install in Terminal");
   expect(host.textContent).toContain("fixture-install");
-  expect(host.textContent).toContain("the machine it runs on—not this device");
+  expect(host.textContent).toContain("the machine it runs on, not this device");
+});
+
+it("says plainly when the engine now runs the copy the app installed", async () => {
+  const opencode: InstanceInfo = {
+    ...engine, instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode",
+    install: { platform: "linux", command: { linux: "npm install -g opencode-ai" }, server: { standalone: { version: "1.19.4", downloadBytes: 79_667_571 } } },
+  };
+  const ready: InstanceInfo = { ...opencode, snapshot: { state: "available", authenticated: true } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ instances: [ready], usingAppCopy: true }))));
+  mount(createElement(EngineSetup, { instance: opencode }));
+  await act(async () => button("Install OpenCode here").click());
+  expect(host.textContent).toContain("Another copy of OpenCode on this computer doesn't start, so OpenCode now uses the copy MausBot installed.");
+  expect(host.textContent).toContain("Installation verified");
 });

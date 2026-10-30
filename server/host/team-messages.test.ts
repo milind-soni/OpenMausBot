@@ -64,6 +64,23 @@ describe("message_person", () => {
     expect(f.notified).toEqual([]);
   });
 
+  it("takes a 👍 on a line of the inbox as the answer: back to the bot that asked, which carries on, and the line is answered", async () => {
+    const f = fixture();
+    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
+    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "marco-private", title: "Scout finished", body: "Daily digest." }, { routine: true });
+    const inbox = f.inboxOf(MARCO).threadId;
+    const [item, report] = f.lines(inbox);
+    const sender = { name: "Marco", id: key(MARCO.email) };
+    await expect(f.team.reactedIn(session(MARCO.email), inbox, item!.id, "👍", { sendId: "reaction-1", sender })).resolves.toEqual({ queued: false });
+    expect(f.continued).toEqual([expect.objectContaining({ botId: "scout", threadId: "philipp-private", text: 'Marco replied to your message ("Can you review the deck?"): 👍' })]);
+    expect(f.lines(inbox).find((row) => row.sendId === "reaction-1")).toMatchObject({ role: "user", text: "👍", reaction: "👍", replyToId: item!.id });
+    expect(f.team.inbox.waiting(inbox)).toEqual([]);
+    await expect(f.team.reactedIn(session(MARCO.email), inbox, item!.id, "👍", { sendId: "reaction-1", sender }), "the same reaction again").resolves.toEqual({ queued: false, repeated: true });
+    expect(f.continued).toHaveLength(1);
+    expect(f.team.reactedIn(session(MARCO.email), inbox, report!.id, "👍", { sendId: "reaction-2", sender }), "a report waits on nothing: the inbox's bot gets it").toBeNull();
+    expect(f.team.reactedIn(session(PHILIPP.email), inbox, item!.id, "👍", { sendId: "reaction-3", sender }), "only its own person answers from it").toBeNull();
+  });
+
   it("lets the person's Chief pass their answer back from the inbox, to whoever sent it", () => {
     const f = fixture();
     f.team.pass("reporter", "rep-main", "Marco", "Which chart goes first?");
@@ -168,11 +185,13 @@ describe("@Marco", () => {
 });
 
 describe("Marco's assistant", () => {
+  // Two days before the busy slot, on the assistant's own clock: on the real one the slot passed and was no longer shown.
+  const NOW = Date.UTC(2026, 9, 27, 9);
   const BUSY = { start: Date.UTC(2026, 9, 29, 14), end: Date.UTC(2026, 9, 29, 15) };
   const assistant = (reply: string) => {
     const generate = vi.fn(async (_botId: string, _prompt: string) => reply);
     const busy = vi.fn(async () => [BUSY]);
-    return { generate, busy, f: fixture({ representative: { generate, busy, timeZone: () => "UTC" } }) };
+    return { generate, busy, f: fixture({ representative: { generate, busy, timeZone: () => "UTC", now: () => NOW } }) };
   };
 
   it("answers a free/busy question itself, says so where it was asked and in his inbox, and notifies him once", async () => {

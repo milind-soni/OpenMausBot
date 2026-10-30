@@ -1,11 +1,13 @@
 // No sudo, no shell, no terminal: the package name comes from the driver's own install descriptor, never a request, and
 // npm runs with a fixed argument list as this process's user into an app-owned prefix.
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { EngineInstall } from "./contracts.ts";
+import type { EngineInstall, StandaloneRelease } from "./contracts.ts";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "./config.ts";
 import { npmEnginesPrefix } from "./engine-roots.ts";
+import { registerStandaloneBinDirs, standaloneAssetFor, standaloneRunEnv } from "./engine-standalone.ts";
+import { STANDALONE_RELEASES } from "./standalone-releases.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
 import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
@@ -22,9 +24,33 @@ export function enginesBinDir(baseDir = DATA_DIR, platform: NodeJS.Platform = pr
   return platform === "win32" ? enginesPrefix(baseDir) : join(enginesPrefix(baseDir), "bin");
 }
 
-/** Called once at boot: engines installed here win over any other copy on PATH. */
-export function registerEnginesBinDir(baseDir = DATA_DIR): void {
+/** Called once at boot: engines npm installed here win over any other copy on PATH. A standalone build the app installed
+ * goes last instead, so a copy the person installs themselves takes over. */
+export function registerEnginesBinDir(baseDir = DATA_DIR, releases: readonly StandaloneRelease[] = STANDALONE_RELEASES): void {
   registerPathDir(enginesBinDir(baseDir));
+  registerStandaloneBinDirs(baseDir, releases);
+}
+
+/** For an engine the app can install as its own build: the copy npm put in the app's folder (before that build existed)
+ * ranks last, behind the person's PATH and the app's own build. */
+export function standaloneEnginePath(path: string, baseDir = DATA_DIR): string {
+  const npm = enginesBinDir(baseDir);
+  const parts = path.split(delimiter);
+  return parts.includes(npm) ? [...parts.filter((part) => part !== npm), npm].join(delimiter) : path;
+}
+
+/** The PATH such an engine's CLI is looked up on when it is spawned. Windows picks a spawn's program from the app's PATH
+ * whatever the child's PATH says, so there it stays the app's. */
+export function standaloneLookupPath(baseDir = DATA_DIR, path: string = augmentedPath()): string {
+  return process.platform === "win32" ? path : standaloneEnginePath(path, baseDir);
+}
+
+/** A spawn environment for an engine with a standalone release: the npm folder last on its PATH, and the release's run
+ * settings when its CLI is the app's own copy. */
+export function applyStandaloneSpawnEnv(release: StandaloneRelease, env: Record<string, string | undefined>, cli: string, baseDir = DATA_DIR): void {
+  const path = env.PATH ?? augmentedPath();
+  env.PATH = standaloneEnginePath(path, baseDir);
+  Object.assign(env, standaloneRunEnv(release, cli, baseDir, standaloneLookupPath(baseDir, path)));
 }
 
 export function npmPackageOf(install: EngineInstall | undefined): string | null {
@@ -37,10 +63,18 @@ export function npmAvailable(): boolean {
   return findCliCandidates("npm").length > 0;
 }
 
-export function serverInstallFor(install: EngineInstall | undefined, npmPresent: boolean = npmAvailable()): { package: string } | null {
+export type ServerInstall = NonNullable<EngineInstall["server"]>;
+
+/** The vendor's own build when it has one for this platform (no Node.js needed), otherwise npm when npm is here. With a
+ * standalone build, `package` says npm is here too, so the client can still offer the npm command for a terminal. */
+export function serverInstallFor(install: EngineInstall | undefined, npmPresent: boolean = npmAvailable()): ServerInstall | null {
   if (!install || install.managed) return null;
-  const pkg = npmPackageOf(install);
-  return pkg && npmPresent ? { package: pkg } : null;
+  const asset = standaloneAssetFor(install.standalone);
+  const pkg = npmPresent ? npmPackageOf(install) : null;
+  if (install.standalone && asset) {
+    return { standalone: { version: install.standalone.version, downloadBytes: asset.approxBytes }, ...(pkg ? { package: pkg } : {}) };
+  }
+  return pkg ? { package: pkg } : null;
 }
 
 interface InstallOptions {

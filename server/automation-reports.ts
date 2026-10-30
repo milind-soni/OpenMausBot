@@ -6,6 +6,7 @@
 // that delivers to the brief posts no line: its answer goes to the brief, which reads it as a small JSON result.
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
+import { signInWaits } from "../shared/sign-in-request.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -51,7 +52,7 @@ export function automationContextText(line: AutomationLine, at: number, text: st
 /** A sign-in, connection or credential card still waiting on the person, in plain words; null once it is settled. */
 export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">): string | null {
   const { signIn, connector, secret } = message;
-  if (message.kind === "signin" && signIn && !signIn.done && !signIn.cancelled && !signIn.superseded && !signIn.resumed && !signIn.stopped) {
+  if (message.kind === "signin" && signIn && signInWaits(signIn) && !signIn.resumed && !signIn.stopped) {
     const reason = signIn.reason?.trim();
     return `I need you to sign in to ${signIn.site}${reason ? `: ${reason}${/[.!?]$/.test(reason) ? "" : "."}` : "."}`;
   }

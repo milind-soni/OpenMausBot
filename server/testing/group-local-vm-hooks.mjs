@@ -31,6 +31,14 @@ registerHooks({
         if (status.container === 'running') await stop();
         return rescueFirefoxProfile(status.runtime, target);
       }
+      export async function keepInstalledAppsBeforeRemove(target, status, _stop) {
+        if (!status.runtime || status.container === 'missing' || !status.managed || status.imageMatches) return 'none';
+        const state = JSON.parse(readFileSync(file, 'utf8'));
+        if (state.failAppRescue) throw new Error("could not copy installed desktop apps: fixture refused");
+        state.appRescues = [...(state.appRescues ?? []), target.key];
+        writeFileAtomic(file, JSON.stringify(state), { durable: false });
+        return 'rescued';
+      }
     ` };
     if (url === mock) return { format: 'module', shortCircuit: true, source: `
       export * from ${JSON.stringify(actual)};
