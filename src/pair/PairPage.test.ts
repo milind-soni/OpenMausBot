@@ -6,7 +6,7 @@ const f = vi.hoisted(() => ({ effects: [] as EffectCallback[], pair: vi.fn() }))
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(), useEffect: (effect: EffectCallback) => { f.effects.push(effect); } }));
 vi.mock("../lib/session", async original => ({ ...await original<typeof import("../lib/session")>(), pairWithCode: f.pair, readSessionState: vi.fn().mockResolvedValue({ kind: "unauthenticated", error: "" }) }));
 vi.mock("../components/DesktopWorkspaceSwitcher", () => ({ DesktopWorkspaceSwitcher: () => null }));
-import { PairPage, pairIntro, pairsAutomatically } from "./PairPage";
+import { PairPage, pairIntro, pairsAutomatically, pairTitle } from "./PairPage";
 import en from "../locales/en.json";
 
 const code = "ABCD-EFGH-JK23";
@@ -59,4 +59,12 @@ it("My Cloud says where its connection starts, never 'the code shown on the serv
   expect(cloud).not.toContain("shown on the server");
   expect(pairIntro({ mode: "code", sent: false, email: "", cloudHome: false })).toContain("shown on the server");
   expect(pairIntro({ mode: "email", sent: true, email: "a@b.test", cloudHome: false })).toContain("a@b.test");
+});
+
+it("a team's Cloud is called by the team's name, a person's own Cloud My Cloud", () => {
+  const descriptor = (capabilities: Record<string, unknown>) => ({ environmentId: "e", label: "Acme Labs", platform: "linux", version: "1", capabilities: { remoteSessions: true as const, selfUpdate: "operator" as const, ...capabilities } });
+  expect(pairTitle(descriptor({ cloudHome: true, cloudTeam: true }), "code")).toBe("Acme Labs");
+  expect(pairTitle(descriptor({ cloudHome: true }), "code")).toBe("My Cloud");
+  expect(pairTitle(descriptor({}), "email")).toBe("Sign in to Acme Labs");
+  expect(pairTitle(null, "code")).toBe("Connect to this MausBot");
 });

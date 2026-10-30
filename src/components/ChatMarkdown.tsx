@@ -91,6 +91,26 @@ const normalizationParseOptions: MarkdownParseOptions = {
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
 };
 
+/** A single line break in a reply is a line break, as chat apps show it, not a space. */
+function remarkSoftBreaks() {
+  return (tree: { children?: any[] }) => {
+    const visit = (node: { children?: any[] }) => {
+      if (!node.children) return;
+      node.children = node.children.flatMap((child) => {
+        if (child?.type !== "text" || !child.value.includes("\n")) {
+          visit(child);
+          return [child];
+        }
+        return (child.value as string).split("\n").flatMap((value, index) => [
+          ...(index ? [{ type: "break" }] : []),
+          ...(value ? [{ type: "text", value }] : []),
+        ]);
+      });
+    };
+    visit(tree);
+  };
+}
+
 function unwrapLinkedImages() {
   return (tree: { children?: any[] }) => {
     const visit = (node: { children?: any[] }) => {
@@ -725,7 +745,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
           rehypePlugins={mathPlugin ? [mathPlugin] : []}
           urlTransform={chatUrlTransform}
           components={MARKDOWN_COMPONENTS}

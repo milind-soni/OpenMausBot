@@ -1198,6 +1198,7 @@
   "team.deleteTitle": "¿Eliminar el departamento {name}?",
   "team.deleteDescription": "Esto elimina el departamento vacío y sus instrucciones compartidas. No se puede deshacer.",
   "team.deleteKeepBotsDescription": "Los bots y los chats de grupo se mueven a General con sus conversaciones intactas. Se eliminan el departamento y sus instrucciones compartidas. No se puede deshacer.",
+  "team.deleteKeepBotsSimple": "Sus bots y chats de grupo se quedan, con sus conversaciones, fuera de cualquier departamento. Se eliminan el departamento y sus instrucciones compartidas. No se puede deshacer.",
   "team.delete": "Eliminar departamento",
   "team.share": "Compartir departamento…",
   "teamSettings.menu": "Configurar para todos los bots de este departamento…",
@@ -1381,6 +1382,8 @@
   "sidebar.section.newContext": "Departamento nuevo…",
   "sidebar.section.newContextAria": "Nombre del departamento nuevo",
   "sidebar.section.removeFromContext": "Mover a General",
+  "sidebar.section.removeFromDepartment": "Quitar del departamento",
+  "sidebar.section.newName": "Departamento nuevo",
   "sidebar.room.renameAria": "Cambiar el nombre de {name}",
   "sidebar.room.saveChatName": "Guardar nombre del hilo",
   "sidebar.room.saveChannelName": "Guardar nombre del chat de grupo",
@@ -5431,5 +5434,13 @@
   "approval.status.timedOut": "Sin respuesta a tiempo; no se ejecutó",
   "secretCard.ref": "{app} lo guarda para un solo uso de sus propias herramientas. Tu bot nunca lo ve y nunca se añade al chat.",
   "secretCard.file": "Se guarda en un archivo privado que los comandos de tu bot pueden leer durante 24 horas; después se borra. Nunca se añade al chat.",
-  "secretCard.resumed": "El bot continuó"
+  "secretCard.resumed": "El bot continuó",
+  "botPanel.backups.title": "IA de respaldo",
+  "botPanel.backups.hint": "Solo se usan cuando la IA de {name} llega a su límite de uso o no puede empezar con un mensaje. Entonces se encarga la primera de aquí que pueda, solo en esa conversación. Cuando el límite de uso se restablece, la conversación vuelve.",
+  "botPanel.backups.row": "Respaldo {position}: {model}",
+  "botPanel.backups.remove": "Quitar {model} de los respaldos",
+  "botPanel.backups.choose": "Elegir una IA de respaldo",
+  "model.fallback.add": "Añadir una IA de respaldo",
+  "model.fallback.uses": "Se usan en orden, sin ningún otro ajuste, cuando la IA de este bot llega a su límite de uso o el proveedor demuestra que una solicitud nunca empezó. El trabajo que pudo haberse ejecutado no se repite. Solo cambia ese hilo; los valores predeterminados del bot y los demás hilos no cambian. El proveedor de respaldo puede cobrar.",
+  "settings.recovery.ownBackups": "Los bots con sus propios respaldos (Modelo → Modelos de respaldo de este bot) usan esos en su lugar, esté esto activado o no."
 }

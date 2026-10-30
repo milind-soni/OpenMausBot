@@ -381,6 +381,14 @@ describe("a Team Cloud's audiences", () => {
     expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub" });
   });
 
+  it("a main chat named as another person's private chat is replaced by a conversation the viewer reads, never sent", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub-2", tasks: [{ threadId: "t-pub-2" }, { threadId: "t-pub" }] };
+    const sent = memberBot(bot, admin) as Record<string, unknown>;
+    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+    expect(memberBot({ ...bot, threadId: "t-pub" }, admin)).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+  });
+
   it("a live frame from another person's private chat never reaches an admin's stream", () => {
     const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
     const ctx: FrameContext = { visible: admin, webhook: () => undefined, freshBot: () => undefined, freshGroup: () => undefined };

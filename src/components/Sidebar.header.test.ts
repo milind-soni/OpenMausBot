@@ -186,11 +186,11 @@ describe("sidebar top row", () => {
     },
   );
 
-  it("keeps the browser build's placeholder lights 12px clear of the drag space and buttons", () => {
+  it("draws no window buttons in a browser, where the browser has its own", () => {
     const row = topRow(render());
-    expect(row).toContain('<div class="flex shrink-0 items-center gap-2 mr-3"><span class="size-3 rounded-full bg-[#ff5f57]"></span>');
+    expect(row).not.toContain("bg-[#ff5f57]");
+    expect(row).not.toContain("data-traffic-light-space");
     const { spacer, buttons } = order(row);
-    expect(spacer).toBeGreaterThan(row.indexOf("bg-[#28c840]"));
     expect(buttons).toBeGreaterThan(spacer);
   });
 

@@ -24,6 +24,7 @@ let shellPath;
 export async function commandPath({ platform = process.platform, env = process.env, home = os.homedir(), probe, exists = existsSync } = {}) {
   if (platform === "win32") return env.PATH;
   const fromShell = probe ? await probe() : await (shellPath ??= probeShellPath());
-  const known = ["/opt/homebrew/bin", "/usr/local/bin", path.join(home, ".local", "bin")].filter(dir => exists(dir));
+  // POSIX joins: this list is only for macOS and Linux, whatever the host that computes it.
+  const known = ["/opt/homebrew/bin", "/usr/local/bin", path.posix.join(home, ".local", "bin")].filter(dir => exists(dir));
   return [...new Set([fromShell, env.PATH].flatMap(list => list?.split(":") ?? []).concat(known).filter(Boolean))].join(":");
 }
