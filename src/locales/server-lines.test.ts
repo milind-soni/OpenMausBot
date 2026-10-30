@@ -338,15 +338,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/app-trigger-requests.ts", "When “ … ” happens in  …  …"],
     ["server/app-trigger-requests.ts", "(it checks every 15 minutes)"],
     ["server/app-trigger-requests.ts", "reviews the event"],
-    ["server/automation-reports.ts", "Recovered:  …  finished OK at  …"],
-    ["server/automation-reports.ts", "This run didn't finish:  …"],
-    ["server/automation-reports.ts", "This run didn't finish."],
-    ["server/incidents.ts", "in the room \" … \""],
-    ["server/incidents.ts", "in its thread # …"],
-    ["server/incidents.ts", "in its main conversation"],
-    ["server/incidents.ts", "… 's run  …  stopped after showing no activity …"],
-    ["server/incidents.ts", "… 's run  …  could not start …"],
-    ["server/incidents.ts", "… 's scheduled routine  …  failed …"],
     ["server/routine-requests.ts", "Each time  … 's usage limit resets"],
     ["server/routine-requests.ts", "When  … 's usage limit resets"],
     ["server/routine-requests.ts", "Every  …  minutes, cadence starting at confirmation; first run is the"],
@@ -384,14 +375,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/routine-requests.ts", "On startup:  …"],
     ["server/routine-requests.ts", "Also runs once each time OpenMausBot starts"],
     ["server/routine-requests.ts", "Runs only on its schedule"],
-    ["server/routine-run-card.ts", "needs your input"],
-    ["server/routine-run-card.ts", "was blocked"],
-    ["server/routine-run-card.ts", "reached its limit"],
-    ["server/routine-run-card.ts", "was stopped"],
-    ["server/routine-run-card.ts", "needs your attention"],
-    ["server/routine-run-card.ts", "was cancelled"],
-    ["server/routine-run-card.ts", "was missed"],
-    ["server/routine-run-card.ts", "deferred: target busy"],
     ["server/webhook-requests.ts", "When another app sends something … ,  …   …"],
     ["server/webhook-requests.ts", "does what it is asked"],
     ["shared/plain-time-zone.ts", "every day"],
@@ -596,6 +579,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/live-call.ts", "Call with  …  ·  …"],
   ],
 };
+
 
 
 
