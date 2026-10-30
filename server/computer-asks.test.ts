@@ -5,7 +5,7 @@ import type { LentPlatform } from "./lent-computers.ts";
 import type { Message } from "./store.ts";
 
 const bot = { id: "scout", name: "Scout", color: "blue" } as unknown as Parameters<ComputerAsks["ask"]>[0]["bot"];
-const PC = { name: "MILIND-PC", platform: "win32" } as const;
+const PC = { name: "HOME-PC", platform: "win32" } as const;
 const desktop = (fields: Partial<DesktopState> = {}): DesktopState => ({ ...PC, paused: false, screen: { ready: true, reason: null }, terminal: false, ...fields });
 const lends = (fields: Partial<OnlineComputer> = {}): OnlineComputer => ({ id: "pc-1", ...PC, computer: true, terminal: false, ...fields });
 

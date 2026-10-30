@@ -364,7 +364,7 @@ describe("server-side scope check (audit M1)", () => {
     const ask = 'call ask_for_computer with need "screen"';
     expect(sharedComputerScopeRefusal({ ...lent, platform: "win32" }, { action: "computer_call" }, "ask_for_computer"))
       .toBe("Apps and screen are not lent to this Cloud right now. Call ask_for_computer with need \"screen\" and what you want to do: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat, and don't use your own cloud computer instead unless they ask.");
-    expect(sharedComputerScopeRefusal({ ...lent, name: "MILIND-PC" }, { action: "run_command" }, "ask_for_computer")).toContain('Call ask_for_computer with need "terminal"');
+    expect(sharedComputerScopeRefusal({ ...lent, name: "HOME-PC" }, { action: "run_command" }, "ask_for_computer")).toContain('Call ask_for_computer with need "terminal"');
     const broker = new SharedComputers(() => true);
     broker.askTool = "ask_for_computer";
     const changes: number[] = [];
