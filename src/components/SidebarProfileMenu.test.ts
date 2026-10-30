@@ -580,6 +580,11 @@ describe("Simple mode's account menu", () => {
     expect(placeMenuItems(place({ bridge: undefined, switchable: false }), { owner: null, onCloudSettings })).toEqual([]);
   });
 
+  it("names a team's Cloud by the team", () => {
+    const team = placeMenuItems(place({ switchable: false, cloudHome: true, onLine: "" }), { owner: null, name: "Acme Labs", onCloudSettings: noop });
+    expect(team.map((item) => item.label)).toEqual(["Acme Labs"]);
+  });
+
   it("shows one Get the phone app row, dotted while this computer's phone is connected", () => {
     expect(simplePhoneItems({ connected: true, onGetApp: noop }).map((item) => [item.key, Boolean(item.trailing)])).toEqual([["phone-app", true]]);
     expect(simplePhoneItems({ connected: false, onGetApp: noop })[0]!.trailing).toBeUndefined();

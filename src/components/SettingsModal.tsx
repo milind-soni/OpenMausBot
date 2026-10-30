@@ -4,6 +4,7 @@ import { useStore, type AppSettingsSection } from "@/state/store";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
+import { AdminOnly } from "./AdminOnly";
 import { KeysPage } from "./keys/KeysPage";
 import { KEY_CATALOG, keyMatches, keySection, type KeyEntry } from "./keys/key-catalog";
 import { openKeySettings, useKeyFocus } from "./keys/key-focus";
@@ -392,19 +393,19 @@ export function SettingsModal() {
       case "experimental":
         return <ExperimentalFeaturesRow />;
       case "connections":
-        return <><KeysPage /><WebSearchSettings /></>;
-      case "decisionModel": return <DecisionModelSettings />;
-      case "engines": return <EnginesSettings />;
-      case "backups": return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
-      case "import": return <ImportSettings />;
+        return <AdminOnly><KeysPage /><WebSearchSettings /></AdminOnly>;
+      case "decisionModel": return <AdminOnly><DecisionModelSettings /></AdminOnly>;
+      case "engines": return <AdminOnly><EnginesSettings /></AdminOnly>;
+      case "backups": return <AdminOnly><WorkspaceBackupSettings /><CompanyBackupSettings /></AdminOnly>;
+      case "import": return <AdminOnly><ImportSettings /></AdminOnly>;
       case "companion":
         return <>{remoteAccess.client}{remoteAccess.domain}{remoteAccess.pairing}{remoteAccess.companion}</>;
       case "computer":
-        return <><BuiltInBrowserRow /><BrowserProfilesRow /><LocalComputerSection /></>;
+        return <><BuiltInBrowserRow /><BrowserProfilesRow /><AdminOnly><LocalComputerSection /></AdminOnly></>;
       case "logins":
         return <LoginsSettings />;
       case "usage":
-        return <UsageSection />;
+        return <AdminOnly note="settings.adminOnly.usage"><UsageSection /></AdminOnly>;
       case "skills":
         return skillsLibraryEnabled(state.config) ? <SkillsSection /> : null;
       case "people":

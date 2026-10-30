@@ -258,8 +258,8 @@ export interface RoutineManagerOptions {
   routineTurn?: (threadId: string) => boolean;
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
   limitResetAt?: (engine: string) => number | null;
-  /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run. */
-  limitBackup?: (botId: string, scope?: "engine" | "model" | "credits") => boolean;
+  /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run, or it is signed out. */
+  limitBackup?: (botId: string, scope?: "engine" | "model" | "credits" | "signed-out") => boolean;
   /** Work this thread handed to another bot is still open, so its wait is not only on the person. */
   handedOffWorkLive?: (threadId: string) => boolean;
   launchId?: string;
@@ -1313,7 +1313,7 @@ export class RoutineManager {
   private settleFailure(run: RoutineRun, failure: string, facts: RoutineFailureFacts) {
     this.failureFacts.delete(run.id);
     if (this.closing) return;
-    const backupReady = (facts.limit !== undefined || facts.limitResetsAt !== undefined) && this.options.limitBackup?.(run.botId, facts.limit) === true;
+    const held = facts.limit !== undefined || facts.limitResetsAt !== undefined ? facts.limit ?? "engine" : facts.stopReason === "auth_required" ? "signed-out" : undefined, backupReady = held !== undefined && this.options.limitBackup?.(run.botId, held) === true;
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert);
     else {
