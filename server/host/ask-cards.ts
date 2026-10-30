@@ -186,16 +186,6 @@ export function createAskCards(deps: AskCardsDeps) {
     if (asked?.card) store.patchMessage(threadId, asked.id, { card: { ...asked.card, answered: "answer", answeredText: text } });
   }
 
-  /** The person wrote in a conversation where a question no turn waits on any more was still open: their line answers
-   * it, so it waits on them no longer. */
-  function answeredByLine(threadId: string, text: string): void {
-    for (const message of store.messagesFor(threadId)) {
-      const card = message.card;
-      if (!ownQuestionCard(message) || !answerableInWords(card) || deps.live(threadId, card.requestId)) continue;
-      store.patchMessage(threadId, message.id, { card: { ...card, answered: "answer", answeredText: text } });
-    }
-  }
-
   /** A bot asked a new question: its earlier open questions in that conversation, which no turn waits on any more, are
    * closed. A parked teammate's own question closes with its work. */
   function askedAgain(threadId: string, requestId: string, botId: string): void {
@@ -235,18 +225,20 @@ export function createAskCards(deps: AskCardsDeps) {
     return true;
   }
 
-  /** A person's line answers an inbox copy it replies to, or the question card the bot's turn waits on in its own
-   * conversation, as a tap would; null leaves the line to be sent (steered or queued) as usual. */
+  /** A person's line answers an inbox copy it replies to, or, in work a teammate handed on, the question card the bot's
+   * turn waits on, as a tap would; null leaves the line to be sent (steered or queued) as usual. */
   async function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
     line: { sendId?: string; sender?: Message["sender"] }): Promise<{ status: number; message?: Message; error?: string } | null> {
     if (store.groupByThread(threadId) || isStopCommand(text)) return null;
+    const delegator = delegatorOf(threadId);
+    const handedOn = Boolean(delegator && delegator.threadId !== threadId);
     const asked = target
       ? answerableInWords(target.card) ? target : undefined
-      : store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!));
+      : handedOn ? store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
     if (!asked?.card?.requestId) return null;
     const requestId = asked.card.requestId;
     const origin = deps.answeredIn(threadId, requestId);
-    if (origin === threadId && !deps.live(threadId, requestId)) return null;
+    if (origin === threadId && !(handedOn && deps.live(threadId, requestId))) return null;
     const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
     if (again) return { status: 202, message: again };
     const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, text) });
@@ -265,5 +257,5 @@ export function createAskCards(deps: AskCardsDeps) {
     questionCard({ id: `${botId}-${turnId}`, threadId, botId, executions: 1, createdAt: reply.at, startedAt: reply.at } as HandoffView, question);
   }
 
-  return { park, decided, closed, askedAgain, answerParked, answeredInWords, answeredByLine, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
+  return { park, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
 }

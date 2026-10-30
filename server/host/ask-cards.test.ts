@@ -224,14 +224,6 @@ describe("nothing stale waits on the person", () => {
     expect(w.rows("work").map((row) => row.card!.answered ?? null)).toEqual(["unavailable", null, null]);
   });
 
-  it("the person's own line answers a question in their chat that no turn waits on any more", () => {
-    const w = world({ live: ["req-live"] });
-    ask(w, "chat", "req-old");
-    ask(w, "chat", "req-live");
-    w.cards.answeredByLine("chat", "Ja, mach das");
-    expect(w.rows("chat").map((row) => [row.card!.answered ?? null, row.card!.answeredText ?? null])).toEqual([["answer", "Ja, mach das"], [null, null]]);
-  });
-
   it("a bot's own reply that ends on NEEDS INPUT becomes the question card, once", () => {
     const w = world();
     w.store.appendMessage("chat", { role: "bot", kind: "text", text: "Ich habe zwei Entwürfe.\nNEEDS INPUT: Welcher gefällt dir?", turnId: "t1" });
@@ -342,12 +334,12 @@ describe("a typed line answers a question card", () => {
     expect(fixed.answers).toEqual([]);
   });
 
-  it("answers the question card the bot's turn waits on in the person's own chat too: the line would only wait behind it", async () => {
+  it("leaves a line in a chat no teammate handed on to be steered or queued, even while its question card waits", async () => {
     const w = world({ live: ["req-1"] });
     const asked = question(w, "chat");
-    const result = await w.cards.typed(AUTH, "chat", "Nimm die zweite", undefined, {});
-    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "Nimm die zweite" }]);
-    expect(result?.message).toMatchObject({ role: "user", replyToId: asked.id });
+    expect(await w.cards.typed(AUTH, "chat", "Nimm die zweite", undefined, {})).toBeNull();
+    expect(await w.cards.typed(AUTH, "chat", "Nimm die zweite", asked, {})).toBeNull();
+    expect(w.answers).toEqual([]);
   });
 
   it("passes on why an answer was refused, and writes no line", async () => {
