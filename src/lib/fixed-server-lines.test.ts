@@ -168,7 +168,7 @@ describe("inbox reasons on the brief", () => {
     const payload: WidgetPayload = { v: 1, root: built.card };
     expect(localizedCard(payload, true)).toBe(payload);
     setLocale("pt-br");
-    expect(JSON.stringify(localizedCard(payload, true))).toContain("Aguardando sua resposta · Pede para você revisar o pedido, prazo: 2026-10-30, cerca de 1.234,5.");
+    expect(localizedCard(payload, true).root.children?.[1]?.children?.[1]?.value).toBe("Aguardando sua resposta · Pedido: revisar o pedido · prazo: 2026-10-30 · valor aproximado: 1.234,5.");
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7])("keeps only string params for reason shape %s", (mask) => {

@@ -23,7 +23,7 @@ describe("a cron schedule in words", () => {
       "Todo mês no último dia às 08:30 · America/Sao_Paulo",
       "Todo mês no dia 15 às 09:00 · America/Sao_Paulo",
       "Todo ano em 25 de dezembro às 09:00 · America/Sao_Paulo",
-      "Todo dia útil às 09:00 · America/Sao_Paulo",
+      "De segunda a sexta às 09:00 · America/Sao_Paulo",
       "Toda sexta-feira às 17:00 · America/Sao_Paulo",
       "Todo mês na segunda segunda-feira às 09:00 · America/Sao_Paulo",
       "Todo mês no último domingo às 09:00 · America/Sao_Paulo",

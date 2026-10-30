@@ -141,7 +141,7 @@ export const WORDS = Object.freeze({
     "lending.activity.title": "Atividade neste computador",
     "lending.activity.empty": "Nada ainda. Todo pedido dos bots de lá vai aparecer aqui, inclusive os recusados.",
     "lending.activity.refused": "recusado",
-    "lending.action.listFiles": "Listou uma pasta",
+    "lending.action.listFiles": "Listou o conteúdo de uma pasta",
     "lending.action.readFile": "Leu um arquivo",
     "lending.action.writeFile": "Salvou um arquivo",
     "lending.action.runCommand": "Executou um comando",

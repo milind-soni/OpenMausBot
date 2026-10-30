@@ -123,7 +123,7 @@ describe("buildApplicationMenu", () => {
     expect(server.submenu[0].label).toBe(pt["place.local"]);
     expect(server.submenu.find((entry) => entry.id === "add-cloud").label).toBe("Adicionar um Cloud…");
     expect(template[0].submenu.find((entry) => entry.accelerator === "CmdOrCtrl+,").label).toBe("Configurações…");
-    expect(template[0].submenu.at(-1)).toEqual({ role: "quit", label: "Sair do OpenMausBot" });
+    expect(template[0].submenu.at(-1)).toEqual({ role: "quit", label: "Sair do app OpenMausBot" });
     expect(template.map((entry) => entry.label)).toEqual(["OpenMausBot", "Arquivo", "Editar", "Servidor", "Visualizar", "Janela"]);
     for (const platform of ["win32", "linux"]) expect(build(platform, { t })[0].submenu[0].label).toBe("Sair do OpenMausBot");
   });

@@ -81,7 +81,7 @@ describe("activityLabel", () => {
     expect(activityLabel(row({ labelKey: "activity.tool.ranCommand" }))).toBe("Executou um comando");
     expect(activityLabel(row({ label: "Send email" }))).toBe("Send email");
     expect(activityLabel(row({ label: "Ran a command", labelKey: "chat.day.today" }))).toBe("Ran a command");
-    expect(activityLabel(row({ app: "Research", label: "Looked up people", labelKey: "activity.tool.lookedUpPeople" }))).toBe("Consultou pessoas");
+    expect(activityLabel(row({ app: "Research", label: "Looked up people", labelKey: "activity.tool.lookedUpPeople" }))).toBe("Consultou dados de pessoas");
     expect(activityLabel(row({ app: "Computer", label: "Type text", labelKey: "activity.tool.computer.typeText" }))).toBe("Digitar texto");
     expect(activityLabel(row({ app: "Team", label: "Brand new tool", labelKey: "activity.tool.team.brandNewTool" }))).toBe("Brand new tool");
     expect([activityApp(row({ app: "Team", appKey: "activity.app.team" })), activityApp(row({ app: "Research", appKey: "activity.app.research" })), activityApp(row({ app: "X" })), activityApp(row({ app: "Gmail", appKey: "chat.day.today" })), activityApp(row({ app: null }))])

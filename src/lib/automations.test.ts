@@ -200,7 +200,7 @@ describe("order and the grey line", () => {
     const failed = automation([], { ...watch, checkTrouble: "The checks could not run; they try again at the next check.", checkTroubleCode: "routines.server.checksFailed" });
     expect(automationStatus(failed, NOW)).toMatchObject({ reason: "The checks could not run; they try again at the next check." });
     setLocale("pt-br");
-    expect(automationStatus(failed, NOW)).toMatchObject({ reason: "Não foi possível fazer as verificações. Elas tentam de novo na próxima verificação." });
+    expect(automationStatus(failed, NOW).reason).toBe("Não foi possível fazer as verificações. Uma nova tentativa será feita na próxima verificação.");
     expect(runLine(run("failed", at(-1, 9), { error: "Waiting to start: busy", errorCode: "routines.server.waitingToStart", errorParams: { failure: "busy" } }), NOW).text)
       .toBe("Esperando para começar. Motivo: busy");
     setLocale("en");

@@ -34,9 +34,9 @@ describe("server notices", () => {
 
   it("word the parts they name and the moment they reset, in the reader's language", () => {
     setLocale("pt-br");
-    expect(activityText(resets, english)).toBe("Esta conta do Claude atingiu o limite semanal, que renova em 22 de out., 15:00 (UTC). Até lá, troque este bot para outra IA ou outra conta do Claude.");
+    expect(activityText(resets, english)).toBe("Esta conta do Claude atingiu o limite semanal, que será renovado em 22 de out., 15:00 (UTC). Até lá, troque este bot para outra IA ou outra conta do Claude.");
     expect(activityText({ nameCode: "chat.notice.usageLimit", nameParams: { provider: "Grok", detail: " (Grok says: \"quota\")" } }, "x"))
-      .toBe("Esta conta de Grok atingiu o limite de uso (Grok says: \"quota\"). Espere o limite renovar ou troque a IA deste bot.");
+      .toBe("Esta conta de Grok atingiu o limite de uso (Grok says: \"quota\"). Espere o limite ser renovado ou troque a IA deste bot.");
   });
 
   it("show the server's own English in English, and when a part or the zone cannot be worded", () => {
@@ -70,7 +70,7 @@ describe("a routine run's coded error and attention", () => {
 
   it("words parts and moments, and only while the field still reads as the line's English", () => {
     setLocale("pt-br");
-    expect(routineLineText("routines.server.limitWait", limitWait, params)).toBe("Esperando o limite de uso da IA renovar. Esta execução começa de novo em 22 de out., 15:00 (UTC)");
+    expect(routineLineText("routines.server.limitWait", limitWait, params)).toBe("Esperando a renovação do limite de uso da IA. Esta execução começa de novo em 22 de out., 15:00 (UTC)");
     expect(routineLineText("routines.server.retryAfter", "Starting again shortly after a rate limit: 429", { why: "routines.server.part.rateLimited", failure: "429" }))
       .toBe("Vai começar de novo em instantes, depois de um limite de requisições. Detalhe: 429");
     expect(routineLineText("routines.server.limitWait", "The routine was paused before this run started", params)).toBe("The routine was paused before this run started");
