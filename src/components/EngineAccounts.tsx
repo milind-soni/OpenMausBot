@@ -10,6 +10,7 @@ import { DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { EngineCard, engineReady, providerName, type EngineCardSummary } from "./EngineLibrary";
 import { CommandRow, EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
+import { ProviderIconPicker } from "./ProviderIconPicker";
 import { MENU_SHEET } from "./menu-recipe";
 
 /** Providers whose accounts are listed together on one card, each signed in on its own. */
@@ -326,6 +327,7 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
         <span className="font-medium text-ink">{t("policy.managedBy", { organization: policy.organizationName })}</span> · {policy.reason}
       </p>}
+      {!policy && <ProviderIconPicker instance={primary} />}
       {!installed ? <EngineSetup instance={primary} unframed /> : (
         <div className="space-y-2">
           <ul data-accounts={group} className="divide-y divide-hairline/40 rounded-xl border border-hairline/50 bg-panel/40">
