@@ -418,14 +418,14 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     m = path.match(/^\/api\/bots\/([\w-]+)\/helper-followup$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]!);
-      if (!bot?.defaultBot || bot.hidden) return json(res, 404, { error: "no such MausBot" });
-      if (!mayFollowUp(bot, auth)) return json(res, 403, { error: "only MausBot's own person can do this" });
+      if (!bot?.defaultBot || bot.hidden) return json(res, 404, { ...userError("serverError.setup.mausbotMissing") });
+      if (!mayFollowUp(bot, auth)) return json(res, 403, { ...userError("serverError.setup.mausbotOwnerOnly") });
       const parsed = helperFollowupBody.safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "body must be { ai, apps?, threadId? }" });
       const threadId = parsed.data.threadId ?? bot.threadId;
       if (store.botByThread(threadId)?.id !== bot.id) return json(res, 404, { error: "no such conversation" });
       const next = helperFollowup(store.messagesFor(threadId), () => followupFacts(bot, parsed.data, store.bots, routines?.listRoutines() ?? []));
-      if (!next) return json(res, 409, { error: "this conversation has no intro to follow up" });
+      if (!next) return json(res, 409, { ...userError("serverError.setup.noIntroToFollowUp") });
       if ("existing" in next) return json(res, 200, { message: next.existing });
       return json(res, 201, { message: store.appendMessage(threadId, next.append) });
     }

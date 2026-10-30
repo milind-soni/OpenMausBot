@@ -1,3 +1,4 @@
+import { userErrorThrown } from "../user-errors.ts";
 // A Team Cloud's people as people a bot can name. Whatever is addressed to a teammate reaches their inbox
 // (person-inbox.ts): a tag of @Bob anywhere a teammate writes it, or in a bot's reply where Bob can see it, and
 // message_person ("tell Bob that…"), which passes one message, whose answer comes back to the conversation that asked.
@@ -282,7 +283,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, ...(line.sendId ? { sendId: line.sendId } : {}),
       ...(line.sender ? { sender: line.sender } : {}), ...(line.reaction ? { reaction: line.reaction } : {}) });
     const back = answerFromInbox(threadId, null, item, text);
-    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Not passed to ${item.from}`, ok: false, output: back.text } });
+    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Not passed to ${item.from}`, nameCode: "chat.notice.inboxNotPassed", nameParams: { from: item.from }, ok: false, output: back.text } });
     return { status: 202, message: posted };
   }
 
@@ -331,7 +332,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const repeated = store.messagesFor(threadId).some((message) => message.sendId === line.sendId);
       const passed = replyIn(auth, threadId, messageId, emoji, { ...line, reaction: emoji });
       if (!passed) return null;
-      if (passed.status >= 400) return Promise.reject(Object.assign(new Error(passed.error ?? "That answer can't be passed back."), { status: passed.status }));
+      if (passed.status >= 400) return Promise.reject(Object.assign(passed.error ? new Error(passed.error) : userErrorThrown("serverError.inbox.answerNotPassed"), { status: passed.status }));
       return Promise.resolve(repeated ? { queued: false, repeated: true } : { queued: false });
     },
     /** The session's person's inbox as its panel lists it; null off a team or for someone without one. */

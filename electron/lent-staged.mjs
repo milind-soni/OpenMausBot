@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 // Bots' changes to a lent folder, made on My Cloud while this computer was away (server/lent-copies.ts), applied here
 // once it is back, under the same rules as a live write (electron/shared-computer-access.mjs): only a folder lent with
 // editing, never through a link, never inside .git or a protected place. A file the person did not touch since takes
@@ -43,14 +44,14 @@ function keepPermissions(file, before) {
  * offline), thrown on. Answers how many changes landed and, for each one kept beside the person's own version, both
  * names.
  */
-export async function applyStaged({ client, folderId, folder, protectedPaths = [], now = Date.now, trashItem, markDownloaded = async () => {}, platform = process.platform, stopper = () => false }) {
+export async function applyStaged({ client, folderId, folder, protectedPaths = [], now = Date.now, trashItem, markDownloaded = async () => {}, platform = process.platform, stopper = () => false, t = nativeText.englishText.t }) {
   const outcome = { applied: 0, kept: [], problem: null };
   if (folder.write !== true) return outcome;
   const changes = await client.staged(folderId);
   const protectedRoots = await protectedIdentities(protectedPaths);
   for (const change of changes) {
     try {
-      const landed = await applyOne({ client, folderId, folder, change, protectedRoots, now, trashItem, markDownloaded, platform });
+      const landed = await applyOne({ client, folderId, folder, change, protectedRoots, now, trashItem, markDownloaded, platform, t });
       if (!landed) continue;
       await client.stagedDone(folderId, change.id, change.sha256);
       if (landed.beside) outcome.kept.push({ path: change.path, beside: landed.beside, at: now() });
@@ -63,9 +64,9 @@ export async function applyStaged({ client, folderId, folder, protectedPaths = [
   return outcome;
 }
 
-async function applyOne({ client, folderId, folder, change, protectedRoots, now, trashItem, markDownloaded, platform }) {
-  if (!validWirePath(change.path) || (platform === "win32" && windowsProblem(change.path))) throw new Error("This computer can't hold that name.");
-  if (insideGitInternals(folder.path, change.path)) throw new Error("Files inside .git are never changed from My Cloud.");
+async function applyOne({ client, folderId, folder, change, protectedRoots, now, trashItem, markDownloaded, platform, t }) {
+  if (!validWirePath(change.path) || (platform === "win32" && windowsProblem(change.path))) throw new Error(t("native.files.nameNotSupported"));
+  if (insideGitInternals(folder.path, change.path)) throw new Error(t("native.files.gitProtected"));
   const target = await sharedPath(folder, change.path);
   await assertOutsideProtected(protectedRoots, target);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -74,7 +75,7 @@ async function applyOne({ client, folderId, folder, change, protectedRoots, now,
   const temporary = path.join(path.dirname(target), `.${path.basename(target).slice(0, 180)}.omb-sync-${tag}`);
   try {
     await client.stagedFile(folderId, change.id, temporary);
-    if (await sha256File(temporary) !== change.sha256) throw new Error("The change was damaged on its way; it will be fetched again.");
+    if (await sha256File(temporary) !== change.sha256) throw new Error(t("native.files.changeDamaged"));
     await markDownloaded(temporary);
     const before = fs.lstatSync(target, { throwIfNoEntry: false });
     if (before?.isFile() && before.nlink === 1) {
@@ -94,7 +95,7 @@ async function applyOne({ client, folderId, folder, change, protectedRoots, now,
       return { applied: true };
     }
     // The person changed it, removed it, or something else is there now: theirs stays, the bot's lands beside it.
-    const beside = clashPath(change.path, now(), (candidate) => fs.existsSync(path.join(folder.path, ...candidate.split("/"))), BESIDE_LABEL);
+    const beside = clashPath(change.path, now(), (candidate) => fs.existsSync(path.join(folder.path, ...candidate.split("/"))), t("native.files.newFromCloud"));
     const besideFile = await sharedPath(folder, beside);
     await assertOutsideProtected(protectedRoots, besideFile);
     renameWithRetry(temporary, besideFile);

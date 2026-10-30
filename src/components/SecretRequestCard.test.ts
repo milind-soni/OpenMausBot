@@ -25,6 +25,9 @@ vi.mock("@/state/store", async (original) => ({
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
+import { setLocale } from "@/lib/i18n";
+
+afterEach(() => setLocale("en"));
 
 const secretCard = (secret: Record<string, unknown>): Message => ({
   id: "secret-card",
@@ -202,6 +205,33 @@ describe("SecretRequestCard key analytics", () => {
 });
 
 describe("SecretRequestCard custom secrets", () => {
+  it.each(["file", "ref"] as const)("localizes the stopped %s delivery using its recorded author, not the saved description's words", (delivery) => {
+    const message: Message = { ...secretCard({ target: "customSecret", reason: "To create test charges.", description: "Original saved description.", helpUrl: "", delivery, stopped: true }), from: { botId: "bot-1", name: "Scout", color: "green" } };
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
+    expect(render()).toContain('title="Original saved description."');
+    setLocale("pt-br");
+    const html = render();
+    expect(html).toContain("To create test charges.");
+    expect(html).toContain(delivery === "file" ? "Os comandos de Scout podem ler" : "Scout recebe uma referência de uso único");
+    expect(html).not.toContain("Original saved description.");
+    setLocale("en");
+    expect(render()).toContain('title="Original saved description."');
+  });
+
+  it.each(["file", "ref"] as const)("uses the direct chat's bot name for stopped %s delivery without a group author", (delivery) => {
+    const message = secretCard({ target: "customSecret", stopped: true, description: "Saved direct chat description.", delivery });
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", botName: "Scout", threadId: "thread-1", message }));
+    expect(render()).toContain('title="Saved direct chat description."');
+    setLocale("pt-br");
+    expect(render()).toContain(delivery === "file" ? "Os comandos de Scout podem ler" : "Scout recebe uma referência de uso único");
+    expect(render()).not.toContain("Saved direct chat description.");
+  });
+
+  it("keeps an older card's description when no recorded author is available", () => {
+    setLocale("pt-br");
+    expect(view({ target: "customSecret", stopped: true, description: "Saved legacy description", delivery: "file" })).toContain('title="Saved legacy description"');
+  });
+
   it("says what the bot may do with it, in the bot's words and plainly, with no key link", () => {
     const file = view({ target: "customSecret", label: "Stripe secret key", reason: "To create test charges.", description: "To create test charges. Scout's commands can read it.", helpUrl: "", delivery: "file" });
     expect(file).toContain("To create test charges.");

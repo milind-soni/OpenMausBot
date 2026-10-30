@@ -1,3 +1,5 @@
+import { piModelId } from "./pi-model-id.ts";
+import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
 // The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
 // (`pi --mode rpc --no-session`), not ACP. pi is BYOK and reads ~/.pi/agent/auth.json itself, so
 // this driver holds no key; resumeCursor is pi's `sessionFile` (switch_session).
@@ -106,11 +108,6 @@ interface PiModelEntry {
   name?: string;
 }
 
-function piModelId(model: unknown): string | null {
-  const entry = model as Partial<PiModelEntry> | null | undefined;
-  return typeof entry?.provider === "string" && entry.provider && typeof entry.id === "string" && entry.id
-    ? `${entry.provider}/${entry.id}` : null;
-}
 interface PiModelsResponse {
   type: "response";
   command: "get_available_models";
@@ -851,10 +848,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           const modelPromise = awaitResponse("set_model");
           send({ type: "set_model", provider: chosen.provider, modelId: chosen.modelId });
           confirmedModel = piModelId(await modelPromise);
-          if (!confirmedModel) throw new Error("Pi did not confirm the selected model");
+          if (!confirmedModel) throw new RuntimeNoticeError("Pi did not confirm the selected model", "chat.notice.piModelNotConfirmed");
         } catch (error) {
           if (!settled) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message) });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message), text: runtimeErrorText(error) });
             await settle(false);
           }
           return { turnId };

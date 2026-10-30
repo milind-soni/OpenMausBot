@@ -1,3 +1,4 @@
+import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
 import { createHash } from "node:crypto";
 import type {
   DriverCreateInput,
@@ -319,7 +320,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       fetch(`${options.apiUrl}/models`, { headers: { authorization: `Bearer ${options.apiKey}` }, signal: AbortSignal.timeout(everyMs) })
         .then((response) => { misses = 0; void response.body?.cancel(); })
         .catch(() => {
-          if (++misses === LIVENESS_MISSES) stop(new Error(`The model server at ${new URL(options.apiUrl).host} stopped answering, so the reply was stopped.`));
+          if (++misses === LIVENESS_MISSES) stop(new RuntimeNoticeError(`The model server at ${new URL(options.apiUrl).host} stopped answering, so the reply was stopped.`, "chat.notice.modelServerStoppedAnswering", { host: new URL(options.apiUrl).host }));
         });
     }, everyMs);
     timer.unref();
@@ -508,6 +509,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       activeSignal.throwIfAborted();
       if (!sawChoice) throw new ChatProtocolError("provider returned no streaming completion choice");
       return { text, reasoning, usage, toolCalls: calls.finish(finishReason, malformedFrame), finishReason, protocolReasoning, protocolReasoningDetails: details.blocks };
+    } catch (error) {
+      if (timeoutController.signal.reason instanceof RuntimeNoticeError) throw timeoutController.signal.reason;
+      throw error;
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       if (liveness) clearInterval(liveness);
@@ -624,6 +628,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let ok = false;
       let stopReason: string | null = null;
       let failure: string | undefined;
+      let failureText: ReturnType<typeof runtimeErrorText>;
       let toolFailed = false;
       let correctiveRounds = 0;
       const denials: string[] = [];
@@ -880,6 +885,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       } catch (value) {
         stopReason = abort.signal.aborted ? "interrupted" : stopReason ?? "error";
         failure = safeText(asError(value).message).slice(0, 2_000);
+        failureText = runtimeErrorText(value);
       } finally {
         turnEntry.ending = true;
         approval.close();
@@ -896,7 +902,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           // "upstream" (an OpenAI-compatible URL) names no provider, and the Cloud trial credit reads its raw line.
           const words = options.httpErrorLabel === "upstream" ? { message: failure } : plainFailure(options.httpErrorLabel, failure);
-          emit({ ...base(turn.threadId, turnId), type: "runtime.error", ...words, terminal: !abort.signal.aborted });
+          emit({ ...base(turn.threadId, turnId), type: "runtime.error", ...words, ...(!cleanupFailed && failureText ? { text: failureText } : {}), terminal: !abort.signal.aborted });
         }
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);

@@ -160,7 +160,7 @@ describe("fixed server words", () => {
 });
 
 describe("inbox reasons on the brief", () => {
-  it("preserves English and formats extracted amounts only when rendering pt-BR", () => {
+  it("preserves English and formats extracted dates and amounts only when rendering pt-BR", () => {
     const picked = inboxWhy({ ask: "to revisar o pedido", deadline: "2026-10-30", amount: 1234.5 });
     expect(picked.why).toBe("Asks you to revisar o pedido, due 2026-10-30, about 1,234.5.");
     expect(picked.whyText?.params).toEqual({ ask: "revisar o pedido", deadline: "2026-10-30", amount: "1,234.5", amountValue: "1234.5" });
@@ -168,7 +168,35 @@ describe("inbox reasons on the brief", () => {
     const payload: WidgetPayload = { v: 1, root: built.card };
     expect(localizedCard(payload, true)).toBe(payload);
     setLocale("pt-br");
-    expect(localizedCard(payload, true).root.children?.[1]?.children?.[1]?.value).toBe("Aguardando sua resposta · Pedido: revisar o pedido · prazo: 2026-10-30 · valor aproximado: 1.234,5.");
+    expect(localizedCard(payload, true).root.children?.[1]?.children?.[1]?.value).toBe("Aguardando sua resposta · Pedido: revisar o pedido · prazo: 30 de out. de 2026 · valor aproximado: 1.234,5.");
+  });
+
+  it.each(["due", "askDue", "dueAmount", "askDueAmount", "waiting.due", "waiting.askDue", "waiting.dueAmount", "waiting.askDueAmount"])("formats an ISO deadline for %s without rewriting its params or its English", (shape) => {
+    const params = { ask: "confirmar", deadline: "2026-10-30", amount: "1,200", amountValue: "1200" };
+    const payload: WidgetPayload = { v: 1, root: { id: "deadline", type: "text", value: "English fallback", i18n: { value: { key: `brief.inbox.${shape}`, params } } } };
+    expect(localizedCard(payload, true)).toBe(payload);
+    setLocale("pt-br");
+    expect(localizedCard(payload, true).root.value).toContain("30 de out. de 2026");
+    expect(params.deadline).toBe("2026-10-30");
+    expect(localizedCard(payload, false)).toBe(payload);
+  });
+
+  it.each(["amanhã", "October 30, 2026", "2026-13-30", "2026-02-30", "2026-10-30Tinvalid"])("keeps the free-form or invalid deadline %s as data", (deadline) => {
+    const payload: WidgetPayload = { v: 1, root: { id: "deadline", type: "text", value: "English fallback", i18n: { value: { key: "brief.inbox.due", params: { deadline } } } } };
+    setLocale("pt-br");
+    expect(localizedCard(payload, true).root.value).toContain(deadline);
+  });
+
+  it("formats ISO timestamps in the renderer's time zone and date-only values without a day shift", () => {
+    setLocale("pt-br");
+    for (const deadline of ["2026-10-30", "2026-10-30T12:00:00Z"]) {
+      const payload: WidgetPayload = { v: 1, root: { id: "deadline", type: "text", value: deadline, i18n: { value: { key: "brief.inbox.due", params: { deadline } } } } };
+      const options: Intl.DateTimeFormatOptions = { dateStyle: "medium", ...(deadline.length === 10 ? { timeZone: "UTC" } : {}) };
+      expect(localizedCard(payload, true).root.value).toContain(new Intl.DateTimeFormat("pt-BR", options).format(new Date(deadline)));
+      setLocale("en");
+      expect(localizedCard(payload, true)).toBe(payload);
+      setLocale("pt-br");
+    }
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7])("keeps only string params for reason shape %s", (mask) => {

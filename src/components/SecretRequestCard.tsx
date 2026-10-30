@@ -4,7 +4,7 @@ import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "luci
 import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget } from "../../shared/credential-request";
 import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
 import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
@@ -14,11 +14,13 @@ import { productName } from "@/lib/brand";
 
 export function SecretRequestCard({
   botId,
+  botName,
   color,
   threadId,
   message,
 }: {
   botId: string;
+  botName?: string;
   color?: Bot["color"];
   threadId: string;
   message: Message;
@@ -38,6 +40,9 @@ export function SecretRequestCard({
   const declined = outcome === "dismissed";
   const superseded = secret.superseded === true;
   const stopped = secret.stopped === true;
+  const authorName = message.from?.name ?? botName;
+  const deliveryDescription = custom && authorName ? t(secret.delivery === "file" ? "secretCard.delivery.fileNamed" : "secretCard.delivery.refNamed", { botName: authorName }) : null;
+  const customDescription = activeLocale() !== "en" && deliveryDescription ? [secret.reason, deliveryDescription].filter(Boolean).join(" ") : secret.description;
   const description = superseded
     ? t("chat.secret.superseded")
     : provided
@@ -48,7 +53,7 @@ export function SecretRequestCard({
       : t("chat.secret.savedWaiting")
     : declined
       ? t("chat.secret.declined", { app: productName() })
-      : custom && secret.reason ? secret.reason : secret.description;
+      : custom && secret.reason ? secret.reason : customDescription;
   const footerLabel = stopped
     ? t("chat.secret.stopped")
     : declined
@@ -155,7 +160,7 @@ export function SecretRequestCard({
   if (stopped && !provided) {
     return (
       <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
-        <span className="text-ink-secondary" title={secret.description}>{secret.label}</span>
+        <span className="text-ink-secondary" title={customDescription}>{secret.label}</span>
         <span> · {t("chat.secret.stopped")}</span>
       </AskSettledLine>
     );

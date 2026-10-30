@@ -345,7 +345,7 @@ export function readyBotTemplate(defaults: NewBotDefaults, bot: ReadyBot): NewBo
     const own = template.memory[path]?.trimEnd();
     template.memory[path] = own ? `${own}\n${text}` : text;
   }
-  template.routines = [...template.routines, ...(bot.routines ?? []).map((routine) => ({ ...routine, enabled: false }))];
+  template.routines = [...template.routines, ...(bot.routines ?? []).map((routine) => ({ ...routine, ...(bot.id === "social" ? { name: t("readyBots.routine.socialWeekly") } : {}), enabled: false }))];
   return template;
 }
 

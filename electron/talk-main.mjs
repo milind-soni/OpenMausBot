@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 import skins from "./skin-overlay.cjs";
 import { createTalkPanel } from "./talk-panel.mjs";
 import { createTalkServer } from "./talk-server.mjs";
@@ -11,7 +12,7 @@ export { isTalkPanel } from "./talk-panel.mjs";
  * is ready. `speech`: speech.mjs's start/stop/finish/busy. `packaged`: asks go to `localRequest`, this computer's own
  * server; in development to `devUrl`, whose Vite /api proxy reaches `pnpm dev:server`.
  */
-export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech, speech, packaged, devUrl, nativeImage, iconPath, openLink, reveal, log, fetch = globalThis.fetch }) {
+export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech, speech, packaged, devUrl, nativeImage, iconPath, openLink, reveal, log, fetch = globalThis.fetch, t = nativeText.englishText.t }) {
   const callPresence = createCallPresence();
   let shortcut = null, session = null, panel = null, theme = null;
 
@@ -51,7 +52,7 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
     start({ globalShortcut, screen, prefs, remote, away, starting, localRequest, dataDir }) {
       const request = (route, init) => (packaged ? localRequest(route, init) : fetch(new URL(route, devUrl), init));
       try {
-        panel = createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, theme, onOpen: logged("open", () => session.open()), onDismiss: logged("dismiss", () => session.dismiss()) });
+        panel = createTalkPanel({ t, BrowserWindow, screen, nativeImage, iconPath, theme, onOpen: logged("open", () => session.open()), onDismiss: logged("dismiss", () => session.dismiss()) });
         session = createTalkSession({
           speech,
           server: createTalkServer({ request, prefs, starting, serverKey: () => (packaged ? dataDir() : devUrl) ?? "local" }),
@@ -76,6 +77,7 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
     },
     /** Listening, or an ask on its way that has not been answered yet. */
     busy: () => session?.busy() ?? false,
+    relabel: () => panel?.relabel(),
     close() {
       logged("close", () => session?.close())();
       logged("close", () => shortcut?.close())();

@@ -3,7 +3,7 @@ import { Check, Clock3, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, StoreContext, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { shareLearnedSkillsMode } from "@/lib/feature-flags";
 import { cn } from "@/lib/cn";
-import { t, tFromServer } from "@/lib/i18n";
+import { activeLocale, t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { composioActionPhrase, outboundSummary } from "@/lib/approval-summary";
@@ -200,11 +200,13 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
 function AppliedChangeLine({
   card,
   name,
+  originalName,
   threadId,
   summary,
 }: {
   card: OptionCardData;
   name: string;
+  originalName?: string;
   threadId?: string;
   summary: { line: string; canUndo: boolean; cancels?: boolean };
 }) {
@@ -305,7 +307,7 @@ function AppliedChangeLine({
           aria-label={t("approval.aria.appliedDetails")}
           className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink"
         >
-          {card.subtitle}
+          {activeLocale() !== "en" && card.waitRequest ? t("approval.applied.waitFollowUp", { name: originalName ?? name, followUp: card.waitRequest.followUp ?? "" }) : card.subtitle}
         </pre>
       )}
     </div>
@@ -425,7 +427,7 @@ export function ApprovalCard({
   const applied = card.autoApplied === true && card.answered === "allow" && !card.held
     ? appliedChange(card, bot?.name ?? t("approval.someone"))
     : undefined;
-  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
+  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} originalName={message.from?.name} threadId={threadId} summary={applied} />;
   const settled = card.answered;
   const expired = card.expired === true || staleRoutineCard(card);
   const via = card.answeredBy?.via;

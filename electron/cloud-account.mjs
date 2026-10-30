@@ -634,12 +634,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const current = grant;
       if (cloudId !== null) {
         const cloud = otherOwnCloud(cloudId);
-        if (!current || !cloud) throw Object.assign(new Error("That Cloud is no longer one of yours."), { gone: true });
-        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(`${cloud.name} isn't ready to open yet.`);
+        if (!current || !cloud) throw Object.assign(new Error(t("native.cloud.otherGone")), { gone: true });
+        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(t("native.cloud.otherNotReady", { name: cloud.name }));
         let result;
         try { result = await request("pairing", { method: "POST", body: { cloudId }, token: current.token }); } catch (error) {
-          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`${cloud.name} is no longer one of your Clouds.`), { gone: true }); }
-          if (error?.status === 409) throw new Error(`${cloud.name} isn't running right now.`);
+          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(t("native.cloud.otherNoLongerYours", { name: cloud.name })), { gone: true }); }
+          if (error?.status === 409) throw new Error(t("native.cloud.otherNotRunning", { name: cloud.name }));
           throw error;
         }
         const pairing = parsePairingGrant(result, cloud.origin, now());
@@ -670,7 +670,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     async addCloud({ tier, interval = "month", name, color = null } = {}) {
       const cleanName = cleanCloudListName(name);
       if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) {
-        throw new Error("Invalid Cloud to add.");
+        throw new Error(t("native.cloud.invalidAdd"));
       }
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
@@ -711,7 +711,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * with the Admin's reason; `taken` when another of the plan's has that name; `unsupported` from an Admin without it. */
     async addOrganization({ name, color = null } = {}) {
       const cleanName = cleanCloudListName(name);
-      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid organization to add.");
+      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(t("native.cloud.invalidOrganization"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.organizations) return { outcome: "unsupported" };
@@ -731,7 +731,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
      * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
     async setCloudColor(cloudId, color) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid Cloud color.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(t("native.cloud.invalidColor"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.managed !== false)) return { outcome: "unsupported" };
@@ -750,7 +750,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
      * Remove from list (whose session never says `removable`). */
     async hideCloud(cloudId) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error(t("native.cloud.invalidRemove"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };

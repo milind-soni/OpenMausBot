@@ -34,6 +34,13 @@ function wordsOf(text: WidgetText): string {
   if (text.key.startsWith("brief.inbox.") && typeof params.amountValue === "string" && Number.isFinite(Number(params.amountValue))) {
     params.amount = new Intl.NumberFormat(intlLocale()).format(Number(params.amountValue));
   }
+  if (text.key.startsWith("brief.inbox.") && typeof params.deadline === "string" && /^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(params.deadline)) {
+    const date = new Date(params.deadline);
+    const day = new Date(params.deadline.slice(0, 10));
+    if (Number.isFinite(date.getTime()) && Number.isFinite(day.getTime()) && day.toISOString().slice(0, 10) === params.deadline.slice(0, 10)) {
+      params.deadline = new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium", ...(params.deadline.length === 10 ? { timeZone: "UTC" } : {}) }).format(date);
+    }
+  }
   const template = t(text.key as LocaleKey);
   const unfilled = [...template.matchAll(/\{(\w+)\}/g)].some(([, name]) => !Object.hasOwn(params, name!));
   if (unfilled) throw new Error(`card text ${text.key} lacks a param`);

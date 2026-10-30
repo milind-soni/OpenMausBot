@@ -72,12 +72,7 @@ describe("describeTool", () => {
       ...["screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec", "computer_exec", "wait_for"].map((tool) => `mcp__computer__${tool}`),
     ];
     const calls = ["apollo.people.search", "crunchbase.companies.lookup", "x.funding.rounds", "newsapi.news.everything", "tikhub.tiktok.user", "g.trends.daily", "serp.google.search", "moz.seo.backlinks", "fal.images.generate", "anyapi.x.search", "people.vendor.thing"];
-    const untranslated = new Map([
-      ["mcp__agents__delete_trigger", "Delete trigger"], ["mcp__agents__wait_until", "Wait until"],
-      ["mcp__agents__list_waits", "List waits"], ["mcp__agents__cancel_wait", "Cancel wait"],
-    ]);
-    for (const [name, label] of untranslated) expect(describedTool(name)).toEqual({ app: "Team", appKey: "activity.app.team", label });
-    const rows = [...named.filter((name) => !untranslated.has(name)).map((name) => describedTool(name)), ...calls.map((id) => describedTool("mcp__agents__research_call", { id }))];
+    const rows = [...named.map((name) => describedTool(name)), ...calls.map((id) => describedTool("mcp__agents__research_call", { id }))];
     for (const row of rows) {
       expect(row.labelKey, row.label).toMatch(/^activity\.tool\./);
       expect(en[row.labelKey!], row.labelKey).toBe(row.label);
@@ -93,6 +88,10 @@ describe("describeTool", () => {
     ["extract", "Extract", "activity.tool.team.extract"],
     ["message_person", "Message person", "activity.tool.team.messagePerson"],
     ["report_bug", "Report bug", "activity.tool.team.reportBug"],
+    ["delete_trigger", "Delete trigger", "activity.tool.team.deleteTrigger"],
+    ["wait_until", "Wait until", "activity.tool.team.waitUntil"],
+    ["list_waits", "List waits", "activity.tool.team.listWaits"],
+    ["cancel_wait", "Cancel wait", "activity.tool.team.cancelWait"],
   ])("names %s with its own activity key and unchanged English", (tool, label, labelKey) => {
     expect(describedTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", appKey: "activity.app.team", label, labelKey });
     expect(describeTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", label });

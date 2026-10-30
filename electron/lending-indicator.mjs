@@ -27,8 +27,8 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: line, enabled: false },
       { type: "separator" },
-      view.paused ? { label: "Resume", click: () => onResume() } : { label: "Pause", click: () => onPause() },
-      { label: "See activity", click: () => onActivity() },
+      view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
+      { label: t("native.lendTray.activity"), click: () => onActivity() },
     ]));
   };
   return {

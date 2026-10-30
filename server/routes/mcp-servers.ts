@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
 import type { CloudHomeConfig } from "../cloud-home.ts";
 import type { AppConfig } from "../config.ts";
@@ -59,7 +60,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   const MAX_CONCURRENT_MCP_PROBES = 2;
   const personalHeaderRefusal = (name: string, server: StoredMcpServer) =>
     deps.teamConnections.personMcp().includes(name) && isRemoteMcpServer(server) && Object.values(server.headers).some((value) => value !== "")
-      ? "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection."
+      ? userError("serverError.mcp.personalHeadersShared")
       : null;
   let mcpProbesInFlight = 0;
   return async ({ req, res, path, method, auth, json, readBody }) => {
@@ -90,7 +91,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const personal = deps.teamConnections.personMcp().includes(name);
         if (personal && isRemoteMcpServer(target) && !target.oauth && Object.keys(target.headers).length > 0) {
           const member = auth.kind === "session" ? sessionMember(auth.session) : null;
-          if (!member) return json(res, 403, { error: "Sign in to the team to test your own connection." });
+          if (!member) return json(res, 403, { ...userError("serverError.mcp.testSignInFirst") });
           const person = personKey({ id: "", email: member.member.email });
           oauth = deps.teamConnections.people.oauth(person);
           const key = deps.teamConnections.people.key(person, name, target.url);
@@ -183,7 +184,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const parsed = parseMcpServerMutation(name, mcpServerBody(body));
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
         const personalRefusal = personalHeaderRefusal(name, parsed.server);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
+        if (personalRefusal) return json(res, 400, personalRefusal);
         const refusal = mcpPolicyRefusal(name, parsed.server);
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
@@ -221,7 +222,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
         }
         const personalRefusal = names.map((name) => personalHeaderRefusal(name, parsed.servers[name]!)).find(Boolean);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
+        if (personalRefusal) return json(res, 400, personalRefusal);
         const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
         if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
         persistMcpServers({ ...current, ...parsed.servers });
@@ -270,7 +271,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const parsed = parseMcpServerMutation(name, body, existing.server);
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
         const personalRefusal = personalHeaderRefusal(name, parsed.server);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
+        if (personalRefusal) return json(res, 400, personalRefusal);
         const refusal = mcpPolicyRefusal(name, parsed.server);
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });

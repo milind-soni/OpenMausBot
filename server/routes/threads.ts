@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
 import type { WireBot, WireGroup } from "../../shared/wire.ts";
@@ -376,7 +377,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     if (m && method === "DELETE") {
       const name = m[1]!;
       if (!UPLOADED_NAME.test(name) || !deps.uploads.owns(auth, name)) return json(res, 404, { error: "no such attachment" });
-      if (deps.attachmentInUse(name)) return json(res, 409, { error: "This file is already in a message, so it stays." });
+      if (deps.attachmentInUse(name)) return json(res, 409, { ...userError("serverError.attachment.alreadyInMessage") });
       deleteAttachment(join(ATTACHMENTS_DIR, name));
       return json(res, 200, { ok: true });
     }

@@ -35,6 +35,7 @@ import {
 } from "@/lib/browser-stream-client";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
 import { AgentCursor } from "./AgentCursor";
 import { AuthPrompt } from "./AuthPrompt";
 import { SelectPopup, type SelectPopupOption } from "./SelectPopup";
@@ -410,7 +411,7 @@ export function StreamSurface(props: {
           } else if (message.type === "authPromptClosed") {
             setAuthPrompt((shown) => (shown && shown.id !== message.id ? shown : null));
           } else if (message.type === "notice" && typeof message.message === "string") {
-            notify({ kind: "error", message: message.message });
+            notify({ kind: "error", message: serverErrorText(message, message.message) });
           }
           propsRef.current.onMessage?.(message);
         },

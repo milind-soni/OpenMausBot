@@ -76,6 +76,10 @@ const RESEARCH_TOOL_LABELS: Record<string, Described> = {
 };
 
 const TEAM_ACTION_KEYS: Record<string, string> = {
+  cancel_wait: "activity.tool.team.cancelWait",
+  delete_trigger: "activity.tool.team.deleteTrigger",
+  list_waits: "activity.tool.team.listWaits",
+  wait_until: "activity.tool.team.waitUntil",
   add_mcp_server: "activity.tool.team.addMcpServer",
   ask_bot: "activity.tool.team.askBot",
   assignment_status: "activity.tool.team.assignmentStatus",

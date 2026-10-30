@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 // The rail of places at the left of the window (the renderer's PlacesRail, drawn by the window's own chrome rail page,
 // chrome-rail.mjs) and its ＋: main builds the list, says who may read it, and does what a circle or ＋ asks through
 // main's own switch and dialogs.
@@ -109,7 +110,7 @@ export function addCloudView(state, offer) {
 /**
  * "“{name}” is ready", once per Cloud this app bought, unless its sheet shows it in the focused window; a click opens it.
  */
-export function createAddedCloudNotice({ Notification, focused, sheetOpen, open, shown = () => {} }) {
+export function createAddedCloudNotice({ Notification, focused, sheetOpen, open, shown = () => {}, t = nativeText.englishText.t }) {
   const announced = new Set();
   return state => {
     const adding = state?.status === "connected" ? state.adding : null;
@@ -117,7 +118,7 @@ export function createAddedCloudNotice({ Notification, focused, sheetOpen, open,
     if (!listed || !["ready", "offline"].includes(listed.status) || !listed.origin || announced.has(adding.cloudId)) return false;
     announced.add(adding.cloudId);
     if ((focused() && sheetOpen()) || !Notification.isSupported()) return false;
-    const note = new Notification({ title: `“${listed.name}” is ready`, body: "Click to open it." });
+    const note = new Notification({ title: t("native.cloud.ready.quotedTitle", { name: listed.name }), body: t("native.cloud.ready.open") });
     note.on("click", () => open(adding.cloudId));
     note.show();
     shown();
@@ -137,7 +138,7 @@ const CHOICES = Object.freeze(["cloud", "link", "address"]);
  * `places()` is railPlaces' list now; `open(id)` main's own switch; `add` the ＋ sheet's fixed actions; `account()` the
  * MausBot Cloud sign-in; `targets()` the pages told when something changed.
  */
-export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets }) {
+export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, t = nativeText.englishText.t }) {
   let sheetOpen = false, sent = "";
   const allowed = (channel, handler) => guard((event, ...args) => {
     if (!trusted(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -157,37 +158,37 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   // A Cloud the Admin is still making has no saved place: its own screen opens, by main's word for which Cloud it is.
   listed("workspaces:open", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.opens);
-    if (!place) throw new Error("That place isn't here any more.");
+    if (!place) throw new Error(t("native.places.noLongerHere"));
     return place.id.startsWith(PENDING) ? openCloud(place.cloudId) : open(place.id);
   });
   // Remove from list, from a circle's menu (the page asked the person first): only a Cloud main listed as removable.
   listed("workspaces:remove", async (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.removable && entry.cloudId);
-    if (!place) throw new Error("That place isn't here any more.");
+    if (!place) throw new Error(t("native.places.noLongerHere"));
     const client = account();
     return { outcome: client?.hideCloud ? (await client.hideCloud(place.cloudId)).outcome : "unsupported" };
   });
   // A link pasted on ＋'s sheet goes to main's own Connect dialog, which checks it and names its host before connecting.
   listed("workspaces:add", (_event, choice, link) => {
-    if (!CHOICES.includes(choice) || !add.choices()[choice]) throw new Error("That isn't something to add here.");
+    if (!CHOICES.includes(choice) || !add.choices()[choice]) throw new Error(t("native.places.cannotAdd"));
     const pasted = choice === "link" ? plain(link).trim().slice(0, 4096) : "";
     return pasted ? add.run(choice, pasted) : add.run(choice);
   });
   handle("cloud-add:state", () => view());
   handle("cloud-add:start", async (_event, tier, name, color) => {
     const client = account();
-    if (!client) throw new Error("Sign in to MausBot Cloud first.");
+    if (!client) throw new Error(t("native.cloud.addSignIn"));
     const plans = (await client.offer().catch(() => null))?.plans ?? [];
     const cleanName = cleanCloudListName(plain(name)), swatch = CLOUD_SWATCHES.includes(color) ? color : null;
-    if (!plans.some(plan => plan.tier === plain(tier)) || !cleanName) throw new Error("Choose a plan and a name to continue.");
+    if (!plans.some(plan => plan.tier === plain(tier)) || !cleanName) throw new Error(t("native.cloud.addPlanAndName"));
     const result = await client.addCloud({ tier: plain(tier), interval: "month", name: cleanName, color: swatch });
     return result.outcome === "blocked" ? { outcome: "blocked", blocked: result.blocked } : { outcome: result.outcome };
   });
   handle("cloud-add:organization", async (_event, name, color) => {
     const client = account();
-    if (!client) throw new Error("Sign in to MausBot Cloud first.");
+    if (!client) throw new Error(t("native.cloud.addSignIn"));
     const cleanName = cleanCloudListName(plain(name)), swatch = CLOUD_SWATCHES.includes(color) ? color : null;
-    if (!cleanName) throw new Error("Give the organization a name to continue.");
+    if (!cleanName) throw new Error(t("native.cloud.addOrganizationName"));
     const result = await client.addOrganization({ name: cleanName, color: swatch });
     return result.outcome === "blocked" ? { outcome: "blocked", blocked: result.blocked } : { outcome: result.outcome };
   });
@@ -199,7 +200,7 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   });
   handle("cloud-add:open", async () => {
     const adding = account()?.state().adding;
-    if (!adding?.cloudId) throw new Error("There is no new Cloud to open.");
+    if (!adding?.cloudId) throw new Error(t("native.cloud.noNewCloud"));
     await openCloud(adding.cloudId);
     account()?.addDone();
   });

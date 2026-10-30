@@ -19,6 +19,7 @@ export const ROUTINE_LINE = {
   "routines.server.part.rateLimited": "a rate limit",
   "routines.server.part.provider": "a temporary error",
   "routines.server.part.failed": "a failure",
+  "routines.server.backupSignedOut": "Starting again on the backup AI: this bot's AI is signed out",
 } as const;
 
 export type RoutineLineKey = keyof typeof ROUTINE_LINE;

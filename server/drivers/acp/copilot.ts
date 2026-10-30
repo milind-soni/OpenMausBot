@@ -219,6 +219,7 @@ const SUPPORT: AcpSupport = {
   isAuthenticated: (env, config) => copilotSignedIn(env, config),
   classifyError: classifyCopilotError,
   describeAccountError: describeCopilotAccountError,
+  accountErrorText: code => code === "invalid_credentials" ? undefined : { key: "chat.notice.copilotAccountRefused" },
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 

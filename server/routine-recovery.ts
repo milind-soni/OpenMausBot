@@ -189,7 +189,7 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   }
   // A signed-out AI's run starts again on the backup the person chose; its start there says once that it needs signing in.
   if (verdict.cause === "signed_out" && facts.backupReady && requeueOnce(run, "failed", failure, now, now + RETRY_MS)) {
-    run.attention = "Starting again on the backup AI: this bot's AI is signed out";
+    attend(run, codedLine("attention", "routines.server.backupSignedOut"));
     return { queued: true };
   }
   const first = firstNotice(notices, run.botId, verdict.cause, now);

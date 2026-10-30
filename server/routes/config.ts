@@ -39,7 +39,7 @@ import { parseSkillMd } from "../skills.ts";
 import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import * as vps from "../vps-computer.ts";
-import { refusalBody, userError } from "../user-errors.ts";
+import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -366,7 +366,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
       }
       const postizRefusal = await postiz?.configCheck(patch);
-      if (postizRefusal) return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code });
+      if (postizRefusal) return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code, ...userErrorFields(postizRefusal) });
       const newBoatToken = patch.box?.token;
       if (newBoatToken?.trim()) {
         const check = await boat.verifyToken(newBoatToken);

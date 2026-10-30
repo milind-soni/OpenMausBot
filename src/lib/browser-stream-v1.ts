@@ -302,10 +302,10 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       let retryable = !(event instanceof MessageEvent);
       if (event instanceof MessageEvent) {
         try {
-          const data = JSON.parse(event.data) as { retryable?: unknown; message?: unknown; asleep?: unknown };
+          const data = JSON.parse(event.data) as { retryable?: unknown; message?: unknown; asleep?: unknown; errorKey?: unknown; errorParams?: unknown };
           retryable = data.retryable === true;
           if (data.asleep === true) events.onMessage?.({ type: "asleep" });
-          else if (typeof data.message === "string") events.onMessage?.({ type: "notice", message: data.message });
+          else if (typeof data.message === "string") events.onMessage?.({ type: "notice", message: data.message, ...(typeof data.errorKey === "string" ? { errorKey: data.errorKey, ...(data.errorParams !== undefined ? { errorParams: data.errorParams } : {}) } : {}) });
         } catch {}
       }
       dropped(live, retryable);

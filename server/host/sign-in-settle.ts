@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // How a sign-in card settles: Done or Cancel on the card, a saved login filling it, or the person's own line in the
 // conversation, which answers every sign-in request still open there.
 import { savedLoginResumePrompt } from "../../shared/logins.ts";
@@ -35,13 +36,13 @@ export function createSignInSettle(deps: SignInSettleDeps) {
   const settle = (botId: string, threadId: string, messageId: string, outcome: "done" | "cancelled", saved?: { site: string }): SignInSettled => {
     const bot = store.bot(botId);
     const message = deps.signInMessage(botId, threadId, messageId);
-    if (!bot || !message?.signIn) return { status: 404, body: { error: "no such sign-in request" } };
+    if (!bot || !message?.signIn) return { status: 404, body: { ...userError("serverError.signIn.requestMissing") } };
     const card = message.signIn;
-    if (card.superseded) return { status: 409, body: { error: "this sign-in request was superseded by a newer one" } };
-    if (card.answeredInChat) return { status: 409, body: { error: "this sign-in request was already answered in the chat" } };
+    if (card.superseded) return { status: 409, body: { ...userError("serverError.signIn.requestReplaced") } };
+    if (card.answeredInChat) return { status: 409, body: { ...userError("serverError.signIn.answeredInChat") } };
     const settled = signInOutcome(card);
     if (settled && settled !== outcome) {
-      return { status: 409, body: { error: `this sign-in request was already ${settled === "done" ? "marked done" : "cancelled"}` } };
+      return { status: 409, body: { ...userError(settled === "done" ? "serverError.signIn.alreadyDone" : "serverError.signIn.alreadyCancelled") } };
     }
     if (settled && card.resumed) return { status: 200, body: { [outcome]: true, resumed: true } };
     if (!settled) handPlaceBack(bot, threadId, message.id, card.place);

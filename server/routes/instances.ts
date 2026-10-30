@@ -1,3 +1,4 @@
+import { userError, userErrorFields } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
 import {
@@ -237,7 +238,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       } catch (error) {
         const requestedStatus = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
         const status = typeof requestedStatus === "number" && [400, 401, 404, 409, 413, 415].includes(requestedStatus) ? requestedStatus : 500;
-        return json(res, status, { error: error instanceof Error ? error.message : String(error) });
+        return json(res, status, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
       }
     }
 
@@ -290,7 +291,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         resetPathCache();
         return json(res, 200, { ok: true, version: result.version });
       } catch (error) {
-        return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        return json(res, 500, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
       } finally {
         claudeUpdatesInFlight.delete(target.cli);
         // Even a failed update may have replaced the executable.
@@ -306,7 +307,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes." });
+      if (!parsed.success) return json(res, 400, { ...userError("serverError.instance.settingsInvalid") });
       const body = parsed.data;
       const instanceId = instancePatch[1];
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
@@ -330,7 +331,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
         }
         if (body.replyWaitMinutes !== undefined) {
-          if (entry.driver !== "openai-compat") return json(res, 400, { error: "The reply wait is available for OpenAI-compatible servers only." });
+          if (entry.driver !== "openai-compat") return json(res, 400, { ...userError("serverError.instance.replyWaitUnsupported") });
           const { replyWaitMinutes: _previous, ...rest } = entry.config as Record<string, unknown>;
           entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
         }
@@ -375,7 +376,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         try { await providerAuthSessions.signOut(live, auth.kind === "session" ? auth.session.id : "loopback"); }
         catch (error) {
           if ((error as { code?: unknown }).code !== "chatgpt_revocation_unconfirmed") {
-            return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
+            return json(res, 409, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
           }
         }
       }

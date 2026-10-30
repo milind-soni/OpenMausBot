@@ -65,7 +65,7 @@ import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
 import { useAiSwitchKeeper } from "@/lib/ai-switch";
 import { useChiefStepOpen } from "@/lib/default-bot";
-import { SESSION_ENDED_REASON, useSessionEnded } from "@/lib/session-ended";
+import { useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 
@@ -459,6 +459,6 @@ function Application() {
 
 export default function App() {
   const ended = useSessionEnded();
-  if (ended) return <PairPage initialCode={null} reason={SESSION_ENDED_REASON} />;
+  if (ended) return <PairPage initialCode={null} reason={t("pair.sessionEnded")} />;
   return <WorkspaceBackupRecovery><Application /></WorkspaceBackupRecovery>;
 }

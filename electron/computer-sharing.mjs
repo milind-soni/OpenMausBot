@@ -647,9 +647,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
      * can't take them yet (paused, or not signed in there), so the move tries again later. */
     async lendProjects(paths) {
       const env = myCloud();
-      if (paused || !env || !verifiedCloud(env)) throw new Error("Lending to My Cloud waits until it is signed in and not paused.");
+      if (paused || !env || !verifiedCloud(env)) throw new Error(t("native.lend.moveWaiting"));
       await lendAutomatically(Array.isArray(paths) ? paths.filter(where => typeof where === "string") : []);
-      if (records[env.id]?.enabled !== true) throw new Error("Lending to My Cloud did not start.");
+      if (records[env.id]?.enabled !== true) throw new Error(t("native.lend.moveNotStarted"));
     },
     paused: () => paused,
     /** Every Cloud of the person's own stops using this computer, across restarts too, until resume(). */

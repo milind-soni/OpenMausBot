@@ -80,7 +80,7 @@ describe("the Set me up route", () => {
     const s = setup(null, { hold: new Promise<void>((resolve) => { release = resolve; }) });
     const first = s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" });
     await Promise.resolve();
-    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toEqual({ status: 409, body: { error: "That answer is already on its way." } });
+    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toEqual({ status: 409, body: { error: "That answer is already on its way.", errorKey: "serverError.chat.answerSent" } });
     expect(await s.call("POST", { threadId: s.bot.threadId })).toMatchObject({ status: 409 });
     release();
     expect(await first).toMatchObject({ status: 200 });
