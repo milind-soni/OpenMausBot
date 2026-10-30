@@ -79,7 +79,10 @@ jobs:
         with:
           # Full history lets PR selection use the merge base, including deletes
           # and both sides of renames, without GitHub's changed-file page limit.
+          # Its trees are enough for that; git fetches an old file's contents
+          # when one is read. The whole history took 2m41s to reach a Boat VM.
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
