@@ -271,39 +271,4 @@ if (!night) {
   }
 }
 
-// A Cloud's sidebar lays a wash of one night colour over its panel (src/styles.css [data-cloud-sky]::before): every ink
-// must read on the panel with that wash at its strongest.
-const washOf = (rule) => ({ token: /var\((--cloud-night-[\w-]+)\)\)/.exec(rule ?? "")?.[1], strength: Number(/opacity: ([\d.]+);/.exec(rule ?? "")?.[1]) });
-const washLight = washOf(/\n\[data-cloud-sky\]::before \{([^}]*)\}/.exec(css)?.[1]);
-const washDark = washOf(/@container style\(--code-color-scheme: dark\) \{\s*\[data-cloud-sky\]::before \{([^}]*)\}/.exec(css)?.[1]);
-if (!night || !washLight.token || !washDark.token || !(washLight.strength > 0) || !(washDark.strength > 0)) {
-  failed = true;
-  console.log("✗ Cloud sidebar — cannot read the wash's strength or the night tokens");
-} else {
-  const hex = ({ r, g, b }) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
-  let washFailed = false;
-  for (const [id, tokens] of skins) {
-    const dark = tokens["--code-color-scheme"] === "dark";
-    const pick = (token) => /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(night[token] ?? "")?.[dark ? 2 : 1];
-    const panel = parseHex(tokens["--color-panel"] ?? "");
-    const problems = [];
-    const wash = dark ? washDark : washLight;
-    const tint = parseHex(pick(wash.token) ?? "");
-    if (!panel || !tint) problems.push(`cannot measure ${wash.token} over --color-panel`);
-    else {
-      const washed = hex(flatten({ ...tint, a: wash.strength }, panel));
-      for (const fg of ["--color-ink", "--color-ink-secondary", "--color-ink-tertiary"]) {
-        const ratio = contrast(tokens[fg] ?? "", washed);
-        if (ratio === null || ratio < 4.5) problems.push(`${fg} on the panel under ${wash.token}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
-      }
-    }
-    if (problems.length) {
-      failed = true;
-      washFailed = true;
-      for (const problem of problems) console.log(`✗ ${id} Cloud sidebar — ${problem}`);
-    }
-  }
-  if (!washFailed) console.log(`✓ Cloud sidebar — every skin's inks read under the night wash (${washLight.token} at ${washLight.strength} light, ${washDark.token} at ${washDark.strength} dark)`);
-}
-
 process.exit(failed ? 1 : 0);

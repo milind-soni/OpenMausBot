@@ -387,6 +387,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             <input
               value={callbackUrl}
               onChange={(event) => setCallbackUrl(event.target.value)}
+              aria-label={t("engineSetup.otherComputerUrl")}
               placeholder="http://127.0.0.1:…/?code=…"
               className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
             />

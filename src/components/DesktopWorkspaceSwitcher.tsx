@@ -78,8 +78,9 @@ export function useWorkspacePlace({ cloudHome = false, howTo = false, onMenuClos
   return { bridge, current, cloudHome, open, error, onLine, waking, openMenu, switchable: Boolean(bridge) && current?.home !== true };
 }
 
+/** `place`: what this Cloud is called here, a team's name on a team's Cloud; My Cloud otherwise. */
 type SwitcherProps = {
-  compact?: boolean; inline?: boolean; pill?: boolean; rail?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; onMenuClosed?: () => void;
+  compact?: boolean; inline?: boolean; pill?: boolean; rail?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; place?: string; onMenuClosed?: () => void;
 };
 
 /** The place on screen and the native Server menu; where a rail of places stands beside the page, the rail switches
@@ -90,32 +91,33 @@ export function DesktopWorkspaceSwitcher(props: SwitcherProps) {
   return railShown(places) ? <div data-switcher-beside-rail className={places.beside ? "hidden" : "contents md:hidden"}>{switcher}</div> : switcher;
 }
 
-function Switcher({ compact = false, inline = false, pill = false, rail = false, cloudHome = false, owner = null, howTo = false, onMenuClosed }: SwitcherProps) {
+function Switcher({ compact = false, inline = false, pill = false, rail = false, cloudHome = false, owner = null, howTo = false, place, onMenuClosed }: SwitcherProps) {
+  const cloudName = place || t("cloudSetup.myCloud");
   const { bridge, current, open, error, onLine, waking, openMenu } = useWorkspacePlace({ cloudHome, howTo, onMenuClosed });
   const withPower = (name: string) => (onLine ? `${name} · ${onLine}` : name);
   // This window's home is My Cloud: it opens nothing else, so there is nothing to switch.
   if (!bridge || current?.home === true) {
     if (!cloudHome && !current?.home) return null;
     const whose = owner ? t("sidebar.cloudOwner", { email: owner }) : "";
-    const label = `${withPower(t("cloudSetup.myCloud"))}${whose ? ` · ${whose}` : ""}`;
+    const label = `${withPower(cloudName)}${whose ? ` · ${whose}` : ""}`;
     if (rail) return <div data-cloud-home-indicator data-workspace-switcher="rail" role="img" aria-label={label} title={label} className="flex size-9 items-center justify-center text-ink-secondary">
       <Cloud size={18} aria-hidden="true" />
     </div>;
     if (inline) return <div data-cloud-home-indicator data-workspace-switcher="inline" title={label}
       className={pill ? "flex h-8 min-w-0 items-center gap-1 rounded-full bg-raised/50 px-3 text-[13px] font-medium text-ink" : "flex min-w-0 items-center gap-1.5 px-1.5 text-[13px] font-medium text-ink"}>
       <Cloud size={pill ? 15 : 14} aria-hidden="true" className={pill ? "hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block" : "shrink-0 text-ink-secondary"} />
-      <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate"}>{t("cloudSetup.myCloud")}</span>
+      <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate"}>{cloudName}</span>
       {(onLine || whose) && <span className="sr-only">{onLine ? ` · ${onLine}` : ""}{whose ? ` · ${whose}` : ""}</span>}
     </div>;
     return <div data-cloud-home-indicator className={cn("py-1.5", compact ? "px-2" : "px-3")}>
       <div title={label} className={cn("flex items-center gap-2 py-2 text-[13px] font-medium text-ink", compact ? "justify-center px-1" : "px-2")}>
         <Cloud size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-        {compact ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{t("cloudSetup.myCloud")}{onLine && <PowerLine text={onLine} />}
+        {compact ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{cloudName}{onLine && <PowerLine text={onLine} />}
           {whose && <span className="block truncate text-[12px] font-normal text-ink-secondary">{whose}</span>}</span>}
       </div>
     </div>;
   }
-  const name = current?.name ?? (cloudHome ? t("cloudSetup.myCloud") : t("sidebar.servers"));
+  const name = current?.name ?? (cloudHome ? cloudName : t("sidebar.servers"));
   const Icon = current?.local === false || (cloudHome && !current) ? Cloud : Laptop;
   const shown = cloudHome ? withPower(name) : name;
   const title = current?.origin ? `${shown} · ${current.origin}` : shown;

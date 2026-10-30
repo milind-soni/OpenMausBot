@@ -96,6 +96,7 @@ describe("POST /api/cloud-send/automations-off", () => {
       calls: () => ({ list: () => of("call").map(({ id: call, value }) => ({ id: call, nextRunAt: value ? 1 : null })), switchOff: (call: string) => { on.set(`call:${call}`, false); return true; } }),
       webhooks: () => ({ list: () => of("webhook").map(({ id: hook, value }) => ({ id: hook, enabled: value })), update: turnOff("webhook") }),
       appEvents: () => ({ list: () => of("app-event").map(({ id: trigger, value }) => ({ id: trigger, enabled: value })), update: turnOff("app-event") }),
+      waits: () => null,
     } as unknown as MoveAutomations;
     return { on, deps };
   }
