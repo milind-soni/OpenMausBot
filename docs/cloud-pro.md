@@ -1563,14 +1563,22 @@ its own nonces. `200`:
 ```json
 { "v": 1, "at": 1792355000000, "bootedAt": 1792350000000, "wokeAt": 1792354000000,
   "idle": false, "busy": ["recent-activity"], "lastActivityAt": 1792354900000, "lastWorkAt": null,
-  "nextDueAt": 1792358600000, "sleeping": false }
+  "nextDueAt": 1792358600000, "sleeping": false, "wokeBy": { "by": "events", "background": true } }
 ```
 
 `busy` holds fixed codes only: `turn`, `run`, `live-call`, `computer`,
 `maintenance`, `recent-activity`, `recent-work`, `just-woke`, `due-soon`.
-`nextDueAt` is the earliest enabled routine's next run or queued run's retry:
-the Admin starts a sleeping home a minute before it. `wokeAt` is the boot, or
-the last resume (noticed as a jump of the clock).
+`nextDueAt` is the earliest enabled routine's next run or queued run's retry,
+or, while a bot waits for something (`wait_until`), 30 minutes on, so its
+checks go on that often: the Admin starts a sleeping home a minute before it
+(3 minutes for one stopped to sleep, which boots). `wokeAt` is the boot, or
+the last resume (noticed as a jump of the clock, by the tick or by a request).
+`wokeBy` (additive) is the first request after that, if one came within 30 s:
+its kind as a fixed code by path alone (`events` the page's stream, `version`
+the desktop's version check, `sync`, `lending`, `phone`, `presence`, `session`,
+`pair`, `admin`, `health`, `webhook`, `sign-in`, `api`, `page`) and whether it
+was a background one; `null` otherwise. The Admin counts it for a wake by
+Fly's proxy, to tell which app reaches a sleeping home.
 
 **`POST /api/cloud/power/sleep`**, signed over its JSON body
 `{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;
@@ -1584,7 +1592,11 @@ resume, someone's use, or 120 s (a sleep the Admin never carried out):
   so a page that kept polling would keep it awake. The frame is live only: a
   stream that resumes from before it never gets it again. The wake is one
   ordinary request (`GET /api/auth/session`), so it also ends a sleep the
-  Admin has not carried out yet;
+  Admin has not carried out yet. A page that is hidden (a background tab, a
+  minimized window) sends no background request at all, frame or not: each
+  waits until the page shows again, one per path (`src/state/api.ts`), so a
+  hidden tab whose stream dropped (the laptop slept) can't wake a sleeping home
+  every minute;
 - held `GET /api/sync/changes` and `POST /api/shared-computers/<id>/poll`
   answer `503 {"error":"asleep"}` with `x-omb-cloud-power: asleep`, and new
   ones get the same, so the desktop's Files sync and lending pause instead of
@@ -1663,13 +1675,18 @@ without them works as before; a malformed one is dropped, never the machine):
   entitlement still decides everything.
 - `cloud.credit: {grantedUsd, remainingUsd, state}`: the trial's Claude
   credit (`active` or `used_up`), shown in Settings here and on the Cloud.
-- `clouds[]` (top level): every Cloud the person can open. The app reads one
-  thing from it, the plan's renewal (`electron/cloud-home.mjs`
+- `clouds[]` (top level): every Cloud the person can open. The app reads the
+  plan's renewal from it (`electron/cloud-home.mjs`
   `parseCloudRenewal`): the account's own primary Cloud's `renewal: {trial,
   endsAt, keptDays}`, which the Admin sends only to the account that pays for
   it while its plan runs. The state carries `renewal: {trial, cancelled,
   renewsAt, endsAt, keptDays, team?}` without the Cloud's id, which stays in
-  main. See [Cancel trial / Cancel plan](#cancel-trial--cancel-plan).
+  main. See [Cancel trial / Cancel plan](#cancel-trial--cancel-plan). And each
+  Ready Cloud's `power` (additive, as `cloud.power`, for a plan that sleeps):
+  lending to another Cloud of the person's own, the window's version check
+  and the quiet updater never reach a Cloud the Admin says is asleep, and go on
+  at the next session read that says it is awake (`electron/cloud-account.mjs`
+  `powerOf`).
 - `offer` (top level, beside `cloud`): what this account may buy now, only
   while it can (no plan, no Cloud, no payment being linked). See
   [Add a Cloud](#add-a-cloud) for its fields.

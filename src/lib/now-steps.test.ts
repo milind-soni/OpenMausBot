@@ -45,6 +45,13 @@ describe("the Now card's steps", () => {
     expect(stepLabel({ name: "Grep", ok: true }, "done")).toBe("Searched files");
     expect(stepLabel({ name: "mcp__agents__ask_bot", ok: true }, "done")).toBe("Asking a teammate");
   });
+
+  it("says whose own app a step used, running or done", () => {
+    const whose = { person: "Ada", app: "Notion" };
+    expect(stepLabel({ name: "mcp__own_apps__NOTION_SEARCH", ok: true, whose }, "done")).toMatch(/ · using Ada's Notion$/);
+    expect(stepLabel({ name: "mcp__own_apps__NOTION_SEARCH", whose }, "now")).toMatch(/ · using Ada's Notion$/);
+    expect(stepLabel({ name: "mcp__own_apps__NOTION_SEARCH", ok: true }, "done")).not.toContain("using");
+  });
 });
 
 describe("a long step's sign of life", () => {

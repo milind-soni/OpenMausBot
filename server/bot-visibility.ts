@@ -352,27 +352,37 @@ export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
 const SELECTED_THREAD_FIELDS = ["messages", "hasMore", "activeLeafId", "pinnedMessageId", "rewound", "waitingForTeammates"] as const;
 
 /** On a Team Cloud a person is sent only their own conversations with a bot and the team's (an admin too). The bot's
- * selected conversation is the server's one choice for everyone; when it is someone else's private chat they get the
- * main chat named instead, without that conversation's messages, and its unread mark counts only what they see. */
+ * selected conversation and main chat are the server's one choice for everyone; when either is someone else's private
+ * chat they get a team conversation they read instead (the other's id never goes out), without that conversation's
+ * messages, and its unread mark counts only what they see. */
 function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
   const record = bot as T & Record<string, unknown>;
-  let out: Record<string, unknown> | null = null;
-  const tasks = record.tasks;
-  if (Array.isArray(tasks)) {
-    const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId));
-    if (kept.length !== tasks.length) {
-      out = { ...record, tasks: kept };
-      if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
-    }
+  let out: Record<string, unknown> = record;
+  const tasks = Array.isArray(record.tasks) ? record.tasks as unknown[] : [];
+  const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId));
+  if (kept.length !== tasks.length) {
+    out = { ...record, tasks: kept };
+    if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
+  }
+  const main = typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId) ? record.mainThreadId : teamConversation(kept);
+  if (typeof record.mainThreadId === "string" && record.mainThreadId !== main) {
+    out = { ...out };
+    if (main) out.mainThreadId = main; else delete out.mainThreadId;
   }
   if (typeof record.threadId === "string" && !visible.thread(record.threadId)) {
-    const next: Record<string, unknown> = { ...(out ?? record) };
+    const next: Record<string, unknown> = { ...out };
     for (const field of SELECTED_THREAD_FIELDS) delete next[field];
-    if (typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId)) next.threadId = record.mainThreadId;
-    else delete next.threadId;
+    if (main) next.threadId = main; else delete next.threadId;
     out = next;
   }
-  return (out ?? record) as T;
+  return out as T;
+}
+
+function teamConversation(tasks: readonly unknown[]): string | undefined {
+  const shared = tasks.filter((task): task is { threadId: string; archivedAt?: unknown } =>
+    Boolean(task) && typeof (task as { threadId?: unknown }).threadId === "string" &&
+    (task as { private?: unknown }).private !== true && !(task as { routineRunId?: unknown }).routineRunId);
+  return (shared.find((task) => task.archivedAt === undefined) ?? shared[0])?.threadId;
 }
 
 /** The SSH alias of the server a bot's VPS computer lives on: an admin's, like the default alias in config. */

@@ -6,10 +6,9 @@ import { unstamped } from "../cloud-owner-lines.ts";
 import { deviceWord } from "../lent-computers.ts";
 import type { Routine, RoutineManager, RoutineRun } from "../routines.ts";
 import type { Message, Store } from "../store.ts";
+import type { RoomRun } from "./acting-person.ts";
 
 type Turn = { botId: string; threadId: string; generation: string };
-/** A room run: the person's line it answers, if one started it, and whether it was stopped. */
-type RoomRun = { requestMessageId?: string; cancelled: boolean };
 
 export interface CloudLendingTurnsDeps {
   store: Pick<Store, "groupByThread" | "messagesFor" | "taskByThread">;
@@ -101,5 +100,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     roomTurnStarted(generation: string, run: RoomRun): void { roomTurnOperations.set(generation, run); },
     /** The run ended: none of its turn generations act for anyone any more. */
     roomTurnEnded(run: RoomRun): void { for (const [generation, owner] of roomTurnOperations) if (owner === run) roomTurnOperations.delete(generation); },
+    /** The run a room member turn generation belongs to, while it lasts (server/host/acting-person.ts reads whom it acts for). */
+    roomRun: (generation: string): RoomRun | undefined => roomTurnOperations.get(generation),
   };
 }

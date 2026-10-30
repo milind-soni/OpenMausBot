@@ -6,6 +6,7 @@ import type { BotMovedTo } from "../shared/wire.ts";
 import type { AppTriggerManager } from "./app-triggers.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { BotRecord } from "./store.ts";
+import type { WaitManager } from "./waits.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
 export interface BotMovesDeps {
@@ -13,6 +14,7 @@ export interface BotMovesDeps {
   routines(): Pick<RoutineManager, "listRoutines" | "update" | "removeForBot"> | null;
   webhooks(): Pick<WebhookManager, "list" | "update"> | null;
   appEvents(): Pick<AppTriggerManager, "list" | "update"> | null;
+  waits(): Pick<WaitManager, "all" | "cancel"> | null;
   /** A turn or a routine run of this bot is going. */
   busy(botId: string): boolean;
   now?: () => number;
@@ -49,10 +51,14 @@ export function createBotMoves(deps: BotMovesDeps) {
     else if (kind === "app-event") await deps.appEvents()?.update(id, { enabled: on });
   }
   const movedOf = (bot: BotRecord | null | undefined): Held | undefined => (bot as (BotRecord & { movedTo?: Held }) | null | undefined)?.movedTo;
+  const cancelWaits = (botId: string) => {
+    const waits = deps.waits();
+    for (const wait of waits?.all() ?? []) if (wait.botId === botId) waits!.cancel(wait.id, botId);
+  };
 
   return {
-    /** The bot stops here for the move: no turns, its automations off. Busy while it answers; a bot already moved stays
-     * moved. Holding it again keeps what the first hold switched off. */
+    /** The bot stops here for the move: no turns, its automations off and its waits cancelled. Busy while it answers; a
+     * bot already moved stays moved. Holding it again keeps what the first hold switched off. */
     async hold(botId: string, team: Team): Promise<{ movedTo: Held } | { busy: string } | { refused: string }> {
       const bot = deps.store.bot(botId);
       if (!bot) return { refused: "This bot is no longer here." };
@@ -71,6 +77,7 @@ export function createBotMoves(deps: BotMovesDeps) {
         deps.store.patchBot(botId, { movedTo: { ...next, held: [...off] } } as Partial<BotRecord>);
         await switchTo(automation.key, false);
       }
+      cancelWaits(botId);
       return { movedTo: movedOf(deps.store.bot(botId))! };
     },
     /** The move stopped before the bot arrived: it is here again as it was, its automations back on. */
@@ -83,13 +90,14 @@ export function createBotMoves(deps: BotMovesDeps) {
       deps.store.patchBot(botId, { movedTo: undefined } as Partial<BotRecord>);
       return { released: true };
     },
-    /** The bot lives in the team now: archived here as the line that opens it there, its routines gone from here. */
+    /** The bot lives in the team now: archived here as the line that opens it there, its routines and waits gone from here. */
     moved(botId: string, team: Team): { movedTo: Held } | { refused: string } {
       const bot = deps.store.bot(botId);
       const held = movedOf(bot);
       if (!bot || !held || held.team.id !== team.id) return { refused: "This bot is not moving to that team." };
       if (held.state !== "moved") {
         deps.routines()?.removeForBot(botId);
+        cancelWaits(botId);
         deps.store.patchBot(botId, { movedTo: { ...held, state: "moved", at: now() }, hidden: true } as Partial<BotRecord>);
       }
       return { movedTo: movedOf(deps.store.bot(botId))! };

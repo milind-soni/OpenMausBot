@@ -185,11 +185,13 @@ describe("@Marco", () => {
 });
 
 describe("Marco's assistant", () => {
+  // Two days before the busy slot, on the assistant's own clock: on the real one the slot passed and was no longer shown.
+  const NOW = Date.UTC(2026, 9, 27, 9);
   const BUSY = { start: Date.UTC(2026, 9, 29, 14), end: Date.UTC(2026, 9, 29, 15) };
   const assistant = (reply: string) => {
     const generate = vi.fn(async (_botId: string, _prompt: string) => reply);
     const busy = vi.fn(async () => [BUSY]);
-    return { generate, busy, f: fixture({ representative: { generate, busy, timeZone: () => "UTC" } }) };
+    return { generate, busy, f: fixture({ representative: { generate, busy, timeZone: () => "UTC", now: () => NOW } }) };
   };
 
   it("answers a free/busy question itself, says so where it was asked and in his inbox, and notifies him once", async () => {
