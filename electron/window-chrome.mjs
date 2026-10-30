@@ -5,9 +5,10 @@ export function windowBackground(prefersDark) {
   return prefersDark ? "#121212" : "#fcfcfc";
 }
 
+/** macOS: the traffic lights (14px) centred in the page's 28px top bar (src/components/WindowFrameBar.tsx), 12px in. */
 export function windowChromeOptions(platform) {
   if (platform === "darwin") {
-    return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } };
+    return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 12, y: 7 } };
   }
   if (platform === "win32") {
     return { titleBarStyle: "hidden" };

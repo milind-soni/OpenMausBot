@@ -1,3 +1,11 @@
+# Boat (https://docs.boat.dev/ci): while the repository variable BOAT_CI is "on", a run from this repository's own
+# branches (a push to main, a pull request, a merge group) that the repository owner both authored and started does its
+# Linux work on one 16 vCPU Boat VM, one Boat start per run: the static job runs on boat-xlarge and, after its checks,
+# runs the Linux vitest shards, behavior evals and the Linux packaged server smoke side by side
+# (scripts/ci-linux-lanes.mjs) instead of as GitHub-hosted jobs. Boat runs a public repository's job only for the users
+# on its allow-list (`boat ci public`) and fails any other at once, so every other run, a fork's, the nightly and manual
+# runs (the release lane among them), and every run while BOAT_CI is anything else run on GitHub's runners exactly as
+# before. `boat ci` and the dashboard's CI on Boat VMs tab list the Boat jobs (docs/ci.md).
 name: CI
 
 on:
@@ -41,14 +49,26 @@ jobs:
   # platform, and every smoke reports on its own. One final `CI` check
   # aggregates the required jobs (see docs/ci.md for ruleset migration).
   static:
-    name: typecheck + lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: >-
+      ${{ vars.BOAT_CI == 'on' && contains(fromJSON('["push", "pull_request", "merge_group"]'), github.event_name)
+      && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login == github.repository_owner)
+      && 'typecheck + lint + Linux tests (Boat)' || 'typecheck + lint' }}
+    runs-on: >-
+      ${{ vars.BOAT_CI == 'on' && contains(fromJSON('["push", "pull_request", "merge_group"]'), github.event_name)
+      && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login == github.repository_owner)
+      && 'boat-xlarge' || 'ubuntu-latest' }}
+    timeout-minutes: ${{ vars.BOAT_CI == 'on' && 45 || 15 }}
     permissions:
       contents: read
       # ci-scope reads whether the commit before a push got its own green run,
       # and whether the pushed commit already passed the merge queue
       actions: read
+      # and a pull request's labels as they are when the run starts
+      pull-requests: read
     outputs:
       jobs: ${{ steps.scope.outputs.jobs }}
       vitest_os: ${{ steps.scope.outputs.vitest_os }}
@@ -59,7 +79,10 @@ jobs:
         with:
           # Full history lets PR selection use the merge base, including deletes
           # and both sides of renames, without GitHub's changed-file page limit.
+          # Its trees are enough for that; git fetches an old file's contents
+          # when one is read. The whole history took 2m41s to reach a Boat VM.
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -70,10 +93,11 @@ jobs:
         id: scope
         env:
           GH_TOKEN: ${{ github.token }}
+          OMB_CI_LINUX_IN_STATIC: ${{ runner.environment == 'self-hosted' }}
         run: node scripts/ci-scope.mjs
       - run: pnpm install --frozen-lockfile
       - name: Verify CI selection and documentation references
-        run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
+        run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
       - name: Validate locale catalogs
         run: pnpm i18n:check
       - run: pnpm lint
@@ -86,18 +110,56 @@ jobs:
       - name: production UI build
         if: steps.scope.outputs.build == 'true'
         run: pnpm exec vite build
+      # The rest runs only on a Boat VM, where ci-scope moved the Linux jobs' work into this job.
+      - name: Remove what Boat installs and GitHub's runners lack
+        if: steps.scope.outputs.linux_lanes
+        # The server starts an engine it finds on PATH: Boat's Hermes then downloads its own Python, Node and tools
+        # into each test's home, about nine seconds for every test that adds a bot. A Team Cloud runs its turns in a
+        # bubblewrap box wherever bwrap works: here, once the step below drops the capability bwrap refuses to start
+        # with, and never on a GitHub runner.
+        run: sudo rm -f /usr/bin/bwrap /usr/local/bin/{agent,claude,codex,cua-driver,cursor-agent,hermes,hermes-acp,hermes-agent,kimi,openclaw,opencode,pi,prime-agent,vibe,vibe-acp}
+      - name: Prepare Electron test runtime
+        if: steps.scope.outputs.linux_lanes
+        run: node --input-type=commonjs -e "require('electron')"
+      - name: Linux tests (vitest shards, behavior evals, packaged server), side by side
+        if: steps.scope.outputs.linux_lanes
+        env:
+          OMB_CI_LINUX_LANES: ${{ steps.scope.outputs.linux_lanes }}
+          # Boat's image sets en_US.UTF-8, whose collation is Intl's default; GitHub's runners use C.UTF-8 and UTC.
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          TZ: UTC
+        # Boat's runner gives every process cap_dac_read_search as an ambient capability, so a test can still read a
+        # file it set to mode 000, and Boat's desktop sets DISPLAY. GitHub's runners have neither.
+        shell: setpriv --inh-caps=-all --ambient-caps=-all -- env -u DISPLAY -u XAUTHORITY bash --noprofile --norc -eo pipefail {0}
+        run: node scripts/ci-linux-lanes.mjs
+      - name: Report flaky tests that needed a retry
+        if: ${{ !cancelled() && steps.scope.outputs.linux_lanes }}
+        env:
+          OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
+        run: node scripts/testing/ci-retry-summary.mjs
+      - name: Upload eval run reports on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && steps.scope.outputs.linux_lanes
+        with:
+          name: behavior-evals-reports-${{ github.sha }}-${{ github.run_attempt }}
+          path: evals/reports/runs/
+          if-no-files-found: warn
+          retention-days: 7
 
   vitest:
     # Admit the expensive runner fan-out only after the quick checks pass.
     # A failing preflight still fails the required gates; nothing is waived.
     needs: static
     if: contains(needs.static.outputs.jobs, '"vitest"')
-    # scripts/ci-scope.mjs picks the platforms and their shards: PRs run Linux
-    # and Windows (the account runs only five macOS jobs at a time), main
-    # pushes and merge groups Linux, and the full lane (nightly, manual runs,
-    # the release lane) all three. A pull request that
+    # scripts/ci-scope.mjs picks the platforms and their shards: PRs run Linux,
+    # and Windows only when their change can break Windows or they carry the
+    # windows label (the account runs only five macOS jobs at a time), main
+    # pushes and merge groups Linux and Windows, and the full lane (nightly,
+    # manual runs, the release lane) all three. A pull request that
     # cannot affect a platform's results leaves it out, and one that changes
-    # only translations runs the locale tests alone. Linux runs every file;
+    # only translations runs the locale tests alone. On a Boat VM the static
+    # job runs the Linux entries itself. Linux runs every file;
     # Windows and macOS run every file but the e2e files that test only OMB's
     # own logic (OMB_VITEST_E2E=host, scripts/testing/host-e2e.ts). The split
     # is deterministic, so a failure names the same shard on every run, and
@@ -589,10 +651,10 @@ jobs:
     if: contains(needs.static.outputs.jobs, '"browser-driver"')
     # Advisory, outside the CI gate until it has run green for a while: the
     # omb-cdp S4 conformance suites and the new browser's checklist and viewer
-    # suites on the runner's own Google Chrome (PRs run Linux and Windows, the
-    # full lane all three; pushes to main and merge groups leave it out), then
-    # on Linux inside the server image's runtime as a non-root
-    # user. Every S4 suite also fails when its trace holds Runtime.enable or
+    # suites on the runner's own Google Chrome (PRs run Linux, and Windows
+    # where the vitest shards do; the full lane all three; pushes to main and
+    # merge groups leave it out), then on Linux inside the server image's
+    # runtime as a non-root user. Every S4 suite also fails when its trace holds Runtime.enable or
     # another forbidden CDP method (docs/ci.md).
     name: browser driver S4 (${{ matrix.os }})
     strategy:

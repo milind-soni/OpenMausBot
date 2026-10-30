@@ -27,13 +27,9 @@ const header = () => headerTag().match(/class="([^"]*)"/)?.[1] ?? "";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("bot settings caption inset", () => {
-  it("drops the close button below the Windows caption buttons", () => {
-    vi.stubGlobal("window", { ogb: { platform: "win32" } });
-    expect(header()).toContain("pt-[28px]");
-  });
-
-  it("keeps the header flush elsewhere", () => {
-    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+  // The window frame's top bar holds the caption buttons and the traffic lights, above the app's card.
+  it.each(["win32", "darwin"] as const)("keeps the header flush on %s: the frame's top bar holds the window's buttons", (platform) => {
+    vi.stubGlobal("window", { ogb: { platform } });
     const classes = header();
     expect(classes).toContain("py-3");
     expect(classes).not.toContain("pt-[28px]");
