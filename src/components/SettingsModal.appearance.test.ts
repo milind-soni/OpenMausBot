@@ -173,7 +173,7 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("all conversation history and running work");
     expect(html).toContain("channels are unchanged");
     expect(html).toContain("Turn this back on");
-    expect(html).not.toContain("Maximum turn length");
+    expect(html).not.toContain("Stop after no progress for");
   });
 
   it("keeps the switch for the window's rail of places with the sidebar's rows, where this window has one", () => {
@@ -356,7 +356,7 @@ describe("Settings → Appearance", () => {
     fixture.section = "general";
     const html = render();
     expect(html).toContain("Profile");
-    expect(html).toContain("Maximum turn length");
+    expect(html).toContain("Stop after no progress for");
     expect(html).toContain("Maximum running threads per bot");
     expect(html).toContain("Automatic recovery");
     expect(html).toContain('aria-label="App language"');
