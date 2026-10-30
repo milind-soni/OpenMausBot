@@ -1514,10 +1514,9 @@ const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, ba
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    Tray, Menu, nativeImage, iconPath: APP_ICON,
-    onPause: () => sharingController().pause(),
+    Tray, Menu, nativeImage, iconPath: APP_ICON, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
     onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)),
-    onActivity: () => lendingActivity.show(),
+    onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
   return lendingTray;
 }

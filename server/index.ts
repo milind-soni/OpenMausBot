@@ -81,7 +81,7 @@ import {
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
-import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
+import { ROOM_TURN_PROGRESS, RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
 import { createPersonStop } from "./host/person-stop.ts";
@@ -10413,6 +10413,7 @@ async function runClaimedGroupMemberTurn(
       if (shouldIgnoreProviderEvent(e)) return;
       if (e.threadId !== threadId) return;
       if (providerTurnId && e.turnId && e.turnId !== providerTurnId) return;
+      if (ROOM_TURN_PROGRESS.has(e.type)) deadline.progress();
       if (e.type === "item.completed" && e.itemType === "assistant_text") turnTexts.push(e.text);
       else if (e.type === "turn.completed") {
         turnCompletedOk = e.ok;
@@ -10422,9 +10423,9 @@ async function runClaimedGroupMemberTurn(
         }
         finish(end.outcome);
       }
-      // Waiting on a person is not turn work: hold the ceiling while a card is open.
-      else if (e.type === "request.opened") deadline.setWaitingOnHuman(true);
-      else if (e.type === "request.resolved") deadline.setWaitingOnHuman(false);
+      // Waiting on a person or the computer is not idling: hold the limit while a card is open or the computer is busy.
+      else if (e.type === "request.opened" || e.type === "turn.wait_started") deadline.setWaiting(true);
+      else if (e.type === "request.resolved" || e.type === "turn.wait_ended") deadline.setWaiting(false);
     });
     deadline.start();
     // Swapped synchronously with the dispatch below, so no stall can fall between them.
