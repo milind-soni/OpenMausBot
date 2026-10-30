@@ -219,8 +219,8 @@ describe("bot-first sidebar", () => {
     const candidate: Bot = { ...bot, threadId: "open", messages: [], unread: false, projects: [], busy: true,
       tasks: [{ threadId: "open", title: "Open", createdAt: 1 }, { threadId: "leads", title: "Leads", createdAt: 2, busy: true, activity: "working" }] };
     noteTurnEvent({ eventId: "e2", provider: "codex", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
-      type: "turn.progress", activity: "web", itemId: "w1", target: "Biber Dammbau" } as RuntimeEvent);
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web for “Biber Dammbau”</span>");
+      type: "turn.progress", activity: "web", itemId: "w1", target: "Acme construction leads" } as RuntimeEvent);
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web for “Acme construction leads”</span>");
     resetTurnLive();
   });
 
