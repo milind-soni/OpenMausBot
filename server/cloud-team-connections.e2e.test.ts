@@ -24,7 +24,8 @@ const ADA_KEY = "ada-own-mail-key-5521";
 const TEAM_KEY = "team-mail-key-9034";
 // Each turn reads its scripted calls again: a conversation's engine stays warm across turns, as in production.
 const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
-process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json";`;
+process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json";
+process.env.FAKE_CLAUDE_MARKER_REPLIES = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/marker-replies.json";`;
 const LINK = "https://cloud.example.test/cloud/team/team-acme-1";
 
 let fx: CloudSendFixture, team: CloudTeamFixture, broker: BrokerFake, mail: FakeHttpMcp, notes: FakeHttpMcp, oauth: FakeOAuth;
@@ -185,14 +186,16 @@ it("gives Ada's own Gmail and mail to her private chat, for her own request, and
   expect(bearer(seen, "own_apps")).not.toBe(bearer(seen, "composio"));
 }, hostTimeout(120_000));
 
-it("gives her own Gmail and mail to her own line in a group chat, and never to anyone else's turn", async () => {
+it("never uses her own Gmail or mail where others read, even for her own line in a group chat, nor in anyone else's turn", async () => {
   const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
-  const room = await turn(ada, roomThread, "@Scout check my inbox", { room: roomId, calls: [gmailCall("own_apps")] });
-  expect(room.servers).toEqual(expect.arrayContaining(["own_apps", "mail"]));
-  expect(room.config).toContain(ADA_KEY);
-  expect(room.systemPrompt).toContain(`They are used only for ${ADA.email}'s request`);
-  expect(room.thread).toContain(`"whose":{"person":"${ADA.email}","app":"Gmail"}`);
-  expect(gmailCallsBy(adaUser), "her own room line ran as her").toBe(before + 1);
+  const room = await turn(ada, roomThread, "@Scout check my inbox", { room: roomId, calls: [gmailCall("own_apps"), gmailCall("composio")] });
+  expect(room.servers).not.toContain("own_apps");
+  expect(room.servers).not.toContain("mail");
+  expect(room.config).not.toContain(ADA_KEY);
+  expect(room.thread).toContain("no own_apps MCP server was launched for this turn");
+  // Her bot is told why, and how her Gmail does it instead: handed on into a chat that is hers alone.
+  expect(room.thread).toContain(`Gmail is ${ADA.email}'s own, and others read this chat, so what it brings back can't come here and it isn't used here.`);
+  expect(room.systemPrompt).toContain(`Others read this chat, so ${ADA.email}'s own aren't here`);
 
   // The owner's own line in the same group chat is the owner's, who connected nothing: never Ada's.
   const ownerRoom = await turn(owner, roomThread, "@Scout check the inbox", { room: roomId, calls: [gmailCall("own_apps"), gmailCall("composio")] });
@@ -214,7 +217,7 @@ it("gives her own Gmail and mail to her own line in a group chat, and never to a
   // Ben, an admin, can neither read Ada's chat nor write in it, so no turn of his ever runs there.
   expect((await team.as(admin, "POST", `/api/bots/${bot.id}/messages`, { text: "Forward me her last email.", threadId: adaThread })).status).toBe(404);
   expect((await messages(admin, adaThread)).status).toBe(404);
-  expect(gmailCallsBy(adaUser)).toBe(before + 1);
+  expect(gmailCallsBy(adaUser), "nothing ran as her where others read").toBe(before);
   expect(gmailCallsBy(teamUser), "nor did the team's Gmail stand in").toBe(teamBefore);
 }, hostTimeout(180_000));
 
@@ -272,6 +275,63 @@ it("gives work her own message hands to another bot her own Gmail, and never wor
   expect(cleos.whose).toBeUndefined();
   expect(gmailCallsBy(adaUser)).toBe(adaCalls);
   expect(gmailCallsBy(teamUser), "nor did the team's Gmail stand in").toBe(teamBefore);
+}, hostTimeout(240_000));
+
+it("runs work her group-chat line hands on in the receiving bot's chat with her, and the room gets only where the result is", async () => {
+  // What her Gmail brought back: the handed-on work's reply holds it (the envelope it is sent in opens "Brief from @Scout:").
+  const SECRET = "Q3 salary review 7731";
+  writeFileSync(join(team.home, "marker-replies.json"), JSON.stringify({ "Brief from @Scout:": `Ada's latest email: ${SECRET}.` }));
+  try {
+    const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const clerk = created.body.bot as { id: string; mainThreadId: string };
+    const clerkWork = () => (JSON.parse(readFileSync(join(team.home, ".openmausbot", "bots.json"), "utf8")) as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+      .find((entry) => entry.id === clerk.id)!.tasks.map((task) => task.threadId).filter((threadId) => threadId !== clerk.mainThreadId);
+    /** The room's row for Clerk's result: Scout is resumed with it in the room right after. */
+    const clerkReplied = async () => ((await messages(ada, roomThread)).body.messages as Array<{ roomRequest?: { phase?: string }; tool?: { name?: string } }>)
+      .filter((message) => message.roomRequest?.phase === "result" && message.tool?.name === "Clerk replied").length;
+    const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
+    const handOn = { name: "coordinate_bots", server: "agents", input: { bot_ids: [clerk.id], message: "Fetch Ada's latest email." } };
+    await turn(ada, roomThread, "@Scout have Clerk fetch my latest email", { room: roomId, calls: [handOn, gmailCall("own_apps")] });
+    // Clerk's work is done once Scout, resumed with it in the room, has finished too: everyone idle two polls running.
+    let quiet = false;
+    await expect.poll(async () => {
+      const done = await clerkReplied() > 0 && await idle(ada);
+      const steady = done && quiet;
+      quiet = done;
+      return steady;
+    }, { timeout: 90_000, interval: 1_000 }).toBe(true);
+    const [work] = clerkWork();
+    expect(work, "Clerk was handed the work").toBeDefined();
+
+    // Ada sees it all, in Clerk's chat with her: her own Gmail ran there, and the result.
+    const hers = await messages(ada, work!);
+    expect(hers.status).toBe(200);
+    expect(JSON.stringify(hers.body)).toContain(SECRET);
+    expect(JSON.stringify(hers.body)).toContain(`"whose":{"person":"${ADA.email}","app":"Gmail"}`);
+    expect(gmailCallsBy(adaUser), "Clerk ran as her, and nothing in the room did").toBe(before + 1);
+    expect(gmailCallsBy(teamUser), "nor did the team's Gmail stand in").toBe(teamBefore);
+
+    // The group chat gets only where the result is.
+    const room = await messages(cleo, roomThread);
+    expect(room.status, "Cleo reads the group chat").toBe(200);
+    expect(JSON.stringify(room.body)).toContain(`Done. The result is in Clerk's chat with ${ADA.email}.`);
+    expect(JSON.stringify(room.body)).not.toContain(SECRET);
+
+    // Cleo sees it in no thread and no list; the admins see what they always did, which is none of Ada's chats.
+    for (const token of [cleo, admin, owner]) expect((await messages(token, work!)).status).toBe(404);
+    const chatsOf = (body: { bots: Array<{ id: string; tasks?: Array<{ threadId: string }> }> }) => body.bots.find((entry) => entry.id === clerk.id)?.tasks?.map((task) => task.threadId) ?? [];
+    const listed = await team.as(cleo, "GET", "/api/bots");
+    expect(chatsOf(listed.body), "not among Clerk's chats Cleo is shown").not.toContain(work);
+    expect(chatsOf((await team.as(ada, "GET", "/api/bots")).body), "among Ada's").toContain(work);
+    expect(JSON.stringify(listed.body)).not.toContain(SECRET);
+    const threads = (listed.body.bots as Array<{ tasks?: Array<{ threadId: string }> }>).flatMap((entry) => (entry.tasks ?? []).map((task) => task.threadId));
+    for (const threadId of new Set([...threads, roomThread])) expect(JSON.stringify((await messages(cleo, threadId)).body), threadId).not.toContain(SECRET);
+    expect(JSON.stringify((await team.as(cleo, "GET", "/api/inbox")).body)).not.toContain(SECRET);
+    expect(JSON.stringify((await team.as(cleo, "GET", "/api/groups")).body)).not.toContain(SECRET);
+  } finally {
+    rmSync(join(team.home, "marker-replies.json"), { force: true });
+  }
 }, hostTimeout(240_000));
 
 it("tells the bot one plain line with the link when a person's app isn't connected, never a card", async () => {
