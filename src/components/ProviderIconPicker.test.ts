@@ -20,4 +20,10 @@ describe("provider icon upload", () => {
       .rejects.toThrow("could not decode");
     expect(decode).toHaveBeenCalledOnce();
   });
+
+  it("rejects a rectangular image", async () => {
+    const decode = vi.fn(async () => ({ width: 64, height: 32 }));
+    await expect(providerIconFromFile(new File([png], "wide.png", { type: "image/png" }), decode))
+      .rejects.toThrow("square");
+  });
 });

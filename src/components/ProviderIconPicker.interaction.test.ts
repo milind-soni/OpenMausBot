@@ -4,7 +4,7 @@ import { setLocale, t } from "@/lib/i18n";
 import { localeChoices } from "@/locales";
 import type { InstanceInfo } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn(), refreshInstances: vi.fn() }));
+const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), refreshInstances: vi.fn() }));
 vi.mock("@/state/store", () => ({ api: fixture.api, useStore: () => fixture }));
 // Exercise the component's event handlers without a DOM. The browser fixture
 // separately checks the disabled controls; these probes control async ordering.
@@ -43,6 +43,7 @@ function controls() {
 
 beforeEach(() => {
   fixture.api.mockReset().mockResolvedValue({});
+  fixture.dispatch.mockReset();
   fixture.refreshInstances.mockReset().mockResolvedValue(undefined);
   images = [];
   vi.stubGlobal("Image", class {
@@ -97,6 +98,15 @@ describe("provider icon operation ordering", () => {
       expect(fixture.api).toHaveBeenCalledTimes(2);
     });
     expect(JSON.parse(fixture.api.mock.calls[1][1].body).icon).toBeNull();
+  });
+
+  it("applies the instances returned by a successful PATCH without a refresh", async () => {
+    const saved: InstanceInfo[] = [{ ...instance, icon: { kind: "preset", preset: "google" } }];
+    fixture.api.mockResolvedValueOnce({ instances: saved });
+    const ui = controls();
+    ui.select();
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "instances", instances: saved }));
+    expect(fixture.refreshInstances).not.toHaveBeenCalled();
   });
 });
 

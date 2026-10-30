@@ -44,11 +44,14 @@ export async function providerIconFromFile(
   if (dimensions.width < 1 || dimensions.height < 1 || dimensions.width > PROVIDER_ICON_MAX_DIMENSION || dimensions.height > PROVIDER_ICON_MAX_DIMENSION) {
     throw new Error(t("engines.icon.dimensionError", { dimension: PROVIDER_ICON_MAX_DIMENSION }));
   }
+  if (dimensions.width !== dimensions.height) {
+    throw new Error(t("engines.icon.squareError"));
+  }
   return icon;
 }
 
 export function ProviderIconPicker({ instance }: { instance: InstanceInfo }) {
-  const { refreshInstances } = useStore();
+  const { dispatch, refreshInstances } = useStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
@@ -62,11 +65,12 @@ export function ProviderIconPicker({ instance }: { instance: InstanceInfo }) {
     setError(null);
     try {
       const icon = typeof choice === "function" ? await choice() : choice;
-      await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/icon`, {
+      const saved = await api<{ instances?: InstanceInfo[] }>(`/api/instances/${encodeURIComponent(instance.instanceId)}/icon`, {
         method: "PATCH",
         body: JSON.stringify({ icon }),
       });
-      await refreshInstances();
+      if (Array.isArray(saved?.instances)) dispatch({ type: "instances", instances: saved.instances });
+      else await refreshInstances();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
