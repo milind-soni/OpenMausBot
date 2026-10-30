@@ -86,7 +86,9 @@ then a Cloud's first look at the PC through the lend path: the tool list, the
 screen's size and the list of apps, over the proxy a lent screen starts with
 the environment it gets. It sends no input. It prints computer control's mode,
 the reason Windows gave when it did not start, and whether apps and screen
-would be lent.
+would be lent. On a pull request it first runs the base branch's `electron/`
+the same way, so one run shows what the change does; only this branch's result
+decides the job.
 
 ### When a Cloud can't use this computer
 

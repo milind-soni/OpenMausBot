@@ -1,16 +1,16 @@
 // Electron main for scripts/smoke-cua-win-lend.mjs, which starts it under a copy of Electron named like the installed app.
 const { app } = require("electron");
 const { spawn } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
+const { existsSync, writeFileSync } = require("node:fs");
 const { createInterface } = require("node:readline");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const root = resolve(__dirname, "..");
+const code = process.env.OMB_SMOKE_CODE || resolve(__dirname, "..", "electron");
 app.setPath("userData", process.env.OMB_SMOKE_USER_DATA);
-const report = { packaged: app.isPackaged, resourcesPath: process.resourcesPath };
-const say = (line) => console.log(`[lend smoke] ${line}`);
-const load = (file) => import(pathToFileURL(join(root, "electron", file)).href);
+const report = { code: process.env.OMB_SMOKE_LABEL ?? "this branch", packaged: app.isPackaged, resourcesPath: process.resourcesPath };
+const say = (line) => console.log(`[lend smoke, ${report.code}] ${line}`);
+const load = (file) => import(pathToFileURL(join(code, file)).href);
 const firstText = (result) => String(result?.content?.find?.((part) => part?.type === "text")?.text ?? "");
 
 /** The driver's own tool list over its stdio MCP proxy, started with this process's whole environment. */
@@ -48,8 +48,11 @@ async function driverTools(mcp) {
 
 async function smoke() {
   const cua = await load("cua.mjs");
-  const { screenStatus } = await load("screen-status.mjs");
   const { sharedCuaConnection } = await load("shared-cua-connection.mjs");
+  const { localComputerReady } = require(join(code, "capabilities.cjs"));
+  // A base branch from before screen-status.mjs decided as main.mjs's lendsScreen did there.
+  const screenStatus = existsSync(join(code, "screen-status.mjs")) ? (await load("screen-status.mjs")).screenStatus
+    : ({ connection }) => { const lent = sharedCuaConnection(connection) !== null && localComputerReady("win32", connection); return { ready: lent, lent, reason: lent ? null : "unknown", fix: null }; };
   const { createSharedCua, executeSharedOperation } = await load("shared-computer-access.mjs");
   const { LENT_SCREEN_ARGUMENTS } = await load("lent-screen-tools.mjs");
   say(`packaged: ${app.isPackaged}; resources: ${process.resourcesPath}`);
