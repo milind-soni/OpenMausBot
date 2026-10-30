@@ -11,7 +11,7 @@
 // older release with no such button, so the rail hides only beside a document that offered one; a new document has a
 // few seconds to offer it, and the rail comes back beside one that doesn't, or that stops responding.
 
-export const CHROME_RAIL_WIDTH = 64;
+export const CHROME_RAIL_WIDTH = 36;
 export const CHROME_RAIL_PATH = "/rail";
 /** How long a rail the person hid stays hidden for the page's next document to offer its button. */
 export const RAIL_OFFER_GRACE_MS = 5_000;
