@@ -11,7 +11,7 @@ import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
-import type { SetupCardFields } from "./setup-card.ts";
+import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
@@ -443,7 +443,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField {
+export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";

@@ -215,6 +215,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   if (parentEnv.OMB_TEST_STALL_CLOCK === "1") childEnv.OMB_TEST_STALL_CLOCK = "1";
   // The first-reply rescue's delay in ms, so a check need not sit through 20 s of silence.
   if (/^\d{1,6}$/.test(parentEnv.OMB_FIRST_REPLY_NOTICE_MS ?? "")) childEnv.OMB_FIRST_REPLY_NOTICE_MS = parentEnv.OMB_FIRST_REPLY_NOTICE_MS;
+  // How often @devs reports are asked about, in ms, so a check sees a fix arrive without an hour's wait.
+  if (/^\d{1,7}$/.test(parentEnv.OMB_DEVS_STATUS_MS ?? "")) childEnv.OMB_DEVS_STATUS_MS = parentEnv.OMB_DEVS_STATUS_MS;
   // The quiet-status knobs in ms, so a long tool call shows its sign of life without a minute's wait.
   for (const knob of ["OMB_ACP_QUIET_NOTICE_MS", "OMB_ACP_QUIET_TICK_MS"] as const) {
     if (/^\d{1,7}$/.test(parentEnv[knob] ?? "")) childEnv[knob] = parentEnv[knob];
