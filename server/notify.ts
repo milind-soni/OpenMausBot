@@ -3,8 +3,33 @@ import { personMentionExcerpt } from "../shared/person-mention.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
+/** A model's markdown as the plain text a notification banner can show:
+ * no fences, headings, emphasis markers, link syntax, bullets, quotes or
+ * table pipes. Issue numbers and snake_case words stay as they are. */
+export function plainNotificationText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\((?:[^)]*)\)/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/^[ \t]*\|/gm, "")
+    .replace(/\|[ \t]*$/gm, "")
+    .replace(/^[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)*$/gm, "")
+    .replace(/[ \t]*\|[ \t]*/g, " · ")
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?!\w)/g, "$1$2")
+    .replace(/(^|[^\w])_(?=\S)([^_\n]*?\S)_(?!\w)/g, "$1$2")
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1")
+    .replace(/<\/?[a-z][^>]*>/gi, "");
+}
+
+/** One line, short enough for a lock screen, with the newlines and the
+ * markdown of a model's answer flattened out of it. */
 export function summarize(text: string, max = 140): string {
-  const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  const line = plainNotificationText(text).replace(/\s+/g, " ").replace(/^[\s·]+|[\s·]+$/g, "").trim();
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 
