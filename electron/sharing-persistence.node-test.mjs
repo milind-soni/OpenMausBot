@@ -103,6 +103,58 @@ test("a failed Pause save cannot silently reconnect after restart", async t => {
   assert.equal(f.saved().automatic.paused, false);
 });
 
+test("an unsaved Pause keeps automatic terminal lending stopped across restart", async t => {
+  const f = fixture(t);
+  const options = { ownClouds: () => [f.env] };
+  const sharing = f.make(options);
+  await sharing.lendTerminal(true);
+  await f.polled;
+  assert.equal(f.saved().records[f.env.id].terminal, true);
+  f.block();
+  sharing.pause();
+  assert.throws(() => sharing.lendTerminal(false));
+  sharing.start();
+  sharing.cloudChanged();
+  await sharing.screenChanged();
+  assert.equal(sharing.lendingToCloud(), false);
+  sharing.close();
+  f.unblock();
+  const restarted = f.make(options);
+  restarted.start();
+  restarted.cloudChanged();
+  await restarted.lendTerminal(true);
+  await restarted.screenChanged();
+  assert.equal(restarted.paused(), true);
+  assert.equal(restarted.lendingToCloud(), false);
+  assert.equal(f.connects.length, 1);
+  assert.equal(f.summaries.at(-1).terminal, true);
+  assert.match(f.summaries.at(-1).pauseError, /previous session/i);
+  await restarted.resume();
+  assert.equal(restarted.paused(), false);
+  assert.equal(f.saved().records[f.env.id].terminal, true);
+});
+
+test("a terminal confirmation after a failed Pause save cannot resume lending", async t => {
+  const f = fixture(t), sharing = f.make({ ownClouds: () => [f.env] });
+  sharing.start();
+  await f.polled;
+  f.block();
+  sharing.pause();
+  f.unblock();
+  await sharing.lendTerminal(true);
+  assert.equal(sharing.paused(), true);
+  assert.equal(sharing.lendingToCloud(), false);
+  assert.equal(f.connects.length, 1);
+  assert.equal(f.saved().automatic.paused, true);
+  assert.equal(f.saved().automatic.terminalAccount, "fixture-account");
+  sharing.close();
+  const restarted = f.make({ ownClouds: () => [f.env] });
+  restarted.start();
+  await restarted.screenChanged();
+  assert.equal(restarted.paused(), true);
+  assert.equal(f.connects.length, 1);
+});
+
 test("an unclean exit leaves lending paused with a recovery message on the next start", t => {
   const f = fixture(t);
   const child = spawnSync(process.execPath, ["--input-type=module", "--eval", `
@@ -249,5 +301,6 @@ test("the tray reports an unsaved pause and offers a save retry alongside Resume
     retry.click();
     assert.equal(retries, 1);
     assert.ok(tray.menu.some(item => item.label === "Resume"));
+    assert.equal(tray.menu.some(item => item.type === "checkbox"), false);
   } finally { indicator.destroy(); }
 });
