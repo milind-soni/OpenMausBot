@@ -162,6 +162,11 @@
      there `raised` is pure white and a card is too. */
   --color-control: #282828;
   --color-hairline: #383838;
+  /* the window's frame: its top bar and the rail of places, around the app's
+     rounded card. A step from the sidebar toward the ink, so every skin gets
+     one without naming it: a shade darker on the light skins, lighter on the
+     dark ones. */
+  --color-frame: color-mix(in oklab, var(--color-panel) 93%, var(--color-ink));
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -2942,6 +2947,13 @@ button:disabled.bg-danger {
 :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
 .fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
   -webkit-app-region: no-drag;
+}
+
+/* Simple's sidebar in the window frame: Search and New sit in its top corner
+   (Sidebar's corner row), and the bot tiles rise beside them while their first
+   row leaves the corner free (SidebarTileGrid measures it). */
+[data-sidebar-top-row="corner"] + [data-sidebar-tiles][data-beside-corner] {
+  margin-top: -34px;
 }
 
 /* Room speaker names. Each skin sets a tone of the bot's palette that clears
