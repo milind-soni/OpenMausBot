@@ -9,6 +9,7 @@ import { BotAvatar, type BotAvatarProps } from "./Avatar";
 import { threadUpdatedLabel } from "./SidebarThreadRow";
 import type { NotificationLogEntry, NotifyKind } from "../../shared/notification";
 import { Select } from "./Select";
+import { useCaptionChrome } from "./DesktopCapabilities";
 
 const KIND_LOOK: Record<NotifyKind, { Icon: LucideIcon; className: string; status: LocaleKey }> = {
   done: { Icon: CheckCircle2, className: "text-success", status: "notifications.status.done" },
@@ -106,6 +107,7 @@ export async function postNotificationRead(path: string, dispatch: (action: Acti
 
 export function NotificationsPanel() {
   const { state, dispatch } = useStore();
+  const { padClass } = useCaptionChrome();
   const showThreads = useShowThreads();
   const [now, setNow] = useState(() => Date.now());
   const [botFilter, setBotFilter] = useState(ALL_BOTS);
@@ -136,7 +138,7 @@ export function NotificationsPanel() {
       aria-label={t("notifications.title")}
       className="animate-panel-in flex h-full w-[300px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30"
     >
-      <div className="flex items-center gap-1.5 border-b border-hairline/40 px-3.5 py-2.5">
+      <div className={cn("flex items-center gap-1.5 border-b border-hairline/40 px-3.5 py-2.5", padClass)}>
         <span className="flex-1 text-[13px] font-medium text-ink">
           {t("notifications.title")}
           {unreadCount > 0 && <span className="ml-1.5 text-[12px] font-normal text-accent">· {t("notifications.unread", { count: unreadCount })}</span>}
