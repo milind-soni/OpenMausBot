@@ -1,11 +1,18 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { resolveCustomAcpModels } from "./custom-model-catalog.ts";
+import { basename, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DISCOVERY_CLIENT_NAME, discoverAcpModels, resolveCustomAcpModels } from "./custom-model-catalog.ts";
+
+/** Lets a test see a process that reports it would not stop; the real stop still runs. */
+const stop = vi.hoisted(() => ({ refuses: false }));
+vi.mock("../../procs.ts", async (original) => {
+  const procs = await original<typeof import("../../procs.ts")>();
+  return { ...procs, killCliTree: async (...args: Parameters<typeof procs.killCliTree>) => (await procs.killCliTree(...args)) && !stop.refuses };
+});
 
 const scratch: string[] = [];
-afterEach(async () => { await Promise.all(scratch.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { stop.refuses = false; await Promise.all(scratch.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
 
 async function fake(mode = "normal") {
   const cwd = await mkdtemp(join(tmpdir(), "omb-catalog-test-"));
@@ -20,6 +27,7 @@ const modelOptions=[{value:'deep',name:'Deep'},{value:'flash',name:'Flash'},{val
 function result(){return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
 function emit(value){process.stdout.write(JSON.stringify(value)+'\\n');}
 function legacyResult(){const r=result();return {...r,models:{currentModelId:current,availableModels:modelOptions.map(x=>({modelId:x.value,name:x.name}))},configOptions:r.configOptions.filter(x=>x.id!=='model')}}
+appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),pid:process.pid})+'\\n');
 for await(const line of createInterface({input:process.stdin})){
  const msg=JSON.parse(line); appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),...msg})+'\\n');
  if(!msg.method)continue;
@@ -42,11 +50,15 @@ for await(const line of createInterface({input:process.stdin})){
   emit({jsonrpc:'2.0',id:msg.id,result:result()});continue;
  }
  emit({jsonrpc:'2.0',id:msg.id,error:{code:-32601,message:'unexpected method'}});
-}`);
+}
+appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({eof:true})+'\\n');
+if(mode==='ignore-eof')setInterval(()=>{},1000);`);
   return {
     config: { cli: `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)}` },
     env: { ...process.env, HOME: cwd, USERPROFILE: cwd, CATALOG_MODE: mode, CATALOG_DUMP: dump },
-    requests: async () => (await readFile(dump, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>),
+    requests: async () => (await readFile(dump, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>)
+      .filter((entry) => entry.pid === undefined && !entry.eof),
+    log: async () => (await readFile(dump, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>),
   };
 }
 
@@ -103,6 +115,43 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     const fixture = await fake("no-models");
     await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("did not advertise any models");
   });
+
+  it("hands the agent's session to forgetSession once the process has stopped, and never before", async () => {
+    const fixture = await fake();
+    const forgetSession = vi.fn(async () => {});
+    await discoverAcpModels(fixture.env, fixture.config.cli, [], { forgetSession });
+    expect(forgetSession).toHaveBeenCalledOnce();
+    const [session] = forgetSession.mock.calls[0] as unknown as [{ sessionId: string; cwd: string; env: unknown }];
+    expect(session.sessionId).toBe("fake-session");
+    expect(basename(session.cwd)).toMatch(/^omb-acp-models-/);
+    // macOS reports the agent's cwd through /private; the folder name is the same either way.
+    expect(basename(session.cwd)).toBe(basename((await fixture.requests())[0].cwd));
+    expect(session.env).toBe(fixture.env);
+    expect((await fixture.requests())[0].params.clientInfo.name).toBe(DISCOVERY_CLIENT_NAME);
+
+    stop.refuses = true;
+    const stuck = vi.fn(async () => {});
+    await expect(discoverAcpModels(fixture.env, fixture.config.cli, [], { forgetSession: stuck })).rejects.toThrow("could not be stopped");
+    expect(stuck).not.toHaveBeenCalled();
+  });
+
+  it("stops a custom agent at once, and lets an agent asked to exit gracefully read EOF first", async () => {
+    const custom = await fake();
+    await resolveCustomAcpModels(custom.env, custom.config);
+    expect((await custom.log()).some((entry) => entry.eof)).toBe(false);
+    const graceful = await fake();
+    await discoverAcpModels(graceful.env, graceful.config.cli, [], { exitGraceMs: 10_000 });
+    expect((await graceful.log()).some((entry) => entry.eof)).toBe(true);
+  });
+
+  it("still stops an agent that ignores EOF, once the grace period is over", async () => {
+    const fixture = await fake("ignore-eof");
+    await discoverAcpModels(fixture.env, fixture.config.cli, [], { exitGraceMs: 50 });
+    const log = await fixture.log();
+    expect(log.some((entry) => entry.eof)).toBe(true);
+    const pid = log.find((entry) => entry.pid !== undefined)?.pid as number;
+    expect(() => process.kill(pid, 0)).toThrow();
+  }, 20_000);
 
   it("bounds malformed output and still removes its isolated workspace", async () => {
     const fixture = await fake("flood");

@@ -162,7 +162,7 @@ export function liveControl(value: { held?: unknown; owned?: unknown; controllin
   const dialog = value.dialog as { type?: unknown; message?: unknown; defaultValue?: unknown } | null | undefined;
   const shown = dialog && typeof dialog.type === "string" && typeof dialog.message === "string" && typeof dialog.defaultValue === "string"
     ? { type: dialog.type, message: dialog.message, defaultValue: dialog.defaultValue } : null;
-  return { canOperate: true, controller, generation, dialog: shown };
+  return { canOperate: true, controller, generation, dialog: shown, ...(value.owned === true ? { owned: true } : {}) };
 }
 
 /**
@@ -293,7 +293,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     });
     listen("control", (data) => {
       const next = liveControl(data, generation);
-      if (control && next.controller === control.controller && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
+      if (control && next.controller === control.controller && next.owned === control.owned && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
       control = next.controller === control?.controller ? next : liveControl(data, ++generation);
       events.onControl?.(control);
     });

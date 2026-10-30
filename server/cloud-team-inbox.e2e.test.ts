@@ -3,7 +3,9 @@
 // cards through the permission socket, and Marco's own Google Calendar on the fake connected-apps service. A bot's "tell
 // Marco", an @Marco and an approval routed to Marco land in his inbox, his chat with his Chief, with one notification
 // each; his answer reaches the bot that asked, which carries on; his assistant answers when he is free, labelled, and
-// leaves decisions and his private chats alone. It proves where things land and what is read, not a model's judgement.
+// leaves decisions and his private chats alone. The asks waiting on him are counted on his inbox, live, and each stops
+// waiting however he answers it: in the bot's own chat, through either respond route, or with a 👍. It proves where
+// things land and what is read, not a model's judgement.
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
@@ -34,8 +36,9 @@ const TOKEN = `ops_fake-team-${randomBytes(8).toString("hex")}`;
 type Row = { id: string; role: string; kind: string; text?: string; card?: { requestId?: string; answered?: string }; replyToId?: string;
   relay?: { kind: string; email: string; name: string }; peerAsk?: { botId: string; name: string };
   inbox?: { kind: string; from: { name: string; email?: string; botId?: string }; via?: { name: string }; origin?: { botId: string; threadId: string; title: string }; replies?: true; answers?: Array<{ by: string; text: string }> } };
-type Bot = { id: string; name: string; threadId: string; mainThreadId?: string; busy?: boolean; activity?: string; tasks?: Array<{ threadId: string; title: string; inbox?: true; private?: true }> };
-type Frame = { kind: string; notification?: { kind: string; botId: string; threadId: string; title: string; body: string; forPerson?: string } };
+type Task = { threadId: string; title: string; inbox?: true; private?: true; openAsks?: number; inboxChangedAt?: number };
+type Bot = { id: string; name: string; threadId: string; mainThreadId?: string; busy?: boolean; activity?: string; tasks?: Task[] };
+type Frame = { kind: string; bot?: Bot; notification?: { kind: string; botId: string; threadId: string; title: string; body: string; forPerson?: string } };
 
 let fx: CloudSendFixture, team: CloudTeamFixture, broker: BrokerFake;
 let philipp = "", marco = "";
@@ -62,6 +65,11 @@ const bots = async (token: string) => (await team.as(token, "GET", "/api/bots"))
 const idle = async () => (await bots(philipp)).every((bot) => !bot.busy && bot.activity !== "working");
 const notifiedIn = (frames: Frame[], threadId: string) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.threadId === threadId);
 const inboxLines = async () => (await messages(marco, inbox)).rows.filter((row) => row.inbox);
+const inboxTask = async () => (await bots(marco)).find((bot) => bot.id === chief.id)!.tasks!.find((task) => task.inbox)!;
+/** Marco's inbox task in each frame about his Chief that reached his live stream. */
+const inboxFrames = (frames: Frame[]) => frames.filter((frame) => frame.kind === "bot" && frame.bot?.id === chief.id).map((frame) => frame.bot!.tasks?.find((task) => task.inbox));
+const needsYou = async (token: string) => (await team.as(token, "GET", "/api/needs-you")).body.items as Array<{ kind: string; botId?: string; text?: string }>;
+const chiefTurns = async () => (await messages(marco, inbox)).rows.filter((row) => row.role === "bot" && row.kind === "text" && !row.inbox);
 
 async function until(done: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
   const end = Date.now() + timeoutMs;
@@ -115,7 +123,11 @@ async function passFromScout(message: string) {
   expect(answer.status, await answer.clone().text()).toBe(200);
 }
 /** Philipp's message holds Reporter's turn in its main chat while it asks Marco's approval through its permission socket. */
-async function approvalFromReporter(command: string) {
+const approvalFromReporter = (command: string) => askedOfMarco((id) => ({ t: "ask", id, tool: "Bash", input: { command } }));
+/** Philipp's message holds Reporter's turn in its main chat while it asks Marco a card through its permission socket. Every
+ * other turn has ended first, so the turn that writes the dump next is this one. */
+async function askedOfMarco(ask: (requestId: string) => Record<string, unknown>) {
+  await until(idle);
   writeFileSync(file("hang-mode"), "");
   rmSync(file("release"), { force: true });
   rmSync(file("dump.json"), { force: true });
@@ -130,7 +142,7 @@ async function approvalFromReporter(command: string) {
   socket.on("error", () => {});
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   const requestId = randomUUID();
-  socket.write(`${JSON.stringify({ t: "ask", id: requestId, tool: "Bash", input: { command } })}\n`);
+  socket.write(`${JSON.stringify(ask(requestId))}\n`);
   await expect.poll(async () => (await messages(philipp, reporter.threadId)).rows.some((row) => row.card?.requestId === requestId), { timeout: 10_000 }).toBe(true);
   return requestId;
 }
@@ -163,7 +175,10 @@ beforeAll(async () => {
   expect((await team.as(marco, "POST", "/api/team/my-connections/apps/googlecalendar/connect", {})).status).toBe(200);
   const marcoUser = broker.userFor(broker.installationIds().at(-1)!);
   broker.account(marcoUser, "googlecalendar", MARCO.email);
-  const start = Math.ceil((Date.now() + 2 * 24 * 60 * 60_000) / (60 * 60_000)) * 60 * 60_000;
+  // At noon two days on, so the busy hour never runs past midnight, which the prompt words as two days.
+  const noon = new Date(Date.now() + 2 * 24 * 60 * 60_000);
+  noon.setHours(12, 0, 0, 0);
+  const start = noon.getTime();
   broker.calendarEvents[marcoUser] = [{ id: "ev1", summary: "Interview at Globex", status: "confirmed", location: "Globex HQ", attendees: [{ email: "hr@globex.test" }],
     start: { dateTime: new Date(start).toISOString() }, end: { dateTime: new Date(start + 60 * 60_000).toISOString() } }];
   marcos = listen(marco);
@@ -282,7 +297,97 @@ it("never lets the assistant decide or approve for Marco, and never shows it his
   expect(prompt).not.toContain("Globex");
 }, hostTimeout(180_000));
 
+it("counts the asks waiting on Marco on his inbox, live, and drops one as soon as he answers it in the bot's own chat", async () => {
+  expect((await inboxTask()).openAsks, "what came before is answered or only news").toBeUndefined();
+  const before = marcos.length;
+  const requestId = await approvalFromReporter("rm -rf ./dist");
+  await until(async () => (await inboxTask()).openAsks === 1);
+  await until(() => inboxFrames(marcos.slice(before)).some((task) => task?.openAsks === 1));
+  const answered = await team.as(marco, "POST", `/api/threads/${reporter.threadId}/respond`, { requestId, behavior: "deny" });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+  await until(async () => (await inboxTask()).openAsks === undefined);
+  await until(() => { const seen = inboxFrames(marcos.slice(before)); return seen.length > 1 && seen.at(-1)!.openAsks === undefined; });
+  expect((await inboxLines()).find((row) => row.card?.requestId === requestId)!.card!.answered, "the copy in his inbox follows").toBeTruthy();
+  expect((await needsYou(marco)).filter((item) => item.botId === reporter.id)).toEqual([]);
+  writeFileSync(file("release"), "");
+  await until(idle);
+}, hostTimeout(120_000));
+
+it("brings an answer given through the inbox bot's own respond route to the bot that asked, after its turn ended too", async () => {
+  const requestId = await askedOfMarco((id) => ({ t: "ask", kind: "question", id, tool: "AskUserQuestion",
+    input: { questions: [{ question: "Which chart goes first?", options: [{ label: "Revenue" }, { label: "Costs" }] }] } }));
+  await until(async () => (await inboxTask()).openAsks === 1);
+  writeFileSync(file("release"), "");
+  await until(idle);
+  expect((await inboxTask()).openAsks, "a question nobody answered still waits once its turn is over").toBe(1);
+  const answered = await team.as(marco, "POST", `/api/bots/${chief.id}/respond`, { threadId: inbox, requestId, behavior: "answer", message: "Revenue" });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+  const asked = async () => (await messages(philipp, reporter.threadId)).rows.find((row) => row.card?.requestId === requestId)!;
+  await until(async () => { const card = await asked(); return (await messages(philipp, reporter.threadId)).rows.some((row) => row.role === "user" && row.text === "Revenue" && row.replyToId === card.id); });
+  expect((await asked()).card!.answered, "Reporter got the answer where it asked").toBe("answer");
+  await until(async () => (await inboxTask()).openAsks === undefined);
+  expect(await chiefTurns(), "Marco's Chief took no turn").toEqual([]);
+  await until(idle);
+}, hostTimeout(120_000));
+
+it("takes Marco's 👍 on a line in his inbox back to the bot that asked, which carries on", async () => {
+  await passFromScout("Can you send me the slides by Friday?");
+  const line = (await inboxLines()).findLast((row) => row.text === "Can you send me the slides by Friday?")!;
+  script(null, "Great, the slides are on their way.");
+  const reacted = await team.as(marco, "POST", `/api/threads/${inbox}/messages/${line.id}/reactions`, { emoji: "👍" });
+  expect(reacted.status, JSON.stringify(reacted.body)).toBe(200);
+  await until(async () => (await messages(philipp, philippThread)).rows.some((row) => row.role === "bot" && row.text === "Great, the slides are on their way."));
+  expect((await messages(philipp, philippThread)).rows.findLast((row) => row.relay?.kind === "reply"))
+    .toMatchObject({ text: 'Marco replied to your message ("Can you send me the slides by Friday?"): 👍', relay: { email: MARCO.email } });
+  expect((await inboxLines()).find((row) => row.id === line.id)!.inbox!.answers).toEqual([expect.objectContaining({ by: "person", text: "👍" })]);
+  expect(await chiefTurns(), "Marco's Chief took no turn").toEqual([]);
+  await until(idle);
+}, hostTimeout(120_000));
+
+it("lets a tag Marco answered in the chat it came from leave his Needs you", async () => {
+  const main = scout.mainThreadId ?? scout.threadId;
+  const tag = "@Marco can you confirm the Q4 numbers?";
+  script(null, tag);
+  await turn(philipp, scout, main, "Ask Marco to confirm the Q4 numbers.");
+  const listed = async () => (await needsYou(marco)).some((item) => item.kind === "message" && item.text === tag);
+  await until(listed);
+  script(null, "Thanks Marco, the numbers stand.");
+  await turn(marco, scout, main, "Confirmed, they are right.");
+  expect(await listed()).toBe(false);
+}, hostTimeout(120_000));
+
+it("lists Marco's inbox by tab, settles an ask answered from its row, and keeps news until he marks it done", async () => {
+  type Listed = { id: string; kind: string; tab: string; text: string; card?: { requestId?: string } };
+  const listed = async () => (await team.as(marco, "GET", "/api/inbox")).body as { botId: string; threadId: string; rows: Listed[] };
+  const before = marcos.length;
+  const requestId = await approvalFromReporter("rm -rf ./tmp");
+  await until(async () => (await listed()).rows.some((row) => row.card?.requestId === requestId));
+  const view = await listed();
+  expect(view).toMatchObject({ botId: chief.id, threadId: inbox });
+  expect(view.rows.find((row) => row.card?.requestId === requestId)).toMatchObject({ kind: "ask", tab: "needs-you" });
+  expect(view.rows.filter((row) => row.tab === "needs-you").map((row) => row.card?.requestId), "only what waits on him needs him").toEqual([requestId]);
+  expect(view.rows.find((row) => row.text === "Can you approve the travel budget for me?")).toMatchObject({ kind: "message", tab: "info" });
+  expect(view.rows.find((row) => row.text === "The launch moved to Friday."), "answered from the inbox").toMatchObject({ tab: "done" });
+  const ask = view.rows.find((row) => row.card?.requestId === requestId)!;
+  expect((await team.as(marco, "POST", `/api/inbox/${ask.id}/done`)).status, "an ask is settled by its answer").toBe(409);
+
+  const answered = await team.as(marco, "POST", `/api/threads/${inbox}/respond`, { requestId, behavior: "allow" });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+  await until(async () => (await listed()).rows.find((row) => row.id === ask.id)?.tab === "done");
+  expect((await inboxTask()).openAsks).toBeUndefined();
+  await until(() => inboxFrames(marcos.slice(before)).some((task, index, all) => index > 0 && (task?.inboxChangedAt ?? 0) > (all[0]?.inboxChangedAt ?? 0)));
+
+  const news = view.rows.find((row) => row.text === "Can you approve the travel budget for me?")!;
+  const marked = await team.as(marco, "POST", `/api/inbox/${news.id}/done`);
+  expect(marked.status, JSON.stringify(marked.body)).toBe(200);
+  expect((marked.body as { rows: Listed[] }).rows.find((row) => row.id === news.id)).toMatchObject({ tab: "done" });
+  expect((await team.as(philipp, "POST", `/api/inbox/${news.id}/done`)).status, "only his own").toBe(404);
+  writeFileSync(file("release"), "");
+  await until(idle);
+}, hostTimeout(120_000));
+
 it("opens Marco's inbox on his first arrival of the day, and forgets it once he leaves", async () => {
+  await passFromScout("Can you book the meeting room for Friday?");
   const arrived = await team.as(marco, "POST", "/api/presence/active", { source: "desktop" });
   expect(arrived.body.open, JSON.stringify(arrived.body)).toEqual({ botId: chief.id, threadId: inbox });
   expect((await team.as(marco, "POST", "/api/presence/active", { source: "desktop" })).body.open).toBeUndefined();
@@ -296,7 +401,7 @@ it("opens Marco's inbox on his first arrival of the day, and forgets it once he 
 
 it("has none of it on a My Cloud: no inbox, no person route", async () => {
   const solo = (await fx.onCloud("POST", "/api/bots", { name: "Solo" })).body.bot as Bot;
-  expect(solo.tasks?.some((task) => task.inbox) ?? false).toBe(false);
+  expect(solo.tasks?.some((task) => task.inbox || task.openAsks !== undefined) ?? false).toBe(false);
   expect(((await fx.onCloud("GET", "/api/needs-you")).body.items as Array<{ kind: string }>).filter((item) => item.kind === "message")).toEqual([]);
   expect((await fx.onCloud("GET", "/api/notifications")).body.notifications.filter((entry: { forPerson?: string }) => entry.forPerson)).toEqual([]);
 }, hostTimeout(60_000));

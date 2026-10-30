@@ -64,8 +64,9 @@ export function launchAfter(record, { version, now = Date.now }) {
  *   now?(): number,
  *   log?(line: string): void,
  * }} deps `signals`: the screen locked, how long since anyone touched this computer, when someone last typed in the
- * app, whether its window is open, work under way in the app itself (a move, a lending job, a backup), and work under
- * way on the servers this app talks to (a bot's turn, a routine run, a sign-in, a Live call), each a name or null.
+ * app, whether its window is open, work under way in the app itself (a move, a lending job, a talk-shortcut ask, a
+ * backup), and work under way on the servers this app talks to (a bot's turn, a routine run, a sign-in, a Live call),
+ * each a name or null.
  */
 export function createQuietInstall({ updater, signals, record, version, now = Date.now, log = () => {} }) {
   let outOfSightSince = null, looking = null;

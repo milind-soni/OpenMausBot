@@ -110,11 +110,16 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
     starts again; the same run, never a copy.
   - Its bot or conversation was busy when it started: it waits there,
     checking every 30 s, for up to an hour.
-  - Signed out, out of credit, payment required, a usage limit or an engine
-    that needs setting up: no retry. The owner gets one notification per bot
-    and cause saying what to do, and no more until one of that bot's runs
-    completes. A usage limit that says when it resets (Claude Code does) puts
-    the run back for just after the reset, if that is within 12 hours.
+  - A usage limit with another AI that can carry on, or a signed-out AI with a
+    backup AI of the bot's own (or the app-wide one while Automatic recovery is
+    on): the run starts again on that AI after a short wait (see "When an engine runs out" and "When an engine is signed
+    out" in self-hosting.md), and the owner hears once that the bot is using it.
+  - Signed out, out of credit, payment required, a usage limit nothing can carry
+    on from, or an engine that needs setting up: no retry. The owner gets one
+    notification per bot and cause saying what to do, and no more until one of
+    that bot's runs completes. A usage limit that says when it resets (Claude
+    Code does) puts the run back for just after the reset, if that is within
+    12 hours.
   - The log says what happened ("Retried after the engine stalled ·
     Completed"), and each routine shows "N of M runs OK this week".
 - Existing one-time, daily/weekday and interval schedules are not migrated or

@@ -94,6 +94,15 @@ export function codexPatchProgress(params: unknown): TurnProgressFields | null {
   return report(activity, "edit", { bytes, ...(file ? { file } : {}), ...(typeof p?.itemId === "string" ? { itemId: p.itemId } : {}) });
 }
 
+type OutputReport = { type: "item.output"; itemType: "tool"; itemId: string; text: string; whole?: true };
+
+/** Codex's item/commandExecution/outputDelta: the next chunk a running command printed. */
+export function codexCommandOutput(params: unknown): OutputReport | null {
+  const p = params as { itemId?: unknown; delta?: unknown } | null;
+  if (typeof p?.itemId !== "string" || !p.itemId || typeof p.delta !== "string" || !p.delta) return null;
+  return { type: "item.output", itemType: "tool", itemId: p.itemId, text: p.delta };
+}
+
 const ACP_KINDS: Record<string, TurnProgressActivity> = {
   edit: "edit",
   delete: "edit",
@@ -127,4 +136,15 @@ export function acpToolProgress(update: unknown): TurnProgressFields | null {
     ...(file ? { file } : {}),
     ...(typeof u.toolCallId === "string" && u.toolCallId ? { itemId: u.toolCallId } : {}),
   });
+}
+
+/** An ACP call still running with text in its content: ACP replaces a call's whole content on each update. */
+export function acpToolOutput(update: unknown): OutputReport | null {
+  const u = update as { sessionUpdate?: unknown; toolCallId?: unknown; status?: unknown; content?: unknown } | null;
+  if (u?.sessionUpdate !== "tool_call" && u?.sessionUpdate !== "tool_call_update") return null;
+  if (u.status === "completed" || u.status === "failed" || typeof u.toolCallId !== "string" || !u.toolCallId) return null;
+  const text = (Array.isArray(u.content) ? u.content as Array<{ type?: unknown; content?: { type?: unknown; text?: unknown } }> : [])
+    .flatMap((part) => (part?.type === "content" && part.content?.type === "text" && typeof part.content.text === "string" ? [part.content.text] : []))
+    .join("\n");
+  return text ? { type: "item.output", itemType: "tool", itemId: u.toolCallId, text, whole: true } : null;
 }

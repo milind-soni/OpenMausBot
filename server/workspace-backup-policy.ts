@@ -1,6 +1,7 @@
 import { readlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseStoredConfig } from "./config.ts";
+import { inSecretFolder } from "./secret-folder.ts";
 
 // Connection sections stay on the destination whole: a restored URL must never redirect an API key kept from that device.
 const PORTABLE_CONFIG_KEYS = [
@@ -34,6 +35,7 @@ export function restoredWorkspaceConfig(portable: unknown, destination: unknown)
 }
 
 export function excludedWorkspaceAuthPath(path: string): boolean {
+  if (inSecretFolder(path)) return true;
   if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // Saved website logins and their key never leave the computer they were saved on, nor does the key sealing webhook secrets.

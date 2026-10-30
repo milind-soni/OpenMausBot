@@ -8,8 +8,8 @@ import { cn } from "@/lib/cn";
 import { buyOfferAllowed, cloudIntroView, cloudPlanLabel, cloudPlanLine, cloudPlanView, moneyBackLine, trialRunning, usd, type CloudPlanView, type CloudSource } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { cloudPlanFromAccount, cloudPlanFromSnapshot, type CloudPlanFacts } from "@/lib/usage-snapshot";
-import { CloudMascots } from "./cloud-buy/CloudMascots";
-import { CLOSE, PRIMARY, QUIET, SHEET, Tag } from "./cloud-buy/parts";
+import { NightCard } from "./cloud-buy/NightCard";
+import { CLOSE, ON_NIGHT, PRIMARY, QUIET, SHEET, Tag, TAG_ON_NIGHT } from "./cloud-buy/parts";
 import { NotNowButton } from "./NoticeCard";
 import { UPDATES_CONSENT_POPUP } from "./UpdatesConsent";
 
@@ -162,13 +162,14 @@ export function CloudProPopup({ view, onPrimary, onSeePlans, onNotNow, onClose }
   }, [onClose]);
   return <div className="ui-scrim fixed inset-0 z-50 flex items-center justify-center p-6" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div role="dialog" aria-modal="true" aria-labelledby={TITLE} aria-describedby="cloud-pro-popup-body" data-cloud-pro-popup={view.plan} tabIndex={-1}
-      className={cn(SHEET, "animate-pop-in relative max-h-full w-full max-w-[440px] overflow-y-auto px-6 pb-4 pt-5 outline-none")}>
-      <div className="flex min-h-8 flex-wrap items-center gap-x-2.5 gap-y-1 pe-10">
-        <CloudMascots size={22} />
-        <h2 id={TITLE} tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] outline-none!">{t("cloudProPopup.title")}</h2>
-        {view.badge && <Tag>{view.badge}</Tag>}
+      className={cn(SHEET, "group/sheet animate-pop-in relative max-h-full w-full max-w-[440px] overflow-y-auto px-6 pb-4 pt-5 outline-none")}>
+      <div className="-mx-4 -mt-3">
+        <NightCard small>
+          <h2 id={TITLE} tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] outline-none!">{t("cloudProPopup.title")}</h2>
+          {view.badge && <Tag className={cn("mt-1.5 self-start", TAG_ON_NIGHT)}>{view.badge}</Tag>}
+        </NightCard>
       </div>
-      <div id="cloud-pro-popup-body" className="mt-2 flex flex-col gap-4">
+      <div id="cloud-pro-popup-body" className="mt-4 flex flex-col gap-4">
         <p className="text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{t("cloudIntro.body")}</p>
         <ul className="flex flex-col gap-2 text-[14px] leading-5">
           {view.points.map(point => <li key={point} className="flex items-start gap-2.5"><Check size={16} strokeWidth={1.5} className="mt-0.5 shrink-0 text-ink-tertiary" aria-hidden="true" />{point}</li>)}
@@ -186,7 +187,7 @@ export function CloudProPopup({ view, onPrimary, onSeePlans, onNotNow, onClose }
         <p className="min-w-0 flex-1 text-[12px] leading-4 text-ink-tertiary">{t("pro.disclaimer")}</p>
         <NotNowButton onClick={onNotNow} />
       </div>
-      <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className={cn(CLOSE, "absolute end-4 top-4")}><X size={16} /></button>
+      <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className={cn(CLOSE, ON_NIGHT, "absolute end-4 top-4")}><X size={16} /></button>
     </div>
   </div>;
 }

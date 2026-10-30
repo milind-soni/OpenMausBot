@@ -10,7 +10,7 @@
 //   FAKE_CLAUDE_RATE_LIMIT  JSON rate_limit_info reported in a `rate_limit_event` after init
 //   FAKE_CLAUDE_LIMITED_FILE  path: while it exists, every turn plays usage-limit with the file's JSON rate_limit_info
 //   FAKE_CLAUDE_MCP_FAILED  comma list of MCP servers init reports as failed (`mcp_servers`)
-//   FAKE_CLAUDE_RELEASE  with hang: the turn ends normally once this file exists
+//   FAKE_CLAUDE_RELEASE  with hang: the turn ends normally once this file exists; a scripted call's `hold` ends then too
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
@@ -30,7 +30,10 @@
 //   FAKE_CLAUDE_CHECK  fail | hang: how the connection check answers (default OK)
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
-//   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?}] each turn calls before its reply (unset: one Bash call)
+//   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?, hold?}] each turn calls before its reply (unset: one Bash call). A call
+//     with `hold` keeps running until FAKE_CLAUDE_RELEASE exists, sending a tool_progress every FAKE_CLAUDE_TOOL_PROGRESS_MS
+//     (default 30000) as 2.1.306 does; hold "busy" | "idle" | "network" also keeps a stand-in child process that burns CPU,
+//     sleeps, or holds a loopback TCP connection, as the call's command would
 //   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
 //   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message
@@ -71,7 +74,7 @@
 //     environment); FAKE_CLAUDE_SHELL_LOG  path: each such call appends {command, output}
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
 import { splitLaunchNote } from "./launch-note.ts";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -136,14 +139,16 @@ const scriptedReplies = (() => {
     return [];
   }
 })();
-type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown; server?: string };
+type ScriptedHold = true | "busy" | "idle" | "network";
+type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown; server?: string; hold?: ScriptedHold };
+const HOLDS = new Set<unknown>([true, "busy", "idle", "network"]);
 const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
   if (raw === undefined) return null;
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
     return parsed
-      .filter((call): call is { name: string; id?: unknown; input?: unknown; ok?: unknown; output?: unknown; server?: unknown } => typeof call?.name === "string")
+      .filter((call): call is { name: string; id?: unknown; input?: unknown; ok?: unknown; output?: unknown; server?: unknown; hold?: unknown } => typeof call?.name === "string")
       .map((call) => ({
         name: call.name,
         ...(typeof call.id === "string" ? { id: call.id } : {}),
@@ -151,6 +156,7 @@ const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
         ok: call.ok !== false,
         output: call.output,
         ...(typeof call.server === "string" ? { server: call.server } : {}),
+        ...(HOLDS.has(call.hold) ? { hold: call.hold as ScriptedHold } : {}),
       }));
   } catch {
     return null;
@@ -386,8 +392,11 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   }
   // Every new bot asks for its setup card's answers (server/setup-suggestions.ts), so that call stays out of the captures
   // below too: FAKE_CLAUDE_SETUP_DUMP records it, FAKE_CLAUDE_SETUP_FILE holds its reply, and without one it fails at once.
+  // FAKE_CLAUDE_SETUP_DELAY_MS holds the reply back, so a recipe can see the card while it waits.
   if (prompt.startsWith("You write the answer options for the first message of a new bot")) {
     if (process.env.FAKE_CLAUDE_SETUP_DUMP) writeDumpAtomic(process.env.FAKE_CLAUDE_SETUP_DUMP, JSON.stringify({ argv, env: process.env, prompt }, null, 2));
+    const delay = Number(process.env.FAKE_CLAUDE_SETUP_DELAY_MS);
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     const file = process.env.FAKE_CLAUDE_SETUP_FILE;
     if (file && existsSync(file)) replyText(readFileSync(file, "utf8"));
     process.stderr.write("fake setup answers failed\n");
@@ -703,6 +712,55 @@ const runBash = (command: string): { ok: boolean; content: string } => {
   return { ok: ran.status === 0, content: output };
 };
 
+// Each stand-in exits once this CLI is gone, so a killed fixture never leaves one behind.
+const ORPHAN_EXIT = "const parent = process.ppid; const orphaned = () => { try { process.kill(parent, 0); return false; } catch { return true; } };";
+const STAND_INS: Record<Exclude<ScriptedHold, true>, string> = {
+  busy: `${ORPHAN_EXIT} let checked = Date.now(); for (;;) { if (Date.now() - checked > 500) { checked = Date.now(); if (orphaned()) process.exit(0); } }`,
+  idle: `${ORPHAN_EXIT} setInterval(() => { if (orphaned()) process.exit(0); }, 500);`,
+  network: `${ORPHAN_EXIT} const net = require("node:net"); const server = net.createServer(() => {}).listen(0, "127.0.0.1", () => { net.connect(server.address().port, "127.0.0.1"); }); setInterval(() => { if (orphaned()) process.exit(0); }, 500);`,
+};
+
+/** The scripted calls in order, each streamed as 2.1.306 does with --include-partial-messages and each held one running
+ * until FAKE_CLAUDE_RELEASE exists. */
+const playHeldCalls = (calls: ScriptedToolCall[], usage: object, done: () => void) => {
+  const progressMs = Number(process.env.FAKE_CLAUDE_TOOL_PROGRESS_MS) || 30_000;
+  const event = (e: unknown) => out({ type: "stream_event", event: e, parent_tool_use_id: null, session_id: "fake-session" });
+  const next = (index: number) => {
+    const call = calls[index];
+    if (!call) return done();
+    const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
+    event({ type: "message_start", message: { id: `msg-${id}`, usage } });
+    event({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name: call.name, input: {} } });
+    event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(call.input) } });
+    event({ type: "content_block_stop", index: 0 });
+    out({ type: "assistant", message: { id: `msg-${id}`, content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
+    event({ type: "message_stop" });
+    const answer = () => {
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !call.ok, content: call.output ?? "" }] } });
+      // A model takes a moment to write its next call; back-to-back frames would only test the coalescing.
+      setTimeout(() => next(index + 1), 600);
+    };
+    if (!call.hold) return answer();
+    const standIn: ChildProcess | null = call.hold === true ? null : spawn(process.execPath, ["-e", STAND_INS[call.hold]], { stdio: "ignore" });
+    const startedAt = Date.now();
+    let beats = 0;
+    const poll = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= (beats + 1) * progressMs) {
+        out({ type: "tool_progress", tool_use_id: `${id}-heartbeat-${beats}`, tool_name: call.name, parent_tool_use_id: id,
+          elapsed_time_seconds: Math.round(elapsed / 1000), heartbeat: true });
+        beats += 1;
+      }
+      const release = process.env.FAKE_CLAUDE_RELEASE;
+      if (!release || !existsSync(release)) return;
+      clearInterval(poll);
+      standIn?.kill();
+      answer();
+    }, 100);
+  };
+  next(0);
+};
+
 const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
   lateContinuation = late;
@@ -1014,6 +1072,13 @@ const playTurn = (prompt: JsonValue, late = false) => {
     return;
   }
   const scriptedToolCalls = turnToolCalls();
+  if (scriptedToolCalls?.some((call) => call.hold)) {
+    playHeldCalls(scriptedToolCalls, usage, () => {
+      for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
+      finish();
+    });
+    return;
+  }
   if (scriptedToolCalls) {
     const failureContext: string[] = [];
     for (const call of scriptedToolCalls) {

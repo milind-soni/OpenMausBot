@@ -43,7 +43,8 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
   ].filter((bot) => !(options.noChiefFor ?? []).includes(bot.reportsTo ?? "") || !bot.chiefOfStaff) as Bot[];
   const groups = [{ id: "room", name: "Launch", threadId: "room-thread", memberIds: ["scout"] }];
   const roomPeople = new Set([key(PHILIPP.email), key(MARCO.email)]);
-  let made = 0, ids = 0;
+  let made = 0, ids = 0, clock = 0;
+  const tick = () => (clock = Math.max(Date.now(), clock + 1));
   const unread: string[] = [];
   const store = {
     bots,
@@ -58,7 +59,7 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
       return task;
     },
     appendMessage: (threadId: string, message: Omit<Message, "id" | "at">) => {
-      const full = { id: `m${++ids}`, at: Date.now(), ...message } as Message;
+      const full = { id: `m${++ids}`, at: tick(), ...message } as Message;
       threads.set(threadId, [...(threads.get(threadId) ?? []), full]);
       emit({ type: "message", threadId, message: full });
       return full;
@@ -85,9 +86,11 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
   const notified: Notification[] = [];
   const continued: Array<{ botId: string; threadId: string; text: string; from: { botId: string; name: string }; relay: Message["relay"] }> = [];
   const audienceOf = (threadId: string): Audience => audiences.get(threadId) ?? (starters.has(threadId) ? memberAudience(starters.get(threadId)!) : "team");
-  const team = createTeamMessages({
+  const changed: string[] = [];
+  const make = () => createTeamMessages({
     team: options.team === false ? null : { id: "team-acme", name: "Acme" },
     dataDir,
+    now: tick,
     store: store as never,
     people: { everyone: () => people.map(({ email, role, leftAt }) => ({ email, role, firstSeenAt: 1, lastSeenAt: 1, ...(leftAt ? { leftAt } : {}) })) },
     personName: (person) => people.find((one) => key(one.email) === person)?.name,
@@ -111,17 +114,23 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
         return owner ? key(owner) : null;
       },
       continueTurn: (botId, threadId, text, from, relay) => { continued.push({ botId, threadId, text, from, relay }); },
+      changed: (threadId) => { changed.push(threadId); },
       handedFrom: (threadId) => options.handed?.[threadId] ?? null,
       notes: (botId) => ({ reporter: "The Q4 report draft is due on Nov 3.", scout: "Philipp's notes.", "marcos-mausbot": "Notes only Marco sees." })[botId] ?? "",
       ...(options.representative ? { representative: options.representative } : {}),
     },
   });
+  let team = make();
   const lines = (threadId: string) => threads.get(threadId) ?? [];
   const said = (threadId: string, text: string, who: { email: string; name: string }, extra: Partial<Message> = {}) =>
     store.appendMessage(threadId, { role: "user", kind: "text", text, sender: { name: who.name, id: key(who.email) }, ...extra });
   const inboxOf = (who: { email: string }) => team.inbox.home(key(who.email))!;
   return {
-    team, store, lines, notified, continued, unread, said, bots, audiences, starters, dataDir, inboxOf,
+    get team() { return team; },
+    store, lines, notified, continued, changed, unread, said, bots, audiences, starters, dataDir, inboxOf,
+    /** The server starts again: the inbox reads back what it kept, over the same conversations. */
+    restart: () => { team.stop(); team = make(); },
+    deleteThread: (threadId: string) => { threads.delete(threadId); emit({ type: "thread.deleted", threadId }); },
     close: () => { team.stop(); rmSync(dataDir, { recursive: true, force: true }); },
   };
 }

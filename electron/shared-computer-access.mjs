@@ -6,7 +6,9 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.mjs";
+import { typeOneCharacterAtATime, typesInOneBurst } from "./paced-typing.mjs";
 import { helperMissing } from "./lent-screen-failures.mjs";
+import { commandPath } from "./shell-path.mjs";
 
 /** Reads stay under the 4 MB body that carries a result to the server (base64 of 2 MiB is 2.8 MB); writes stay small. */
 const READ_LIMIT = 2 * 1024 * 1024;
@@ -24,10 +26,13 @@ const STOP_GRACE_MS = 5000;
 const RESULT_LIMIT = 3_900_000;
 const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
 const GIT_INTERNALS = "Files inside .git cannot be changed through a shared folder: git runs commands from its configuration and hooks";
+const HOME_SETTINGS = "The home folder's hidden files, Library and AppData cannot be changed through a shared folder: shells, git and apps run what they hold";
 
 /** Keys that open a shell or an account, and places that run code by themselves: no folder grant reaches these. Relative to home. */
 const PERSONAL_SECRETS = [
-  ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".netrc", ".git-credentials", ".npmrc", ".pypirc",
+  ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".netrc", ".git-credentials", ".gitconfig", ".npmrc", ".pypirc",
+  // Shell start-up files run in every new terminal and often export API keys.
+  ".profile", ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout",
   ".claude", ".claude.json", ".codex", ".mozilla", ".local/share/keyrings", ".local/bin",
   ".config/gh", ".config/gcloud", ".config/op", ".config/git", ".config/fish", ".config/autostart", ".config/systemd",
   ".config/google-chrome", ".config/chromium", ".config/BraveSoftware", ".config/microsoft-edge",
@@ -42,6 +47,7 @@ const PERSONAL_SECRETS = [
   "AppData/Roaming/Microsoft/Credentials", "AppData/Local/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect",
   "AppData/Roaming/Microsoft/Vault", "AppData/Local/Microsoft/Vault",
   "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup",
+  "Documents/PowerShell", "Documents/WindowsPowerShell",
 ];
 export function personalSecretPaths(home) {
   return typeof home === "string" && home ? PERSONAL_SECRETS.map(entry => path.join(home, ...entry.split("/"))) : [];
@@ -52,6 +58,12 @@ export { LENT_SCREEN_TOOLS } from "./lent-screen-tools.mjs";
 /** Compared the way a case-folding, Unicode-normalizing filesystem compares it. */
 const gitComponent = part => part.normalize("NFC").toLowerCase() === ".git";
 export const insideGitInternals = (root, relative) => root.split(path.sep).some(gitComponent) || relative.split("/").some(gitComponent);
+/** Security: the home folder is lent with editing, so a write through it never reaches its own hidden files and folders,
+ * Library (macOS) or AppData (Windows), where shell start-up files, git's configuration and apps' settings live. */
+export const insideHomeSettings = relative => {
+  const first = relative.split("/").find(part => part && part !== ".");
+  return Boolean(first) && (first.startsWith(".") || ["library", "appdata"].includes(first.normalize("NFC").toLowerCase()));
+};
 const hash = data => createHash("sha256").update(data).digest("hex");
 const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
 const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
@@ -154,9 +166,11 @@ const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "US
 
 export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
 
-export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
+export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
   if (typeof command !== "string" || !command.trim() || command.length > 8000) throw new Error("Give a command of at most 8000 characters");
   if (!validCommandSeconds(seconds)) throw new Error(`Give timeout_seconds as a whole number from 1 to ${MAX_COMMAND_SECONDS}`);
+  signal.throwIfAborted();
+  const PATH = await commandPath();
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const windows = process.platform === "win32";
@@ -168,7 +182,7 @@ export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
       // Without PATHEXT, PowerShell treats even .exe files as documents.
-      env: hostEnvironment(),
+      env: { ...hostEnvironment(), ...(PATH ? { PATH } : {}) },
     });
     const chunks = []; let bytes = 0; let reason; let settled = false;
     const graces = [];
@@ -202,7 +216,7 @@ export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
 }
 
 /** Persistent transport: Cua observation references survive to the next call. Ending sharing closes this, not the app's daemon. */
-export function createSharedCua(connection) {
+export function createSharedCua(connection, { platform = process.platform } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
     env: { ...hostEnvironment(), ...connection.mcpEnv },
@@ -237,7 +251,11 @@ export function createSharedCua(connection) {
     signal?.addEventListener("abort", abort, { once: true });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
-  const ready = request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "omb-shared-desktop", version: "1" } }).then(() => child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n'));
+  let driver;
+  const ready = request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "omb-shared-desktop", version: "1" } }).then(answer => {
+    driver = answer?.serverInfo;
+    child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+  });
   ready.catch(() => {});
   return {
     async call(operation, signal) {
@@ -250,6 +268,9 @@ export function createSharedCua(connection) {
       // Every tool and argument is checked here: nothing the server sends reaches the driver unless a lent screen accepts it.
       const lent = lentScreenArguments(operation.tool_name, operation.arguments);
       if (lent.error) throw new Error(lent.error);
+      if (typesInOneBurst(platform, driver?.version, operation.tool_name, lent.arguments)) {
+        return typeOneCharacterAtATime((name, args) => request("tools/call", { name, arguments: args }, signal), lent.arguments);
+      }
       return request("tools/call", { name: operation.tool_name, arguments: lent.arguments }, signal);
     },
     close() { lines.close(); fail(new Error("Computer sharing stopped")); },
@@ -288,6 +309,7 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   const write = operation.action === "write_file";
   if (write && folder.write !== true) throw new Error("This folder is read-only");
   if (write && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
+  if (write && folder.home === true && insideHomeSettings(operation.path ?? "")) throw new Error(HOME_SETTINGS);
   let data;
   if (write) {
     if (typeof operation.content !== "string") throw new Error("Give file content to write");

@@ -363,7 +363,7 @@ describe("the model picker in Simple mode", () => {
     expect(atDefault).toContain('title="The model decides how hard to think." class="text-[12px] leading-4 text-ink-tertiary">Default</span>');
   });
 
-  it("names the model on the Simple chip at every header width, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
+  it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
     const chip = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     const markup = renderToStaticMarkup(chip);
     expect(markup).not.toContain("data-model-effort");
@@ -374,7 +374,7 @@ describe("the model picker in Simple mode", () => {
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
-    expect(markup).toContain('<span class="max-w-[160px] truncate">Opus 5.5</span>');
+    expect(markup).toContain('<span class="min-w-0 max-w-[160px] truncate">Opus 5.5</span>');
     expect(markup).toContain("opacity-60");
     fixture.advanced = true;
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
@@ -399,6 +399,15 @@ describe("the model picker in Simple mode", () => {
     const chip = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(String(chip.props.className)).not.toContain("bg-composer");
     expect(String(chip.props.className)).not.toContain("shadow-(--shadow-float)");
+  });
+
+  it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
+    const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
+    const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(loose.props.className)).toContain("shrink-0");
+    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
@@ -739,6 +748,23 @@ describe("the model picker in Simple mode", () => {
     expect(html).toMatch(/data-simple-route="true"[^>]*>anthropic</);
     expect(html).toMatch(/data-simple-route="true"[^>]*>amazon-bedrock</);
     expect(html).not.toMatch(/data-simple-route="true"[^>]*>openai</);
+  });
+
+  it("renders a model's route on its own line in a row that may grow", () => {
+    fixture.instances = [engine("pi", "piAgent", "pi", "custom", [
+      { id: "amazon-bedrock/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
+      { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },
+    ])];
+    const html = menu(open(bot(undefined, "pi", "amazon-bedrock/claude-sonnet-4-5")).html);
+    const row = html.split("<button").find((part) => part.includes("data-simple-route") && part.includes("anthropic"));
+    expect(row).toBeDefined();
+    const lines = row!.slice(row!.indexOf("data-simple-model-text"));
+    expect(lines).toMatch(/data-simple-model-text="true" class="[^"]*\bflex-col\b/);
+    expect(lines).toMatch(/<span class="truncate">Claude Sonnet 4\.5<\/span>/);
+    expect(lines).toMatch(/data-simple-route="true" class="[^"]*\btruncate\b[^"]*">anthropic</);
+    expect(row).toContain("min-h-[30px]");
+    expect(row).not.toMatch(/\sh-\[30px\]/);
+    expect(row).not.toContain("max-w-[45%]");
   });
 
   it("looks for local models only when asked, on Show all where a provider offers them, never just for opening", () => {

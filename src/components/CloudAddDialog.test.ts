@@ -16,7 +16,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("./cloud-buy/CloudMascots", () => ({ CloudMascots: () => createElement("i", { "data-cloud-mascots": "" }) }));
+vi.mock("./cloud-buy/NightCard", () => ({ NightCard: ({ children }: { children: ReactNode }) => createElement("div", { "data-night-card": "" }, children) }));
 import { CloudAddDialog, CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } from "./CloudAddDialog";
 import { ChooseScreen } from "./cloud-buy/ChooseScreen";
 import { cloudAddView, type CloudAddView } from "@/lib/cloud-plan";
@@ -92,7 +92,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
       "Every plan includes", "Works while you're away", "Routines, long jobs and replies keep going around the clock.", "Private to you", "Reach it from anywhere",
       "A real browser and desktop", "Bring everything over", "Your bots, chats and memory move across in about a minute.",
       "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "Already have a plan? Sign in"]);
-    expect(html, "the mascots stand before the title").toMatch(/<i data-cloud-mascots=""><\/i><h2 id="cloud-add-title"/);
+    expect(html, "the night card holds the title, the line and Compare plans").toMatch(/<div data-night-card=""><h2 id="cloud-add-title"[^]*Compare plans[^]*<\/div><\/div><section/);
     expect(html.match(/data-plan-row="(hours|storage|voice)"/g), "what sets the cards apart, three rows on each").toHaveLength(9);
     expect(tree.filter(node => node.props.id?.startsWith?.("cloud-plan-details-")).map(node => node.props.hidden), "the rest waits for Compare plans").toEqual([true, true, true]);
     expect(tree.filter(node => node.props["data-plan-buy"]).map(node => node.props.className.includes("ui-button-primary")), "one primary action, on the recommended plan")
@@ -324,6 +324,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     const sheet = (kind: CloudAddView["kind"], staging = false) => renderToStaticMarkup(createElement(CloudAddSheet, { kind, staging, onClose: vi.fn(), children: "x" }));
     expect(sheet("offer")).toContain("max-w-[920px]"); expect(sheet("starting")).toContain("max-w-[720px]"); expect(sheet("waiting")).toContain("max-w-[540px]");
     expect(sheet("offer")).toContain('aria-label="Close"');
+    expect(sheet("offer"), "over a night card the close button takes the card's light ink").toContain("group-has-[[data-night-card]]/sheet:text-(--cloud-night-ink-quiet)");
     expect(sheet("offer"), "above Settings and the welcome flow (z-50), which it opens over").toContain("fixed inset-0 z-[60]");
     expect(sheet("offer")).not.toContain("data-cloud-staging");
     expect(text(sheet("offer", true))).toMatch(/Staging ?: This app uses the staging MausBot Cloud: test payments and test Clouds, not real ones\./);

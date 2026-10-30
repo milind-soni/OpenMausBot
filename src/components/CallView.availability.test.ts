@@ -91,8 +91,8 @@ describe("call capability guidance", () => {
       engine: "apple-speech",
       onDevice: true,
     }), false)).toEqual({
-      label: "The call service is unavailable",
-      reason: "The speech service is unavailable in this app build. Restart or update OpenMausBot.",
+      label: "Calls aren't available right now",
+      reason: "The speech service is unavailable in this app build. Restart or update MausBot.",
     });
   });
 });

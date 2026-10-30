@@ -1,9 +1,11 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown, its usage-analytics switch, the app's language and its answer to the product-updates email question.
+// has shown, its usage-analytics switch, the app's language, its answer to the product-updates email question and
+// whether the person hid the window's rail of places.
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
+import { DEFAULT_TALK_KEY, isTalkKey } from "./talk-keys.mjs";
 import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent } from "./updates-consent.mjs";
 import { accountFullName } from "./system-name.mjs";
 
@@ -15,6 +17,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
 const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
 const isLanguage = value => typeof value === "string" && value.length <= 24 && LANGUAGE.test(value);
+const CHAT_ID = /^[\w-]{1,128}$/;
 const INSTALL_ID = /^[A-Za-z0-9_-]{22,64}$/;
 
 /** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included.
@@ -35,6 +38,9 @@ export function jsonFile(file, files = fs) {
   };
 }
 
+const parseChat = value => value && typeof value === "object" && typeof value.botId === "string" && typeof value.threadId === "string"
+  && CHAT_ID.test(value.botId) && CHAT_ID.test(value.threadId) ? { botId: value.botId, threadId: value.threadId } : null;
+
 function parse(raw) {
   const record = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const seen = Array.isArray(record.seen) ? DESKTOP_NOTICES.filter(id => record.seen.includes(id)) : [];
@@ -43,10 +49,17 @@ function parse(raw) {
     return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
   }));
   const updatesConsent = parseUpdatesConsent(record.updatesConsent);
+  const quickAsks = record.quickAsks && typeof record.quickAsks === "object" && !Array.isArray(record.quickAsks)
+    ? Object.fromEntries(Object.entries(record.quickAsks).flatMap(([server, chat]) => { const parsed = parseChat(chat); return parsed ? [[server, parsed]] : []; }))
+    : {};
   return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}),
     ...(isLanguage(record.language) ? { language: record.language } : {}),
     ...(typeof record.installId === "string" && INSTALL_ID.test(record.installId) ? { installId: record.installId } : {}),
-    ...(updatesConsent ? { updatesConsent } : {}) };
+    ...(updatesConsent ? { updatesConsent } : {}),
+    ...(typeof record.talkShortcut === "boolean" ? { talkShortcut: record.talkShortcut } : {}),
+    ...(isTalkKey(record.talkKey) ? { talkKey: record.talkKey } : {}),
+    ...(typeof record.railHidden === "boolean" ? { railHidden: record.railHidden } : {}),
+    ...(Object.keys(quickAsks).length ? { quickAsks } : {}) };
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -97,6 +110,28 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
       save({ ...current(), updatesConsent });
       return true;
     },
+    talkShortcut: () => current().talkShortcut ?? true,
+    setTalkShortcut(enabled) { save({ ...current(), talkShortcut: enabled === true }); },
+    talkKey: () => current().talkKey ?? DEFAULT_TALK_KEY,
+    setTalkKey(id) {
+      if (!isTalkKey(id)) return false;
+      if (current().talkKey !== id) save({ ...current(), talkKey: id });
+      return true;
+    },
+    quickAsksChat(server) {
+      const quickAsks = current().quickAsks;
+      return quickAsks && Object.hasOwn(quickAsks, server) ? { ...quickAsks[server] } : null;
+    },
+    setQuickAsksChat(server, chat) {
+      const parsed = typeof server === "string" ? parseChat(chat) : null;
+      if (parsed) save({ ...current(), quickAsks: { ...current().quickAsks, [server]: parsed } });
+    },
+    /** The window's rail of places is shown until the person hides it. */
+    railHidden: () => current().railHidden === true,
+    setRailHidden(hidden) {
+      const railHidden = hidden === true;
+      if ((current().railHidden === true) !== railHidden) save({ ...current(), railHidden });
+    },
   };
 }
 
@@ -108,8 +143,8 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
  */
-export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now, systemName = accountFullName }) {
-  let prefs = null;
+export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now, systemName = accountFullName }) {
+  let prefs = given ?? null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
   const from = (channel, pages, handler) => (event, ...args) => {
     const asking = page(event);

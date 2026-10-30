@@ -978,6 +978,26 @@
   background: color-mix(in srgb, var(--color-ink) 15%, transparent);
 }
 
+/* A primary action that belongs to one bot wears that bot's flat bubble tone in every skin. Unlayered, like the
+   neutral pill above, so no utility repaints it. Its focus ring is the global one, 2px off the fill, so it reads on
+   any bot colour; a disabled one takes the same quiet colours as a disabled accent button. */
+.bot-button {
+  border-color: transparent;
+  background-color: var(--bot-button);
+  color: var(--bot-button-ink);
+}
+.bot-button:enabled:hover {
+  background-color: var(--bot-button-hover);
+}
+.bot-button:enabled:active {
+  background-color: var(--bot-button-pressed);
+}
+.bot-button:disabled {
+  background-color: var(--color-raised-hover);
+  color: var(--color-ink-secondary);
+  opacity: 1;
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -1519,6 +1539,52 @@ body {
   backdrop-filter: none;
   mask-image: none;
 }
+/* The colour of the place on screen (PlaceTint), faint, from the very top of the sidebar to just below its head, under
+   everything there: the head's words and controls stay on what is still almost the plain panel. Dark skins take a
+   little more of it to show at all. Reduced transparency: a thin solid line at the top instead; forced colours: none. */
+.place-tint {
+  height: calc(var(--glass-top, 48px) + 16px);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--place-tint) var(--place-tint-strength, 16%), transparent), transparent);
+}
+@container style(--code-color-scheme: dark) {
+  .place-tint { --place-tint-strength: 26%; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .place-tint { height: 3px; background: var(--place-tint); }
+}
+@media (forced-colors: active) {
+  .place-tint { display: none; }
+}
+/* The workspace's banner picture (PlaceTint), in place of its colour's tint: faded into the panel from the top of the
+   sidebar, dimmed and lightly blurred, so the head's words and controls stay readable over any picture. Without a
+   picture (or before it loads) the colour's tint shows; with reduced transparency or forced colours the picture never
+   does, and the tint's own rules apply. */
+.place-banner {
+  /* Its head's height and a little more, as the tint: the list's own fade band never cuts through it. */
+  height: calc(var(--glass-top, 48px) + 16px);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black, rgb(0 0 0 / 0.6) 60%, transparent);
+  mask-image: linear-gradient(to bottom, black, rgb(0 0 0 / 0.6) 60%, transparent);
+}
+.place-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--place-banner-strength, 0.3);
+  filter: blur(1.5px) saturate(0.85);
+  transform: scale(1.04);
+}
+@container style(--code-color-scheme: dark) {
+  .place-banner img { --place-banner-strength: 0.26; filter: blur(1.5px) saturate(0.85) brightness(0.8); }
+}
+.place-tint[data-under-banner] { display: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .place-banner { display: none; }
+  .place-tint[data-under-banner] { display: block; }
+}
+@media (forced-colors: active) {
+  .place-banner { display: none; }
+}
 /* The frame publishes its bars' heights. Rows rest clear of the glass,
    keyboard focus scrolls them clear, and the scrollbar runs only between the
    bars (a bar over it would swallow the drag). */
@@ -1876,7 +1942,46 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   from { opacity: 0; }
 }
 .turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
+.turn-now-toggle {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin: -4px -6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  text-align: start;
+  cursor: pointer;
+}
+.turn-now-toggle:hover, .turn-now-toggle[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+.turn-now-toggle:focus-visible {
+  outline: 1.5px solid var(--color-focus);
+  outline-offset: 1px;
+}
+.turn-now-chevron {
+  flex-shrink: 0;
+  color: var(--color-ink-tertiary);
+  transition: transform 160ms ease-out;
+}
+@keyframes turn-now-in {
+  from { opacity: 0; transform: translateY(-2px); }
+}
+.turn-now-card {
+  margin-top: 8px;
+  margin-inline-start: 44px;
+  width: min(560px, calc(100% - 44px));
+  border-radius: 14px;
+  background: var(--color-composer);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 10%, transparent);
+  padding: 10px 12px;
+  animation: turn-now-in 160ms ease-out both;
+}
 @media (prefers-reduced-motion: reduce) {
+  .turn-now-card { animation: none; }
+  .turn-now-chevron { transition: none; }
   .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
@@ -2869,6 +2974,51 @@ button:disabled.bg-danger {
 .user-bubble-colored *::selection {
   background-color: var(--bubble-selection, color-mix(in srgb, #000000 35%, var(--color-bubble-user)));
   color: var(--bubble-selection-ink, #ffffff);
+}
+
+/* MausBot Cloud's night: a deep night sky in the dark skins and an indigo dusk in the light ones. light-dark() picks by
+   the color-scheme of the element that paints it. One star twinkles, the z's drift and now and then a star shoots, each
+   slowly; the z's need transform-box to grow around their own centre. */
+:root {
+  --cloud-night-from: light-dark(#2c3274, #0e1230);
+  --cloud-night-mid: light-dark(#373b84, #151a45);
+  --cloud-night-to: light-dark(#7a68ae, #252c69);
+  --cloud-night-glow: light-dark(#f2a9c2, #6d5fd0);
+  --cloud-night-ink: #ffffff;
+  --cloud-night-ink-quiet: light-dark(#ffffffd6, #ffffffc4);
+  --cloud-night-star: light-dark(#ffffff, #fff7dd);
+  --cloud-night-laptop: light-dark(#eceef7, #c4c9de);
+  --cloud-night-laptop-edge: light-dark(#a9aecb, #7c84a8);
+  --cloud-night-z: light-dark(#ffffffe0, #dfe3ffcc);
+  --cloud-night-paper: light-dark(#f7eedb, #efe4c6);
+  --cloud-night-carve: light-dark(#d6c7a2, #c9bb95);
+  --cloud-night-far: light-dark(#5a4e9c, #1f2560);
+  --cloud-night-near: light-dark(#463f8c, #161b4b);
+}
+.cloud-night {
+  color-scheme: var(--code-color-scheme);
+  color: var(--cloud-night-ink);
+  background:
+    radial-gradient(55% 110% at 90% 115%, color-mix(in srgb, var(--cloud-night-glow) 20%, transparent), transparent 70%),
+    linear-gradient(100deg, var(--cloud-night-from) 0%, var(--cloud-night-mid) 55%, var(--cloud-night-to) 100%);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.08);
+}
+.cloud-night-twinkle { animation: cloud-night-twinkle 9s ease-in-out infinite; }
+.cloud-night-z { transform-box: fill-box; transform-origin: center; animation: cloud-night-z 7s linear infinite; }
+.cloud-night-z:nth-child(2) { animation-delay: -2.4s; }
+.cloud-night-z:nth-child(3) { animation-delay: -4.8s; }
+.cloud-night-shoot { opacity: 0; animation: cloud-night-shoot 19s ease-in infinite; }
+.cloud-night[data-paused] * { animation-play-state: paused; }
+@keyframes cloud-night-twinkle { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes cloud-night-z {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  15%, 70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(14px, -22px) scale(1.05); }
+}
+@keyframes cloud-night-shoot {
+  0%, 90% { opacity: 0; transform: translate(0, 0); }
+  92% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(120px, 36px); }
 }
 
 /* Trace waterfall: AI steps lavender, tools pale teal, errors red, each mixed into the skin's card so every skin keeps its contrast. */

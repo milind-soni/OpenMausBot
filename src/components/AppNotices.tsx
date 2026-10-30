@@ -10,13 +10,12 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstReplyPending } from "@/lib/corner-popup";
-import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, USE_MY_COMPUTER_NOTICE, usedBefore } from "@/lib/notices";
+import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { useUpdaterState } from "@/lib/updater";
-import { activeLocale, t } from "@/lib/i18n";
-import { useUseMyComputerDue } from "@/lib/use-my-computer-notice";
+import { t } from "@/lib/i18n";
 import { engineReady } from "./EngineLibrary";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
 import { CLOUD_PRO_POPUP_SOURCE, CloudProPopup, cloudProCloudPageView, cloudProPopupView, reportCloudProPopup, useDesktopNotices, useOtherDialogOpen,
@@ -82,11 +81,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const intent = useCloudIntent();
   const moving = useMoveQuiet(now);
   const mausBot = useMausBotWelcomeDue(viewer);
-  const lending = remote ? undefined : window.ogb?.cloudLending;
-  const [macAsked, setMacAsked] = useState(false);
-  const [macAsking, setMacAsking] = useState(false);
-  const macDue = useUseMyComputerDue(lending, macAsked);
-  const macBlocked = useOtherDialogOpen(macDue === true) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -166,10 +160,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const mausBotFirst = mausBot.due;
   const consentNow = consentWaits === true || consentFact === false ? false : consentWaits === null || mausBotFirst ? null : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
-  // Main's Use my Mac popup is full-screen too: it waits and skips a launch as the Cloud Pro popup does.
-  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || Boolean(lending?.ask) || simpleDue ? nextNotice({
-    [USE_MY_COMPUTER_NOTICE]: moving || macDue === false || afterWelcome === true ? false
-      : macDue === null || moving === null || afterWelcome === null || mausBotFirst || macBlocked ? null : true,
+  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || simpleDue ? nextNotice({
     // As the Cloud Pro popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
     [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
     [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome === true ? false
@@ -189,7 +180,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   useEffect(() => {
     if (!shownKey) return;
     // The popups and the question own this launch: MausBot's first-launch card waits for a later one.
-    if (shownKey === USE_MY_COMPUTER_NOTICE || shownKey === SIMPLE_MODE_NOTICE || shownKey === CLOUD_PRO_UPDATE_NOTICE || shownKey === UPDATES_CONSENT_NOTICE) markLaunchDialog("notices");
+    if (shownKey === SIMPLE_MODE_NOTICE || shownKey === CLOUD_PRO_UPDATE_NOTICE || shownKey === UPDATES_CONSENT_NOTICE) markLaunchDialog("notices");
     if (shownKey === CLOUD_INTRO) {
       setIntroOpen(true);
       track("cloud_card_shown", { variant: view?.kind === "signed-out" ? "signed_out" : "free" });
@@ -198,10 +189,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     } else if (notice === CLOUD_TRIAL_NOTICE && trialOpen !== shownKey) {
       setTrialOpen(shownKey);
       void planBridge?.noticeSeen?.().catch(() => {});
-    } else if (shownKey === USE_MY_COMPUTER_NOTICE && !macAsking) {
-      // Main draws this popup itself: the page only says now, and waits for it to be answered or put off.
-      setMacAsking(true);
-      void lending?.ask?.(activeLocale()).catch(() => {}).finally(() => { setMacAsked(true); close(); });
     } else if (shownKey === SIMPLE_MODE_NOTICE && !simpleShown) {
       setSimpleShown(true);
       reportSimpleModePrompt("shown");

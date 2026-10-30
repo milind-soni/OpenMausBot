@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { VM_WORKSPACE_GUEST, managedImageDockerfile, type LocalVmTarget } from "./container-computer.ts";
-import { rescueFirefoxProfile } from "./local-vm-profiles.ts";
+import { rescueFirefoxProfile, rescueInstalledApps } from "./local-vm-profiles.ts";
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -56,6 +56,17 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     // Chrome and Chromium keep working as before.
     expect(readlinkSync(join(home, ".config", "google-chrome"))).toBe(join(workspace, ".browser-profiles", "google-chrome"));
     expect(readlinkSync(join(home, ".config", "chromium"))).toBe(join(workspace, ".browser-profiles", "chromium"));
+    expect(readlinkSync(join(home, ".local"))).toBe(join(workspace, ".desktop-apps", "local"));
+  });
+
+  it("keeps a user-installed desktop app across a new VM image", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(workspace, ".desktop-apps", "local", "share", "applications"), { recursive: true });
+    writeFileSync(join(workspace, ".desktop-apps", "local", "share", "applications", "example.desktop"), "[Desktop Entry]");
+    runPrepare(prepareScript(dir, workspace), home);
+    expect(readFileSync(join(home, ".local", "share", "applications", "example.desktop"), "utf8")).toBe("[Desktop Entry]");
   });
 
   it("keeps a durable profile over the image's empty one and clears the old desktop's Firefox locks", () => {
@@ -135,6 +146,31 @@ cp -RP "${container}$src" "$3"
 const target = (workspaceDir: string): LocalVmTarget => ({ key: "bot:x", containerName: "openmausbot-computer-x", workspaceDir, viewerPort: null, label: "x" });
 
 describe.skipIf(process.platform === "win32")("rescueFirefoxProfile", () => {
+  it("copies user-installed desktop apps into the durable area before replacement", async () => {
+    const dir = scratch();
+    const container = join(dir, "container");
+    mkdirSync(join(container, "home", "cua", ".local", "share", "applications"), { recursive: true });
+    writeFileSync(join(container, "home", "cua", ".local", "share", "applications", "example.desktop"), "[Desktop Entry]");
+    const workspace = join(dir, "workspace");
+    mkdirSync(workspace);
+    expect(await rescueInstalledApps(fakeRuntime(dir, container).runtime, target(workspace))).toBe("rescued");
+    expect(readFileSync(join(workspace, ".desktop-apps", "local", "share", "applications", "example.desktop"), "utf8")).toBe("[Desktop Entry]");
+  });
+
+  it("refuses to replace a different durable app area", async () => {
+    const dir = scratch();
+    const container = join(dir, "container");
+    mkdirSync(join(container, "home", "cua", ".local", "share", "applications"), { recursive: true });
+    writeFileSync(join(container, "home", "cua", ".local", "share", "applications", "example.desktop"), "old desktop");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(workspace, ".desktop-apps", "local", "share", "applications"), { recursive: true });
+    const durable = join(workspace, ".desktop-apps", "local", "share", "applications", "example.desktop");
+    writeFileSync(durable, "durable desktop");
+
+    await expect(rescueInstalledApps(fakeRuntime(dir, container).runtime, target(workspace)))
+      .rejects.toThrow(/durable app area differs/);
+    expect(readFileSync(durable, "utf8")).toBe("durable desktop");
+  });
   it("copies an old desktop's Firefox profile into the workspace before the desktop is removed", async () => {
     const dir = scratch();
     const container = join(dir, "container");

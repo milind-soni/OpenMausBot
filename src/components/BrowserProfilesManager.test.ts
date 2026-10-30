@@ -102,7 +102,7 @@ describe("browser profile manager", () => {
     fixture.engine = { myChrome: false, myChromeLendable: true };
     fixture.profiles = [{ id: "work", name: "Work", browser: "chrome" }];
     const html = renderToStaticMarkup(createElement(BrowserProfilesManager));
-    expect(html).toContain("turn on Your Chrome");
+    expect(html).toContain("it lends its Chrome by itself");
     expect(html).toContain("bots on a My Chrome profile can&#x27;t browse");
     expect(html).toContain("switching a profile to Built-in works too");
     expect(html).not.toContain("there is no Chrome of yours to use");
@@ -112,7 +112,7 @@ describe("browser profile manager", () => {
     fixture.engine = { myChrome: false, myChromeLendable: true };
     fixture.profiles = [{ id: "work", name: "Work" }];
     const html = renderToStaticMarkup(createElement(BrowserProfilesManager));
-    expect(html).toContain("turn on Your Chrome");
+    expect(html).toContain("it lends its Chrome by itself");
     expect(html).not.toContain("this profile&#x27;s bots");
   });
 
@@ -124,7 +124,7 @@ describe("browser profile manager", () => {
     expect(html).not.toContain("Signed-in sites");
     const botPanel = renderToStaticMarkup(createElement(BrowserProfilesManager, { bot })).split("<details")[0]!;
     expect(botPanel).toContain("act inside your real Chrome");
-    expect(botPanel).toContain("turn on Your Chrome");
+    expect(botPanel).toContain("it lends its Chrome by itself");
     expect(botPanel).not.toContain("Signed-in sites");
   });
 

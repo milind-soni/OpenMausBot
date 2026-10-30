@@ -1,7 +1,5 @@
 import { hintSeen, hintSeenPatch, type OnboardingStatus } from "@/lib/onboarding";
 
-/** Main's own Use my Mac popup, asked for when nothing else is on screen; main keeps whether it came, per Cloud. */
-export const USE_MY_COMPUTER_NOTICE = "use-my-computer";
 export const CLOUD_PRO_UPDATE_NOTICE = "cloud-pro-update-2026-10";
 export const UPDATES_CONSENT_NOTICE = "updates-consent";
 /** The Simple mode popup, once per browser (simple-mode-prompt.ts keeps whether it was closed). */
@@ -14,9 +12,9 @@ export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 
-export type NoticeId = typeof USE_MY_COMPUTER_NOTICE | typeof SIMPLE_MODE_NOTICE | typeof CLOUD_PRO_UPDATE_NOTICE | typeof UPDATES_CONSENT_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof STAR_NOTICE;
+export type NoticeId = typeof SIMPLE_MODE_NOTICE | typeof CLOUD_PRO_UPDATE_NOTICE | typeof UPDATES_CONSENT_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof STAR_NOTICE;
 
-export const NOTICES: readonly NoticeId[] = [USE_MY_COMPUTER_NOTICE, SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE];
+export const NOTICES: readonly NoticeId[] = [SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 

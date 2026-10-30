@@ -43,6 +43,7 @@ export interface ChatAppsMcpDeps {
   apps: ChatApps;
   storedServers(): Record<string, unknown>;
   mountedServers(bot: BotRecord): Record<string, McpServerSpec>;
+  personMcp?(): readonly string[];
   oauth: ChatAppsMcpOAuth;
   dataDir?: string;
   catalog?: McpAppCatalog;
@@ -371,7 +372,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     queued.add(name);
     probing = probing.then(async () => {
       queued.delete(name);
-      if (closed) return;
+      if (closed || deps.personMcp?.().includes(name)) return;
       const stored = storedServer(name, deps.storedServers()[name]);
       if (!stored?.enabled || stored.apps === false) return;
       if (isRemoteMcpServer(stored) && deps.oauth.authState(name, stored.url) === "needs-sign-in") return;

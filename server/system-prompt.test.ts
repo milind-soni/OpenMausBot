@@ -298,9 +298,11 @@ describe("shared sentences", () => {
     }
     expect(LEARN_PROMPT).toContain("only when the user explicitly asks to revise that exact name");
     // Triggers have no pending state: the bot sets them up in the same turn and the person undoes from the card.
-    expect(TRIGGER_PROMPT).toContain("set it up with create_trigger in this turn");
+    expect(TRIGGER_PROMPT).toContain("set it up with trigger action=create in this turn");
     expect(TRIGGER_PROMPT).toContain("Do not ask for confirmation");
     expect(TRIGGER_PROMPT).toContain("Edit, Pause and Undo");
+    expect(TRIGGER_PROMPT).toContain("use wait_until instead of staying busy or making a short-interval routine");
+    expect(TRIGGER_PROMPT).toContain("give follow_up only when they asked for something to be done at that moment");
     expect(TRIGGER_PROMPT).not.toMatch(/pending|explicitly asks/);
     expect(CREDENTIAL_PROMPT).toContain("secure credential request");
     expect(CREDENTIAL_PROMPT).not.toContain("applied immediately");
@@ -308,8 +310,14 @@ describe("shared sentences", () => {
 });
 
 describe("composioSystemPrompt", () => {
-  it("keeps the generic all-tools sentence for legacy bots", () => {
-    expect(composioSystemPrompt(undefined)).toBe(COMPOSIO_PROMPT);
+  it("keeps the generic all-tools sentence for legacy bots, with the app tools every engine offers by name", () => {
+    expect(composioSystemPrompt(undefined)).toBe(`${COMPOSIO_PROMPT} Gmail and Google Calendar, when connected, have tools of their own: call gmail.search_emails, gmail.read_email and gmail.read_email_thread, and googlecalendar.list_events and googlecalendar.list_calendars directly (your engine may show them behind its own prefix, with _ for the dot), and use the composio tools for everything else.`);
+  });
+
+  it("names the app tools of only the apps a bot was granted", () => {
+    expect(composioSystemPrompt({ gmail: { tools: "*" } })).toContain("Gmail, when connected, has tools of its own: call gmail.search_emails, gmail.read_email and gmail.read_email_thread directly");
+    expect(composioSystemPrompt({ github: { tools: "*" } })).not.toContain("gmail.");
+    expect(composioSystemPrompt({})).not.toContain("gmail.");
   });
 
   it("offers only a connection card when no tools are granted", () => {
@@ -355,7 +363,8 @@ describe("cloudHomePrompt", () => {
 
   it("points to a lent computer only when the turn has the shared-computer tools", () => {
     expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer");
-    expect(cloudHomePrompt(true)).toContain("otherwise give them [Use this computer](openmausbot://use-my-computer) to press in OpenMausBot on that computer: it asks them once");
+    expect(cloudHomePrompt(true)).toContain("otherwise ask them to open OpenMausBot on that computer, signed in to MausBot Cloud: it shares that computer with you by itself");
+    expect(cloudHomePrompt(true)).not.toContain("use-my-computer");
     expect(cloudHomePrompt(true)).not.toContain("Settings →");
     expect(cloudHomePrompt(true)).toContain("use its say field when it has one");
     expect(cloudHomePrompt(false)).not.toMatch(/shared_computer|list_shared_computers/);
@@ -374,7 +383,7 @@ describe("cloudHomePrompt", () => {
   it("names the person's computer by its platform, never a Mac unless it is one, and the product by its name", () => {
     const pc = cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }]);
     expect(pc).toContain("If they ask for something on their PC (ASH-PC), check list_shared_computers");
-    expect(pc).toContain("give them [Use my PC](openmausbot://use-my-computer) to press in OpenMausBot on that PC: it asks them once and shares that PC with you. It is a PC: call it that, never a Mac unless it is one.");
+    expect(pc).toContain("otherwise ask them to open OpenMausBot on that PC, signed in to MausBot Cloud: it shares that PC with you by itself. It is a PC: call it that, never a Mac unless it is one.");
     const mac = cloudHomePrompt(false, [], [{ name: "Ash’s MacBook", platform: "darwin" }, { name: "ASH-PC", platform: "win32" }]);
     expect(mac).toContain("You cannot see or use their Mac (Ash’s MacBook), its screen or its files from here.");
     for (const text of [pc, mac, cloudHomePrompt(true), cloudHomePrompt(true, [], [{ name: "box", platform: "linux" }])]) {

@@ -34,8 +34,8 @@ function tabsOf(value: unknown): BrowserTab[] {
 
 /**
  * A bot's browser: the page fills the panel on either engine, streamed over the v2 WebSocket when the new engine runs
- * it, else over the v1 live view. Security: a new connection never silently restores permission to type and never
- * replays old input. Only the server returns a hold, and only to this panel's reconnect after its own v1 stream dropped.
+ * it, else over the v1 live view. Security: a new connection never replays old input. Only the server gives this view a
+ * hold: one of the same person's, when none of their views uses it or when they take it over here.
  */
 export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
@@ -137,6 +137,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const created = createBrowserControl({
       transport,
       owned: () => controlRef.current?.controller === "you",
+      mine: () => controlRef.current?.owned === true,
       onTakeStatus: setTakeStatus,
       onError: setError,
       onHalted: () => setError(t("browser.input.tooSlow")),
@@ -276,6 +277,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       connected={connected}
       control={control}
       takeStatus={takeStatus}
+      hint={t(kept || signInOpen ? "browser.control.keptHint" : "browser.control.yoursHint", { name: bot.name })}
       commandsReady={commandsReady}
       profileName={profileName}
       fullscreen={fullscreen}

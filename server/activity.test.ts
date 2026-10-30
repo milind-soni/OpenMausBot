@@ -130,6 +130,16 @@ describe("readBotActivity", () => {
     ]);
   });
 
+  it("shows each run's step under it, the words the working line used, with the run's turn to open it at", () => {
+    event("t1", "2026-09-07T09:00:00.000Z", { type: "item.started", itemType: "tool", itemId: "i1", title: "Bash",
+      step: { activity: "command", target: "scrape.py", detail: "cd ~/biber && python3 scrape.py --pages 40" } });
+    event("t1", "2026-09-07T09:01:00.000Z", { type: "item.started", itemType: "tool", itemId: "i2", title: "WebFetch", step: { activity: "fetch", target: "linkedin.com" } });
+    expect(read().map((row) => [row.label, row.summary, row.turnId])).toEqual([
+      ["Fetched a page", "linkedin.com", "turn-1"],
+      ["Ran a command", "cd ~/biber && python3 scrape.py --pages 40", "turn-1"],
+    ]);
+  });
+
   it("keeps reused provider item IDs separate across turns, including legacy no-turn events", () => {
     for (const [turnId, tool, ok, minute] of [["turn-one", "Read", true, "00"], ["turn-two", "Bash", false, "01"], [undefined, "Edit", true, "02"]] as const) {
       event("t1", `2026-09-07T09:${minute}:00.000Z`, { type: "item.started", itemType: "tool", itemId: "item_0", turnId, title: tool });

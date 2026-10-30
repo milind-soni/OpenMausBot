@@ -509,3 +509,45 @@ describe("connector MCP bridge", () => {
     }
   });
 });
+describe("connected-app tools by name", () => {
+  const upstreamFor = (calls: any[]) => listen((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const frame = JSON.parse(body);
+      calls.push(frame);
+      response.writeHead(200, { "content-type": "application/json" });
+      if (frame.method === "tools/list") {
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { tools: [{ name: "COMPOSIO_MULTI_EXECUTE_TOOL", description: "Run app tools", inputSchema: { type: "object" } }] } }));
+        return;
+      }
+      const slug = frame.params?.arguments?.tools?.[0]?.tool_slug;
+      const text = JSON.stringify({ successful: true, data: { results: [{ tool_slug: slug, response: { successful: true, data: { messages: [{ messageId: "m1", subject: "Q3" }] } } }] } });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { content: [{ type: "text", text }] } }));
+    });
+  });
+
+  it("lists the app tools after the upstream's, under the spelling the engine asked for", async () => {
+    for (const [style, names] of [["dotted", ["gmail.search_emails", "gmail.read_email_thread"]], ["", ["gmail_search_emails", "gmail_read_email_thread"]]] as const) {
+      const upstream = await upstreamFor([]);
+      const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails", "gmail.read_email_thread", "not.a_tool"]), ...(style ? { OMB_CONNECTOR_APP_TOOL_NAMES: style } : {}) });
+      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+      const listed = await nextJson(lines);
+      expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["COMPOSIO_MULTI_EXECUTE_TOOL", ...names]);
+      expect(listed.result.tools[1].annotations).toEqual({ readOnlyHint: true });
+      child!.kill("SIGKILL");
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = null;
+    }
+  });
+
+  it("runs a call by either name as its Composio tool through the multi-execute tool, and answers with that tool's data", async () => {
+    const calls: any[] = [];
+    const upstream = await upstreamFor(calls);
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails"]) });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "gmail_search_emails", arguments: { query: "from:ada" } } })}\n`);
+    const reply = await nextJson(lines);
+    expect(calls.at(-1).params).toEqual({ name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { user_id: "me", query: "from:ada", max_results: 10, include_payload: false, verbose: false } }] } });
+    expect(reply).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: JSON.stringify({ messages: [{ messageId: "m1", subject: "Q3" }] }) }] } });
+  });
+});

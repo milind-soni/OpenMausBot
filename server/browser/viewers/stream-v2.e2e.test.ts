@@ -63,6 +63,7 @@ suite("the v2 stream on real Chrome", () => {
     const route = createBrowserViewerRoutes({
       upgrades,
       dataDir: real.dataDir,
+      person: () => "local-owner",
       viewers: {
         open: async () => {},
         action: async () => ({ ok: true }),
@@ -190,8 +191,9 @@ suite("the v2 stream on real Chrome", () => {
     const holder = await connect("width=1200&height=800&maxWidth=2400&maxHeight=1600");
     await takeControl(holder);
     await until(pageSize, same([1280, 853, 2]));
+    // The same person's second panel watches their hold: the page keeps the size of the one it is used from.
     const other = await connect("width=700&height=1000&maxWidth=1400&maxHeight=2000");
-    await until(() => other.messages.filter((message) => message.type === "control").at(-1), (control) => control?.controller === "another-viewer");
+    await until(() => other.messages.filter((message) => message.type === "control").at(-1), (control) => control?.controller === "agent" && control.owned === true && control.controlling === false);
     await sleep(1_000);
     expect(await pageSize()).toEqual([1280, 853, 2]);
     await other.close();

@@ -20,6 +20,8 @@ vi.mock("@/state/store", async (importOriginal) => {
 import { BotContextMenu, BotListItem, BotThreadList, botRowProps, GroupListItem, PinnedBotCircle, type BotRowProps } from "./Sidebar";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { forgetSearchDisclosuresForTests } from "@/lib/search-disclosure";
+import { noteTurnEvent, resetTurnLive } from "@/state/turn-status";
+import type { RuntimeEvent } from "../../shared/runtime-events";
 
 const bot: Bot = {
   id: "atlas", threadId: "last-selected", name: "Atlas", title: "", description: "",
@@ -188,6 +190,38 @@ describe("bot-first sidebar", () => {
     expect(working).toContain('<span class="sr-only">Working</span>');
     expect(working).not.toContain('role="status"');
     expect(working).toContain("[--row:var(--color-panel)]");
+  });
+
+  it.each([false, true])("says the step a working bot is on in place of its last message, and its last message again once done (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.showThreads = false;
+    resetTurnLive();
+    const said: Bot["messages"] = [{ id: "hi", role: "bot", kind: "text", at: 1, text: "Here are the leads from Monday." }];
+    const leads = { threadId: "leads", title: "Leads", createdAt: 1 };
+    const candidate: Bot = { ...bot, threadId: "leads", messages: said, unread: false, projects: [], tasks: [{ ...leads, busy: true, activity: "working" }], busy: true };
+    noteTurnEvent({ eventId: "e1", provider: "claudeAgent", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
+      type: "turn.progress", activity: "command", itemId: "c1", target: "scrape.py", quiet: { kind: "busy" } } as RuntimeEvent);
+    const working = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(working).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Running scrape.py</span>');
+    expect(working, "the row's second line keeps its height: no taller dots").not.toContain("h-[1.5em]");
+    expect(working).not.toContain("Monday");
+    expect(working, "the row says the step alone, not how it is doing").not.toContain("busy, no output yet");
+    const done = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...candidate, busy: false, tasks: [{ ...leads, busy: false, activity: "idle" }] })));
+    expect(done).toContain("Here are the leads from Monday.");
+    expect(done).not.toContain("scrape.py");
+    resetTurnLive();
+  });
+
+  it("speaks for the conversation that is working when another one is open", () => {
+    fixture.advanced = true;
+    fixture.showThreads = false;
+    resetTurnLive();
+    const candidate: Bot = { ...bot, threadId: "open", messages: [], unread: false, projects: [], busy: true,
+      tasks: [{ threadId: "open", title: "Open", createdAt: 1 }, { threadId: "leads", title: "Leads", createdAt: 2, busy: true, activity: "working" }] };
+    noteTurnEvent({ eventId: "e2", provider: "codex", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
+      type: "turn.progress", activity: "web", itemId: "w1", target: "Biber Dammbau" } as RuntimeEvent);
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web for “Biber Dammbau”</span>");
+    resetTurnLive();
   });
 
   it("rings a focused row or group chat inside its edge in both modes", () => {

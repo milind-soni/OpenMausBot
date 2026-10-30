@@ -38,7 +38,10 @@ UI and harness, then removes its temporary data; the server log remains.
    A Cmd shortcut such as Cmd+C must not delay that. Keep **Type or paste
    text…** open past 8 seconds: control stays yours until it closes. Press
    **Take control**, then wait a minute: it stays yours until **Hand back**,
-   which returns it at once. **Type a password or code…** shows a masked
+   which returns it at once. Leave it untouched for 5 minutes: control goes
+   back to the bot by itself, kept or not. Close the panel while you hold it:
+   the bot gets it back 2 minutes later, unless you open the panel again
+   first, on any device, which carries on with your hold. **Type a password or code…** shows a masked
    field; its text reaches the selected page field and appears in no log,
    response or other view.
    Holding a mouse button or key down must never hand back. Reconnect the
@@ -51,9 +54,12 @@ UI and harness, then removes its temporary data; the server log remains.
    switch to it (a clean browser), then back to Own browser. The previous page
    remains. Rename a shared profile without changing its identity. Confirmed
    deletion clears its bot references without deleting another profile's data.
-5. Open a second isolated browser tab on the preview. Interact in one; the
-   other must not receive new page frames or accept input. Hand-back and
-   disconnect must never release another viewer's control lease. Hide the app's
+5. Open the panel in a second window signed in as you, then take control in
+   the first: the second shows the page and says the bot is paused for you,
+   and its **Hand back** returns the browser at once. Interacting in the second
+   moves your hold there; the first takes no more input. Open it as a
+   different person (another member's session): that view gets no page frames
+   and no input, and its hand-back or disconnect never ends your hold. Hide the app's
    window or tab while a panel only watches: its view must leave (the browser
    stops streaming and may idle-close) and reconnect on its own when the app
    shows again. A panel holding the browser keeps its view while hidden.

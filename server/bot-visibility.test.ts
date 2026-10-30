@@ -381,6 +381,14 @@ describe("a Team Cloud's audiences", () => {
     expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub" });
   });
 
+  it("a main chat named as another person's private chat is replaced by a conversation the viewer reads, never sent", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub-2", tasks: [{ threadId: "t-pub-2" }, { threadId: "t-pub" }] };
+    const sent = memberBot(bot, admin) as Record<string, unknown>;
+    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+    expect(memberBot({ ...bot, threadId: "t-pub" }, admin)).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+  });
+
   it("a live frame from another person's private chat never reaches an admin's stream", () => {
     const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
     const ctx: FrameContext = { visible: admin, webhook: () => undefined, freshBot: () => undefined, freshGroup: () => undefined };
@@ -409,6 +417,21 @@ describe("a Team Cloud's audiences", () => {
     expect(routineRunVisible({ botId: "pub", threadId: "t-pub-2" }, admin)).toBe(false);
     expect(routineRunVisible({ botId: "pub", threadId: "t-pub", resultsThreadId: "t-pub-2" }, admin)).toBe(false);
     expect(routineRunVisible({ botId: "pub", threadId: "t-pub" }, admin)).toBe(true);
+  });
+
+  it("sends what a bot is doing now only to someone who may see that chat, as the Activity panel does", () => {
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    const ctx: FrameContext = { visible: admin, webhook: () => undefined, freshBot: () => undefined, freshGroup: () => undefined };
+    const seen: StreamSeen = { bots: new Set(open.map((bot) => bot.id)), groups: new Set(["room-pub"]) };
+    const step = (threadId: string) => ({ kind: "runtime", event: { type: "turn.progress", threadId, activity: "command", itemId: "c1",
+      target: "payroll.py", detail: "python3 payroll.py --month 10", quiet: { kind: "busy" }, tail: ["paid 12 of 40"] } });
+    const started = (threadId: string) => ({ kind: "runtime", event: { type: "item.started", itemType: "tool", threadId, itemId: "c1",
+      title: "Bash", step: { activity: "command", target: "payroll.py", detail: "python3 payroll.py --month 10" } } });
+    for (const frame of [step("t-pub-2"), started("t-pub-2"), { kind: "message", threadId: "t-pub-2", message: { tool: { name: "Bash", step: { activity: "command", target: "payroll.py" } } } }]) {
+      expect(frameForMember(frame, ctx, seen), JSON.stringify(frame)).toBeUndefined();
+    }
+    const own = step("t-pub");
+    expect(frameForMember(own, ctx, seen)).toBe(own);
   });
 
   it("finds every conversation a request names: a task in the path, the query and the body", () => {

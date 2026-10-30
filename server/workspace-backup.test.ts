@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup,
   readLastWorkspaceRestore, readPendingWorkspaceRestoreMetadata, readStagedWorkspaceBackup,
-  removeWorkspaceBackupJob, stageWorkspaceBackup,
+  omittedFromWorkspaceBackup, removeWorkspaceBackupJob, stageWorkspaceBackup,
 } from "./workspace-backup.ts";
 
 const PASSWORD = "correct horse battery staple";
@@ -115,6 +115,30 @@ function caseSensitiveTempFolder(): boolean {
 afterEach(() => { for (const root of scratch.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("encrypted full workspace backups", () => {
+  it("leaves waits out of backups and Cloud sends", () => expect(omittedFromWorkspaceBackup("waits.json")).toBe(true));
+
+  it("carries no waits, and a restore ends the waits already here, keeping them in the safety copy", async () => {
+    const source = directory();
+    writeFileSync(join(source, "waits.json"), JSON.stringify({ version: 1, waits: [{ id: "from-the-backup" }] }));
+    writeFileSync(join(source, "notes.md"), "kept");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    expect(exported.summary.exclusions).toContain("Waits bots set up: they end within a week, so ask the bot again after restoring.");
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("Restoring pauses routines, webhooks and calendar calls, ends every wait,"))).toBe(true);
+    const target = directory();
+    const here = JSON.stringify({ version: 1, waits: [{ id: "made-before-the-restore" }] });
+    writeFileSync(join(target, "waits.json"), here);
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const manifest = readJson(join(target, ".backups", staged.id, "staged", "manifest.json"));
+    expect(manifest.entries.map((entry: { path: string }) => entry.path)).toContain("notes.md");
+    expect(manifest.entries.map((entry: { path: string }) => entry.path)).not.toContain("waits.json");
+    commitPendingWorkspaceRestore(target, staged.id);
+    const result = applyPendingWorkspaceRestore(target);
+    expect(result).toMatchObject({ restored: true });
+    expect(readFileSync(join(target, "notes.md"), "utf8")).toBe("kept");
+    expect(existsSync(join(target, "waits.json"))).toBe(false);
+    expect(readFileSync(join(result.safetyCopyPath!, "data", "waits.json"), "utf8")).toBe(here);
+  });
+
   it("leaves Sync with My Cloud's own records out of a backup", async () => {
     const source = directory();
     mkdirSync(join(source, "sync", "trash"), { recursive: true });

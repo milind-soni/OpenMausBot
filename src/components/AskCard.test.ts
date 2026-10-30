@@ -2,66 +2,122 @@ import { createElement, type KeyboardEvent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mode = vi.hoisted(() => ({ advanced: true }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => mode.advanced }));
+import { askPrimary, AskCard, AskChoices, AskDetail, AskHeader, AskReply, AskSettledLine, ASK_SECONDARY_BUTTON, ASK_QUIET_ANSWER, moveChoiceFocus, settledAnswer } from "./AskCard";
 
-import { AskCard, AskChoiceLetter, AskSettledLine, moveChoiceFocus } from "./AskCard";
+afterEach(() => vi.unstubAllGlobals());
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  mode.advanced = true;
-});
+const classesOf = (html: string, at: RegExp) => (at.exec(html)?.[1] ?? "").split(" ");
+const LONG = "Ja, auch den Einladungstext und den Abschlusstext der Sondervariante natural-greenery, als Branch fix/natural-greenery-custom-case";
 
 describe("AskCard", () => {
-  it("leads with an accent title and an optional line on why in Advanced mode", () => {
-    const html = renderToStaticMarkup(createElement(AskCard, {
-      ariaLabel: "Plan",
-      icon: null,
-      title: "Choose a plan",
-      explanation: "The workspace needs one before it can start.",
-    }));
+  it("is one raised card in both modes: the composer's surface, a 0.5px hairline, rounded 20, 560 wide", () => {
+    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Plan", title: "Choose a plan", explanation: "Why it asks." }));
+    const card = classesOf(html, /^<div[^>]*class="([^"]*)"/);
+    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "rounded-[20px]", "max-w-[560px]", "w-full", "text-start"]));
     expect(html).toContain('role="group"');
     expect(html).toContain('aria-label="Plan"');
-    expect(html).toMatch(/text-accent-text[^"]*"><bdi dir="auto">Choose a plan</);
-    expect(html).toContain("The workspace needs one before it can start.");
-    expect(html).toContain("text-start");
-    expect(html).not.toContain("text-left");
-    expect(html).toContain("rounded-2xl bg-composer");
-    expect(html).toContain("ring-1 ring-composer-ring");
-    expect(html).not.toContain("border-accent");
+    expect(html).toContain("Why it asks.");
     expect(html).not.toContain("shadow");
   });
 
-  it("is Simple mode's question card: the composer's surface, 560 wide, rounded 20, a 16/22 semibold title in secondary ink", () => {
-    mode.advanced = false;
-    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Plan", icon: null, title: "Choose a plan", explanation: "Why it asks." }));
-    const card = html.match(/^<div[^>]*class="([^"]*)"/)![1]!.split(" ");
-    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "max-w-[560px]", "rounded-[24px]", "w-full"]));
-    expect(card).not.toContain("rounded-2xl");
-    expect(html).toMatch(/text-\[16px\] font-semibold leading-\[22px\] text-ink-secondary"><bdi dir="auto">Choose a plan</);
-    expect(html).not.toContain("text-accent-text\"><bdi");
-  });
-
-  it("letters each Simple choice in a 24px rounded box, greyed when quiet", () => {
-    const box = (props: Parameters<typeof AskChoiceLetter>[0]) => renderToStaticMarkup(createElement(AskChoiceLetter, props)).match(/class="([^"]*)"/)![1]!.split(" ");
-    expect(box({ letter: "A" })).toEqual(expect.arrayContaining(["size-6", "rounded-[7px]", "bg-ink/[0.06]", "text-[12px]", "text-ink-secondary"]));
-    expect(box({ letter: "A", quiet: true })).toContain("text-ink-tertiary");
-    expect(box({ letter: "A", picked: true })).toContain("text-ink");
+  it("puts the question in clear ink at reading size, under a header line in secondary ink that names the bot that asks", () => {
+    const header = createElement(AskHeader, { asker: { name: "Biber", color: "teal" }, line: "Biber asks" });
+    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Q", header, title: "Soll ich den Fix umsetzen?" }));
+    expect(html).toMatch(/text-\[15px\] font-medium leading-\[22px\] text-ink"><bdi dir="auto">Soll ich den Fix umsetzen\?</);
+    expect(html).toMatch(/data-ask-header="" class="[^"]*text-\[13px\][^"]*text-ink-secondary[^"]*"/);
+    expect(html.indexOf("Biber asks")).toBeLessThan(html.indexOf("Soll ich den Fix umsetzen?"));
   });
 
   it("offers a dismiss button only with a name for it", () => {
-    const base = { ariaLabel: "Key", icon: null, title: "API key" };
+    const base = { ariaLabel: "Key", title: "API key" };
     expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {} }))).not.toContain("<button");
-    expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {}, dismissLabel: "Not now" })))
-      .toContain('aria-label="Not now"');
+    expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {}, dismissLabel: "Not now" }))).toContain('aria-label="Not now"');
+  });
+});
+
+describe("AskChoices", () => {
+  const render = (props: Partial<Parameters<typeof AskChoices>[0]> = {}) => renderToStaticMarkup(createElement(AskChoices, {
+    choices: [{ label: "Ja, nur den Abschlusstext" }, { label: LONG }, { label: "Nein" }], label: "Soll ich?", onPick: () => {}, ...props,
+  }));
+
+  it("is one button per choice, stacked, at least 36px tall and 44 on touch, with a label that wraps instead of being cut", () => {
+    const html = render();
+    const buttons = html.match(/<button[^>]*data-ask-choice[^>]*>/g)!;
+    expect(buttons).toHaveLength(3);
+    for (const tag of buttons) {
+      const classes = classesOf(tag, /class="([^"]*)"/);
+      expect(classes).toEqual(expect.arrayContaining(["min-h-10", "pointer-coarse:min-h-11", "w-full", "text-start", "focus-visible:ring-2"]));
+      expect(classes).not.toContain("truncate");
+      expect(classes).not.toContain("whitespace-nowrap");
+    }
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toMatch(/class="block break-words[^"]*">Ja, auch den Einladungstext/);
   });
 
-  it("settles into one quiet line that announces itself", () => {
-    const html = renderToStaticMarkup(createElement(AskSettledLine, { ariaLabel: "Plan", children: "Choose a plan · Pro" }));
+  it("has no letter keys: a choice is pressed, never typed", () => {
+    const html = render();
+    expect(html).not.toContain("aria-keyshortcuts");
+    expect(html).not.toMatch(/>A</);
+  });
+
+  it("shows the tapped choice on its way and holds the others until it lands", () => {
+    const html = render({ sending: "Nein" });
+    const tags = html.match(/<button[^>]*data-ask-choice[^>]*>/g)!;
+    expect(tags[2]).toContain('aria-busy="true"');
+    expect(tags[2]).toContain('aria-checked="true"');
+    expect(tags[2]).not.toContain(' disabled=""');
+    expect(tags[0]).toContain(' disabled=""');
+    expect(html).toContain("motion-safe:animate-spin");
+  });
+
+  it("is a checkbox group for several picks, and tags each choice for the surface that shows it", () => {
+    const html = render({ multi: true, picked: ["Nein"], tag: "data-inbox-choice" });
+    expect(html).toContain('role="group"');
+    expect(html).toContain('role="checkbox"');
+    expect(html).toContain('data-inbox-choice="Nein"');
+  });
+});
+
+describe("the card's buttons", () => {
+  it("are 36px tall, 44 on touch: the answer in the asking bot's colour, the rest quiet and neutral", () => {
+    const primary = askPrimary("teal");
+    expect(primary.className.split(" ")).toEqual(expect.arrayContaining(["bot-button", "min-h-9", "pointer-coarse:min-h-11"]));
+    expect(askPrimary(undefined).className.split(" ")).toEqual(expect.arrayContaining(["ui-button-primary", "min-h-9"]));
+    expect(ASK_SECONDARY_BUTTON.split(" ")).toEqual(expect.arrayContaining(["min-h-9", "pointer-coarse:min-h-11", "bg-ink/[0.07]", "text-ink"]));
+    expect(ASK_SECONDARY_BUTTON).not.toContain("danger");
+    expect(ASK_QUIET_ANSWER.split(" ")).toEqual(expect.arrayContaining(["min-h-9", "text-ink-secondary"]));
+  });
+});
+
+describe("AskReply", () => {
+  it("is a field with a send button in the asking bot's colour, which waits for words", () => {
+    const html = renderToStaticMarkup(createElement(AskReply, { label: "Answer", placeholder: "Write your answer", color: "teal", value: "", onChange: () => {}, onSend: () => {} }));
+    expect(html).toContain('placeholder="Write your answer"');
+    expect(html).toMatch(/<button type="submit" disabled=""[^>]*class="[^"]*bot-button/);
+  });
+});
+
+describe("AskDetail", () => {
+  it("folds a long command after three lines, and keeps a short one whole", () => {
+    expect(renderToStaticMarkup(createElement(AskDetail, { text: "git push", mono: true }))).not.toContain("line-clamp-3");
+    const long = renderToStaticMarkup(createElement(AskDetail, { text: "git push origin fix/natural-greenery-custom-case ".repeat(6), mono: true }));
+    expect(long).toContain("line-clamp-3");
+    expect(long).toContain("font-mono");
+    expect(long).toContain('aria-expanded="false"');
+  });
+});
+
+describe("AskSettledLine", () => {
+  it("settles into one calm line that announces itself, with its own mark for an answer, a stop and an expiry", () => {
+    const html = renderToStaticMarkup(createElement(AskSettledLine, { ariaLabel: "Plan", children: settledAnswer("Ja, nur den Abschlusstext", ["Ja, nur den Abschlusstext", "Nein"]) }));
     expect(html).toContain('data-ask-card="settled"');
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain("truncate");
-    expect(html).toContain("Choose a plan · Pro");
+    expect(html).toContain("You chose:");
+    expect(html).toContain("Ja, nur den Abschlusstext");
+    expect(html).toContain("text-success");
+    expect(renderToStaticMarkup(createElement(AskSettledLine, { children: settledAnswer("Erst morgen", ["Ja", "Nein"]) }))).toContain("You answered:");
+    expect(renderToStaticMarkup(createElement(AskSettledLine, { tone: "stopped", children: "Stopped" }))).toContain('data-tone="stopped"');
+    expect(renderToStaticMarkup(createElement(AskSettledLine, { tone: "expired", children: "Expired" }))).toContain('data-tone="expired"');
   });
 });
 

@@ -11,6 +11,7 @@ import {
   type ChipTone,
 } from "@/lib/activity";
 import { listenLiveFrames } from "@/lib/live-events";
+import { useActivityFocus } from "@/lib/activity-focus";
 import { t } from "@/lib/i18n";
 
 const LIMIT = 300;
@@ -84,6 +85,12 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   }, [threadIds, load]);
 
   const days = useMemo(() => (rows ? groupActivityByDay(rows, new Date()) : []), [rows]);
+  const focus = useActivityFocus(bot.id);
+  const list = useRef<HTMLDivElement>(null);
+  const focused = (row: ActivityRow) => Boolean(focus?.turnId && row.turnId === focus.turnId && row.threadId === focus.threadId);
+  useEffect(() => {
+    list.current?.querySelector("[data-activity-focused]")?.scrollIntoView({ block: "nearest" });
+  }, [rows, focus]);
 
   const jump = (row: ActivityRow) => {
     if (row.threadId !== bot.threadId && threadIds.has(row.threadId)) {
@@ -121,7 +128,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
         {t("activity.panel.subtitle", { name: bot.name })}
       </p>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={list} className="min-h-0 flex-1 overflow-y-auto">
         {error && <div className="px-4 py-3 text-[13px] text-danger">{t("activity.panel.error", { message: error })}</div>}
         {rows && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-[13px] text-ink-secondary">
@@ -135,7 +142,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
               {day.label}
             </h3>
             {day.rows.map((row) => (
-              <ActivityLine key={`${row.threadId}:${row.at}:${row.tool}:${row.requestId ?? ""}`} row={row} current={row.threadId === bot.threadId} onJump={() => jump(row)} />
+              <ActivityLine key={`${row.threadId}:${row.at}:${row.tool}:${row.requestId ?? ""}`} row={row} current={row.threadId === bot.threadId} focused={focused(row)} onJump={() => jump(row)} />
             ))}
           </section>
         ))}
@@ -144,13 +151,15 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   );
 }
 
-function ActivityLine({ row, current, onJump }: { row: ActivityRow; current: boolean; onJump: () => void }) {
+function ActivityLine({ row, current, focused, onJump }: { row: ActivityRow; current: boolean; focused: boolean; onJump: () => void }) {
   const chip = outcomeChip(row.outcome);
   return (
     <button
       type="button"
       onClick={onJump}
-      className="flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left hover:bg-raised/60"
+      aria-current={focused || undefined}
+      data-activity-focused={focused ? "" : undefined}
+      className={cn("flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left hover:bg-raised/60", focused && "bg-raised/60")}
       title={current ? row.tool : t("activity.panel.openOtherTask", { tool: row.tool })}
     >
       <span className="mt-[2px] shrink-0 tabular-nums text-[11px] text-ink-secondary">{formatActivityTime(row.at)}</span>
