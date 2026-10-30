@@ -98,7 +98,7 @@ it("creates an environment with the chosen folder — and without one when the f
   envFormFields()[0]!.props.onChange!({ target: { value: "Work" } });
   forms()[0]!.props.onSubmit!({ preventDefault: () => {} });
   await flush();
-  expect(render().html).toContain("Couldn't create the environment.");
+  expect(render().html).toContain("Couldn't create the environment. Check the data folder, then try again.");
 });
 
 it('"Choose…" fills the folder field from the native picker', async () => {
@@ -150,7 +150,7 @@ it("confirms before switching to a local environment, and a failed switch says o
   rowButton("Switch to Old")!.props.onClick!();
   await flush();
   expect(environments.switch).toHaveBeenCalledWith("env-2");
-  expect(render().html).toContain("Couldn't switch.");
+  expect(render().html).toContain("Couldn't switch environments. Try again.");
 });
 
 it("a failed forget keeps the panel honest: one generic error, no crash", async () => {
@@ -161,7 +161,7 @@ it("a failed forget keeps the panel honest: one generic error, no crash", async 
   textButton("Forget")!.props.onClick!();
   await flush();
   expect(environments.forget).toHaveBeenCalledWith("env-1");
-  expect(render().html).toContain("Couldn't forget the environment.");
+  expect(render().html).toContain("Couldn't forget the environment. Try again.");
   expect(render().html).not.toContain("purge");
 });
 

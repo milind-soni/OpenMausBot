@@ -77,6 +77,11 @@ describe("buildNotification", () => {
 
     expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
   });
+  it("titles a finished wait and keeps its line as the body", () => {
+    expect(buildNotification("wait", { id: "b", name: "Pepper" }, "t", "the build: done. ci passed.")).toEqual({
+      kind: "wait", botId: "b", botName: "Pepper", threadId: "t", title: "Pepper's wait is over", body: "the build: done. ci passed.",
+    });
+  });
 });
 
 describe("sign-in requests", () => {

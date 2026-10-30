@@ -59,6 +59,15 @@ vi.mock("shiki/engine/javascript", () => ({
   createJavaScriptRegexEngine: () => ({}),
 }));
 
+describe("soft line breaks", () => {
+  it("keeps a reply's single line breaks as line breaks, outside code", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "1\n2\n3\n\n`a`\nb\n\n```\nx\ny\n```" }));
+    expect(html).toContain('<p dir="ltr">1<br/>\n2<br/>\n3</p>');
+    expect(html).toMatch(/>a<\/code><br\/>\nb<\/p>/);
+    expect(html).toContain(">x\ny</pre>");
+  });
+});
+
 describe("mention highlighting", () => {
   const mentionPeers = [{ name: "Atlas" }, { name: "調査担当" }];
   it("carries bot colors into Markdown without coloring everyone as a bot", () => {
