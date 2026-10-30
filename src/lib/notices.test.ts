@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
-import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, localDay, nextNotice, noticeSeen, NOTICES,
+import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, localDay, nextNotice, noticeSeen, NOTICES,
   OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, type NoticeFacts } from "./notices";
 
 let storage: Map<string, string>;
@@ -13,16 +14,17 @@ afterEach(() => vi.unstubAllGlobals());
 
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
 const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
-  consent: boolean | null = false, simple: boolean | null = false): NoticeFacts =>
-  ({ [SIMPLE_MODE_NOTICE]: simple, [CLOUD_PRO_UPDATE_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud, [STAR_NOTICE]: star });
+  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false): NoticeFacts =>
+  ({ [SIMPLE_MODE_NOTICE]: simple, [CLOUD_PRO_UPDATE_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
+    [BOAT_OFFER_NOTICE]: boat, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
 
-it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, the star", () => {
+it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, Boat's credit offer, the star", () => {
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), none)).toBe(SIMPLE_MODE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true, null), none), "nothing shows while the Simple mode popup waits").toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(CLOUD_PRO_UPDATE_NOTICE);
-  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE]);
+  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE]);
   expect(nextNotice(facts(true, true, true, true, true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === CLOUD_PRO_UPDATE_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null, true), none)).toBeNull();
@@ -39,9 +41,19 @@ it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the pro
   expect(nextNotice(facts(false, true, true, true), none)).toBe(CLOUD_TRIAL_NOTICE);
   expect(nextNotice(facts(false, false, true, true), none)).toBe(CLOUD_NOTICE);
   expect(nextNotice(facts(false, false, false, true), none)).toBe(STAR_NOTICE);
+  const boat = (intro: boolean, trial: boolean, cloud: boolean, offer: boolean | null) => facts(intro, trial, cloud, true, false, false, false, false, offer);
+  expect(nextNotice(boat(false, false, false, true), none)).toBe(BOAT_OFFER_NOTICE);
+  expect(nextNotice(boat(false, true, false, true), none), "a trial's notice goes first").toBe(CLOUD_TRIAL_NOTICE);
+  expect(nextNotice(boat(false, false, true, true), none), "so does the account's card").toBe(CLOUD_NOTICE);
+  expect(nextNotice(boat(false, false, false, null), none), "the star waits for it").toBeNull();
+  expect(nextNotice(boat(false, false, false, true), id => id === BOAT_OFFER_NOTICE)).toBe(STAR_NOTICE);
   expect(nextNotice(facts(true, true, true, true), id => id === CLOUD_INTRO || id === STAR_NOTICE)).toBe(CLOUD_TRIAL_NOTICE);
   expect(nextNotice(facts(true, true, true, true), () => true)).toBeNull();
   expect(nextNotice(facts(false, false, false, false), none)).toBeNull();
+});
+
+it("Boat's credit offer is one the desktop keeps for its every page, as the Cloud Pro popup is", () => {
+  expect(DESKTOP_NOTICES).toEqual([CLOUD_PRO_UPDATE_NOTICE, BOAT_OFFER_NOTICE]);
 });
 
 it("waits while an earlier notice's answer is unknown, so a later one never shows first", () => {

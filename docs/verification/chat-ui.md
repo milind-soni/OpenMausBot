@@ -259,9 +259,9 @@ fake Codex app-server, and `FAKE_CODEX_COMMAND`, `FAKE_CODEX_COMMAND_OUTPUT`
 script its command. A bot moved to the `codex` instance then shows `last
 output just now` and the command's last two lines in the card.
 
-| Before | After |
-| --- | --- |
-| ![Working · 1m 06s · Running a command](evidence/live-step/before-command-advanced-midnight.jpg) | ![Working · 1m 05s · Running scrape.py · busy, no output yet](evidence/live-step/after-command-advanced-midnight.jpg) |
+The before-and-after screenshots were removed because they showed real example
+data; run the `scripts/control-omb.ts ui launch` command above to see the
+working line and the Now card.
 
 The checks are `server/step-summary.test.ts` (the words and their redaction),
 `server/harness/live-steps.test.ts` and `server/harness/bus.test.ts` (one path
