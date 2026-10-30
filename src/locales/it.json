@@ -89,6 +89,7 @@
   "notice.dismiss": "Non mostrare più",
   "notice.notNow": "Non ora",
   "notice.openFailed": "Non riesco ad aprire il browser. Riprova.",
+  "server.teammates.sameRequest": "Un altro compagno di squadra ha appena chiesto la stessa cosa, quindi questo riceve quella risposta invece di una seconda.",
   "server.reports.sent": "Inviata al team di MausBot (segnalazione {report}). Milind e Omkar la ricevono via email.",
   "server.reports.sentReply": "Inviata al team di MausBot (segnalazione {report}). Milind e Omkar la ricevono via email e risponderanno a {contact}.",
   "server.reports.sentLater": "Inviata al team di MausBot (segnalazione {report}) dopo che un tentativo precedente non era andato a buon fine. Milind e Omkar la ricevono via email.",

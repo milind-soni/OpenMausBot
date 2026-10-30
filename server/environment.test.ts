@@ -133,7 +133,9 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
       .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
-    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "only a Cloud home takes a move").not.toHaveProperty("move");
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "only a Cloud home, or a server one person owns, takes a move").not.toHaveProperty("move");
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: true }).capabilities).toEqual({ remoteSessions: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: false }).capabilities).not.toHaveProperty("move");
     // A lent computer may lend its internet connection only to a Cloud home that lends at all.
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, sharedComputers: true }).capabilities)
       .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, fileEdits: true, deviceLink: true, myChromeLink: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });

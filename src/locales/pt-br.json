@@ -83,6 +83,7 @@
   "notice.dismiss": "Dispensar para sempre",
   "notice.notNow": "Agora não",
   "notice.openFailed": "Não foi possível abrir seu navegador. Tente novamente.",
+  "server.teammates.sameRequest": "Outro colega perguntou a mesma coisa há pouco, então isto recebe aquela resposta em vez de uma segunda.",
   "server.reports.sent": "Enviado para a equipe do MausBot (relatório {report}). Milind e Omkar recebem por e-mail.",
   "server.reports.sentReply": "Enviado para a equipe do MausBot (relatório {report}). Milind e Omkar recebem por e-mail e vão responder para {contact}.",
   "server.reports.sentLater": "Enviado para a equipe do MausBot (relatório {report}) depois que uma tentativa anterior não deu certo. Milind e Omkar recebem por e-mail.",

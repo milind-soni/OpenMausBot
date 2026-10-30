@@ -69,6 +69,7 @@
   "notice.dismiss": "Kalıcı olarak kapat",
   "notice.notNow": "Şimdi değil",
   "notice.openFailed": "Tarayıcınız açılamadı. Lütfen tekrar deneyin.",
+  "server.teammates.sameRequest": "Başka bir ekip arkadaşı az önce aynısını sordu, bu yüzden ikinci bir yanıt yerine o yanıt kullanılıyor.",
   "server.reports.sent": "MausBot ekibine gönderildi (rapor {report}). Milind ve Omkar e-postayla alıyor.",
   "server.reports.sentReply": "MausBot ekibine gönderildi (rapor {report}). Milind ve Omkar e-postayla alıyor ve {contact} adresine yanıt verecek.",
   "server.reports.sentLater": "Önceki bir deneme başarısız olduktan sonra MausBot ekibine gönderildi (rapor {report}). Milind ve Omkar e-postayla alıyor.",

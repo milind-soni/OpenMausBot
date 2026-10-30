@@ -91,6 +91,7 @@
   "notice.dismiss": "Odrzuć na zawsze",
   "notice.notNow": "Nie teraz",
   "notice.openFailed": "Nie udało się otworzyć przeglądarki. Spróbuj ponownie.",
+  "server.teammates.sameRequest": "Inny członek zespołu zapytał o to samo przed chwilą, więc to dostaje tamtą odpowiedź zamiast drugiej.",
   "server.reports.sent": "Wysłano do zespołu MausBot (zgłoszenie {report}). Milind i Omkar dostaną je e-mailem.",
   "server.reports.sentReply": "Wysłano do zespołu MausBot (zgłoszenie {report}). Milind i Omkar dostaną je e-mailem i odpowiedzą na adres {contact}.",
   "server.reports.sentLater": "Wysłano do zespołu MausBot (zgłoszenie {report}) po nieudanej wcześniejszej próbie. Milind i Omkar dostaną je e-mailem.",
