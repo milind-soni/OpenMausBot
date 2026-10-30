@@ -102,6 +102,14 @@ function handoffIds(r: Json): string[] {
 const MOVED_ENTRIES_SHOWN = 5;
 const FORGOTTEN_SHOWN = 8;
 
+/** A preference saved once in the person's About me, which every bot reads in their work. */
+function preferText(r: Json): string {
+  const whose = typeof r.person === "string" && r.person ? `${r.person}'s` : "the person's";
+  return r.preference === "saved"
+    ? `Saved in ${whose} About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too.`
+    : `Already in ${whose} About me, or they removed it before: nothing to save or pass on.`;
+}
+
 function forgetText(passage: string, r: Json): string {
   const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
   const notes = list(r.forgotten);
@@ -642,10 +650,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (member === "memory_update") {
     const passageOnly = args.action === "remove" || args.action === "forget";
-    if (!["append", "replace", "remove", "supersede", "forget"].includes(String(args.action))
+    if (!["append", "replace", "remove", "supersede", "forget", "prefer"].includes(String(args.action))
       || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
-      || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
-      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, or forget with old_text naming what to forget.", isError: true };
+      || (args.action !== "append" && args.action !== "prefer" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
+      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, forget with old_text naming what to forget, or prefer with text: one standing preference of the person.", isError: true };
     }
     const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
@@ -660,6 +668,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
+    if (args.action === "prefer") return { text: preferText(r) };
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
     const full = r.truncated

@@ -32,6 +32,8 @@ export interface McpServerRouteDeps {
   forgetPeople?(name: string): void;
   /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
   health?: { changed(name: string): void };
+  /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
+  connectionsChanged?(change: "added" | "removed"): void;
 }
 
 /** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
@@ -189,6 +191,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         persistMcpServers({ ...current, [name]: parsed.server });
         appCatalog?.serverChanged(name);
         health?.changed(name);
+        deps.connectionsChanged?.("added");
         return json(res, 201, withServerDetails(mcpServerResponse()));
       } finally {
         mcpConfigBusy.set(false);
@@ -225,6 +228,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
         if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
         persistMcpServers({ ...current, ...parsed.servers });
+        deps.connectionsChanged?.("added");
         return json(res, 201, { ...withServerDetails(mcpServerResponse()), added: names });
       } finally {
         mcpConfigBusy.set(false);
@@ -249,6 +253,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           mcpOAuth.forget(name);
           forgetPeople?.(name);
           appCatalog?.forgetServer(name);
+          deps.connectionsChanged?.("removed");
           return json(res, 200, withServerDetails(mcpServerResponse()));
         }
 
