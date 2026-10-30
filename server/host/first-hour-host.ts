@@ -23,7 +23,6 @@ export function createFirstHourHooks(options: { dataDir: string; personal: boole
       counted: (kind: ValueKind, count: number) => ledger?.add(kind, count),
       look: (threadId: string) => current?.look(threadId) ?? null,
       morning: {
-        at: () => current?.morningAt(),
         push: (summary: string) => current?.morningPush(summary) ?? summary,
         overnight: (since: number) => (ledger ? current?.overnight(ledger.since(since)) : undefined),
       },

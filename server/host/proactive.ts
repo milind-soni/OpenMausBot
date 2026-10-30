@@ -88,6 +88,8 @@ export interface ProactiveDeps {
   /** A new Cloud's first look, confined like a read-and-draft run. */
   look?: ReadAndDraftDeps["look"];
   morning?: MorningDeps;
+  done?: BriefDeps["done"];
+  answer?: BriefDeps["answer"];
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -132,6 +134,8 @@ export function createProactive(deps: ProactiveDeps) {
     ...(deps.ideas ? { ideas: deps.ideas } : {}),
     prepped: () => deps.counted?.("prepped", 1),
     ...(deps.morning ? { morning: deps.morning } : {}),
+    ...(deps.done ? { done: deps.done } : {}),
+    ...(deps.answer ? { answer: deps.answer } : {}),
   });
   const inbox = deps.helpers ? createInboxTriage({ ...deps.helpers, config: () => cfg }) : undefined;
   const suggestion = createHelperSuggestion({
