@@ -245,6 +245,15 @@ it("gives work her own message hands to another bot her own Gmail, and never wor
   expect(adas.ok, adas.output).toBe(true);
   expect(adas.whose, "the step says whose").toEqual({ person: ADA.email, app: "Gmail" });
   expect(gmailCallsBy(adaUser), "her bot and the helper both ran as her").toBeGreaterThanOrEqual(before + 2);
+  // Her bot is then resumed with the helper's result and runs its own step as her once more: count only once all of her
+  // work has finished (everyone idle, and her count the same two polls running).
+  let last = -1;
+  await expect.poll(async () => {
+    const now = gmailCallsBy(adaUser);
+    const steady = now === last && now >= before + 3 && await idle(ada);
+    last = now;
+    return steady;
+  }, { timeout: 90_000, interval: 1_000 }).toBe(true);
 
   const adaCalls = gmailCallsBy(adaUser), seen = helperThreads();
   await turn(cleo, cleoThread, "Have Helper fetch my latest email.", { calls: [handOn("Cleo"), gmailCall("own_apps")] });
