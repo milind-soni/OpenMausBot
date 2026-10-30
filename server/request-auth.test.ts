@@ -199,6 +199,12 @@ describe("scopes", () => {
     expect(clientGroupPatchViolation({ memberIds: [] })).toBe("memberIds");
   });
 
+  it("refuses a session without the admin scope a bot's move into or out of a department", () => {
+    expect(clientBotPatchViolation({ section: "Work" }, false, true)).toBe("section");
+    expect(clientBotPatchViolation({ section: "" }, false, true)).toBe("section");
+    for (const method of ["POST", "PUT"]) expect(requiredScope(method, "/api/sidebar-sections"), method).toBe("admin");
+  });
+
   it("lets a bot's maker without the admin scope say who it is and how it looks, never what it may do or whom it directs", () => {
     const profile = { name: "Scout", title: "Trips", soul: "Plans trips.", color: "teal", avatarCrop: "square", voice: "alloy", modelSelection: { instanceId: "claude", model: "m" } };
     expect(adminOnlyBotSetting(profile)).toBeNull();
