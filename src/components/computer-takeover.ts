@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LocalizedPanelError } from "@/lib/computer-messages";
+import { productName } from "@/lib/brand";
 
 export interface TakeoverSnapshot {
   held: boolean;
@@ -47,7 +48,7 @@ export async function openProviderDesktop({ botId, title, held, request, join, c
   try {
     if (!held) {
       lease = newLeaseId();
-      if (!(await request("take", lease)).held) throw new Error("OpenMausBot could not confirm computer control");
+      if (!(await request("take", lease)).held) throw new Error(`${productName()} could not confirm computer control`);
     }
     if (!current()) throw changed();
     const { joinUrl } = await join(AbortSignal.timeout(JOIN_TIMEOUT_MS));
@@ -115,7 +116,7 @@ export function useComputerTakeover({ botId, session, held, request, viewerClose
   const take = useCallback(async (expand = false) => {
     const id = newLeaseId();
     const snap = await request("take", id);
-    if (!snap.held) throw new Error("OpenMausBot could not confirm computer control");
+    if (!snap.held) throw new Error(`${productName()} could not confirm computer control`);
     lease.current = snap.owned ? { id, viewerClose: closeRef.current } : null;
     setHere(true);
     setExpanded(expand);

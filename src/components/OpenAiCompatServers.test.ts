@@ -107,6 +107,48 @@ describe("adding another OpenAI-compatible server", () => {
   });
 });
 
+describe("how long a server may take to reply", () => {
+  type Props = { children?: ReactNode; servers?: unknown; value?: unknown; onChange?: (event: { target: { value: string } }) => void; "aria-label"?: string };
+  const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
+    Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  function waitSelect(replyWaitMinutes?: number) {
+    vi.stubGlobal("window", {});
+    const servers = [instance("openai-compat-1", "Ollama", { url: "http://127.0.0.1:11434/v1", ...(replyWaitMinutes ? { replyWaitMinutes } : {}) })];
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, instances: servers }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+    });
+    const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
+    fixture.counting = true;
+    fixture.index = 0;
+    try {
+      return nodes((added.type as (props: Props) => ReactNode)(added.props)).find((node) => node.props["aria-label"] === "How long to wait for Ollama to reply")!;
+    } finally {
+      fixture.counting = false;
+    }
+  }
+
+  it("saves the chosen minutes for that server, and Default clears them", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [] });
+    const select = waitSelect();
+    expect(select.props.value).toBe("");
+    select.props.onChange!({ target: { value: "20" } });
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: 20 }) });
+    fixture.values = [];
+    waitSelect(20).props.onChange!({ target: { value: "" } });
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: null }) });
+  });
+
+  it("shows a saved wait that is not one of the usual choices", () => {
+    fixture.values = [];
+    const html = JSON.stringify(waitSelect(45).props.children);
+    expect(html).toContain("Wait 45 min");
+  });
+});
+
 describe("LM Studio and Bionic setup", () => {
   type Props = { children?: ReactNode; onChange?: (event: { target: { value: string } }) => void; onClick?: () => void; "aria-label"?: string };
   const elementNodes = (tree: ReactNode): Array<ReactElement<Props>> =>

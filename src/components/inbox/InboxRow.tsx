@@ -18,7 +18,7 @@ const ACTION_LOOK: Record<QuickAction, { Icon: LucideIcon; label: LocaleKey }> =
   open: { Icon: ExternalLink, label: "inbox.action.openInChat" },
 };
 
-const ROW_ACTION = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-inset hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent";
+const ROW_ACTION = "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.07] hover:text-ink active:bg-ink/[0.11] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:size-9";
 
 export function InboxRowItem({ row, now, onOpen, onAction, inCard = false }: {
   row: InboxRow;

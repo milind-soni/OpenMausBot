@@ -1005,7 +1005,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           nativeImageInput: true,
           // pi rejects an unsupported level and the turn keeps the engine default.
           effortLevels: EFFORT_LEVELS,
-          queueing: true,
+          queueing: true, askTool: { kind: "native", name: "ask_user" },
         },
         sendTurn,
         interruptTurn: async (threadId) => { await active.get(threadId)?.stop(); },

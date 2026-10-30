@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { setLocale, t } from "@/lib/i18n";
 import type { ConfigStatus } from "@/state/store";
 import { WORKSPACE_CREDENTIAL_ENV } from "../../../server/credential-env.ts";
-import { CREDENTIAL_TARGETS } from "../../../shared/credential-request";
+import { CREDENTIAL_TARGETS, credentialConfigPatch, desktopCredentialSlot, isConfigCredentialTarget } from "../../../shared/credential-request";
 import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
 
 const NOT_A_PERSONS_KEY: Record<string, string> = {
@@ -51,16 +51,24 @@ describe("every credential has one home on the keys page", () => {
     for (const name of patched) expect(homed(name), name).toBe(true);
   });
 
-  it("covers every credential a bot can ask for in a chat", () => {
+  // A key saved from a bot's card lands exactly where its Settings row puts it: the same desktop slot, or the same config.
+  it("covers every credential a bot can ask for in a chat, saved where Settings saves it", () => {
     const homes: Record<keyof typeof CREDENTIAL_TARGETS, KeyId> = {
       xaiApiKey: "xai", boxToken: "box", opencodeGoApiKey: "opencodeGo", ttsKey: "elevenlabs", fishAudioKey: "fishAudio",
-      openaiImageApiKey: "imageOpenai", onePasswordToken: "onePassword",
+      openaiImageApiKey: "imageOpenai", onePasswordToken: "onePassword", composioApiKey: "composio", openaiApiKey: "openai",
+      anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq",
+      metaApiKey: "meta", deepseekApiKey: "deepseek",
     };
     expect(Object.keys(homes).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
-    for (const [name, id] of Object.entries(homes)) {
+    for (const [name, id] of Object.entries(homes) as Array<[keyof typeof CREDENTIAL_TARGETS, KeyId]>) {
       const entry = keyEntry(id);
-      if (entry.target) expect(entry.target.slot, name).toBe(name);
-      else expect(entry.opens, name).toBe("logins");
+      if (!entry.target) {
+        expect(entry.opens, name).toBe("logins");
+        expect(desktopCredentialSlot(name), name).toBeNull();
+        continue;
+      }
+      expect(desktopCredentialSlot(name), name).toBe(entry.target.slot ?? null);
+      if (isConfigCredentialTarget(name)) expect(credentialConfigPatch(name, "k"), name).toEqual(entry.target.patch("k", true));
     }
   });
 

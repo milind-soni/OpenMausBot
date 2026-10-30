@@ -175,7 +175,10 @@ beforeAll(async () => {
   expect((await team.as(marco, "POST", "/api/team/my-connections/apps/googlecalendar/connect", {})).status).toBe(200);
   const marcoUser = broker.userFor(broker.installationIds().at(-1)!);
   broker.account(marcoUser, "googlecalendar", MARCO.email);
-  const start = Math.ceil((Date.now() + 2 * 24 * 60 * 60_000) / (60 * 60_000)) * 60 * 60_000;
+  // At noon two days on, so the busy hour never runs past midnight, which the prompt words as two days.
+  const noon = new Date(Date.now() + 2 * 24 * 60 * 60_000);
+  noon.setHours(12, 0, 0, 0);
+  const start = noon.getTime();
   broker.calendarEvents[marcoUser] = [{ id: "ev1", summary: "Interview at Globex", status: "confirmed", location: "Globex HQ", attendees: [{ email: "hr@globex.test" }],
     start: { dateTime: new Date(start).toISOString() }, end: { dateTime: new Date(start + 60 * 60_000).toISOString() } }];
   marcos = listen(marco);

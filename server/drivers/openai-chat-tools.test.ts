@@ -12,6 +12,7 @@ import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
 import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
+import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { GrokDriver } from "./grok.ts";
@@ -974,20 +975,21 @@ describe("structured tool execution boundaries", () => {
   });
 
   it.each([
-    { scenario: "one chunk", pieces: ["abab"] },
-    { scenario: "split chunks", pieces: ["ab", "ab"] },
+    // Letters outside hex and the usual id alphabets, so a random id in the events can never contain the credential.
+    { scenario: "one chunk", pieces: ["zqxzqx"] },
+    { scenario: "split chunks", pieces: ["zqx", "zqx"] },
   ])("redacts an overlapping-prefix credential received in $scenario", async ({ pieces }) => {
     const f = await fixture((_request, response) => sse(response, [
       chunk({ content: "Before " }),
       ...pieces.map((piece) => chunk({ content: piece })),
       chunk({ content: " after." }, "stop"),
-    ]), "openai-compat", "abab");
+    ]), "openai-compat", "zqxzqx");
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe("Before [redacted] after.");
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: combined }));
-    expect(JSON.stringify(f.recorder.events)).not.toContain("abab");
+    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqx");
   });
 
   it("redacts a configured credential echoed by a tool from events, diagnostics, and the returned tool result", async () => {
@@ -1326,6 +1328,51 @@ describe("a configured MCP server that cannot mount", () => {
     const names = f.requests[0].tools!.map((tool) => tool.function.name);
     expect(names).toContain("audit_write");
     expect(names.some((name) => name.startsWith("slack_"))).toBe(false);
+  });
+});
+
+describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    cleanups.push(() => removeTempDir(dir));
+    return server;
+  }
+  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
+    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
+    browser: catalog(syntheticToolNames("agent_browser", 32)),
+    agents: catalog(syntheticToolNames("agent", agents)),
+    composio: catalog(syntheticToolNames("router", 7)),
+    data: catalog(syntheticToolNames("table", 5)),
+    ...more,
+  });
+
+  it("sends at most 128 tools, ask_user and every agents tool among them", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    await f.start({ integrations: integrations(42) });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toHaveLength(115);
+    expect(names).toContain("ask_user");
+    expect(names).toEqual(expect.arrayContaining(syntheticToolNames("agents_agent", 42)));
+    expect(names).toEqual(expect.arrayContaining(["computer_click", "computer_type_text", "computer_get_window_state"]));
+    expect(names.filter((name) => name.startsWith("computer_browser_"))).toEqual([]);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([]);
+  });
+
+  it("lists fewer built-in tools when they still overflow, says which, and runs the turn", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: integrations(51, { composio: catalog(syntheticToolNames("router", 14)), device: catalog(syntheticToolNames("phone", 23)) }) });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toHaveLength(128);
+    expect(names.at(-1)).toBe("ask_user");
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice",
+      message: `"data" listed 2 of 5 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.` }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 });
 

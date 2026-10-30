@@ -7,7 +7,7 @@ import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
+import { mcpServersForBot, mcpServersOfBot, useMcpServers } from "@/lib/mcp-servers";
 import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
@@ -99,6 +99,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
         >
           <input
             className={cn(inputCls, "font-mono text-[13px]")}
+            aria-label={t("botAccess.folder.title")}
             placeholder={t("botAccess.folder.placeholder")}
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
@@ -124,8 +125,9 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
  */
 export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
   const { dispatch } = useStore();
-  const { servers, error, refresh } = useMcpServers();
-  const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers) : []).map((server) => server.name));
+  const { servers: all, error, refresh } = useMcpServers();
+  const servers = all ? mcpServersOfBot(all, bot.id) : null;
+  const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers, bot.id) : []).map((server) => server.name));
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
@@ -166,6 +168,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
               <div className="min-w-0 flex-1">
                 <div className="truncate font-mono text-[13px] text-ink">{server.name}</div>
                 {!server.enabled && <div className="text-[12px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
+                {server.enabled && server.offFor?.includes(bot.id) && <div className="text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: bot.name })}</div>}
               </div>
               <Switch
                 checked={mounted.has(server.name)}

@@ -70,7 +70,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList };
+  return { sign, call, probesAfterList, base };
 }
 
 describe("engine sign-in routes", () => {
@@ -169,3 +169,28 @@ describe("installing an engine's own build from Settings", () => {
     expect(persisted).toEqual([]);
   });
 });
+
+describe("a server's reply wait", () => {
+  it("saves minutes for an OpenAI-compatible server, clears them with null, and refuses other engines or bad values", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = { instances: { a: { driver: "fake" }, "openai-compat-1": { driver: "openai-compat", config: { url: "http://127.0.0.1:11434/v1", key: "k" } } } };
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    await call("PATCH", "/api/instances/openai-compat-1", { replyWaitMinutes: 20 });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "http://127.0.0.1:11434/v1", key: "k", replyWaitMinutes: 20 });
+    await call("PATCH", "/api/instances/openai-compat-1", { replyWaitMinutes: null });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "http://127.0.0.1:11434/v1", key: "k" });
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("a", { replyWaitMinutes: 20 })).toBe(400);
+    for (const bad of [0, 61, 2.5, "10"]) expect(await status("openai-compat-1", { replyWaitMinutes: bad })).toBe(400);
+    expect(persisted).toHaveLength(2);
+  });
+});
+

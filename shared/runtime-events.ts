@@ -43,6 +43,8 @@ export type RuntimeEvent = RuntimeEventBase &
         /** the provider refused the turn's resumeCursor and this new session
          * was started from the turn's recoveryText */
         rebuilt?: boolean;
+        /** the turn's `custom` MCP servers the engine reported could not connect */
+        mcpFailed?: string[];
       }
     | { type: "session.model-variants"; model: string; variants: ModelVariantState }
     | { type: "session.exited"; reason?: string }
@@ -134,6 +136,9 @@ export type RuntimeEvent = RuntimeEventBase &
         /** The shell command line exactly as the engine sent it, even when `command` is absent for want of a cwd.
          * Read only by the safety floor; no grant is ever made from it, and like `command` it is never broadcast. */
         commandLine?: string;
+        /** The files a read tool's ask reads (absolute): a request that reads only the bot's own files is answered
+         * without the person. Like `command`, never broadcast. */
+        reads?: string[];
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer
@@ -184,8 +189,10 @@ export type RuntimeEvent = RuntimeEventBase &
     // `trialCredit`: the trial's Claude credit refused the call.
     // `stalled`: the engine went silent and the turn was stopped as stuck.
     // `limitResetsAt`: epoch ms when the usage limit refusing this account resets, when the engine says.
+    // `limit`: a usage limit refused this turn: the account's on this engine ("engine"), one model's own window
+    // ("model"), or that model's extra usage credits ("credits"); the engine's other models still work for the last two.
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
-        stalled?: boolean; limitResetsAt?: number }
+        stalled?: boolean; limitResetsAt?: number; limit?: "engine" | "model" | "credits" }
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
     | { type: "runtime.notice"; message: string }

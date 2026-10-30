@@ -7,6 +7,7 @@ import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type M
 import { probeMcpServer } from "../mcp-probe.ts";
 import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
+import { postizKeyHeaders } from "../postiz/connection.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { BusyFlag } from "./config.ts";
@@ -14,7 +15,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 import { sessionMember } from "./team-phone.ts";
 
 export interface McpServerRouteDeps {
-  cfg: Pick<AppConfig, "mcpServers">;
+  cfg: Pick<AppConfig, "mcpServers" | "postiz">;
   sessions: Pick<SessionRegistry, "isLive">;
   mcpOAuth: McpOAuthManager;
   teamConnections: Pick<TeamConnectionsHost, "personMcp" | "people">;
@@ -29,6 +30,8 @@ export interface McpServerRouteDeps {
   appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
   /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
   forgetPeople?(name: string): void;
+  /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
+  health?: { changed(name: string): void };
 }
 
 /** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
@@ -51,7 +54,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   };
   const {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
-    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog, forgetPeople,
+    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog, forgetPeople, health,
   } = deps;
   const MAX_CONCURRENT_MCP_PROBES = 2;
   const personalHeaderRefusal = (name: string, server: StoredMcpServer) =>
@@ -92,6 +95,8 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           oauth = deps.teamConnections.people.oauth(person);
           const key = deps.teamConnections.people.key(person, name, target.url);
           target = { ...target, headers: key ? { [key.header]: key.value } : {} };
+        } else if (!personal && isRemoteMcpServer(target)) {
+          target = { ...target, headers: { ...target.headers, ...postizKeyHeaders(cfg.postiz, name, target) } };
         }
         if (isRemoteMcpServer(target) && oauth.authState(name, target.url) === "signed-in") {
           const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
@@ -183,6 +188,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
         appCatalog?.serverChanged(name);
+        health?.changed(name);
         return json(res, 201, withServerDetails(mcpServerResponse()));
       } finally {
         mcpConfigBusy.set(false);
@@ -257,6 +263,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           const { apps: _apps, ...rest } = existing.server;
           persistMcpServers({ ...current, [name]: key === "enabled" ? { ...existing.server, enabled: body.enabled } : { ...rest, ...(body.apps ? {} : { apps: false }) } });
           if (body[key] === true) appCatalog?.serverChanged(name);
+          if (key === "enabled") health?.changed(name);
           return json(res, 200, withServerDetails(mcpServerResponse()));
         }
 
@@ -269,6 +276,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         persistMcpServers({ ...current, [name]: parsed.server });
         appCatalog?.forgetServer(name);
         appCatalog?.serverChanged(name);
+        health?.changed(name);
         // A sign-in belongs to one address: a token never follows the entry elsewhere.
         const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
         const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;

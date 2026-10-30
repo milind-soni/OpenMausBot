@@ -155,15 +155,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (email) deps.ensureOwnBot?.(email);
     const bot = representativeOf(person);
     if (!bot) return null;
-    const kept = homes[person];
-    const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
-    if (task && !task.archivedAt) return { bot, threadId: task.threadId };
-    const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
-    const brief = own.find((one) => one.title === BRIEF_TITLE);
-    const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
-    let threadId = chat?.threadId;
-    if (brief) store.patchTask(bot.id, brief.threadId, { title: INBOX_TITLE });
-    else if (!chat) {
+    const standing = standingHome(person, bot);
+    if (standing?.kept) return { bot, threadId: standing.threadId };
+    let threadId = standing?.threadId;
+    if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
+    else if (!standing) {
       const created = store.createTask(bot.id, INBOX_TITLE, false);
       if (!created) return null;
       deps.starters.set(created.threadId, person);
@@ -173,6 +169,22 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     indexHomes();
     save();
     return { bot, threadId: threadId! };
+  }
+
+  function standingHome(person: string, bot: BotRecord): { threadId: string; kept: boolean; brief: boolean } | null {
+    const kept = homes[person];
+    const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
+    if (task && !task.archivedAt) return { threadId: task.threadId, kept: true, brief: false };
+    const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
+    const brief = own.find((one) => one.title === BRIEF_TITLE);
+    const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
+    return chat ? { threadId: chat.threadId, kept: false, brief: Boolean(brief) } : null;
+  }
+
+  /** Whether this conversation is the person's inbox, or the one `home` would make it, before anything reached it. */
+  function isHomeOf(threadId: string, person: string | null): boolean {
+    const bot = team && person && deps.person(person) ? representativeOf(person) : null;
+    return bot ? standingHome(person!, bot)?.threadId === threadId : false;
   }
 
   let homeThreads = new Map<string, string>();
@@ -411,6 +423,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   return {
     home,
     personOf,
+    isHomeOf,
     deliver,
     route,
     answeredIn,

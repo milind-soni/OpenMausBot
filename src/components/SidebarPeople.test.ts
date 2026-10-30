@@ -7,6 +7,7 @@ import { needsYouVersion, setTeamPeople, type TeamPeople } from "@/state/team-pe
 
 import { InboxAnswers, InboxCaption, RelayLabel } from "./InboxLine";
 import { inboxBotOf, SidebarPeople } from "./SidebarPeople";
+import { pendingApprovals, PendingApprovalPanel } from "./PendingApproval";
 
 const PHILIPP = { email: "philipp@acme.test", name: "Philipp", role: "owner" };
 const MARCO = { email: "marco@acme.test", name: "Marco", role: "member", you: true as const };
@@ -79,6 +80,21 @@ describe("a line in the inbox", () => {
     expect(markup).toMatch(/<button[^>]*aria-label="Open Scout"[^>]*>· in Scout<\/button>/);
     const hidden = render(createElement(InboxCaption, { message: line({ kind: "message", from: { name: "Philipp", email: PHILIPP.email }, replies: true }) }));
     expect(hidden).not.toContain("<button");
+  });
+
+  it("leaves a question's copy, and an approval's while it waits, to the card's own header, which links back", () => {
+    setTeamPeople(asMarco);
+    const ask = { kind: "ask" as const, from: { name: "Biber", botId: "biber" }, origin: { botId: "biber", threadId: "work", title: "Fix" } };
+    const message = (card: Partial<NonNullable<Message["card"]>>) => line(ask, { kind: "options",
+      card: { title: "", subtitle: "git push", options: [], requestId: "r1", ...card } as Message["card"] });
+    const caption = (card: Partial<NonNullable<Message["card"]>>) => render(createElement(InboxCaption, { message: message(card) }));
+    expect(caption({ requestType: "question", options: ["Ja", "Nein"] })).toBe("");
+    expect(caption({ tool: "Bash" })).toBe("");
+    expect(caption({ tool: "Bash", answered: "allow" })).toContain("From Biber");
+    expect(caption({ tool: "Bash", expired: true })).toContain("From Biber");
+    const pending = pendingApprovals([message({ tool: "Bash" })])[0]!;
+    const dock = render(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, asker: { name: "Biber", color: "teal" } }));
+    expect(dock).toMatch(/<button[^>]*aria-label="Open Fix"[^>]*>· in Fix<\/button>/);
   });
 
   it("names the sender's assistant on its answer, and shows what yours answered with the way to correct it", () => {
