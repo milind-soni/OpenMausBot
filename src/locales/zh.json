@@ -72,6 +72,7 @@
   "server.reports.refused": "MausBot 团队的服务器拒绝了这份错误报告，因此没有发送任何内容：{detail}。",
   "server.reports.full": "未发送：已有 {count} 份错误报告在等待发送给 MausBot 团队。等它们发送后，再输入一次 @devs。",
   "server.reports.dropped": "此对话中的一份错误报告一周内都无法送达 MausBot 团队，因此已被丢弃。如需发送新的报告，请再输入一次 @devs。",
+  "server.warmSummary.summarized": "已在对话空闲时生成摘要；最新的消息逐字保留",
   "star.title": "喜欢 {app} 吗？",
   "star.body": "在 GitHub 上点个星，能帮助更多人发现它。",
   "star.button": "在 GitHub 上点星",

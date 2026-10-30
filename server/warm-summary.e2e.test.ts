@@ -86,7 +86,7 @@ it("after: the conversation is summarized while idle, so the next turn starts sm
   expect(dump.argv).not.toContain("--no-session-persistence");
   const fork = f.task().resumeCursors.claude;
   expect(fork).not.toBe(before);
-  expect((await f.messages()).some((m) => m.kind === "activity" && /summarized this conversation while it was idle; the last 2 exchanges carry on word for word/.test(m.tool?.name))).toBe(true);
+  expect((await f.messages()).some((m) => m.kind === "activity" && /summarized this conversation while it was idle; the latest messages carry on word for word/.test(m.tool?.name))).toBe(true);
 
   const after = await f.send("MSG-4 what changed?");
   record({ case: "after", nextReplyMs: after });

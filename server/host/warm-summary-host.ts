@@ -14,6 +14,7 @@ import type { IdleCompactResult } from "../contracts.ts";
 import { isContextMessage, type HandedState } from "../delta-context.ts";
 import { wakeHoldOf } from "../routine-due.ts";
 import type { Routine, RoutineRun } from "../routines.ts";
+import { serverLine } from "../server-lines.ts";
 import type { Message, Store } from "../store.ts";
 import type { WaitRecord } from "../waits.ts";
 import { createWarmSummary, WARM_SUMMARY_MIN_TOKENS, WARM_SUMMARY_RETRY_MS, type WarmSummaryOutcome, type WarmSummaryPlan, type WarmSummaryTarget } from "../warm-summary.ts";
@@ -51,6 +52,8 @@ export interface WarmSummaryHostDeps {
   book(target: WarmSummaryTarget, result: Extract<IdleCompactResult, { ok: true }>): void;
   /** Until when keep-warm already holds this conversation's process. */
   keepWarmUntil(threadId: string): number | undefined;
+  /** The language the conversation's person reads its lines in (server/server-lines.ts); undefined reads as English. */
+  language?(threadId: string): string | undefined;
   now?(): number;
   after?(ms: number, fn: () => void): { cancel(): void };
   log?(line: string): void;
@@ -86,11 +89,6 @@ export function keptAfterSummary(messages: readonly Message[], session: string, 
   return { state, exchanges: through === undefined ? users.length : KEPT_EXCHANGES };
 }
 
-/** The line the conversation shows for a summary written while it was idle. */
-export function summarizedLine(exchanges: number): string {
-  const kept = exchanges <= 0 ? "" : exchanges === 1 ? "; the last exchange carries on word for word" : `; the last ${exchanges} exchanges carry on word for word`;
-  return `summarized this conversation while it was idle${kept}`;
-}
 
 export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
   const { store } = deps;
@@ -111,7 +109,8 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const { state, exchanges } = keptAfterSummary(store.activePath(threadId), result.session, task.handedMessages?.[instanceId]);
     store.setResumeCursor(botId, instanceId, result.session, threadId);
     store.setHandedMessages(botId, threadId, instanceId, state);
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: summarizedLine(exchanges), ok: true } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });
+    deps.log?.(`warm summary ${threadId}: moved to its summarized session, keeping ${exchanges} exchange(s) word for word`);
     return { ok: true };
   };
 

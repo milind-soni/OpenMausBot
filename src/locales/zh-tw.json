@@ -82,6 +82,7 @@
   "server.reports.refused": "MausBot 團隊的伺服器拒絕了這份錯誤回報，因此沒有傳送任何內容：{detail}。",
   "server.reports.full": "未傳送：已有 {count} 份錯誤回報正在等待傳送給 MausBot 團隊。等它們傳送後，再輸入一次 @devs。",
   "server.reports.dropped": "此對話中的一份錯誤回報一週內都無法送達 MausBot 團隊，因此已被捨棄。若要傳送新的回報，請再輸入一次 @devs。",
+  "server.warmSummary.summarized": "已在對話閒置時整理摘要；最新的訊息逐字保留",
   "star.title": "喜歡 {app} 嗎？",
   "star.body": "在 GitHub 上給顆星，能幫助更多人找到它。",
   "star.button": "在 GitHub 上給星",

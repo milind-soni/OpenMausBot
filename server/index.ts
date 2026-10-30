@@ -5325,7 +5325,7 @@ cacheKeepWarmStatus = (threadId) => cacheKeepWarm.status(threadId);
 const warmSummaries = createWarmSummaryHost({ store, instance: (id) => registry.get(id), queued: hasQueuedSteeredMessages, coordinator, waits: () => botWaits, routines: () => routines,
   enabled: () => cfg.context?.autoCompact !== false && process.env.OMB_WARM_SUMMARY !== "0" && spendState(cfg, DATA_DIR)?.exceeded !== true, memoryShort: () => engineMemory.headroom() < 0.3,
   nativeCompactAt: (id) => { const instance = registry.get(id), at = instance ? nativeCompactTokens(instance) : undefined; return at && Number.isFinite(at) ? at : undefined; },
-  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line),
+  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line), language: (threadId) => personLanguages.forLine(threadStarters.get(threadId)),
   fold: async ({ botId, threadId, instanceId }, idle) => { const bot = store.projectBotForTask(botId, threadId), model = store.taskByThread(botId, threadId)?.lastContextModel, instance = registry.get(instanceId), before = latestCompaction(store.activePath(threadId))?.id;
     if (bot && instance && model?.startsWith(`${instanceId}:`)) await compactConversation({ bot, threadId, generation: `idle:${randomUUID()}`, instance, model: model.slice(instanceId.length + 1), excludedIds: new Set(), manual: false, idle });
     return latestCompaction(store.activePath(threadId))?.id !== before; } });

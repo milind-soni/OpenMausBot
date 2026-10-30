@@ -148,6 +148,7 @@
   "server.reports.refused": "The MausBot team's server refused this bug report, so nothing was sent: {detail}.",
   "server.reports.full": "Not sent: {count} bug reports are already waiting to go to the MausBot team. Type @devs again once they have gone.",
   "server.reports.dropped": "A bug report from this conversation could not reach the MausBot team for a week, so it was dropped. Type @devs again to send a new one.",
+  "server.warmSummary.summarized": "summarized this conversation while it was idle; the latest messages carry on word for word",
   "star.title": "Enjoying {app}?",
   "star.body": "A star on GitHub helps more people find it.",
   "star.button": "Star on GitHub",

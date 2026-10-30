@@ -97,6 +97,7 @@
   "server.reports.refused": "O servidor da equipe do MausBot recusou este relatório de bug, então nada foi enviado: {detail}.",
   "server.reports.full": "Não enviado: {count} relatórios de bug já estão esperando para ir para a equipe do MausBot. Digite @devs de novo quando eles tiverem sido enviados.",
   "server.reports.dropped": "Um relatório de bug desta conversa não conseguiu chegar à equipe do MausBot durante uma semana, então foi descartado. Digite @devs de novo para enviar um novo.",
+  "server.warmSummary.summarized": "esta conversa foi resumida enquanto estava parada; as mensagens mais recentes seguem palavra por palavra",
   "star.title": "Está gostando do {app}?",
   "star.body": "Uma estrela no GitHub ajuda mais pessoas a encontrá-lo.",
   "star.button": "Dar uma estrela no GitHub",

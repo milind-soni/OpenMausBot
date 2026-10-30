@@ -83,6 +83,7 @@
   "server.reports.refused": "Máy chủ của đội MausBot đã từ chối báo cáo lỗi này nên chưa có gì được gửi: {detail}.",
   "server.reports.full": "Chưa gửi: đã có {count} báo cáo lỗi đang chờ gửi tới đội MausBot. Hãy gõ lại @devs sau khi chúng đã được gửi.",
   "server.reports.dropped": "Một báo cáo lỗi từ cuộc trò chuyện này không thể tới được đội MausBot trong một tuần nên đã bị bỏ. Hãy gõ lại @devs để gửi báo cáo mới.",
+  "server.warmSummary.summarized": "đã tóm tắt cuộc trò chuyện này khi nó đang tạm dừng; các tin nhắn mới nhất được giữ nguyên văn",
   "star.title": "Bạn thích {app} chứ?",
   "star.body": "Một ngôi sao trên GitHub sẽ giúp nhiều người biết đến ứng dụng hơn.",
   "star.button": "Tặng sao trên GitHub",

@@ -4,7 +4,8 @@ import type { IdleCompactResult } from "../contracts.ts";
 import type { HandedState } from "../delta-context.ts";
 import type { Message } from "../store.ts";
 import { WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
-import { createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summarizedLine, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
+import { addServerLinePacks } from "../server-lines.ts";
+import { createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
 
 let at = 0;
 const line = (role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
@@ -20,7 +21,6 @@ describe("what a summary keeps", () => {
     const { state, exchanges } = keptAfterSummary(messages, "fork-1", { session: "old", config: "cfg", ids: ["x"] });
     expect(state).toEqual({ session: "fork-1", config: "cfg", through: messages[1]!.id, ids: [] });
     expect(exchanges).toBe(2);
-    expect(summarizedLine(exchanges)).toBe("summarized this conversation while it was idle; the last 2 exchanges carry on word for word");
   });
 
   it("keeps a short conversation whole", () => {
@@ -28,7 +28,6 @@ describe("what a summary keeps", () => {
     const { state, exchanges } = keptAfterSummary(messages, "fork-2", undefined);
     expect(state).toEqual({ session: "fork-2", ids: [] });
     expect(exchanges).toBe(1);
-    expect(summarizedLine(exchanges)).toBe("summarized this conversation while it was idle; the last exchange carries on word for word");
   });
 
   it("asks the summary to keep open questions, and only open ones", () => {
@@ -126,8 +125,17 @@ describe("warm summaries for a Claude conversation", () => {
     expect(f.compactCalls).toEqual([{ threadId: "t1", session: "live-session", instructions: expect.stringContaining("every question still waiting"), signal: expect.any(AbortSignal) }]);
     expect(f.task.resumeCursors.claude).toBe("fork-session");
     expect(f.task.handedMessages.claude).toEqual({ session: "fork-session", config: "cfg", through: f.messages[1]!.id, ids: [] });
-    expect(f.appended).toEqual([expect.objectContaining({ kind: "activity", tool: { name: "summarized this conversation while it was idle; the last 2 exchanges carry on word for word", ok: true } })]);
+    expect(f.appended).toEqual([expect.objectContaining({ kind: "activity", tool: { name: "summarized this conversation while it was idle; the latest messages carry on word for word", ok: true } })]);
     expect(f.book).toHaveBeenCalledWith({ threadId: "t1", botId: "b1", instanceId: "claude" }, expect.objectContaining({ ok: true, cacheRead: 150_000 }));
+  });
+
+  it("writes its line in the language of the conversation's person", async () => {
+    // A stand-in pack: the real translations are checked with the locale tests.
+    addServerLinePacks({ de: { "server.warmSummary.summarized": "in einer Pause zusammengefasst" } });
+    const f = setup({ language: (threadId) => (threadId === "t1" ? "de" : undefined) });
+    f.finishTurn();
+    await f.advance(WARM_SUMMARY_IDLE_MS);
+    expect(f.appended).toEqual([expect.objectContaining({ tool: { name: "in einer Pause zusammengefasst", ok: true } })]);
   });
 
   it("leaves a conversation that moved to another session meanwhile alone", async () => {

@@ -51,6 +51,7 @@
   "server.reports.refused": "Le serveur de l'équipe MausBot a refusé ce rapport de bug, rien n'a donc été envoyé : {detail}.",
   "server.reports.full": "Non envoyé : {count} rapports de bug attendent déjà d'être envoyés à l'équipe MausBot. Écrivez de nouveau @devs une fois qu'ils sont partis.",
   "server.reports.dropped": "Un rapport de bug de cette conversation n'a pas pu atteindre l'équipe MausBot pendant une semaine, il a donc été abandonné. Écrivez de nouveau @devs pour en envoyer un nouveau.",
+  "server.warmSummary.summarized": "cette conversation a été résumée pendant une pause ; les derniers messages sont conservés mot pour mot",
   "star.title": "Vous aimez {app} ?",
   "star.body": "Une étoile sur GitHub aide plus de gens à le découvrir.",
   "star.button": "Mettre une étoile sur GitHub",
