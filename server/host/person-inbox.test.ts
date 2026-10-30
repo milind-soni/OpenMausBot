@@ -251,16 +251,16 @@ describe("the inbox itself", () => {
 
   it("prunes expired items from memory while the private-flag save is pending, and leaves the evidence file untouched", () => {
     const f = fixture();
-    f.inboxOf(MARCO);
+    f.inboxOf(BEN);
     const file = join(f.dataDir, PERSON_INBOX_FILE);
     const kept = JSON.parse(readFileSync(file, "utf8")) as { homes: Record<string, { botId: string; threadId: string }> };
     const at = Object.values(kept.homes)[0]!;
-    const stale = { id: "stale-1", person: key(MARCO.email), botId: at.botId, threadId: at.threadId, kind: "message", from: "Ada", text: "Old news", at: 1 };
+    const stale = { id: "stale-1", person: key(BEN.email), botId: at.botId, threadId: at.threadId, kind: "message", from: "Ada", text: "Old news", at: 1 };
     writeFileSync(file, JSON.stringify({ version: 1, homes: kept.homes, items: [stale] }));
     f.store.privateTasksSaved = false;
     f.restart();
-    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
-    expect(f.team.inbox.markDone(key(MARCO.email), "stale-1"), "the expired item is pruned from memory even though no save may land").toBe("unknown");
+    f.team.pass("scout", "cleo-private", "Ben", "Can you review the deck?");
+    expect(f.team.inbox.markDone(key(BEN.email), "stale-1"), "the expired item is pruned from memory even though no save may land").toBe("unknown");
     expect((JSON.parse(readFileSync(file, "utf8")).items as Array<{ id: string }>).map((item) => item.id), "the file keeps the evidence until the flags are saved").toEqual(["stale-1"]);
   });
 });
