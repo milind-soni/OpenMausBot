@@ -85,7 +85,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, openSidebarBot, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -857,7 +857,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     if (renaming) return;
     const insideRenameInput = event.target instanceof HTMLInputElement;
     if (botListItemPointerIntent(event.type, insideRenameInput) === "select") {
-      openBot(dispatch, bot, showThreads);
+      openSidebarBot(dispatch, bot, showThreads);
     }
   };
 
@@ -886,7 +886,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           if (drag && stepKey(event)) { event.preventDefault(); drag.step(bot.id, stepKey(event)!); return; }
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            openBot(dispatch, bot, showThreads);
+            openSidebarBot(dispatch, bot, showThreads);
           }
         }}
         onContextMenu={onContextMenu}
@@ -1468,7 +1468,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           )}
           {!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} />}
           {unsectionedChief && (phone ? (
-            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBot(dispatch, unsectionedChief, showThreads)} onMenu={setMenu} />
+            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openSidebarBot(dispatch, unsectionedChief, showThreads)} onMenu={setMenu} />
           ) : (
             <div className="mb-1.5">
               <BotListItem {...botRow(unsectionedChief)} />

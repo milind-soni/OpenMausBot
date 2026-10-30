@@ -2950,13 +2950,14 @@ try {
 // Replay only after the secondary write above is durable.
 if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
+let threadAwaitingAnswer = (_threadId: string): boolean => false;
 let threadsAwaitingTeammates = (): ReadonlySet<string> => new Set<string>();
 let cacheKeepWarmStatus = (_threadId: string): KeepWarmStatus | undefined => undefined;
 const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threadsAwaitingTeammates()): WireTask => {
   // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
   const { snoozedUntil, ...base } = toWireTask(task, botModel);
   const keepWarm = cacheKeepWarmStatus(task.threadId);
-  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}), ...teamMessages.inbox.wire(task.threadId) };
+  const coordinated = { ...base, activity: threadAwaitingAnswer(task.threadId) ? "waiting-on-you" as const : base.activity, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}), ...teamMessages.inbox.wire(task.threadId) };
   const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
   return asleep ? { ...coordinated, snoozedUntil } : coordinated;
 };
@@ -2969,7 +2970,7 @@ const wireBot = (bot: BotRecord): WireBot => {
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : { ...rest, approvalMode: approvalModeFor(rest) };
   const awaiting = threadsAwaitingTeammates();
-  return { ...visible, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
+  return { ...visible, activity: threadAwaitingAnswer(bot.threadId) ? "waiting-on-you" : visible.activity, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
     mainThreadId: botMainThread(bot.id),
     avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
 };
@@ -4155,6 +4156,7 @@ const coordinator: Coordinator = createCoordinator({
     },
   },
 });
+threadAwaitingAnswer = (threadId) => coordinator.awaitingAnswer(threadId);
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
 const groupUsageReader = new GroupUsageReader(DATA_DIR);
 try { groupUsageReader.refresh(); } catch {}
