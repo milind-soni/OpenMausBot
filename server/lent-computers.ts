@@ -4,7 +4,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
-import { useMyComputerLink } from "../shared/use-my-computer.ts";
 import { writeFileAtomic } from "./atomic.ts";
 
 export const LENT_PLATFORMS = ["darwin", "win32", "linux"] as const;
@@ -12,7 +11,7 @@ export type LentPlatform = typeof LENT_PLATFORMS[number];
 
 const recordSchema = z.object({
   id: z.string().uuid(), person: z.string().min(1).max(200), name: z.string().min(1).max(120), platform: z.enum(LENT_PLATFORMS).nullable(),
-  folders: z.number().int().min(0).max(20), terminal: z.boolean(), screen: z.boolean(), internet: z.boolean().optional(),
+  folders: z.number().int().min(0).max(20), terminal: z.boolean(), screen: z.boolean(), internet: z.boolean().optional(), chrome: z.boolean().optional(),
   lastSeenAt: z.number(), lastUsedAt: z.number().nullable(), stoppedAt: z.number().nullable(),
 }).strict();
 const fileSchema = z.object({ version: z.literal(1), computers: z.array(recordSchema).max(200) });
@@ -57,12 +56,12 @@ export class LentComputers {
 
   /** A computer that registered, now lending these scopes. Each new grant has a new id, so a computer is known by its
    * name: lending again from the same computer updates its one record. A person's newest computers are kept. */
-  connected(person: string, input: { id: string; name: string; platform?: LentPlatform; folders: number; terminal: boolean; screen: boolean; internet?: boolean }): void {
+  connected(person: string, input: { id: string; name: string; platform?: LentPlatform; folders: number; terminal: boolean; screen: boolean; internet?: boolean; chrome?: boolean }): void {
     const at = this.now();
     const same = (computer: LentComputer) => computer.person === person && (computer.id === input.id || computer.name === input.name);
     const previous = this.computers.find(same);
     const next: LentComputer = { id: input.id, person, name: input.name, platform: input.platform ?? previous?.platform ?? null, folders: input.folders,
-      terminal: input.terminal, screen: input.screen, internet: input.internet === true, lastSeenAt: at, lastUsedAt: previous?.lastUsedAt ?? null, stoppedAt: null };
+      terminal: input.terminal, screen: input.screen, internet: input.internet === true, chrome: input.chrome === true, lastSeenAt: at, lastUsedAt: previous?.lastUsedAt ?? null, stoppedAt: null };
     const others = this.computers.filter((computer) => !same(computer));
     const mine = [next, ...others.filter((computer) => computer.person === person)].slice(0, PER_PERSON);
     this.computers = [...mine, ...others.filter((computer) => computer.person !== person)];
@@ -103,9 +102,10 @@ export class LentComputers {
   }
 }
 
-/** How the person lends apps and screen: one link, pressed in OpenMausBot on the lent computer, which asks them once. */
-export const lendScreenSteps = (device: "PC" | "Mac" | "computer") => `To lend them, give the person ${useMyComputerLink(device)} to press in OpenMausBot `
-  + `on that ${device}: it asks them once and turns on its apps and screen.`;
+/** What makes a lent computer lend its apps and screen: OpenMausBot on it lends them by itself once computer control works there. */
+export const lendScreenSteps = (device: "PC" | "Mac" | "computer") => device === "Mac"
+  ? "OpenMausBot on that Mac lends them by itself once macOS allows it Accessibility and Screen Recording: tell the person in one sentence to allow both for OpenMausBot in System Settings → Privacy & Security on that Mac, and to update OpenMausBot there if it is an older version."
+  : `OpenMausBot on that ${device} lends them by itself once its computer control works: tell the person in one sentence to check computer control in OpenMausBot on that ${device}, and to update OpenMausBot there if it is an older version.`;
 
 const dateText = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
@@ -121,6 +121,6 @@ export function awayNotice(known: LentComputer[], online: ReadonlySet<string>): 
   const device = deviceWord(latest.platform);
   const say = latest.stoppedAt === null
     ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): OpenMausBot on it is closed, or the ${device} is asleep or off. Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`
-    : `Their ${device} ${latest.name} is no longer shared with the Cloud: sharing was turned off on it. To share it again, they press ${useMyComputerLink(device)} in OpenMausBot on that ${device}.`;
+    : `Their ${device} ${latest.name} no longer shares itself with the Cloud: OpenMausBot on it is paused, or signed out of MausBot Cloud. Ask them to choose Resume from OpenMausBot's icon in the ${device === "Mac" ? "menu bar" : "taskbar"} on that ${device}, or sign in there again.`;
   return { offline, say };
 }

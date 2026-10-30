@@ -10,6 +10,7 @@ import {
   mentionChipBackground,
   quoteSurface,
   selectionBackground,
+  userBubbleStyle,
   userBubbleTone,
 } from "./user-bubble-tone";
 
@@ -42,6 +43,15 @@ describe("user bubble tone", () => {
     if (tone.ink === "#ffffff" && contrastRatio("#ffffff", MAUS_COLORS[color]) >= BUBBLE_TEXT_MIN) {
       expect(tone.background).toBe(MAUS_COLORS[color]);
     }
+  });
+
+  it.each(MAUS_COLOR_NAMES)("gives %s a flat fill whose ink reads at 4.5:1, for the Simple bubble and the composer's round button", (color) => {
+    const tone = userBubbleTone(color);
+    expect(contrastRatio(tone.ink, tone.background)).toBeGreaterThanOrEqual(4.5);
+    const flat = userBubbleStyle(color, { flat: true }) as Record<string, unknown>;
+    expect(flat.backgroundColor).toBe(tone.background);
+    expect(flat.backgroundImage).toBe("none");
+    expect((userBubbleStyle(color) as Record<string, unknown>).backgroundImage).toBe(tone.gradient);
   });
 
   it("keeps yellow bright with dark text instead of darkening it to olive", () => {

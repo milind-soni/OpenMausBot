@@ -8,7 +8,7 @@ import { SettingRow } from "./SettingsPrimitives";
  * Where this app's logs are, and the recent part of them to share with support. Security: the report never holds
  * credential values (electron/diagnostics.mjs redacts every line); opening the folder only shows main's own logs folder.
  */
-export function DiagnosticsRow() {
+export function DiagnosticsRow({ simple = false }: { simple?: boolean }) {
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
@@ -44,7 +44,7 @@ export function DiagnosticsRow() {
   return (
     <SettingRow
       title={t("settings.diagnostics.title")}
-      subtitle={t("settings.diagnostics.subtitle")}
+      subtitle={t(simple ? "settings.simple.diagnostics" : "settings.diagnostics.subtitle")}
       message={<>
         {folder && result?.kind !== "error" && <p role="status" data-logs-folder className="break-all text-ink-secondary">{t("settings.diagnostics.logsAt", { folder })}</p>}
         {result && <p role={result.kind === "error" ? "alert" : "status"} className={cn("break-all", result.kind === "error" ? "text-danger" : "text-success")}>

@@ -1,9 +1,11 @@
 // MCP stdio server the claude CLI spawns for --permission-prompt-tool; forwards each ask to the server's broker over a unix socket.
 // stdout is the MCP channel: never console.log here.
-import { connect } from "node:net";
+import { connect, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { parseAskQuestions, questionAnswersByQuestion, type AskQuestion } from "../shared/ask-question.ts";
 import { allowsTool, parseToolScope } from "../shared/tool-scope.ts";
+import { REFUSED_NEXT_STEP } from "./reply-habits.ts";
 
 const selection = parseToolScope(process.env.OMB_PERMISSION_TOOL_SCOPE === undefined
   ? undefined : (() => { try { return JSON.parse(process.env.OMB_PERMISSION_TOOL_SCOPE); } catch { return null; } })());
@@ -12,56 +14,105 @@ const allowQuestion = allowsTool(selection.scope, { kind: "mcp", server: "ogb", 
 
 const socketPath = process.argv[2] ?? "";
 
-const waiting = new Map<string, (msg: any) => void>();
-const conn = connect(socketPath);
-// JSON lines can span reads; a stream decoder keeps a split character whole.
-conn.setEncoding("utf8");
-
+interface BrokerAnswer {
+  behavior?: string;
+  message?: string;
+  source?: string;
+  always?: boolean;
+}
+type AskKind = "question" | "permission";
 interface AllowPermissionResult {
   behavior: "allow";
   updatedInput: object;
   updatedPermissions?: object[];
 }
-const dead = () => {
-  for (const resolve of waiting.values()) {
-    resolve({ behavior: "deny", message: "OpenMausBot: permission broker unavailable — skip this action" });
-  }
-  waiting.clear();
-};
-conn.on("error", dead);
-conn.on("close", dead);
 
-let connBuf = "";
-conn.on("data", (chunk) => {
-  connBuf += chunk;
-  let nl;
-  while ((nl = connBuf.indexOf("\n")) !== -1) {
-    const line = connBuf.slice(0, nl);
-    connBuf = connBuf.slice(nl + 1);
-    let msg: any;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      continue;
+/** What the bot is told when the person cannot be asked at all: what to do instead, so it never just skips. */
+const UNREACHABLE_NOTE: Record<AskKind, string> = {
+  question:
+    "OpenMausBot could not show this question to the person: its question service did not answer. Do not retry this tool. Ask in your reply instead: end it with the exact question and stop there until they answer.",
+  permission:
+    "OpenMausBot could not ask the person to approve this step: its approval service did not answer. Skip this step, and say in your reply what you wanted to do and why, so the person can decide.",
+};
+const unreachable = (kind: AskKind): BrokerAnswer => ({ behavior: "deny", message: UNREACHABLE_NOTE[kind], source: "system" });
+
+/** Asks waiting for the broker, by id; an answer only ever comes back on the connection its ask went out on. */
+const waiting = new Map<string, { conn: Socket; kind: AskKind; resolve: (answer: BrokerAnswer) => void }>();
+let live: Socket | null = null;
+let opening: Promise<Socket | null> | null = null;
+
+function open(): Promise<Socket | null> {
+  return new Promise((resolve) => {
+    const conn = connect(socketPath);
+    // JSON lines can span reads; a stream decoder keeps a split character whole.
+    conn.setEncoding("utf8");
+    let connected = false;
+    let buf = "";
+    conn.on("data", (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        let msg: any;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const entry = msg?.t === "answer" ? waiting.get(String(msg.id)) : undefined;
+        if (entry?.conn !== conn) continue;
+        waiting.delete(String(msg.id));
+        entry.resolve(msg);
+      }
+    });
+    conn.once("connect", () => {
+      connected = true;
+      resolve(conn);
+    });
+    conn.on("error", () => {});
+    conn.once("close", () => {
+      if (!connected) resolve(null);
+      if (live === conn) live = null;
+      for (const [id, entry] of waiting) {
+        if (entry.conn !== conn) continue;
+        waiting.delete(id);
+        entry.resolve(unreachable(entry.kind));
+      }
+    });
+  });
+}
+
+/** The connection to the broker, opened again after a drop; a few quick tries ride out a broker that is still binding. */
+function brokerConnection(): Promise<Socket | null> {
+  if (live && !live.destroyed) return Promise.resolve(live);
+  opening ??= (async () => {
+    for (const pause of [0, 200, 800]) {
+      if (pause) await sleep(pause);
+      const conn = await open();
+      if (conn) return (live = conn);
     }
-    if (msg.t === "answer") {
-      waiting.get(msg.id)?.(msg);
-      waiting.delete(msg.id);
-    }
-  }
-});
+    return null;
+  })().finally(() => {
+    opening = null;
+  });
+  return opening;
+}
+// Connected at start, so a process that outlives its session never reaches a newer broker bound at the same path.
+void brokerConnection();
 
 const send = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
-function askBroker(ask: Record<string, unknown>): Promise<any> {
+async function askBroker(ask: Record<string, unknown> & { id: string }, kind: AskKind): Promise<BrokerAnswer> {
+  const conn = await brokerConnection();
+  if (!conn || conn.destroyed) return unreachable(kind);
   return new Promise((resolve) => {
-    waiting.set(String(ask.id), resolve);
-    if (conn.destroyed) return dead();
-    try {
-      conn.write(JSON.stringify(ask) + "\n");
-    } catch {
-      dead();
-    }
+    waiting.set(ask.id, { conn, kind, resolve });
+    conn.write(JSON.stringify(ask) + "\n", (error) => {
+      if (!error || waiting.get(ask.id)?.conn !== conn) return;
+      waiting.delete(ask.id);
+      resolve(unreachable(kind));
+    });
   });
 }
 
@@ -87,13 +138,7 @@ async function answerNativeQuestions(input: unknown): Promise<string> {
         "OpenMausBot: this AskUserQuestion call had no answerable question (each one needs question text), so nobody was shown it. Ask again with a well-formed call, or continue without it.",
     });
   }
-  const answer = await askBroker({
-    t: "ask",
-    id: randomUUID(),
-    kind: "question",
-    tool: ASK_USER_QUESTION,
-    input: { questions },
-  });
+  const answer = await askBroker({ t: "ask", id: randomUUID(), kind: "question", tool: ASK_USER_QUESTION, input: { questions } }, "question");
   if (answer.behavior === "deny") {
     return JSON.stringify({ behavior: "deny", message: answer.message || "Denied from OpenMausBot" });
   }
@@ -159,7 +204,7 @@ async function handle(msg: any) {
   if (msg.method === "tools/call") {
     const name = msg.params?.name;
     const args = msg.params?.arguments ?? {};
-    const reply = (text: string) => send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });
+    const reply = (text: string, isError = false) => send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }], ...(isError ? { isError } : {}) } });
     if (name === "ask_user" && !allowQuestion) return reply("OpenMausBot: this question tool is excluded by the bot's tool selection.");
     if (name === "approve" && args.tool_name === ASK_USER_QUESTION) {
       return reply(await answerNativeQuestions(args.input));
@@ -173,10 +218,11 @@ async function handle(msg: any) {
       : Array.isArray(args.suggestions)
         ? args.suggestions
         : null;
-    const answer: any = await askBroker(
+    const answer = await askBroker(
       isQuestion
         ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: args.question, choices: args.choices, ...(picksSeveral ? { questions: picksSeveral } : {}) } }
         : { t: "ask", id: askId, tool: args.tool_name, input: args.input },
+      isQuestion ? "question" : "permission",
     );
     let text = answer.message || "No answer was given — use your best judgment.";
     if (picksSeveral && answer.source === "user" && typeof answer.message === "string") {
@@ -188,10 +234,10 @@ async function handle(msg: any) {
         if (answer.always && suggestions) result.updatedPermissions = suggestions;
         text = JSON.stringify(result);
       } else {
-        text = JSON.stringify({ behavior: "deny", message: answer.message || "Denied from OpenMausBot" });
+        text = JSON.stringify({ behavior: "deny", message: (answer.message || "Denied from OpenMausBot") + (answer.source === "user" ? REFUSED_NEXT_STEP : "") });
       }
     }
-    return reply(text);
+    return reply(text, isQuestion && answer.behavior === "deny");
   }
   if (String(msg.method ?? "").startsWith("notifications/")) return;
   if (msg.id != null) {

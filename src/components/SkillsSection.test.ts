@@ -13,6 +13,7 @@ const skill = (overrides: Partial<SkillsLibrarySkillWire> = {}): SkillsLibrarySk
   description: "Audits an order before it ships.",
   source: "local-import",
   enabled: true,
+  everyBot: false,
   tags: [],
   version: null,
   importedAt: "2026-09-20T12:00:00.000Z",

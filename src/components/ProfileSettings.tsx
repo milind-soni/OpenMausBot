@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { saveTeamProfile } from "@/lib/own-profile";
@@ -6,6 +6,8 @@ import { IMAGE_MAX_BYTES, imageAttachmentFromFile, isImageFile } from "@/lib/com
 import type { LocaleKey } from "@/locales";
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
 import { AboutMeSettings } from "./AboutMeSettings";
+import { profileInitials } from "./SidebarProfileMenu";
+import { User } from "lucide-react";
 
 const PHOTO_MIN_SIDE = 64;
 const PHOTO_MAX_SIDE = 8192;
@@ -193,6 +195,50 @@ export function ProfileFields() {
         className={inputClass}
       />
       <AboutMeSettings />
+    </div>
+  );
+}
+
+function ProfileAvatar({ profile }: { profile?: { name?: string; email?: string; avatarUrl?: string } }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const initials = profileInitials(profile);
+  const photo = profile?.avatarUrl && failed !== profile.avatarUrl ? profile.avatarUrl : null;
+  return (
+    <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-ink/[0.06] text-[15px] font-medium text-ink-secondary">
+      {photo ? <img src={photo} alt="" onError={() => setFailed(photo)} className="size-full object-cover" />
+        : initials !== "?" ? initials : <User size={20} aria-hidden="true" />}
+    </span>
+  );
+}
+
+export function ProfileSummaryRow() {
+  const { state } = useStore();
+  const [editing, setEditing] = useState(false);
+  const profile = state.config?.profile;
+  const name = profile?.name?.trim() ?? "";
+  const email = profile?.email?.trim() ?? "";
+  const fieldsId = useId();
+  const fields = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (editing) fields.current?.querySelector<HTMLInputElement>("input:not([type=file])")?.focus();
+  }, [editing]);
+  return (
+    <div data-profile-summary="" className="px-4 py-[13px]">
+      <div className="flex min-w-0 items-center gap-3">
+        <ProfileAvatar profile={profile} />
+        <div className="min-w-0 flex-1">
+          {name || email ? <>
+            <div className="truncate text-[14px] leading-5 text-ink">{name || email}</div>
+            {name && email && <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{email}</div>}
+          </> : <div className="truncate text-[14px] leading-5 text-ink-secondary">{t("settings.simple.account.noName")}</div>}
+        </div>
+        <button type="button" aria-expanded={editing} aria-controls={fieldsId} className="ui-button shrink-0" onClick={() => setEditing(!editing)}>
+          {editing ? t("common.done") : t(name || email ? "settings.simple.account.edit" : "settings.simple.account.add")}
+        </button>
+      </div>
+      <div id={fieldsId} ref={fields} hidden={!editing} className="mt-4">
+        {editing && <ProfileFields />}
+      </div>
     </div>
   );
 }

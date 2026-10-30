@@ -2,6 +2,7 @@ import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
+import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
 import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
@@ -146,20 +147,20 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
         {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
       </button>
       {motion.shown && (
-        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl", motion.className)} {...motion.exitProps}>
-          <div className="border-b border-hairline/20 px-4 py-3 text-[14px] font-medium text-ink">{t("place.chipTitle")}</div>
-          <div className="flex flex-col py-1.5">
+        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+          <div className={MENU_HEADING}>{t("place.chipTitle")}</div>
+          <div className="flex flex-col gap-1">
             <button
               type="button"
               role="menuitemradio"
               aria-checked={!pinned}
               onClick={() => choose(null)}
-              className={cn("flex items-start gap-3 px-4 py-2 text-left hover:bg-control/60", !pinned && "bg-control/40")}
+              className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", !pinned ? "bg-menu-active" : "hover:bg-menu-hover")}
             >
-              <PlaceIcon place={botDefault} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
+              <PlaceIcon place={botDefault} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] text-ink">{followsAuto ? t("place.auto") : t("place.followBot")}</span>
-                <span className="block text-[11px] text-ink-secondary">
+                <span className="block text-[14px] leading-[18px] text-ink">{followsAuto ? t("place.auto") : t("place.followBot")}</span>
+                <span className="block text-[12px] leading-4 text-ink-secondary">
                   {followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) })}
                 </span>
               </span>
@@ -178,12 +179,12 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
                   disabled={!reachable}
                   title={!policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined}
                   onClick={() => choose(place)}
-                  className={cn("flex items-start gap-3 px-4 py-2 text-left", reachable ? "hover:bg-control/60" : "cursor-not-allowed opacity-45", selected && "bg-control/40")}
+                  className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", selected ? "bg-menu-active" : reachable ? "hover:bg-menu-hover" : "cursor-not-allowed opacity-45")}
                 >
-                  <PlaceIcon place={place} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
+                  <PlaceIcon place={place} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] text-ink">{t(placeLabelKey(place))}</span>
-                    <span className="block text-[11px] text-ink-secondary">{detail}</span>
+                    <span className="block text-[14px] leading-[18px] text-ink">{t(placeLabelKey(place))}</span>
+                    <span className="block text-[12px] leading-4 text-ink-secondary">{detail}</span>
                   </span>
                   {selected && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
                 </button>

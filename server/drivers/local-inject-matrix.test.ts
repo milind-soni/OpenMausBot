@@ -97,6 +97,14 @@ describe("inject id dialect", () => {
     expect(decodeInjectId("omlx::")).toBeNull();
     expect(decodeInjectId("notahost::gemma-4-31b-it-bf16")).toBeNull();
     expect(decodeInjectId("omlx::bad id")).toBeNull();
+    expect(decodeInjectId("lmstudio::bad id")).toBeNull();
+  });
+
+  it("accepts an LM Studio quant variant id", () => {
+    expect(decodeInjectId("lmstudio::publisher/model@q4_k_m")).toEqual({
+      host: "lmstudio",
+      model: "publisher/model@q4_k_m",
+    });
   });
 });
 
@@ -420,6 +428,29 @@ describe("loaded host probes", () => {
     expect(catalog.options.find((o) => o.id === "ollama::mistral:latest")?.loaded).toBeUndefined();
     expect(catalog.options.find((o) => o.id === "lmstudio::qwen")?.loaded).toBe(true);
     expect(catalog.options.find((o) => o.id === "lmstudio::other")?.loaded).toBeUndefined();
+  });
+
+  it("keeps LM Studio v0 loaded flags when /api/v1/models is absent", async () => {
+    const catalog = await mergeLocalInject(
+      { default: "keep", options: [{ id: "keep", label: "Keep" }] },
+      { VITEST: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "1" },
+      async (url) => {
+        const href = String(url);
+        if (href.endsWith("/api/v1/models")) return new Response("missing", { status: 404 });
+        if (href.endsWith(":1234/v1/models")) {
+          return new Response(JSON.stringify({ data: [{ id: "qwen" }, { id: "other" }] }), { status: 200 });
+        }
+        if (href.endsWith("/api/v0/models")) {
+          return new Response(
+            JSON.stringify({ data: [{ id: "qwen", state: "loaded" }, { id: "other", state: "not-loaded" }] }),
+            { status: 200 },
+          );
+        }
+        return new Response("nope", { status: 500 });
+      },
+    );
+    expect(catalog.options.find((option) => option.id === "lmstudio::qwen")?.loaded).toBe(true);
+    expect(catalog.options.find((option) => option.id === "lmstudio::other")?.loaded).toBeUndefined();
   });
 });
 

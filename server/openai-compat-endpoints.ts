@@ -30,6 +30,7 @@ export const addEndpointSchema = z.object({
   url: z.string().max(512),
   key: z.string().trim().min(1).max(4096),
   models: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
+  catalog: z.literal("lmstudio").optional(),
 }).strict();
 
 export type AddEndpoint = z.infer<typeof addEndpointSchema>;
@@ -46,7 +47,7 @@ export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { 
   const models = [...new Set(body.models ?? [])];
   instances[instanceId] = {
     driver: "openai-compat", displayName: body.displayName, access: "api",
-    config: { key: body.key, url, ...(models.length ? { managedModels: models } : {}) },
+    config: { key: body.key, url, ...(models.length ? { managedModels: models } : {}), ...(body.catalog ? { catalog: body.catalog } : {}) },
   };
   return { instanceId };
 }

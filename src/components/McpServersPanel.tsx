@@ -30,6 +30,7 @@ import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
 import { WHOP_MCP_URL, isWhopServer, whopServerName } from "@/lib/whop-integration";
+import { POSTIZ_SERVER } from "../../shared/postiz";
 import { openBotSettings } from "./bot-panel/panel-link";
 
 export interface ProbeResult {
@@ -89,6 +90,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   onWhopConnection?: (connected: boolean) => void;
 } = {}) {
   const { state: store, dispatch } = useStore();
+  const botName = (id: string) => store.bots?.find((bot) => bot.id === id)?.name ?? id;
   const policy = store.config?.managedPolicy;
   const restricted = Boolean(policy && !policy.mcp.allowCustom);
   const [servers, setServers] = useState<McpServerListing[] | null>(null);
@@ -184,12 +186,18 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     let latest = servers ?? [];
     try {
       for (const item of items) {
-        latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...item.body }) })).servers);
-        added.push(item.name);
+        const body = item.ownKey
+          ? { ...item.body, headers: Object.fromEntries(Object.keys(item.body.headers ?? {}).map((name) => [name, ""])) }
+          : item.body;
+        latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...body }) })).servers);
         if (item.ownKey) {
           await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
-          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
+          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey, url: body.url }) });
+          latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
+            method: "PUT", body: JSON.stringify({ ...body, enabled: false }),
+          })).servers);
         }
+        added.push(item.name);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -211,7 +219,22 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     setError(null);
     setNotice(null);
     try {
-      listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...item.body, enabled: existing.enabled }) })).servers);
+      let body = item.body;
+      let ownKey: string | undefined;
+      if (store.config?.team && existing.scope !== "team" && typeof body.url === "string" && !body.oauth) {
+        const connections = await api("/api/team/my-connections");
+        if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
+          const headers = (body.headers ?? {}) as Record<string, string | true>;
+          if (Object.keys(headers).length > 1) {
+            throw new Error("Personal MCP connections support one header. Remove the extra headers before saving.");
+          }
+          const value = Object.values(headers)[0];
+          ownKey = typeof value === "string" ? value : undefined;
+          body = { ...body, headers: Object.fromEntries(Object.keys(headers).map((name) => [name, ""])) };
+        }
+      }
+      listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...body, enabled: existing.enabled }) })).servers);
+      if (ownKey) await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: ownKey, url: body.url }) });
       closeEditor();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -450,7 +473,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     </div>;
   }
 
-  const visibleServers = servers?.filter((server) => !hideWhop || !isRemoteMcpListing(server) || !isWhopServer(server));
+  const visibleServers = servers?.filter((server) => !hideWhop || !isRemoteMcpListing(server) || !(isWhopServer(server) || server.name === POSTIZ_SERVER));
 
   return (
     <section
@@ -535,6 +558,8 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                       </div>
                       {server.managedBy && <div className="mt-1 text-[12px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
                       {server.runsOn && <div data-mcp-runs-on className="mt-1 text-[12px] text-ink-secondary">{t("mcp.runsOn", { computer: server.runsOn.label })}</div>}
+                      {server.bot && <div data-mcp-own-bot className="mt-1 text-[12px] text-ink-secondary">{t("mcp.ownBot", { bot: botName(server.bot) })}</div>}
+                      {server.offFor?.length ? <div data-mcp-off-for className="mt-1 text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") })}</div> : null}
                       <div className="mt-1 truncate font-mono text-[12px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>

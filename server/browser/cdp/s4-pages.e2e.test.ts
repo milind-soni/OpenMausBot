@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { hostTimeout } from "../../testing/host-timeout.ts";
 import type { CdpPage } from "./page.ts";
-import { Screencast, type ScreencastFrame } from "./screencast.ts";
+import { PICTURE_LIMITS, pictureScale, Screencast, type ScreencastFrame } from "./screencast.ts";
 import { FixtureServer } from "./testing/fixtures.ts";
 import { CHROME, forbiddenCommands, inPageWorld, startChrome, type RunningChrome } from "./testing/real-chrome.ts";
 
@@ -160,7 +160,8 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     await page.click({ selector: "#o" });
     expect(run.browser.activePage).toBe(page);
     await popup.close();
-    await page.waitFor({ ms: 200 });
+    // Chrome reports the closed tab with an event after Target.closeTarget has answered.
+    for (const until = Date.now() + hostTimeout(5_000); run.browser.pages().includes(popup) && Date.now() < until;) await page.waitFor({ ms: 25 });
     expect(run.browser.pages()).not.toContain(popup);
   });
 
@@ -194,7 +195,7 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     await second.click({ selector: "#b" });
     expect(await read(`document.getElementById("b").textContent`, second)).toBe("two");
     await second.close();
-    await page.waitFor({ ms: 200 });
+    for (const until = Date.now() + hostTimeout(5_000); run.browser.pages().includes(second) && Date.now() < until;) await page.waitFor({ ms: 25 });
     expect(run.browser.pages()).toEqual([page]);
     await expect(second.click({ selector: "#b" })).rejects.toMatchObject({ code: "closed" });
   });
@@ -266,17 +267,26 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     expect(page.takeHealth().failedRequests).toEqual([]);
   });
 
-  it("takes pictures at most 1280 pixels wide: the viewport, an element and the whole page", async () => {
+  it("takes pictures one pixel per CSS pixel within the limits a model takes as they are: the viewport, an element and the whole page", async () => {
     await open(`<div id="box" style="margin:40px;width:200px;height:100px;background:red"></div><div style="height:3000px"></div>`);
     expect(await read("[innerWidth, innerHeight]")).toEqual([1280, 720]);
-    expect(pngSize((await page.screenshot()).data)).toEqual({ width: 1280, height: 720 });
+    const viewport = await page.screenshot();
+    // The viewport's width: 1280 where scrollbars overlay the page (macOS), less a 15-16 px classic scrollbar elsewhere.
+    expect(viewport).toMatchObject({ scale: 1, region: { height: 720 }, width: viewport.region.width, height: 720 });
+    expect(viewport.region.width).toBeGreaterThanOrEqual(1_260);
+    expect(viewport.region.width).toBeLessThanOrEqual(1_280);
+    expect(pngSize(viewport.data)).toEqual({ width: viewport.region.width, height: 720 });
     const element = await page.screenshot({ target: { selector: "#box" } });
     expect(pngSize(element.data)).toEqual({ width: 200, height: 100 });
     const full = await page.screenshot({ fullPage: true });
     // The document's width: 1280 where scrollbars overlay the page (macOS), less a 15-16 px classic scrollbar elsewhere.
-    expect(pngSize(full.data).width).toBeGreaterThanOrEqual(1_260);
-    expect(pngSize(full.data).width).toBeLessThanOrEqual(1_280);
-    expect(pngSize(full.data).height).toBeGreaterThan(3000);
+    expect(full.region.width).toBeGreaterThanOrEqual(1_260);
+    expect(full.region.width).toBeLessThanOrEqual(1_280);
+    expect(full.region.height).toBeGreaterThan(3000);
+    expect(full.scale).toBe(pictureScale(full.region));
+    expect(pngSize(full.data)).toEqual({ width: full.width, height: full.height });
+    expect(full.height).toBeLessThanOrEqual(PICTURE_LIMITS.maxHeight);
+    expect(full.width * full.height).toBeLessThanOrEqual(PICTURE_LIMITS.maxPixels);
     const retina = await startChrome("retina", { launch: { screen: { width: 1512, height: 982, deviceScaleFactor: 2 } } });
     extra.push(retina);
     const sharp = await retina.browser.waitForPage();
@@ -285,7 +295,12 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     expect(await sharp.evaluate("[innerWidth, innerHeight, screen.width, screen.height]")).toEqual([1280, 720, 1512, 982]);
     const shot = await sharp.screenshot();
     expect(pngSize(shot.data)).toEqual({ width: 1280, height: 720 });
-    expect(pngSize((await sharp.screenshot({ maxWidth: 2560 })).data)).toEqual({ width: 2560, height: 1440 });
+    await sharp.emulateSize({ width: 1280, height: 2400 });
+    const tall = await sharp.screenshot();
+    expect(tall).toMatchObject({ scale: 0.62, region: { width: 1280, height: 2400 }, width: 794, height: 1488 });
+    expect(pngSize(tall.data)).toEqual({ width: 794, height: 1488 });
+    await sharp.emulateSize({ width: 390, height: 844 });
+    expect(pngSize((await sharp.screenshot()).data)).toEqual({ width: 390, height: 844 });
   });
 
   it("fits each headless window so its page is exactly the viewport asked for", async () => {

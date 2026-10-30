@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import { cronScheduleLabel } from "../shared/cron-label.ts";
+import { plainClock, plainTimeZone, plainWeekdays } from "../shared/plain-time-zone.ts";
 import { normalizeCronSchedule, nextCronRuns } from "../shared/routine-schedule.ts";
 import { newId } from "./contracts.ts";
 import { UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-apply.ts";
@@ -46,7 +47,6 @@ const WEEKDAY_NUMBER = {
   saturday: 6,
 } as const;
 
-const WEEKDAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const RFC3339_WITH_OFFSET =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/i;
 const ACTION_COPY = {
@@ -570,30 +570,30 @@ export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string,
     const name = engines?.name(schedule.engine) ?? schedule.engine;
     return schedule.repeat === "every_reset" ? `Each time ${name}'s usage limit resets` : `When ${name}'s usage limit resets`;
   }
-  if (schedule.type === "once") return `${formatInstant(schedule.at, timeZone)} (${timeZone})`;
+  const zone = plainTimeZone(timeZone);
+  if (schedule.type === "once") return `${formatInstant(schedule.at, timeZone)} ${zone}`;
   if (schedule.type === "interval") {
     const restricted = intervalHasRestrictions(schedule);
     const cadence = schedule.anchorAt === undefined
       ? restricted
         ? `Every ${schedule.everyMinutes} minutes, cadence starting at confirmation; first run is the next allowed time`
         : `Every ${schedule.everyMinutes} minutes, starting one interval after confirmation`
-      : `Every ${schedule.everyMinutes} minutes, anchored at ${formatInstant(schedule.anchorAt, timeZone)} (${timeZone})`;
+      : `Every ${schedule.everyMinutes} minutes, anchored at ${formatInstant(schedule.anchorAt, timeZone)} ${zone}`;
     const restrictions = [
       schedule.weekdays?.length
-        ? `on ${schedule.weekdays.map((day) => WEEKDAY_LABEL[day]).join(", ")} (${timeZone})`
+        ? `on ${plainWeekdays(schedule.weekdays)} (${zone})`
         : null,
-      schedule.window ? `during ${schedule.window.start}–${schedule.window.end} (${timeZone})` : null,
-      schedule.endsAt !== undefined ? `until ${formatInstant(schedule.endsAt, timeZone)} (${timeZone})` : null,
+      schedule.window ? `during ${plainClock(schedule.window.start)}–${plainClock(schedule.window.end)} ${zone}` : null,
+      schedule.endsAt !== undefined ? `until ${formatInstant(schedule.endsAt, timeZone)} ${zone}` : null,
     ].filter((part): part is string => part !== null);
     return restrictions.length ? `${cadence} · ${restrictions.join(" · ")}` : cadence;
   }
-  const days = schedule.weekdays.map((day) => WEEKDAY_LABEL[day]).join(", ");
-  return `${days} at ${schedule.time} (${timeZone})`;
+  return `${plainWeekdays(schedule.weekdays)} at ${plainClock(schedule.time)} ${zone}`;
 }
 
 export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false): string {
   const session = continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
-  if (schedule.type === "cron") return `Will run at matching calendar times in ${schedule.timeZone}; ${session}.`;
+  if (schedule.type === "cron") return `Will run at matching calendar times, ${plainTimeZone(schedule.timeZone)}; ${session}.`;
   if (schedule.type === "once") return "Will run once; that run starts a fresh session.";
   if (schedule.type === "limit_reset") {
     return schedule.repeat === "every_reset"
@@ -680,7 +680,7 @@ function cardCopy(
     ? "None — this routine remains paused"
     : deferredInterval
       ? deferredRestrictedInterval
-        ? `Next allowed time after confirmation (${timeZone})`
+        ? `Next allowed time after confirmation (${plainTimeZone(timeZone)})`
         : "One interval after confirmation"
       : nextRunAt !== null
         ? formatInstant(nextRunAt, scheduleTimeZone)
@@ -705,7 +705,7 @@ function cardCopy(
       `Schedule: ${when}`,
       `Next run: ${nextDescription}`,
       ...(definition.schedule.type === "cron" && nextRunAt !== null && operation.action !== "run_now"
-        ? [`Next 3 runs (${scheduleTimeZone}): ${nextCronRuns(definition.schedule, now, 3).map((at) => formatInstant(at, scheduleTimeZone)).join(" · ")}`]
+        ? [`Next 3 runs (${plainTimeZone(scheduleTimeZone)}): ${nextCronRuns(definition.schedule, now, 3).map((at) => formatInstant(at, scheduleTimeZone)).join(" · ")}`]
         : []),
       `Runs on: ${destination}`,
       `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
@@ -844,7 +844,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
     if (duplicate) {
       // The tool cannot choose a result destination.
       throw new RoutineRequestError(
-        `An enabled routine with the same instructions and execution settings already exists (${duplicate.id}). Use list_triggers to review it, then change or run that trigger instead.`,
+        `An enabled routine with the same instructions and execution settings already exists (${duplicate.id}). Use trigger_info to review it, then change or run that trigger instead.`,
         409,
         { terminal: true },
       );

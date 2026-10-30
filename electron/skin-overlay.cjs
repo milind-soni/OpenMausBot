@@ -3,7 +3,7 @@
 "use strict";
 
 const SKIN_CHROME = Object.freeze({
-  midnight: Object.freeze({ color: "#070707", symbolColor: "#b5b5b5" }),
+  midnight: Object.freeze({ color: "#121212", symbolColor: "#b5b5b5" }),
   atelier: Object.freeze({ color: "#f5f1eb", symbolColor: "#6b6559" }),
   foundry: Object.freeze({ color: "#100e0b", symbolColor: "#b0a696" }),
   lagoon: Object.freeze({ color: "#dfeceb", symbolColor: "#4d5c5b" }),
@@ -26,4 +26,11 @@ function isKnownSkin(skin) {
   return Object.hasOwn(SKIN_CHROME, skin);
 }
 
-module.exports = { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin };
+/** A light skin: its page colour is nearer white than black. */
+function skinIsLight(skin) {
+  const hex = skinChrome(skin).color;
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 127.5;
+}
+
+module.exports = { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin, skinIsLight };

@@ -12,6 +12,7 @@ type ChannelMode = "chat" | "goal";
 type DraftRestore = { text: string; attachments: Attachment[]; channelMode?: ChannelMode };
 type DraftRestoreListener = (draft: DraftRestore) => void;
 const restoreListeners = new Map<string, Set<DraftRestoreListener>>();
+const channelModeListeners = new Map<string, Set<() => void>>();
 const attachmentPendingCounts = new Map<string, number>();
 const attachmentPendingListeners = new Map<string, Set<() => void>>();
 export interface FailedComposerSend {
@@ -471,18 +472,28 @@ function getStore(): Store {
   }
 }
 
+/** A draft's channel mode, the same in every place that shows it: the composer's chip and the bot panel's switch. */
 export function useComposerChannelMode(id: string): [ChannelMode, (next: SetStateAction<ChannelMode>) => void] {
   const store = getStore();
   const [mode, setMode] = useState(() => getDraftChannelMode(store, id));
   useEffect(() => {
-    const unsubscribe = subscribeToDraftRestores(id, () => setMode(getDraftChannelMode(store, id)));
-    setMode(getDraftChannelMode(store, id));
-    return unsubscribe;
+    const sync = () => setMode(getDraftChannelMode(store, id));
+    const unsubscribe = subscribeToDraftRestores(id, sync);
+    const listeners = channelModeListeners.get(id) ?? new Set<() => void>();
+    listeners.add(sync);
+    channelModeListeners.set(id, listeners);
+    sync();
+    return () => {
+      unsubscribe();
+      listeners.delete(sync);
+      if (listeners.size === 0 && channelModeListeners.get(id) === listeners) channelModeListeners.delete(id);
+    };
   }, [id, store]);
   const set = useCallback((next: SetStateAction<ChannelMode>) => {
     const value = typeof next === "function" ? next(getDraftChannelMode(store, id)) : next;
     setDraftChannelMode(store, id, value);
     setMode(value);
+    for (const listener of Array.from(channelModeListeners.get(id) ?? [])) listener();
   }, [id, store]);
   return [mode, set];
 }

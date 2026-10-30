@@ -1,6 +1,14 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Advanced mode's table chrome; Simple mode's table card has its own tests below.
+const mode = vi.hoisted(() => ({ advanced: true }));
+vi.mock("@/lib/interface-mode", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => mode.advanced,
+  readAdvancedMode: () => mode.advanced,
+}));
 import { RichTable } from "./RichTable";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { AttachedFileChip } from "./AttachmentPreview";
@@ -46,5 +54,44 @@ describe("rich table rendering", () => {
     await expect(readTableResponse(new Response(new Uint8Array(TABLE_FILE_MAX_BYTES + 1)), signal)).rejects.toThrow("size");
     await expect(readTableResponse(new Response("A,B"), AbortSignal.abort())).rejects.toThrow();
     await expect(readTableResponse(new Response(new Uint8Array([0xff])), signal)).rejects.toThrow();
+  });
+});
+
+describe("Simple mode's table card", () => {
+  const card = (rows: number) => {
+    mode.advanced = false;
+    try {
+      return renderToStaticMarkup(createElement(RichTable, {
+        columns: [{ text: "Sender" }, { text: "Emails" }],
+        rows: Array.from({ length: rows }, (_, index) => [{ text: `Sender ${index}` }, { text: String(index) }]),
+      }));
+    } finally {
+      mode.advanced = true;
+    }
+  };
+
+  it("draws a short table as a card with a hover plate, header names that sort, and no footer", () => {
+    const html = card(3);
+    const surface = html.match(/<div data-table-card="[^"]*" class="([^"]*)"/)?.[1] ?? "";
+    expect(surface.split(" ")).toEqual(expect.arrayContaining(["rounded-[20px]", "bg-composer", "touch:pt-11"]));
+    // The header row starts at the card's top: the plate floats over it instead of keeping a band at rest.
+    expect(surface.split(" ").some((name) => /^(pt|py|p)-/.test(name))).toBe(false);
+    const plate = html.match(/<div class="(table-plate [^"]*)"/)?.[1] ?? "";
+    expect(plate.split(" ")).toEqual(expect.arrayContaining(["absolute", "top-1.5", "end-1.5", "bg-composer", "opacity-0", "group-hover/table:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
+    expect(html).toContain('aria-label="Copy table"');
+    expect(html).toContain('aria-label="Download results as CSV"');
+    expect(html).toContain('aria-label="Expand table"');
+    expect(html).toMatch(/<button type="button" class="group\/th [^"]*" aria-label="Sort by Sender"[^>]*><span dir="auto">Sender<\/span>/);
+    expect(html).toContain("border-t-[0.5px] border-ink/[0.07]");
+    expect(html).not.toContain("<footer");
+    expect(html).not.toContain(`aria-label="${"Search all rows…"}"`);
+    expect(html).toContain('data-fit="true"');
+  });
+
+  it("puts search and the row count inside the card once a table runs past eight rows", () => {
+    const html = card(12);
+    expect(html).toContain('aria-label="Search all rows…"');
+    expect(html).toContain("12 of 12 rows · 2 columns");
+    expect(html).not.toContain("<footer");
   });
 });

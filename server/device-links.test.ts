@@ -50,9 +50,9 @@ async function cloud(options: { sleeping?: () => boolean; sleep?: AbortControlle
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   cleanups.push(() => new Promise<void>((resolve) => { computers.close(); links.close(); upgrades.close(); server.closeAllConnections(); server.close(() => resolve()); }));
-  const register = async (session = "owner", internet = true, id: string = randomUUID()) => {
+  const register = async (session = "owner", internet = true, id: string = randomUUID(), chrome = false) => {
     const response = await fetch(`${base}/api/shared-computers/connect`, { method: "POST", headers: { authorization: `Bearer session-${session}`, "content-type": "application/json", "x-omb-computer-secret": secret },
-      body: JSON.stringify({ id, name: "Ash's MacBook", environmentId: "11111111-1111-4111-8111-111111111111", folders: [], terminal: false, computer: false, platform: "darwin", internet }) });
+      body: JSON.stringify({ id, name: "Ash's MacBook", environmentId: "11111111-1111-4111-8111-111111111111", folders: [], terminal: false, computer: false, platform: "darwin", internet, ...(chrome ? { chrome } : {}) }) });
     expect(response.status, await response.clone().text()).toBe(200);
     return id;
   };
@@ -233,6 +233,45 @@ describe("the device link", () => {
     expect(await mac.ended).toEqual({ code: 4001, reason: "asleep" });
     expect(home.links.route(PERSON)).toBeNull();
     expect((await link(home.base, id, site.port).ended).code, "a link dialled while My Cloud sleeps is told so at once").toBe(4001);
+  });
+
+  it("a Chrome stream goes only to a computer that lends Chrome, through its own door", async () => {
+    const home = await cloud();
+    const echo = createTcpServer((socket) => socket.pipe(socket));
+    await new Promise<void>((resolve) => echo.listen(0, "127.0.0.1", resolve));
+    cleanups.push(() => new Promise<void>((resolve) => { echo.close(() => resolve()); }));
+    const id = await home.register("owner", false, randomUUID(), true);
+    const stop = new AbortController();
+    const ended = runDeviceLink({
+      url: `${home.base.replace("http", "ws")}${linkPath(id)}`, signal: stop.signal,
+      headers: { authorization: "Bearer session-owner", "x-omb-computer-secret": secret },
+      lends: () => ({ internet: false, chrome: true }),
+      chrome: { open: async () => ({ socket: tcpConnect((echo.address() as AddressInfo).port, "127.0.0.1") }) },
+    });
+    cleanups.push(() => { stop.abort(); return ended; });
+    await until(() => home.links.chromeRoute(PERSON) !== null, "the link to be offered as a way to Chrome");
+    expect(home.links.route(PERSON), "it does not lend its internet connection").toBeNull();
+    const opened = await home.links.chromeRoute(PERSON)!.open();
+    expect("join" in opened).toBe(true);
+    const relay = createTcpServer();
+    await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    const accepted = new Promise<Socket>((resolve) => relay.once("connection", resolve));
+    const client = tcpConnect((relay.address() as AddressInfo).port, "127.0.0.1");
+    (opened as { join: (socket: Socket, head: Buffer[]) => void }).join(await accepted, []);
+    client.write("ping");
+    const echoed = await new Promise<string>((resolve) => client.once("data", (chunk) => resolve(String(chunk))));
+    expect(echoed).toBe("ping");
+    client.destroy();
+    relay.close();
+  });
+
+  it("a computer registered without Chrome has no Chrome route, while its internet route still works", async () => {
+    const home = await cloud();
+    const site = await website();
+    const id = await home.register();
+    link(home.base, id, site.port);
+    await until(() => home.links.route(PERSON) !== null, "the link");
+    expect(home.links.chromeRoute(PERSON)).toBeNull();
   });
 
   it("drops a link that stops answering, so My Cloud's browsing never waits on a computer that went to sleep", async () => {

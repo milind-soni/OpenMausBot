@@ -179,7 +179,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     } finally { await instance.dispose(); }
   }, 20_000);
 
-  const cardRaisedFor = async (approvalMode: "ask" | "full") => {
+  const cardRaisedFor = async (approvalMode: "ask" | "full", approvalModeNow?: () => "ask" | "full") => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
       'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fx_write","arguments":"{}"}}]}}]}\n\n'
         + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
@@ -193,7 +193,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     const events: RuntimeEvent[] = [];
     instance.adapter.onEvent((event) => events.push(event));
     await instance.adapter.sendTurn({
-      threadId: "thread", text: "hi", approvalMode,
+      threadId: "thread", text: "hi", approvalMode, ...(approvalModeNow ? { approvalModeNow } : {}),
       integrations: { custom: { fx: toolServer() } },
     });
     await vi.waitFor(() => {
@@ -213,6 +213,11 @@ describe("createOpenAIChatRuntime tool approvals", () => {
 
   it("answers for the person under Full access, so no card is raised", async () => {
     expect(await cardRaisedFor("full")).toBe(false);
+  }, 20_000);
+
+  it("gates each tool call on the level the person has picked by then, not the one the turn started with", async () => {
+    expect(await cardRaisedFor("ask", () => "full")).toBe(false);
+    expect(await cardRaisedFor("full", () => "ask")).toBe(true);
   }, 20_000);
 
   it("still holds an ask_user card for a person under Full access and returns the reply verbatim", async () => {

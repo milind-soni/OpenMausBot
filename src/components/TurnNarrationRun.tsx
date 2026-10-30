@@ -4,10 +4,12 @@ import { Check, ChevronRight } from "lucide-react";
 
 export function TurnNarrationRun({
   label,
+  title,
   forceOpen = false,
   children,
 }: {
   label: string;
+  title?: string;
   forceOpen?: boolean;
   children: React.ReactNode;
 }) {
@@ -23,7 +25,7 @@ export function TurnNarrationRun({
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          title={open ? "Hide progress messages" : "Show progress messages"}
+          title={title ?? (open ? "Hide progress messages" : "Show progress messages")}
           className="ui-pill"
         >
           <Check size={13} className="text-success" />

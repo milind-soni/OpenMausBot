@@ -84,10 +84,10 @@ function helperWriter(write: NonNullable<SideJobInstance["generateText"]>, helpe
   const booked: Array<Parameters<SideJobsDeps["book"]>[0]> = [];
   const engines: Record<string, SideJobInstance> = {
     codex: {
-      instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: { agentsMcp: true } },
+      instanceId: "codex", driverKind: "codex", enabled: true, models: { default: "", options: [] }, adapter: { capabilities: { agentsMcp: true } },
       generateMemoryText: async () => { throw new Error("Codex's background call must never write the summary"); },
     },
-    helper: { instanceId: "helper", driverKind: "claudeAgent", enabled: true, adapter: { capabilities: { agentsMcp: true } }, generateText: write },
+    helper: { instanceId: "helper", driverKind: "claudeAgent", enabled: true, models: { default: "", options: [] }, adapter: { capabilities: { agentsMcp: true } }, generateText: write },
   };
   const jobs = createSideJobs({
     bot: () => ({ id: "b1", name: "Scout", threadId: "main", modelSelection: { instanceId: "codex" } }),

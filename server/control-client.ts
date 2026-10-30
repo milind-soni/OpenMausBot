@@ -38,7 +38,8 @@ export interface ControlState {
 }
 
 export interface ControlClient {
-  state(fresh?: boolean): Promise<ControlState>;
+  /** `call`: what a tools/call would open, sent along so a first ask can name it; such a read is never cached. */
+  state(fresh?: boolean, call?: Record<string, string>): Promise<ControlState>;
   readonly configured: boolean;
 }
 
@@ -67,9 +68,15 @@ export function createControlClient(options?: {
   let cachedAt = 0;
   let cached: ControlState = DISENGAGED;
 
-  async function read(): Promise<ControlState> {
+  async function read(call?: Record<string, string>): Promise<ControlState> {
     try {
-      const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      let target = url;
+      if (call && Object.keys(call).length) {
+        const withCall = new URL(url);
+        for (const [key, value] of Object.entries(call)) withCall.searchParams.set(key, value);
+        target = withCall.href;
+      }
+      const res = await fetchImpl(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) return UNCONFIRMED;
       const body: any = await res.json().catch(() => null);
       if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNCONFIRMED;
@@ -86,11 +93,11 @@ export function createControlClient(options?: {
 
   return {
     configured,
-    async state(fresh = false): Promise<ControlState> {
+    async state(fresh = false, call?: Record<string, string>): Promise<ControlState> {
       if (!configured) return DISENGAGED;
       const now = Date.now();
-      if (!fresh && now - cachedAt < cacheMs) return cached;
-      cached = await read();
+      if (!fresh && !call && now - cachedAt < cacheMs) return cached;
+      cached = await read(call);
       cachedAt = Date.now();
       return cached;
     },

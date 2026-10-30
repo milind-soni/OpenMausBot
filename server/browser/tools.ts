@@ -12,8 +12,8 @@ const tab = z.string().regex(/^(?:new|t[1-9]\d{0,8})$/u).describe("The tab, as t
 const actTab = z.string().regex(/^t[1-9]\d{0,8}$/u).describe("The tab to act in, as t1, t2…. Omit it for the tab in front.");
 const ref = z.string().min(1).max(64).describe("An element ref from the latest snapshot, such as e12.");
 const selector = z.string().min(1).max(2_048).describe("A CSS selector, role=button[name=\"Save\"] or text=Save, matching exactly one element in the page (not inside frames). Prefer a ref.");
-const x = z.number().min(0).max(16_384).describe("A point in the page's viewport, in CSS pixels; pass y too.");
-const y = z.number().min(0).max(16_384).describe("A point in the page's viewport, in CSS pixels; pass x too.");
+const x = z.number().min(0).max(16_384).describe("A point in the page's viewport as it is now, in CSS pixels, as your latest screenshot maps them; pass y too.");
+const y = z.number().min(0).max(16_384).describe("A point in the page's viewport as it is now, in CSS pixels, as your latest screenshot maps them; pass x too.");
 const timeoutMs = z.number().int().min(0).max(60_000).describe("How long to wait at most, in milliseconds. Defaults to 15000.");
 const point = z.object({ ref: ref.optional(), selector: selector.optional(), x: x.optional(), y: y.optional() });
 
@@ -136,7 +136,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   agent_browser_navigate: "Go to an address in the current tab, or go back, forward or reload. Refs from earlier snapshots stop applying to the new page.",
   agent_browser_snapshot: "The page's accessibility tree with element refs, across frames and shadow roots, plus what the page reported. Take one before acting when you have no current refs; refs expire when the page navigates or a person takes control. Capped near 20 KB; it lists what it left out.",
   agent_browser_read: "The page's visible text, or one element's, for reading long content or a single value such as a price. Pass offset to read on.",
-  agent_browser_screenshot: "A PNG of the visible page (1280 px wide at most), the whole page, or one element. Use it when the tree is not enough to see the page.",
+  agent_browser_screenshot: "A PNG of the visible page, the whole page, or one element; its answer says how the picture's pixels map to the page's CSS pixels, which change when a person resizes the panel watching the browser. Use it when the tree is not enough to see the page.",
   agent_browser_click: "Click one element by ref (preferred) or selector, or a point. Waits until the element is visible, still and not covered. Returns early when the click opens a dialog.",
   agent_browser_fill: "Clear a text field and put text in it, as a paste would. Set submit to press Enter afterwards.",
   agent_browser_type: "Type text key by key into a field (by ref or selector) or wherever the focus is, for fields that react to each key.",

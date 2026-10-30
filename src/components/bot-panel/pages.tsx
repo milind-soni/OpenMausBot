@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { FolderOpen, Plus } from "lucide-react";
 
-import { withBotApp } from "@/lib/bot-app-access";
+import { appSwitchPatch } from "@/lib/bot-app-access";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
-import { MEMORY_INDEX, saveMemoryDoc } from "@/lib/memory";
+import { deleteMemoryDoc, MEMORY_INDEX, saveMemoryDoc, type MemoryDoc } from "@/lib/memory";
 import { openExternalLink } from "@/lib/app-links";
 import type { Routine } from "@/lib/routines";
 import { shortPath } from "@/lib/short-path";
@@ -19,8 +19,9 @@ import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { RoutineList } from "../routines/RoutineList";
 import { BrowserLogins } from "./browser-logins";
-import { useOpenComputer } from "./ComputerTab";
-import { memoryNotes, withMemoryNote, withoutMemoryNote } from "./memory-notes";
+import { useOpenComputer, WherePage } from "./ComputerTab";
+import { SettingsPage } from "./SettingsPage";
+import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, rowCls, SwitchRow, TextRow, TrashButton } from "./rows";
 import { useMemoryDoc } from "./use-memory-doc";
@@ -40,22 +41,13 @@ function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-/** One switch per connected app; the first app switched on while apps are off for the bot turns them on with only
- * that app granted. */
 export function AppsPage({ bot, derived }: PageContext) {
   const { dispatch } = useStore();
   const apps = useBotApps(bot);
-  const { patch, canUseConnectedApps, connectedAppsEnabled } = derived;
+  const { patch, canUseConnectedApps } = derived;
 
   const toggle = (app: BotApp) => {
-    const on = app.scope === null;
-    const connectorScopes = on && !connectedAppsEnabled && !bot.connectorScopes
-      ? { apps: { [app.slug]: "write" as const } }
-      : withBotApp(bot.connectorScopes, apps.connectedSlugs, app.slug, on);
-    const next = {
-      ...(connectorScopes ? { connectorScopes } : {}),
-      ...(on && !connectedAppsEnabled ? { composio: true } : {}),
-    };
+    const next = appSwitchPatch(bot, apps.connectedSlugs, app.slug, app.scope === null);
     if (Object.keys(next).length > 0) patch(next);
   };
   const note = !canUseConnectedApps
@@ -134,29 +126,23 @@ export function RoutinesPage({ bot, derived }: PageContext) {
   );
 }
 
-/** MEMORY.md's bullets. Every write goes through the memory file route with the hash it was read at, so a note the
- * bot added meanwhile is never lost: a conflict re-reads and asks again. */
+/** MEMORY.md's bullets, and on a Team Cloud the person's own notes. Every write goes through the memory file route with
+ * the hash it was read at, so a note the bot added meanwhile is never lost: a conflict re-reads and asks again. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const memoryOn = bot.memoryEnabled !== false;
-  const notes = memory.doc ? memoryNotes(memory.doc.text) : null;
+  const notes = memory.docs ? panelMemoryNotes(memory.docs) : null;
+  const index = memory.docs?.find((doc) => doc.path === MEMORY_INDEX) ?? null;
 
-  const write = async (text: string) => {
-    if (!memory.doc || saving) return false;
+  const change = async (save: () => Promise<boolean>) => {
+    if (saving) return false;
     setSaving(true);
     setError(null);
     try {
-      const result = await saveMemoryDoc(bot.id, MEMORY_INDEX, text, memory.doc.exists ? memory.doc.hash : undefined);
-      if (result.ok) {
-        memory.setDoc(result.doc);
-        return true;
-      }
-      await memory.reload();
-      setError(t("memory.conflict.title", { name: bot.name }));
-      return false;
+      return await save();
     } catch (cause) {
       setError(errorText(cause, t("botPanel.library.memoryError")));
       return false;
@@ -164,10 +150,29 @@ export function MemoryPage({ bot }: PageContext) {
       setSaving(false);
     }
   };
-  const forget = (line: number) => { if (memory.doc) void write(withoutMemoryNote(memory.doc.text, line)); };
+  const write = (doc: MemoryDoc, text: string) => change(async () => {
+    const result = await saveMemoryDoc(bot.id, doc.path, text, doc.exists ? doc.hash : undefined, memory.mine);
+    if (result.ok) {
+      memory.setDoc(result.doc);
+      return true;
+    }
+    await memory.reload();
+    setError(t("memory.conflict.title", { name: bot.name }));
+    return false;
+  });
+  const forget = (note: PanelMemoryNote) => {
+    const doc = memory.docs?.find((candidate) => candidate.path === note.path);
+    if (!doc) return;
+    if (note.line !== null) void write(doc, withoutMemoryNote(doc.text, note.line));
+    else void change(async () => {
+      await deleteMemoryDoc(bot.id, doc.path, memory.mine);
+      await memory.reload();
+      return true;
+    });
+  };
   const add = async () => {
-    if (!memory.doc || !draft.trim()) return;
-    if (await write(withMemoryNote(memory.doc.text, draft))) setDraft("");
+    if (!index || !draft.trim()) return;
+    if (await write(index, withMemoryNote(index.text, draft))) setDraft("");
   };
 
   return (
@@ -182,9 +187,9 @@ export function MemoryPage({ bot }: PageContext) {
         ) : notes.length === 0 ? (
           <NoteRow>{t("botPanel.memory.empty")}</NoteRow>
         ) : notes.map((note) => (
-          <div key={`${note.line}:${note.text}`} data-memory-note={note.line} className={rowCls}>
+          <div key={`${note.path}:${note.line}:${note.text}`} data-memory-note={note.line ?? note.path} className={rowCls}>
             <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">{note.text}</div>
-            <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => forget(note.line)} />
+            <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => forget(note)} />
           </div>
         ))}
         {error && <NoteRow tone="warn">{error}</NoteRow>}
@@ -197,7 +202,7 @@ export function MemoryPage({ bot }: PageContext) {
             placeholder={t("botPanel.memory.addPlaceholder", { name: bot.name })}
             label={t("botPanel.memory.addPlaceholder", { name: bot.name })}
             action={t("common.add")}
-            disabled={saving || memory.doc === null}
+            disabled={saving || index === null}
             onChange={setDraft}
             onSubmit={() => void add()}
           />
@@ -388,8 +393,17 @@ export function BrowserPage({ bot, derived }: PageContext) {
   return <BrowserLogins bot={bot} browserEnabled={derived.browserEnabled} onOpenBrowser={() => openComputer("browser")} />;
 }
 
-export function PageBody({ page, ...context }: PageContext & { page: SimplePageId }): ReactNode {
+export function PageBody({ page, onOpen, editingInstructions, onEditInstructions, ...context }: PageContext & {
+  page: SimplePageId;
+  onOpen?: (page: SimplePageId) => void;
+  editingInstructions?: boolean;
+  onEditInstructions?: (open: boolean) => void;
+}): ReactNode {
   switch (page) {
+    case "settings":
+      return <SettingsPage {...context} onOpen={onOpen} editingInstructions={editingInstructions} onEditInstructions={onEditInstructions} />;
+    case "where":
+      return <WherePage {...context} />;
     case "apps":
       return <AppsPage {...context} />;
     case "routines":

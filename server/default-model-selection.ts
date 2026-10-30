@@ -1,3 +1,4 @@
+import { freeFallback, rankAis } from "../shared/ai-ranking.ts";
 import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
@@ -13,10 +14,18 @@ export interface SelectableInstance {
 export interface DefaultSelectionContext {
   company?: (instanceId: string) => boolean;
   refusal?: (instance: SelectableInstance) => string | undefined;
+  /** What this AI's test message showed: true it answered, false it didn't, undefined not tested (server/tested-ai.ts). */
+  answered?: (instance: SelectableInstance) => boolean | undefined;
 }
 
-const claudeFirst = (instances: readonly SelectableInstance[]) =>
-  instances.find((instance) => instance.driverKind === "claudeAgent") ?? instances[0];
+/** The shared ranking (shared/ai-ranking.ts), with an AI that answered its test ahead of one that didn't or wasn't tested.
+ * OpenCode's free backup comes in only once every other AI didn't answer. */
+const best = (instances: readonly SelectableInstance[], context: DefaultSelectionContext) => {
+  const ranked = rankAis(instances);
+  const usable = (list: readonly SelectableInstance[]) => list.find((instance) => context.answered?.(instance) === true)
+    ?? list.find((instance) => context.answered?.(instance) !== false);
+  return usable(ranked.filter((instance) => !freeFallback(instance))) ?? usable(ranked) ?? ranked[0];
+};
 
 /** The saved config's enabled switch and picker group win over what the driver reports. */
 export function withInstanceConfig<T extends SelectableInstance>(instances: readonly T[], configs: InstanceConfigMap): T[] {
@@ -70,9 +79,9 @@ export function selectDefaultModelSelection(
   const ready = available.filter((instance) => readyToRun(instance, context));
   const company = context.company;
   const personal = company && instances.some((instance) => company(instance.instanceId))
-    ? claudeFirst(ready.filter((instance) => !company(instance.instanceId)))
+    ? best(ready.filter((instance) => !company(instance.instanceId)), context)
     : undefined;
-  const pick = personal ?? claudeFirst(ready) ?? claudeFirst(available);
+  const pick = personal ?? best(ready, context) ?? best(available, context);
   return { instanceId: pick?.instanceId ?? "", model: pick ? defaultModel(pick) : "" };
 }
 

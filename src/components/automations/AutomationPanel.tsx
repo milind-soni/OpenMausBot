@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, Copy, Pause, Pencil, Play, RotateCw, Trash2, X } from "lucide-react";
 
-import { automationStatus, capital, lastReceived, lastWhen, runLine, STATUS_WORD, webhookCalls, type Automation } from "@/lib/automations";
+import { automationStatus, automationSubtitle, capital, lastReceived, lastWhen, runLine, STATUS_WORD, webhookCalls, type Automation } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
@@ -29,6 +29,9 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
   const credential = webhook ? loadWebhookCredentials(webhookCredentialStore())[webhook.id] : undefined;
   const receiving = state.webhookIngress?.available !== false;
   const statusWord = t(STATUS_WORD[status.state]);
+  const name = automation.name.trim();
+  const botName = state.bots.find((bot) => bot.id === automation.botId)?.name ?? t("routines.unavailableBot");
+  const instructions = automation.instructions.trim();
   const reason = status.state === "done" ? t("automations.reason.done") : status.reason;
   const calls = webhook ? webhookCalls(webhook.id, state.webhookAttempts) : [];
   const received = webhook ? lastReceived(webhook, state.webhookAttempts) : null;
@@ -45,7 +48,10 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
   return (
     <aside aria-label={t("automations.panel.label")} className="flex h-full w-[min(380px,100vw)] shrink-0 flex-col border-l border-hairline/40 bg-panel">
       <div className="flex items-start gap-3 border-b border-hairline/40 px-5 py-4">
-        <h2 className="min-w-0 flex-1 text-[16px] font-semibold leading-snug text-ink">{sentence}</h2>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[16px] font-semibold leading-snug text-ink">{name || sentence}</h2>
+          {name && <p className="mt-0.5 text-[13px] text-ink-secondary">{automationSubtitle(automation, botName)}</p>}
+        </div>
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("automations.panel.close")}><X size={16} /></button>
       </div>
 
@@ -105,6 +111,8 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
             </details>
           </section>
         )}
+
+        {name && instructions && <p data-testid="automation-instructions" className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink">{instructions}</p>}
 
         {automation.appTrigger && <AppEventsSection trigger={automation.appTrigger} />}
 

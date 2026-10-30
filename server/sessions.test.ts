@@ -653,6 +653,22 @@ describe("a member's own phone on a Team Cloud", () => {
     expect(registry.authenticate(phone.token), "no check within the hour: removed from the team, the phone signs out").toBeNull();
   });
 
+  it("ends every session of a removed member, one stored without a role too; a role change ends only the other roles", () => {
+    const desktop = fromAdmin();
+    registry.close();
+    const stored = JSON.parse(readFileSync(file(), "utf8"));
+    for (const session of stored.sessions) delete session.teamRole;
+    writeFileSync(file(), JSON.stringify(stored));
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    expect(registry.revokeMember(ADA.email)).toBe(1);
+    expect(registry.list().map((session) => session.id)).not.toContain(desktop.id);
+    const member = fromAdmin();
+    const admin = fromAdmin({ ...ADA, role: "admin" });
+    expect(registry.revokeMember(ADA.email, "admin")).toBe(1);
+    expect(registry.list().map((session) => session.id)).toEqual(expect.arrayContaining([admin.id]));
+    expect(registry.list().map((session) => session.id)).not.toContain(member.id);
+  });
+
   it("never stretches a session the Admin opened itself", () => {
     const desktop = fromAdmin();
     clock += 30 * 60_000;

@@ -12,7 +12,9 @@ import { createHighLevelRoutes } from "../routes/highlevel.ts";
 import { PASS } from "../routes/table.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { FAKE_LOCATION_ID, startFakeHighLevel, startFakeRelay, type FakeHighLevel, type FakeRelay } from "../testing/fake-highlevel.ts";
-import { HIGHLEVEL_RELAY_URL_DEFAULT, createHighLevelRelay, highlevelRelayUrl } from "./relay.ts";
+import { HIGHLEVEL_RELAY_URL_DEFAULT, HighLevelRelayError, createHighLevelRelay, highlevelRelayUrl, type HighLevelRelay, type RelayTokens } from "./relay.ts";
+import { HighLevelSignIn } from "./sign-in.ts";
+import { HighLevelStore } from "./store.ts";
 import { createHighLevelService, type HighLevelService } from "./service.ts";
 
 let hl: FakeHighLevel;
@@ -151,8 +153,47 @@ describe("sign-in flow", () => {
     expect(await svc.connectWithToken(" pit-abcdefgh12345678 ", ` ${FAKE_LOCATION_ID} `)).toMatchObject({ state: "connected", kind: "token", location: { id: FAKE_LOCATION_ID, name: "Example Profiles" } });
     expect(svc.store.get()).toMatchObject({ kind: "token", accessToken: "pit-abcdefgh12345678", companyId: "company_1" });
     expect(svc.store.get()?.refreshToken).toBeUndefined();
-    svc.store.markNeedsSignIn("HighLevel rejected the Private Integration token.");
+    svc.store.markNeedsSignIn("HighLevel rejected the Private Integration token.", svc.store.get()!);
     expect(svc.status()).toMatchObject({ state: "needs-sign-in", kind: "token", problem: "HighLevel rejected the Private Integration token." });
+  });
+});
+
+describe("a replaced flow's late claim", () => {
+  function staged() {
+    const dir = mkdtempSync(join(tmpdir(), "omb-highlevel-signin-"));
+    dirs.push(dir);
+    const claims: Array<{ state: string; reject(error: unknown): void }> = [];
+    let starts = 0;
+    const stub: HighLevelRelay = {
+      start: async () => ({ state: `state_${++starts}`, authorizationUrl: "https://marketplace.leadconnectorhq.com/v2/oauth/chooselocation", expiresAt: Date.now() + 600_000 }),
+      claim: (state) => new Promise<RelayTokens | "pending" | "claimed">((_resolve, reject) => { claims.push({ state, reject }); }),
+      refresh: () => Promise.reject(new Error("unused")),
+    };
+    const signIn = new HighLevelSignIn({ relay: stub, store: new HighLevelStore({ dataDir: dir }), lookupLocationName: async () => undefined, pollMs: 1 });
+    const claimsFor = (state: string) => claims.filter((claim) => claim.state === state);
+    return { signIn, claims, claimsFor };
+  }
+
+  it.each([
+    ["refused", new HighLevelRelayError(400, "highlevel_bad_state", "The relay refused this sign-in.")],
+    ["unavailable", new HighLevelRelayError(503, "highlevel_unavailable", "The relay is down.")],
+  ])("leaves the newer flow alone when the replaced flow's claim fails late (%s)", async (_name, failure) => {
+    const { signIn, claimsFor } = staged();
+    try {
+      const first = await signIn.start();
+      await until(() => claimsFor("state_1").length, (count) => count === 1);
+      const second = await signIn.start();
+      await until(() => claimsFor("state_2").length, (count) => count === 1);
+      claimsFor("state_1")[0]!.reject(failure);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(signIn.active()?.flowId).toBe(second.flowId);
+      expect(signIn.status(second.flowId)).toEqual({ phase: "waiting" });
+      expect(signIn.status(first.flowId)).toEqual({ phase: "failed", message: "A newer sign-in replaced this one." });
+      expect(claimsFor("state_1")).toHaveLength(1);
+      expect(claimsFor("state_2")).toHaveLength(1);
+    } finally {
+      signIn.close();
+    }
   });
 });
 

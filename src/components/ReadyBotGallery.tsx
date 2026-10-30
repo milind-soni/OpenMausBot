@@ -7,11 +7,11 @@ import { READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, type ReadyBotCategor
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import type { Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 
 const APP_LABELS: Record<string, string> = {
   gmail: "Gmail", github: "GitHub", discord: "Discord", slack: "Slack", googlecalendar: "Google Calendar",
-  notion: "Notion", linear: "Linear", figma: "Figma", gong: "Gong", hubspot: "HubSpot",
+  notion: "Notion", linear: "Linear", figma: "Figma", gong: "Gong", hubspot: "HubSpot", postiz: "Postiz",
 };
 
 const CATEGORY_KEYS: Record<ReadyBotCategory, LocaleKey> = {
@@ -26,8 +26,13 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
   onAdded: (bot: Bot) => void;
 }) {
   const [category, setCategory] = useState<ReadyBotCategory | null>(null);
+  const { dispatch } = useStore();
   const [adding, setAdding] = useState<string | null>(null);
-  const open = (id: string | null) => { setAdding(id); onDialog(id !== null); };
+  const open = (id: string | null) => {
+    // A paired device may not read the host's New bot defaults that the review is filled from.
+    if (id !== null && window.ogb?.remoteClient?.active) { dispatch({ type: "newBot", onCreated: onAdded }); return; }
+    setAdding(id); onDialog(id !== null);
+  };
   const visible = READY_BOTS.filter((bot) => (!category || bot.category === category) && matchesReadyBot(bot, search));
   if (search.trim() && visible.length === 0) return null;
   return <section className="mb-8" aria-labelledby="ready-bots-title">

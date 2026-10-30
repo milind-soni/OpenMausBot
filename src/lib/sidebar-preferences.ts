@@ -14,6 +14,7 @@ export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
+export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.simple.v1";
 export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
 export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
 export const PINNED_CIRCLE_ORDER_KEY = "openmausbot.pinnedCircleOrder.v1";
@@ -169,8 +170,8 @@ export function useSidebarToolsLayout(): SidebarToolsLayout {
   return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
 }
 
-export function clampSidebarWidth(width: number, viewportWidth: number): number {
-  return Math.max(240, Math.min(480, viewportWidth - 320, Math.round(width)));
+export function clampSidebarWidth(width: number, viewportWidth: number, max = 480): number {
+  return Math.max(240, Math.min(max, viewportWidth - 320, Math.round(width)));
 }
 
 export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key = SIDEBAR_WIDTH_KEY): number | null {
@@ -444,4 +445,15 @@ export function saveSectionOrder(
   storage?: Pick<Storage, "setItem"> | null,
 ): void {
   saveStringList(SIDEBAR_SECTION_ORDER_KEY, ids, storage);
+}
+
+export function loadSimpleSectionOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
+  return loadStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, storage);
+}
+
+export function saveSimpleSectionOrder(
+  ids: string[],
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  saveStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, ids, storage);
 }

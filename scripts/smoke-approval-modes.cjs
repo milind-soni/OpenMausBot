@@ -255,18 +255,18 @@ app.whenReady().then(async () => {
   assert.equal((await api(`/api/bots/${parallel.id}/tasks/${working.threadId}`, "POST")).status, 200);
   assert.equal((await api(`/api/bots/${parallel.id}/messages`, "POST", { text: "Hold for fixture approval", threadId: working.threadId })).status, 202);
   const held = await until(async () => pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id)));
-  const parallelModes = async () => (await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).tasks.map(task => task.approvalMode);
-  const modesBefore = await parallelModes();
-  await assert.rejects(coordinator.request(child, parallel.id, "full", { allThreads: true }), /active turns/);
-  assert.deepEqual(await parallelModes(), modesBefore);
-  await assert.rejects(coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true }), /Stop this thread/);
   const separate = await coordinator.request(child, parallel.id, "full", { threadId: idle.threadId, threadOnly: true });
   assert.equal(separate.tasks.find(task => task.threadId === working.threadId).busy, true);
   assert.equal(separate.tasks.find(task => task.threadId === working.threadId).approvalMode, "ask");
   assert.equal(separate.tasks.find(task => task.threadId === idle.threadId).approvalMode, "full");
+  // A level picked while the bot works is saved at once; the card already open stays for the person to answer.
+  const whileWorking = await coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true });
+  assert.equal(whileWorking.tasks.find(task => task.threadId === working.threadId).busy, true);
+  assert.equal(whileWorking.tasks.find(task => task.threadId === working.threadId).approvalMode, "full");
+  assert.equal(pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id))?.requestId, held.requestId);
   await api(`/api/bots/${parallel.id}/respond`, "POST", { requestId: held.requestId, behavior: "deny" });
   await until(async () => !(await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).busy);
-  console.log(JSON.stringify({ composerGrantWhileSiblingBusy: true, siblingNotInterrupted: true }));
+  console.log(JSON.stringify({ composerGrantWhileSiblingBusy: true, siblingNotInterrupted: true, composerGrantWhileBusy: true, openCardKept: true }));
   // The fake reviewer only approves the two known reads under native Auto.
   // Their actual MCP calls reach this real isolated server. This verifies the
   // routing contract, not the availability/quality of Grok's hosted reviewer.
@@ -403,7 +403,8 @@ app.whenReady().then(async () => {
   assert.equal(askPeerResponse.body.receipts[0].threadId, peerWorkThreadId);
   const peerCard = await until(async () => pendingCard((await api(`/api/threads/${peerWorkThreadId}/messages`)).body));
   assert.equal(lastPrompt().mode, "default");
-  const askDecision = (await api("/api/decisions")).body.decisions.find((row) => row.threadId === peerWorkThreadId && row.requestId === peerCard.requestId);
+  // The card can show before its decision row is written: wait for the row, as the checks above do.
+  const askDecision = await until(async () => (await api("/api/decisions")).body.decisions.find((row) => row.threadId === peerWorkThreadId && row.requestId === peerCard.requestId));
   assert.equal(askDecision.decision, "card-shown");
   assert.notEqual(askDecision.source, "full-access");
   assert.equal((await api(`/api/threads/${peerWorkThreadId}/respond`, "POST", { requestId: peerCard.requestId, behavior: "allow" })).status, 200);

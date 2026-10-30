@@ -38,6 +38,21 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
   let cursor = now();
   const changes: Array<{ seq: number; folderId: string }> = [];
   const waiters = new Set<() => void>();
+  const mutations = new Map<string, Map<string | null, Promise<unknown>>>();
+  const mutate = <T>(folderId: string, path: string | null, work: () => T | Promise<T>): Promise<T> => {
+    let pending = mutations.get(folderId);
+    if (!pending) mutations.set(folderId, pending = new Map());
+    const queue = pending;
+    const previous = path === null ? [...queue.values()] : [queue.get(null), queue.get(path)];
+    const run = Promise.all(previous).then(work);
+    const settled = run.catch(() => undefined);
+    queue.set(path, settled);
+    void settled.then(() => {
+      if (queue.get(path) === settled) queue.delete(path);
+      if (!queue.size) mutations.delete(folderId);
+    });
+    return run;
+  };
 
   const folderOf = (id: string): SyncFolder => {
     const folder = store.folder(id);
@@ -97,25 +112,27 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
     },
     register(body: unknown): SyncFolder {
       const input = (body ?? {}) as Record<string, unknown>;
-      if (!UUID.test(String(input.computerId)) || !text(input.computerName, 200) || !text(input.pcPath, 4096) || !text(input.name, 200)) {
+      if (!UUID.test(String(input.computerId)) || !text(input.computerName, 200) || !text(input.pcPath, 4096) || !text(input.name, 200) || (input.lent !== undefined && typeof input.lent !== "boolean")) {
         throw new SyncError(400, { error: "invalid folder" });
       }
       if (!posix.isAbsolute(input.pcPath) && !win32.isAbsolute(input.pcPath)) throw new SyncError(400, { error: "the folder on the computer must be an absolute path" });
-      const folder = store.register({ computerId: String(input.computerId), computerName: input.computerName, pcPath: input.pcPath, name: input.name });
+      const folder = store.register({ computerId: String(input.computerId), computerName: input.computerName, pcPath: input.pcPath, name: input.name, lent: input.lent === true });
       noteChange(folder.id);
       return folder;
     },
-    unregister(id: string, keepCloudCopy: boolean): void {
-      const folder = store.unregister(id);
-      if (!folder) throw new SyncError(404, { error: "no such synced folder" });
-      // Never through a link; synced files go to the trash, and what sync never carried (.git, node_modules) stays.
-      if (!keepCloudCopy && lstatSync(folder.cloudPath, { throwIfNoEntry: false })?.isDirectory()) {
-        let files;
-        try { files = Array.from(walk(folder.cloudPath)); } catch (error) { unreadable(error); }
-        for (const entry of files!) store.toTrash(folder, entry.path, join(folder.cloudPath, ...entry.path.split("/")));
-        pruneEmptyDirectories(folder.cloudPath);
-      }
-      noteChange(id);
+    async unregister(id: string, keepCloudCopy: boolean): Promise<void> {
+      return mutate(id, null, () => {
+        const folder = store.unregister(id);
+        if (!folder) throw new SyncError(404, { error: "no such synced folder" });
+        // Never through a link; synced files go to the trash, and what sync never carried (.git, node_modules) stays.
+        if (!keepCloudCopy && lstatSync(folder.cloudPath, { throwIfNoEntry: false })?.isDirectory()) {
+          let files;
+          try { files = Array.from(walk(folder.cloudPath)); } catch (error) { unreadable(error); }
+          for (const entry of files!) store.toTrash(folder, entry.path, join(folder.cloudPath, ...entry.path.split("/")));
+          pruneEmptyDirectories(folder.cloudPath);
+        }
+        noteChange(id);
+      });
     },
     async files(id: string): Promise<SyncFile[]> {
       const folder = folderOf(id);
@@ -162,20 +179,23 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
       if (upload.received !== upload.size) throw new SyncError(409, { error: "upload incomplete", received: upload.received });
       const part = uploadFile(uploadId, "part");
       if (await sha256File(part) !== upload.sha256) { dropUpload(uploadId); throw new SyncError(422, { error: "the file's bytes do not match its hash" }); }
-      const folder = folderOf(upload.folderId);
-      const target = fileOf(folder, upload.path);
-      const current = await store.current(folder, upload.path);
-      if ((current?.sha256 ?? null) !== upload.baseSha256) { dropUpload(uploadId); throw new SyncError(409, { error: "changed on My Cloud", current }); }
-      if (current) store.toTrash(folder, upload.path, target);
-      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-      renameSync(part, target);
-      // A copy from the person's computer: bots read it, and save their own work in their own folder.
-      if (folder.kind === "pc") chmodSync(target, 0o444);
-      dropUpload(uploadId);
-      const stat = lstatSync(target);
-      store.remember(folder, { path: upload.path, size: stat.size, mtimeMs: stat.mtimeMs, sha256: upload.sha256 });
-      noteChange(folder.id);
-      return { sha256: upload.sha256 };
+      return mutate(upload.folderId, upload.path, async () => {
+        readUpload(uploadId);
+        const folder = folderOf(upload.folderId);
+        const target = fileOf(folder, upload.path);
+        const current = await store.current(folder, upload.path);
+        if ((current?.sha256 ?? null) !== upload.baseSha256) { dropUpload(uploadId); throw new SyncError(409, { error: "changed on My Cloud", current }); }
+        if (current) store.toTrash(folder, upload.path, target);
+        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+        renameSync(part, target);
+        // A copy from the person's computer: bots read it, and save their own work in their own folder.
+        if (folder.kind === "pc") chmodSync(target, 0o444);
+        dropUpload(uploadId);
+        const stat = lstatSync(target);
+        store.remember(folder, { path: upload.path, size: stat.size, mtimeMs: stat.mtimeMs, sha256: upload.sha256 });
+        noteChange(folder.id);
+        return { sha256: upload.sha256 };
+      });
     },
     async download(id: string, path: unknown): Promise<{ file: string; size: number; sha256: string }> {
       const folder = folderOf(id);
@@ -191,13 +211,17 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
       const results: Array<{ ok: true } | { conflict: true; current: SyncFile | null }> = [];
       for (const op of list as Array<Record<string, unknown>>) {
         if (op?.op === "delete" && typeof op.baseSha256 === "string") {
-          const file = fileOf(folder, op.path);
-          const current = await store.current(folder, op.path as string);
-          if (!current) { results.push({ ok: true }); continue; }
-          if (current.sha256 !== op.baseSha256) { results.push({ conflict: true, current }); continue; }
-          store.toTrash(folder, op.path as string, file);
-          removeEmptyParents(folder, file);
-          results.push({ ok: true });
+          fileOf(folder, op.path);
+          await mutate(id, op.path as string, async () => {
+            const folder = folderOf(id);
+            const file = fileOf(folder, op.path);
+            const current = await store.current(folder, op.path as string);
+            if (!current) { results.push({ ok: true }); return; }
+            if (current.sha256 !== op.baseSha256) { results.push({ conflict: true, current }); return; }
+            store.toTrash(folder, op.path as string, file);
+            removeEmptyParents(folder, file);
+            results.push({ ok: true });
+          });
         } else {
           throw new SyncError(400, { error: "invalid op" });
         }
@@ -209,20 +233,23 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
       const found = typeof entryId === "string" ? store.trashEntry(entryId) : null;
       if (!found) throw new SyncError(404, { error: "no such deleted file" });
       // Its folder may no longer sync (turned off) or list (a bot folder emptied): put it back where it came from.
-      const home = found.cloudPath && [store.root, join(options.dataDir, "task-workspaces")].some((root) => found.cloudPath!.startsWith(root + sep)) ? found.cloudPath : null;
-      const known = store.folder(found.entry.folderId);
-      if (!known && !home) throw new SyncError(404, { error: "the folder this file came from is gone" });
-      if (!known) mkdirSync(home!, { recursive: true, mode: 0o700 });
-      const folder = known ?? { id: found.entry.folderId, kind: found.entry.folderId.startsWith("bot-") ? "bot" as const : "pc" as const, cloudPath: home! };
-      if (!lstatSync(folder.cloudPath, { throwIfNoEntry: false })?.isDirectory()) throw new SyncError(410, { error: "this folder is missing on My Cloud" });
-      let path = found.entry.path;
-      if (existsSync(fileOf(folder, path))) path = clashPath(path, now(), (candidate) => existsSync(fileOf(folder, candidate)), "restored");
-      const target = fileOf(folder, path);
-      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-      renameSync(found.file, target);
-      store.dropTrash(found.entry.id);
-      noteChange(folder.id);
-      return { folderId: folder.id, path };
+      const home = found.cloudPath && [store.root, store.lentRoot(), join(options.dataDir, "task-workspaces")].some((root) => found.cloudPath!.startsWith(root + sep)) ? found.cloudPath : null;
+      return mutate(found.entry.folderId, found.entry.path, () => {
+        if (!store.trashEntry(found.entry.id)) throw new SyncError(404, { error: "no such deleted file" });
+        const known = store.folder(found.entry.folderId);
+        if (!known && !home) throw new SyncError(404, { error: "the folder this file came from is gone" });
+        if (!known) mkdirSync(home!, { recursive: true, mode: 0o700 });
+        const folder = known ?? { id: found.entry.folderId, kind: found.entry.folderId.startsWith("bot-") ? "bot" as const : "pc" as const, cloudPath: home! };
+        if (!lstatSync(folder.cloudPath, { throwIfNoEntry: false })?.isDirectory()) throw new SyncError(410, { error: "this folder is missing on My Cloud" });
+        let path = found.entry.path;
+        if (existsSync(fileOf(folder, path))) path = clashPath(path, now(), (candidate) => mutations.get(folder.id)?.has(candidate) || existsSync(fileOf(folder, candidate)), "restored");
+        const target = fileOf(folder, path);
+        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+        renameSync(found.file, target);
+        store.dropTrash(found.entry.id);
+        noteChange(folder.id);
+        return { folderId: folder.id, path };
+      });
     },
     trash() {
       return { entries: store.trash() };

@@ -21,8 +21,12 @@ const MINUTE = 60_000;
 const ROUTING = "stream error: workspace routing discovery failed: error sending request";
 const STALL = "No activity for 20 minutes — the routine was stopped";
 const SIGNED_OUT = "Not logged in · Please run /login";
-const SIGN_IN_ACTION = "This bot's AI is signed out. Sign in again in Settings → Model providers.";
+const SIGN_IN_ACTION = "This bot's AI is signed out. Sign in again in Settings → AI.";
 const BUSY = "this thread is already working — interrupt it first";
+const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
+const CAPPED = "Stopped after 40 tool calls without a final answer";
+const DENIED = "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.";
+const NO_HOURS = "This month's cloud desktop hours are used up. See your plan on the Plan page.";
 type EventBody = RuntimeEvent extends infer E ? E extends RuntimeEvent ? Omit<E, "eventId" | "provider" | "threadId" | "createdAt"> : never : never;
 
 function harness(extra: Partial<RoutineManagerOptions> = {}) {
@@ -85,7 +89,8 @@ function harness(extra: Partial<RoutineManagerOptions> = {}) {
 
 describe("classifyRoutineFailure", () => {
   it.each<[string, Parameters<typeof classifyRoutineFailure>[1], ReturnType<typeof classifyRoutineFailure>]>([
-    [STALL, { cause: "stalled" }, { kind: "retry", cause: "stalled" }],
+    // The turn watchdog's stall is never retried; an engine's own stall is.
+    [STALL, { cause: "stalled" }, { kind: "final" }],
     ["OpenCode sent nothing for 10 minutes with no tool running, so the turn was stopped as stuck.", { stalled: true, stopReason: "rpc_error" }, { kind: "retry", cause: "stalled" }],
     [BUSY, { cause: "busy" }, { kind: "busy" }],
     ["xAI hit a rate limit (HTTP 429). Wait a minute, then run it again.", {}, { kind: "retry", cause: "rate_limited" }],
@@ -101,6 +106,25 @@ describe("classifyRoutineFailure", () => {
     ["Claude Code is too old for this model. Update it.", { setup: true, stopReason: "update_required" }, { kind: "owner", cause: "setup" }],
     ["The engine stopped without saying why (stop reason: cancelled).", { stopReason: "cancelled" }, { kind: "final" }],
     ["the turn was interrupted", {}, { kind: "final" }],
+    // Any other failure gets one retry...
+    [CRASH, {}, { kind: "retry", cause: "failed" }],
+    ["The bot did not complete this run", {}, { kind: "retry", cause: "failed" }],
+    // ...except a stop someone pressed or typed, a refusal and a spent cap.
+    [CRASH, { stopReason: "interrupted" }, { kind: "final" }],
+    ["Provider settings changed while this thread was running", { stopReason: "interrupted" }, { kind: "final" }],
+    ["The engine stopped without saying why (stop reason: refusal).", { stopReason: "refusal" }, { kind: "final" }],
+    ["The model refused the request (HTTP 400): unsupported model", {}, { kind: "final" }],
+    [CAPPED, {}, { kind: "final" }],
+    ["Model-call limit reached before a final answer", {}, { kind: "final" }],
+    ["The bot repeated the same call 6 times, so it was stopped", { cause: "cap" }, { kind: "final" }],
+    ["this workspace has reached its monthly spend limit of $20.00", { cause: "cap" }, { kind: "final" }],
+    ["The routine was deleted before it could start", { cause: "refused" }, { kind: "final" }],
+    [DENIED, { stopReason: "tool_error" }, { kind: "final" }],
+    // A start that failed before its turn began is judged by its words, and never retried as a crash.
+    [NO_HOURS, { cause: "refused" }, { kind: "final" }],
+    [CRASH, { cause: "refused" }, { kind: "final" }],
+    [SIGNED_OUT, { cause: "refused" }, { kind: "owner", cause: "signed_out" }],
+    ["xAI hit a rate limit (HTTP 429). Wait a minute, then run it again.", { cause: "refused" }, { kind: "retry", cause: "rate_limited" }],
   ])("%s", (failure, facts, verdict) => {
     expect(classifyRoutineFailure(failure, facts)).toEqual(verdict);
   });
@@ -108,8 +132,14 @@ describe("classifyRoutineFailure", () => {
   it("reads a busy refusal from its code, never its words", () => {
     expect(dispatchRefusal(Object.assign(new Error(BUSY), { status: 409, code: "thread_busy" }))).toEqual({ cause: "busy" });
     expect(dispatchRefusal(Object.assign(new Error("this provider account is being updated"), { status: 409, code: "settling" }))).toEqual({ cause: "busy" });
-    expect(dispatchRefusal(Object.assign(new Error(BUSY), { status: 409 }))).toEqual({});
     expect(dispatchRefusal("thread_busy")).toEqual({});
+  });
+
+  it("reads the spend cap and any other refusal to start, and leaves an engine that would not spawn a plain failure", () => {
+    expect(dispatchRefusal(Object.assign(new Error("this workspace has reached its monthly spend limit of $20.00"), { status: 409, code: "spend_cap" }))).toEqual({ cause: "cap" });
+    expect(dispatchRefusal(Object.assign(new Error(BUSY), { status: 409 }))).toEqual({ cause: "refused" });
+    expect(dispatchRefusal(Object.assign(new Error("no such bot"), { status: 404 }))).toEqual({ cause: "refused" });
+    expect(dispatchRefusal(new Error("spawn claude ENOENT"))).toEqual({});
   });
 });
 
@@ -161,17 +191,83 @@ describe("an unattended run that fails for a passing reason", () => {
   it("starts again once after its engine stalled, ignores the stalled turn's own end, and fails on a second stall", async () => {
     const h = harness();
     const run = await h.start(h.routine().id);
-    h.manager.failThread("thread-1", STALL, { cause: "stalled" });
-    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "stalled", attention: `Starting again shortly after the AI stalled: ${STALL}` });
+    const engineStall = "OpenCode sent nothing for 10 minutes with no tool running, so the turn was stopped as stuck.";
+    h.fail("thread-1", engineStall, { stalled: true, stopReason: "rpc_error" });
+    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "stalled", attention: `Starting again shortly after the AI stalled: ${engineStall}` });
     h.event("thread-1", { type: "turn.completed", ok: false, stopReason: "interrupted" });
     expect(h.run(run.id).status).toBe("queued");
     await h.advance(16 * SECOND);
     expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
     expect(h.started[1]!.prompt).toContain(retryNote("stalled"));
 
-    h.manager.failThread("thread-1", STALL, { cause: "stalled" });
-    expect(h.run(run.id)).toMatchObject({ status: "failed", retried: "stalled", error: `Failed after one automatic retry: ${STALL}` });
+    h.fail("thread-1", engineStall, { stalled: true, stopReason: "rpc_error" });
+    expect(h.run(run.id)).toMatchObject({ status: "failed", retried: "stalled", error: `Failed after one automatic retry: ${engineStall}` });
     expect(h.failed.map(({ run: failed }) => failed.id)).toEqual([run.id]);
+  });
+
+  it("never starts a run again that the turn watchdog stopped as stalled: its owner and Chief hear at once", async () => {
+    const h = harness();
+    const run = await h.start(h.routine().id);
+    h.manager.failThread("thread-1", STALL, { cause: "stalled" });
+    expect(h.run(run.id)).toMatchObject({ status: "failed", error: STALL });
+    expect(h.run(run.id).retried).toBeUndefined();
+    await h.advance(MINUTE);
+    expect(h.started).toHaveLength(1);
+    expect(h.failed.map(({ run: failed }) => failed.id)).toEqual([run.id]);
+  });
+
+  it("retries any other failure once, then fails it and tells of it once: a second failure is never retried", async () => {
+    const h = harness();
+    const run = await h.start(h.routine().id);
+    h.fail("thread-1", CRASH);
+    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "failed", attention: `Starting again shortly after a failure: ${CRASH}` });
+    expect(h.failed).toEqual([]);
+    await h.advance(16 * SECOND);
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
+    expect(h.started[1]!.prompt).toBe(`${h.started[0]!.prompt}\n\n${retryNote("failed")}`);
+
+    h.fail("thread-1", CRASH);
+    expect(h.run(run.id)).toMatchObject({ status: "failed", retried: "failed", error: `Failed after one automatic retry: ${CRASH}` });
+    expect(h.failed.map(({ run: failed }) => failed.id)).toEqual([run.id]);
+    await h.advance(MINUTE);
+    expect(h.started).toHaveLength(2);
+  });
+
+  it.each<[string, (h: ReturnType<typeof harness>) => void]>([
+    ["a Stop the owner pressed or typed", (h) => h.fail("thread-1", CRASH, { stopReason: "interrupted" })],
+    ["a turn cap", (h) => h.fail("thread-1", CAPPED)],
+    ["the repeat guard", (h) => h.manager.failThread("thread-1", "The bot repeated the same call 6 times, so it was stopped", { cause: "cap" })],
+    ["an AI that declined", (h) => h.fail("thread-1", "I can't help with that.", { stopReason: "refusal" })],
+    ["a tool call the person denied", (h) => h.fail("thread-1", DENIED, { stopReason: "tool_error" })],
+  ])("never retries a run ended by %s", async (_what, end) => {
+    const h = harness();
+    const run = await h.start(h.routine().id);
+    end(h);
+    expect(h.run(run.id).status).toBe("failed");
+    expect(h.run(run.id).retried).toBeUndefined();
+    await h.advance(MINUTE);
+    expect(h.started).toHaveLength(1);
+  });
+
+  it("never retries a run whose start failed before its turn began", async () => {
+    const dispatchErrors: Array<(message: string) => void> = [];
+    const h = harness({ startTurn: async (_botId, _threadId, _prompt, _runOn, _trigger, onDispatchError) => { dispatchErrors.push(onDispatchError); } });
+    const run = await h.start(h.routine().id);
+    dispatchErrors[0]!(NO_HOURS);
+    expect(h.run(run.id)).toMatchObject({ status: "failed", error: NO_HOURS });
+    expect(h.run(run.id).retried).toBeUndefined();
+    await h.advance(MINUTE);
+    expect(dispatchErrors).toHaveLength(1);
+  });
+
+  it("never retries a run the spend cap kept from starting", async () => {
+    const h = harness();
+    h.refuse(Object.assign(new Error("this workspace has reached its monthly spend limit of $20.00"), { status: 409, code: "spend_cap" }));
+    const run = await h.start(h.routine().id);
+    expect(h.run(run.id)).toMatchObject({ status: "failed", error: "this workspace has reached its monthly spend limit of $20.00" });
+    h.refuse(null);
+    await h.advance(MINUTE);
+    expect(h.attempts).toHaveLength(1);
   });
 
   it("never starts a room goal again by itself", async () => {
@@ -264,6 +360,22 @@ describe("an unattended run only its owner can fix", () => {
     const fourth = await h.start(h.manager.listRoutines().find((routine) => routine.name === "Inbox sweep")!.id);
     h.fail(fourth.threadId!, SIGNED_OUT, { setup: true, stopReason: "auth_required" });
     expect(h.failed.at(-1)!.alert).toEqual({ detail: SIGN_IN_ACTION });
+  });
+
+  it("starts a signed-out run once more on the backup the person chose, and fails it as before when there is none", async () => {
+    const scopes: unknown[] = [];
+    const h = harness({ limitBackup: (botId, scope) => { scopes.push(scope); return botId === "maus-1"; } });
+    const run = await h.start(h.routine("maus-1").id);
+    h.fail(run.threadId!, SIGNED_OUT, { setup: true, stopReason: "auth_required" });
+    expect(scopes).toEqual(["signed-out"]);
+    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "failed", attention: "Starting again on the backup AI: this bot's AI is signed out" });
+    expect(h.failed).toEqual([]);
+    await h.advance(20 * SECOND);
+    expect(h.attempts).toEqual([run.threadId, run.threadId]);
+
+    const other = await h.start(h.routine("maus-2").id);
+    h.fail(other.threadId!, SIGNED_OUT, { setup: true, stopReason: "auth_required" });
+    expect(h.run(other.id)).toMatchObject({ status: "failed", error: `${SIGN_IN_ACTION} The AI said: “${SIGNED_OUT}”` });
   });
 
   it("fails an out-of-credit refusal at once with what to do, and the trial credit says to sign in", async () => {

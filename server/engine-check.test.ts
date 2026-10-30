@@ -34,4 +34,33 @@ describe("checking a just-connected engine with one tiny real message", () => {
     expect(await again).toEqual({ ok: true });
     expect(instance.generateText).toHaveBeenCalledTimes(2);
   });
+
+  it("checks an engine whose only one-off call is the background one, as Codex and the ACP engines have", async () => {
+    const generateMemoryText = vi.fn(async (_prompt: string) => "OK");
+    expect(await checkEngine({ instanceId: "opencodeGo", displayName: "OpenCode", driverKind: "opencodeGo", generateMemoryText })).toEqual({ ok: true });
+    expect(generateMemoryText.mock.calls[0]![0]).toMatch(/single word OK/);
+  });
+
+  it("fails a check that hangs past its time, tells the engine to stop, and holds nothing open", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const generateText = vi.fn((_prompt: string, options?: { signal?: AbortSignal }) => {
+        signal = options?.signal;
+        return new Promise<string>(() => {});
+      });
+      const hanging = { instanceId: "hanging", displayName: "Grok", driverKind: "grokAgent", generateText };
+      const pending = checkEngine(hanging, { timeoutMs: 5_000 });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await pending).toEqual({ ok: false, error: "Grok didn't answer within 5 seconds." });
+      expect(signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      // The engine is free for the next check.
+      void checkEngine(hanging, { timeoutMs: 5_000 });
+      expect(generateText).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

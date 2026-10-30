@@ -1,5 +1,6 @@
 import type { WireMessage as Message } from "../shared/wire.ts";
 import { isPersistentQuestionCard } from "../shared/ask-question.ts";
+import { signInWaits } from "../shared/sign-in-request.ts";
 
 export function requestConflict(message = "The request no longer owns this conversation") {
   return Object.assign(new Error(message), { status: 409, code: "guarded_request_changed" });
@@ -58,5 +59,5 @@ export function requestNeedsInput(message: Message): boolean {
   return Boolean((message.card?.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired && !isPersistentQuestionCard(message.card)) ||
     (message.connector && !message.connector.dismissed && !message.connector.resumed && message.connector.status !== "connected") ||
     (message.secret && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded) ||
-    (message.signIn && !message.signIn.done && !message.signIn.cancelled && !message.signIn.superseded));
+    (message.signIn && signInWaits(message.signIn)));
 }

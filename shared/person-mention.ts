@@ -58,7 +58,7 @@ function maskFences(text: string): string {
 
 /** The text with every code block and code span blanked, offsets kept. CommonMark code spans close on a backtick run
  * of the opening length and may cross line endings. */
-function proseOnly(text: string): string {
+export function proseOnly(text: string): string {
   return maskFences(text).replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, (code) => code.replace(/[^\n]/g, " "));
 }
 

@@ -75,17 +75,20 @@ describe("the header's right side", () => {
     return { markup, controls: markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf("role=\"log\"")) };
   };
 
-  it("shows only what applies in Simple mode: no model, computer or ⋯, which the bot panel holds", () => {
+  it("keeps the model picker and the bot's computer in view in Simple mode, with ⋯ left to the bot panel", () => {
     fixture.advanced = false;
-    const { markup, controls } = header();
-    expect(markup).not.toContain("data-test-model-control");
-    expect(fixture.model).toBeNull();
-    expect(markup).not.toContain('data-tour="computer"');
-    expect(markup).not.toContain('data-testid="chat-more"');
-    expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
-    expect(controls).not.toContain("<button");
-    expect(markup).toContain("data-chathead-pill");
-    fixture.advanced = true;
+    try {
+      const { markup, controls } = header();
+      expect(controls).toContain("data-test-model-control");
+      expect(fixture.model).toMatchObject({ threadId: "selected" });
+      const computer = controls.match(/<button[^>]*data-tour="computer"[^>]*>/)?.[0] ?? "";
+      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-8"]));
+      expect(markup).not.toContain('data-testid="chat-more"');
+      expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
+      expect(markup).toContain("data-chathead-pill");
+    } finally {
+      fixture.advanced = true;
+    }
   });
 
   it("keeps the computer and ⋯ in a remote client's Simple header, whose settings panel has no room for them", () => {
@@ -104,12 +107,25 @@ describe("the header's right side", () => {
     }
   });
 
-  it("keeps Stop in the Simple header while a turn runs", () => {
+  it("moves Stop out of the Simple header into the composer's round button while a turn runs", () => {
     fixture.advanced = false;
+    try {
+      const busy = { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) };
+      const { markup, controls } = header(busy);
+      expect(controls).not.toContain("Stop this turn");
+      const stop = markup.match(/<button[^>]*data-composer-stop="slot"[^>]*>/)?.[0] ?? "";
+      expect(stop).toContain('aria-label="Stop this turn"');
+      expect(markup).not.toContain('data-call-button="composer"');
+      expect(header({ ...busy, waitingForTeammates: true, busy: false, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: false, waitingForTeammates: true })) }).markup)
+        .toContain('data-composer-stop="slot"');
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
+  it("keeps Stop in the Advanced header while a turn runs", () => {
     const { controls } = header({ ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) });
     expect(controls).toContain('title="Stop this turn"');
-    expect(controls.match(/<button/g)).toHaveLength(1);
-    fixture.advanced = true;
   });
 
   it("leaves Advanced mode's model, computer and ⋯ exactly as they were, the inspector unlocked", () => {
@@ -126,31 +142,52 @@ describe("the header's right side", () => {
   });
 });
 
-describe("header conversation title", () => {
-  it("reads Bot / Conversation ▾ in Simple mode, in place of the other-activity picker and the way back, and only there", () => {
-    const busyElsewhere: Bot = { ...bot, mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
+describe("the Simple header", () => {
+  it("is one pill: the avatar and name, with a dot for another busy conversation and no title, role or way back", () => {
+    const busyElsewhere: Bot = { ...bot, title: "Research", mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
     fixture.advanced = false;
-    const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
-    const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
-    expect(identity.indexOf("data-chathead-conversation")).toBeGreaterThan(identity.indexOf("data-chathead-pill"));
-    expect(identity).toMatch(/data-chathead-conversation[^>]*><span dir="auto" class="truncate">Selected<\/span>/);
-    expect(simple).not.toContain("data-background-activity");
-    expect(simple).not.toContain("data-chathead-back");
-    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
     try {
-      const remote = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
-      expect(remote).not.toContain("data-chathead-conversation");
-      expect(remote).toContain("data-background-activity");
+      const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+      const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
+      const pill = identity.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/)!;
+      expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
+      expect(pill[1]).toContain(">Pepper</span>");
+      expect(pill[1]).toContain('data-chathead-elsewhere="true"');
+      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "py-[7.5px]", "pr-[13.5px]"]));
+      // Away from the bot's main conversation, the pill names the one on screen.
+      expect(pill[1]).toContain("data-chathead-conversation");
+      for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
+        expect(simple, gone).not.toContain(gone);
+      }
+      window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+      try {
+        const remote = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+        expect(remote).not.toContain("data-chathead-elsewhere");
+        expect(remote).toContain("data-background-activity");
+      } finally {
+        delete window.ogb;
+      }
     } finally {
-      delete window.ogb;
+      fixture.advanced = true;
     }
-    fixture.advanced = true;
     fixture.showThreads = false;
     const advanced = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
-    expect(advanced).not.toContain("data-chathead-conversation");
+    expect(advanced).not.toContain("data-chathead-elsewhere");
     expect(advanced).toContain("data-background-activity");
     expect(advanced).toContain("data-chathead-back");
+    expect(advanced).toContain("data-chathead-role");
     fixture.showThreads = true;
+  });
+
+  it("opens the bot panel from the pill", () => {
+    fixture.advanced = false;
+    fixture.dispatch.mockClear();
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(markup).toMatch(/<button[^>]*data-chathead-pill="true"[^>]*aria-label="Open Pepper&#x27;s profile"/);
+    } finally {
+      fixture.advanced = true;
+    }
   });
 });
 
@@ -176,8 +213,10 @@ describe("header name", () => {
     expect(pill).toContain("Rename Pepper");
   });
 
-  it("shows the bot's role beside the pill in both modes, taking only the room the name leaves", () => {
-    for (const advanced of [true, false]) {
+  it("shows the bot's role beside the pill in Advanced mode, taking only the room the name leaves, and leaves it to the bot panel in Simple", () => {
+    fixture.advanced = false;
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: " Research " } }))).not.toContain("data-chathead-role");
+    for (const advanced of [true]) {
       fixture.advanced = advanced;
       const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: " Research " } }));
       const identity = markup.slice(markup.indexOf("data-chathead-identity"), markup.indexOf("data-chathead-controls"));
@@ -185,7 +224,7 @@ describe("header name", () => {
       expect(role, `advanced ${advanced}`).toBeTruthy();
       expect(role![1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "max-w-fit", "grow", "basis-0"]));
       expect(role![2].split(" ")).toEqual(expect.arrayContaining(["truncate", "text-[13px]", "text-ink-secondary"]));
-      expect(identity.indexOf("data-chathead-role")).toBeGreaterThan(identity.indexOf(advanced ? "Rename Pepper" : "</button>"));
+      expect(identity.indexOf("data-chathead-role")).toBeGreaterThan(identity.indexOf("Rename Pepper"));
       expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("data-chathead-role");
     }
     fixture.advanced = true;
@@ -211,7 +250,7 @@ describe("header name", () => {
       expect(pillOf(busyMarkup)).toBe(pillOf(idleMarkup));
       expect(busyMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true">Working…<\/span>/);
       expect(idleMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true"><\/span>/);
-      expect(busyMarkup).toContain('title="Stop this turn"');
+      expect(busyMarkup).toContain(advanced ? 'title="Stop this turn"' : 'aria-label="Stop this turn"');
     }
     fixture.advanced = true;
   });
@@ -256,6 +295,20 @@ describe("glass header", () => {
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
   });
 
+  it("fades the transcript into the canvas under the header in both modes", () => {
+    const bar = (markup: string) => markup.match(/<div data-glass-bar="top"[^>]*>/)?.[0] ?? "";
+    expect(bar(renderToStaticMarkup(createElement(ChatView, { bot })))).toContain('data-glass-fade=""');
+    fixture.advanced = false;
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(bar(markup)).toContain('data-glass-fade=""');
+      expect(bar(markup)).not.toContain("before:hidden");
+      expect(markup).toMatch(/class="glass-scroller [^"]*" style="scroll-padding-bottom:calc\(/);
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
   it("holds every row's positioned parts inside the transcript, so nothing in it can make the window scroll", () => {
     // An absolutely positioned reply label with no positioned ancestor in the scroller is placed past
     // the window, which then scrolls by script: an app frame's scrollIntoView lifts the whole app off the top.
@@ -286,14 +339,18 @@ describe("thread control placement", () => {
     fixture.advanced = true;
   });
 
-  it("gives the editor its own row above the controls", () => {
+  it("keeps the editor and its controls on one line, wrapping only in a narrow composer", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).toContain("@container/composer");
-    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!;
-    expect(row[1].split(" ")).toContain("flex-wrap");
-    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!;
-    expect(editor[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "order-first", "basis-full"]));
-    expect(/<textarea[^>]*class="([^"]*)"/.exec(markup)![1].split(" ")).toContain("min-h-14");
+    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(row).toContain("@max-[30rem]/composer:flex-wrap");
+    expect(row).not.toContain("flex-wrap");
+    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(editor).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
+    expect(editor).not.toContain("basis-full");
+    const textarea = /<textarea[^>]*class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(textarea).toContain("min-h-6");
+    expect(textarea).not.toContain("min-h-14");
   });
 
   it("keeps the composer inert until the deleted thread's replacement transcript arrives", () => {
@@ -481,23 +538,23 @@ describe("thread control placement", () => {
     fixture.localMessage = "Screen Recording required";
     window.ogb = { platform: "darwin", permOpenSettings: vi.fn(), relaunch: vi.fn() } as unknown as NonNullable<Window["ogb"]>;
     const screen = renderToStaticMarkup(createElement(ErrorRow, {
-      message: "CUA Driver is not ready for this computer — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
+      message: "OpenMausBot can't use this computer yet — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
     }));
     expect(screen).toContain("Open Screen Recording Settings");
     expect(screen).toContain("Relaunch OpenMausBot");
     expect(screen).not.toContain("Open Accessibility Settings");
     fixture.localMessage = "Accessibility required";
     const accessibility = renderToStaticMarkup(createElement(ErrorRow, {
-      message: "CUA Driver is not ready for this computer — Accessibility required",
+      message: "OpenMausBot can't use this computer yet — Accessibility required",
     }));
     expect(accessibility).toContain("Open Accessibility Settings");
     expect(accessibility).not.toContain("Open Screen Recording Settings");
     expect(renderToStaticMarkup(createElement(ErrorRow, {
-      message: "CUA Driver is not ready for this computer — Screen Recording required",
+      message: "OpenMausBot can't use this computer yet — Screen Recording required",
     }))).not.toContain("Open Screen Recording Settings");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout" }))).not.toContain("Open Screen Recording Settings");
     fixture.localReasonCode = "remote-server";
-    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "CUA Driver is not ready for this computer — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "OpenMausBot can't use this computer yet — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
     fixture.localReasonCode = "cua-driver-unavailable";
     fixture.platform = "other";
     fixture.localMessage = "";
@@ -544,9 +601,16 @@ describe("thread control placement", () => {
     expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
     expect(markup).not.toContain('aria-label="Thread settings"');
     expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", disabled: false, trustedModesAvailable: false });
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
     fixture.approval!.onSelect("auto");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
+  });
+
+  it("changes a working thread's level from the composer, saying the bot is working", () => {
+    renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) } }));
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: true });
+    fixture.approval!.onSelect("full");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
   });
 
   it("keeps both controls hidden for remote clients", () => {

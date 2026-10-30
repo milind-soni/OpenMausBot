@@ -48,6 +48,7 @@ export class PhoneRegistry {
   private readonly now: () => number;
   private phones = new Map<string, PhoneRecord>();
   private written = new Map<string, number>();
+  private removalPending = false;
   /** Removed on the computer: such a key never registers again; pairing the phone again gives it a new one. */
   private removed = new Set<string>();
 
@@ -67,9 +68,14 @@ export class PhoneRegistry {
     }
   }
 
-  private save(): void {
-    try { writeFileAtomic(this.file, `${JSON.stringify({ version: 1, phones: [...this.phones.values()], blocked: [...this.removed] })}\n`, { mode: 0o600 }); }
-    catch (error) { console.warn(`phones: could not save the record of paired phones: ${error instanceof Error ? error.message : String(error)}`); }
+  private save(required = false): void {
+    try {
+      writeFileAtomic(this.file, `${JSON.stringify({ version: 1, phones: [...this.phones.values()], blocked: [...this.removed] })}\n`, { mode: 0o600 });
+      this.removalPending = false;
+    } catch (error) {
+      console.warn(`phones: could not save the record of paired phones: ${error instanceof Error ? error.message : String(error)}`);
+      if (required) throw error;
+    }
   }
 
   /** Same key: update. Same owner + installId under another key: replace that record, keeping its history. A key the
@@ -120,7 +126,8 @@ export class PhoneRegistry {
       this.removed.add(key);
       for (const oldest of this.removed) { if (this.removed.size <= MAX_BLOCKED) break; this.removed.delete(oldest); }
     }
-    if (removed || blocking) this.save();
+    if (removed || blocking) this.removalPending = true;
+    if (this.removalPending) this.save(true);
     return removed;
   }
 

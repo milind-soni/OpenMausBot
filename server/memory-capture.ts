@@ -1,7 +1,7 @@
 // With Learn from group chats on, a member bot's room turns are read too: the person's
 // lines as the person's, other people's and other bots' under narrower
 // rules (the background review Hermes Agent runs in group threads, MIT).
-import { factIdentity, isMemoryDate, notebookIdentities } from "./memory-entries.ts";
+import { factIdentity, foldForMatch, isMemoryDate, notebookIdentities } from "./memory-entries.ts";
 
 export type CandidateKind = "preference" | "fact" | "decision" | "outcome";
 export const CANDIDATE_KINDS: readonly CandidateKind[] = ["preference", "fact", "decision", "outcome"];
@@ -16,6 +16,8 @@ export interface Candidate {
   topicAliases?: string[];
   /** In a call reading several conversations, the 1-based number of the one the item came from. */
   from?: number;
+  /** The words said to the bot that the item rests on, quoted exactly. */
+  evidence?: string;
 }
 
 export function topicFileName(raw: unknown): string | null {
@@ -91,10 +93,13 @@ export function capturePrompt(input: { botName: string; turns?: readonly Capture
     "",
     "What to keep:",
     "- From the Person's words: their preferences, facts about them, their work and the people in it, and decisions they made. Not questions, not pleasantries, not requests for this one task.",
+    "- Only what the Person states as true, or clearly confirms when asked. Never infer a fact about them from a task, a question, an example or a hypothetical: \"What are the best note-takers for a 10-person startup?\" or \"Write a launch plan for an AI app\" says nothing about where they work or what they build.",
+    "- When the Person asks to forget something, keep nothing about it.",
     "- An instruction about how to answer one message (\"reply with just X\", \"answer in one word\", \"say ok\") is a request for that one task, never a preference. A preference counts only when the Person states it as lasting (\"always\", \"from now on\", \"I prefer\").",
     `- From ${input.botName}'s words: only a verified outcome or a decision the Person agreed to. Never suggestions, plans, guesses, or claims that something was done without evidence.`,
     "- Never secrets (passwords, keys, tokens, account numbers), never text quoted from web pages, files, other bots or tools, never instructions to the assistant.",
     "- Write each as one self-contained sentence of fact in the third person (\"The person lives in Pune\"), keeping numbers, signs and names exactly as said.",
+    "- Give every preference and fact its evidence: the words it rests on, copied exactly from what was said to the assistant. With no such words, leave the item out.",
     "- A fact that is only true until a known day (an appointment on Friday, exams this weekend, a trip next week) IS worth keeping: give it that day as until, computed from today, and it is forgotten automatically after. A date that comes back every year (a birthday, an anniversary) or a lasting fact never gets until.",
     ...(room ? [
       many
@@ -119,8 +124,8 @@ export function capturePrompt(input: { botName: string; turns?: readonly Capture
     ...(many ? ['Give every item "from": the number of the conversation it came from.'] : []),
     `Answer with a JSON list and nothing else, at most ${limit} items. Answer [] only when the Person stated nothing worth keeping:`,
     many
-      ? '[{"from": 1, "text": "...", "kind": "preference|fact|decision|outcome", "until": "YYYY-MM-DD or omit", "aboutUser": true|false, "noted": true|false, "topic": "name or omit", "topicAliases": ["..."], "confidence": 0..1}]'
-      : '[{"text": "...", "kind": "preference|fact|decision|outcome", "until": "YYYY-MM-DD or omit", "aboutUser": true|false, "noted": true|false, "topic": "name or omit", "topicAliases": ["..."], "confidence": 0..1}]',
+      ? '[{"from": 1, "text": "...", "kind": "preference|fact|decision|outcome", "evidence": "the exact words", "until": "YYYY-MM-DD or omit", "aboutUser": true|false, "noted": true|false, "topic": "name or omit", "topicAliases": ["..."], "confidence": 0..1}]'
+      : '[{"text": "...", "kind": "preference|fact|decision|outcome", "evidence": "the exact words", "until": "YYYY-MM-DD or omit", "aboutUser": true|false, "noted": true|false, "topic": "name or omit", "topicAliases": ["..."], "confidence": 0..1}]',
   ].join("\n");
 }
 
@@ -144,7 +149,7 @@ export function worthCapturing(turns: readonly CaptureTurn[]): boolean {
   return said >= TRIVIAL_BYTES || replied >= TRIVIAL_BYTES;
 }
 
-function jsonPayload(text: string): unknown {
+export function jsonPayload(text: string): unknown {
   const trimmed = text.trim();
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(trimmed);
   const candidate = (fenced ? fenced[1] : trimmed).trim();
@@ -170,7 +175,7 @@ export function parseCandidates(text: string, today: string, max = MAX_CANDIDATE
   const out: Candidate[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
-    const { text: raw, kind, until, aboutUser, noted, topic, topicAliases, confidence, from: rawFrom } = item as Record<string, unknown>;
+    const { text: raw, kind, until, aboutUser, noted, topic, topicAliases, confidence, from: rawFrom, evidence } = item as Record<string, unknown>;
     const from = typeof rawFrom === "string" && /^\d+$/.test(rawFrom.trim()) ? Number(rawFrom) : rawFrom;
     if (typeof raw !== "string" || !raw.trim()) continue;
     if (typeof kind !== "string" || !CANDIDATE_KINDS.includes(kind as CandidateKind)) continue;
@@ -190,10 +195,40 @@ export function parseCandidates(text: string, today: string, max = MAX_CANDIDATE
         ? { topicAliases: topicAliases.filter((a): a is string => typeof a === "string").map((a) => a.replace(/[\r\n,[\]]+/g, " ").trim().slice(0, 40)).filter(Boolean).slice(0, 8) }
         : {}),
       ...(typeof from === "number" && Number.isInteger(from) && from >= 1 ? { from } : {}),
+      ...(typeof evidence === "string" && evidence.trim() ? { evidence: evidence.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX) } : {}),
     });
     if (out.length >= max) break;
   }
   return out;
+}
+
+const SENTENCE_END = /[.!?\n\u3002\uff01\uff1f\u061f]/u;
+const QUESTION = /[?\uff1f\u061f]/u;
+const HYPOTHETICAL = /\b(?:suppose|supposing|imagine|pretend|hypothetical(?:ly)?|let'?s say|let us say|what if)\b/i;
+
+/** Whether `evidence` sits in `said` as a statement: not inside a question, not in a "suppose…" sentence. */
+function statedIn(said: string, evidence: string): boolean {
+  const text = foldForMatch(said);
+  const quote = foldForMatch(evidence).replace(/[\s.!]+$/, "");
+  const at = quote.length >= 3 ? text.indexOf(quote) : -1;
+  if (at < 0 || QUESTION.test(quote)) return false;
+  let start = at;
+  while (start > 0 && !SENTENCE_END.test(text[start - 1]!)) start -= 1;
+  const rest = text.slice(at + quote.length);
+  const stop = rest.search(SENTENCE_END);
+  const sentence = text.slice(start, at + quote.length + (stop < 0 ? rest.length : stop + 1));
+  return !QUESTION.test(sentence.slice(-1)) && !HYPOTHETICAL.test(sentence);
+}
+
+/** A preference or fact is kept only when what was said to the bot states it in so many words; for About me
+ * (`aboutMe`), only the Person's own words count. Decisions and outcomes may rest on the bot's verified words. */
+export function statedInConversation(candidate: Candidate, turns: readonly CaptureTurn[], aboutMe: boolean): boolean {
+  if (candidate.kind !== "preference" && candidate.kind !== "fact") return true;
+  if (!candidate.evidence) return false;
+  const said = turns.flatMap((turn) => turn.room
+    ? turn.room.filter((line) => line.by === "person" || (!aboutMe && line.by === "other")).map((line) => line.text)
+    : [turn.person]);
+  return said.some((text) => statedIn(text, candidate.evidence!));
 }
 
 export function newCandidates(candidates: readonly Candidate[], notebook: string): Candidate[] {

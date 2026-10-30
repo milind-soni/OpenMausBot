@@ -33,6 +33,7 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   hermesAgent: { resume: true },
   deepseekAgent: { resume: true },
   clineAgent: { resume: true },
+  copilotAgent: { resume: true },
   customAcp: { resume: true },
   "openai-compat": CHAT_ROW,
   grok: CHAT_ROW,

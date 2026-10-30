@@ -18,3 +18,10 @@ export function pickBotName(taken: Iterable<string>): string {
     if (!used.has(`${base.toLowerCase()} ${i}`)) return `${base} ${i}`;
   }
 }
+
+const PICKED = new Set(NAMES.map((name) => name.toLowerCase()));
+
+/** A name pickBotName could have given ("Pesto", "Pesto 2"): New bot sends one from /api/bot-defaults' suggestedName. */
+export function isPickedBotName(name: string): boolean {
+  return PICKED.has(name.trim().toLowerCase().replace(/ \d+$/, ""));
+}

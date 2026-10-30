@@ -11,6 +11,7 @@ import { DriverError, isUnanswered } from "./cdp/errors.ts";
 import { callOnNode, valueInWorld } from "./cdp/evaluate.ts";
 import type { PointerReporter } from "./cdp/actions.ts";
 import { navigable } from "./cdp/page.ts";
+import type { Screenshot } from "./cdp/screencast.ts";
 import { resolveElement } from "./cdp/selectors.ts";
 import { MAX_VISIBLE_TEXT_LENGTH } from "./cdp/snapshot.ts";
 import { BROWSER_CONTROL_REFUSAL, type ProfileControl } from "./control.ts";
@@ -180,6 +181,16 @@ async function act(context: ToolContext, tab: Tab | null, run: () => Promise<Too
   });
 }
 
+/** How a picture's pixels map to the CSS pixels the point tools take, so a point read off it lands where it was seen. */
+export function pictureNote(shot: Pick<Screenshot, "width" | "height" | "scale" | "region">, of: "viewport" | "page" | "element" = "viewport"): string {
+  const pixels = `${shot.width}x${shot.height} pixels`;
+  const region = `${Math.round(shot.region.width)}x${Math.round(shot.region.height)} CSS-pixel`;
+  if (of !== "viewport") return `${pixels}: the ${region} ${of === "page" ? "page" : "element"}${shot.scale === 1 ? "" : ` drawn at ${shot.scale}`}.`;
+  return shot.scale === 1
+    ? `${pixels}, one per CSS pixel of the viewport, so x and y read off it are the point the click, hover and drag tools take.`
+    : `${pixels}: the ${region} viewport drawn at ${shot.scale}, so divide x and y read off it by ${shot.scale} for the point the click, hover and drag tools take.`;
+}
+
 async function snapshotResult(context: ToolContext, tab: Tab, { includeImage = false, save = false }: { includeImage?: boolean; save?: boolean } = {}): Promise<ToolResult> {
   const snapshot = await tab.page.snapshot();
   await context.browser.refreshTargets().catch(() => undefined);
@@ -187,10 +198,11 @@ async function snapshotResult(context: ToolContext, tab: Tab, { includeImage = f
   if (!includeImage && !save) return textResult(text);
   const shot = await context.paused(tab, () => tab.page.screenshot());
   const saved = save ? context.saveScreenshot(shot.data, tab.page.url()) : null;
+  const shown = includeImage || !save;
   return {
     content: [
-      { type: "text", text: saved ? `${text}\nScreenshot saved at ${saved}` : text },
-      ...(includeImage || !save ? [{ type: "image" as const, data: shot.data.toString("base64"), mimeType: "image/png" }] : []),
+      { type: "text", text: `${text}${saved ? `\nScreenshot saved at ${saved}` : ""}${shown ? `\nThe screenshot is ${pictureNote(shot)}` : ""}` },
+      ...(shown ? [{ type: "image" as const, data: shot.data.toString("base64"), mimeType: "image/png" }] : []),
     ],
   };
 }
@@ -278,7 +290,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       return act(context, tab, async () => {
         await tab.page.bringToFront();
         const shot = await context.paused(tab, () => tab.page.screenshot({ fullPage: call.input.fullPage === true, ...(target && !("x" in target) ? { target } : {}) }));
-        return { content: [{ type: "text", text: `Screenshot of ${pageLabel(describe(tab))}, ${shot.width}x${shot.height} pixels.` }, { type: "image", data: shot.data.toString("base64"), mimeType: "image/png" }] };
+        const note = pictureNote(shot, target ? "element" : call.input.fullPage === true ? "page" : "viewport");
+        return { content: [{ type: "text", text: `Screenshot of ${pageLabel(describe(tab))}, ${note}` }, { type: "image", data: shot.data.toString("base64"), mimeType: "image/png" }] };
       });
     }
     case "agent_browser_click": {

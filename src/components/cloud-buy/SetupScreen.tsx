@@ -6,7 +6,7 @@ import { CLOUD_COLOR_LABEL, CLOUD_COLORS, CLOUD_NAME_MAX, cloudColorFill } from 
 import { cloudPlanLabel, usd, type CloudStarted } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { Badge, Checklist, CloudTile, FIELD, Heading, ProgressBar } from "./parts";
+import { ACTIONS, Badge, Checklist, CloudTile, FIELD, Heading, PRIMARY, ProgressBar, QUIET, SCREEN } from "./parts";
 
 const STEPS = [["reserving", "cloudHome.step.reserving"], ["storage", "cloudHome.step.storage"], ["starting", "cloudBuy.step.starting"], ["checking", "cloudHome.step.checking"]] as const satisfies
   ReadonlyArray<readonly [CloudSetupStep, LocaleKey]>;
@@ -28,27 +28,29 @@ export function SetupScreen({ started, received, step, slow, ready, sleeps = fal
 }) {
   const at = ready ? STEPS.length : Math.max(0, STEPS.findIndex(([key]) => key === step));
   const plan = cloudPlanLabel(started.tier ?? started.trial?.tier ?? undefined);
-  return <div data-cloud-add={ready ? "ready" : received ? "received" : "starting"} data-cloud-setup={ready ? "ready" : step ?? "reserving"} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
-    <Badge>{startedBadge(started, received)}</Badge>
-    <Heading title={ready ? t("cloudBuy.ready.title", { name }) : t("cloudBuy.setup.title")}
-      sub={ready ? t("cloudBuy.ready.sub") : received ? t("cloudAccount.purchaseNoteNoDate") : t("cloudBuy.setup.sub")} />
-    <div className="grid gap-[18px] sm:grid-cols-2">
+  return <div data-cloud-add={ready ? "ready" : received ? "received" : "starting"} data-cloud-setup={ready ? "ready" : step ?? "reserving"} className={SCREEN}>
+    <div className="flex flex-col gap-3">
+      <Badge>{startedBadge(started, received)}</Badge>
+      <Heading title={ready ? t("cloudBuy.ready.title", { name }) : t("cloudBuy.setup.title")}
+        sub={ready ? t("cloudBuy.ready.sub") : received ? t("cloudAccount.purchaseNoteNoDate") : t("cloudBuy.setup.sub")} />
+    </div>
+    <div className="grid gap-6 sm:grid-cols-2">
       <div className="flex flex-col gap-3">
         <ProgressBar value={at / STEPS.length} label={t("cloudBuy.setup.progress")} />
         <Checklist label={t("cloudBuy.setup.progress")} items={STEPS.map(([key, label], index) => ({
           key, title: t(label, { name }),
           state: index < at ? "done" as const : index === at ? "now" as const : "next" as const,
         }))} />
-        {slow && !ready && <p role="status" className="text-[13px] text-ink-secondary">{t("cloudHome.slow")}</p>}
+        {slow && !ready && <p role="status" className="px-3 text-[13px] leading-[18px] text-ink-secondary">{t("cloudHome.slow")}</p>}
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="cloud-add-name" className="text-[13px] font-medium text-ink-secondary">{t("cloudBuy.setup.name")}</label>
+          <label htmlFor="cloud-add-name" className="text-[13px] leading-[18px] text-ink-secondary">{t("cloudBuy.setup.name")}</label>
           <input id="cloud-add-name" value={typed} maxLength={CLOUD_NAME_MAX} placeholder={t("cloudSetup.myCloud")} autoComplete="off" spellCheck={false}
             onChange={event => onName(event.target.value)} className={FIELD} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <span id="cloud-add-color" className="text-[13px] font-medium text-ink-secondary">{t("cloudBuy.setup.color")}</span>
+          <span id="cloud-add-color" className="text-[13px] leading-[18px] text-ink-secondary">{t("cloudBuy.setup.color")}</span>
           <div role="radiogroup" aria-labelledby="cloud-add-color" className="flex flex-wrap gap-2">
             {CLOUD_COLORS.map(option => <button key={option} type="button" role="radio" aria-checked={option === color} aria-label={t(CLOUD_COLOR_LABEL[option])}
               tabIndex={option === color ? 0 : -1} data-color={option} onClick={() => onColor(option)}
@@ -62,26 +64,26 @@ export function SetupScreen({ started, received, step, slow, ready, sleeps = fal
               }}
               style={{ background: cloudColorFill(option) }}
               className={cn("size-[26px] rounded-lg border-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                option === color ? "border-ink shadow-[inset_0_0_0_2px_var(--color-panel)]" : "border-transparent")} />)}
+                option === color ? "border-ink shadow-[inset_0_0_0_2px_var(--color-app)]" : "border-transparent")} />)}
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium text-ink-secondary">{t("cloudBuy.setup.preview")}</span>
-          <span data-cloud-preview className="inline-flex max-w-full items-center gap-2 self-start rounded-[10px] border border-hairline/70 bg-app py-1.5 pe-2.5 ps-1.5">
+          <span className="text-[13px] leading-[18px] text-ink-secondary">{t("cloudBuy.setup.preview")}</span>
+          <span data-cloud-preview className="inline-flex max-w-full items-center gap-2 self-start rounded-[12px] border-[0.5px] border-ink/10 bg-menu py-1.5 pe-3 ps-1.5">
             <CloudTile color={color} />
-            <span className="min-w-0"><span className="block truncate text-[13px] font-semibold leading-tight text-ink">{name}</span>
+            <span className="min-w-0"><span className="block truncate text-[13px] font-medium leading-4 text-ink">{name}</span>
               <span className="block truncate text-[12px] text-ink-tertiary">{t(sleeps ? "cloudBuy.setup.previewLineSleeps" : "cloudBuy.setup.previewLine", { plan })}</span></span>
           </span>
         </div>
       </div>
     </div>
-    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-      {counting !== null && <span role="status" className="text-[13px] text-ink-secondary">{t("cloudBuy.setup.openingIn", { seconds: counting })}</span>}
-      {counting !== null && <button type="button" className="ui-button" onClick={onNotNow}>{t("notice.notNow")}</button>}
-      <button type="button" className="ui-button ui-button-primary" disabled={!ready || busy} onClick={onOpen}>{t("cloudBuy.setup.open", { name })}</button>
+    {ready && counting === null && <p className="text-[13px] leading-[18px] text-ink-tertiary">{t("cloudBuy.ready.hint", { name })}</p>}
+    <div className={ACTIONS}>
+      {counting !== null && <span role="status" className="me-1 text-[13px] text-ink-secondary">{t("cloudBuy.setup.openingIn", { seconds: counting })}</span>}
+      {counting !== null && <button type="button" className={QUIET} onClick={onNotNow}>{t("notice.notNow")}</button>}
+      <button type="button" className={PRIMARY} disabled={!ready || busy} onClick={onOpen}>{t("cloudBuy.setup.open", { name })}</button>
     </div>
-    {ready && counting === null && <p className="text-[12px] text-ink-tertiary">{t("cloudBuy.ready.hint", { name })}</p>}
-    {openFailed && <p role="alert" className="text-[13px] text-danger">{t("cloudBuy.openFailed", { name })}</p>}
+    {openFailed && <p role="alert" className="-mt-2 text-end text-[13px] leading-[18px] text-danger">{t("cloudBuy.openFailed", { name })}</p>}
   </div>;
 }
 
@@ -89,24 +91,26 @@ export function SetupScreen({ started, received, step, slow, ready, sleeps = fal
  * colour here: the team's name is the Admin's. */
 export function TeamSetupScreen({ team, step, slow }: { team: string | null; step: CloudSetupStep | null; slow: boolean }) {
   const at = Math.max(0, STEPS.findIndex(([key]) => key === step)), name = team ?? t("cloudBuy.team.unnamed");
-  return <div data-cloud-add="team-starting" data-cloud-setup={step ?? "reserving"} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+  return <div data-cloud-add="team-starting" data-cloud-setup={step ?? "reserving"} className={SCREEN}>
     <Heading title={t("cloudBuy.team.setupTitle")} sub={t("cloudBuy.team.setupSub")} />
-    <ProgressBar value={at / STEPS.length} label={t("cloudBuy.setup.progress")} />
-    <Checklist label={t("cloudBuy.setup.progress")} items={STEPS.map(([key, label], index) => ({
-      key, title: t(label, { name }), state: index < at ? "done" as const : index === at ? "now" as const : "next" as const,
-    }))} />
-    {slow && <p role="status" className="text-[13px] text-ink-secondary">{t("cloudHome.slow")}</p>}
+    <div className="flex flex-col gap-3">
+      <ProgressBar value={at / STEPS.length} label={t("cloudBuy.setup.progress")} />
+      <Checklist label={t("cloudBuy.setup.progress")} items={STEPS.map(([key, label], index) => ({
+        key, title: t(label, { name }), state: index < at ? "done" as const : index === at ? "now" as const : "next" as const,
+      }))} />
+      {slow && <p role="status" className="px-3 text-[13px] leading-[18px] text-ink-secondary">{t("cloudHome.slow")}</p>}
+    </div>
   </div>;
 }
 
 /** A Team or Business plan's Cloud, ready: the team's, opened as the switcher opens it. */
 export function TeamReadyScreen({ name, busy, openFailed, onOpen }: { name: string; busy: boolean; openFailed: boolean; onOpen: () => void }) {
-  return <div data-cloud-add="team-ready" className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+  return <div data-cloud-add="team-ready" className={SCREEN}>
     <Heading title={t("cloudBuy.team.readyTitle")} sub={t("cloudBuy.team.readySub", { name })} />
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <button type="button" data-autofocus className="ui-button ui-button-primary" disabled={busy} onClick={onOpen}>{t("cloudBuy.setup.open", { name })}</button>
+    <p className="text-[13px] leading-[18px] text-ink-tertiary">{t("cloudBuy.ready.hint", { name })}</p>
+    <div className={ACTIONS}>
+      <button type="button" data-autofocus className={PRIMARY} disabled={busy} onClick={onOpen}>{t("cloudBuy.setup.open", { name })}</button>
     </div>
-    <p className="text-[12px] text-ink-tertiary">{t("cloudBuy.ready.hint", { name })}</p>
-    {openFailed && <p role="alert" className="text-[13px] text-danger">{t("cloudBuy.openFailed", { name })}</p>}
+    {openFailed && <p role="alert" className="-mt-2 text-end text-[13px] leading-[18px] text-danger">{t("cloudBuy.openFailed", { name })}</p>}
   </div>;
 }

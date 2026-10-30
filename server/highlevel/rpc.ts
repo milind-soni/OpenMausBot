@@ -30,10 +30,11 @@ export async function highlevelRpc(
   const args = params.arguments ?? {};
   const problem = highlevelToolCallProblem(params.name, args);
   if (problem || !isHighLevelToolName(params.name)) return highlevelErrorResult(problem ?? "Unknown HighLevel tool.", { code: "invalid_input" });
+  const name = params.name;
   deps.assertActive();
-  const verdict = deps.authorize(params.name);
+  const verdict = deps.authorize(name);
   if (!verdict.ok) return highlevelErrorResult(verdict.text, { code: "refused" });
-  const { result, write } = await runHighLevelTool(deps.client, params.name, args as Record<string, unknown>);
+  const { result, write } = await deps.client.withActiveCall(deps.assertActive, () => runHighLevelTool(deps.client, name, args as Record<string, unknown>));
   deps.assertActive();
   if (write && !result.isError) deps.onWrite?.(write);
   return result;

@@ -1,4 +1,4 @@
-import { BookmarkPlus, CheckCircle2, ChevronDown, ChevronUp, ListChecks, Loader2, X, XCircle } from "lucide-react";
+import { BookmarkPlus, CheckCircle2, ChevronDown, ChevronUp, Circle, ListChecks, Loader2, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/cn";
@@ -14,6 +14,8 @@ function StatusIcon({ status }: { status: RunStep["status"] }) {
       return <CheckCircle2 aria-hidden="true" className={cn(className, "text-success")} />;
     case "failed":
       return <XCircle aria-hidden="true" className={cn(className, "text-danger")} />;
+    case "unverified":
+      return <Circle aria-hidden="true" className={cn(className, "text-ink-secondary")} />;
   }
 }
 

@@ -10,6 +10,7 @@ import {
   slugifyTranscriptFilename,
 } from "@/lib/export-transcript";
 import type { Message } from "@/state/store";
+import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 
 export interface ExportTranscriptMenuProps {
   title: string;
@@ -101,7 +102,7 @@ export function ExportTranscriptMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
-          "rounded-md p-1.5 transition-colors hover:bg-raised",
+          "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
           open ? "text-accent" : "text-ink-secondary hover:text-ink",
           className,
         )}
@@ -114,14 +115,14 @@ export function ExportTranscriptMenu({
         <div
           role="menu"
           aria-label="Export options"
-          className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/50", motion.className)} {...motion.exitProps}
+          className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
         >
-          <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          <div className={MENU_HEADING}>
             Export Conversation
           </div>
 
           {!hasMessages ? (
-            <div className="px-3 py-2 text-[12px] text-ink-secondary">
+            <div className="px-2 py-1.5 text-[12px] text-ink-secondary">
               No messages to export yet.
             </div>
           ) : (
@@ -133,9 +134,9 @@ export function ExportTranscriptMenu({
                 className="ui-menu-row text-ink"
               >
                 {copied ? (
-                  <Check size={14} className="shrink-0 text-success" />
+                  <Check size={16} className="shrink-0 text-success" />
                 ) : (
-                  <Copy size={14} className="shrink-0 text-ink-secondary" />
+                  <Copy size={16} className="shrink-0 text-ink-secondary" />
                 )}
                 <span className="flex-1 truncate">
                   {copied ? "Copied to clipboard!" : "Copy as Markdown"}
@@ -143,7 +144,7 @@ export function ExportTranscriptMenu({
               </button>
 
               {copyFailed && (
-                <div role="status" className="px-3 py-2 text-[12px] text-ink-secondary">
+                <div role="status" className="px-2 py-1.5 text-[12px] text-ink-secondary">
                   Clipboard unavailable. Download the Markdown file instead.
                 </div>
               )}
@@ -154,7 +155,7 @@ export function ExportTranscriptMenu({
                 onClick={handleDownload}
                 className="ui-menu-row text-ink"
               >
-                <Download size={14} className="shrink-0 text-ink-secondary" />
+                <Download size={16} className="shrink-0 text-ink-secondary" />
                 <span className="flex-1 truncate">Download as .md</span>
               </button>
             </>

@@ -5,7 +5,6 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
-  keepFixedSectionSlots,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -18,9 +17,11 @@ import {
   sidebarGoalRunPreview,
   sidebarSectionCollapsed,
   sidebarSectionLabel,
+  simpleOrderedSections,
   simpleSidebarSections,
   userSectionId,
   userSectionName,
+  withPrimaryTile,
 } from "./sidebar-layout";
 
 describe("sidebar virtual sections", () => {
@@ -255,25 +256,51 @@ describe("Simple-mode section order", () => {
   const work = userSectionId("Work");
   const home = userSectionId("Home");
 
-  it("puts Pinned and the heading-less Bots list first by default and keeps a saved order for the rest", () => {
+  it("puts Pinned, the bots, group chats and bot threads first, then the departments in their saved order", () => {
     const natural = [PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOT_CHATS_SECTION_ID, BOTS_SECTION_ID, work];
     expect(simpleSidebarSections(natural)).toEqual([PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, BOT_CHATS_SECTION_ID, work]);
-    expect(simpleSidebarSections([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work])).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, work]);
+    expect(simpleSidebarSections([work, CHANNELS_SECTION_ID, BOTS_SECTION_ID])).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, work]);
     const saved = orderedSidebarSections([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home], [home, CHANNELS_SECTION_ID, BOTS_SECTION_ID, work]);
-    expect(simpleSidebarSections(saved)).toEqual([BOTS_SECTION_ID, home, CHANNELS_SECTION_ID, work]);
+    expect(simpleSidebarSections(saved)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, home, work]);
   });
 
-  it("writes a Simple reorder back without moving Pinned or Bots in the saved order", () => {
-    const full = [PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home];
-    const shown = simpleSidebarSections(full);
-    const moved = simpleSidebarSections(placeSection(shown, home, CHANNELS_SECTION_ID, "before"));
-    expect(moved).toEqual([PINNED_SECTION_ID, BOTS_SECTION_ID, home, CHANNELS_SECTION_ID, work]);
-    expect(keepFixedSectionSlots(full, moved)).toEqual([PINNED_SECTION_ID, home, BOTS_SECTION_ID, CHANNELS_SECTION_ID, work]);
-    expect(keepFixedSectionSlots(full, shown)).toEqual(full);
+  it("keeps that default until a section is moved in Simple, then follows Simple's own saved order", () => {
+    const ordered = [PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home];
+    expect(simpleOrderedSections(ordered, [])).toEqual([PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, work, home]);
+    const moved = [CHANNELS_SECTION_ID, home, PINNED_SECTION_ID, BOTS_SECTION_ID, work];
+    expect(simpleOrderedSections(ordered, moved)).toEqual(moved);
   });
 
-  it("cannot move a section above the heading-less Bots list", () => {
-    const shown = [BOTS_SECTION_ID, CHANNELS_SECTION_ID, work];
-    expect(simpleSidebarSections(moveSection(shown, CHANNELS_SECTION_ID, -1))).toEqual(shown);
+  it("can move any section, the bots and group chats included, above the others", () => {
+    const shown = simpleOrderedSections([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work], []);
+    expect(moveSection(shown, work, -1)).toEqual([BOTS_SECTION_ID, work, CHANNELS_SECTION_ID]);
+    expect(placeSection(shown, CHANNELS_SECTION_ID, BOTS_SECTION_ID, "before")).toEqual([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work]);
+  });
+
+  it("slots a department added after a Simple move in beside its neighbours from the default", () => {
+    const saved = [work, CHANNELS_SECTION_ID, BOTS_SECTION_ID];
+    expect(simpleOrderedSections([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home], saved)).toEqual([work, home, CHANNELS_SECTION_ID, BOTS_SECTION_ID]);
+  });
+});
+
+describe("the primary tile", () => {
+  const bot = (id: string, extra: Partial<{ chiefOfStaff: boolean; pinned: boolean; section: string }> = {}) => ({ id, ...extra });
+
+  it("is the unsectioned Chief of Staff, pinned or not, taken out of the lists", () => {
+    const parts = partitionSidebarBots([bot("chief", { chiefOfStaff: true, pinned: true }), bot("atlas", { pinned: true }), bot("bea")], { universalPins: true });
+    const tiled = withPrimaryTile(parts, undefined);
+    expect(tiled.primary?.id).toBe("chief");
+    expect(tiled.unsectionedChief).toBeNull();
+    expect(tiled.pinnedBots.map((candidate) => candidate.id)).toEqual(["atlas"]);
+    expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["bea"]);
+  });
+
+  it("falls back to the person's MausBot, and leaves a department's Chief in its department", () => {
+    const parts = partitionSidebarBots([bot("lead", { chiefOfStaff: true, section: "Work" }), bot("mausbot"), bot("bea")]);
+    const tiled = withPrimaryTile(parts, "mausbot");
+    expect(tiled.primary?.id).toBe("mausbot");
+    expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["bea"]);
+    expect(tiled.sectionChiefs.map((candidate) => candidate.id)).toEqual(["lead"]);
+    expect(withPrimaryTile(parts, undefined).primary).toBeNull();
   });
 });

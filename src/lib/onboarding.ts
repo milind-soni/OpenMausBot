@@ -1,4 +1,5 @@
 import { ONBOARDING_CLOUD_HINT, WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
+import { freeFallback, rankAis, type AiTestState, type RankableAi } from "../../shared/ai-ranking";
 
 export interface OnboardingStatus {
   completedAt: string;
@@ -60,6 +61,27 @@ export function completionPatch(now: Date = new Date()): { onboarding: { complet
   return { onboarding: { completedAt: now.toISOString(), version: WELCOME_VERSION } };
 }
 
+/** Kept by an install whose first run ended by meeting its Chief of Staff: its first conversation stays quiet (no
+ * corner notices until a reply, no spotlights). */
+export const MET_CHIEF_HINT = "met-chief-v1";
+
+/** The first run's record: done, marked as the one that met the Chief (MET_CHIEF_HINT), plus any `seen` it settles. */
+export function firstRunPatch(
+  record: OnboardingStatus | undefined,
+  now: Date = new Date(),
+  seen: readonly string[] = [],
+): { onboarding: { completedAt: string; version: number; hintsSeen?: string[] } } {
+  const have = record?.hintsSeen ?? [];
+  const added = [MET_CHIEF_HINT, ...seen].filter((id, index, all) => !have.includes(id) && all.indexOf(id) === index);
+  return { onboarding: { ...completionPatch(now).onboarding, ...(added.length ? { hintsSeen: [...have, ...added] } : {}) } };
+}
+
+/** Where a first run could offer MausBot Cloud: this computer's own page with the Cloud bridge, not a branded build,
+ * a hosted or a remote viewer. A first run there settles the Cloud Pro popup, so it never follows on the next launch. */
+export function cloudBeatPossible(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean }): boolean {
+  return input.bridge && !input.branded && !input.hosted && !input.remote;
+}
+
 export function hintSeen(record: OnboardingStatus | undefined, id: string): boolean {
   return (record?.hintsSeen ?? []).includes(id);
 }
@@ -73,59 +95,24 @@ export function hintSeenPatch(
 }
 
 
-export type BeatId = "hello" | "engines" | "import" | "permissions" | "cloud";
+export type BeatId = "meet" | "chief";
 
-/** Every step the welcome can show, in the order it shows them. */
-export const BEAT_ORDER: readonly BeatId[] = ["hello", "engines", "import", "permissions", "cloud"];
+/** Every screen the first run can show, in the order it shows them. */
+export const BEAT_ORDER: readonly BeatId[] = ["meet", "chief"];
 
-export interface BeatOptions {
-  dictation: boolean;
-  hosted?: boolean;
-  /** An AI already works here (a signed-in CLI, an API key, an organization's or the Cloud's model): it is used without a step. */
-  aiReady?: boolean;
-  /** This computer has skills or MCP servers from another AI tool to bring in. */
-  setupImport?: boolean;
-  /** MausBot Cloud can be bought from this desktop now (cloudBeatWanted). */
-  cloud?: boolean;
+/** Two screens, then the chat: meeting the app (and connecting an AI when none works), then the Chief of Staff. A hosted
+ * place's admin only meets the app: their team's bots and Chief are already set up. */
+export function beatsFor(options: { hosted?: boolean }): BeatId[] {
+  return options.hosted ? ["meet"] : ["meet", "chief"];
 }
 
-/** A short first run: the greeting, an AI when none works, then only the steps this computer needs. It ends in the chat. */
-export function beatsFor(options: BeatOptions): BeatId[] {
-  if (options.hosted) return ["hello"];
-  const beats: BeatId[] = ["hello"];
-  if (!options.aiReady) beats.push("engines");
-  if (options.setupImport) beats.push("import");
-  if (options.dictation) beats.push("permissions");
-  if (options.cloud) beats.push("cloud");
-  return beats;
-}
-
-/** Where a reloaded welcome opens: the saved step, or, while that step is not offered (yet), the nearest one before it. */
+/** Where a reloaded first run opens: the saved screen while it is offered, else the first. */
 export function resumeBeat(beats: readonly BeatId[], saved: BeatId | undefined): BeatId {
-  const at = saved ? BEAT_ORDER.indexOf(saved) : -1;
-  for (let index = at; index >= 0; index--) if (beats.includes(BEAT_ORDER[index]!)) return BEAT_ORDER[index]!;
-  return "hello";
-}
-
-/** The one count the dots and "Step N of M" both draw from. */
-export function flowProgress(beats: readonly BeatId[], beat: BeatId): { current: number; total: number } {
-  return { current: Math.max(1, beats.indexOf(beat) + 1), total: beats.length };
+  return saved && beats.includes(saved) ? saved : beats[0] ?? "meet";
 }
 
 export function onboardingCloudOffered(record: OnboardingStatus | undefined): boolean {
   return hintSeen(record, ONBOARDING_CLOUD_HINT);
-}
-
-/** Where the welcome may offer MausBot Cloud at all: this computer's own page with the Cloud bridge, not a branded
- * build, not a hosted or remote viewer. */
-export function cloudBeatPossible(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean }): boolean {
-  return input.bridge && !input.branded && !input.hosted && !input.remote;
-}
-
-/** ...and whether it does: as the buy sheet decides, an account that may buy (buyOfferAllowed) and the Admin's offer
- * loaded. Anything unknown is no beat: onboarding never waits for it. */
-export function cloudBeatWanted(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean; mayBuy: boolean | null; offer: unknown }): boolean {
-  return cloudBeatPossible(input) && input.mayBuy === true && Boolean(input.offer);
 }
 
 let welcomeShown = 0;
@@ -159,32 +146,6 @@ export function welcomeFinishedThisLaunch(): boolean {
   }
 }
 
-/** The next step offered after `current`. A step that left the list (an AI connected meanwhile) still moves on to the
- * next one offered, in BEAT_ORDER, instead of ending the welcome early. */
-export function nextBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const at = BEAT_ORDER.indexOf(current);
-  return beats.find((beat) => BEAT_ORDER.indexOf(beat) > at) ?? null;
-}
-
-export function previousBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const at = BEAT_ORDER.indexOf(current);
-  return beats.filter((beat) => BEAT_ORDER.indexOf(beat) < at).at(-1) ?? null;
-}
-
-export function beatWidth(beat: BeatId): number {
-  switch (beat) {
-    case "engines":
-      return 680;
-    case "import":
-      return 540;
-    case "cloud":
-      return 520;
-    default:
-      return 460;
-  }
-}
-
-
 export const DEFAULT_ADMIN_ORIGIN = "https://admin.openmausbot.com";
 
 export function organisationSignIn<Bridge>(
@@ -203,15 +164,36 @@ interface AiChoice {
   driverKind: string;
   access?: string;
   readOnly?: boolean;
+  snapshot?: { freeFallback?: boolean };
 }
 
-/** The one way the welcome recommends to connect an AI (a Claude account first, then a ChatGPT plan), and every other way. */
+/** The one way the welcome recommends to connect an AI, in the new-bot default's own order (shared/ai-ranking.ts: a Claude
+ * account first, then a ChatGPT plan), and every other way. */
 export function aiChoices<Instance extends AiChoice>(instances: readonly Instance[]): { recommended?: Instance; others: Instance[] } {
   const plan = (instance: Instance) => !instance.readOnly && instance.access !== "api" && instance.access !== "custom";
-  const recommended = instances.find((instance) => plan(instance) && instance.driverKind === "claudeAgent")
-    ?? instances.find((instance) => plan(instance) && instance.driverKind === "codex")
-    ?? instances.find((instance) => !instance.readOnly);
+  const recommended = rankAis(instances.filter(plan))[0] ?? instances.find((instance) => !instance.readOnly);
   return { recommended, others: instances.filter((instance) => instance !== recommended) };
+}
+
+/** The AI the welcome's Connect an AI step stands on: the best ready AI (the same ranking) that isn't OpenCode's free
+ * backup, passing over one whose test message got no answer. An AI not tested yet is `testing`; none ready is null. */
+export function welcomeAi<Instance extends RankableAi>(
+  instances: readonly Instance[],
+  ready: (instance: Instance) => boolean,
+  test: (instance: Instance) => AiTestState | undefined,
+): { instance: Instance; state: AiTestState } | null {
+  let silent: Instance | undefined;
+  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && !freeFallback(candidate)))) {
+    const state = test(instance) ?? "testing";
+    if (state !== "failed") return { instance, state };
+    silent ??= instance;
+  }
+  return silent ? { instance: silent, state: "failed" } : null;
+}
+
+/** It answered its test, or has no way to be tested and is trusted as before. */
+export function aiWorks(found: { state: AiTestState } | null): boolean {
+  return found?.state === "passed" || found?.state === "untestable";
 }
 
 interface SignInStep {

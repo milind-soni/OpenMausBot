@@ -277,6 +277,31 @@ revocation. They cover both named-section and sectionless Chiefs; the posting
 suite independently checks room listing and transcript writes. These are
 server workflow checks, not UI or live-model verification.
 
+### Work for a bot outside the room
+
+Work a bot hands into a room (`coordinate_bots` in the room, or with that
+room's `group_id`) for a bot that isn't one of its members is not refused: it
+goes to that bot directly, in its standing work thread with the sender (a fresh
+one with `thread: "new"`), as a hand-off from outside a room would. Membership
+does not change, so nobody new reads the room and the bot's turn gets only the
+brief. The sender's conversation shows "Sent to <bot> directly: it isn't in
+this room." (naming the room when sent from elsewhere), linking to that thread,
+the receipt says so, and the reply resumes the sender as any direct hand-off's
+does. A Team Cloud private chat and a room whose setup is unfinished keep their
+refusals, and a member who left a room's job thread still stops. Nothing asks
+the person to add the bot; `manage_room` stays limited to rooms in the Chief's
+own department.
+
+```sh
+pnpm exec vitest run server/host/room-access.test.ts server/room-coordination.e2e.test.ts
+```
+
+The e2e test has a Chief in a room create three bots in its department and hand
+them work with the room as `group_id`: each runs in a thread of its own without
+the room's bulletin, the room's members stay the same, the room shows the three
+notes and three result cards, the Chief resumes once, and no card waits on the
+person.
+
 ### Parallel threads in one room
 
 A room's threads run side by side; turns stay serial within a thread, and a

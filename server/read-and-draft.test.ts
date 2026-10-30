@@ -80,7 +80,7 @@ describe("the fence around a read-and-draft run", () => {
     for (const route of [["GET", "/api/internal/session-search"], ["POST", "/api/internal/hook"], ["POST", "/api/internal/connectors/mcp"]]) {
       expect(gate.refusesRoute(bot, "run-thread", route[0]!, route[1]!)).toBe(false);
     }
-    for (const route of [["POST", "/api/internal/coordinate"], ["POST", "/api/internal/memory"], ["POST", "/api/internal/options-card"], ["POST", "/api/internal/trigger-requests"]]) {
+    for (const route of [["POST", "/api/internal/coordinate"], ["POST", "/api/internal/memory"], ["POST", "/api/internal/options-card"], ["POST", "/api/internal/trigger-requests"], ["POST", "/api/internal/waits"], ["GET", "/api/internal/waits"], ["POST", "/api/internal/waits/cancel"]]) {
       expect(gate.refusesRoute(bot, "run-thread", route[0]!, route[1]!)).toBe(true);
     }
     expect(gate.refusesRoute(bot, "main-chat", "POST", "/api/internal/memory")).toBe(false);
@@ -93,5 +93,43 @@ describe("the fence around a read-and-draft run", () => {
     expect(gate.refusesConnectorCall(bot, "run-thread", call("GMAIL_CREATE_EMAIL_DRAFT", { thread_id: "t-ada", recipient_email: "ada@x.test" }))).toBe(true);
     expect(gate.refusesConnectorCall(bot, "run-thread", call("GMAIL_CREATE_EMAIL_DRAFT", { thread_id: "t-other", recipient_email: "ada@x.test" }))).toBe(true);
     expect(gate.refusesConnectorCall(bot, "main-chat", call("GMAIL_SEND_EMAIL"))).toBe(false);
+  });
+});
+
+describe("the fence around a new Cloud's first look", () => {
+  function looking() {
+    let drafts = 0;
+    const wrote: Array<[string, number]> = [];
+    const decided: Array<Record<string, unknown>> = [];
+    const gate = createReadAndDraft({
+      runFor: () => null, adapter: () => undefined, stale: () => false, decide: (row) => decided.push(row as never), release: () => {},
+      mayDraft: () => false, drafted: () => {},
+      look: (threadId) => (threadId === "chief-chat" ? { draft: () => (drafts < 3 ? (drafts += 1, true) : false) } : null),
+      wroteDrafts: (botId, count) => wrote.push([botId, count]),
+    });
+    return { gate, wrote, decided };
+  }
+
+  it("lets the Chief's own chat read and write reply drafts while the first look runs, and refuses sending, deleting and connecting", () => {
+    const { gate, wrote, decided } = looking();
+    expect(gate.refusesConnectorCall(bot, "chief-chat", call("GMAIL_FETCH_EMAILS"))).toBe(false);
+    expect(gate.refusesConnectorCall(bot, "chief-chat", call("GOOGLECALENDAR_EVENTS_LIST"))).toBe(false);
+    expect(gate.refusesConnectorCall(bot, "chief-chat", call("GMAIL_CREATE_EMAIL_DRAFT", { thread_id: "t-ada", recipient_email: "ada@x.test" }))).toBe(false);
+    for (const slug of ["GMAIL_SEND_EMAIL", "GMAIL_REPLY_TO_THREAD", "GMAIL_DELETE_MESSAGE", "GMAIL_MOVE_TO_TRASH", "GOOGLECALENDAR_DELETE_EVENT", "SLACK_SEND_MESSAGE"]) {
+      expect(gate.refusesConnectorCall(bot, "chief-chat", call(slug)), slug).toBe(true);
+    }
+    expect(gate.refusesConnectorCall(bot, "chief-chat", { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["slack"] } } })).toBe(true);
+    expect(gate.refusesConnectorCall(bot, "chief-chat", call("GMAIL_CREATE_EMAIL_DRAFT", { thread_id: "t-bob", recipient_email: "bob@x.test", cc: ["eve@x.test"] }))).toBe(true);
+    expect(wrote).toEqual([["chief", 1]]);
+    expect(decided.map((row) => row.rule)).toEqual(Array(8).fill("read-and-draft"));
+  });
+
+  it("writes at most three drafts, and leaves every other chat alone", () => {
+    const { gate, wrote } = looking();
+    for (const thread of ["t1", "t2", "t3"]) expect(gate.refusesConnectorCall(bot, "chief-chat", call("GMAIL_CREATE_EMAIL_DRAFT", { thread_id: thread }))).toBe(false);
+    expect(gate.refusesConnectorCall(bot, "chief-chat", call("GMAIL_CREATE_EMAIL_DRAFT", { thread_id: "t4" }))).toBe(true);
+    expect(wrote).toEqual([["chief", 1], ["chief", 1], ["chief", 1]]);
+    expect(gate.refusesConnectorCall(bot, "another-chat", call("GMAIL_SEND_EMAIL"))).toBe(false);
+    expect(gate.confines("chief-chat")).toBe(false);
   });
 });

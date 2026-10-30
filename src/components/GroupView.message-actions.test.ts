@@ -137,7 +137,7 @@ describe("room message boundary", () => {
       createElement("p", null, "still here"),
     )));
     expect(host.textContent).toContain("plain words");
-    expect(host.querySelector(".chat-text")?.className).toContain("max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))]");
+    expect(host.querySelector(".chat-text")?.className).toMatch(/max-w-\[min\(var\(--chat-bubble-max\),var\(--chat-bubble-pct\)/);
     expect(host.textContent).toContain("still here");
   });
 });

@@ -106,6 +106,41 @@ test("selected folders are read-only; writes require an explicit grant and fresh
   await assert.rejects(run({ action: "delete_file", path: "note.txt" }), /Unsupported/);
 });
 
+test("a new file's missing folders are made inside the shared folder, never in a read-only, protected or linked one", async t => {
+  const { dir, folder, grant, run } = await fixture(t);
+  const piece = "articles/pieces/relationship-with-money";
+  await assert.rejects(run({ action: "write_file", path: `${piece}/brief.md`, content: "brief" }), /read-only/);
+  await assert.rejects(stat(path.join(dir, "articles")), { code: "ENOENT" });
+  folder.write = true;
+  await run({ action: "write_file", path: `${piece}/brief.md`, content: "brief" });
+  await run({ action: "write_file", path: `${piece}/notes.md`, content: "notes" });
+  assert.equal(await readFile(path.join(dir, piece, "brief.md"), "utf8"), "brief");
+  assert.equal(await readFile(path.join(dir, piece, "notes.md"), "utf8"), "notes");
+  await writeFile(path.join(dir, "taken"), "a file");
+  await assert.rejects(run({ action: "write_file", path: "taken/inside.md", content: "x" }), /taken is a file, not a folder/);
+  // Windows answers ENOENT, not ENOTDIR, for a path through a file: the same refusal, not a missing-file error.
+  const realLstat = fs.lstat;
+  fs.lstat = async (target, ...rest) => {
+    if (String(target).endsWith(path.join("taken", "inside.md"))) throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    return realLstat(target, ...rest);
+  };
+  try { await assert.rejects(run({ action: "write_file", path: "taken/inside.md", content: "x" }), /taken is a file, not a folder/); }
+  finally { fs.lstat = realLstat; }
+  await assert.rejects(run({ action: "write_file", path: ".git/hooks/pre-commit", content: "x" }), /inside \.git/);
+  await assert.rejects(stat(path.join(dir, ".git")), { code: "ENOENT" });
+  await mkdir(path.join(dir, "vault"));
+  grant.protectedPaths = [path.join(dir, "vault")];
+  await assert.rejects(run({ action: "write_file", path: "vault/deep/planted.json", content: "{}" }), /Desktop credentials|sharing settings/);
+  await assert.rejects(stat(path.join(dir, "vault", "deep")), { code: "ENOENT" });
+  if (process.platform !== "win32") {
+    const outside = await realpath(await mkdtemp(path.join(tmpdir(), "omb-shared-outside-")));
+    t.after(() => rm(outside, { recursive: true, force: true }));
+    await symlink(outside, path.join(dir, "linked"));
+    await assert.rejects(run({ action: "write_file", path: "linked/deep/planted.md", content: "x" }), /Symbolic links/);
+    await assert.rejects(stat(path.join(outside, "deep")), { code: "ENOENT" });
+  }
+});
+
 test("folder boundary rejects traversal, links, oversized files and unknown folder IDs", async t => {
   const { dir, run } = await fixture(t);
   for (const unsafe of ["../escape", "/etc/passwd", "nested/../../escape", "C:\\secret", "note.txt\0"]) {
@@ -208,6 +243,21 @@ test("explicit terminal grant executes a harmless command and cancellation stops
   while (!(await readFile(started, "utf8").catch(() => "")) && Date.now() < startedBy) await delay(50);
   stop.abort();
   await assert.rejects(pending, /revoked|turn ended/);
+});
+
+test("a command runs up to the time the call asks for, and a time out of range is refused", async t => {
+  const { dir, grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const run = operation => executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", ...operation }, new AbortController().signal);
+  const command = process.platform === "win32" ? "Start-Sleep -Seconds 5" : "sleep 5";
+  const started = Date.now();
+  await assert.rejects(run({ command, timeout_seconds: 1 }), /timed out after 1 second/);
+  assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
+  for (const timeout_seconds of [0, 241, 1.5, "60"]) {
+    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 240/);
+  }
+  assert.equal(payload(await run({ command: "echo fixture-default" })).exitCode, 0);
+  void dir;
 });
 
 /** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */
@@ -337,6 +387,41 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   assert.equal(next.content[0].text, "2"); assert.equal(next.content[1].type, "image");
   cua.close();
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
+});
+
+test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-windows-fixture.mjs");
+  // Notepad behind cua-driver 0.28.2: of one SendInput burst only the first character lands, the rest repeat the last.
+  await writeFile(script, `import readline from 'node:readline'; let front = 7, document = ''; const calls = [];
+const hex = value => '0x' + value.toString(16);
+const answer = (name, args) => { calls.push(name);
+  if (name === 'bring_to_front') { const previous = front; front = args.window_id; return { content: [], structuredContent: { previous_fg_hwnd: hex(previous), target_hwnd: hex(front) } }; }
+  if (name === 'list_windows') return { content: [], structuredContent: { windows: [{ window_id: 7, pid: 70 }, { window_id: 9, pid: 90 }] } };
+  if (name === 'type_text') { const text = args.text; document += text.length < 2 ? text : text[0] + text.at(-1).repeat(text.length - 1); return { content: [{ type: 'text', text: 'typed' }], structuredContent: { effect: 'unverifiable', route: 'global_input' } }; }
+  return { content: [{ type: 'text', text: JSON.stringify({ document, calls, front }) }] }; };
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'cua-driver',version:'0.28.2'}}:answer(m.params.name, m.params.arguments);
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  const signal = new AbortController().signal;
+  const typing = { action: "computer_call", tool_name: "type_text", arguments: { pid: 90, window_id: 9, delivery_mode: "foreground", text: "Notiz, 28.10" } };
+  const state = async cua => JSON.parse((await cua.call({ action: "computer_call", tool_name: "get_screen_size" }, signal)).content[0].text);
+  for (const platform of ["win32", "darwin"]) {
+    const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] }, { platform });
+    t.after(() => cua.close());
+    const typed = await cua.call(typing, signal);
+    const after = await state(cua);
+    if (platform === "win32") {
+      assert.equal(after.document, "Notiz, 28.10");
+      assert.equal(typed.content[0].text, "✅ Typed 12 char(s) on pid 90 via SendInput (delivery_mode:foreground), one character at a time.");
+      assert.deepEqual(after.calls, [..."Notiz, 28.10"].flatMap(() => ["bring_to_front", "type_text"]).concat("list_windows", "bring_to_front", "get_screen_size"));
+      assert.equal(after.front, 7);
+    } else {
+      assert.equal(after.document, "N00000000000");
+      assert.deepEqual(after.calls, ["type_text", "get_screen_size"]);
+    }
+    cua.close();
+  }
 });
 
 test("a protected directory spelled in another case is still refused", async t => {

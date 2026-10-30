@@ -40,6 +40,8 @@ export const CustomAcpDriver: typeof base = {
   },
   async create(input) {
     if (!input.config.cli.trim()) throw new Error(CONFIGURE_HINT);
-    return base.create(input);
+    // What the person reads names their agent ("My Agent"), never "Custom (ACP)".
+    const name = input.displayName?.trim();
+    return (name ? createAcpDriver({ ...support, displayName: name }) : base).create(input);
   },
 };

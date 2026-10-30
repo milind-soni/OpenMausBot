@@ -6,7 +6,7 @@ import { createServer, request, type IncomingMessage, type Server, type ServerRe
 import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserHostError, SETUP_COMMAND } from "../browser/chrome/host-setup.ts";
 import type { Audience } from "../audience.ts";
@@ -52,6 +52,10 @@ interface Fixture {
   pickerChecks: number;
   /** The v1 views opened, by the view each asked to carry on from. */
   resumes: Array<string | null | undefined>;
+  /** The person each v1 view was opened for. */
+  people: Array<string | undefined>;
+  /** The panel size each v1 view opened at. */
+  sizes: Array<{ width: number; height: number } | null | undefined>;
   /** Whose browser each view was opened on, and each check that the view still shows it. */
   opened: Audience[];
   checked: Audience[];
@@ -63,6 +67,7 @@ interface Fixture {
 const servers: Server[] = [];
 const folders: string[] = [];
 afterEach(async () => {
+  vi.unstubAllGlobals();
   for (const server of servers.splice(0)) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
@@ -73,7 +78,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
   download?: (id: string) => Download | undefined;
   audience?: (threadId: string | null) => Audience | null;
 } = {}): Promise<Fixture> {
-  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
+  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], people: [], sizes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
   const viewer = { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => {} } as unknown as Viewer;
   const service = {
@@ -89,9 +94,12 @@ async function serve({ attach, current = () => true, download, audience = () => 
   const deps: BrowserViewerRouteDeps = {
     upgrades,
     dataDir: fixture.dataDir,
+    person: (auth) => (auth.kind === "session" ? `person-of-${auth.session.id}` : "local-owner"),
     viewers: {
       open: async (options) => {
         fixture.resumes.push(options.resume);
+        fixture.people.push(options.person);
+        fixture.sizes.push(options.size);
         fixture.isCurrent = options.isCurrent;
         options.res.writeHead(204).end();
       },
@@ -200,7 +208,7 @@ describe("the v2 stream", () => {
     expect(texts).toEqual([{ type: "viewport", width: 1280, height: 800, setting: { mode: "fill" }, zoom: 1 }]);
     expect(fixture.inputs).toEqual(interactive ? [...mutations, null] : []);
     expect(fixture.attachments).toEqual([{
-      owner: "local-owner", canOperate: interactive, maxWidth: 1280, maxHeight: 800, quality: 70, pace: "hi", authPrompts: true, pagePopups: true,
+      owner: "local-owner", person: "local-owner", canOperate: interactive, maxWidth: 1280, maxHeight: 800, quality: 70, pace: "hi", authPrompts: true, pagePopups: true,
       ...(interactive ? { size: { width: 1600, height: 1000 } } : {}),
     }]);
   });
@@ -256,6 +264,25 @@ describe("the v2 stream", () => {
     expect(fixture.inputs).toEqual([{ type: "takeControl" }]);
   });
 
+  it("ends a hold at once when the panel closes its socket, and waits the grace when the connection breaks", async () => {
+    const closes: Array<{ dropped?: boolean } | undefined> = [];
+    const fixture = await serve({
+      attach: async () => ({ id: "viewer", input: async () => {}, close: async (options?: { dropped?: boolean }) => { closes.push(options); } }) as unknown as Viewer,
+    });
+    const panel = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream`);
+    await new Promise((resolve) => panel.addEventListener("open", resolve));
+    await until(() => fixture.attachments.length === 1);
+    panel.close();
+    await until(() => closes.length === 1);
+    expect(closes[0]).toEqual({ dropped: false });
+    const phone = await stubbornStream(fixture);
+    await until(() => fixture.attachments.length === 2);
+    // No close frame: a phone in the background or a network that dropped.
+    phone.destroy();
+    await until(() => closes.length === 2);
+    expect(closes[1]).toEqual({ dropped: true });
+  });
+
   it("checks each message as each v1 action is checked: a person who may no longer see the bot is cut off at once", async () => {
     let current = true;
     const fixture = await serve({ current: () => current });
@@ -293,17 +320,27 @@ describe("the v2 stream", () => {
 });
 
 describe("the v1 live view", () => {
-  it("passes on the view a reconnecting panel had, so its dropped hold can be returned", async () => {
+  it("passes on the view a reconnecting panel had, and the person watching, whose hold every view of theirs shares", async () => {
     const fixture = await serve();
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live?resume=old-viewer`)).status).toBe(204);
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live`)).status).toBe(204);
     expect(fixture.resumes).toEqual(["old-viewer", null]);
+    expect(fixture.people).toEqual(["local-owner", "local-owner"]);
+  });
+
+  it("opens the view at the panel's size, and leaves a collapsed or missing one to the page", async () => {
+    const fixture = await serve();
+    for (const query of ["?width=365&height=686", "?width=365&height=40", "", "?width=wide&height=686"]) {
+      expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live${query}`)).status).toBe(204);
+    }
+    expect(fixture.sizes).toEqual([{ width: 365, height: 686 }, null, null, null]);
   });
 });
 
 describe("the page's file picker and downloads", () => {
-  it("passes uploaded files to the page's open picker, which only its current id answers", async () => {
+  it.each(["linux", "darwin", "win32"])("passes uploaded bytes to the page's open picker on %s, which only its current id answers", async (platform) => {
     const fixture = await serve();
+    vi.stubGlobal("process", { ...process, platform });
     const upload = (chooser: string) => {
       const body = new FormData();
       body.append("file", new File(["hello"], "notes.txt", { type: "text/plain" }));

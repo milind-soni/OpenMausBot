@@ -36,6 +36,7 @@ describe("permission proxy", () => {
   let asks: any[];
   let answerWith: (ask: any, index: number) => Record<string, unknown> | null;
   let conns: Socket[];
+  let listen: () => Promise<void>;
   const results = new Map<number, any>();
 
   const rpc = (msg: unknown) => proxy.stdin!.write(JSON.stringify(msg) + "\n");
@@ -77,7 +78,11 @@ describe("permission proxy", () => {
     conns = [];
     answerWith = () => null;
     const socketPath = brokerSocketPath(scratch, "test");
-    broker = createServer((conn: Socket) => {
+    listen = async () => {
+      broker = createServer(onConnection);
+      await new Promise<void>((resolve) => broker.listen(socketPath, resolve));
+    };
+    const onConnection = (conn: Socket) => {
       conns.push(conn);
       let buf = "";
       conn.on("error", () => {});
@@ -96,8 +101,8 @@ describe("permission proxy", () => {
           if (answer) conn.write(JSON.stringify({ t: "answer", id: ask.id, ...answer }) + "\n");
         }
       });
-    });
-    await new Promise<void>((resolve) => broker.listen(socketPath, resolve));
+    };
+    await listen();
 
     startProxy(socketPath);
     rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
@@ -107,9 +112,15 @@ describe("permission proxy", () => {
   afterEach(async () => {
     results.clear();
     proxy?.kill();
-    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    if (broker.listening) await new Promise<void>((resolve) => broker.close(() => resolve()));
     removeTempDir(scratch);
   });
+
+  /** The broker stops listening and drops every connection, as when the socket is gone or unreachable. */
+  const brokerGone = async () => {
+    for (const conn of conns.splice(0)) conn.destroy();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+  };
 
   it("withholds an excluded question without losing the CLI permission callback", async () => {
     const exited = once(proxy, "exit"); proxy.kill(); await exited; results.clear();
@@ -392,4 +403,43 @@ describe("permission proxy", () => {
     const res = await waitFor(2);
     expect(resultJson(res)).toMatchObject({ behavior: "deny" });
   });
+
+  it("tells a waiting question what to do when its connection drops, and asks the next one on a new connection", async () => {
+    answerWith = () => null;
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ask_user", arguments: { question: "One?" } } });
+    await waitForAsks(1);
+    for (const conn of conns.splice(0)) conn.destroy();
+    const dropped = await waitFor(2);
+    expect(dropped.result.isError).toBe(true);
+    expect(dropped.result.content[0].text).toContain("Ask in your reply instead");
+    answerWith = () => ({ behavior: "answer", message: "second", source: "user" });
+    rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ask_user", arguments: { question: "Two?" } } });
+    expect((await waitFor(3)).result.content[0].text).toBe("second");
+    expect(asks.map((ask) => ask.input.question)).toEqual(["One?", "Two?"]);
+    expect(conns).toHaveLength(1);
+  });
+
+  it("tells the bot what to do instead while nobody can be asked, and asks once the broker is back", async () => {
+    await brokerGone();
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ask_user", arguments: { question: "Which account?" } } });
+    const question = await waitFor(2);
+    expect(question.result.isError).toBe(true);
+    expect(question.result.content[0].text).toMatch(/could not show this question to the person.*Ask in your reply instead: end it with the exact question/);
+    rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "approve", arguments: { tool_name: "Bash", input: { command: "git push" } } } });
+    expect(resultJson(await waitFor(3))).toEqual({
+      behavior: "deny",
+      message: expect.stringMatching(/could not ask the person to approve this step.*Skip this step, and say in your reply what you wanted to do and why/),
+    });
+    rpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "approve", arguments: { tool_name: "AskUserQuestion", input: QUESTION } } });
+    expect(resultJson(await waitFor(4))).toMatchObject({ behavior: "deny", message: expect.stringContaining("Ask in your reply instead") });
+    expect(asks).toEqual([]);
+
+    await listen();
+    answerWith = () => ({ behavior: "answer", message: "Work", source: "user" });
+    rpc({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "ask_user", arguments: { question: "Which account?" } } });
+    const answered = await waitFor(5);
+    expect(answered.result.content[0].text).toBe("Work");
+    expect(answered.result.isError).toBeUndefined();
+    expect(asks).toHaveLength(1);
+  }, 20_000);
 });

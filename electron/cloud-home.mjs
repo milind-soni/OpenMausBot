@@ -13,7 +13,7 @@ const ADMIN_STATES = Object.freeze({
 const CODE = /^[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
 const MAX_GRANT_MS = 10 * 60_000;
 
-function homeOrigin(value) {
+export function homeOrigin(value) {
   if (typeof value !== "string" || value.length > 300) return null;
   try {
     const url = new URL(value);

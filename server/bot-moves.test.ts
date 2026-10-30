@@ -1,11 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts";
 import type { BotRecord } from "./store.ts";
+import { WaitManager } from "./waits.ts";
+
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 const ACME = { id: "team-acme", name: "Acme" };
 
-function setup({ busy = false } = {}) {
+function waitsFor(settled: string[][]) {
+  const dir = mkdtempSync(join(tmpdir(), "omb-bot-moves-"));
+  dirs.push(dir);
+  return new WaitManager({
+    file: join(dir, "waits.json"), probes: { stamp: async () => null }, sourceAlive: () => true, botBusy: () => false,
+    post: () => true, followUp: () => undefined, showCard: (wait) => `card-${wait.label}`, settleCard: (wait, how) => { settled.push([wait.label, how]); },
+  });
+}
+
+function setup({ busy = false, waits = null as WaitManager | null } = {}) {
   const bots = new Map<string, Record<string, unknown>>([["scout", { id: "scout", name: "Scout" }], ["pip", { id: "pip", name: "Pip" }]]);
   const routines = [
     { id: "brief", botId: "scout", enabled: true }, { id: "weekly", botId: "scout", enabled: false }, { id: "pips", botId: "pip", enabled: true },
@@ -22,6 +38,7 @@ function setup({ busy = false } = {}) {
       removeForBot: (botId: string) => { removed.push(botId); for (let i = routines.length - 1; i >= 0; i--) if (routines[i]!.botId === botId) routines.splice(i, 1); } }),
     webhooks: () => ({ list: () => hooks as never, update: (id: string, patch: unknown) => Object.assign(hooks.find((hook) => hook.id === id)!, patch as object) as never }),
     appEvents: () => ({ list: () => events as never, update: async (id: string, patch: unknown) => Object.assign(events.find((event) => event.id === id)!, patch as object) as never }),
+    waits: () => waits,
     busy: () => busy,
     now: () => 1_000,
   });
@@ -66,5 +83,20 @@ describe("My Cloud holding a bot while it moves into a team", () => {
     expect(moves.moved("scout", ACME)).toMatchObject({ movedTo: { state: "moved" } });
     expect(removed, "once").toEqual(["scout"]);
     expect(moves.moved("pip", ACME)).toEqual({ refused: "This bot is not moving to that team." });
+  });
+
+  it("cancels the moving bot's waits, card and all, so none fires for a bot that lives in the team; other bots keep theirs", async () => {
+    const settled: string[][] = [];
+    const waits = waitsFor(settled);
+    const made = (botId: string, label: string) => waits.create({ botId, threadId: `t-${botId}`, label, condition: { kind: "file_exists", path: `/${label}` }, followUp: "Tell them." });
+    await made("scout", "the report"); await made("pip", "the build");
+    const { moves } = setup({ waits });
+    await moves.hold("scout", ACME);
+    expect(waits.all().map((wait) => wait.botId)).toEqual(["pip"]);
+    expect(settled).toEqual([["the report", "cancelled"]]);
+    await made("scout", "the invoice");
+    moves.moved("scout", ACME);
+    expect(waits.all().map((wait) => wait.botId)).toEqual(["pip"]);
+    expect(settled).toEqual([["the report", "cancelled"], ["the invoice", "cancelled"]]);
   });
 });

@@ -420,6 +420,23 @@ describe("automation reports", () => {
     expect(f.reports.answeredIn(f.main, "ask-9")).toBe(f.main);
   });
 
+  it("leaves a missed run, or one failed before it had a conversation, to its card, since no line can say so", () => {
+    const f = fixture();
+    const missed = f.finished(null, "Inbox brief", { status: "missed", threadId: undefined, error: "This computer was offline" });
+    const missedAfterRequeue = f.finished(null, "Inbox brief", { status: "missed", error: "The routine ended before this run could start" });
+    const unstarted = f.finished(null, "Inbox brief", { status: "failed", threadId: undefined, error: "Could not create a task for this run" });
+    const queued = f.finished(null, "Inbox brief", { status: "queued", threadId: undefined });
+    const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Signed out" });
+    expect([missed, missedAfterRequeue, unstarted, queued, failed].map((run) => f.reports.speaksFor(run))).toEqual([false, false, false, true, true]);
+  });
+
+  it("leaves a missed run of a routine that delivers to the brief to the brief, with no card in the chat", () => {
+    const f = fixture();
+    const missed = f.finished(null, "Watch", { status: "missed", threadId: undefined, deliver: "brief", error: "This computer was offline" });
+    const unstarted = f.finished(null, "Watch", { status: "failed", threadId: undefined, deliver: "brief", error: "Could not create a task for this run" });
+    expect([missed, unstarted].map((run) => f.reports.speaksFor(run))).toEqual([true, true]);
+  });
+
   it("knows which conversations are a run's own whose last reply goes to another chat", () => {
     const f = fixture();
     const own = f.finished(null, "Inbox brief", { status: "running" });

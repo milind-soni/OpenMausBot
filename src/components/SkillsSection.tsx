@@ -143,6 +143,28 @@ export function SkillsSection() {
     }
   };
 
+  const toggleEveryBot = async (skill: SkillsLibrarySkillWire) => {
+    if (busy.current) return;
+    busy.current = true;
+    setWorking(skill.name);
+    setError("");
+    try {
+      const response = await fetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ everyBot: !skill.everyBot }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Could not update this skill.");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this skill.");
+    } finally {
+      busy.current = false;
+      setWorking("");
+    }
+  };
+
   const view = async (skill: SkillsLibrarySkillWire, review = false) => {
     setError("");
     try {
@@ -250,6 +272,18 @@ export function SkillsSection() {
                     />
                   </div>
                   <LibrarySkillMeta skill={skill} />
+                  <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-inset px-2.5 py-2">
+                    <div>
+                      <div className="text-[12px] font-medium text-ink">{t("skills.library.everyBot")}</div>
+                      <div className="text-[11px] text-ink-secondary">{t("skills.library.everyBotHint")}</div>
+                    </div>
+                    <Switch
+                      checked={skill.everyBot}
+                      aria-label={t("skills.library.everyBot")}
+                      disabled={Boolean(working || importing)}
+                      onClick={() => void toggleEveryBot(skill)}
+                    />
+                  </div>
                   {skill.warnings.length > 0 && (
                     <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                   )}

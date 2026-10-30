@@ -66,34 +66,45 @@ To delete a department, right-click its name in the sidebar and choose **Delete 
 
 Every named department keeps an **Add bots** button in the sidebar. Once it has members, the button reads **Add or remove bots**. The dialog lists current members as checked alongside other available bots. Check a bot to move it into the department; uncheck one to move it to General, then save. Conversations stay with the bots. A move that would put two Chiefs of Staff in the same department is refused.
 
-Choose **New bot** inside this dialog to open bot creation for that department. The new bot is created directly in the selected department and appears checked when you return to the membership list. Creating it does not discard your other unsaved checkbox edits.
+Choose **New bot** inside this dialog to make a bot in that department at once. It appears checked in the membership list, and your other unsaved checkbox edits stay as they were.
 
 ## Who a bot reports to (teams)
 
-On a team's Cloud, every bot reports to one person: whoever created it, unless someone chose another. That person gets the bot's questions, approvals, failures and routine results in their **Needs you** and their notifications. Everyone can still chat with every shared bot. In your own private chat with a bot, what it asks always comes to you.
+On a team's Cloud, every bot reports to one person: whoever created it, unless someone chose another. That person gets the bot's questions, approvals, failures and routine results in their inbox (below). Everyone can still chat with every shared bot. In your own private chat with a bot, what it asks always comes to you there.
 
 - The face at the end of a bot's row in the sidebar shows who it reports to. Admins, and the person it reports to, can click it to pick someone else.
 - Right-click a department and choose **Set owner for all bots…** to change every bot in it at once. When they all report to one person, the department shows "→ Name".
 - A question or approval in a shared chat says who it is asking.
-- Each person can have their own Chief of Staff: a crowned bot that reports to them. It is in charge of the bots that report to that person, and keeps their daily brief in their private chat with it. Like every bot, it can still talk to any other bot, and any bot can talk to it.
+- Each person can have their own Chief of Staff: a crowned bot that reports to them. It is in charge of the bots that report to that person, and your chat with it is your inbox. Like every bot, it can still talk to any other bot, and any bot can talk to it.
 - In your private chat, a bot can ask any other bot for you. That bot's work stays private to you too, and nothing from your private chat is posted into a group chat.
 - The Team map's **Who reports to whom** shows each person with their Chief and their bots. Drag a bot onto a person to change who it reports to, or open it from a department's menu with **See who reports to whom**.
 
-## Telling a teammate (teams)
+## Your inbox (teams)
 
-On a team's Cloud, the people in your team are in the **@** list next to the bots, with their picture (or their initial when they have none) and a small "Person" tag. Everyone in the team sees each teammate's name and picture, wherever the app shows a person; your About you and everything else stay private.
+On a team's Cloud, everything for you arrives in one place: your chat with your own Chief of Staff, or with your own MausBot if you have no Chief. Nothing to set up. Each line says who it is from and where it came from, with a link back when you can open that conversation, and you get one notification for it, on your computer and your phone.
 
-- **@Bob in a chat Bob can see** (a bot's shared chat, or a group chat he is in) tags him: Bob gets a notification and a line in his **Needs you** that opens the message. Nobody else is notified, admins included. Bots can tag people the same way.
-- **"Tell Bob that…" in your own chat with a bot** (or "@Bob, the launch moved") asks the bot to pass it on. Bob gets a new private conversation with that same bot, called "From Ada", whose first line is "Ada asked me to pass this on: …", plus a notification. Only that message goes: Bob never sees the rest of your chat. Your chat shows a small **Told Bob** chip with what was sent.
-- **When Bob answers** in that conversation ("tell Ada I'll do it tonight"), the bot passes it back to the chat you asked from, as "Bob replied: …", and you get a notification. Bob's other words stay in his chat.
-- Asking in a chat Bob can already see just tags him there.
-- Someone who has left the team can't be reached, and the bot says so. One conversation can pass at most 10 messages an hour.
+- A bot's **"Tell Marco that…"** (the `message_person` tool), from any bot or chat.
+- **@Marco** written by a teammate anywhere, or by a bot in a chat Marco can see.
+- Questions and approvals for you (from the bots that report to you), with the same Approve and Deny buttons as in the chat they came from. Answering here answers there.
+- Work handed between bots that waits on you, failures, and your routines' results.
+
+**Answering is replying.** Use **Reply** on a line, give it a 👍 or 👎, or just tell your Chief ("tell Philipp Friday works"). The answer goes back where the line came from: to the bot that asked, which carries on, or to the teammate's own inbox. Only your answer goes, nothing else from your chat.
+
+**Your inbox at a glance.** In your chat with your Chief, one card keeps what needs you in view: how many things need you and how many are just for your information, the newest few with their answer buttons right there, and **Open inbox**. The whole inbox opens on the right, in three tabs: **Needs you** (questions and approvals), **For your info** (reports, mentions and messages) and **Done**. Click a line to read it in full and answer or reply; mark news done when you need nothing more from it. On a phone it opens as a sheet.
+
+**What waits on you is counted.** Your own row under People shows how many questions and approvals wait on you in your inbox, and the same number is added to the count on the app's icon and in the browser tab. It drops as soon as you settle one, wherever you do it: in your inbox, in the chat it came from, or on your phone. A message you answer in the chat it came from leaves **Needs you** too.
+
+**Your assistant answers simple facts for you.** When a teammate asks something your shared facts answer, your Chief answers by itself and says it was "Marco's assistant". It only knows when you are busy (from your own Google Calendar, when you connected it: times only, never what the meetings are), the shared notes of your bots, and how their work stands. It never decides, approves, promises or agrees to anything for you, never sends anything outside the team, and never reads your private chats or About you: those questions wait for you. You see every question and every answer it gave in your inbox, and replying corrects it.
+
+**People in the sidebar.** The team's people are listed with their pictures, and they are in the **@** list next to the bots. Click yourself to open your inbox; click a teammate to start a message with @their name in the chat you have open. Everyone in the team sees each teammate's name and picture; your About you and everything else stay private.
+
+Someone who has left the team can't be reached, and the bot says so. One conversation can pass at most 10 messages an hour.
 
 Off a team, nothing changes: the @ list shows bots, and `@you` still means you.
 
 ## Delegation
 
-Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back.
+Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back. A bot does not need to be in a group chat to get work from one: work for a bot that isn't in the chat goes to that bot directly, in a thread of its own, and the chat shows "Sent to Bolt directly: it isn't in this room." Nobody is added to the chat, so nobody new reads it.
 
 ### Creating a specialist with a chosen model
 

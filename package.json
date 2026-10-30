@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.128",
+  "version": "0.1.134",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -95,6 +95,8 @@
     "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",
     "@duckdb/node-api": "1.5.6-r.1",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@hpke/core": "1.9.0",
     "@lezer/highlight": "1.2.5",
@@ -131,6 +133,7 @@
     "tailwind-merge": "^3.3.1",
     "tar": "7.5.22",
     "tldts": "7.4.18",
+    "undici": "8.11.2",
     "vega": "6.4.0",
     "vega-embed": "7.3.0",
     "vega-interpreter": "2.3.2",

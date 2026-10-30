@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SKINS, SKIN_IDS, DEFAULT_SKIN, PRIOR_INSTALL_SKIN } from "./skins";
+import { SKINS, SKIN_IDS, DEFAULT_SKIN_CHOICE, PRIOR_INSTALL_SKIN, THEME_SKINS, resolveSkin } from "./skins";
 
 const css = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
@@ -35,6 +35,17 @@ describe("skins", () => {
     }
   });
 
+  it("tints a hovered menu row with ink at 6% in Midnight and Daylight, and with raised at 70% in every other skin", () => {
+    for (const id of SKIN_IDS) {
+      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+      const token = (name: string) => body.match(new RegExp(`(?:^|\\s)${name}:\\s*([^;]+);`))?.[1]?.trim();
+      const expected = id === "midnight" || id === "daylight"
+        ? `${token("--color-ink")}0f`
+        : "color-mix(in srgb, var(--color-raised) 70%, transparent)";
+      expect(token("--color-menu-hover"), id).toBe(expected);
+    }
+  });
+
   it("selects a code-only light or dark palette in every nearest skin", () => {
     for (const id of SKIN_IDS) {
       const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
@@ -49,8 +60,15 @@ describe("skins", () => {
     expect(SKIN_IDS.slice(0, 8)).toEqual([
       "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "daylight",
     ]);
-    expect(DEFAULT_SKIN).toBe("meadow");
     expect(PRIOR_INSTALL_SKIN).toBe("midnight");
+  });
+
+  it("follows the computer between Daylight and Midnight by default", () => {
+    expect(DEFAULT_SKIN_CHOICE).toBe("system");
+    expect(THEME_SKINS).toEqual({ light: "daylight", dark: "midnight" });
+    expect(resolveSkin("system", false)).toBe("daylight");
+    expect(resolveSkin("system", true)).toBe("midnight");
+    expect(resolveSkin("meadow", true)).toBe("meadow");
   });
 
   it("keeps Meadow's own bubble light, in the page's ink", () => {

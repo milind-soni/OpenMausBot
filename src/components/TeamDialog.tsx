@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { Plus, X } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { BotPickerList } from "./BotPickerList";
-import { NewBotDialog } from "./lazy-screens";
 import { t } from "@/lib/i18n";
 
 export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
@@ -17,7 +16,6 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
   const managing = Boolean(section) && !rename;
   const initialMembers = useRef(new Set(managing ? state.bots.filter(bot => !bot.hidden && (bot.section?.trim() ?? "") === section).map(bot => bot.id) : []));
   const [picked, setPicked] = useState<Set<string>>(() => new Set(initialMembers.current));
-  const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const dialog = useRef<HTMLDivElement>(null);
@@ -28,9 +26,6 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
     (dialog.current?.querySelector<HTMLElement>("input") ?? dialog.current?.querySelector<HTMLElement>("button"))?.focus();
     return () => { if (opener?.isConnected) opener.focus(); };
   }, []);
-  useEffect(() => {
-    if (!creating) (dialog.current?.querySelector<HTMLElement>("input") ?? dialog.current?.querySelector<HTMLElement>("button"))?.focus();
-  }, [creating]);
   const moving = section !== undefined && !rename;
   const title = rename ? t("team.rename") : managing ? t(initialMembers.current.size ? "team.manageBots" : "team.addBots") : moving ? t("team.moveTo", { name: section || "General" }) : t("team.create");
   const candidates = state.bots.filter((bot) => !bot.hidden && (managing || !moving || (bot.section?.trim() ?? "") !== section));
@@ -59,10 +54,13 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
       setSaving(false);
     }
   };
-  if (creating) return createPortal(<NewBotDialog section={section} preserveSelection onClose={() => setCreating(false)} onCreated={(bot) => {
-    initialMembers.current.add(bot.id);
-    setPicked(previous => new Set([...previous, bot.id]));
-  }} />, document.body);
+  const createBot = () => {
+    setError("");
+    dispatch({ type: "newBot", section, preserveSelection: true, onError: setError, onCreated: (bot) => {
+      initialMembers.current.add(bot.id);
+      setPicked(previous => new Set([...previous, bot.id]));
+    } });
+  };
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !saving) onClose();
@@ -92,7 +90,7 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
           <p className="mb-3 text-[13px] leading-relaxed text-ink-secondary">
             {managing ? t("team.manageIntro") : moving ? t("team.moveIntro") : t("team.createIntro")} {t("team.moveWarning")}
           </p>
-          {managing && <button disabled={saving || state.botCreationPending} onClick={() => setCreating(true)}
+          {managing && <button disabled={saving || state.botCreationPending} onClick={createBot}
             className="mb-3 flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] text-accent hover:bg-raised disabled:opacity-40">
             <Plus size={14} />{t("sidebar.newBot")}
           </button>}

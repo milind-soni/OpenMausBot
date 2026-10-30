@@ -34,6 +34,7 @@ export declare const COPY_RETRY_MS: number[];
 export declare const FAILING_LINE_MS: number;
 export declare const KEPT_MS: number;
 export function parseJournal(value: unknown): Record<string, any> | null;
+export function rateLimited(error: unknown): boolean;
 /** Home is My Cloud by this journal. */
 export function awayIn(journal: Record<string, any> | null | undefined): boolean;
 export function parseKeep(value: unknown): { on: boolean };
@@ -60,8 +61,6 @@ export function createOneHome(deps: {
   /** My Cloud's session is no longer needed: the move is done, paused, or not this account's. */
   release?(): Promise<void>;
   lend?(projects: string[]): Promise<unknown>;
-  /** Once this computer is lent: asks the person, at most once, to lend the rest of it too, without being waited for. */
-  offer?(): unknown;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;
   openLocal?(): void;
@@ -90,11 +89,16 @@ export function createOneHome(deps: {
   kick(): Promise<void>;
   view(): OneHomeView | null;
   away(): boolean;
+  /** A move or a send under way that restarting this app would cut into. */
+  busy(): boolean;
   keeps(): boolean;
   /** Throws once this computer's bots are on their way home past turning back and `on` is false. */
   keep(on: boolean): Promise<void>;
   retry(): Promise<void>;
   seen(): OneHomeView | null;
   changed(): void;
+  /** What the last run found holding the move that only a run finds out (move-status.mjs), and what kind of work holds
+   * the freeze ("" when the server didn't say), never its name. */
+  facts(): { noted: "waiting_quiet" | "thaw_failed" | "frozen_without_move" | "local_unavailable" | null; waiting: string | null };
   close(): void;
 };

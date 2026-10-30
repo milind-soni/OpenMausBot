@@ -11,7 +11,7 @@ import {
   type LocalVmTarget,
 } from "./container-computer.ts";
 import { discoverExistingPerBotLocalVms, discoverExistingPoolLocalVms, shouldArmLocalVmIdle, type LocalVmInventoryBot } from "./local-vm-inventory.ts";
-import { keepFirefoxProfileBeforeRemove } from "./local-vm-profiles.ts";
+import { keepFirefoxProfileBeforeRemove, keepInstalledAppsBeforeRemove } from "./local-vm-profiles.ts";
 
 export type LocalVmUpdateNeed = "image" | "recreate";
 
@@ -64,6 +64,7 @@ export interface LocalVmUpdaterDeps {
   inUse(target: LocalVmTarget): boolean;
   updated(target: LocalVmTarget, status: ContainerComputerStatus): void;
   keepSignIns?: typeof keepFirefoxProfileBeforeRemove;
+  keepApps?: typeof keepInstalledAppsBeforeRemove;
   workspaceExists?(target: LocalVmTarget): boolean;
   pollMs?: number;
   /** How long a turn that needs the desktop waits for its update. */
@@ -93,6 +94,7 @@ export function createLocalVmUpdater(deps: LocalVmUpdaterDeps) {
   const pollMs = deps.pollMs ?? 1_000;
   const waitMs = deps.waitMs ?? Math.max(1_000, Number(process.env.OMB_LOCAL_VM_UPDATE_WAIT_MS) || 20 * 60_000);
   const keepSignIns = deps.keepSignIns ?? keepFirefoxProfileBeforeRemove;
+  const keepApps = deps.keepApps ?? keepInstalledAppsBeforeRemove;
   const workspaceExists = deps.workspaceExists ?? localVmWorkspaceExists;
   let image: Promise<void> | null = null;
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -148,6 +150,7 @@ export function createLocalVmUpdater(deps: LocalVmUpdaterDeps) {
       status = await deps.status(target);
       if (status.container === "missing" || !status.managed || status.imageMatches) return;
       await keepSignIns(target, status, () => deps.act("stop", target));
+      await keepApps(target, { ...status, container: "stopped" }, () => deps.act("stop", target));
       await deps.act("remove", target);
       status = await deps.act("run", target);
     } finally {

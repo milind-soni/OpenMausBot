@@ -124,7 +124,8 @@ describe("Slack management in agent settings", () => {
     await evaluate("window.slackFixture.mode = 'ready'; true");
     await openProfile();
     await expect.poll(row, { timeout: 10_000 }).toBe(true);
-    await click("Slack");
+    // Slack is still the open section from the first agent's settings.
+    await evaluate("document.querySelector('[data-bot-settings-section=slack] > button[aria-expanded=false]')?.click(); true");
     const expected = `https://admin.example.test/slack?workspace=acme&bot=${second.id}`;
     await expect.poll(link, { timeout: 10_000 }).toBe(expected);
     await evaluate("window.slackFixture.pending.forEach(resolve => resolve()); true");

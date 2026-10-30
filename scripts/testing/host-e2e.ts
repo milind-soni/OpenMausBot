@@ -12,6 +12,7 @@ export const HOST_E2E: Readonly<Record<string, string>> = {
   "server/cloud-lending.e2e.test.ts": "Windows keeps a running process's working folder, and the lent computer is named for its OS",
   "server/cloud-send-kinds.e2e.test.ts": "this computer's paths, Windows backslashes included, in what a moved bot is told",
   "server/cloud-sync.e2e.test.ts": "a PC folder's paths and copies on the desktop's own file system",
+  "server/desktop-computer.e2e.test.ts": "the desktop app's own server still using this computer, which Linux validates per runtime",
   "server/group-local-vm.e2e.test.ts": "This computer behind the control gate and the macOS permission failure, which Linux has not",
   "server/headless-cli.e2e.test.ts": "the omb command line as a real process on each OS",
   "server/host-lazy-claim.e2e.test.ts": "Auto on the person's own desktop, which only macOS and Windows have",

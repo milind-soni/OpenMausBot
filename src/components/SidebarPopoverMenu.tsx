@@ -4,6 +4,8 @@ import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
+import { submenuIntent, type Point, type SubmenuIntent } from "@/lib/submenu-intent";
+import { MENU_HEADING, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 
 export interface SidebarMenuItem {
   key: string;
@@ -21,13 +23,19 @@ export interface SidebarMenuItem {
   value?: string;
   keepOpen?: boolean;
   submenu?: SidebarMenuItem[];
+  chevron?: boolean;
+  /** a sentence that wraps instead of being cut short */
+  wrap?: boolean;
+  /** the row's tooltip, for what its one line leaves out */
+  title?: string;
   onSelect: () => void;
   tourId?: string;
 }
 
 const OPEN_DELAY_MS = 80;
 const CLOSE_DELAY_MS = 250;
-export const ANCHORED_MENU_WIDTH = 280;
+export const MENU_MIN_WIDTH = 237;
+const MENU_MAX_WIDTH = 320;
 const EDGE_MARGIN = 8;
 const ANCHOR_GAP = 6;
 
@@ -76,66 +84,59 @@ export function nextMenuIndex(key: string, current: number, count: number): numb
 
 function MenuRows({
   items,
-  roomy,
   openSubmenu,
+  engaged = false,
   onItem,
-  onSubmenuHover,
-  onSubmenuLeave,
+  onRowEnter,
+  onRowLeave,
 }: {
   items: SidebarMenuItem[];
-  roomy: boolean;
   openSubmenu?: string | null;
-  onItem: (item: SidebarMenuItem, element: HTMLElement) => void;
-  onSubmenuHover?: (item: SidebarMenuItem, element: HTMLElement) => void;
-  onSubmenuLeave?: () => void;
+  engaged?: boolean;
+  onItem: (item: SidebarMenuItem, element: HTMLElement, keyboard: boolean) => void;
+  onRowEnter?: (item: SidebarMenuItem, element: HTMLElement, point: Point) => void;
+  onRowLeave?: (item: SidebarMenuItem) => void;
 }) {
   return (
     <>
       {items.map((item) => (
-        <div key={item.key}>
-          {item.separatorBefore && <div role="separator" className={cn("h-px bg-hairline/50", roomy ? "mx-3 my-1.5" : "my-1.5")} />}
-          {item.heading && <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{item.heading}</div>}
+        <div key={item.key} className="flex flex-col gap-1">
+          {item.separatorBefore && <div role="separator" className={MENU_ITEM_SEPARATOR} />}
+          {item.heading && <div className={MENU_HEADING}>{item.heading}</div>}
           <button
             type="button"
             role="menuitem"
             data-tour={item.tourId}
             data-menu-key={item.key}
+            title={item.title}
             disabled={item.disabled}
             aria-haspopup={item.submenu ? "menu" : undefined}
             aria-expanded={item.submenu ? openSubmenu === item.key : undefined}
-            onClick={(event) => onItem(item, event.currentTarget)}
-            onPointerEnter={(event) => {
-              if (item.submenu) onSubmenuHover?.(item, event.currentTarget);
-              else onSubmenuLeave?.();
-            }}
+            onClick={(event) => onItem(item, event.currentTarget, event.detail === 0)}
+            onPointerEnter={(event) => onRowEnter?.(item, event.currentTarget, { x: event.clientX, y: event.clientY })}
+            onPointerLeave={() => onRowLeave?.(item)}
             className={cn(
-              "flex w-full items-center text-start disabled:opacity-60 focus-visible:outline-none",
-              roomy
-                ? "min-h-10 gap-3 rounded-lg px-3 py-2 text-[15px] font-medium leading-5 focus-visible:bg-raised/70"
-                : "gap-3 px-3.5 py-2 text-[14px] focus-visible:bg-raised/70",
-              item.active || (item.submenu && openSubmenu === item.key) ? "bg-raised text-ink" : "text-ink hover:bg-raised/70",
+              "flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] disabled:opacity-60 focus-visible:bg-menu-hover focus-visible:outline-none",
+              item.active || (item.submenu && openSubmenu === item.key && engaged) ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
             )}
           >
             {item.icon && (
               <span
-                className={cn(
-                  "flex size-5 shrink-0 items-center justify-center",
-                  item.active ? "text-accent" : roomy ? "text-ink" : "text-ink-secondary",
-                )}
+                className={cn("flex size-4 shrink-0 items-center justify-center [&>svg]:size-4", item.wrap && "h-[18px] self-start", item.active ? "text-accent" : "text-ink-secondary")}
               >
                 {item.icon}
               </span>
             )}
             {item.subtitle || item.note ? (
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate">{item.label}</span>
+                <span className={item.wrap ? "break-words" : "truncate"}>{item.label}</span>
                 {item.subtitle && <span className="truncate text-[12px] font-normal leading-4 text-ink-secondary">{item.subtitle}</span>}
                 {item.note && <span className="text-[12px] font-normal leading-snug text-ink-tertiary">{item.note}</span>}
               </span>
             ) : (
-              <span className="flex-1 truncate">{item.label}</span>
+              <span className={cn("flex-1", item.wrap ? "min-w-0 break-words" : "truncate")}>{item.label}</span>
             )}
-            {item.value && <span className="shrink-0 text-[14px] font-normal leading-5 tabular-nums text-ink-secondary">{item.value}</span>}
+            {item.value && <span className="shrink-0 text-[13px] font-normal leading-[18px] tabular-nums text-ink-secondary">{item.value}</span>}
             {item.trailing}
             {item.attention && (
               <span
@@ -145,7 +146,7 @@ function MenuRows({
                 )}
               />
             )}
-            {item.submenu && <ChevronRight size={16} aria-hidden className="shrink-0 text-ink-secondary rtl:-scale-x-100" />}
+            {(item.submenu || item.chevron) && <ChevronRight size={14} aria-hidden className="-me-0.5 shrink-0 text-ink-secondary rtl:-scale-x-100" />}
           </button>
         </div>
       ))}
@@ -163,6 +164,9 @@ export function SidebarPopoverMenu({
   placement = "above",
   triggerClassName = "w-full",
   triggerTitle,
+  triggerLabel,
+  triggerTour,
+  onOpenChange,
   renderTrigger,
 }: {
   placement?: "above" | "below";
@@ -171,6 +175,10 @@ export function SidebarPopoverMenu({
   openOnHover?: boolean;
   triggerClassName?: string;
   triggerTitle?: string;
+  /** the trigger's own name, when it says more than the menu's */
+  triggerLabel?: string;
+  triggerTour?: string;
+  onOpenChange?: (open: boolean) => void;
   renderTrigger: (state: { open: boolean }) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -183,23 +191,36 @@ export function SidebarPopoverMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
   const subRowRef = useRef<HTMLElement | null>(null);
+  const rowsByKey = useRef(new Map<string, HTMLElement>());
+  const [engaged, setEngaged] = useState(false);
+  const intentRef = useRef<SubmenuIntent | null>(null);
+  intentRef.current ??= submenuIntent({
+    open: (key) => {
+      subRowRef.current = rowsByKey.current.get(key) ?? null;
+      setSubPosition(null);
+      setSubmenu(key);
+    },
+    close: () => { setSubmenu(null); setEngaged(false); },
+    submenuBox: () => subRef.current?.getBoundingClientRect() ?? null,
+  });
+  const intent = intentRef.current;
   const focusFirst = useRef(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
   const motion = useMenuMotion(open);
   const anchored = placement === "above";
+  const reportOpen = useRef(onOpenChange);
+  reportOpen.current = onOpenChange;
+  useEffect(() => { reportOpen.current?.(open); }, [open]);
 
   const clearTimers = () => {
     if (openTimer.current) clearTimeout(openTimer.current);
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    if (subTimer.current) clearTimeout(subTimer.current);
     openTimer.current = null;
     closeTimer.current = null;
-    subTimer.current = null;
   };
-  useEffect(() => clearTimers, []);
+  useEffect(() => () => { clearTimers(); intentRef.current?.reset(); }, []);
 
   const hoverOpen = () => {
     if (!openOnHover || pinned) return;
@@ -213,9 +234,11 @@ export function SidebarPopoverMenu({
   };
   const close = useCallback((refocus = false) => {
     clearTimers();
+    intentRef.current?.reset();
     setPinned(false);
     setOpen(false);
     setSubmenu(null);
+    setEngaged(false);
     if (refocus) triggerRef.current?.focus();
   }, []);
 
@@ -254,22 +277,19 @@ export function SidebarPopoverMenu({
   }, [open, anchored, position]);
 
   const openSub = (item: SidebarMenuItem, row: HTMLElement, focus = false) => {
-    if (subTimer.current) clearTimeout(subTimer.current);
-    subRowRef.current = row;
-    setSubPosition(null);
-    setSubmenu(item.key);
+    rowsByKey.current.set(item.key, row);
+    intent.openNow(item.key);
     if (focus) requestAnimationFrame(() => menuItems(subRef.current)[0]?.focus());
   };
   const closeSub = (focusRow = false) => {
-    if (subTimer.current) clearTimeout(subTimer.current);
-    setSubmenu(null);
+    intent.closeNow();
     if (focusRow) subRowRef.current?.focus();
   };
 
-  const selectItem = (item: SidebarMenuItem, row: HTMLElement) => {
+  const selectItem = (item: SidebarMenuItem, row: HTMLElement, keyboard: boolean) => {
     if (item.submenu) {
       if (submenu === item.key) closeSub();
-      else openSub(item, row, true);
+      else openSub(item, row, keyboard);
       return;
     }
     item.onSelect();
@@ -312,11 +332,7 @@ export function SidebarPopoverMenu({
   };
 
   const openItem = submenu ? items.find((item) => item.key === submenu) : undefined;
-  const roomy = anchored;
-  const sheetClass = cn(
-    "overflow-hidden border border-hairline/50 bg-menu shadow-2xl shadow-black/50",
-    roomy ? "rounded-2xl p-1.5" : "rounded-xl py-1.5",
-  );
+  const sheetClass = cn(MENU_SHEET, "overflow-hidden");
 
   const sheet = motion.shown && (
     <div
@@ -327,12 +343,9 @@ export function SidebarPopoverMenu({
       data-sidebar-popover-menu={anchored ? "anchored" : undefined}
       {...motion.exitProps}
       onKeyDown={(event) => onMenuKey(event, false)}
-      onPointerLeave={() => {
-        if (!openItem) return;
-        if (subTimer.current) clearTimeout(subTimer.current);
-        subTimer.current = setTimeout(() => setSubmenu((key) => (subRef.current?.matches(":hover") ? key : null)), CLOSE_DELAY_MS);
-      }}
-      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, width: ANCHORED_MENU_WIDTH, maxWidth: `calc(100vw - ${EDGE_MARGIN * 2}px)`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
+      onPointerMove={(event) => intent.move({ x: event.clientX, y: event.clientY }, Boolean(submenu && subRowRef.current?.contains(event.target as Node)))}
+      onPointerLeave={() => intent.leaveMenu()}
+      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, minWidth: MENU_MIN_WIDTH, width: "max-content", maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
       className={cn(
         sheetClass,
         anchored ? "z-[60] overflow-y-auto" : "absolute z-40",
@@ -342,18 +355,14 @@ export function SidebarPopoverMenu({
     >
       <MenuRows
         items={items}
-        roomy={roomy}
         openSubmenu={submenu}
+        engaged={engaged}
         onItem={selectItem}
-        onSubmenuHover={(item, row) => {
-          if (subTimer.current) clearTimeout(subTimer.current);
-          subTimer.current = setTimeout(() => openSub(item, row), OPEN_DELAY_MS);
+        onRowEnter={(item, row, point) => {
+          if (item.submenu) rowsByKey.current.set(item.key, row);
+          intent.enterRow(item.key, Boolean(item.submenu), point);
         }}
-        onSubmenuLeave={() => {
-          if (!openItem) return;
-          if (subTimer.current) clearTimeout(subTimer.current);
-          subTimer.current = setTimeout(() => setSubmenu(null), OPEN_DELAY_MS);
-        }}
+        onRowLeave={(item) => intent.leaveRow(item.key)}
       />
     </div>
   );
@@ -365,13 +374,15 @@ export function SidebarPopoverMenu({
       aria-label={openItem.label}
       data-sidebar-popover-submenu
       onKeyDown={(event) => onMenuKey(event, true)}
-      onPointerEnter={() => subTimer.current && clearTimeout(subTimer.current)}
-      style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 220, width: "max-content", maxWidth: `min(${ANCHORED_MENU_WIDTH + 40}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: subPosition ? undefined : "hidden" }}
+      onPointerEnter={() => { intent.enterSubmenu(); setEngaged(true); }}
+      onPointerLeave={() => setEngaged(false)}
+      onFocus={() => setEngaged(true)}
+      onBlur={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setEngaged(false); }}
+      style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 200, width: "max-content", maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: subPosition ? undefined : "hidden" }}
       className={cn(sheetClass, "z-[61] animate-pop-in overflow-y-auto")}
     >
       <MenuRows
         items={openItem.submenu}
-        roomy={roomy}
         onItem={(item) => {
           item.onSelect();
           if (!item.keepOpen) close(true);
@@ -398,8 +409,9 @@ export function SidebarPopoverMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={ariaLabel}
+        aria-label={triggerLabel ?? ariaLabel}
         title={triggerTitle}
+        data-tour={triggerTour}
         onClick={(event) => {
           clearTimers();
           if (open && (pinned || !openOnHover)) close();

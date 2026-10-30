@@ -125,6 +125,11 @@ describe("vitest shard balance", () => {
     const elsewhere = FILES.map((file) => ({ moduleId: path.join(ROOT, "..", "elsewhere", file) }) as TestSpecification);
     await new DurationSequencer(context(1, 4, (line) => lines.push(line))).shard(elsewhere);
     expect(lines[1]).toMatch(/^::warning title=duration-sequencer::Only 0 of \d+ weighted test files were found/);
+
+    lines.length = 0;
+    vi.stubEnv("OMB_VITEST_SUBSET", "src/ scripts/generate-locale.test.mjs");
+    await new DurationSequencer(context(1, 2, (line) => lines.push(line))).shard(specs(FILES.filter((file) => file.startsWith("src/"))));
+    expect(lines).toEqual([expect.stringMatching(/^duration-sequencer: shard 1\/2 runs \d+ of \d+ files/)]);
   });
 });
 

@@ -1,7 +1,7 @@
 // The tab strip and address bar above a bot's browser. The address bar follows pingdotgg/t3code@00cdceb1
 // apps/web/src/components/preview/PreviewChromeRow.tsx, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
 // third_party/t3-code/LICENSE); modified: OpenMausBot's tabs, control pill and profile button.
-import { ArrowLeft, ArrowRight, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Expand, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
 import { forwardRef, useState, type ReactNode } from "react";
 
 import type { PreviewStreamControl } from "@/lib/browser-stream-client";
@@ -24,7 +24,7 @@ export interface BrowserNav {
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:cursor-not-allowed disabled:opacity-40";
 
-export type PillState = "connecting" | "watching" | "bot" | "yours" | "elsewhere" | "taking" | "waiting";
+export type PillState = "connecting" | "watching" | "bot" | "yours" | "held" | "elsewhere" | "taking" | "waiting";
 
 /** What the pill says: who has the browser now, from this viewer's side. */
 export function controlPill(connected: boolean, control: PreviewStreamControl | null, takeStatus: BrowserTakeStatus): PillState {
@@ -32,6 +32,8 @@ export function controlPill(connected: boolean, control: PreviewStreamControl | 
   if (takeStatus === "pending") return "taking";
   if (takeStatus === "slow") return "waiting";
   if (control.controller === "you") return "yours";
+  // The person's hold, used from another view of theirs or not granted yet: they can hand it back from here.
+  if (control.owned) return "held";
   if (control.controller === "another-viewer") return "elsewhere";
   return control.controller === "agent" ? "bot" : "watching";
 }
@@ -41,6 +43,7 @@ const PILL_TEXT: Record<PillState, (bot: string) => string> = {
   watching: () => "Watching",
   bot: (bot) => `${bot} has control`,
   yours: () => "You have control",
+  held: (bot) => `${bot} is paused for you`,
   elsewhere: () => "Held on another device",
   taking: () => "Taking control…",
   waiting: (bot) => t("browser.control.waiting", { name: bot }),
@@ -53,16 +56,21 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
   connected: boolean;
   control: PreviewStreamControl | null;
   takeStatus: BrowserTakeStatus;
+  /** What holding the browser means for the bot, while this view has control. */
+  hint?: string;
   /** Toolbar commands are open while connected and the browser is not held on another device. */
   commandsReady: boolean;
   profileName: string;
   fullscreen: boolean;
+  /** Maximized: the panel overlays the whole window, instead of its usual share of it. */
+  maximized: boolean;
   menu: ReactNode;
   onCommand: (command: { type: "navigate"; url: string } | { type: "history"; delta: -1 | 1 } | { type: "reload" } | { type: "tabSelect"; tabId: string } | { type: "tabClose"; tabId: string } | { type: "tabNew" }) => void;
   onAddress: (text: string) => void;
   onTake: () => void;
   onHandBack: () => void;
   onFullscreen: () => void;
+  onMaximize: () => void;
   onProfiles: () => void;
 }>(function ChromeRow(props, addressRef) {
   const { botName, tabs, nav, connected, control, takeStatus, commandsReady } = props;
@@ -70,6 +78,8 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
   const [editing, setEditing] = useState(false);
   const pill = controlPill(connected, control, takeStatus);
   const yours = pill === "yours";
+  // Whenever the person holds the browser, from this view or another, the pill hands it back.
+  const handsBack = yours || pill === "held";
   const shown = nav.url === "about:blank" ? "" : nav.url;
   return (
     <div className="shrink-0 border-b border-hairline/40">
@@ -86,18 +96,20 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
         </div>
         <button
           type="button"
-          aria-pressed={yours}
-          aria-label={yours ? `${PILL_TEXT[pill](botName)}. ${t("browser.control.handBack")}` : `${PILL_TEXT[pill](botName)}. ${t("browser.control.take")}`}
-          title={yours ? t("browser.control.handBack") : t("browser.control.take")}
+          aria-pressed={handsBack}
+          aria-label={`${PILL_TEXT[pill](botName)}. ${t(handsBack ? "browser.control.handBack" : "browser.control.take")}`}
+          aria-description={yours ? props.hint : undefined}
+          title={yours && props.hint ? props.hint : t(handsBack ? "browser.control.handBack" : "browser.control.take")}
           disabled={!connected || pill === "elsewhere" || pill === "connecting" || pill === "taking" || pill === "waiting"}
-          onClick={yours ? props.onHandBack : props.onTake}
-          className={`flex max-w-56 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] disabled:cursor-default ${yours ? "border-accent-border bg-accent/15 text-accent-text" : "border-hairline text-ink-secondary hover:bg-inset hover:text-ink"}`}
+          onClick={handsBack ? props.onHandBack : props.onTake}
+          className={`flex max-w-56 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] disabled:cursor-default ${handsBack ? "border-accent-border bg-accent/15 text-accent-text" : "border-hairline text-ink-secondary hover:bg-inset hover:text-ink"}`}
           data-pill={pill}
         >
           {pill === "taking" || pill === "waiting" || pill === "connecting" ? <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden="true" /> : <Hand size={12} className="shrink-0" aria-hidden="true" />}
           <span className="truncate">{PILL_TEXT[pill](botName)}</span>
-          {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : yours ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
+          {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : handsBack ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
         </button>
+        <button className={button} title={props.maximized ? "Restore size" : "Maximize"} aria-label={props.maximized ? "Restore size" : "Maximize"} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <Expand size={15} />}</button>
         <button className={button} title={props.fullscreen ? "Exit full screen" : "Full screen"} aria-label={props.fullscreen ? "Exit full screen" : "Full screen"} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
         <button className={`${button} rounded-xl bg-inset p-1.5`} title={`Browser profile: ${props.profileName}`} aria-label="Browser profiles" onClick={props.onProfiles}><UserRound size={15} /></button>
       </div>
