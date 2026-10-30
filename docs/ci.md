@@ -360,8 +360,9 @@ instead (Settings → Secrets and variables → Actions → Variables; anything 
   Hermes in every test home, and Team Cloud turns run in boxes they never get
   on GitHub.
 - **Cost.** One Boat start per run, and the account's daily start limit is
-  shared with customers' Cloud computers: keep it to one job. The Linux leg
-  takes about 20 minutes.
+  shared with customers' Cloud computers: keep it to one job. The job takes
+  about 25 minutes: 4 for setup and the checks, 21 for the lanes, whose
+  slowest shard sets the time.
 - **Where to look.** `boat ci` (setup, problems, the last jobs), `boat ci job
   <job id>` and `boat ci logs <job id> --follow`, or the CI on Boat VMs tab
   of the Boat dashboard. The job id is the GitHub job's id.
