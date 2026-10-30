@@ -338,6 +338,29 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     await w.host.release(node.id, { ok: true, text: "done" });
   });
 
+  it("lets a bot hand work to a new thread of its own only as an own thread, and every other way back stays refused", async () => {
+    const helping: Script = (node) => node.threadId.startsWith("chief-helper") || node.botId === "builder" ? "hold" : undefined;
+    const w = world(helping);
+    const helper: RoomAddress = { botId: "chief", threadId: "chief-helper-1" };
+    const own = (source: RoomAddress, parentId: string | undefined, target: RoomAddress, text = "Review the diff") => {
+      if (!parentId) begun(w, source, "gen-1");
+      return w.coordinator.enqueue(source, "gen-1", parentId, target, text, { ownThread: true });
+    };
+    expect(() => send(w, chief, "gen-1", undefined, helper, "Review the diff")).toThrow("Cannot assign work back to an ancestor; results return automatically");
+    expect(() => own(chief, undefined, chief)).toThrow(/back to an ancestor/);
+    expect(() => own(chief, undefined, inRoom("chief"))).toThrow(/back to an ancestor/);
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    const first = own(chief, undefined, helper);
+    expect(first).toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-helper-1", parentId: "gen-1", status: "queued" } });
+    expect(own(chief, undefined, { botId: "chief", threadId: "chief-helper-2" }).duplicate).toBe(false);
+    w.coordinator.tick();
+    expect(() => own(helper, first.node.id, { botId: "chief", threadId: "chief-helper-3" })).toThrow(/back to an ancestor/);
+    const work = w.coordinator.children("gen-1").find(child => child.botId === "builder")!;
+    expect(() => own(builder, work.id, { botId: "chief", threadId: "chief-helper-4" })).toThrow(/back to an ancestor/);
+    await w.host.release(first.node.id, { ok: true, text: "Looks right" });
+    expect(own(chief, undefined, { botId: "chief", threadId: "chief-helper-5" }).duplicate).toBe(false);
+  });
+
   it("refuses a second assignment to a teammate that completed one, unless it is rework", async () => {
     const w = world();
     const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");

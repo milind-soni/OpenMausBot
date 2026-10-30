@@ -6,8 +6,8 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
-import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
-import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
+import type { Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -187,11 +187,15 @@ export class RuntimeCoordinator implements Coordinator {
     const kind: HandoffView["kind"] = target.groupId !== undefined && target.groupId === source.groupId ? "assignment" : "work";
     const lineage = path(this.store, parent);
     const root = lineage[0]!;
-    if (lineage.some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    const assignee: Assignee = { botId: target.botId, destination: { kind: target.groupId ? "room_thread" : thread === "standing" ? "standing_thread" : "work_thread",
+      threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } };
+    const own = ownThread(lineage, assignee, options.ownThread);
+    if ((own ? lineage.slice(0, -1) : lineage).some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
     const siblings = this.store.children(parent.id);
-    const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode);
+    const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode
+      && (!own || c.assignee.destination.threadId === target.threadId));
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
-    if (mode === "work" && !rework && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
+    if (mode === "work" && !rework && !own && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
     if (kind === "work" && target.groupId && lineage.some(n => n.assignee.destination.groupId === target.groupId)) throw new Error(ROOM_ANCESTOR);
     const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
@@ -203,9 +207,8 @@ export class RuntimeCoordinator implements Coordinator {
       parentId: parent.id,
       origin: parent.origin,
       requester,
-      assignee: { botId: target.botId, destination: { kind: target.groupId ? "room_thread" : thread === "standing" ? "standing_thread" : "work_thread",
-        threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } },
-      mode, reply, brief: text, rework,
+      assignee, mode, reply, brief: text, rework,
+      ...(own ? { ownThread: true } : {}),
       ...(options.doneWhen ? { doneWhen: options.doneWhen } : {}),
       levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),

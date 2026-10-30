@@ -22,7 +22,8 @@ export function sentRow(input: { sender: Who; recipient: Who; threadId: string; 
     role: "bot", kind: "activity",
     from: { botId: sender.id, name: sender.name, color: sender.color },
     tool: {
-      name: outside ? `Sent to ${recipient.name} directly: it isn't in ${roomWords(outside)}.` : `Sent to ${recipient.name}${room && !room.here ? ` · ${room.name}` : ""}`,
+      name: sender.id === recipient.id ? `Opened thread #${input.title ?? "Untitled"}`
+        : outside ? `Sent to ${recipient.name} directly: it isn't in ${roomWords(outside)}.` : `Sent to ${recipient.name}${room && !room.here ? ` · ${room.name}` : ""}`,
       ok: true, ...(input.reason ? { output: input.reason } : {}),
     },
     ...(input.doneWhen ? { doneWhen: input.doneWhen } : {}),

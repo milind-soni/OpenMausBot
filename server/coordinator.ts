@@ -2,6 +2,7 @@ import { RuntimeCoordinator } from "./runtime-coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
+import type { ModelSelection } from "../shared/wire.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
 export type CoordinateBotsCall = {
@@ -17,6 +18,8 @@ export type CoordinateBotsCall = {
   doneWhen?: string;
   title?: string;
   projectId?: string;
+  /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
+  ownThread?: { modelSelection?: ModelSelection; approvalMode?: "ask" };
 };
 
 export type { LegacyThreadResolver };
@@ -92,6 +95,8 @@ export interface HandoffOptions {
   rework?: boolean;
   requestBatchKey?: string;
   doneWhen?: string;
+  /** The target is a new thread of the requester's own bot (start_thread with report_back). */
+  ownThread?: boolean;
 }
 
 export type RoomAddress = Pick<HandoffView, "groupId" | "threadId" | "botId">;
