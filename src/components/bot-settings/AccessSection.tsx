@@ -7,7 +7,7 @@ import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
+import { mcpServersForBot, mcpServersOfBot, useMcpServers } from "@/lib/mcp-servers";
 import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
@@ -27,6 +27,8 @@ import {
   type ConnectorVerb,
 } from "@/lib/connector-grants";
 import { inputCls } from "./field";
+import { openKeySettings } from "../keys/key-focus";
+import { KeysLink } from "../keys/KeysLink";
 import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
@@ -97,6 +99,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
         >
           <input
             className={cn(inputCls, "font-mono text-[13px]")}
+            aria-label={t("botAccess.folder.title")}
             placeholder={t("botAccess.folder.placeholder")}
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
@@ -122,8 +125,9 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
  */
 export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
   const { dispatch } = useStore();
-  const { servers, error, refresh } = useMcpServers();
-  const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers) : []).map((server) => server.name));
+  const { servers: all, error, refresh } = useMcpServers();
+  const servers = all ? mcpServersOfBot(all, bot.id) : null;
+  const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers, bot.id) : []).map((server) => server.name));
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
@@ -164,6 +168,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
               <div className="min-w-0 flex-1">
                 <div className="truncate font-mono text-[13px] text-ink">{server.name}</div>
                 {!server.enabled && <div className="text-[12px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
+                {server.enabled && server.offFor?.includes(bot.id) && <div className="text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: bot.name })}</div>}
               </div>
               <Switch
                 checked={mounted.has(server.name)}
@@ -482,7 +487,7 @@ function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: bo
         <div className="text-[15px] font-medium text-ink">{t("research.title")}</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">{line}</div>
         {!available && !connecting && (
-          <button type="button" className="ui-button mt-2" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}>
+          <button type="button" className="ui-button mt-2" onClick={() => dispatch(openKeySettings("treg"))}>
             {t("research.openKeys")}
           </button>
         )}
@@ -557,7 +562,7 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
       <div className="mt-0.5 text-[12px] text-ink-secondary">
         {defaultAlias
           ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
-          : t("botAccess.cloud.serverNoDefault")}
+          : t("botAccess.cloud.serverNoDefault")} <KeysLink id="vps" />
       </div>
       <form
         className="mt-2 flex items-center gap-2"

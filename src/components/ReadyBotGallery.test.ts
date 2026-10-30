@@ -4,10 +4,11 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const opened = vi.hoisted(() => ({ props: null as null | { readyBotId?: string; onClose?: () => void; onCreated?: (bot: { id: string }) => void } }));
+const opened = vi.hoisted(() => ({ props: null as null | { readyBotId?: string; onClose?: () => void; onCreated?: (bot: { id: string }) => void }, dispatch: vi.fn() }));
 vi.mock("./lazy-screens", () => ({
   NewBotDialog: (props: NonNullable<typeof opened.props>) => { opened.props = props; return null; },
 }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: opened.dispatch }) }));
 
 const { ReadyBotGallery } = await import("./ReadyBotGallery");
 const { READY_BOTS } = await import("@/lib/ready-bots");
@@ -29,10 +30,11 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   opened.props = null;
+  opened.dispatch.mockReset();
   onDialog.mockClear();
   onAdded.mockClear();
 });
-afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
+afterEach(() => { flushSync(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe("ready-made bots gallery", () => {
   it("shows every ready-made bot with its own Add button", () => {
@@ -68,6 +70,14 @@ describe("ready-made bots gallery", () => {
     opened.props!.onCreated!({ id: "new-bot" });
     expect(onAdded).toHaveBeenCalledWith({ id: "new-bot" });
     expect(onDialog).toHaveBeenLastCalledWith(false);
+  });
+
+  it("on a paired device, which cannot read the host's defaults, makes the bot at once", () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: true } });
+    render();
+    flushSync(() => button("Add Fern, Plant care log").click());
+    expect(opened.props).toBeNull();
+    expect(opened.dispatch).toHaveBeenCalledWith({ type: "newBot", onCreated: onAdded });
   });
 
   it("gives Templates its keys back when New bot is closed without creating", () => {

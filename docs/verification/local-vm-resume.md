@@ -3,9 +3,15 @@
 Run the focused lifecycle checks in disposable homes:
 
 ```sh
-pnpm exec vitest run server/container-computer.test.ts server/local-vm-stop-reason.test.ts server/computer-idle.test.ts server/group-local-vm.e2e.test.ts server/routes/desktop-viewer.test.ts src/components/LocalComputerSection.test.ts src/components/ComputerPanel.test.ts src/components/ComputerPanel.i18n.test.ts
+pnpm exec vitest run server/container-computer.test.ts server/local-vm-browser-profiles.test.ts server/local-vm-stop-reason.test.ts server/computer-idle.test.ts server/group-local-vm.e2e.test.ts server/routes/desktop-viewer.test.ts src/components/LocalComputerSection.test.ts src/components/ComputerPanel.test.ts src/components/ComputerPanel.i18n.test.ts
 node --experimental-strip-types scripts/verify-local-vm-resume.ts
 ```
+
+The image preparation fixture runs the generated shell script in a temporary
+home and workspace. It supplies synthetic Linux boot and PID 1 start records.
+Browser locks are cleared once per container start. A Cua driver restart keeps
+live Chromium and Firefox locks. A changed PID 1 start time or boot ID clears
+old locks again, including when the container reuses its home directory.
 
 The browser recipe uses `launchVerificationServer`, the fake engine and a
 private browser profile. It mounts the real ComputerPanel with synthetic

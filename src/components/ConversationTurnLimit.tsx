@@ -5,17 +5,30 @@ import { parseRoomTurnTimeoutMinutes } from "@/lib/room-turn-timeout";
 import { useStore, type Group } from "@/state/store";
 import { Select } from "./Select";
 
-const PRESET_TURN_LIMITS = [30, 60, 120] as const;
+export const PRESET_TURN_LIMITS = [30, 60, 120] as const;
 
 const isPresetTurnLimit = (minutes: number): minutes is (typeof PRESET_TURN_LIMITS)[number] =>
   (PRESET_TURN_LIMITS as readonly number[]).includes(minutes);
 
-export function ConversationTurnLimit({ group }: { group: Group }) {
+export function useConversationTurnLimit(group: Group) {
   const { state, dispatch } = useStore();
   const globalMinutes = state.config?.rooms.turnTimeoutMinutes ?? 5;
   const task = group.dm ? undefined : group.tasks?.find((candidate) => candidate.threadId === group.threadId);
   const override = group.dm ? group.turnTimeoutMinutes : task?.turnTimeoutMinutes;
   const saved = typeof override === "number" ? override : null;
+  const save = (minutes: number | null) => dispatch({
+    type: "setConversationTurnLimit",
+    groupId: group.id,
+    threadId: group.threadId,
+    minutes,
+    dm: group.dm === true,
+  });
+  return { globalMinutes, saved, save };
+}
+
+export function ConversationTurnLimit({ group }: { group: Group }) {
+  const limit = useConversationTurnLimit(group);
+  const { globalMinutes, saved } = limit;
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -28,13 +41,7 @@ export function ConversationTurnLimit({ group }: { group: Group }) {
   const save = (minutes: number | null) => {
     setError("");
     setCustom(false);
-    dispatch({
-      type: "setConversationTurnLimit",
-      groupId: group.id,
-      threadId: group.threadId,
-      minutes,
-      dm: group.dm === true,
-    });
+    limit.save(minutes);
   };
 
   if (custom) {

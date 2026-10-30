@@ -164,8 +164,8 @@ if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.str
 await import(${JSON.stringify(fake)});
 `, { mode: 0o755 });
   // `done`: every turn completes, and memory capture's one-shot proposes the
-  // injected instruction as a fact to remember.
-  writeFileSync(join(home, "capture.json"), JSON.stringify({ facts: [{ text: INJECTED, kind: "preference" }] }));
+  // injected instruction as a decision to remember (a decision needs no quoted words).
+  writeFileSync(join(home, "capture.json"), JSON.stringify({ facts: [{ text: INJECTED, kind: "decision" }] }));
   const completing = (name: string, replies: string[]) => {
     const cli = join(home, `${name}-claude.mjs`);
     writeFileSync(cli, `#!/usr/bin/env node
@@ -187,7 +187,7 @@ await import(${JSON.stringify(fake)});
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     memory: { captureQuietMs: 1_000 },
     instances: {
-      ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi", "claude"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "claude"].map((id) => [id, { driver: "not-a-real-driver" }])),
       held: { driver: "claudeAgent", displayName: "Held", config: { cli: held } },
       done: { driver: "claudeAgent", displayName: "Done", config: { cli: done } },
       brief: { driver: "claudeAgent", displayName: "Brief", config: { cli: brief } },
@@ -222,14 +222,19 @@ await import(${JSON.stringify(fake)});
   const folderPath = realpathSync(mkdtempSync(join(tmpdir(), "omb-cloud-lent-memory-")));
   writeFileSync(join(folderPath, "plan.md"), "from the Mac");
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
+  // A folder lent before lending was automatic, which the automatic grant keeps: the memory gate holds for it.
+  folderId = randomUUID();
+  const file = join(home, "desktop-profile", "computer-sharing.json");
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ version: 1, records: { [env.id]: { sessionId: null, environmentId: null, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true,
+    folders: [{ id: folderId, name: "Plans", path: folderPath, write: false }], terminal: false, computer: false, internet: true, cloud: { accountId: "acct_fixture", origin: base } } } }));
   connector = createComputerSharing({
-    file: join(home, "desktop-profile", "computer-sharing.json"), environments: () => [env], cuaConnection: async () => null,
+    file, environments: () => [env], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null,
     enabled: async () => false, cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: join(home, "mac-home"),
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, authorization: `Bearer ${owner}`, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` } }),
   });
-  folderId = randomUUID();
-  await connector.saveCloud(env, { folders: [{ id: folderId, name: "Plans", path: folderPath, write: false }], screen: false });
-  for (const deadline = Date.now() + 8000; !connector.cloudState(env).connected;) {
+  connector.start();
+  for (const deadline = Date.now() + 8000; !(connector.cloudState(env).connected && connector.cloudState(env).chrome);) {
     if (Date.now() > deadline) throw new Error(`the Mac never connected: ${JSON.stringify(connector.cloudState(env))}`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

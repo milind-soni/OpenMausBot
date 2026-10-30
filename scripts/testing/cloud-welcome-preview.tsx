@@ -27,7 +27,6 @@ function installCloudPage(move: string | null) {
     onCapabilitiesChanged: () => () => {},
     workspaces: { state: async () => ({ local: false, name, origin: location.origin, home: true }), menu: async () => {} },
     cloudSendPage: { notice: async () => notice, dismiss: async () => notice, onNotice: () => () => {} },
-    cloudLending: { open: async () => {} },
     cloudPlan: {
       state: async () => ({ status: "paid", tier: "pro", credit: { grantedUsd: 5, remainingUsd: 5, state: "active" } }),
       manage: async () => {},

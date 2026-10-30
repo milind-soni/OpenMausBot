@@ -93,8 +93,9 @@ export type RoutineRunStatus =
 
 /** Why a run started a second time by itself: its engine stalled, OpenMausBot
  * restarted while it ran, the provider rate-limited it or failed for a moment,
- * or it waited for its engine's usage limit to reset. A run gets one. */
-export type RoutineRetryCause = "stalled" | "restarted" | "rate_limited" | "provider" | "usage_limit";
+ * it waited for its engine's usage limit to reset, or it failed some other way.
+ * A run gets one. */
+export type RoutineRetryCause = "stalled" | "restarted" | "rate_limited" | "provider" | "usage_limit" | "failed";
 
 /** The statuses both failure indicators count: a run that went wrong and has
  * not been acknowledged. */
@@ -169,8 +170,8 @@ export interface RoutineRun {
   status: RoutineRunStatus;
   manual: boolean;
   triggerSource?: RoutineRunTrigger;
-  /** "app": a connected-app event started it; triggerSource is then "webhook" (an outside event). */
-  eventSource?: "app";
+  /** "app": a connected-app event started it; "wait": a wait's follow-up did. triggerSource is then "webhook" (an outside event). */
+  eventSource?: "app" | "wait";
   webhookId?: string;
   deliveryId?: string;
   /** Room task created for a team-goal run. */

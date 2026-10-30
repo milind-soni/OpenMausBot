@@ -7,6 +7,7 @@ import { afterEach, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { AUTOMATION_REPLY_PROMPT } from "./system-prompt.ts";
+import { launchRestartableServer } from "./testing/restartable-server.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
 
 let fixture: VerificationServer | undefined;
@@ -384,4 +385,35 @@ it("says in the main chat, once per run of failures, that an automation could no
   await s.settled(second, "failed");
   expect((await s.run(second)).error).toBe((await s.run(first)).error);
   expect(await s.lines()).toHaveLength(1);
+}, 120_000);
+
+it("tells the main chat about a run missed while the computer was off, which has no conversation of its own", async () => {
+  const restartable = await launchRestartableServer({ scripted: true });
+  const api = async (method: string, path: string, body?: unknown) => (await fetch(`${restartable.url}${path}`, {
+    method, headers: { "content-type": "application/json", origin: restartable.url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })).json() as Promise<any>;
+  try {
+    const { bot } = await runControlOmb(["new-bot", "--name", "Pepper", "--url", restartable.url]) as any;
+    const main = bot.activeTaskId as string;
+    const { routine } = await api("POST", "/api/routines", {
+      name: "Inbox watch", prompt: "Do the Inbox watch check.", botId: bot.id,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    });
+    await restartable.stop();
+    const file = join(restartable.dataDir, "routines.json");
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    saved.routines.find((each: any) => each.id === routine.id).nextRunAt = Date.now() - 13 * 3_600_000;
+    writeFileSync(file, JSON.stringify(saved));
+    await restartable.start();
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.map((run: any) => run.status), { timeout: 30_000 }).toEqual(["missed"]);
+    const missed = (await api("GET", "/api/routines")).runs[0];
+    expect(missed).toMatchObject({ resultsThreadId: main });
+    expect(missed.threadId).toBeUndefined();
+    await expect.poll(async () => (await api("GET", `/api/threads/${main}/messages?limit=200`)).messages
+      .filter((message: any) => message.routineRun?.runId === missed.id).map((message: any) => message.routineRun.status), { timeout: 10_000 }).toEqual(["missed"]);
+    const task = (await api("GET", "/api/bots")).bots.find((each: any) => each.id === bot.id).tasks.find((each: any) => each.threadId === main);
+    expect(task.unread).toBe(true);
+  } finally {
+    await restartable.close();
+  }
 }, 120_000);

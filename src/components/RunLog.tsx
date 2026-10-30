@@ -11,6 +11,7 @@ const STATUS = {
   complete: "inspector.run.complete",
   failed: "inspector.run.failed",
   observed: "inspector.run.observed",
+  unverified: "inspector.run.unverified",
 } as const;
 
 export function RunLog({ events }: { events: TimelineEvent[] }) {

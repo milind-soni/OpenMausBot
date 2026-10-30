@@ -44,6 +44,8 @@ describe("additive template imports in the real renderer", () => {
     await control("send", "--bot", info!.botId, "--text", "Keep this original conversation after importing templates.");
     expect(await control("wait", "--bot", info!.botId, "--timeout", "30")).toMatchObject({ status: "settled" });
     const original = await api("/api/bots");
+    // Viewing a chat marks it read at any moment; an import must leave everything else as it was.
+    const withoutReadState = (value: unknown) => JSON.parse(JSON.stringify(value, (key, field) => key === "unread" || key === "lastReadMessageId" ? undefined : field));
     const transcript = await control("messages", "--bot", info!.botId, "--limit", "10");
     const manifest = { format: "openmaus.team", version: 2, team: { name: "Sales crew", members: [
       { key: "researcher", name: "Lead finder", appearance: { color: "cyan" } },
@@ -74,14 +76,14 @@ describe("additive template imports in the real renderer", () => {
         // Exercise the file input's actual change handler, not the OS picker.
         await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(window.templateFixture)], 'sales.mausteam.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
       }
-      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Adds a new team for Sales crew");
+      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Adds a new department for Sales crew");
       await click("Add team");
       const section = source === "library" ? "Sales crew" : "Sales crew 2";
       await expect.poll(snapshot, { timeout: 10_000 }).toContain(`button "${section}"`);
       const current = await api("/api/bots");
       expect(current.bots.filter((bot: { section?: string }) => bot.section === section)).toHaveLength(2);
-      for (const bot of original.bots) expect(current.bots.find((value: { id: string }) => value.id === bot.id)).toEqual(bot);
-      expect(await control("messages", "--bot", info!.botId, "--limit", "10")).toEqual(transcript);
+      for (const bot of original.bots) expect(withoutReadState(current.bots.find((value: { id: string }) => value.id === bot.id))).toEqual(withoutReadState(bot));
+      expect(withoutReadState(await control("messages", "--bot", info!.botId, "--limit", "10"))).toEqual(withoutReadState(transcript));
       expect(await snapshot()).toContain('button "Existing work"');
       expect(await snapshot()).toContain('button "Personal"');
     }

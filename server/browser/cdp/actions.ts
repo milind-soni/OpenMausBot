@@ -18,7 +18,7 @@ const POLL_MS = 100;
 export const MAX_TYPED_KEYS = 500;
 const DRAG_LEAD_PX = 12;
 
-/** A ref from a snapshot, a selector, or a point in the 1280x720 viewport (CSS pixels). */
+/** A ref from a snapshot, a selector, or a point in the viewport as it is laid out now (CSS pixels). */
 export type Target = { ref: string } | { selector: string } | Point;
 
 export interface ActionContext {
@@ -183,9 +183,19 @@ async function untilDialog(context: ActionContext, action: Promise<void>): Promi
 /** Shown to people watching before the agent's pointer acts there; the action waits for it. */
 export type PointerReporter = (point: Point, phase: "move" | "click") => Promise<void>;
 
+/** A point the bot passed, refused outside the viewport as it is now: a person's panel can resize it between two calls. */
+async function inViewport(context: ActionContext, point: Point): Promise<Point> {
+  const size = await valueInWorld<[number, number]>(context.frames, context.frames.mainFrameId, "[innerWidth, innerHeight]").catch(() => null);
+  if (size && (point.x >= size[0] || point.y >= size[1])) {
+    throw new DriverError("refused", `${Math.round(point.x)},${Math.round(point.y)} is outside the page's viewport, which is ${size[0]}x${size[1]} CSS pixels now. Take a new screenshot and aim inside it.`);
+  }
+  return point;
+}
+
 /** Where to act: found, shown to people watching, then found again, since the page may have moved meanwhile. */
 async function pointAfterShowing(context: ActionContext, at: Point | (NodeHandle & { ref?: string }), deadline: number, phase: "move" | "click", pointer: PointerReporter | undefined, options: { wantEnabled?: boolean } = {}): Promise<Point> {
   if ("x" in at) {
+    await inViewport(context, at);
     await pointer?.(at, phase);
     return at;
   }
@@ -394,7 +404,7 @@ export async function drag(context: ActionContext, from: Target, to: Target, { t
   const deadline = Date.now() + timeoutMs;
   const source = isPoint(from) ? null : await element(context, from);
   const start = await pointAfterShowing(context, source ?? (from as Point), deadline, "move", pointer);
-  const end = isPoint(to) ? to : await actionablePoint(context, await element(context, to), deadline, { hitTest: false });
+  const end = isPoint(to) ? await inViewport(context, to) : await actionablePoint(context, await element(context, to), deadline, { hitTest: false });
   const sourceFrame = source?.frameId ?? context.frames.mainFrameId;
   const session = context.session;
   const intercepted: { data: Record<string, unknown> | null } = { data: null };
@@ -440,7 +450,7 @@ export async function scroll(context: ActionContext, target: Target | null, delt
   await context.bringToFront();
   const point = target === null
     ? await valueInWorld<Point>(context.frames, context.frames.mainFrameId, VIEWPORT_CENTER)
-    : isPoint(target) ? target : await actionablePoint(context, await element(context, target), Date.now() + timeoutMs, { hitTest: false });
+    : isPoint(target) ? await inViewport(context, target) : await actionablePoint(context, await element(context, target), Date.now() + timeoutMs, { hitTest: false });
   await context.mouse.move(point.x, point.y);
   await context.mouse.wheel(deltaX, deltaY);
   await valueInWorld(context.frames, context.frames.mainFrameId, NEXT_FRAME, { awaitPromise: true }).catch(() => {});

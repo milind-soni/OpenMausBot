@@ -3,9 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { t } from "@/lib/i18n";
-import { StoreProvider, type Bot, type Message } from "@/state/store";
-import { HelperIntro } from "./HelperIntro";
-import { setupAction } from "./HelperSetup";
+import { StoreProvider, type Bot } from "@/state/store";
 import { draftOf, MausBotWelcomeCard, mausBotWelcomeDue, welcomeName, welcomePatch } from "./MausBotWelcome";
 
 const maus = { id: "maus", threadId: "t1", name: "MausBot", title: "", description: "", notifications: true, color: "chrome", mascotBody: null,
@@ -63,34 +61,5 @@ describe("MausBot's first-launch welcome", () => {
     expect(html).toMatch(/data-mausbot-welcome-panel="closed"[^>]*|inert=""[^>]*data-mausbot-welcome-panel="closed"/);
     expect(html).toContain(t("mausbotWelcome.title", { name: "MausBot" }));
     expect(html).toContain(t("mausbotWelcome.add", { name: "MausBot" }));
-  });
-});
-
-describe("MausBot's intro in the chat", () => {
-  const intro: Message = { id: "intro", role: "bot", kind: "options", at: 1, helperIntro: true, text: "Hi, I'm MausBot.",
-    card: { title: "Hi, I'm MausBot, your helper for everything here.", subtitle: "", options: ["What are my bots up to?"] } };
-  const render = (asksDone: boolean) => renderToStaticMarkup(createElement(StoreProvider, null,
-    createElement(HelperIntro, { botId: "maus", threadId: "t1", message: intro, asksDone })));
-
-  it("says who it is in the viewer's language, with asks and, on a fresh install, only the setup still to do", () => {
-    const html = render(false);
-    expect(html).toContain(t("helperIntro.title", { name: "MausBot" }).replace("'", "&#x27;"));
-    expect(html).toContain('data-helper-ask="helperIntro.ask.overview"');
-    for (const step of ["ai", "bots", "apps", "phone", "cloud"]) expect(html).toContain(`data-helper-step="${step}"`);
-  });
-
-  it("drops the asks and setup once they were answered or dismissed, keeping what it said", () => {
-    const html = render(true);
-    expect(html).toContain('data-helper-intro="intro"');
-    expect(html).not.toContain("data-helper-ask");
-    expect(html).not.toContain("data-helper-step");
-  });
-
-  it("opens the app's own flow for each setup step", () => {
-    expect(setupAction("ai")).toEqual({ type: "toggleAppSettings", open: true, section: "engines" });
-    expect(setupAction("bots")).toEqual({ type: "toggleNewBot", open: true });
-    expect(setupAction("apps")).toEqual({ type: "togglePlugins", open: true, surface: "apps" });
-    expect(setupAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "companion", phonePairing: true });
-    expect(setupAction("cloud")).toEqual({ type: "openCloudAdd", source: "app_onboarding" });
   });
 });

@@ -28,6 +28,20 @@ it("puts synced folders beside the data folder unless OMB_SYNC_ROOT says otherwi
   expect(syncRoot("/data/.openmausbot", { OMB_SYNC_ROOT: "/mnt/sync" })).toBe("/mnt/sync");
 });
 
+it("keeps a lent folder's copy in the data folder, out of bots' reach and the prompt; a copy kept before stays where it is", () => {
+  const { home, dataDir, store } = setup();
+  const lent = store.register({ computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Notes", name: "Notes", lent: true });
+  expect(lent.cloudPath).toBe(join(dataDir, "sync", "lent", "Ash-MBP", "Notes"));
+  expect(lent.lent).toBe(true);
+  const before = store.register({ computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Clients", name: "Clients" });
+  expect(before.cloudPath).toBe(join(home, "Synced", "Ash-MBP", "Clients"));
+  expect(store.register({ computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Clients", name: "Clients", lent: true }).id).toBe(before.id);
+  expect(syncedFolders(dataDir).map((folder) => folder.cloudPath)).toEqual([before.cloudPath]);
+  // Its copy gone, a lent folder is copied again where bots can't read it.
+  rmSync(before.cloudPath, { recursive: true });
+  expect(store.register({ computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Clients", name: "Clients", lent: true }).cloudPath).toBe(join(dataDir, "sync", "lent", "Ash-MBP", "Clients"));
+});
+
 it("registers a PC folder once, under that computer's own folder, and creates it", () => {
   const { home, store } = setup();
   const first = store.register({ computerId: PC, computerName: "Ash-PC", pcPath: "C:\\Users\\Ash\\Documents\\PA", name: "PA" });

@@ -6,6 +6,7 @@
 // that delivers to the brief posts no line: its answer goes to the brief, which reads it as a small JSON result.
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
+import { signInWaits } from "../shared/sign-in-request.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -51,7 +52,7 @@ export function automationContextText(line: AutomationLine, at: number, text: st
 /** A sign-in, connection or credential card still waiting on the person, in plain words; null once it is settled. */
 export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">): string | null {
   const { signIn, connector, secret } = message;
-  if (message.kind === "signin" && signIn && !signIn.done && !signIn.cancelled && !signIn.superseded && !signIn.resumed && !signIn.stopped) {
+  if (message.kind === "signin" && signIn && signInWaits(signIn) && !signIn.resumed && !signIn.stopped) {
     const reason = signIn.reason?.trim();
     return `I need you to sign in to ${signIn.site}${reason ? `: ${reason}${/[.!?]$/.test(reason) ? "" : "."}` : "."}`;
   }
@@ -245,9 +246,12 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     runFailed(run: RoutineRun, detail: string): void {
       if (run.target === "bot" && run.status === "failed" && run.deliver !== "brief" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
     },
-    /** This run's result, questions and failure come to its bot's chat as lines of their own. */
+    /** This run's result, questions and failure come to its bot's chat as lines of their own, or through the brief.
+     * A missed run, or one that failed before it had a conversation, has no line to say so, and keeps its card,
+     * unless it delivers to the brief, which lists it as missed. */
     speaksFor(run: RoutineRun): boolean {
-      return run.target === "bot" && destination(run) !== null;
+      return run.target === "bot" && destination(run) !== null
+        && (run.deliver === "brief" || (run.status !== "missed" && (run.status !== "failed" || Boolean(run.threadId))));
     },
     /** This conversation is a run's own, and only its last reply reaches the chat the run reports to. */
     reportsElsewhere(threadId: string): boolean {

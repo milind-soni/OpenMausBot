@@ -98,6 +98,42 @@ describe("charts end to end on DuckDB", () => {
     expect(svg).toContain(">avg(amount)</text>");
   });
 
+  it("a stacked bar over weekly dates draws one full-width column per week, stacked from the baseline", async () => {
+    await connection.run(`CREATE TABLE weekly AS
+      SELECT (DATE '2026-08-31' + INTERVAL (w * 7) DAY)::DATE AS week, plan, CAST((w + 1) * mult AS DOUBLE) AS revenue
+      FROM range(8) r(w), (VALUES ('Max', 300), ('Pro', 200), ('Starter', 100)) p(plan, mult)`);
+    const { compiled, reduced } = await chart({ type: "bar", x: "week", y: "revenue", color: "plan", stack: true }, "weekly");
+    expect(reduced.rows).toHaveLength(24);
+    const day = 86_400_000;
+    // A DATE comes back as "2026-08-31" and the bucket end as a TIMESTAMP: read both as local wall-clock time.
+    const at = (cell: Cell) => Date.parse(String(cell).length === 10 ? `${String(cell)}T00:00:00` : String(cell).replace(" ", "T"));
+    for (const [x, x2] of reduced.rows) expect(at(x2!) - at(x!)).toBe(7 * day);
+    const svg = await chartRenderer.svg(compiled.vegaLite, reduced.rows, reduced.columns, { theme: "light", width: 640 });
+    const bars = [...svg.matchAll(/aria-roledescription="bar" d="M([\d.]+),([\d.]+)h([\d.]+)v([\d.]+)/g)]
+      .map((m) => ({ x: Number(m[1]), y: Number(m[2]), w: Number(m[3]), h: Number(m[4]) }));
+    expect(bars).toHaveLength(24);
+    const left = Math.min(...bars.map((bar) => bar.x));
+    const right = Math.max(...bars.map((bar) => bar.x + bar.w));
+    for (const bar of bars) expect(bar.w).toBeGreaterThan(((right - left) / 8) * 0.9);
+    const columns = new Map<number, typeof bars>();
+    for (const bar of bars) columns.set(bar.x, [...(columns.get(bar.x) ?? []), bar]);
+    expect(columns.size).toBe(8);
+    const baselines = new Set<number>();
+    for (const segments of columns.values()) {
+      const ordered = [...segments].sort((a, b) => a.y - b.y);
+      for (let i = 1; i < ordered.length; i += 1) expect(ordered[i]!.y).toBeCloseTo(ordered[i - 1]!.y + ordered[i - 1]!.h, 3);
+      baselines.add(Math.round(ordered.at(-1)!.y + ordered.at(-1)!.h));
+    }
+    expect(baselines.size).toBe(1);
+    expect(svg).toContain(">Sep 7</text>");
+  });
+
+  it("a whole-number x draws one bar per value", async () => {
+    await connection.run(`CREATE TABLE weeks AS SELECT 36 + i AS week_no, CAST(i * 10 AS DOUBLE) AS revenue FROM range(9) r(i)`);
+    const { reduced } = await chart({ type: "bar", x: "week_no", y: "revenue" }, "weeks");
+    expect(reduced.rows.map((r) => [Number(r[0]), Number(r[1])])).toEqual(Array.from({ length: 9 }, (_, i) => [36 + i, 37 + i]));
+  });
+
   it("line of a raw series: M4 keeps at most four points per pixel column and every extreme", async () => {
     const { compiled, reduced } = await chart({ type: "line", x: "ts", y: "amount" }, "big");
     expect(compiled.reduction.method).toBe("m4");

@@ -11,6 +11,7 @@ import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
+import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 
 const { localOnly } = localOriginModule;
 
@@ -53,6 +54,10 @@ let stateListener = () => {};
 const connectionStore = createCuaConnectionStore({
   getUserData: () => app.getPath("userData"),
 });
+const localComputerGrant = createLocalComputerGrant({
+  connection: () => connectionStore.get(),
+  log: (line) => console.error(`[cua] ${line}`),
+});
 
 function ensureLinuxRuntime() {
   if (!linuxRuntime) {
@@ -66,7 +71,7 @@ function ensureLinuxRuntime() {
         clearPreference: true,
         reasonCode: support.reasonCode,
         message: support.message,
-        onChange: (connection) => stateListener(connection),
+        onChange: (connection) => notifyState(connection),
       });
       return linuxRuntime;
     }
@@ -85,17 +90,27 @@ function ensureLinuxRuntime() {
         getUserData: () => app.getPath("userData"),
         connectionStore,
         bundledDriverPath,
-        onChange: (connection) => stateListener(connection),
+        onChange: (connection) => notifyState(connection),
       });
     } catch (error) {
       console.error("[cua] Bundled Linux driver failed integrity validation:", error);
       linuxRuntime = createUnavailableLinuxRuntime({
         connectionStore,
-        onChange: (connection) => stateListener(connection),
+        onChange: (connection) => notifyState(connection),
       });
     }
   }
   return linuxRuntime;
+}
+
+/** The app's own server child gets the driver connection, and every change to it, over its private port. */
+export function grantLocalComputer(proc, isCurrent) {
+  localComputerGrant.attach(proc, isCurrent);
+}
+
+function notifyState(connection) {
+  localComputerGrant.changed();
+  stateListener(connection);
 }
 
 export function setCuaStateListener(listener) {
@@ -104,7 +119,7 @@ export function setCuaStateListener(listener) {
 
 function persistAndNotify(next) {
   const connection = connectionStore.persist(next);
-  stateListener(connection);
+  notifyState(connection);
   return connection;
 }
 

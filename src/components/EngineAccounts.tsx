@@ -10,6 +10,7 @@ import { DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { EngineCard, engineReady, providerName, type EngineCardSummary } from "./EngineLibrary";
 import { CommandRow, EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
+import { MENU_SHEET } from "./menu-recipe";
 
 /** Providers whose accounts are listed together on one card, each signed in on its own. */
 export type AccountGroup = "claude" | "chatgpt";
@@ -118,7 +119,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
         {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 text-[13px] shadow-2xl shadow-black/50">
+        <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
           <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
           {canRemove && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
@@ -315,13 +316,13 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 }
 
 /** One card for a provider's accounts: who is signed in, one button for whoever is not, and one way to add another. */
-export function AccountsCard({ group, accounts, advanced }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode }) {
+export function AccountsCard({ group, accounts, advanced, bare = false }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode; bare?: boolean }) {
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const primary = accounts[0]!;
   const installed = accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
   return (
-    <EngineCard instance={primary} summary={summaryFor(group, accounts)}>
+    <EngineCard instance={primary} summary={summaryFor(group, accounts)} bare={bare}>
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
         <span className="font-medium text-ink">{t("policy.managedBy", { organization: policy.organizationName })}</span> · {policy.reason}
       </p>}

@@ -55,7 +55,7 @@ describe("Shared with the Cloud", () => {
   it("says what sharing does, shows nothing shared yet, and always offers Add a folder", async () => {
     await mount();
     expect(page()).toContain("Files");
-    expect(page()).toContain("Cloud bots can use these folders, even when this computer is off. They never change your files here.");
+    expect(page()).toContain("Cloud bots can use these folders, even when this computer is off. They change files here only in folders you let them edit.");
     expect(page()).toContain("Nothing shared yet.");
     expect(button("Add a folder")).toBeTruthy();
     expect(page()).not.toMatch(/sync/i);
@@ -78,6 +78,18 @@ describe("Shared with the Cloud", () => {
     expect(row("confirm-deletes").textContent).toContain("1 file was removed from this folder here. Remove it from the Cloud too?");
     await click("Remove from the Cloud", row("confirm-deletes"));
     expect(bridge.answerDeletes).toHaveBeenLastCalledWith("f-confirm-deletes", true);
+  });
+
+  it("says in its one line, for a week, when a bot's change met the person's own: both kept, and where", async () => {
+    const kept = [{ path: "todo.md", beside: "todo (new from My Cloud, 27 Oct 2026).md", at: Date.now() - 60_000 }];
+    await mount({ ...base, shared: [folder("synced", { lent: true, kept })] });
+    expect(row("synced").textContent).toContain("Kept both versions of “todo.md”: yours, and the bot's as “todo (new from My Cloud, 27 Oct 2026).md”.");
+    expect(row("synced").textContent).not.toContain("Up to date");
+    await mount({ ...base, shared: [folder("synced", { lent: true, kept: [{ ...kept[0]!, at: Date.now() - 8 * 24 * 60 * 60_000 }] })] });
+    expect(row("synced").textContent).toContain("Up to date");
+    // Something to do comes first.
+    await mount({ ...base, shared: [folder("missing", { lent: true, kept })] });
+    expect(row("missing").textContent).toContain("Can't find this folder. Was it moved?");
   });
 
   it("finds a moved folder, or stops sharing it after saying what that does", async () => {

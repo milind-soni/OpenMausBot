@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TurnResources } from "./turn-resources.ts";
+import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 
 const a = { threadId: "a", generation: "1" };
 const b = { threadId: "b", generation: "2" };
@@ -52,6 +52,21 @@ describe("thread resource ownership", () => {
     expect(leases.owns("browser:one", a)).toBe(true);
     leases.releaseOne("computer:vm:shared", { ...b, generation: "stale" });
     expect(leases.owns("computer:vm:shared", b)).toBe(true);
+  });
+
+  it("onClaim fires when a turn becomes a resource's holder, not when it claims again", () => {
+    const leases = new TurnResources();
+    const seen: Array<[string, TurnOwner]> = [];
+    const stop = leases.onClaim((resource, owner) => { seen.push([resource, owner]); });
+    expect(leases.claim("browser:one", a)).toBe(true);
+    expect(leases.claim("browser:one", a)).toBe(true);
+    expect(leases.claim("browser:one", b)).toBe(false);
+    leases.release(a);
+    expect(leases.claim("browser:one", b)).toBe(true);
+    stop();
+    leases.release(b);
+    expect(leases.claim("browser:one", a)).toBe(true);
+    expect(seen).toEqual([["browser:one", a], ["browser:one", b]]);
   });
 });
 

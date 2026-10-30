@@ -52,7 +52,10 @@ function heldUntilReleased(input: PreviewStreamInput): boolean {
  */
 export function createBrowserControl(options: {
   transport: ControlTransport;
+  /** This view's input runs now. */
   owned: () => boolean;
+  /** The person holds the browser, from this view or another of theirs. */
+  mine?: () => boolean;
   onTakeStatus: (status: BrowserTakeStatus) => void;
   onError: (message: string) => void;
   onHalted: () => void;
@@ -183,7 +186,13 @@ export function createBrowserControl(options: {
       kept = on;
       if (!on) arm();
     },
-    handBack() { if (!closed) { soon = true; arm(); } },
+    handBack() {
+      if (closed) return;
+      // Their hold is used from another view of theirs: this one has nothing of its own to send first.
+      if (state === "bot" && !options.owned() && options.mine?.()) { release(); return; }
+      soon = true;
+      arm();
+    },
     hold(on: boolean) {
       if (closed || pinned === on) return;
       pinned = on;

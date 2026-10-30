@@ -130,7 +130,7 @@ export function ReactAction({ threadId, message }: { threadId: string; message: 
           aria-label={t("chat.reactions")}
           onKeyDown={onKey}
           className={cn(
-            "absolute bottom-full z-40 mb-1 flex animate-pop-in items-center gap-0.5 rounded-full border border-hairline/50 bg-menu p-1 shadow-2xl shadow-black/40",
+            "popover-surface absolute bottom-full z-40 mb-1 flex animate-pop-in items-center gap-0.5 rounded-full border border-hairline/50 bg-menu p-1 shadow-2xl shadow-black/40",
             end ? "end-0" : "start-0",
           )}
         >

@@ -145,6 +145,13 @@ there is no brief at all. Its row says
   starts no turn. Recent dismissals go into the next triage as records.
 - A hosted team workspace or Team Cloud gets no watch and no brief. Presence is
   recorded for the owner only.
+- A personal Cloud that began with its first hour (`server/host/first-hour.ts`)
+  also has a morning time, 8:00 in the person's zone: the day's brief is posted
+  or refreshed then and pushed, with its first line saying what was done since
+  the person was last here (emails sorted, reply drafts written, meetings
+  prepared, from `value.json`), and only what was. A watch run still sorting
+  the night's mail gets 20 minutes first, and a sleeping Cloud is woken at 7:50
+  for it (`nextWakeAt`). The very first morning push says it is the first brief.
 - An install that can't reach connected apps gets no watch, and so no brief,
   until it can. It checks once a minute, since a Cloud's access arrives after
   start. A scripted test install without the fake connected-apps service

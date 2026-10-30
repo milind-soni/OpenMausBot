@@ -26,3 +26,19 @@ it("writes what the save delay still holds when the process exits cleanly, once"
   flushEngineStatusFiles();
   expect(process.listeners("exit").filter((listener) => listener === flushEngineStatusFiles)).toHaveLength(1);
 });
+
+it("keeps the marks the welcome and the AI tests read: a ChatGPT plan and OpenCode's free backup", () => {
+  dir = mkdtempSync(join(tmpdir(), "omb-engine-status-"));
+  const file = join(dir, "providers", "engine-status.json");
+  const status = engineStatusFile(file);
+  const free = { state: "available" as const, authenticated: true, freeFallback: true };
+  const plan = { state: "available" as const, authenticated: true, chatgptPlan: true, account: { email: "a@example.com", method: "login" as const } };
+  status.save([
+    { instanceId: "opencode", driverKind: "opencodeGo", cli: "opencode", snapshot: free },
+    { instanceId: "codex", driverKind: "codex", cli: "codex", snapshot: plan },
+  ]);
+  flushEngineStatusFiles();
+  const read = status.read((instanceId) => instanceId === "opencode" ? { driverKind: "opencodeGo", cli: "opencode" } : { driverKind: "codex", cli: "codex" });
+  expect(read.get("opencode")).toEqual(free);
+  expect(read.get("codex")).toEqual(plan);
+});

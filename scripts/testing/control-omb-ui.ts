@@ -29,6 +29,8 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const UI_TOOLS_DIR = join(ROOT, ".omb-scratch", "verify-tools");
 /** Verbs that change the fixture or the page; they take the explicit handle, never discovery. */
 export const UI_MUTATING = new Set(["click", "type", "press", "flag", "eval"]);
+/** The sidebar's Tools section starts open, and a click on its header closes it. */
+export const OPEN_SIDEBAR_TOOLS = "(() => { document.querySelector('[data-tour=tools] button[aria-expanded=false]')?.click(); return true; })()";
 
 const ENTRIES = {
   threads: { entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Chat" },
@@ -422,7 +424,10 @@ export async function launchUi(
   io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process,
   fixtureOptions: { boatFixtureApi?: string } = {},
 ): Promise<void> {
-  const values = parse("ui launch", args, { entry: { type: "string" }, "tool-calls": { type: "string" }, mode: { type: "string" } });
+  const values = parse("ui launch", args, { entry: { type: "string" }, "tool-calls": { type: "string" }, mode: { type: "string" }, engine: { type: "string" } });
+  if (values.engine !== undefined && values.engine !== "codex") {
+    throw new ControlOmbError(`unknown --engine ${JSON.stringify(values.engine)}`, "the fake Claude CLI always runs; --engine codex adds the fake Codex app-server beside it");
+  }
   const entryName = typeof values.entry === "string" ? values.entry : "threads";
   if (!Object.hasOwn(ENTRIES, entryName)) {
     throw new ControlOmbError(`unknown --entry ${JSON.stringify(entryName)}`, `available entries: ${Object.keys(ENTRIES).join(", ")}`);
@@ -459,7 +464,7 @@ export async function launchUi(
     const { binary, chrome } = await ensureUiBrowser(parentEnv, note);
     checkpoint();
     fixture = await launchVerificationServer({ ...parentEnv, ...fakeEnv }, startup.signal, undefined,
-      { binaryPath: binary, executablePath: chrome ?? "" }, undefined, undefined, [], fixtureOptions.boatFixtureApi);
+      { binaryPath: binary, executablePath: chrome ?? "" }, undefined, undefined, values.engine === "codex" ? ["codex"] : [], fixtureOptions.boatFixtureApi);
     checkpoint();
     const api = fixtureApi(fixture.info.url);
     await api("PATCH", "/api/config", { language: "en" });

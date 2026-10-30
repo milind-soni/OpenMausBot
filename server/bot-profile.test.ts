@@ -122,6 +122,20 @@ describe("mascotBody", () => {
   });
 });
 
+describe("mascotFaceColor", () => {
+  it.each(["white", "black", null] as const)("accepts %s at both profile boundaries", (mascotFaceColor) => {
+    for (const strict of [true, false]) {
+      expect(parseBotProfilePatch({ mascotFaceColor }, strict)).toEqual({ ok: true, patch: { mascotFaceColor } });
+    }
+  });
+
+  it.each(["red", "#ffffff", "", 1, {}, []])("rejects an unsupported color %j", (mascotFaceColor) => {
+    expect(parseBotProfilePatch({ mascotFaceColor } as never, true)).toEqual({
+      ok: false, error: "mascotFaceColor must be white, black, or null",
+    });
+  });
+});
+
 describe("soul (standing instructions)", () => {
   it("accepts soul on both the strict and broad boundaries", () => {
     expect(parseBotProfilePatch({ soul: "Be brief." }, true)).toEqual({ ok: true, patch: { soul: "Be brief." } });

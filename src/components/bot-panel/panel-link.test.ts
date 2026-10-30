@@ -21,8 +21,8 @@ describe("named links into a bot's settings", () => {
   });
 
   it("lands the access callers on the Simple page that holds what they are about, else on the Computer tab", () => {
-    expect(linkTarget("access", link({ section: "access", page: "apps" }))).toEqual({ tab: "bot", page: "apps" });
-    expect(linkTarget("access", link({ section: "access", page: "folder" }))).toEqual({ tab: "bot", page: "folder" });
+    expect(linkTarget("access", link({ section: "access", page: "apps" }))).toEqual({ tab: "details", page: "apps" });
+    expect(linkTarget("access", link({ section: "access", page: "folder" }))).toEqual({ tab: "library", page: "folder" });
     // Simple mode has no MCP or tool-selection page: those links open the Computer tab, where Access lives.
     expect(linkTarget("access", link({ section: "access", page: "mcp" }))).toEqual({ tab: "computer" });
     expect(linkTarget("access", link({ section: "access", page: "tools" }))).toEqual({ tab: "computer" });
@@ -31,7 +31,7 @@ describe("named links into a bot's settings", () => {
   });
 
   it("lands a link that names a card on that card, on its section's tab, and on no other section", () => {
-    expect(linkTarget("overview", link({ section: "overview", anchor: "conversations" }))).toEqual({ tab: "bot", anchor: "conversations" });
+    expect(linkTarget("overview", link({ section: "overview", anchor: "conversations" }))).toEqual({ tab: "details", anchor: "conversations" });
     expect(linkTarget("access", link({ section: "access", anchor: "conversations" }))).toEqual({ tab: "computer", anchor: "conversations" });
     expect(linkTarget("usage", link({ section: "overview", anchor: "conversations" }))).toEqual(sectionTarget("usage"));
   });

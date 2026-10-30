@@ -7,6 +7,11 @@ import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
+import { AppCopyNotice, AppCopySetup } from "./EngineAppCopy";
+import { noteAppCopySwitch } from "@/state/engine-install";
+import { keyEntry, keyForInstance, type KeyId } from "./keys/key-catalog";
+import { openKeySettings } from "./keys/key-focus";
+import { KeyRow, SavedKeyLine } from "./keys/KeyRow";
 
 type Platform = "darwin" | "win32" | "linux";
 
@@ -163,6 +168,9 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const standalone = instance.install?.server?.standalone;
+  // The app installs its own build without npm; the npm command only helps when the server has npm.
+  const terminalCommand = standalone && !instance.install?.server?.package ? null : command;
 
   const run = async () => {
     if (busy) return;
@@ -170,7 +178,8 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
     setDone(false);
     setError(null);
     try {
-      const { instances } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+      const { instances, usingAppCopy } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+      noteAppCopySwitch(instance.instanceId, usingAppCopy === true);
       const installed = (instances as InstanceInfo[] | undefined)?.find((candidate) => candidate.instanceId === instance.instanceId);
       if (instances) dispatch({ type: "instances", instances });
       if (installed?.snapshot.state !== "available") {
@@ -192,19 +201,26 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
         disabled={busy}
         onClick={() => void run()}
         className={cn("flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:cursor-wait disabled:opacity-70",
-          quiet ? "bg-control text-ink hover:bg-raised-hover" : "bg-accent text-white hover:brightness-110")}
+          quiet ? "bg-control text-ink hover:bg-raised-hover" : "ui-button-primary bg-accent text-white hover:brightness-110")}
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         {busy
           ? t("engineSetup.serverInstalling")
           : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: instance.displayName })}
       </button>
+      {standalone && mode === "install" && !busy && !done && (
+        <p className="text-center text-[11px] text-ink-tertiary">
+          {/* Decimal megabytes, as macOS and Windows show file sizes. */}
+          {t("engineSetup.standaloneDownloadNote", { mb: Math.max(1, Math.round(standalone.downloadBytes / 1_000_000)) })}
+        </p>
+      )}
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.installVerified")}</p>}
+      {!busy && <AppCopyNotice instance={instance} />}
       {error && <p role="alert" className="whitespace-pre-wrap text-[12px] leading-relaxed text-danger">{error}</p>}
-      {command && (
+      {terminalCommand && (
         <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
           <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
-          <CommandRow command={command} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact allowTerminal={state.config?.cloudHome !== true} />
+          <CommandRow command={terminalCommand} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact allowTerminal={state.config?.cloudHome !== true} />
         </details>
       )}
     </div>
@@ -371,6 +387,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             <input
               value={callbackUrl}
               onChange={(event) => setCallbackUrl(event.target.value)}
+              aria-label={t("engineSetup.otherComputerUrl")}
               placeholder="http://127.0.0.1:…/?code=…"
               className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
             />
@@ -406,8 +423,25 @@ function apiKeySetup(instance: InstanceInfo): boolean {
   return instance.snapshot.authenticated === false;
 }
 
+function inlineKey(instance: InstanceInfo): KeyId | undefined {
+  const key = keyForInstance(instance.instanceId);
+  return key && keyEntry(key).kind === "key" && key !== "openaiCompat" ? key : undefined;
+}
+
+export const openKeysFor = (instance?: InstanceInfo) =>
+  openKeySettings(instance ? keyForInstance(instance.instanceId) ?? (instance.driverKind === "openai-compat" ? "openaiCompat" : undefined) : undefined);
+
+export function ApiKeyHint({ instance }: { instance: InstanceInfo }) {
+  const key = window.ogb?.remoteClient?.active === true ? undefined : inlineKey(instance);
+  return (
+    <>
+      <div className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{t("model.apiKeyHint")}</div>
+      {key && <SavedKeyLine id={key} />}
+    </>
+  );
+}
+
 function GrokKeyInstead({ className, unframed }: { className?: string; unframed: boolean }) {
-  const { dispatch } = useStore();
   const remote = window.ogb?.remoteClient?.active === true;
   return (
     <div data-engine-setup-key-instead className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
@@ -417,16 +451,7 @@ function GrokKeyInstead({ className, unframed }: { className?: string; unframed:
         </span>
         <p className="min-w-0 text-[13px] leading-relaxed text-ink">{t("engineSetup.grok.notInstalled")}</p>
       </div>
-      {!remote && (
-        <button
-          type="button"
-          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
-          className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover"
-        >
-          <KeyRound size={13} aria-hidden="true" />
-          {t("engineSetup.grok.addKey")}
-        </button>
-      )}
+      {!remote && <KeyRow id="xai" bare via="model_picker" className="mt-2 px-0 pb-0" />}
     </div>
   );
 }
@@ -434,9 +459,10 @@ function GrokKeyInstead({ className, unframed }: { className?: string; unframed:
 function ApiKeyEngineSetup({ instance, className, unframed, configured = false }: { instance: InstanceInfo; className?: string; unframed: boolean; configured?: boolean }) {
   const { dispatch } = useStore();
   const remote = window.ogb?.remoteClient?.active === true;
+  const inline = remote ? undefined : inlineKey(instance);
   const copy = configured
-    ? { title: "engineSetup.apiKey.configuredTitle", description: remote ? "engineSetup.apiKey.configuredRemote" : "engineSetup.apiKey.configuredDescription", action: "engineSetup.apiKey.change" } as const
-    : { title: "engineSetup.apiKey.title", description: remote ? "engineSetup.apiKey.remote" : "engineSetup.apiKey.description", action: "engineSetup.apiKey.open" } as const;
+    ? { title: "engineSetup.apiKey.configuredTitle", description: remote ? "engineSetup.apiKey.configuredRemote" : inline ? null : "engineSetup.apiKey.configuredDescription", action: "engineSetup.apiKey.change" } as const
+    : { title: "engineSetup.apiKey.title", description: remote ? "engineSetup.apiKey.remote" : inline ? "engineSetup.apiKey.inline" : "engineSetup.apiKey.description", action: "engineSetup.apiKey.open" } as const;
   return (
     <div data-engine-setup-api-key={configured ? "configured" : ""} className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
@@ -445,18 +471,18 @@ function ApiKeyEngineSetup({ instance, className, unframed, configured = false }
         </span>
         <div className="min-w-0">
           <div className="text-[13px] font-semibold text-ink">{t(copy.title, { name: instance.displayName })}</div>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(copy.description)}</p>
+          {copy.description && <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(copy.description)}</p>}
         </div>
       </div>
       {/* An API-only engine is available only with a saved key, so unauthenticated means rejected.
           A key engine with its own CLI (DeepSeek Harness) is unauthenticated simply when no key is saved yet. */}
-      {isApiKeyEngine(instance) && needsSignIn(instance) && (
+      {!inline && isApiKeyEngine(instance) && needsSignIn(instance) && (
         <p role="alert" className="mt-2 text-[12px] leading-relaxed text-danger">{t("engineSetup.apiKey.rejected")}</p>
       )}
-      {!remote && (
+      {inline ? <KeyRow id={inline} bare via="model_picker" rejected={isApiKeyEngine(instance) && needsSignIn(instance)} className="mt-2 px-0 pb-0" /> : !remote && (
         <button
           type="button"
-          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+          onClick={() => dispatch(openKeysFor(instance))}
           className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover"
         >
           <KeyRound size={13} aria-hidden="true" />
@@ -478,12 +504,14 @@ export function EngineSetup({
   intent = "cloud",
   unframed = false,
   description: descriptionOverride,
+  quiet = false,
 }: {
   instance: InstanceInfo;
   className?: string;
   intent?: "cloud" | "inject";
   unframed?: boolean;
   description?: string;
+  quiet?: boolean;
 }) {
   const { state } = useStore();
   const cloudHome = state.config?.cloudHome === true;
@@ -538,6 +566,11 @@ export function EngineSetup({
     );
   }
 
+  // The app's own copy is out of reach of the person's terminal, so its sign-in is finished here.
+  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !pasteSignIn) {
+    return <AppCopySetup instance={instance} className={className} unframed={unframed} />;
+  }
+
   return (
     <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
@@ -550,11 +583,16 @@ export function EngineSetup({
         </div>
       </div>
 
-      {instance.snapshot.state === "unavailable" && instance.snapshot.reason && (
+      {instance.snapshot.state === "unavailable" && instance.snapshot.reason && (quiet ? (
+        <details data-engine-setup-reason className="mt-2 text-[12px] leading-4 text-ink-tertiary">
+          <summary className="cursor-pointer select-none hover:text-ink-secondary">{t("engineSetup.details")}</summary>
+          <p className="mt-1 whitespace-pre-wrap">{instance.snapshot.reason}</p>
+        </details>
+      ) : (
         <p role="alert" className="mt-2 text-[12px] leading-relaxed text-danger">
           {instance.snapshot.reason}
         </p>
-      )}
+      ))}
 
       {deviceSignIn || browserSignIn ? (
         <>

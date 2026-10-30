@@ -121,6 +121,17 @@ describe("autoVerdict", () => {
       source: "command-allowlist",
     });
   });
+
+  it("answers a bot's plain read of its own files at every level, but never a sandbox widening or a question", () => {
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "Bash", { ownFilesRead: true }), mode).toEqual({ approve: "approved Bash (its own files)", source: "own-files" });
+    }
+    expect(autoVerdict("ask", "Read", { ownFilesRead: true })).toEqual({ approve: "approved Read (its own files)", source: "own-files" });
+    expect(autoVerdict("ask", "Bash", { ownFilesRead: true, requiresExplicitApproval: true })).toEqual({ approve: null, source: "explicit-approval-block" });
+    expect(autoVerdict("ask", "AskUserQuestion", { ownFilesRead: true })).toEqual({ approve: null, source: "no-grant" });
+    expect(autoVerdict("full", "Read", { ownFilesRead: true }).source).toBe("full-access");
+    expect(autoVerdict("ask", "Bash", { ownFilesRead: false })).toEqual({ approve: null, source: "no-grant" });
+  });
 });
 
 describe("approvalModeForOrigin", () => {

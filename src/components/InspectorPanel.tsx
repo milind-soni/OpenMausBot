@@ -17,7 +17,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const { padClass, dragProps } = useCaptionChrome();
   const threadId = bot.threadId;
   const [lens, setLens] = useState<Lens>("run");
-  const activity = useMemo(() => timelineEvents(visibleMessages(bot)), [bot]);
+  const activity = useMemo(() => timelineEvents(visibleMessages(bot), bot), [bot]);
   const [page, setPage] = useState<InspectorPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());

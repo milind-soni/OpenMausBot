@@ -17,17 +17,18 @@ import { createConnectedReads, READ_APPS, type ReadApp } from "../connected-read
 import { evaluateConnectorTools } from "../connector-verdict.ts";
 import type { DecisionRow } from "../decision-log.ts";
 import type { ProviderAdapter } from "../contracts.ts";
-import { createReadAndDraft } from "../read-and-draft.ts";
+import { createReadAndDraft, type ReadAndDraftDeps } from "../read-and-draft.ts";
 import type { Routine, RoutineChecks, RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { deciderEnabled, type Decider } from "../decider/index.ts";
 import type { Extractor } from "../extractor/index.ts";
-import { createBrief, type BriefDeps } from "./brief.ts";
+import { createBrief, type BriefDeps, type MorningDeps } from "./brief.ts";
 import { WATCH_EVERY_MINUTES, WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 import { createHelperSuggestion } from "./helper-suggestion.ts";
 import { createInboxTriage } from "./inbox-triage.ts";
 import { mainChief, proactiveOwner } from "./proactive-owner.ts";
 import { createRoutineChecks } from "./routine-checks.ts";
+import type { ValueKind } from "./value-ledger.ts";
 
 export { WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 export const WATCH_FILE = "watch.json";
@@ -80,6 +81,13 @@ export interface ProactiveDeps {
   owned(routine: Routine): void;
   /** The decision and extraction models: with them on, they sort the inbox on any engine. */
   helpers?: { decider: Pick<Decider, "choose">; extractor: Pick<Extractor, "extract"> };
+  /** The owner's last nightly dream, for the brief's Ideas. */
+  ideas?: BriefDeps["ideas"];
+  /** What the proactive bot did, counted as it happens: emails sorted, replies drafted, meetings prepared. */
+  counted?(kind: ValueKind, count: number): void;
+  /** A new Cloud's first look, confined like a read-and-draft run. */
+  look?: ReadAndDraftDeps["look"];
+  morning?: MorningDeps;
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -121,6 +129,9 @@ export function createProactive(deps: ProactiveDeps) {
     failRun: (runId, why) => deps.routines()?.rejectResult(runId, why),
     keep: (key) => checks.commit(key),
     items: (key) => checks.items(key),
+    ...(deps.ideas ? { ideas: deps.ideas } : {}),
+    prepped: () => deps.counted?.("prepped", 1),
+    ...(deps.morning ? { morning: deps.morning } : {}),
   });
   const inbox = deps.helpers ? createInboxTriage({ ...deps.helpers, config: () => cfg }) : undefined;
   const suggestion = createHelperSuggestion({
@@ -135,6 +146,9 @@ export function createProactive(deps: ProactiveDeps) {
       if (found.gmail) suggestion.consider({ gmailConnected: found.gmail.connected, ...(found.gmail.address ? { inbox: found.gmail.address } : {}) });
     },
     ...(inbox ? { inbox } : {}),
+    sorted: (routineId, count) => {
+      if (deps.routines()?.listRoutines().find((routine) => routine.id === routineId)?.botId === owner()?.id) deps.counted?.("sorted", count);
+    },
   });
   /** One brief, the main agent's: a briefing routine of any other bot finds nothing to do. */
   const routineChecks: RoutineChecks = {
@@ -150,6 +164,8 @@ export function createProactive(deps: ProactiveDeps) {
     adapter: (instanceId) => deps.registry.get(instanceId)?.adapter,
     stale: deps.stale, decide: deps.decide, release: deps.release,
     mayDraft: checks.mayDraft, drafted: checks.drafted,
+    ...(deps.look ? { look: deps.look } : {}),
+    wroteDrafts: (botId, count) => { if (botId === owner()?.id) deps.counted?.("drafted", count); },
   });
 
   const watchFile = join(deps.dataDir, WATCH_FILE);
@@ -227,6 +243,10 @@ export function createProactive(deps: ProactiveDeps) {
   let timer: ReturnType<typeof setInterval> | null = null;
   return {
     checks: routineChecks, fence, brief,
+    /** The brief is on: the proactive bot's briefing routine is. */
+    briefOn: watching,
+    /** Only the owner dreams, and only while its brief is on: at most one model call a night, with no switch of its own. */
+    dreamer: (): string | undefined => (watching() ? owner()?.id : undefined),
     /** Not now on the add-a-key suggestion; the inbox connected now is remembered with it. */
     suggestionNotNow: (threadId: string, messageId: string, auth: RequestAuth) => {
       const address = checks.address();

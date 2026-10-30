@@ -21,7 +21,8 @@ describe("execution timeline", () => {
 
   it("shows a pending activity as running until its completion patch arrives", () => {
     const start = { id: "tool", role: "bot" as const, kind: "activity" as const, tool: { name: "browser.search" }, at: 2 };
-    expect(timelineEvents([start])).toMatchObject([{ label: "browser.search", state: "running" }]);
+    expect(timelineEvents([start], { busy: true, turnStartedAt: 1 })).toMatchObject([{ label: "browser.search", state: "running" }]);
+    expect(timelineEvents([start])).toMatchObject([{ label: "browser.search", state: "unverified" }]);
     expect(timelineEvents([{ ...start, tool: { name: "browser.search", ok: true } }])).toMatchObject([
       { label: "browser.search", state: "complete" },
     ]);
@@ -53,7 +54,7 @@ describe("execution timeline", () => {
   });
 
   it("does not invent commands or results for an unfinished tool", () => {
-    const events = timelineEvents([{ id: "t", role: "bot", kind: "activity", tool: { name: "Read" }, at: 0 }]);
+    const events = timelineEvents([{ id: "t", role: "bot", kind: "activity", tool: { name: "Read" }, at: 0 }], { busy: true, turnStartedAt: 0 });
     expect(events[0]).toMatchObject({ label: "Read", state: "running" });
     expect(events[0].command).toBeUndefined();
     expect(runLogText([])).toBe("");

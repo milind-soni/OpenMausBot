@@ -24,6 +24,7 @@ import { browserRoot, profileDir, profileHash, profileKind, removeProfile, works
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
 import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
+import type { HoldLimits } from "./hold.ts";
 import { errorResult, shapeResult, textResult, withParts, type ToolResult } from "./shape.ts";
 import { TabRegistry, type Tab } from "./tabs.ts";
 import { parseToolCall, RESTART_TOOL, TOOL_LIST } from "./tools.ts";
@@ -57,6 +58,8 @@ export interface BrowserServiceOptions {
   laneWaitMs?: number;
   takeoverMs?: number;
   capacityWaitMs?: number;
+  /** How long a person's hold lasts without a hand-back; the standard limits when unset. */
+  holdLimits?: HoldLimits;
   log?: (line: string) => void;
 }
 
@@ -638,10 +641,6 @@ export class BrowserService {
     return download?.state === "completed" && download.path ? download : undefined;
   }
 
-  canControl(session: string, owner: string): boolean {
-    return this.#bySession(session)?.control.canControl(owner) ?? false;
-  }
-
   interrupted(session: string): boolean {
     return this.#bySession(session)?.control.uncertain === true;
   }
@@ -652,12 +651,7 @@ export class BrowserService {
 
   /** Done on a sign-in card, from any window or device: whoever holds this browser hands it back. */
   async handBack(session: string): Promise<void> {
-    const profile = this.#bySession(session);
-    const owner = profile?.control.owner;
-    if (!profile || !owner) return;
-    const viewer = [...profile.hub.viewers].find((candidate) => candidate.id === owner);
-    await profile.control.release(owner, () => viewer?.releaseInput() ?? Promise.resolve(true));
-    profile.hub.broadcastControl();
+    await this.#bySession(session)?.hub.handBack();
   }
 
   /** A person's restart: every tab closes and the browser comes back on one blank tab. */
@@ -679,6 +673,7 @@ export class BrowserService {
   #hubHost(profile: ProfileState) {
     return {
       control: profile.control,
+      ...(this.#options.holdLimits ? { holdLimits: this.#options.holdLimits } : {}),
       browser: () => (profile.run && !profile.run.closing ? profile.run.browser : null),
       active: () => profile.active(),
       tabs: () => profile.tabs.list(),

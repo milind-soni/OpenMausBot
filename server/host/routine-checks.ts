@@ -93,6 +93,8 @@ export interface RoutineChecksDeps {
   report(report: CheckReport): void | Promise<void>;
   /** The helper models' inbox triage (server/host/inbox-triage.ts); absent or not ready means an AI run sorts mail. */
   inbox?: Pick<InboxTriage, "ready" | "triage">;
+  /** Emails a routine's checks had sorted: by a run whose answer was kept, or by the helper models. */
+  sorted?(routineId: string, count: number): void;
 }
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);
@@ -164,6 +166,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (!owner) return;
     const [routineId, pending] = owner;
     const entry = of(routineId);
+    if (pending.replies.length) deps.sorted?.(routineId, pending.replies.length);
     if (pending.mailCursor !== undefined) entry.mailCursor = Math.max(entry.mailCursor ?? 0, pending.mailCursor);
     if (pending.runsCursor !== undefined) entry.runsCursor = Math.max(entry.runsCursor ?? 0, pending.runsCursor);
     entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...pending.mail])], MAX_JUDGED);
@@ -273,6 +276,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
             return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
           });
           entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
+          if (plan.batch.length) deps.sorted?.(routine.id, plan.batch.length);
           // Mail an earlier run still holds keeps the cursor back, so a failed run's mail is read again.
           const heldMail = Object.values(entry.pending ?? {}).some((one) => one.mail.length > 0);
           if (advanced !== undefined && !heldMail) entry.mailCursor = advanced;

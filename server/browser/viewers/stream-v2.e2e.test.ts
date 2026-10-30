@@ -16,6 +16,7 @@ import { CHROME } from "../cdp/testing/real-chrome.ts";
 import type { BrowserTarget } from "../service.ts";
 import { jpegSize, startService, until, type RealService } from "../testing/real-service.ts";
 import { StreamV2 } from "./stream-v2.ts";
+import { fillPage } from "./viewport.ts";
 
 const suite = CHROME ? describe : describe.skip;
 const LOOPBACK = { kind: "loopback", scopes: ["admin", "client"] } as RequestAuth;
@@ -62,6 +63,7 @@ suite("the v2 stream on real Chrome", () => {
     const route = createBrowserViewerRoutes({
       upgrades,
       dataDir: real.dataDir,
+      person: () => "local-owner",
       viewers: {
         open: async () => {},
         action: async () => ({ ok: true }),
@@ -155,8 +157,13 @@ suite("the v2 stream on real Chrome", () => {
     expect(client.messages).toContainEqual(expect.objectContaining({ type: "viewport", width: 1600, height: 1000 }));
     // Watching is enough to size the page; nobody has to take control for it.
     client.send({ type: "resize", width: 1200, height: 900 });
-    await until(pageSize, same([1200, 900, 2]));
-    await until(() => client.frames.at(-1), (frame) => frame?.width === 2400 && frame.height === 1800);
+    await until(pageSize, same([1280, 960, 2]));
+    await until(() => client.frames.at(-1), (frame) => frame?.width === 2560 && frame.height === 1920);
+    // A narrow, tall panel: a desktop page of its shape, taller than the screen, in frames as tall as the viewer takes.
+    client.send({ type: "resize", width: 400, height: 750 });
+    await until(pageSize, same([1280, 2400, 2]));
+    await until(() => client.frames.at(-1), (frame) => frame?.height === 2000 && Math.abs(frame.width - 1067) <= 1);
+    expect(client.messages.filter((message) => message.type === "viewport").at(-1)).toMatchObject({ width: 1280, height: 2400 });
     await client.close();
     await until(pageSize, same([1280, 800, 2]));
   }, hostTimeout(90_000));
@@ -164,7 +171,7 @@ suite("the v2 stream on real Chrome", () => {
   it("ends every drag of the panel on a sharp frame of the final size, on a page that never repaints by itself", async () => {
     await opened("/still", STILL);
     const client = await connect("width=1200&height=800&maxWidth=3200&maxHeight=2000");
-    await until(pageSize, same([1200, 800, 2]));
+    await until(pageSize, same([1280, 853, 2]));
     for (let trial = 0; trial < 6; trial++) {
       const grow = trial % 2 === 0;
       const sizes = Array.from({ length: 10 }, (_, step) => (grow ? [1240 + step * 40, 820 + step * 20] : [1560 - step * 40, 980 - step * 20]));
@@ -172,9 +179,9 @@ suite("the v2 stream on real Chrome", () => {
         client.send({ type: "resize", width, height });
         await sleep(150);
       }
-      const [width, height] = sizes.at(-1)!;
-      await until(pageSize, same([width, height, 2]));
-      await until(() => client.frames.at(-1), (frame) => frame?.width === width! * 2 && frame.height === height! * 2, 3_000);
+      const page = fillPage({ width: sizes.at(-1)![0]!, height: sizes.at(-1)![1]! });
+      await until(pageSize, same([page.width, page.height, 2]));
+      await until(() => client.frames.at(-1), (frame) => frame?.width === page.width * 2 && frame.height === page.height * 2, 3_000);
     }
     await client.close();
   }, hostTimeout(120_000));
@@ -183,11 +190,12 @@ suite("the v2 stream on real Chrome", () => {
     await opened("/held", STILL);
     const holder = await connect("width=1200&height=800&maxWidth=2400&maxHeight=1600");
     await takeControl(holder);
-    await until(pageSize, same([1200, 800, 2]));
+    await until(pageSize, same([1280, 853, 2]));
+    // The same person's second panel watches their hold: the page keeps the size of the one it is used from.
     const other = await connect("width=700&height=1000&maxWidth=1400&maxHeight=2000");
-    await until(() => other.messages.filter((message) => message.type === "control").at(-1), (control) => control?.controller === "another-viewer");
+    await until(() => other.messages.filter((message) => message.type === "control").at(-1), (control) => control?.controller === "agent" && control.owned === true && control.controlling === false);
     await sleep(1_000);
-    expect(await pageSize()).toEqual([1200, 800, 2]);
+    expect(await pageSize()).toEqual([1280, 853, 2]);
     await other.close();
     holder.send({ type: "resize", width: 1512, height: 900 });
     holder.send({ type: "frameCap", maxWidth: 3024, maxHeight: 1800 });

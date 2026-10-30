@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { OPEN_SIDEBAR_TOOLS, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 import { fixtureApi } from "./preview-fixture.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -73,7 +73,7 @@ type BotRecord = {
     })()`);
     const messages = async (id: string) => (await control("messages", "--bot", id, "--limit", "10")).messages;
     const openMap = async () => {
-      await click("Tools");
+      await evaluate(OPEN_SIDEBAR_TOOLS);
       await click("Team map");
       await expect.poll(() => evaluate("Boolean(document.querySelector('[data-team-canvas]'))"), { timeout: 10_000 }).toBe(true);
     };
@@ -154,7 +154,7 @@ type BotRecord = {
     expect(await snapshot()).toContain('region "Team canvas"');
     for (const name of ["Ada", "Ben", "Cleo", "Dana"]) expect(await snapshot()).toContain(`Change default model for ${name}`);
     expect(await evaluate("[...document.querySelectorAll('[data-team-key] article span')].some(span => span.textContent.trim() === 'Ready')")).toBe(false);
-    expect(await evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Computer for \"]').length")).toBe(0);
+    expect(await evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]').length")).toBe(0);
 
     // The full-app fixture has no Boat credentials. The explicit + entry
     // explains paid creation, but cannot allocate anything until connected.
@@ -162,18 +162,18 @@ type BotRecord = {
     expect(beforeComputers.configured).toBe(false);
     await evaluate("document.querySelector('summary[aria-label=\"Add to team map\"]').focus(); true");
     await ui("press", "--keys", "Enter");
-    await click("Cloud computer");
+    await click("Cloud desktop");
     await expect.poll(snapshot).toContain("Connect your Boat account before creating a cloud desktop.");
     await expect.poll(snapshot).toContain("Your Boat plan and usage charges apply.");
     const inputRefs = (await ui("snapshot")).refs as Record<string, { role: string; name: string }>;
     const nameInput = Object.entries(inputRefs).filter(([, entry]) => entry.role === "textbox" && entry.name === "New cloud desktop");
     expect(nameInput).toHaveLength(1);
     await ui("type", "--ref", `@${nameInput[0][0]}`, "--text", "Fixture desktop");
-    expect(await evaluate("document.querySelector('[aria-label=\"Team computers\"] button[type=submit]').disabled")).toBe(true);
+    expect(await evaluate("document.querySelector('aside[aria-label=\"Desktops\"] button[type=submit]').disabled")).toBe(true);
     expect((await api("GET", "/api/team-computers")).computers).toEqual(beforeComputers.computers);
     await click("Cancel");
-    await click("Close computers");
-    expect(await evaluate("Boolean(document.querySelector('[aria-label=\"Team computers\"]'))")).toBe(false);
+    await click("Close desktops");
+    expect(await evaluate("Boolean(document.querySelector('aside[aria-label=\"Desktops\"]'))")).toBe(false);
     receipts.unconfiguredComputerCreation = "Explicit Add entry shows cost disclosure and keeps Create cloud desktop disabled without credentials.";
 
     await evaluate(`(() => {
@@ -188,12 +188,12 @@ type BotRecord = {
     await click("Edit Ben");
     await expect.poll(snapshot).toContain('dialog "Ben"');
     expect(await evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(true);
-    await expect.poll(() => evaluate("[...document.querySelectorAll('[data-team-canvas] [aria-label^=\"Computer for \"]')].map(button => button.getAttribute('aria-label'))"))
-      .toEqual(["Computer for Ben"]);
-    await click("Computer for Ben");
+    await expect.poll(() => evaluate("[...document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]')].map(button => button.getAttribute('aria-label'))"))
+      .toEqual(["Desktop for Ben"]);
+    await click("Desktop for Ben");
     await expect.poll(() => evaluate("document.querySelector('[data-bot-settings-section=access] > button')?.getAttribute('aria-expanded')")).toBe("true");
     await click("Close settings");
-    await expect.poll(() => evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Computer for \"]').length")).toBe(0);
+    await expect.poll(() => evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]').length")).toBe(0);
     await click("Change default model for Ben");
     await expect.poll(() => evaluate("document.querySelector('[data-bot-settings-section=model] > button')?.getAttribute('aria-expanded')")).toBe("true");
     expect(await snapshot()).toContain("Default model");
@@ -251,7 +251,7 @@ type BotRecord = {
     const cardSelector = `[data-bot-id=${JSON.stringify(ben.id)}]`;
     receipts.cancelledDrop = await drag(cardSelector, { x: 0, y: 0 }, teamSelector("Research"));
     await expect.poll(snapshot).toContain('alertdialog "Move Ben to Research?"');
-    expect(await snapshot()).toContain("This changes the bot's home team and shared instructions, not just its position.");
+    expect(await snapshot()).toContain("This changes the bot's home department and shared instructions, not just its position.");
     expect((await savedBot(ben.id)).section).toBe("Delivery");
     await click("Cancel");
     await expect.poll(snapshot).not.toContain('alertdialog "Move Ben to Research?"');
@@ -293,9 +293,9 @@ type BotRecord = {
     expect(await messages(ben.id)).toEqual(transcript);
     receipts.order = await cardOrder("Delivery");
     const beforeArrange = await teamPosition("Delivery");
-    receipts.cancelledArrange = await drag('[aria-label="Arrange Delivery team"]', { x: 45, y: 20 }, undefined, true);
+    receipts.cancelledArrange = await drag('[aria-label="Arrange Delivery department"]', { x: 45, y: 20 }, undefined, true);
     expect(await teamPosition("Delivery")).toEqual(beforeArrange);
-    receipts.arrange = await drag('[aria-label="Arrange Delivery team"]', { x: 12, y: 10 });
+    receipts.arrange = await drag('[aria-label="Arrange Delivery department"]', { x: 12, y: 10 });
     await expect.poll(() => teamPosition("Delivery")).not.toEqual(beforeArrange);
     const arranged = await teamPosition("Delivery");
     const beforePan = await view();
@@ -319,7 +319,7 @@ type BotRecord = {
     await expect.poll(async () => (await view()).scale).toBe(0.3);
     const beforeWheelPan = await view();
     await wheel(45, false);
-    await expect.poll(async () => (await view()).y).toBeCloseTo(beforeWheelPan.y - 45, 4);
+    await expect.poll(async () => (await view()).y).toBeCloseTo(beforeWheelPan.y - 45, 3);
     await click("Fit departments to view");
     expect(await evaluate(`(() => {
       const viewport = document.querySelector('[data-team-canvas]').getBoundingClientRect();

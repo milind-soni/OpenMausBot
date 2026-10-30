@@ -14,6 +14,7 @@ import { closeMessageDb,
   lastRowAt,
   latestPersonLineAts,
   logNotification,
+  openRescueMessages,
   latestSaidByBot,
   markNotificationLogRead,
   markThreadNotificationLogRead,
@@ -61,6 +62,19 @@ describe("message-db", () => {
     const thread = readThread("t1", legacy("t1"));
     expect(thread.messages.map((m) => m.text)).toEqual(["hello, edited", "world"]);
     expect(thread.activeLeafId).toBe("m2");
+  });
+
+  it("finds the first-reply rescue rows that never settled or ended", () => {
+    const rescue = (id: string, state: Record<string, true> = {}) => msg(id, "", {
+      role: "bot", kind: "activity",
+      tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
+        rescue: { botId: "b", threadId: "t1", turnId: id, instanceId: "opencodeGo", ai: "OpenCode", ...state } },
+    });
+    insertMessage("t1", rescue("open"));
+    insertMessage("t1", rescue("settled", { settled: true }));
+    insertMessage("t1", rescue("over", { over: true }));
+    insertMessage("t1", msg("plain", "", { role: "bot", kind: "activity", tool: { name: "notice: something else", ok: true } }));
+    expect(openRescueMessages().map((hit) => [hit.threadId, hit.message.id])).toEqual([["t1", "open"]]);
   });
 
   it("imports a legacy JSON thread file exactly once", () => {

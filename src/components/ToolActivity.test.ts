@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
 
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true }));
 const { ToolActivity } = await import("./ToolActivity");
@@ -18,10 +19,21 @@ describe("ToolActivity", () => {
     expect(html).not.toContain("<script>");
   });
   it("distinguishes pending, failed and unrecorded output", () => {
-    const render = (ok?: boolean) => renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Read", ok } }));
-    expect(render()).toContain("Waiting for the tool to finish");
+    const render = (ok?: boolean, live = false) => renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Read", ok }, live }));
+    expect(render(undefined, true)).toContain("Waiting for the tool to finish");
+    expect(render()).toContain("No result");
+    expect(render()).not.toContain("Waiting for the tool to finish");
     expect(render(false)).toContain("Failed");
     expect(render(false)).toContain("No output was recorded");
     expect(render(true)).toContain("No output was recorded");
+  });
+  it("translates unverified status in active locale", () => {
+    try {
+      setLocale("es");
+      const html = renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Read" } }));
+      expect(html).toContain("Sin resultado");
+    } finally {
+      setLocale("en");
+    }
   });
 });

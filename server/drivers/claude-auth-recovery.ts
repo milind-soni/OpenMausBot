@@ -6,7 +6,7 @@ type Frame = {
   is_error?: unknown; isReplay?: unknown; total_cost_usd?: unknown;
   message?: { model?: unknown; content?: unknown };
 };
-type Refusal = { text: string; kind: "auth" | "limit"; said?: string; resetsAt?: number };
+type Refusal = { text: string; kind: "auth" | "limit"; said?: string; resetsAt?: number; scope?: "engine" | "model" | "credits" };
 type Pending = { refusal?: Refusal; refused?: boolean; buffered: RuntimeEvent[]; settle: (error?: Error) => void };
 
 /** Only CLI-marked API errors count; assistant prose about signing out does not. */
@@ -65,7 +65,7 @@ export function claudeAuthRecovery(
       const refusal = held.refusal;
       if (refusal?.kind === "auth" && event.type === "runtime.error" && event.setup && event.message === refusal.text) return void held.buffered.push(event);
       if (refusal?.kind === "limit" && event.type === "runtime.error" && !event.setup) {
-        Object.assign(refusal, { said: event.message, resetsAt: event.limitResetsAt });
+        Object.assign(refusal, { said: event.message, resetsAt: event.limitResetsAt, scope: event.limit });
         return void held.buffered.push(event);
       }
       if (refusal && held.refused && event.type === "turn.completed" && !event.ok && event.stopReason === refusedStop[refusal.kind] && typeof event.turnId === "string") {
@@ -76,7 +76,7 @@ export function claudeAuthRecovery(
           if (!stopped) return accept(event.threadId, held);
           pending.delete(event.threadId);
           held.settle(refusal.kind === "auth" ? new TurnAuthenticationRefusedError(turnId, refusal.text)
-            : new TurnUsageLimitRefusedError(turnId, refusal.said ?? refusal.text, refusal.resetsAt));
+            : new TurnUsageLimitRefusedError(turnId, refusal.said ?? refusal.text, refusal.resetsAt, refusal.scope));
         }, () => accept(event.threadId, held));
       }
       accept(event.threadId, held);

@@ -24,8 +24,8 @@ const CALL_ENDPOINT_MS = 850;
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
-/** `fill` (Simple composer): a round button in that colour. */
-export function GroupCallButton({ group, members, placement, fill }: { group: Group; members: Bot[]; placement?: CallButtonPlacement; fill?: string }) {
+/** `fill` (Simple composer): a round button in that colour, with its glyph in `ink`. */
+export function GroupCallButton({ group, members, placement, fill, ink }: { group: Group; members: Bot[]; placement?: CallButtonPlacement; fill?: string; ink?: string }) {
   const { capabilities, ready } = useDesktopCapabilities();
   if (group.dm) return null;
   if (ready && !capabilities.dictation.available) return null;
@@ -33,6 +33,7 @@ export function GroupCallButton({ group, members, placement, fill }: { group: Gr
     <CallTargetButton
       placement={placement}
       fill={fill}
+      ink={ink}
       targetId={group.id}
       targetName={group.name}
       voices={members.map((member) => member.voice)}

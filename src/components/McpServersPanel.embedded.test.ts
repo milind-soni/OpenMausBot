@@ -81,7 +81,7 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     const html = render(true, true);
     expect(html).toContain('data-app-tile="whop"');
     expect(html).toContain('aria-label="Connect Whop"');
-    expect(html).toContain("no API key needed");
+    expect(html).toContain("No API key needed");
     expect(html).toContain("admin access across businesses");
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("Your MCP servers");

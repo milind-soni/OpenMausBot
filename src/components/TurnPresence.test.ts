@@ -47,15 +47,15 @@ describe("TurnPresence phrases", () => {
     expect(visibleText()).toEqual([phraseAt(thinking, `${seed}|think`, 1)]);
   });
 
-  it("crossfades the outgoing phrase in the same cell, then drops it", () => {
-    render({ phrases: thinking, phase: "think" });
+  it("swaps one phrase for the next and never draws two at once", () => {
+    // The fading old phrase sat out of flow: a longer one drew over the size beside it ("Piecing it together" over "· 2 KB").
+    render({ label: "Working", phrases: thinking, phase: "think", since: Date.now(), size: "2 KB" });
     act(() => void vi.advanceTimersByTime(phraseHoldMs(`${seed}|think`, 0)));
-    const outgoing = host.querySelector(".turn-phrase-out");
-    expect(outgoing?.textContent).toBe("Thinking");
-    expect(outgoing?.getAttribute("aria-hidden")).toBe("true");
+    const drawn = () => Array.from(host.querySelectorAll("[data-turn-now] .thinking-shimmer")).map((node) => node.textContent);
+    expect(drawn()).toEqual([phraseAt(thinking, `${seed}|think`, 1)]);
     expect(host.querySelector(".turn-phrase-in")).not.toBeNull();
     act(() => void vi.advanceTimersByTime(320));
-    expect(host.querySelector(".turn-phrase-out")).toBeNull();
+    expect(drawn()).toEqual([phraseAt(thinking, `${seed}|think`, 1)]);
   });
 
   it("starts a new step at its plain label", () => {
@@ -75,13 +75,6 @@ describe("TurnPresence phrases", () => {
     expect(visibleText()).toEqual(["Thinking"]);
   });
 
-  it("floats the outgoing phrase out of flow, so only the shown phrase sets the width", () => {
-    render({ phrases: thinking, phase: "think" });
-    act(() => void vi.advanceTimersByTime(phraseHoldMs(`${seed}|think`, 0)));
-    expect(host.querySelector(".turn-phrase-out")?.className).toContain("absolute");
-    expect(host.querySelector(".turn-phrase-in")?.className).not.toContain("absolute");
-  });
-
   it("keeps a single phrase steady", () => {
     render({ phrases: ["Running the test suite"], phase: "spoken" });
     act(() => void vi.advanceTimersByTime(60_000));
@@ -98,8 +91,7 @@ describe("TurnPresence phrases", () => {
 
 describe("the status line", () => {
   const line = () => {
-    const shown = host.querySelector("[data-turn-status]")?.cloneNode(true) as HTMLElement | undefined;
-    shown?.querySelectorAll(".turn-phrase-out").forEach((node) => node.remove());
+    const shown = host.querySelector("[data-turn-status]");
     return shown?.textContent?.replace(/\s+/g, " ").trim();
   };
 
@@ -123,6 +115,79 @@ describe("the status line", () => {
     render({ label: "Working", since: null, phrases: ["Thinking"], phase: "think" });
     expect(host.querySelector(".turn-phrase-out")).toBeNull();
     expect(line()).toBe("Working · Thinking");
+  });
+});
+
+describe("a long step's quiet part", () => {
+  const line = () => host.querySelector("[data-turn-status]")?.textContent?.replace(/\s+/g, " ").trim();
+
+  it("follows the step with how it is doing, and counts the time since its last output on its own", () => {
+    vi.setSystemTime(1_000_000);
+    render({ label: "Working", since: 1_000_000 - 72_000, phrases: ["Running scrape.py"], phase: "step", hover: "python3 scrape.py --pages 40", quiet: { kind: "busy" } });
+    expect(line()).toBe("Working · 1m 12s · Running scrape.py · busy, no output yet");
+    expect(host.querySelector("[data-turn-now]")?.getAttribute("title")).toBe("python3 scrape.py --pages 40");
+    render({ label: "Working", since: 1_000_000 - 72_000, phrases: ["Running scrape.py"], phase: "step", quiet: { kind: "output", at: 1_000_000 - 30_000 } });
+    expect(host.querySelector("[data-turn-quiet]")?.textContent).toBe("last output just now");
+    act(() => void vi.advanceTimersByTime(45_000));
+    expect(host.querySelector("[data-turn-quiet]")?.textContent).toBe("last output 1 min ago");
+  });
+
+  it("says it in Simple mode too, after the one phrase", () => {
+    render({ simple: true, phrases: ["Running scrape.py"], phase: "step", quiet: { kind: "network" } });
+    expect(line()).toBe("Running scrape.py · waiting on the network");
+  });
+});
+
+describe("the Now card", () => {
+  const toggle = () => host.querySelector<HTMLButtonElement>("button[aria-expanded]");
+  const card = () => host.querySelector("[role=region]");
+  const open = (extra: Record<string, unknown> = {}) =>
+    render({ label: "Working", since: Date.now(), phrases: ["Running scrape.py"], phase: "step", card: createElement("p", null, "steps"), cardLabel: "What Biber is doing", ...extra });
+
+  it("is one calm line by default; a click unfolds the card under it and another folds it", () => {
+    open();
+    expect(toggle()?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle()?.getAttribute("aria-label")).toBe("What Biber is doing");
+    expect(card()).toBeNull();
+    act(() => toggle()!.click());
+    expect(toggle()?.getAttribute("aria-expanded")).toBe("true");
+    expect(card()?.textContent).toBe("steps");
+    expect(toggle()?.getAttribute("aria-controls")).toBe(card()?.id);
+    act(() => toggle()!.click());
+    expect(toggle()?.getAttribute("aria-expanded")).toBe("false");
+    expect(card()).toBeNull();
+  });
+
+  it("folds on Escape and gives focus back to the line", () => {
+    open();
+    act(() => toggle()!.click());
+    toggle()!.focus();
+    act(() => void document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(card()).toBeNull();
+    expect(document.activeElement).toBe(toggle());
+  });
+
+  it("leaves Escape to whatever else has the focus", () => {
+    const field = document.createElement("textarea");
+    document.body.append(field);
+    open();
+    act(() => toggle()!.click());
+    field.focus();
+    act(() => void document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(card()).not.toBeNull();
+    field.remove();
+  });
+
+  it("is a plain line with nothing to show, in Simple mode a button as well, and folds when the turn ends", () => {
+    render({ label: "Working", since: Date.now(), phrases: ["Thinking"], phase: "think" });
+    expect(toggle()).toBeNull();
+    open({ simple: true });
+    act(() => toggle()!.click());
+    expect(card()).not.toBeNull();
+    render({ visible: false, card: createElement("p", null, "steps"), cardLabel: "What Biber is doing" });
+    act(() => void vi.advanceTimersByTime(300));
+    open({ simple: true });
+    expect(toggle()?.getAttribute("aria-expanded"), "a new turn starts folded").toBe("false");
   });
 });
 

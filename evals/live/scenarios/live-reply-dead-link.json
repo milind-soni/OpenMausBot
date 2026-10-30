@@ -1,0 +1,37 @@
+{
+  "id": "live-reply-dead-link",
+  "title": "Live: a link that does not open gets the outcome first and a way forward",
+  "behavior": "Against a real model, a request to summarize a page that does not exist leads with the outcome, explains it plainly and offers a way forward (the right link, or pasting the text), with no invented summary.",
+  "bots": [
+    {
+      "key": "helper",
+      "name": "Helper"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "helper",
+      "text": "Summarize https://this-domain-does-not-exist-omb.com/article."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "helper",
+      "count": 1
+    }
+  ],
+  "invariants": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "helper"
+    },
+    {
+      "kind": "botReplied",
+      "bot": "helper",
+      "thread": "active"
+    }
+  ],
+  "judged": {
+    "prompt": "reply-habits-v1"
+  }
+}

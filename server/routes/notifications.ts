@@ -1,11 +1,11 @@
 import { markNotificationLogRead, markThreadNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-/** Opening a conversation reads its notifications, so every open app's badge drops them too. */
-export function readThreadNotifications(threadId: string, broadcast: (payload: Record<string, unknown>) => void): void {
-  const ids = markThreadNotificationLogRead(threadId);
+/** Automatic conversation reads keep spend alerts unread unless the opener is an owner or admin. */
+export function readThreadNotifications(threadId: string, broadcast: (payload: Record<string, unknown>) => void, auth: RequestAuth): void {
+  const ids = markThreadNotificationLogRead(threadId, ownerOrAdmin(auth));
   if (ids.length) broadcast({ kind: "notifications.read", threadId, ids });
 }
 
@@ -17,7 +17,8 @@ export function createNotificationRoutes(deps = {
   reaches: (auth: RequestAuth, entry: NotificationLogEntry) => boolean = () => true): RouteHandler {
   const visible = (auth: RequestAuth) => {
     const seen = shown(auth);
-    return deps.recent().filter((entry) => (!entry.threadId || seen(entry.threadId)) && reaches(auth, entry));
+    const admin = ownerOrAdmin(auth);
+    return deps.recent().filter((entry) => (entry.kind !== "spend" || admin) && (!entry.threadId || seen(entry.threadId)) && reaches(auth, entry));
   };
   return async ({ res, path, method, auth, json }) => {
     if (method === "GET" && path === "/api/notifications") {

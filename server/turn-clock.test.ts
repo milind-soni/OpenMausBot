@@ -6,18 +6,18 @@ const at = (iso: string) => Date.parse(iso);
 describe("turnClockLine", () => {
   it("names the weekday, local date and time, IANA timezone and UTC offset", () => {
     expect(turnClockLine(at("2026-10-08T16:48:00Z"), "Asia/Baghdad"))
-      .toBe("Current time when this message was sent: Thursday, 2026-10-08 19:48 Asia/Baghdad (UTC+03:00).");
+      .toBe("Current time when this message was sent: Thursday, 2026-10-08 19:48 Asia/Baghdad (Iraq time, UTC+03:00).");
     expect(turnClockLine(at("2026-10-08T16:48:00Z"), "Asia/Kolkata"))
-      .toBe("Current time when this message was sent: Thursday, 2026-10-08 22:18 Asia/Kolkata (UTC+05:30).");
+      .toBe("Current time when this message was sent: Thursday, 2026-10-08 22:18 Asia/Kolkata (India time, UTC+05:30).");
     expect(turnClockLine(at("2026-10-08T16:48:00Z"), "UTC"))
       .toBe("Current time when this message was sent: Thursday, 2026-10-08 16:48 UTC (UTC+00:00).");
   });
 
   it("follows daylight saving and writes a western offset with an ASCII minus", () => {
     expect(turnClockLine(at("2026-01-15T17:05:00Z"), "America/New_York"))
-      .toBe("Current time when this message was sent: Thursday, 2026-01-15 12:05 America/New_York (UTC-05:00).");
+      .toBe("Current time when this message was sent: Thursday, 2026-01-15 12:05 America/New_York (Eastern time, UTC-05:00).");
     expect(turnClockLine(at("2026-07-15T16:05:00Z"), "America/New_York"))
-      .toBe("Current time when this message was sent: Wednesday, 2026-07-15 12:05 America/New_York (UTC-04:00).");
+      .toBe("Current time when this message was sent: Wednesday, 2026-07-15 12:05 America/New_York (Eastern time, UTC-04:00).");
   });
 
   it("uses the local calendar day, not the UTC one, near midnight", () => {
@@ -39,7 +39,7 @@ describe("turnClockLine", () => {
 
   it("costs a few dozen tokens at most", () => {
     const longest = turnClockLine(at("2026-09-30T16:48:00Z"), "America/Argentina/ComodRivadavia");
-    expect(Math.ceil(Buffer.byteLength(longest) / 4)).toBeLessThanOrEqual(32);
+    expect(Math.ceil(Buffer.byteLength(longest) / 4)).toBeLessThanOrEqual(36);
   });
 });
 

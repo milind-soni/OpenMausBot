@@ -359,8 +359,8 @@ describe("the scheduler", () => {
   function helperReviewer(write: NonNullable<SideJobInstance["generateText"]>, helper: { instanceId: string } | null = { instanceId: "helper" }) {
     const booked: Array<Parameters<SideJobsDeps["book"]>[0]> = [];
     const engines: Record<string, SideJobInstance> = {
-      pi: { instanceId: "pi", driverKind: "piAgent", enabled: true, adapter: { capabilities: { agentsMcp: true } } },
-      helper: { instanceId: "helper", driverKind: "openai-compat", enabled: true, adapter: { capabilities: { agentsMcp: true } }, generateText: write },
+      pi: { instanceId: "pi", driverKind: "piAgent", enabled: true, models: { default: "", options: [] }, adapter: { capabilities: { agentsMcp: true } } },
+      helper: { instanceId: "helper", driverKind: "openai-compat", enabled: true, models: { default: "", options: [] }, adapter: { capabilities: { agentsMcp: true } }, generateText: write },
     };
     const jobs = createSideJobs({
       bot: (id) => (id === BOT.id ? { ...BOT, threadId: "main", modelSelection: { instanceId: "pi" } } : undefined),

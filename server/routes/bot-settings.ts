@@ -164,7 +164,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       sawThread(current.threadId);
       deps.threadRead?.(auth, current.threadId);
       store.patchTask(current.id, current.threadId, { unread: false, ...readCursor(current.threadId) });
-      readThreadNotifications(current.threadId, broadcast);
+      readThreadNotifications(current.threadId, broadcast, auth);
       const bot = store.bot(current.id)!;
       const visible = wireBot(bot);
       broadcast({ kind: "bot", bot: visible });

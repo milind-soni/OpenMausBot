@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { ChevronDown, ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -14,6 +14,7 @@ import { MausAvatar } from "../Avatar";
 import { AvatarImageGenerator } from "../AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "../avatar-editing";
 import { Segmented } from "./rows";
+import { MascotFaceColorPicker } from "../MascotFaceColorPicker";
 
 export type AvatarEditorTab = "bot" | "generate" | "upload";
 
@@ -65,7 +66,9 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   }, []);
   const pickMascot = (patch: AvatarPatch) => onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
   const body = bot.mascotBody ?? "cursor";
-  const costume = wornBody(bot.mascotBody, bot.color, useHalloweenDressed());
+  const dressed = useHalloweenDressed();
+  const costume = wornBody(bot.mascotBody, bot.color, dressed);
+  const [moreLooks, setMoreLooks] = useState(() => dressed || isHalloweenBody(body) || Boolean(bot.mascotExpression && bot.mascotExpression !== "idle"));
   const dressedAs = costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
   const bodyButton = (id: BotBodyId, name: string) => (
     <button
@@ -81,7 +84,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         !showsImage && body === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]",
       )}
     >
-      <MausAvatar color={bot.color} bodyId={id} size={40} animated={false} trackPointer={false} />
+      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} bodyId={id} size={40} animated={false} trackPointer={false} />
     </button>
   );
 
@@ -98,7 +101,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
       aria-label={t("botPanel.avatar.edit")}
       data-panel-avatar-editor
       onKeyDown={onKeyDown}
-      className="absolute inset-x-[-6px] top-[92px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
+      className="popover-surface absolute inset-x-[-5px] top-[80px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
     >
       <div ref={tabsRef} className="flex items-center gap-0.5 border-b border-ink/[0.06] p-2">
         {TABS.map(([id, label]) => (
@@ -134,13 +137,6 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
             <div className="grid grid-cols-5 gap-1.5">
               {MASCOT_BODY_IDS.map((id) => bodyButton(id, MASCOT_BODIES[id].name))}
             </div>
-            <div className="flex flex-wrap items-baseline gap-x-2 px-1 pb-1.5 pt-3 text-[12px] text-ink-tertiary">
-              <span>{t("botPanel.avatar.halloween")}</span>
-              {dressedAs && <span data-avatar-costume>{t("botPanel.avatar.costume", { name: dressedAs })}</span>}
-            </div>
-            <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
-              {HALLOWEEN_BODY_IDS.map((id) => bodyButton(id, HALLOWEEN_BODIES[id].name))}
-            </div>
             <div className="flex flex-wrap justify-center gap-2 px-1 pb-1 pt-3.5">
               {MAUS_COLOR_NAMES.map((color) => (
                 <button
@@ -159,25 +155,47 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
                 />
               ))}
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2.5" role="group" aria-label={t("botPanel.avatar.face")}>
-              <span className="mr-0.5 text-[12px] text-ink-tertiary">{t("botPanel.avatar.face")}</span>
-              {PICKABLE_STATES.map((expression) => (
-                <button
-                  key={expression}
-                  type="button"
-                  disabled={busy}
-                  data-avatar-face={expression}
-                  aria-pressed={activeState === expression}
-                  onClick={() => pickMascot({ mascotExpression: expression })}
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[12px] disabled:opacity-50",
-                    activeState === expression ? "bg-ink/[0.15] text-ink" : "bg-ink/[0.04] text-ink-secondary hover:text-ink",
-                  )}
-                >
-                  {faceLabel(expression)}
-                </button>
-              ))}
-            </div>
+            <MascotFaceColorPicker bot={bot} disabled={busy} onPatch={pickMascot} />
+            <button
+              type="button"
+              data-avatar-more
+              aria-expanded={moreLooks}
+              onClick={() => setMoreLooks((open) => !open)}
+              className="mx-auto mt-2.5 flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+            >
+              {t("botPanel.avatar.more")}
+              <ChevronDown size={13} aria-hidden="true" className={cn("transition-transform", moreLooks && "rotate-180")} />
+            </button>
+            {moreLooks && (
+              <div data-avatar-more-looks>
+                <div className="flex flex-wrap items-baseline gap-x-2 px-1 pb-1.5 pt-2 text-[12px] text-ink-tertiary">
+                  <span>{t("botPanel.avatar.halloween")}</span>
+                  {dressedAs && <span data-avatar-costume>{t("botPanel.avatar.costume", { name: dressedAs })}</span>}
+                </div>
+                <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
+                  {HALLOWEEN_BODY_IDS.map((id) => bodyButton(id, HALLOWEEN_BODIES[id].name))}
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2.5" role="group" aria-label={t("botPanel.avatar.face")}>
+                  <span className="mr-0.5 text-[12px] text-ink-tertiary">{t("botPanel.avatar.face")}</span>
+                  {PICKABLE_STATES.map((expression) => (
+                    <button
+                      key={expression}
+                      type="button"
+                      disabled={busy}
+                      data-avatar-face={expression}
+                      aria-pressed={activeState === expression}
+                      onClick={() => pickMascot({ mascotExpression: expression })}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-[12px] disabled:opacity-50",
+                        activeState === expression ? "bg-ink/[0.15] text-ink" : "bg-ink/[0.04] text-ink-secondary hover:text-ink",
+                      )}
+                    >
+                      {faceLabel(expression)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 

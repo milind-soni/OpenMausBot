@@ -1,17 +1,66 @@
-// Settings → Import: everything that brings work in from elsewhere, in one place. "From your AI apps" is the welcome
-// tour's import step (the same rows, client and server route); "From Grok Bot" is the same Grok Bot import as Templates.
+// Settings → Import: everything that brings work in from elsewhere, in one place. "From your AI apps" brings the skills
+// and MCP servers another AI tool keeps on this computer; the bot import below is the same one Templates has.
 import { BookOpen, Check, Info, Loader2, Plug } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSummary, type SetupImportClient } from "@/lib/setup-import";
 import { useStore } from "@/state/store";
-import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult } from "../../shared/setup-import";
+import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
 import { GrokImportFlow } from "./GrokImportFlow";
-import { ImportRow } from "./onboarding/beats/ImportBeat";
+import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
+
+function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
+  const marks = [...new Set(sources.map((source) => (source === "claudeDesktop" ? "claudeCode" : source)))];
+  return (
+    <span className="mr-1.5 inline-flex items-center gap-1 align-[-1px]" aria-hidden="true">
+      {marks.map((source) => {
+        switch (source) {
+          case "codex": return <CodexMark key={source} size={12} />;
+          case "cursor": return <CursorMark key={source} size={12} />;
+          case "gemini": return <PresetProviderMark key={source} preset="google" size={12} />;
+          default: return <ClaudeMark key={source} size={12} />;
+        }
+      })}
+    </span>
+  );
+}
+
+export function ImportRow({ icon, label, summary, hint, sources, checked, disabled, onChange }: {
+  icon: ReactNode;
+  label: string;
+  summary: string;
+  hint: string;
+  sources: readonly SetupSource[];
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={cn("flex items-start gap-3 px-3.5 py-3 transition-colors", disabled ? "cursor-default" : "cursor-pointer hover:bg-raised/40")}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 size-4 shrink-0 cursor-[inherit] accent-[var(--color-accent)]"
+      />
+      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-ink-secondary">{icon}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        {/* One run of text, so a narrow card wraps the summary under the label, marks included. */}
+        <span className="text-[13px] leading-5 text-ink-secondary">
+          <span className="mr-2 text-[14px] font-medium text-ink">{label}</span>
+          <SourceMarks sources={sources} />
+          {summary}
+        </span>
+        <span className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{hint}</span>
+      </span>
+    </label>
+  );
+}
 
 const buttonClass = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
 

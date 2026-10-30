@@ -1,3 +1,4 @@
+import { plainTimeZone } from "./plain-time-zone.ts";
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -9,7 +10,7 @@ export function cronScheduleLabel(schedule: RoutineCronSchedule): string {
   const [minute, hour, day, month, weekday] = schedule.expression.trim().split(/\s+/);
   let label = `Cron ${schedule.expression}`;
   if (/^\d+$/.test(minute ?? "") && /^\d+$/.test(hour ?? "")) {
-    const time = `${hour!.padStart(2, "0")}:${minute!.padStart(2, "0")}`;
+    const time = `${Number(hour)}:${minute!.padStart(2, "0")}`;
     const monthDay = /^\d+$/.test(day ?? "") ? Number(day) : null;
     if (weekday === "*" && month === "*") {
       if (day === "*") label = `Every day at ${time}`;
@@ -30,5 +31,5 @@ export function cronScheduleLabel(schedule: RoutineCronSchedule): string {
       }
     }
   }
-  return `${label} · ${schedule.timeZone}`;
+  return `${label} ${plainTimeZone(schedule.timeZone)}`;
 }

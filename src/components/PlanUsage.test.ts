@@ -38,3 +38,19 @@ describe("Plan usage presentation", () => {
     expect(html).not.toContain("100% left");
   });
 });
+
+describe("Usage & billing in Simple mode", () => {
+  const provider = (id: string, ok: boolean, used: number | null) => ({
+    id, name: id, driver: id, plan: null, ok, error: null, extra: [],
+    fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null },
+    weekly: { available: used !== null, remainingPercent: used === null ? null : 100 - used, usedPercent: used, resetsAt: null },
+  });
+
+  it("leads with the provider whose weekly allowance is most used, and ignores providers that report none or fail", async () => {
+    const { busiestWeekly } = await import("./PlanUsage");
+    expect(busiestWeekly({ providers: [provider("claude", true, 34), provider("codex", true, 61), provider("grok", false, 90), provider("kimi", true, null)] }))
+      .toMatchObject({ provider: { id: "codex" }, used: 61 });
+    expect(busiestWeekly({ providers: [provider("grok", false, 90)] })).toBeNull();
+    expect(busiestWeekly(null)).toBeNull();
+  });
+});

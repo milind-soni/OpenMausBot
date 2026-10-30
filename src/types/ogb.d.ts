@@ -114,20 +114,11 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
+       * whose page carries that server's version. Absent in desktop builds before it. */
+      app?: { version: string; ownPage: boolean };
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
-      /** "Let my bots use this Mac" (this PC, this computer), on My Cloud's own page in this app: its one switch and
-       * what is lent (electron/cloud-lending-ipc.mjs). `open` shows this computer's own Settings, leaving the page. */
-      cloudLending?: { open(): Promise<void>; state?(): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; set?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; screen?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; terminal?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>;
-        /** A bot's Use my Mac link: this app's own popup, which turns on every part of Let my bots use this Mac, in
-         * `language` (the page's own). */
-        offer?(language?: string): Promise<void>;
-        /** Whether the Use my Mac popup is due on this computer for this Cloud: once per Cloud, and never after the person
-         * turned lending off or answered it. */
-        due?(): Promise<boolean>;
-        /** The page's notices found the moment: main shows its Use my Mac popup if it is still due, and resolves once it is
-         * answered or put off. */
-        ask?(language?: string): Promise<void> };
       /** Either page in this app: the one-time move's line (on its way, what arrived, coming home). */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
@@ -135,6 +126,8 @@ const __APP_VERSION__: string;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
       home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      /** This computer's own page only: the account's full name, for a first run's profile (system-name.mjs). */
+      desktopProfile?: { systemName(): Promise<string | null> };
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
       desktopLanguage?: import("../../electron/desktop-prefs.mjs").DesktopLanguageBridge;
       /** This computer's page and My Cloud's own page: the one-time "Get MausBot updates?" answer. */
@@ -150,6 +143,9 @@ const __APP_VERSION__: string;
         cancel(): Promise<void>;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
+      /** The window's own rail of places: its page at /rail (a sheet of its own covers the window while open; the skin of
+       * the page beside it comes from main), and the button on the page beside it that hides and shows it. */
+      rail?: import("../../electron/chrome-rail.mjs").ChromeRailBridge;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
          * home is this Cloud, so there is nothing to switch to. */
@@ -158,6 +154,43 @@ const __APP_VERSION__: string;
         menu: (options?: { from?: "howto" }) => Promise<void>;
         /** One plain line for the next page, served once: a team this person is no longer in. */
         line?: () => Promise<{ kind: "left"; name: string } | null>;
+        /** The rail's circles, for this app's page and a hosted Cloud's only (empty elsewhere, and with fewer than two
+         * places). Absent on an older app. */
+        places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
+        /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
+        open?: (id: string) => Promise<unknown>;
+        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
+         * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
+        add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
+        /** The colour of the place this page is (This computer's too), and whether it can be changed here. Absent on an
+         * older app. */
+        look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
+        /** That place's colour, from the person's click: one of the six swatches, or null for none. */
+        color?: (swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
+        /** The colour of a place the window's rail lists, by its circle's id, from the person's click on the rail's own
+         * page (refused on any other page). */
+        recolor?: (id: string, swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
+        /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
+         * the rail's own page (refused on any other page). Absent on an older app. */
+        remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
+        /** Main's word that the places or the sign-in changed: read them again. */
+        onChanged?: (callback: () => void) => () => void;
+      };
+      /** Buying another Cloud from the rail's ＋, on this app's page or a hosted Cloud's; absent on an older app. */
+      cloudAdd?: {
+        state(): Promise<import("../../electron/cloud-rail.mjs").AddCloudView>;
+        /** Opens that plan's checkout in the browser, for a Cloud of this name and swatch; only from the person's click. */
+        start(tier: string, name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "opened" | "unsupported" | "failed" } | { outcome: "blocked"; blocked: import("../../electron/cloud-account.mjs").CloudAddBlock }>;
+        reopen(): Promise<boolean>;
+        copyLink(): Promise<boolean>;
+        /** Opens the Cloud just bought, once it is ready. */
+        open(): Promise<void>;
+        interest(): Promise<void>;
+        /** The sheet is open on this page (main then says "ready" here, not with a notification). */
+        sheet(open: boolean): Promise<void>;
+        /** A new organization on the Team plan this account pays for, of this name and swatch: no checkout; only from the person's click. */
+        organization?(name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "added" | "taken" | "unsupported" | "failed" }
+          | { outcome: "blocked"; blocked: import("../../electron/cloud-list.mjs").OrganizationBlock }>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
@@ -179,6 +212,8 @@ const __APP_VERSION__: string;
             color?: string;
             /** The person's own My Cloud. */
             home?: boolean;
+            /** Another Cloud of the person's own, as the verified session lists it. */
+            cloud?: { id: string; role: string };
           }>;
         }>;
         /** Local targets answer {ok, error?} (error strings are an open set); remote ones answer nothing. */
@@ -259,6 +294,10 @@ const __APP_VERSION__: string;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */
       speechFinish?(): Promise<void>;
+      /** This computer's page only: Settings → General's talk shortcut. */
+      talkShortcut?: import("../../electron/talk-shortcut.mjs").TalkShortcutBridge;
+      /** A call holds the microphone, so the talk shortcut waits. */
+      callActive?(active: boolean): Promise<void>;
       onSpeechTranscript(
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
@@ -350,9 +389,11 @@ const __APP_VERSION__: string;
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
       /** Opens this app's logs folder in Explorer or Finder and says where it is. */
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
+      /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
+      openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
@@ -364,6 +405,8 @@ const __APP_VERSION__: string;
         /** apply the download: quit-and-install, or copy the command and open
          * a terminal. On a server's page, only from the person's click. */
         install(): Promise<void>;
+        /** The person saw the line that the app updated itself: it is not shown again. */
+        seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
     };
@@ -414,6 +457,10 @@ export interface UpdaterState {
   command?: string;
   /** hand-off only: whether a terminal was opened to paste it into */
   terminalOpened?: boolean;
+  /** downloaded only: the app installs it by itself the next time the person is away and nothing is running */
+  installsByItself?: boolean;
+  /** the version the app updated itself to while the person was away, until they have seen it said */
+  updated?: string;
 }
 
 export interface CompanionAccountState {

@@ -13,6 +13,8 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
 import { createComputerSharing } from "../electron/computer-sharing.mjs";
 import { helperMissing, SCREEN_LOCKED } from "../electron/lent-screen-failures.mjs";
+import { createHostScreenLease } from "../electron/host-screen-lease.mjs";
+import { personActiveText } from "../electron/lent-screen-presence.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { LENT_BROWSER_NO_ENDPOINT, LENT_SCREEN_BROWSING } from "./lent-screen-guidance.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -39,6 +41,9 @@ const proxies: ChildProcess[] = [];
 /** What the PC's screen does next; the scripted driver reads it on every call. */
 const screen = { file: "", set(mode: "normal" | "exit" | "hang") { writeFileSync(this.file, JSON.stringify({ mode })); } };
 let locked = false;
+/** Seconds since the person last touched the PC; null: the PC cannot tell. */
+let idle: number | null = null;
+let leaseUrl = "";
 let signedIn = true;
 let driver: { mcpCommand: string; mcpArgs: string[]; mcpEnv: Record<string, string> } | { mode: "unavailable"; reason: string };
 const channel = { lose: null as null | "answer" | "poll", lost: 0, abandoned: [] as AbortController[] };
@@ -136,7 +141,7 @@ if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.str
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ instances: {
-    ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])),
+    ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])),
     claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
   } }));
   chmodSync(cli, 0o755);
@@ -176,18 +181,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   screen.set("normal");
   driver = { mcpCommand: process.execPath, mcpArgs: [writeDriver(home)], mcpEnv: {} };
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
-  // The desktop's own lease on its screen, as Electron main takes it from its local server.
-  const lease = async (id: string, action: string, signal?: AbortSignal) => {
-    const response = await fetch(`${lender.info.url}/api/desktop/shared-computer-control`, {
-      method: "POST", headers: { "content-type": "application/json", origin: lender.info.url }, body: JSON.stringify({ id, action }),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
-    });
-    if (!response.ok) throw new Error("This computer is in use locally or held by a person. Wait, then observe it again before acting.");
-  };
+  // The desktop's own lease on its screen, taken from its local server the way Electron main takes it.
+  leaseUrl = `${lender.info.url}/api/desktop/shared-computer-control`;
   connector = createComputerSharing({
     file: join(home, "pc-profile", "computer-sharing.json"), environments: () => [env],
-    cuaConnection: async () => driver, screenLocked: () => locked,
-    hostControl: async (id: string, signal: AbortSignal) => { await lease(id, "acquire", signal); return { renew: () => lease(id, "acquire"), release: () => lease(id, "release") }; },
+    cuaConnection: async () => driver, screenLocked: () => locked, idleSeconds: () => idle,
+    hostControl: createHostScreenLease({ url: () => leaseUrl, headers: () => ({ origin: lender.info.url }) }),
     cloud: () => ({ status: signedIn ? "connected" : "unverified", accountId: "acct_fixture", origin: base }),
     home: join(home, "pc-home"),
     // The PC's network to its Cloud, which a test can make lose a poll's answer, or leave a poll hanging as a dead connection does.
@@ -241,14 +240,43 @@ it("a browser task through the lent PC: the browser tools explain the screen rou
   expect(said(page)).toContain("Total: 42.00 EUR");
 }, hostTimeout(60_000));
 
-it("the PC's screen held locally answers in one sentence, and works once it is free", async () => {
-  const held = await fetch(`${lender.info.url}/api/desktop/shared-computer-control`, { method: "POST", headers: { "content-type": "application/json", origin: lender.info.url }, body: JSON.stringify({ id: "5d0c7a39-2b39-4b07-9a0e-0c58a7d55f21", action: "acquire" }) });
-  expect(held.status).toBe(200);
-  const busy = await screenCall("get_desktop_state");
-  expect(busy.isError).toBe(true);
-  expect(said(busy)).toBe("This computer is in use locally or held by a person. Wait, then observe it again before acting.");
-  await fetch(`${lender.info.url}/api/desktop/shared-computer-control`, { method: "POST", headers: { "content-type": "application/json", origin: lender.info.url }, body: JSON.stringify({ id: "5d0c7a39-2b39-4b07-9a0e-0c58a7d55f21", action: "release" }) });
+const lenderLease = (id: string, action: string) => fetch(leaseUrl, { method: "POST", headers: { "content-type": "application/json", origin: lender.info.url }, body: JSON.stringify({ id, action }) });
+
+it("a screen lock an earlier lent call left behind, or a person holding a bot's other computer, never blocks the lent screen", async () => {
+  // An earlier lent call whose release never arrived (the app crashed, or the release timed out) still holds the lock.
+  expect((await lenderLease("5d0c7a39-2b39-4b07-9a0e-0c58a7d55f21", "acquire")).status).toBe(200);
   expect((await screenCall("get_desktop_state")).isError).toBeFalsy();
+  // The person took control of a desktop bot's own cloud computer and never handed it back: that is another computer.
+  const bot = await (await fetch(`${lender.info.url}/api/bots`, { method: "POST", headers: { "content-type": "application/json", origin: lender.info.url }, body: JSON.stringify({ name: "Desk bot" }) })).json() as { bot: { id: string } };
+  const take = await fetch(`${lender.info.url}/api/bots/${bot.bot.id}/computer/control`, { method: "POST", headers: { "content-type": "application/json", origin: lender.info.url }, body: JSON.stringify({ action: "take" }) });
+  expect((await take.json() as { held: boolean }).held).toBe(true);
+  const free = await screenCall("get_desktop_state");
+  expect(free.isError, said(free)).toBeFalsy();
+}, hostTimeout(30_000));
+
+it("a screen the PC's own server cannot check says so in one sentence, never that a person is using it", async () => {
+  const right = leaseUrl;
+  leaseUrl = `${lender.info.url}/api/desktop/not-the-screen-lock`;
+  const refused = await screenCall("get_desktop_state");
+  leaseUrl = right;
+  expect(refused.isError).toBe(true);
+  expect(said(refused)).toMatch(/^OpenMausBot on this computer could not check whether its screen is free \(its server answered 404.*\), so this call was not performed\. This is not a person using the computer\./);
+  expect((await screenCall("get_desktop_state")).isError).toBeFalsy();
+}, hostTimeout(30_000));
+
+it("while the person uses the PC, background calls run and a call that would take their mouse waits with the reason", async () => {
+  idle = 0;
+  const listing = await call("shared_computer", { computer_id: computerId, action: "computer_tools" });
+  expect(listing.isError, said(listing)).toBeFalsy();
+  expect((await screenCall("launch_app", { name: "Google Chrome", urls: [pageUrl] })).isError).toBeFalsy();
+  expect(said(await screenCall("get_window_state", { pid: 4242, window_id: 7 }))).toContain("Total: 42.00 EUR");
+  expect((await screenCall("click", { pid: 4242, window_id: 7, element_index: 3 })).isError).toBeFalsy();
+  const front = await screenCall("click", { x: 10, y: 10 });
+  expect(front.isError).toBe(true);
+  expect(said(front)).toBe(personActiveText("click"));
+  idle = 45;
+  expect((await screenCall("click", { x: 10, y: 10 })).isError).toBeFalsy();
+  idle = null;
 }, hostTimeout(30_000));
 
 it("a locked screen says to unlock it, and works once unlocked", async () => {

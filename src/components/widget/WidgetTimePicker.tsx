@@ -227,7 +227,7 @@ export function WidgetTimePicker({ node, bare }: { node: WidgetNode; bare: boole
           // preventDefault on mousedown keeps the focus on the trigger.
           onMouseDown={(event) => event.preventDefault()}
           style={{ position: "fixed", ...place, visibility: place ? undefined : "hidden" }}
-          className="z-[70] animate-pop-in overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1 shadow-2xl shadow-black/50"
+          className="popover-surface z-[70] animate-pop-in overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1 shadow-2xl shadow-black/50"
         >
           {slots.map((slot, index) => (
             <div

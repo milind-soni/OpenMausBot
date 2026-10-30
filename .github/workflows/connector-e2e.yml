@@ -1,0 +1,59 @@
+name: Connector e2e
+
+# The MausBot connector on a stock ubuntu-24.04 runner, as a person installs it on their own server: a fake Admin,
+# install.sh with a one-time code, then start, update, an unclean kill and a forced rollback (connector/e2e/run.sh).
+# It pulls published home images and talks to no production service.
+on:
+  pull_request:
+    paths:
+      - connector/**
+      - .github/workflows/connector-e2e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connector-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: install, start, update and roll back on Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: The connector's unit tests, on Linux and Node 24
+        run: pnpm exec vitest run connector/test --maxWorkers=2
+      - name: Leave the 20 GB a server needs free for Docker
+        # The installer refuses a server with less, as it should; a runner sometimes has less to start with.
+        run: |
+          set -euo pipefail
+          free_gb() { df -BG --output=avail /var/lib/docker | tail -n 1 | tr -dc '0-9'; }
+          echo "free for Docker: $(free_gb) GB"
+          if [ "$(free_gb)" -lt 30 ]; then
+            sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            echo "free for Docker now: $(free_gb) GB"
+          fi
+      - name: Install, start, update, kill and roll back
+        env:
+          OUT: ${{ runner.temp }}/connector-e2e
+        run: bash connector/e2e/run.sh
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: connector-e2e
+          path: ${{ runner.temp }}/connector-e2e
+          retention-days: 14

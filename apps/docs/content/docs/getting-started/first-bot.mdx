@@ -12,32 +12,26 @@ Install and sign in to at least one supported agent CLI. When one already works,
 
 ## Your first bot is your Chief of Staff
 
-A new install starts with one bot: MausBot, in chrome, your helper for everything in the app and your Chief of Staff. Its first message lists what is left to set up, and it can do each step with you. Rename it or change its color in **Bot settings** like any other bot. MausBot is never deleted: to take it off the sidebar, choose **Hide from sidebar** in its menu, or turn off **Show MausBot in the sidebar** in **Settings → General**. An install that already had bots before MausBot arrived gets one beside them: its Chief of Staff stays as it was, and if it had none, MausBot becomes it. The first time you open the app with MausBot, click its picture to change its name, color, look or picture before adding it. It does the work itself and adds a specialist bot on its own when a job needs one, telling you in one line. In Simple mode, **New bot** opens the Chief's chat with a short starter; say what the bot should do and the Chief adds it. Advanced mode opens the dialog below.
+A new install starts with one bot: MausBot, in chrome, your helper for everything in the app and your Chief of Staff. Its first message lists what is left to set up, and it can do each step with you. Rename it or change its color in **Bot settings** like any other bot. MausBot is never deleted: to take it off the sidebar, choose **Hide from sidebar** in its menu, or turn off **Show MausBot in the sidebar** in **Settings → General**. An install that already had bots before MausBot arrived gets one beside them: its Chief of Staff stays as it was, and if it had none, MausBot becomes it. The first time you open the app with MausBot, click its picture to change its name, color, look or picture before adding it. It does the work itself and adds a specialist bot on its own when a job needs one, telling you in one line.
 
 ## Create the bot
 
-1. Select **New or share** in the sidebar.
+1. Select **New or share** in the sidebar (or press Ctrl+N, ⌘N on a Mac).
 2. Choose **New bot**.
-3. Review the **New bot** dialog. Its settings start from your saved defaults, and the suggested name remains editable.
-4. Give the bot a clear name and purpose in **Identity**, then select its engine and model in **Model**.
-5. Review the other sections: **Soul**, **Skills**, **Memory**, **Routines**, **Access**, **Permissions**, and **Voice & alerts**. Choose a working folder in **Access** if it should edit files or work in a repository.
-6. Select **Create bot**. Closing or cancelling the dialog discards the draft without creating a bot.
 
-The working folder matters: it becomes the bot's starting context and limits accidental edits elsewhere. Use a dedicated project folder for coding, research, or content work.
+The bot is made at once from your saved defaults, with a name no other bot has and the default AI, and its chat opens ready for your first message. If no AI is connected yet, the bot is made without one and uses the first AI you connect. If making it fails, the chat says why and no bot is left behind. On a team's Cloud the bot is shared with the team, reports to the person its department reports to (or to you), and opens your own private chat with it.
 
-In **Identity**, **Random female name** and **Random male name** insert a local
-suggestion into the editable name field. Click again for another suggestion
-or type your own. The lists contain 4,944 female and 3,897 male names from
-stdlib's English-language Moby Word II datasets. Choosing a name does not
-create a bot, call a model, or change any other profile setting.
+Shape it later: **Set me up** under its greeting lets you describe the job in one sentence, and everything else (name, picture, AI, instructions, working folder, permissions) is in its **Bot settings**. The working folder matters: it becomes the bot's starting context and limits accidental edits elsewhere. Use a dedicated project folder for coding, research, or content work.
+
+To start from a ready-made bot instead, open **Templates** and choose **Add** on one: you review its settings, and pick a preset under **Starting role**, before it is created.
 
 ## Set defaults for future bots
 
-Open **App settings → General → Defaults for new bots → Edit**. This opens the same editor as bot creation. Save the identity, model, instructions, access preferences, memory, skills, and routines you want future bots to start with. Leave the name empty for a random suggested name each time.
+Open **App settings → General → Defaults for new bots → Edit**. In **Identity**, **Random female name** and **Random male name** insert a local suggestion into the editable name field; the lists contain 4,944 female and 3,897 male names from stdlib's English-language Moby Word II datasets. Save the identity, model, instructions, access preferences, memory, skills, and routines you want future bots to start with. Leave the name empty for a random suggested name each time.
 
-Saving defaults does not change existing bots or start routines. When creating a bot, you can override or clear any inherited value. New bots start at Full access unless the saved defaults pick another level. A saved level applies to the new bot at once, with no confirmation; local-computer Auto still asks for its confirmation when the bot is created.
+Saving defaults does not change existing bots or start routines. New bots start at Full access unless the saved defaults pick another level. A saved level applies to the new bot at once, with no confirmation; local-computer Auto needs your OK, so a bot whose defaults ask for it starts on Ask and says how to turn it on.
 
-These full templates apply to the creation dialog and the HTTP bot-creation endpoint. Bot-driven team setup applies at once with an Undo; it does not automatically copy template memory, skills, or routines.
+These full templates apply to **New bot**, the ready-made bots in Templates, and the HTTP bot-creation endpoint. Bot-driven team setup applies at once with an Undo; it does not automatically copy template memory, skills, or routines.
 
 ## Give it a useful first task
 

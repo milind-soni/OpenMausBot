@@ -8,10 +8,12 @@ import type { IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 
+import { BROWSER_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES } from "../../shared/upload-limits.ts";
 import type { Audience } from "../audience.ts";
 import { storeUploads } from "../browser-upload.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { LiveRouter } from "../browser/engines.ts";
+import { requestedSize } from "../browser/viewers/viewport.ts";
 import { messageFileDisposition } from "../message-file.ts";
 import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -23,7 +25,6 @@ const UPLOAD = /^\/api\/bots\/([\w-]+)\/browser\/upload$/;
 const DOWNLOAD = /^\/api\/bots\/([\w-]+)\/browser\/download\/([\w-]{1,64})$/;
 const CHOOSER = /^[\w-]{1,64}$/;
 const UPLOAD_MAX_FILES = 20;
-const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
 const PICKER_CLOSED = "The page's file picker is no longer open.";
 
 type Spec = Parameters<BrowserLive["open"]>[0]["spec"];
@@ -32,6 +33,8 @@ type Failure = { status: number; error: string };
 export interface BrowserViewerRouteDeps {
   upgrades: Upgrades;
   viewers: Pick<LiveRouter, "open" | "action" | "stream" | "fileChooserOffered" | "answerFileChooser" | "download">;
+  /** Who is watching, as a hold of the browser knows them: every view and device of one person shares their hold. */
+  person(auth: RequestAuth): string;
   /** Whose browser of the bot this person's view shows (`threadId` names the conversation they look at); null when
    * they may not see that conversation. */
   audience(auth: RequestAuth, threadId: string | null): Audience | null;
@@ -122,12 +125,14 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     const failure = await deps.authorize(req, auth);
     if (failure) return json(res, failure.status, { error: failure.error });
     const owner = ownerOf(auth);
+    const person = deps.person(auth);
     const isCurrent = () => deps.audience(auth, threadId) === audience && deps.current(browser.botId, browser.session, auth, audience);
 
     if (live) {
       if (method === "GET" && live[2] === "live") {
         req.socket.setTimeout(0);
-        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, isCurrent, res, resume: url.searchParams.get("resume") });
+        const size = requestedSize(Number(url.searchParams.get("width")), Number(url.searchParams.get("height")));
+        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size });
       }
       if (method === "POST" && live[2] === "action") {
         const body = await readBody(req, 32_768);
@@ -145,7 +150,7 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
       pending.release();
       const opened = deps.viewers.stream({
-        session: browser.session, spec: browser.spec, botId: browser.botId, owner,
+        session: browser.session, spec: browser.spec, botId: browser.botId, owner, person,
         canOperate: url.searchParams.get("interactive") !== "false",
         params: url.searchParams, req, socket: pending.socket, head: pending.head,
         isCurrent, restartRefusal: () => deps.restartRefusal(browser.session),

@@ -5,6 +5,22 @@
  * web, reading a file or a page, searching files, or any other tool. */
 export type TurnProgressActivity = "write" | "edit" | "command" | "web" | "read" | "fetch" | "search" | "tool";
 
+/** What one tool call works on, in the words the status line, its chip and the sidebar use: a command's program and
+ * main target ("scrape.py", "pnpm test"), a web search's query, a page's site, a file's name. Server-made from redacted
+ * text and redacted again: never an environment variable's value or a credential. */
+export interface LiveStep {
+  activity: TurnProgressActivity;
+  /** At most 60 characters. */
+  target: string;
+  /** The whole command, query or page address the target was read from, environment values left out; at most 200
+   * characters, and absent when it says no more than the target. */
+  detail?: string;
+}
+
+/** How a call that has run a while is doing: when its output last arrived (epoch ms), or, while it has sent none, what
+ * its processes show: holding a network connection, using the CPU, or neither. */
+export type StepQuiet = { kind: "output"; at: number } | { kind: "network" | "busy" | "idle" };
+
 export interface TurnProgressFields {
   type: "turn.progress";
   activity: TurnProgressActivity;
@@ -15,6 +31,14 @@ export interface TurnProgressFields {
   /** Bytes of the call's input generated so far: for a write, about the size of the file. */
   bytes?: number;
   itemId?: string;
+  /** The call's LiveStep target, once the server has read one from the call. */
+  target?: string;
+  /** The call's LiveStep detail, for the phrase's tooltip. */
+  detail?: string;
+  /** Set once the call has run past the quiet notice. */
+  quiet?: StepQuiet;
+  /** A running command's last lines of output, redacted, oldest first. */
+  tail?: string[];
 }
 
 const KB = 1024;
@@ -36,7 +60,9 @@ export function progressFile(path: unknown): string | undefined {
 }
 
 /** Two reports that read the same on screen share a key, so only a visible change is worth a frame. */
-export function progressKey(event: { turnId?: string; itemId?: string; activity: string; tool?: string; file?: string; bytes?: number }): string {
+export function progressKey(event: Omit<TurnProgressFields, "type" | "activity"> & { activity: string; turnId?: string }): string {
   const size = progressSize(event.bytes);
-  return [event.turnId ?? "", event.itemId ?? "", event.activity, event.tool ?? "", event.file ?? "", size ? `${size.count}${size.unit}` : ""].join("|");
+  const quiet = event.quiet ? `${event.quiet.kind}${event.quiet.kind === "output" ? `@${event.quiet.at}` : ""}` : "";
+  return [event.turnId ?? "", event.itemId ?? "", event.activity, event.tool ?? "", event.file ?? "", size ? `${size.count}${size.unit}` : "",
+    event.target ?? "", event.detail ?? "", quiet, (event.tail ?? []).join("\n")].join("|");
 }

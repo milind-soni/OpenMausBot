@@ -1,14 +1,14 @@
 // Works because styles.css keys skins on [data-skin], not :root[data-skin], so any element opens a skin context for its
 // subtree.
-import { useState } from "react";
 import { Check } from "lucide-react";
-import { SKINS, applySkin, readSkin, type SkinId } from "@/lib/skins";
+import { SKINS, applySkin, resolveSkin, type SkinId } from "@/lib/skins";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { setDressUp, useDressUp } from "@/lib/halloween-dress";
 import type { HalloweenBodyId } from "../../shared/halloween-bodies";
 import { MausAvatar } from "./Avatar";
 import { Switch } from "./SettingsPrimitives";
+import { useSkinChoice } from "./ThemeRow";
 
 function Miniature({ skin }: { skin: SkinId }) {
   return (
@@ -80,10 +80,7 @@ export function DressUpRow() {
 }
 
 export function SkinPicker() {
-  // SAFETY: main.tsx writes data-skin from applySkin() before the first paint; readSkin() covers it missing.
-  const [active, setActive] = useState<SkinId>(
-    () => (document.documentElement.dataset.skin as SkinId) || readSkin(),
-  );
+  const active = resolveSkin(useSkinChoice());
 
   return (
     <>
@@ -96,7 +93,6 @@ export function SkinPicker() {
               type="button"
               onClick={() => {
                 applySkin(skin.id);
-                setActive(skin.id);
               }}
               aria-pressed={selected}
               className={cn(

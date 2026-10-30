@@ -42,9 +42,9 @@ describe("an app-event automation in plain words", () => {
   });
 
   it("says it checks every 15 minutes and waits for the first email, then shows the last run", () => {
-    expect(statusLine(automation(), NOW)).toBe("Working · checks every 15 minutes · waiting for the first email");
-    expect(statusLine(automation({ lastEventAt: NOW - 60_000 }, [run("completed", NOW - 60_000)]), NOW)).toMatch(/^Working · last ran today .+ · checks every 15 minutes$/);
-    expect(statusLine(automation({ delivery: "instant", event: "SLACK_X" }), NOW)).toBe("Working · waiting for the first one");
+    expect(statusLine(automation(), NOW)).toBe("On · checks every 15 minutes · waiting for the first email");
+    expect(statusLine(automation({ lastEventAt: NOW - 60_000 }, [run("completed", NOW - 60_000)]), NOW)).toMatch(/^On · last ran today .+ · checks every 15 minutes$/);
+    expect(statusLine(automation({ delivery: "instant", event: "SLACK_X" }), NOW)).toBe("On · waiting for the first one");
   });
 
   it("needs the person when the app connection expired, with Reconnect as the fix", () => {

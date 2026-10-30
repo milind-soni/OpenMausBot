@@ -1,14 +1,12 @@
-// Telling a teammate on a Team Cloud, end to end (docs/team-cloud.md "Telling a teammate"): Acme's Owner (Olive), an
-// Admin (Ada) and two members (Bob, Carl), the synthetic Claude CLI calling message_person through the real agents MCP
-// server. Ada's private chat passes Bob one message into a new private conversation of his own, Bob's answer comes back
-// to Ada's chat, an @Bob in a shared chat reaches Bob alone, someone who left is refused, and a My Cloud has none of it.
-// It proves where each message lands and who may see it, not a model's judgement.
+// Teammates as people a bot can name on a Team Cloud (docs/team-cloud.md "Telling a teammate"): Acme's Owner (Olive), an
+// Admin (Ada) and two members (Bob, Carl), the synthetic Claude CLI with the real agents MCP server. A team's turns are
+// told the team's people and get message_person; someone who left is refused in plain words, passes from one
+// conversation are capped, and a My Cloud has none of it. Where a message lands is cloud-team-inbox.e2e.test.ts.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
-import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OLIVE = { email: "olive@acme.test", role: "owner" as const };
@@ -21,29 +19,21 @@ process.env.FAKE_CLAUDE_REPLY_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/rep
 const CLOUD_CAPABILITY_KEY = randomBytes(16).toString("hex");
 
 type Row = { id: string; role: string; kind: string; text?: string; tool?: { name: string; ok?: boolean; output?: string }; relay?: { kind: string; email: string; name: string } };
-type Task = { threadId: string; title: string; private?: boolean };
-type Frame = { kind: string; notification?: { kind: string; threadId: string; title: string; forPerson?: string } };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
-let olive = "", ada = "", bob = "", carl = "";
+let olive = "", ada = "";
 let scout: { id: string; threadId: string; mainThreadId?: string };
-let mainThread = "", adaThread = "", bobThread = "";
-const streams: AbortController[] = [];
+let mainThread = "", adaThread = "";
 
 const script = (calls: unknown[] | null, reply = "Done.") => {
   const file = join(team.home, "tool-calls.json");
   if (calls) writeFileSync(file, JSON.stringify(calls)); else rmSync(file, { force: true });
   writeFileSync(join(team.home, "reply.txt"), reply);
 };
-const tell = (to: string, message: string) => [{ name: "message_person", server: "agents", input: { to, message } }];
 const messages = async (token: string, threadId: string) => {
   const answer = await team.as(token, "GET", `/api/threads/${threadId}/messages?limit=200`);
   return { status: answer.status, rows: (answer.body.messages ?? []) as Row[] };
 };
-const tasks = async (token: string) => ((await team.as(token, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks?: Task[] }>)
-  .find((bot) => bot.id === scout.id)?.tasks ?? [];
-const needsYou = async (token: string) => (await team.as(token, "GET", "/api/needs-you")).body.items as Array<{ kind: string; threadId: string; messageId?: string; from?: string; fromEmail?: string; text?: string }>;
-const feed = async (token: string) => (await team.as(token, "GET", "/api/notifications")).body.notifications as Array<{ kind: string; threadId: string; title: string; forPerson?: string }>;
 const idle = async () => ((await team.as(olive, "GET", "/api/bots")).body.bots as Array<{ busy?: boolean; activity?: string }>).every((bot) => !bot.busy && bot.activity !== "working");
 
 async function until(done: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
@@ -62,29 +52,6 @@ async function turn(token: string, threadId: string, text: string) {
   await until(async () => await idle() && (await messages(token, threadId)).rows.some((row) => row.role === "bot" && row.kind === "text" && row.text === readFileSync(join(team.home, "reply.txt"), "utf8")));
   return JSON.parse(readFileSync(join(team.home, "dump.json"), "utf8")) as { systemPrompt: string; mcpConfig: { mcpServers: { agents?: { env?: Record<string, string> } } } };
 }
-function listen(token: string): Frame[] {
-  const frames: Frame[] = [];
-  const abort = new AbortController();
-  streams.push(abort);
-  void (async () => {
-    const response = await fetch(`${team.base}/api/events`, { headers: { ...fx.edge, authorization: `Bearer ${token}` }, signal: abort.signal });
-    const reader = response.body!.getReader();
-    let buffered = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      buffered += new TextDecoder().decode(value);
-      const parts = buffered.split("\n\n");
-      buffered = parts.pop()!;
-      for (const part of parts) {
-        const data = part.split("\n").find((line) => line.startsWith("data: "));
-        if (data) try { frames.push(JSON.parse(data.slice(6)) as Frame); } catch { /* a heartbeat */ }
-      }
-    }
-  })().catch(() => {});
-  return frames;
-}
-const notifiedIn = (frames: Frame[], threadId: string) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.threadId === threadId && frame.notification.kind === "mention");
 /** message_person straight from a turn's own bearer, as the agents server sends it. */
 async function passDirect(threadId: string, to: string, message: string) {
   const bearer = await team.capability(scout.id, threadId);
@@ -98,8 +65,8 @@ beforeAll(async () => {
   team = fx.team!;
   olive = (await team.pair(OLIVE)).token!;
   ada = (await team.pair(ADA)).token!;
-  bob = (await team.pair(BOB)).token!;
-  carl = (await team.pair(CARL)).token!;
+  await team.pair(BOB);
+  await team.pair(CARL);
   const created = await team.as(olive, "POST", "/api/bots", { name: "Scout" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   scout = created.body.bot;
@@ -110,7 +77,6 @@ beforeAll(async () => {
 }, hostTimeout(120_000));
 
 afterAll(async () => {
-  for (const stream of streams) stream.abort();
   await fx?.close();
 });
 
@@ -122,87 +88,6 @@ it("lists the team's people for the @ menu and mounts message_person on a team's
   expect(dump.mcpConfig.mcpServers.agents?.env?.OMB_TEAM_PEOPLE).toBe("1");
   expect(dump.systemPrompt).toContain('The people in Acme (the names they chose): "Bob", "Carl", "Olive" (owner).');
   expect(dump.systemPrompt).toContain("message_person");
-}, hostTimeout(90_000));
-
-it("passes Ada's message to Bob in a new private conversation of his own, and nothing else of her chat", async () => {
-  const [olives, adas, bobs] = [listen(olive), listen(ada), listen(bob)];
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  script(tell("Bob", "The launch moved to Friday."), "Told Bob.");
-  await turn(ada, adaThread, "Tell @Bob the launch moved to Friday.");
-
-  const chip = (await messages(ada, adaThread)).rows.find((row) => row.relay?.kind === "told");
-  expect(chip).toMatchObject({ kind: "activity", tool: { name: "Told Bob", ok: true, output: "The launch moved to Friday." }, relay: { email: BOB.email, name: "Bob" } });
-
-  const delivered = (await tasks(bob)).find((task) => task.title === "From Ada");
-  expect(delivered, JSON.stringify(await tasks(bob))).toMatchObject({ private: true });
-  bobThread = delivered!.threadId;
-  const bobsRows = (await messages(bob, bobThread)).rows;
-  expect(bobsRows.map((row) => row.text)).toEqual(["Ada asked me to pass this on: The launch moved to Friday."]);
-  expect(bobsRows[0]!.relay).toEqual({ kind: "from", email: ADA.email, name: "Ada" });
-  expect(JSON.stringify(bobsRows)).not.toContain("salary");
-
-  // Only Bob: his Needs you, his notification; no one else's, the Owner's included.
-  await until(async () => (await needsYou(bob)).some((item) => item.kind === "message" && item.threadId === bobThread));
-  expect((await needsYou(bob)).find((item) => item.threadId === bobThread)).toMatchObject({ from: "Ada", fromEmail: ADA.email, text: "The launch moved to Friday." });
-  for (const token of [ada, olive]) expect((await needsYou(token)).filter((item) => item.kind === "message")).toEqual([]);
-  for (const token of [ada, olive]) expect((await feed(token)).filter((entry) => entry.threadId === bobThread)).toEqual([]);
-  await until(() => notifiedIn(bobs, bobThread).length === 1);
-  expect(notifiedIn(bobs, bobThread)[0]!.notification).toMatchObject({ title: "Message from Ada via Scout" });
-  expect(notifiedIn(adas, bobThread)).toEqual([]);
-  expect(notifiedIn(olives, bobThread)).toEqual([]);
-
-  // Ada asking in her private chat never makes it the bot's main chat for anyone.
-  for (const token of [bob, olive]) {
-    const seen = ((await team.as(token, "GET", "/api/bots")).body.bots as Array<{ id: string; mainThreadId?: string; threadId?: string }>).find((bot) => bot.id === scout.id)!;
-    expect(seen).toMatchObject({ mainThreadId: mainThread, threadId: mainThread });
-  }
-  // Each private chat stays its person's: Bob never reads Ada's, Ada and the Owner never read or list Bob's.
-  expect((await messages(bob, adaThread)).status).toBe(404);
-  for (const token of [ada, olive]) {
-    expect((await messages(token, bobThread)).status).toBe(404);
-    expect((await tasks(token)).some((task) => task.threadId === bobThread)).toBe(false);
-  }
-}, hostTimeout(90_000));
-
-it("brings Bob's answer back into Ada's own conversation, where only Ada reads it", async () => {
-  const [adas, olives] = [listen(ada), listen(olive)];
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  script(tell("Ada", "Bob will review it tonight."), "I'll let Ada know.");
-  const dump = await turn(bob, bobThread, "Thanks! Tell Ada I'll review it tonight. (Private: I'm job hunting.)");
-  expect(dump.systemPrompt).toContain('This conversation began when "Ada" asked you to pass a message on');
-  expect(dump.systemPrompt).toContain('message_person to "Ada"');
-
-  const adasRows = (await messages(ada, adaThread)).rows;
-  const reply = adasRows.find((row) => row.relay?.kind === "reply");
-  expect(reply).toMatchObject({ role: "bot", kind: "text", text: "Bob replied: Bob will review it tonight.", relay: { email: BOB.email, name: "Bob" } });
-  expect(JSON.stringify(adasRows)).not.toContain("job hunting");
-  expect((await messages(bob, bobThread)).rows.some((row) => row.relay?.kind === "told" && row.relay.email === ADA.email)).toBe(true);
-  await until(async () => (await needsYou(ada)).some((item) => item.kind === "message" && item.threadId === adaThread));
-  expect((await needsYou(ada)).find((item) => item.threadId === adaThread)).toMatchObject({ from: "Bob", fromEmail: BOB.email, messageId: reply!.id });
-  await until(() => notifiedIn(adas, adaThread).length === 1);
-  expect(notifiedIn(olives, adaThread)).toEqual([]);
-  expect((await messages(ada, bobThread)).status).toBe(404);
-  expect((await messages(bob, adaThread)).status).toBe(404);
-
-  // Opening the conversation settles what waited there.
-  expect((await team.as(bob, "POST", `/api/bots/${scout.id}/read`, { threadId: bobThread })).status).toBe(200);
-  expect((await needsYou(bob)).filter((item) => item.threadId === bobThread)).toEqual([]);
-}, hostTimeout(90_000));
-
-it("notifies only Bob of an @Bob in the bot's shared chat, from a person or from the bot", async () => {
-  const [olives, adas, bobs, carls] = [listen(olive), listen(ada), listen(bob), listen(carl)];
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  script(null, "Noted. @Carl can you pull the numbers too?");
-  await turn(ada, mainThread, "@Bob can you check the numbers before Friday?");
-  await until(() => notifiedIn(bobs, mainThread).length === 1);
-  expect(notifiedIn(bobs, mainThread)[0]!.notification).toMatchObject({ title: "Ada mentioned you in Scout", forPerson: personKey({ id: "", email: BOB.email }) });
-  expect(notifiedIn(adas, mainThread)).toEqual([]);
-  expect(notifiedIn(olives, mainThread)).toEqual([]);
-  expect((await needsYou(bob)).find((item) => item.threadId === mainThread)).toMatchObject({ kind: "message", from: "Ada" });
-  for (const token of [ada, olive]) expect((await feed(token)).filter((entry) => entry.threadId === mainThread && entry.kind === "mention")).toEqual([]);
-  await until(() => notifiedIn(carls, mainThread).length === 1);
-  expect(notifiedIn(carls, mainThread)[0]!.notification).toMatchObject({ title: "Scout mentioned you" });
-  expect(notifiedIn(bobs, mainThread).map((frame) => frame.notification!.title)).toEqual(["Ada mentioned you in Scout"]);
 }, hostTimeout(90_000));
 
 it("refuses someone who left in plain words, and caps passes per conversation", async () => {

@@ -1,4 +1,5 @@
-// Set me up: the press is answered by the server alone, and only the person's next line in that conversation runs as setup.
+// The setup card: a pick or the person's first line runs as setup; Something else is answered by the server alone, and
+// then only the person's next line in that conversation runs as setup.
 import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -41,11 +42,26 @@ describe("the Set me up offer", () => {
     expect(openSetupOffer(s.store, s.bot.id, s.threadId)).toBeNull();
   });
 
-  it("goes away with the person's first line, pressed or not", () => {
+  it("lets the person's first line run as typed when nothing was picked, and stays to settle", () => {
     const s = setup();
-    expect(s.take(s.say("hello"))).toBe(false);
-    expect(s.store.messagesFor(s.threadId)[0]?.setupOffer).toBeUndefined();
+    expect(s.take(s.say("What's the weather in Paris?"))).toBe(false);
+    expect(s.store.messagesFor(s.threadId)[0]?.setupOffer).toBe(true);
     expect(openSetupOffer(s.store, s.bot.id, s.threadId)).toBeNull();
+  });
+
+  it("lets a first line that is a command, or a routine's, run as typed", () => {
+    const command = setup();
+    expect(command.take(command.say("/learn the inbox"))).toBe(false);
+    const routine = setup();
+    expect(routine.take(routine.say("Run the daily check"), { person: false })).toBe(false);
+    expect(routine.take(routine.say("hello"))).toBe(false);
+  });
+
+  it("once closed, lets the person's lines run as typed", () => {
+    const s = setup();
+    expect(cancelSetupRequest(s.store, s.bot.id, s.threadId)).toBe("cleared");
+    expect(s.store.messagesFor(s.threadId)[0]?.setupOffer).toBeUndefined();
+    expect(s.take(s.say("hello"))).toBe(false);
   });
 
   it("is closed once anything is written there, even by a routine or another bot", () => {
@@ -62,13 +78,13 @@ describe("the Set me up offer", () => {
 });
 
 describe("pressing Set me up", () => {
-  it("answers at once with the bot's own line, takes the button away and marks the conversation", () => {
+  it("answers Something else at once with the bot's own line and marks the conversation, keeping the card", () => {
     const s = setup();
     const pressed = askForSetup(s.store, s.bot.id, s.threadId, "en");
     expect(pressed).toMatchObject({ ok: true, message: { role: "bot", kind: "text", text: LINE } });
     const messages = s.store.messagesFor(s.threadId);
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.setupOffer).toBeUndefined();
+    expect(messages[0]?.setupOffer).toBe(true);
     expect(messages[1]).toMatchObject({ role: "bot", kind: "text", text: LINE });
     expect(s.waiting()).toEqual({ at: messages[1]!.at });
   });
@@ -84,7 +100,7 @@ describe("pressing Set me up", () => {
     askForSetup(s.store, s.bot.id, s.threadId, "en");
     const reloaded = new Store(selection, undefined, undefined, "en");
     expect(reloaded.taskByThread(s.bot.id, s.threadId)?.setupRequest).toEqual(expect.objectContaining({ at: expect.any(Number) }));
-    expect(reloaded.messagesFor(s.threadId)[0]?.setupOffer).toBeUndefined();
+    expect(reloaded.messagesFor(s.threadId)[0]?.setupOffer).toBe(true);
     expect(askForSetup(reloaded, s.bot.id, s.threadId, "en")).toEqual({ ok: true, already: true });
     expect(reloaded.messagesFor(s.threadId)).toHaveLength(2);
   });
@@ -100,6 +116,13 @@ describe("pressing Set me up", () => {
     expect(askForSetup(fresh.store, fresh.bot.id, fresh.threadId, "en")).toMatchObject({ ok: false, status: 409 });
     expect(askForSetup(fresh.store, fresh.bot.id, "not-a-thread", "en")).toMatchObject({ ok: false, status: 404 });
     expect(fresh.store.messagesFor(fresh.threadId).filter((message) => message.role === "bot")).toHaveLength(1);
+  });
+
+  it("marks the conversation for a pick without the bot's line, so the pick's words are what comes next", () => {
+    const s = setup();
+    expect(askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a", true)).toEqual({ ok: true, picked: true });
+    expect(s.store.messagesFor(s.threadId)).toHaveLength(1);
+    expect(s.waiting()).toEqual({ at: expect.any(Number), by: "member-a" });
   });
 
   it("speaks the app's language", () => {

@@ -6,7 +6,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
-import { createLendingIndicator } from "./lending-indicator.mjs";
+import { PERSON_AWAY_SECONDS, personActiveText } from "./lent-screen-presence.mjs";
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
@@ -35,7 +35,7 @@ async function scratch(t) {
   return dir;
 }
 
-function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false } = {}) {
+function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
@@ -46,7 +46,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return state.paired ? json({ kind: "session", id: state.sessionId, scopes, ...(cloudHome ? { cloudHome: true } : {}) }) : json({ error: "unauthorized" }, 401);
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -88,12 +88,12 @@ async function lendingFixture(t, options = {}) {
   const leases = [];
   const driver = await hangingDriver(dir);
   const sharing = createComputerSharing({
-    file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [env],
-    ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}),
+    file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
+    ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}), ...(options.ownClouds ? { ownClouds: options.ownClouds } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
-    cloud: () => cloud, home: path.join(dir, "home"),
-    cuaConnection: async () => driver.connection,
+    cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
+    cuaConnection: async () => driver.connection, ...(options.idleSeconds ? { idleSeconds: options.idleSeconds } : {}),
     hostControl: options.hostControl ?? (async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; }),
     onChange: summary => summaries.push(summary),
   });
@@ -153,6 +153,15 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), /terminal/);
 });
 
+test("Your Chrome does not outlive the switch: after an Off nothing reports it and a plain save does not bring it back", async t => {
+  const { folderPath, sharing } = await lendingFixture(t);
+  const folders = [{ id: randomUUID(), path: folderPath, write: false }];
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false, chrome: true })).chrome, true);
+  sharing.revoke(env);
+  assert.equal(sharing.cloudState(env).chrome, false);
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false })).chrome, false);
+});
+
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {
   const folder = async dir => [{ id: randomUUID(), path: dir, write: false }];
   for (const cloud of [null, { status: "signed-out", accountId: null, origin: null }, { status: "unavailable", accountId: "acct_1", origin: null }, { status: "connected", accountId: "acct_1", origin: "https://omb-u-other.fly.dev" }]) {
@@ -194,7 +203,6 @@ test("another server behind the Cloud's address (a replaced machine) ends lendin
   restarted.start({ maintainer: false });
   await until(() => restarted.cloudState(env).problem === "machine-changed", "machine-changed");
   assert.equal(restarted.cloudState(env).enabled, false);
-  // Why it stopped outlives the app: after another restart the switch still says why and since when.
   restarted.close();
   const later = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [env], enabled: async () => false,
@@ -202,12 +210,8 @@ test("another server behind the Cloud's address (a replaced machine) ends lendin
   });
   t.after(() => later.close());
   later.start({ maintainer: false });
-  const stopped = later.cloudState(env);
-  assert.equal(stopped.enabled, false);
-  assert.equal(stopped.stopped.reason, "machine-changed");
-  assert.ok(Math.abs(stopped.stopped.at - Date.now()) < 60_000);
-  assert.equal(stopped.screen, false);
-  assert.equal(stopped.folders.length, 1, "the choices are kept, so the same can be lent again in one click");
+  assert.equal(later.cloudState(env).enabled, false, "a restart never lends to the machine that replaced it");
+  assert.equal(later.cloudState(env).folders.length, 1, "what it lent is kept for the next grant");
   assert.equal(home.connects.length, 1);
 });
 
@@ -271,6 +275,32 @@ for (const stalled of ["the Cloud's lease answer", "the renew"]) {
   });
 }
 
+test("while the person uses this computer, background screen calls run and one that would take their mouse waits, with the reason", async t => {
+  let idle = 0;
+  const { home, sharing, driver, leases } = await lendingFixture(t, { idleSeconds: () => idle });
+  await sharing.saveCloud(env, { folders: [], screen: true });
+  await connected(sharing, 1, home);
+  const run = async operation => {
+    const before = home.results.length;
+    home.push(operation);
+    await until(() => home.results.length === before + 1, operation.tool_name ?? operation.action);
+    return home.results.at(-1);
+  };
+  // Listing the tools never touches the screen, so it takes no screen lock.
+  assert.notEqual((await run({ action: "computer_tools" })).isError, true);
+  assert.deepEqual(leases, []);
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_index: 3 } })).isError, true);
+  for (const args of [{ x: 5, y: 5 }, { pid: 42, window_id: 7, x: 5, y: 5, delivery_mode: "foreground" }]) {
+    const refused = await run({ action: "computer_call", tool_name: "click", arguments: args });
+    assert.equal(refused.isError, true);
+    assert.equal(refused.content[0].text, personActiveText("click"));
+  }
+  assert.equal(leases.filter(entry => entry.startsWith("acquire:")).length, 1, "a refused call never takes the screen");
+  assert.equal((await readFile(driver.calls, "utf8")).trim().split("\n").length, 1, "nor reaches the driver");
+  idle = PERSON_AWAY_SECONDS;
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { x: 5, y: 5 } })).isError, true);
+});
+
 test("another Cloud account or another machine ends lending; a sign-in that needs renewing only pauses it", async t => {
   {
     const { folderPath, home, sharing, setCloud } = await lendingFixture(t);
@@ -304,23 +334,23 @@ test("another Cloud account or another machine ends lending; a sign-in that need
   }
 });
 
-test("Stop lending is instant: the Cloud is told, running work is cancelled, and nothing more runs", async t => {
-  const { home, sharing, driver, summaries } = await lendingFixture(t);
+test("Pause is instant: the Cloud is told, running work is cancelled, nothing more runs, and the menu bar says Paused", async t => {
+  const { home, sharing, driver, summaries } = await lendingFixture(t, { ownClouds: () => [env] });
   await sharing.saveCloud(env, { folders: [], screen: true });
   await connected(sharing, 1, home);
   home.push({ action: "computer_call", tool_name: "drag", arguments: {} });
   await until(async () => (await readFile(driver.calls, "utf8").catch(() => "")).includes("drag"), "the drag to start");
-  assert.ok(summaries.some(summary => summary.busy?.env === env.id), "the indicator heard that the Cloud is using the Mac");
+  assert.deepEqual(summaries.at(-1).using, ["My Cloud"], "the menu bar names the Cloud using this Mac");
   const pid = Number(await readFile(driver.pid, "utf8"));
-  const stopped = sharing.revoke(env);
-  assert.equal(stopped.enabled, false);
+  sharing.pause();
   await until(() => !alive(pid), "the driver transport to be closed");
   await until(() => home.disconnects >= 1, "the Cloud to be told");
-  assert.deepEqual(home.disconnectBodies, [{}], "Stop lending is no pause");
+  assert.deepEqual(home.disconnectBodies, [{}], "the Cloud hears it is no longer lent, not that it waits for a sign-in");
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], internetOnly: false, busy: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], using: [], paused: true, busy: null });
+  assert.equal(sharing.cloudState(env).problem, "paused");
 });
 
 test("quitting the app pauses lending; it never switches it off, even mid-reconnect", async t => {
@@ -352,63 +382,21 @@ test("quitting the app pauses lending; it never switches it off, even mid-reconn
   assert.equal(after.cloudState(env).enabled, true, "the next launch still lends");
 });
 
-test("the menu-bar indicator exists only while lending, reads In use while bots use the Mac, and turns lending off", () => {
-  const trays = [];
-  class Tray {
-    constructor() { this.destroyed = false; this.title = ""; this.menu = null; trays.push(this); }
-    on() {} setToolTip(value) { this.tip = value; } setTitle(value) { this.title = value; }
-    setContextMenu(menu) { this.menu = menu; } isDestroyed() { return this.destroyed; } destroy() { this.destroyed = true; }
-  }
-  const Menu = { buildFromTemplate: items => items };
-  const nativeImage = { createFromPath: () => ({ resize: () => ({}) }) };
-  let stops = 0, opens = 0;
-  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++, device: "Mac" });
-  indicator.update({ lending: false, busy: false });
-  assert.equal(trays.length, 0, "nothing in the menu bar while nothing is lent");
-  indicator.update({ lending: true, busy: false });
-  assert.equal(trays.length, 1);
-  assert.equal(trays[0].title, "");
-  assert.equal(trays[0].menu[0].label, "Your bots can use this Mac");
-  indicator.update({ lending: true, busy: true });
-  assert.equal(trays.length, 1);
-  assert.equal(trays[0].title, "In use");
-  assert.equal(trays[0].menu[0].label, "Your bots are using this Mac now");
-  trays[0].menu.find(item => item.label === "Stop sharing").click();
-  trays[0].menu.find(item => item.label === "Sharing settings…").click();
-  assert.deepEqual([stops, opens], [1, 1]);
-  indicator.update({ lending: false, busy: true });
-  assert.equal(trays[0].destroyed, true, "gone as soon as lending ends");
-});
-
-test("Stop lending is remembered as the person's own choice, with when, and a new lend clears it", async t => {
-  const { folderPath, home, sharing } = await lendingFixture(t);
-  await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: true });
-  await connected(sharing, 1, home);
-  assert.equal(sharing.cloudState(env).stopped, undefined);
-  sharing.revoke(env);
-  assert.equal(sharing.cloudState(env).stopped.reason, "you");
-  assert.equal(sharing.cloudState(env).screen, true);
-  await sharing.saveCloud(env, { folders: sharing.cloudState(env).folders, screen: true });
-  assert.equal(sharing.cloudState(env).enabled, true);
-  assert.equal(sharing.cloudState(env).stopped, undefined);
-});
-
-test("a Computer access grant on My Cloud's entry shows as lent, terminal and all, says when it cannot run, and Stop lending ends it", async t => {
+test("a Computer access grant kept for My Cloud's entry gives way to the automatic grant, terminal and all", async t => {
   const dir = await scratch(t);
   const file = path.join(dir, "profile", "computer-sharing.json");
   await mkdir(path.dirname(file), { recursive: true });
-  // What Settings → Servers → Computer access saved for My Cloud's entry before it left that entry: no Cloud binding.
+  // What Settings → Servers → Computer access saved for My Cloud's entry: no Cloud binding, a terminal and the screen.
   await writeFile(file, JSON.stringify({ version: 1, records: { [env.id]: { id: randomUUID(), secret: "c".repeat(64), enabled: true, sessionId: randomUUID(), environmentId: randomUUID(), folders: [], terminal: true, computer: true } } }));
   const home = cloudHome();
-  const sharing = createComputerSharing({ file, fetch: home.fetch, environments: () => [env], enabled: async () => false,
+  const sharing = createComputerSharing({ file, fetch: home.fetch, environments: () => [env], enabled: async () => false, ownClouds: () => [env],
     cloud: () => ({ status: "connected", accountId: "acct_1", origin: ORIGIN }), home: path.join(dir, "home"), cuaConnection: async () => null });
   t.after(() => sharing.close());
   sharing.start({ maintainer: false });
-  const state = sharing.cloudState(env);
-  assert.deepEqual([state.enabled, state.via, state.terminal, state.screen, state.problem], [true, "access", true, true, "access-off"]);
-  sharing.revoke(env);
-  assert.equal(sharing.cloudState(env).enabled, false);
-  assert.equal(sharing.cloudState(env).via, undefined);
+  await until(() => home.connects.length === 1, "the automatic grant to reach My Cloud");
+  assert.deepEqual({ terminal: home.connects[0].terminal, computer: home.connects[0].computer }, { terminal: false, computer: false });
+  const kept = JSON.parse(await readFile(file, "utf8")).records[env.id];
+  assert.deepEqual({ cloud: kept.cloud, terminal: kept.terminal, internet: kept.internet }, { cloud: { accountId: "acct_1", origin: ORIGIN }, terminal: false, internet: true });
 });
 
 test("tells My Cloud its platform only when that Cloud takes it, so its bots say PC on Windows and Mac only on a Mac", async t => {
@@ -418,6 +406,15 @@ test("tells My Cloud its platform only when that Cloud takes it, so its bots say
     await connected(sharing, 1, home);
     if (details) assert.equal(home.connects[0].platform, process.platform);
     else assert.equal("platform" in home.connects[0], false, "an older Cloud refuses fields it does not know");
+  }
+});
+
+test("says it takes a command's timeout only to a Cloud that sends one, since an older Cloud refuses fields it does not know", async t => {
+  for (const timeouts of [true, false]) {
+    const { folderPath, home, sharing } = await lendingFixture(t, { home: { timeouts } });
+    await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+    await connected(sharing, 1, home);
+    assert.equal(home.connects[0].commandTimeouts, timeouts ? true : undefined);
   }
 });
 
@@ -439,4 +436,21 @@ test("signs back in to My Cloud by itself when its session there ended, and trie
   await delay(5_600);
   assert.equal(tries, 1, "a failed sign-in is not retried every few seconds");
   assert.equal(stuck.sharing.cloudState(env).problem, "connect-first");
+});
+
+test("another Cloud of the person's own is lent at its own address, apart from My Cloud, and lending to it ends once the session no longer lists it", async t => {
+  const other = { id: "client-a", name: "Client A", origin: "https://omb-c-a.fly.dev", cloud: { id: "c-a", role: "owner" } };
+  let listed = true;
+  const asked = [];
+  const { folderPath, home, sharing } = await lendingFixture(t, { env: other, cloud: place => {
+    asked.push(place?.id ?? null);
+    return { status: "connected", accountId: "acct_1", origin: listed && place?.origin === other.origin ? other.origin : ORIGIN };
+  } });
+  const lent = await sharing.saveCloud(other, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+  assert.equal(lent.enabled, true);
+  await until(() => sharing.cloudState(other).connected && home.connects.length >= 1, "the other Cloud's link");
+  assert.ok(asked.includes("client-a"), "its own Cloud's word, never My Cloud's alone");
+  listed = false;
+  sharing.cloudChanged();
+  assert.deepEqual([sharing.cloudState(other).enabled, sharing.cloudState(other).problem], [false, "machine-changed"]);
 });

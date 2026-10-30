@@ -77,6 +77,7 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
       return;
     }
     const remote = parseAccountConsent(await client().updatesConsent());
+    if (!fresh()) return;
     if (remote) {
       if (local?.status !== remote.status || local.account !== who.id || local.pending)
         keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}) });

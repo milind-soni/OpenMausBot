@@ -13,18 +13,19 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("did not reach the expected state"); }
 
 async function world(t) {
-  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true, gate: null };
-  const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "device-1" }, account: { id: "account-1", email: "person@example.test" } });
+  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, accountId: "account-1", accessToken, requests: [], saved: null, timer: null, available: true, gate: null };
+  const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "device-1" }, account: { id: f.accountId, email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
-    const body = raw ? JSON.parse(raw) : undefined, bearer = req.headers.authorization === `Bearer ${accessToken}`;
+    const body = raw ? JSON.parse(raw) : undefined, bearer = req.headers.authorization === `Bearer ${f.accessToken}`;
     const send = (status, data) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(data)); };
     if (req.url === "/api/cloud/desktop/authorize") return send(201, { cloudContractVersion: 1, deviceCode: "A".repeat(43), userCode: "ABCDE-FGHJK",
       verificationUriComplete: `${f.origin}/cloud/desktop?code=ABCDE-FGHJK`, expiresIn: 600, interval: 5 });
-    if (req.url === "/api/cloud/desktop/token") return f.approved ? send(200, { ...identity(), accessToken }) : send(400, { error: "authorization_pending" });
+    if (req.url === "/api/cloud/desktop/token") return f.approved ? send(200, { ...identity(), accessToken: f.accessToken }) : send(400, { error: "authorization_pending" });
     if (req.url === "/api/cloud/desktop/session" && bearer) return send(200, { ...identity(), entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, cloud: null });
     if (req.url === "/api/cloud/desktop/updates-consent" || req.url === "/api/updates-consent") {
       f.requests.push({ method: req.method, path: req.url, bearer, body });
+      const previous = f.account;
       await f.gate;
       if (f.down) return send(503, { error: "unavailable" });
       if (!f.supported) return send(404, { error: "Not found." });
@@ -34,7 +35,7 @@ async function world(t) {
       }
       if (!bearer) return send(401, { error: "invalid_token" });
       if (req.method === "POST") f.account = { status: body.status, textVersion: body.textVersion, source: "desktop", decidedAt: f.now };
-      return send(200, { cloudContractVersion: 1, consent: f.account });
+      return send(200, { cloudContractVersion: 1, consent: req.method === "GET" ? previous : f.account });
     }
     send(404, { error: "not_found" });
   });
@@ -166,6 +167,29 @@ test("a new answer given while the previous one is still on its way wins on this
     { status: "opted_in", email: "person@example.test", installId: g.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
     { status: "withdrawn", receipt: RECEIPT }]);
   assert.deepEqual(g.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: g.now, email: "person@example.test", receipt: RECEIPT });
+});
+
+test("a slow account A consent read cannot overwrite account B's withdrawal", async t => {
+  const f = await world(t);
+  f.saved = { updatesConsent: { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, pending: true } };
+  f.launch();
+  await f.signInNow();
+  const held = Promise.withResolvers();
+  t.after(() => held.resolve());
+  f.gate = held.promise;
+  const syncing = f.consent.sync();
+  await until(() => f.requests.length === 1);
+  await f.client.signOut();
+  f.accountId = "account-2";
+  f.accessToken = `omc_${"B".repeat(43)}`;
+  f.account = { status: "withdrawn", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
+  await f.signInNow();
+  f.gate = null;
+  held.resolve();
+  await syncing;
+  assert.equal(f.account.status, "withdrawn");
+  assert.deepEqual(f.requests.map(({ method }) => method), ["GET", "GET"]);
+  assert.deepEqual(f.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: f.now, account: "account-2" });
 });
 
 test("nothing is asked or sent where it isn't available: a branded build, or no Cloud sign-in in this app", async t => {

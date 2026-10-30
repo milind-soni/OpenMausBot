@@ -39,7 +39,7 @@ export function PermissionsSection({
   const applyFullEverywhere = () =>
     dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
-    if (bot.busy || mode === approvalMode) return;
+    if (mode === approvalMode) return;
     if (mode === "full") {
       applyFullEverywhere();
       return;
@@ -142,13 +142,13 @@ export function PermissionsSection({
             onSelect={setApprovalMode}
             menuDirection="down"
             wide
-            disabled={Boolean(bot.busy)}
+            busy={Boolean(bot.busy)}
             trustedModesAvailable={trustedModesAvailable}
             onManageCommandAllowlist={!draft && ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: bot.id, botName: bot.name }) : undefined}
           />
         </div>
         {!draft && approvalMode === "full" && <button
-          type="button" disabled={Boolean(bot.busy)}
+          type="button"
           className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
           onClick={applyFullEverywhere}
         >{t("permissions.approval.applyFull")}</button>}

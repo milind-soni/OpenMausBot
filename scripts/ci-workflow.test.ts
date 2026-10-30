@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { vitestMatrix } from "./ci-scope.mjs";
+import { SELECTABLE_JOBS, vitestMatrix } from "./ci-scope.mjs";
 
 const workflow = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 const requiredRuntimeJobs = ["vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes"];
@@ -21,10 +21,11 @@ function runGate(needs: Record<string, unknown>) {
   return check;
 }
 
-function gateNeeds(runtime: string) {
+/** The gate's needs when static selected `selected`: each required job ran exactly when selected. */
+function gateNeeds(selected: string[]) {
   return {
-    static: { result: "success", outputs: { runtime } },
-    ...Object.fromEntries(requiredRuntimeJobs.map((job) => [job, { result: runtime === "true" ? "success" : "skipped" }])),
+    static: { result: "success", outputs: { jobs: JSON.stringify(selected) } },
+    ...Object.fromEntries(requiredRuntimeJobs.map((job) => [job, { result: selected.includes(job) ? "success" : "skipped" }])),
   };
 }
 
@@ -35,12 +36,19 @@ describe("CI concurrency", () => {
     expect(workflow.concurrency["cancel-in-progress"]).toBe("${{ github.event_name == 'pull_request' }}");
   });
 
-  it("keeps main to one running and one waiting run, apart from PR and merge-queue groups", () => {
+  it("keeps main's pushes to one running and one waiting run, and gives every other run a group no push joins", () => {
     // One group for every main push: GitHub keeps the running run and only
-    // the newest waiting one, so a burst of merges cannot pile up full runs.
+    // the newest waiting one, so a burst of merges cannot pile up runs. A
+    // merge group has its own ref; the nightly run and each manual run (the
+    // release lane among them) are named by event and branch, so a push
+    // never replaces one that is waiting.
     expect(workflow.concurrency.group).toBe(
-      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}",
+      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('{0}-{1}', github.event_name, github.ref) }}",
     );
+  });
+
+  it("runs the full lane every night", () => {
+    expect(workflow.on.schedule).toEqual([{ cron: expect.stringMatching(/^\d+ \d+ \* \* \*$/) }]);
   });
 
   it("stops a closed PR's run by joining ci.yml's PR group", () => {
@@ -75,21 +83,26 @@ describe("CI concurrency", () => {
 
   it("runs each selected platform's own shards, and its e2e files, from ci-scope's matrix", () => {
     expect(workflow.jobs.static.outputs.vitest_matrix).toBe("${{ steps.scope.outputs.vitest_matrix }}");
-    expect(workflow.jobs.vitest.name).toBe("vitest (${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})");
+    expect(workflow.jobs.vitest.name).toBe("vitest (${{ matrix.os }}, ${{ matrix.part }})");
     const run = (workflow.jobs.vitest.steps as { name?: string; run?: string; env?: Record<string, string> }[])
       .find((step) => step.name === "Run tests")!;
-    expect(run.run).toContain("--shard=${{ matrix.shard }}/${{ matrix.shards }} ");
+    expect(run.run).toContain("pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} ");
     expect(run.env?.OMB_VITEST_E2E).toBe("${{ matrix.e2e }}");
+    expect(run.env?.OMB_VITEST_SUBSET).toBe("${{ matrix.files }}");
     const { include } = vitestMatrix(["macos-latest", "ubuntu-latest", "windows-latest"]);
     for (const os of ["macos-latest", "ubuntu-latest", "windows-latest"]) {
       const shards = include.filter((entry) => entry.os === os);
       expect(shards.map((entry) => entry.shard)).toEqual(Array.from({ length: shards[0]!.shards }, (_, i) => i + 1));
       expect(new Set(shards.map((entry) => entry.e2e))).toEqual(new Set([os === "ubuntu-latest" ? "all" : "host"]));
     }
-    const units = (workflow.jobs.vitest.steps as { name?: string; "timeout-minutes"?: number }[]).find((step) => step.name === "Broker and Electron unit tests")!;
+    const units = (workflow.jobs.vitest.steps as { name?: string; if?: string; "timeout-minutes"?: number }[]).find((step) => step.name === "Broker and Electron unit tests")!;
     expect(units["timeout-minutes"]).toBe(5);
-    // Browser jobs keep one job per platform.
+    // Once per platform's full run, and beside the locale tests, never once per shard.
+    expect(units.if).toBe("matrix.node_tests");
+    // Browser jobs keep one job per platform, and the packaged server one per platform without the macOS smokes.
     expect(workflow.jobs["browser-identity"].strategy.matrix.os).toBe("${{ fromJSON(needs.static.outputs.vitest_os) }}");
+    expect(workflow.jobs["browser-driver"].strategy.matrix.os).toBe("${{ fromJSON(needs.static.outputs.vitest_os) }}");
+    expect(workflow.jobs["packaged-server"].strategy.matrix.os).toBe("${{ fromJSON(needs.static.outputs.packaged_server_os) }}");
   });
 
   it("keeps each PR to one macOS job", () => {
@@ -167,26 +180,36 @@ describe("CI concurrency", () => {
     expect(readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8")).toContain('runner: "./scripts/testing/ci-retry-runner.ts"');
   });
 
-  it.each(requiredRuntimeJobs)("fails closed for every required %s outcome", (job) => {
+  it.each(requiredRuntimeJobs)("fails closed for every required %s outcome when selected", (job) => {
     for (const result of ["success", "failure", "cancelled", "skipped"]) {
-      const check = runGate({ ...gateNeeds("true"), [job]: { result } });
+      const check = runGate({ ...gateNeeds(SELECTABLE_JOBS), [job]: { result } });
       expect(check.status, check.stderr).toBe(result === "success" ? 0 : 1);
     }
   });
 
-  it("accepts only deliberately unselected jobs on docs-only PRs", () => {
-    expect(runGate(gateNeeds("false")).status).toBe(0);
+  it.each(requiredRuntimeJobs)("accepts %s skipped only when static left it out", (job) => {
+    const others = SELECTABLE_JOBS.filter((name) => name !== job);
+    expect(runGate(gateNeeds(others)).status).toBe(0);
     for (const result of ["success", "failure", "cancelled"]) {
-      expect(runGate({ ...gateNeeds("false"), vitest: { result } }).status).toBe(1);
+      expect(runGate({ ...gateNeeds(others), [job]: { result } }).status).toBe(1);
+    }
+  });
+
+  it("accepts every required job skipped on a docs-only PR, and nothing else", () => {
+    expect(runGate(gateNeeds([])).status).toBe(0);
+    for (const result of ["success", "failure", "cancelled"]) {
+      expect(runGate({ ...gateNeeds([]), vitest: { result } }).status).toBe(1);
     }
   });
 
   it("rejects failed preflight and missing or malformed selection", () => {
     for (const result of ["failure", "cancelled", "skipped"]) {
-      expect(runGate({ ...gateNeeds("false"), static: { result, outputs: { runtime: "false" } } }).status).toBe(1);
+      expect(runGate({ ...gateNeeds([]), static: { result, outputs: { jobs: "[]" } } }).status).toBe(1);
     }
-    for (const runtime of ["", "yes", "TRUE"]) expect(runGate(gateNeeds(runtime)).status).toBe(1);
-    expect(runGate({ ...gateNeeds("false"), static: { result: "success", outputs: {} } }).status).toBe(1);
+    for (const jobs of ["", "yes", "true", "{}", "[1]", "null", '"vitest"']) {
+      expect(runGate({ ...gateNeeds([]), static: { result: "success", outputs: { jobs } } }).status, jobs).toBe(1);
+    }
+    expect(runGate({ ...gateNeeds([]), static: { result: "success", outputs: {} } }).status).toBe(1);
   });
 
   it("always starts the workflow and validates selection and docs before fanout", () => {
@@ -195,10 +218,18 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.static.steps[0].with["fetch-depth"]).toBe(0);
     expect(workflow.jobs.static.steps.find((step: { id?: string }) => step.id === "scope").run).toBe("node scripts/ci-scope.mjs");
     expect(workflow.jobs.static.outputs).toEqual({
-      runtime: "${{ steps.scope.outputs.runtime }}",
+      jobs: "${{ steps.scope.outputs.jobs }}",
       vitest_os: "${{ steps.scope.outputs.vitest_os }}",
       vitest_matrix: "${{ steps.scope.outputs.vitest_matrix }}",
+      packaged_server_os: "${{ steps.scope.outputs.packaged_server_os }}",
     });
+    // Only these three static steps depend on the scope's build flag; the rest always run.
+    const built = (workflow.jobs.static.steps as { if?: string; run?: string }[]).filter((step) => step.if !== undefined);
+    expect(built.map((step) => [step.if, step.run])).toEqual([
+      ["steps.scope.outputs.build == 'true'", "pnpm typecheck"],
+      ["steps.scope.outputs.build == 'true'", "pnpm check:electron"],
+      ["steps.scope.outputs.build == 'true'", "pnpm exec vite build"],
+    ]);
     expect(workflow.jobs.static.steps.some((step: { run?: string }) =>
       step.run === "pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts",
     )).toBe(true);
@@ -227,8 +258,11 @@ describe("CI concurrency", () => {
         continue;
       }
       expect(job.needs).toBe("static");
-      expect(job.if).toBe("needs.static.outputs.runtime == 'true'");
+      expect(job.if).toBe(`contains(needs.static.outputs.jobs, '"${name}"')`);
     }
+    // ci-scope selects exactly the jobs the workflow has.
+    expect(Object.keys(workflow.jobs).filter((name) => !["static", "gate", "deploy-composio-broker"].includes(name)).sort())
+      .toEqual([...SELECTABLE_JOBS].sort());
   });
 
   it("pins every external action to a full commit SHA", () => {

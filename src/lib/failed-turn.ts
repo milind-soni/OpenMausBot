@@ -6,7 +6,7 @@ import { failedTurnCause } from "../../shared/failed-turn";
 import { toolStepLabel } from "@/lib/tool-step-label";
 import { isClientCancellation, isStoppedTurnName } from "../../shared/client-cancel";
 
-const STATUS_MARKER = /^(?:recovery|notice):\s*/;
+export const STATUS_MARKER = /^(?:recovery|notice):\s*/;
 
 export { failedTurnCause };
 

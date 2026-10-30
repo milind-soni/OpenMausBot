@@ -13,8 +13,9 @@ function browserSources(config: ConfigStatus | null): UsageSources {
   const local = !remoteClient && localDesktopPage();
   const companion = (globalThis as { ogb?: { companion?: CompanionDevices } }).ogb?.companion ?? null;
   return {
-    request: (path) => api(path),
-    connectedApps: () => preloadConnectedApps(),
+    // Background reads: the daily snapshot is nobody using a Cloud home (src/state/api.ts).
+    request: (path) => api(path, { background: true }),
+    connectedApps: () => preloadConnectedApps(false, true),
     companion: local ? companion : null,
     cloudAccount: local ? ogb?.cloudAccount ?? null : null,
     cloudPlan: !remoteClient && !local && config?.cloudHome === true ? ogb?.cloudPlan ?? null : null,

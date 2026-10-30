@@ -2,16 +2,19 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { CircleAlert, X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
 import { usePageOpener } from "@/lib/page-open";
+import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { resolvedThreadTarget } from "@/lib/thread-target";
 import { openThread } from "@/state/thread-navigation";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import {
-  widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetOther, type WidgetPayload,
+  PHONE_PAIRING_ACTION, widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetOther, type WidgetPayload,
   type WidgetSettled, type WidgetValues,
 } from "../../../shared/widget";
 import { ASK_QUIET_BUTTON, AskSettledLine, returnFocusToComposer } from "../AskCard";
+import { plainBotBubble } from "../chat-bubble";
 import { WidgetBody } from "./WidgetBody";
 import { WIDGET_COMPACT_BELOW, widgetActionUrl, widgetThreadTarget, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
 import { kids } from "./widget-style";
@@ -34,13 +37,14 @@ function isEmpty(field: WidgetField, values: WidgetValues, other: WidgetOther): 
 }
 
 export function WidgetMessage({ botId, threadId, message }: { botId: string; threadId?: string; message: Message }) {
+  const simple = !useAdvancedMode();
   const payload = message.widget;
   if (!payload?.root || typeof payload.root !== "object" || typeof payload.root.type !== "string") {
     return message.text
-      ? <div className="chat-text w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">{message.text}</div>
+      ? <div data-chat-bubble={simple ? "simple" : ""} className={plainBotBubble(simple)}>{message.text}</div>
       : null;
   }
-  // update_widget renumbers node ids, so a new revision remounts the card.
+  // Replacing a widget renumbers node ids, so a new revision remounts the card.
   return <WidgetCard key={payload.rev ?? 0} botId={botId} threadId={threadId} messageId={message.id} payload={payload} />;
 }
 
@@ -113,6 +117,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
     const entry = actions.get(ref);
     if (!entry || sendingNow.current || pending !== undefined) return;
     if (entry.client) {
+      if (entry.action.type === PHONE_PAIRING_ACTION) dispatch(phonePairingSettingsAction());
       const url = widgetActionUrl(entry);
       if (url) openPage(url);
       const target = resolvedThreadTarget(widgetThreadTarget(entry), state);

@@ -5,7 +5,7 @@ import { ArrowDown, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { releaseHighlights } from "@/lib/release-highlights";
 import { RELEASES_URL, appVersion, openExternalLink } from "@/lib/app-links";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
@@ -14,7 +14,7 @@ export function updateIndicatorShown(state: UpdaterState | null): boolean {
 }
 
 export function updateIndicatorLabel(state: UpdaterState): string {
-  const app = brand().name;
+  const app = productName();
   const version = state.version ?? "";
   if (state.status === "downloaded" || state.status === "installing") {
     return t("update.button.ready", { app, version }).replace("  ", " ").trim();
@@ -153,7 +153,9 @@ export function UpdateCard({
       ? t("update.card.downloadingNote")
       : handoff
         ? t("update.card.handoffNote")
-        : t("update.card.restartNote", { app: brand().name });
+        : status === "downloaded" && state.installsByItself
+          ? t("update.card.idleNote", { app: productName() })
+          : t("update.card.restartNote", { app: productName() });
 
   return createPortal(
     <div
@@ -186,7 +188,7 @@ export function UpdateCard({
               {t("update.card.title")}
             </h2>
             <p className="text-[13px] leading-5 text-ink-secondary">
-              {[state.version ? `${brand().name} ${state.version}` : brand().name, appVersion() ? t("update.card.current", { version: appVersion() }) : ""].filter(Boolean).join(" · ")}
+              {[state.version ? `${productName()} ${state.version}` : productName(), appVersion() ? t("update.card.current", { version: appVersion() }) : ""].filter(Boolean).join(" · ")}
             </p>
           </div>
         </div>
