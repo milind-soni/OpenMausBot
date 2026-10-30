@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../control-omb.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
+import { BOAT_OFFER_NOTICE } from "../../src/lib/notices";
 import { ensureUiBrowser } from "./control-omb-ui.ts";
 import { fixtureApi, mountPreview, type MountedPreview } from "./preview-fixture.ts";
 
@@ -78,7 +79,8 @@ async function connect(url: string) {
     mkdirSync(evidence, { recursive: true });
     const save = () => writeFileSync(join(evidence!, "receipt.json"), JSON.stringify(receipts, null, 2));
     const api = fixtureApi(fixture.info.url);
-    await api("PATCH", "/api/config", { language: "en" });
+    const config = await api("PATCH", "/api/config", { language: "en" });
+    await api("PATCH", "/api/config", { onboarding: { hintsSeen: [...(config.onboarding?.hintsSeen ?? []), BOAT_OFFER_NOTICE] } });
     const { bots } = await api("GET", "/api/bots");
     for (const bot of bots.filter((bot: { defaultBot?: unknown }) => bot.defaultBot)) await api("PATCH", `/api/bots/${bot.id}`, { welcomed: true });
     const created = await runControlOmb(["new-bot", "--name", "Pepper", "--url", fixture.info.url]) as { bot: { id: string; activeTaskId: string } };
