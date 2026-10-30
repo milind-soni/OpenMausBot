@@ -115,7 +115,7 @@ describe("how long a server may take to reply", () => {
     vi.stubGlobal("window", {});
     const servers = [instance("openai-compat-1", "Ollama", { url: "http://127.0.0.1:11434/v1", ...(replyWaitMinutes ? { replyWaitMinutes } : {}) })];
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: servers }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: servers }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
     fixture.counting = true;
