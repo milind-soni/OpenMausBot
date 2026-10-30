@@ -25,7 +25,6 @@ function absolute(text: string, at?: number): string | null {
   });
 }
 
-/** Validate each quote against an owner statement, then compare concrete facts with those quotes only. */
 export function checkDreamFacts(text: string, from: readonly number[], evidence: readonly string[] | undefined, chats: readonly DreamConversation[]): string | null {
   if (!evidence || evidence.length !== from.length || redactSecretsInText(text) !== text) return null;
   const sources: { text: string; at?: number }[] = [];
