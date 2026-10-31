@@ -4,12 +4,18 @@ import { dirname, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Counts disk touches for the cost test: the count is what the design promises, whatever the machine's speed.
-const fsCalls = vi.hoisted(() => ({ lstat: 0, opendir: 0, read: 0, failOpening: "" }));
+const fsCalls = vi.hoisted(() => ({ lstat: 0, opendir: 0, read: 0, failOpening: "", frozen: "", frozenNs: 0n }));
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return {
     ...fs,
-    lstatSync: ((...args: Parameters<typeof fs.lstatSync>) => { fsCalls.lstat++; return fs.lstatSync(...args); }) as typeof fs.lstatSync,
+    lstatSync: ((...args: Parameters<typeof fs.lstatSync>) => {
+      fsCalls.lstat++;
+      const stat = fs.lstatSync(...args);
+      // A coarse change clock: the frozen path reports the same times, however often it changes.
+      if (!stat || !fsCalls.frozen || String(args[0]) !== fsCalls.frozen || !("ctimeNs" in stat)) return stat;
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { mtimeNs: fsCalls.frozenNs, ctimeNs: fsCalls.frozenNs });
+    }) as typeof fs.lstatSync,
     opendirSync: ((...args: Parameters<typeof fs.opendirSync>) => {
       fsCalls.opendir++;
       if (fsCalls.failOpening && String(args[0]) === fsCalls.failOpening) throw Object.assign(new Error("EMFILE: too many open files"), { code: "EMFILE" });
@@ -24,7 +30,7 @@ import { botMemoryFiles, createLendingMemory, FOLDER_ENTRY_CAP, fingerprintOf, m
 const memoryFingerprint = (workspace: string, workingFolders: readonly string[] = []) => fingerprintOf(memoryFiles(workspace, workingFolders));
 
 let dir = "";
-afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
+afterEach(() => { vi.useRealTimers(); if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
 const workspace = () => {
   dir = mkdtempSync(join(tmpdir(), "omb-lending-memory-"));
   const ws = join(dir, "workspaces", "bot1");
@@ -66,6 +72,18 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     expect(rewritten.size).toBe(size);
     expect(rewritten.mtimeNs).toBe(mtimeNs);
     expect(memoryFingerprint(ws)).not.toBe(before);
+  });
+  it("sees a file added in the same tick of the change clock as the folder's last change", () => {
+    const ws = workspace();
+    const memory = join(ws, "memory");
+    Object.assign(fsCalls, { frozen: memory, frozenNs: BigInt(Date.now()) * 1_000_000n });
+    try {
+      const before = memoryFingerprint(ws);
+      writeFileSync(join(memory, "mac.md"), "- added in the same tick\n");
+      expect(memoryFingerprint(ws)).not.toBe(before);
+    } finally {
+      fsCalls.frozen = "";
+    }
   });
   // NTFS can report a folder's mtime late, so the listing cache can miss a just-added link (flaky on Windows CI).
   it.skipIf(process.platform === "win32")("a link is judged by where it points, and swapping one in is a change", () => {
@@ -321,6 +339,8 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     const bot = { id: "bot1", tasks: Array.from({ length: 4_000 }, (_, i) => ({ threadId: `t${i}`, ...(i < 3_000 ? { cwd: join(tasks, "bot1", `t${i}`) } : {}) })) };
     for (let i = 0; i < 3_000; i += 1) mkdirSync(join(tasks, "bot1", `t${i}`), { recursive: true });
     for (let i = 0; i < 3_000; i += 300) writeFileSync(join(tasks, "bot1", `t${i}`, "AGENTS.md"), `folder ${i}`);
+    // Only a folder or file whose last change has settled is cached, and these were all made just now.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 3_000 });
     const snapshot = () => botMemoryFiles(bot, { workspace: () => ws, taskWorkspaces: tasks });
     const cold = snapshot();
     expect(Object.keys(cold).filter((name) => name.endsWith("AGENTS.md"))).toHaveLength(10);
