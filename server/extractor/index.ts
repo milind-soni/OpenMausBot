@@ -87,7 +87,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
     const started = now();
     let outcome: ExtractBackendResult;
     try {
-      outcome = await Promise.race([Promise.resolve().then(() => backend(request)).catch((): ExtractBackendResult => ({ ok: false, reason: "malformed" })), timedOut]);
+      outcome = await Promise.race([Promise.resolve().then(() => controller.signal.aborted ? { ok: false, reason: "cancelled" } as ExtractBackendResult : backend(request)).catch((): ExtractBackendResult => ({ ok: false, reason: "malformed" })), timedOut]);
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", onAbort);

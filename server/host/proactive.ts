@@ -143,6 +143,7 @@ export function createProactive(deps: ProactiveDeps) {
     dataDir: deps.dataDir, reads, mayRead, fenced, runs, timeZone: brief.timeZone, dismissedFrom: brief.dismissedFrom,
     report: async (found) => {
       await brief.report(found);
+      found.signal?.throwIfAborted();
       if (found.gmail) suggestion.consider({ gmailConnected: found.gmail.connected, ...(found.gmail.address ? { inbox: found.gmail.address } : {}) });
     },
     ...(inbox ? { inbox } : {}),
@@ -153,6 +154,9 @@ export function createProactive(deps: ProactiveDeps) {
   /** One brief, the main agent's: a briefing routine of any other bot finds nothing to do. */
   const routineChecks: RoutineChecks = {
     check: (routine, context) => (deps.team || (routine.deliver === "brief" && routine.botId !== owner()?.id) ? Promise.resolve({}) : checks.check(routine, context)),
+    timeoutMs: checks.timeoutMs,
+    drain: checks.drain,
+    pendingKeys: checks.pendingKeys,
     release: checks.release,
     settled: (run) => {
       checks.settled(run);

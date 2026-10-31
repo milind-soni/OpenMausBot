@@ -81,7 +81,7 @@ describe("routines with checks", () => {
     open();
     await h.settle();
     expect(h.started).toEqual([]);
-    expect(h.released).toEqual(["late-batch"]);
+    expect(h.released).toEqual([]);
     expect(readFileSync(h.file, "utf8")).toBe(before);
     await h.tick();
     expect(h.asked).toHaveLength(1);

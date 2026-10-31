@@ -218,7 +218,8 @@ describe("bounded scheduled overlap and run health", () => {
       process.off("unhandledRejection", onUnhandled);
     }
     save.mockRestore();
-    await h.manager.tick();
+    h.manager.start();
+    try { await h.manager.tick(); } finally { h.manager.stop(); }
     expect(h.started).toHaveLength(trigger === "start" ? 1 : 2);
     expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 10 * 60_000);
   });

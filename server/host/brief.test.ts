@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { NeedsYouItem } from "../../shared/today.ts";
 import { widgetActions, type WidgetRoot } from "../../shared/widget.ts";
-import type { CalendarEvent, EmailHeader } from "../connected-reads.ts";
+import type { CalendarEvent, EmailHeader, ReadSession } from "../connected-reads.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
 import { Store, type Message } from "../store.ts";
@@ -25,7 +25,7 @@ const standup: CalendarEvent = {
   attendees: [{ email: "me@x.test", self: true, organizer: true }, { email: "ada@x.test", name: "Ada", self: false, organizer: false }],
 };
 
-function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string; ideas?: string[] } = {}) {
+function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string; ideas?: string[]; session?: () => ReadSession | null } = {}) {
   let watching = true;
   const dir = mkdtempSync(join(tmpdir(), "omb-brief-"));
   dirs.push(dir);
@@ -42,7 +42,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
   const make = () => createBrief({
     store, dataDir: dir, now: () => now, hosted: options.hosted ?? false, watching: () => watching, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => busy,
     notify: (_bot, _thread, detail) => notified.push(detail), runs: () => runs, needsYou: () => options.needsYou ?? [], engineName: () => "Claude",
-    hostTimeZone: () => "UTC", language: () => options.language, session: () => null, address: () => "me@x.test",
+    hostTimeZone: () => "UTC", language: () => options.language, session: options.session ?? (() => null), address: () => "me@x.test",
     failRun: (id, why) => failed.push([id, why]), keep: (key) => kept.push(key), items: (key) => items.get(key) ?? null,
     ideas: (botId) => (botId === chief.id && options.ideas ? { ideas: options.ideas, conversations: 3 } : { ideas: [], conversations: 0 }),
   });
@@ -76,6 +76,36 @@ describe("the brief", () => {
     await s.brief.active("desktop", "America/New_York", "en");
     expect(s.shown()).toContain("After midnight");
     expect(s.shown()).not.toContain("Before midnight");
+  });
+
+  it.each(["thread", "message"] as const)("a cancelled check cannot change the brief after its pending %s read", async (read) => {
+    let current: ReadSession | null = null;
+    const s = setup({ session: () => current });
+    const email = { ...ada, at: s.now() - MINUTE };
+    const pick = { email, why: "Reply needed", needsReply: true };
+    await s.brief.report({ routine: {} as never, at: s.now(), picked: [pick] });
+    const controller = new AbortController();
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    let readSignal: AbortSignal | undefined;
+    const session: ReadSession = {
+      address: async () => "me@x.test", events: async () => [], emails: async () => ({ emails: [], more: false }),
+      thread: async (_id, signal) => { readSignal = signal; await gate; return [{ id: "answer", at: s.now(), from: "me@x.test" }]; },
+      message: async (_id, signal) => { readSignal = signal; await gate; return { ...email, subject: "Late changed subject" }; },
+    };
+    if (read === "message") { current = session; s.restart(); }
+    const pending = s.brief.report({ routine: {} as never, at: s.now(), signal: controller.signal,
+      ...(read === "thread" ? { session } : { picked: [{ ...pick, email: { ...email, id: "m2" } }] }) });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort();
+    const before = JSON.stringify(s.rows());
+    let rejected = false;
+    const outcome = pending.catch((error: unknown) => { rejected = true; return error; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    try { expect(rejected).toBe(true); expect(readSignal).toBe(controller.signal); } finally { open(); }
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(JSON.stringify(s.rows())).toBe(before);
+    expect(s.shown()).toContain("Q3 numbers");
   });
 
   it("counts only the emails it leaves out, and still says how many new ones wait", () => {

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   calendarsFromData, createConnectedReads, emailsFromData, eventsFromData, messageFromData, profileFromData, SourceError, threadFromData, toolData,
@@ -100,5 +100,46 @@ describe("a check's reads", () => {
     expect(mail).toMatchObject({ app: "gmail", signedOut: true });
     const calendar = await session.events(0, 1).catch((error: unknown) => error);
     expect(calendar).toMatchObject({ app: "googlecalendar", signedOut: false });
+  });
+});
+
+
+describe("read cancellation", () => {
+  it.each(["address", "events", "emails", "message", "thread"] as const)("cancels %s at the relay and keeps its read timeout", async (method) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Read timed out", "TimeoutError")), ms);
+      return controller.signal;
+    });
+    const { deps } = relay({});
+    try {
+      for (const cancel of ["caller", "timeout"] as const) {
+        const controller = new AbortController();
+        let inFlight: AbortSignal | undefined;
+        let entered!: () => void;
+        const ready = new Promise<void>((resolve) => { entered = resolve; });
+        const reads = createConnectedReads({ ...deps, readTimeoutMs: 25,
+          relay: async (payload, session, signal) => {
+            if ((payload as { method: string }).method !== "tools/call") return deps.relay(payload, session);
+            inFlight = signal; entered();
+            return new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+          },
+        }).session();
+        const signal = controller.signal;
+        const pending = method === "address" ? reads.address(signal)
+          : method === "events" ? reads.events(0, 1, signal)
+          : method === "emails" ? reads.emails(0, 10, signal)
+          : method === "message" ? reads.message("m1", signal) : reads.thread("t1", signal);
+        const outcome = pending.catch((error: unknown) => error);
+        await ready;
+        if (cancel === "caller") controller.abort();
+        else await vi.advanceTimersByTimeAsync(25);
+        expect(inFlight?.aborted, cancel).toBe(true);
+        expect(await outcome).toBeInstanceOf(SourceError);
+        expect(controller.signal.aborted).toBe(cancel === "caller");
+        await vi.runAllTimersAsync();
+      }
+    } finally { timeout.mockRestore(); vi.useRealTimers(); }
   });
 });

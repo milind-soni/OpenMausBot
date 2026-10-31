@@ -11,6 +11,8 @@ export const REMINDER_LEAD_MS = 10 * MINUTE;
 export const LOOKAHEAD_MS = 36 * HOUR;
 /** Emails one run sorts; any more since the last check wait for the next, newest first. */
 export const TRIAGE_BATCH = 20;
+export const BRIEF_HEADER_READ_LIMIT = 12;
+export const BRIEF_REPLY_READ_LIMIT = 10;
 /** Important emails one run may pick. */
 export const PICKS_PER_TRIAGE = 5;
 export const EMAIL_MAX_AGE_MS = 24 * HOUR;

@@ -6,15 +6,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { flushDeciderLog } from "../decider/log.ts";
 import { writeFileAtomic } from "../atomic.ts";
-import { SourceError, type CalendarEvent, type ConnectedReads, type EmailHeader, type ReadApp, type ReadSession } from "../connected-reads.ts";
+import { GMAIL_PAGES, READ_TIMEOUT_MS, SourceError, type CalendarEvent, type ConnectedReads, type EmailHeader, type ReadApp, type ReadSession } from "../connected-reads.ts";
 import type { Routine, RoutineCheckResult, RoutineChecks, RoutineRun } from "../routines.ts";
+import { awaitRoutineCheck } from "../routine-check-task.ts";
 import type { CheckHold } from "../routine-check-pacing.ts";
 import {
-  clashes, emailSince, fingerprint, keepNewest, LOOKAHEAD_MS, mergeMeetings, nextMeetingDue, planMail, planMeetings, pruneMeetings, type MeetingRecord,
+  BRIEF_HEADER_READ_LIMIT, BRIEF_REPLY_READ_LIMIT, clashes, emailSince, fingerprint, keepNewest, LOOKAHEAD_MS, mergeMeetings, nextMeetingDue, planMail, planMeetings, pruneMeetings, type MeetingRecord,
 } from "./check-plan.ts";
 import { checkedPrompt, watchPrompt, type CheckItems } from "./check-prompts.ts";
-import type { InboxTriage } from "./inbox-triage.ts";
+import { INBOX_TRIAGE_BUDGET_MS, type InboxTriage } from "./inbox-triage.ts";
 
 const MINUTE = 60_000;
 const CHECK_MS = 15 * MINUTE;
@@ -54,6 +56,7 @@ type Pending = z.infer<typeof pendingSchema>;
 export interface CheckReport {
   routine: Routine;
   at: number;
+  signal?: AbortSignal;
   /** The person's meetings in the next 36 hours, each once; undefined when Calendar was not read. */
   meetings?: CalendarEvent[];
   clashes?: Array<[CalendarEvent, CalendarEvent]>;
@@ -122,6 +125,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   address(): string | undefined;
 } {
   const file = join(deps.dataDir, CHECKS_FILE);
+  const revisions = new Map<string, number>();
+  const changed = (routineId: string): void => { revisions.set(routineId, (revisions.get(routineId) ?? 0) + 1); };
   const now = deps.now ?? Date.now;
   let state: z.infer<typeof fileSchema> = { version: 1, routines: {} };
   try {
@@ -155,6 +160,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     handed.delete(key);
     if (!owner) return;
     const entry = of(owner[0]);
+    changed(owner[0]);
     for (const meeting of owner[1].prep) if (entry.meetings?.[meeting]) delete entry.meetings[meeting]!.prepStartedAt;
     delete entry.pending![key];
     save();
@@ -165,8 +171,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     handed.delete(key);
     if (!owner) return;
     const [routineId, pending] = owner;
+    changed(routineId);
     const entry = of(routineId);
-    if (pending.replies.length) deps.sorted?.(routineId, pending.replies.length);
     if (pending.mailCursor !== undefined) entry.mailCursor = Math.max(entry.mailCursor ?? 0, pending.mailCursor);
     if (pending.runsCursor !== undefined) entry.runsCursor = Math.max(entry.runsCursor ?? 0, pending.runsCursor);
     entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...pending.mail])], MAX_JUDGED);
@@ -178,6 +184,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     }
     delete entry.pending![key];
     save();
+    if (pending.replies.length) deps.sorted?.(routineId, pending.replies.length);
   }
 
   /** A read that failed counts toward its app's failure streak, so the brief says so once and reads back off. */
@@ -196,36 +203,46 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (entry.failures?.[app]) delete entry.failures[app];
   };
 
-  async function check(routine: Routine, context: { manual: boolean; hold?: CheckHold }): Promise<RoutineCheckResult> {
+  async function check(routine: Routine, context: { manual: boolean; hold?: CheckHold; signal?: AbortSignal; release?: (key: string) => void }): Promise<RoutineCheckResult> {
+    const signal = context.signal;
+    signal?.throwIfAborted();
     const checks = routine.checks ?? [];
-    const entry = of(routine.id);
+    const revision = revisions.get(routine.id);
+    const entry = structuredClone(of(routine.id));
     const at = now();
     for (const [key, pending] of Object.entries(entry.pending ?? {})) {
       const run = deps.runs().find((candidate) => candidate.checkKey === key);
-      if ((run && !ACTIVE.has(run.status)) || (!run && at - pending.at > PENDING_MS)) release(key);
+      if ((run && !ACTIVE.has(run.status)) || (!run && at - pending.at > PENDING_MS)) {
+        for (const meeting of pending.prep) if (entry.meetings?.[meeting]) delete entry.meetings[meeting]!.prepStartedAt;
+        delete entry.pending![key];
+        handed.delete(key);
+      }
     }
     // The first check fixes where mail is watched from, so mail a failed read or run gave back is read again.
     if (checks.includes("mail")) entry.mailCursor ??= emailSince({ now: at });
     const brief = routine.deliver === "brief";
     const aiAllowed = !context.hold && (routine.access !== "read-and-draft" || deps.fenced(routine.botId));
-    const report: CheckReport = { routine, at };
+    const report: CheckReport = { routine, at, signal };
     const trouble: Array<{ app: ReadApp; signedOut: boolean }> = [];
     const items: CheckItems = { mail: [], prep: [], runs: [] };
     const pending: Omit<Pending, "at"> = { mail: [], prep: [], replies: [] };
     const held = new Set(Object.values(entry.pending ?? {}).flatMap((one) => [...one.mail, ...one.prep]));
     let wakeAt: number | undefined;
-    const apps = checks.includes("calendar") || checks.includes("mail") ? await deps.reads.connected().catch(() => null) : null;
+    let sortedCount = 0;
+    const apps = checks.includes("calendar") || checks.includes("mail") ? await awaitRoutineCheck(deps.reads.connected().catch(() => null), signal) : null;
+    signal?.throwIfAborted();
     const session = deps.reads.session();
     report.session = session;
     const readable = (app: ReadApp): boolean => apps?.[app] === true && deps.mayRead(routine.botId, app) && !trouble.some((one) => one.app === app) &&
       (context.manual || !readsBackOff(entry, app));
     if (readable("gmail") && entry.address === undefined) {
-      try { entry.address = await session.address(); } catch (error) { trouble.push(failed(entry, "gmail", error)); }
+      try { const address = await awaitRoutineCheck(session.address(signal), signal); signal?.throwIfAborted(); entry.address = address; } catch (error) { signal?.throwIfAborted(); trouble.push(failed(entry, "gmail", error)); }
     }
 
     if (checks.includes("calendar") && readable("googlecalendar")) {
       try {
-        const meetings = mergeMeetings(await session.events(at - 60 * MINUTE, at + LOOKAHEAD_MS), entry.address);
+        const meetings = mergeMeetings(await awaitRoutineCheck(session.events(at - 60 * MINUTE, at + LOOKAHEAD_MS, signal), signal), entry.address);
+        signal?.throwIfAborted();
         succeeded(entry, "googlecalendar");
         entry.meetings = pruneMeetings(entry.meetings ?? {}, at);
         const records = entry.meetings;
@@ -253,6 +270,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
         }
         wakeAt = nextMeetingDue({ now: at, events: meetings, meetings: records });
       } catch (error) {
+        signal?.throwIfAborted();
         trouble.push(failed(entry, "googlecalendar", error));
       }
     }
@@ -260,7 +278,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (checks.includes("mail") && readable("gmail")) {
       try {
         const since = emailSince({ now: at, emailCursor: entry.mailCursor });
-        const { emails, more } = await session.emails(since, MAIL_READ_LIMIT);
+        const { emails, more } = await awaitRoutineCheck(session.emails(since, MAIL_READ_LIMIT, signal), signal);
+        signal?.throwIfAborted();
         succeeded(entry, "gmail");
         const judged = new Set([...(entry.judged ?? []), ...held]);
         const plan = planMail({ now: at, emails, judged });
@@ -268,7 +287,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
         const advanced = waiting || more ? undefined : at;
         const helpers = brief && deps.inbox?.ready() === true;
         if (helpers) report.helpersSort = true;
-        const picked = helpers && plan.batch.length ? await deps.inbox!.triage(plan.batch, deps.dismissedFrom()) : null;
+        const picked = helpers && plan.batch.length ? await awaitRoutineCheck(deps.inbox!.triage(plan.batch, deps.dismissedFrom(), signal), signal) : null;
+        signal?.throwIfAborted();
         if (picked) {
           // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
           report.picked = picked.flatMap((pick) => {
@@ -276,7 +296,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
             return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
           });
           entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
-          if (plan.batch.length) deps.sorted?.(routine.id, plan.batch.length);
+          sortedCount = plan.batch.length;
           // Mail an earlier run still holds keeps the cursor back, so a failed run's mail is read again.
           const heldMail = Object.values(entry.pending ?? {}).some((one) => one.mail.length > 0);
           if (advanced !== undefined && !heldMail) entry.mailCursor = advanced;
@@ -295,6 +315,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
         }
         if (brief && (waiting || more)) report.waiting = more ? true : waiting;
       } catch (error) {
+        signal?.throwIfAborted();
         trouble.push(failed(entry, "gmail", error));
       }
     }
@@ -318,7 +339,6 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (work > 0) {
       const key = `chk-${randomUUID()}`;
       entry.pending = { ...entry.pending, [key]: { at, ...pending } };
-      handed.set(key, { mail: items.mail, prep: items.prep.map(({ key: meeting, event }) => ({ key: meeting, event })) });
       run = {
         key,
         prompt: brief
@@ -326,8 +346,19 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
           : checkedPrompt({ instructions: routine.prompt, items, timeZone: deps.timeZone() }),
       };
     }
+    signal?.throwIfAborted();
+    if (revisions.get(routine.id) !== revision) return state.routines[routine.id] ? check(routine, context) : {};
+    state.routines[routine.id] = entry;
+    if (run) handed.set(run.key, { mail: items.mail, prep: items.prep.map(({ key: meeting, event }) => ({ key: meeting, event })) });
     save();
-    if (brief) await deps.report(report);
+    if (sortedCount) deps.sorted?.(routine.id, sortedCount);
+    try {
+      if (brief) await awaitRoutineCheck(Promise.resolve(deps.report(report)), signal);
+      signal?.throwIfAborted();
+    } catch (error) {
+      if (run) context.release?.(run.key);
+      throw error;
+    }
     const sentence = troubleSentence(trouble);
     return { ...(run ? { run } : {}), ...(sentence ? { trouble: sentence } : {}), ...(wakeAt !== undefined ? { wakeAt } : {}) };
   }
@@ -340,6 +371,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   }
 
   return {
+    timeoutMs: (2 + GMAIL_PAGES + BRIEF_HEADER_READ_LIMIT + BRIEF_REPLY_READ_LIMIT) * READ_TIMEOUT_MS + INBOX_TRIAGE_BUDGET_MS + MINUTE,
+    drain: () => flushDeciderLog(deps.dataDir),
     check, release, settled, commit,
     mayDraft(key, threadId, to) {
       const pending = ownerOf(key)?.[1];
@@ -347,8 +380,10 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       return Boolean(target && !pending!.drafted?.includes(threadId) && (to === undefined || to.trim().toLowerCase() === target.to));
     },
     drafted(key, threadId) {
-      const pending = ownerOf(key)?.[1];
-      if (!pending) return;
+      const owner = ownerOf(key);
+      if (!owner) return;
+      changed(owner[0]);
+      const pending = owner[1];
       pending.drafted = [...new Set([...(pending.drafted ?? []), threadId])];
       save();
     },
@@ -357,6 +392,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     pendingKeys: () => Object.values(state.routines).flatMap((entry) => Object.keys(entry.pending ?? {})),
     forget(routineId) {
       if (!state.routines[routineId]) return;
+      changed(routineId);
       delete state.routines[routineId];
       save();
     },
