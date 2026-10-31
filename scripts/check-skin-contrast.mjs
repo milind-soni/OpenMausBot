@@ -188,7 +188,7 @@ const PAIRS = [
   ["--color-card", "--color-app", 1.04],
   ["--color-panel", "--color-app", 1.03],
   // The app's card is told from the frame round it.
-  ["--color-frame", "--color-app", 1.02],
+  ["--color-frame", "--color-app", 1.05],
 ];
 
 const skins = parseSkins(css);
