@@ -182,8 +182,9 @@ const bridge = {
   // out; the account, the token and the checkout page stay in main. Only from the person's click where it opens anything.
   cloudAdd: {
     state: () => ipcRenderer.invoke("cloud-add:state"),
-    start: (tier, name, color) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color)) : Promise.reject(new Error("Choose Continue to checkout.")),
+    start: (tier, name, color, source) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color), ...(source == null ? [] : [String(source)]))
+      : Promise.reject(new Error("Choose Continue to checkout.")),
     reopen: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-add:reopen") : Promise.reject(new Error("Choose Reopen checkout.")),
     copyLink: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -571,7 +572,6 @@ const bridge = {
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
-    shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
   },
   desktopAnalytics: {
     enabled: () => {
