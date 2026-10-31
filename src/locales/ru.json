@@ -91,6 +91,7 @@
   "notice.dismiss": "Больше не показывать",
   "notice.notNow": "Не сейчас",
   "notice.openFailed": "Не удалось открыть браузер. Повторите попытку.",
+  "server.teammates.sameRequest": "Другой участник команды только что спросил то же самое, поэтому здесь будет тот же ответ, а не второй.",
   "server.reports.sent": "Отправлено команде MausBot (отчёт {report}). Milind и Omkar получат его по электронной почте.",
   "server.reports.sentReply": "Отправлено команде MausBot (отчёт {report}). Milind и Omkar получат его по электронной почте и ответят на {contact}.",
   "server.reports.sentLater": "Отправлено команде MausBot (отчёт {report}) после неудачной предыдущей попытки. Milind и Omkar получат его по электронной почте.",

@@ -598,6 +598,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
 
 
 
+
 const listed = (finding: Finding, file: string, snippet: string) => finding.file === file && finding.text.includes(snippet);
 
 describe("lines the server writes for a person", () => {
@@ -636,7 +637,7 @@ describe("lines the server writes for a person", () => {
       .map((path) => relative(ROOT, path).split("\\").join("/"));
     expect(readers.sort()).toEqual(["server/server-line-packs.ts", "server/server-lines.ts"]);
     // The server loads the other languages when it starts; without them every line reads in English.
-    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/^import [^\n]*\bimport "\.\/server-line-packs\.ts";$|^import "\.\/server-line-packs\.ts";$/m);
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/(?:^|;\s*)import "\.\/server-line-packs\.ts";/m);
   });
 });
 

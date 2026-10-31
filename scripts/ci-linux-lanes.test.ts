@@ -38,7 +38,7 @@ describe("Linux lanes", () => {
     expect(lanesFor({ vitest: [], evals: true, packaged_server: false }, "/r")).toEqual([EVALS_LANE]);
   });
 
-  // The lane runner uses POSIX process groups to stop its Bash commands on Linux CI.
+  // The lanes run on one Linux VM: a lane is a process group, stopped with kill(-pid), which Windows has no form of.
   it.skipIf(process.platform === "win32")("runs lanes at once, prints each log whole when it ends, and names every lane that failed or ran out of time", async () => {
     const lines: string[] = [];
     let summary = "";

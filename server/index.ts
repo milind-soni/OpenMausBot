@@ -44,7 +44,7 @@ import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
-import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import { serverLine } from "./server-lines.ts"; import "./server-line-packs.ts";
+import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { serverLine } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
@@ -4157,7 +4157,7 @@ const coordinator: Coordinator = createCoordinator({
       return outwardActions(turnRows(node));
     },
     shareAnswer: createShareAnswer({ askedFrom: (node) => (node.parentId ? coordinator.node(node.parentId)?.threadId : undefined), audienceOf: teamHost.audienceOf, pinned: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd, botFolder: (botId) => store.bot(botId)?.cwd, privateFolders: TASK_WORKSPACES_DIR }),
-    joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(personLanguages.forLine(teamConversationPerson(node.threadId) ?? threadPersonKey(node.threadId) ?? THIS_COMPUTER), "server.coordination.joined")}`, ok: true } }); },
+    joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(personLanguages.forLine(teamConversationPerson(node.threadId) ?? threadPersonKey(node.threadId)), "server.teammates.sameRequest")}`, ok: true } }); },
   },
 });
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();

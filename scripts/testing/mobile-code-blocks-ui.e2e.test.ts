@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../control-omb.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
-import { BOAT_OFFER_NOTICE } from "../../src/lib/notices";
 import { ensureUiBrowser } from "./control-omb-ui.ts";
 import { fixtureApi, mountPreview, type MountedPreview } from "./preview-fixture.ts";
+import { NOTICES } from "../../src/lib/notices.ts";
 
 const enabled = process.env.OMB_UI_E2E === "1";
 if (!enabled) console.log("skipping mobile code-block UI: set OMB_UI_E2E=1 for isolated browser qualification");
@@ -79,8 +79,7 @@ async function connect(url: string) {
     mkdirSync(evidence, { recursive: true });
     const save = () => writeFileSync(join(evidence!, "receipt.json"), JSON.stringify(receipts, null, 2));
     const api = fixtureApi(fixture.info.url);
-    const config = await api("PATCH", "/api/config", { language: "en" });
-    await api("PATCH", "/api/config", { onboarding: { hintsSeen: [...(config.onboarding?.hintsSeen ?? []), BOAT_OFFER_NOTICE] } });
+    await api("PATCH", "/api/config", { language: "en" });
     const { bots } = await api("GET", "/api/bots");
     for (const bot of bots.filter((bot: { defaultBot?: unknown }) => bot.defaultBot)) await api("PATCH", `/api/bots/${bot.id}`, { welcomed: true });
     const created = await runControlOmb(["new-bot", "--name", "Pepper", "--url", fixture.info.url]) as { bot: { id: string; activeTaskId: string } };
@@ -117,6 +116,8 @@ async function connect(url: string) {
     await request("Runtime.enable");
     await request("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.request("Browser.grantPermissions", { origin: new URL(preview.previewUrl).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+    // The notices (the Boat card and the like) are not this test's subject, and on a phone one covers the last block.
+    await request("Page.addScriptToEvaluateOnNewDocument", { source: `try { for (const notice of ${JSON.stringify(NOTICES)}) localStorage.setItem(notice, "1"); } catch {}` });
     await request("Page.navigate", { url: preview.previewUrl });
     await expect.poll(() => evaluate(`Boolean(document.querySelector('textarea[aria-label="Message Pepper"]'))`), { timeout: 120_000 }).toBe(true);
     await evaluate(`document.querySelector('textarea[aria-label="Message Pepper"]').focus()`);
