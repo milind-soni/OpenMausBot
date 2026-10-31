@@ -25,3 +25,8 @@ export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
 export function localVmPreservesInstalledApps(cfg: AppConfig): boolean {
   return cfg.localVm?.preserveInstalledApps === true;
 }
+
+/** Administrator-provided add-ons live below the app data directory and are mounted read-only into each new Local VM. */
+export function localVmPersistentAddons(cfg: AppConfig): ReadonlyArray<{ name: string; mounts: ReadonlyArray<{ source: string; guestPath: string }> }> {
+  return cfg.localVm?.persistentAddons ?? [];
+}

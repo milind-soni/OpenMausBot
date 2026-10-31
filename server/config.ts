@@ -85,6 +85,19 @@ const mcpConfigSchema = z.object({
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
     .optional(),
 }).strict();
+const localVmAddonNameSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "must be a lowercase add-on name");
+const localVmAddonSourceSchema = z.string().refine(
+  (value) => !value.includes("\\") && !value.includes(",") && !value.includes("\r") && !value.includes("\n") && value.split("/").every((part) => part !== "" && part !== "." && part !== ".."),
+  { message: "must be a non-empty slash-delimited relative path without dot segments, commas, or line breaks" },
+);
+const localVmAddonGuestPathSchema = z.string().refine(
+  (value) => value.startsWith("/") && !value.includes(",") && !value.includes("\r") && !value.includes("\n") && value.split("/").slice(1).every((part) => part !== "" && part !== "." && part !== ".."),
+  { message: "must be an absolute guest path without dot segments, commas, or line breaks" },
+);
+const localVmPersistentAddonSchema = z.object({
+  name: localVmAddonNameSchema,
+  mounts: z.array(z.object({ source: localVmAddonSourceSchema, guestPath: localVmAddonGuestPathSchema }).strict()).min(1).max(8),
+}).strict();
 /** Bot desktop isolation, default "shared"; `maxInstances` caps per-bot desktops or pool seats. Switching modes cold-starts every desktop. */
 const localVmConfigSchema = z.object({
   mode: z.enum(["shared", "per-bot", "pool"]).optional(),
@@ -101,6 +114,8 @@ const localVmConfigSchema = z.object({
     .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
     .optional(),
   preserveInstalledApps: z.boolean().optional(),
+  /** Read-only, server-owned folders at DATA_DIR/vm-addons/<name>/<source>. */
+  persistentAddons: z.array(localVmPersistentAddonSchema).max(8).optional(),
 });
 /** A named browser session; its id names a durable Electron partition. */
 const browserProfileSchema = z.object({
@@ -517,7 +532,7 @@ export interface AppConfig extends HelperConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; persistentAddons?: Array<{ name: string; mounts: Array<{ source: string; guestPath: string }> }> };
   features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
