@@ -735,6 +735,23 @@ describe("saving the newer sections", () => {
     }
   });
 
+  it("drops a hand-edited invalid web search field instead of keeping it through every save", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ webSearch: { braveApiKey: "invalid key", searxngUrl: "https://search.example/" } }));
+    try {
+      saveConfig({ webSearch: { searxngUrl: "https://search2.example/" } });
+      let disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.webSearch).toEqual({ searxngUrl: "https://search2.example/" });
+      expect(parseStoredConfig(disk).webSearch).toEqual({ searxngUrl: "https://search2.example/" });
+      saveConfig({ webSearch: { braveApiKey: "good-key" } });
+      disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.webSearch).toEqual({ searxngUrl: "https://search2.example/", braveApiKey: "good-key" });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
   it("clears a thread event-log knob with null while other keys survive", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });
