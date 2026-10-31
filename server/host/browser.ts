@@ -123,6 +123,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
+    held: (session) => !turnResources.free(`browser:${session}`),
     log: (line) => console.warn(line),
   });
   const lendRefusal = deps.lendRefusal ?? ((): LendRefusal => "unproven");
