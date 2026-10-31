@@ -15,7 +15,7 @@ import { createDesktopPrefs, registerDesktopPrefs } from "../../electron/desktop
 import { createUpdatesConsent, registerUpdatesConsent } from "../../electron/updates-consent.mjs";
 
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default",
-  viewerEmail: undefined as string | null | undefined }));
+  viewerEmail: undefined as string | null | undefined, rail: null as { available: boolean; hidden: boolean } | null, tour: null as Record<string, any> | null }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? initial() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(f.values[index]) : next; }]; },
@@ -32,8 +32,13 @@ vi.mock("@/lib/default-bot", async original => ({ ...await original<typeof impor
 vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ brand: { name: "OpenMausBot" }, source: f.brand, file: "" }), productName: () => "MausBot" }));
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapshot: { state: string; authenticated?: boolean } }) =>
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
+// The window's rail as this page knows it; none unless a test says so.
+vi.mock("@/lib/chrome-rail", async original => ({ ...await original<typeof import("@/lib/chrome-rail")>(), useChromeRail: () => f.rail }));
+// The tour's own steps and timing are SidebarTour.test.ts's: here it is the queue's entry, driven by its callbacks.
+vi.mock("./onboarding/SidebarTour", async original => ({ ...await original<typeof import("./onboarding/SidebarTour")>(),
+  SidebarTour: (props: Record<string, any>) => { f.tour = props; return createElement("div", null, `Tour of the rail at ${props.at}: ${props.steps.map((step: { id: string }) => step.id).join(" ")}`); } }));
 import { AppNotices } from "./AppNotices";
-import { BOAT_OFFER_NOTICE, CLOUD_PRO_UPDATE_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, CLOUD_INTRO, localDay, STAR_NOTICE } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_PRO_UPDATE_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, CLOUD_INTRO, localDay, SIDEBAR_TOUR_NOTICE, STAR_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { identifyEmail, track } from "@/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
@@ -134,6 +139,7 @@ const hints = () => f.state.config.onboarding.hintsSeen as string[];
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW; desk = desktopMachine();
+  f.rail = { available: false, hidden: false }; f.tour = null;
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
   session = new Map(); f.viewerEmail = undefined;
   vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
@@ -1196,5 +1202,159 @@ describe("the Simple mode popup after the update", () => {
     session.clear();
     const later = await launch();
     expect(later).toContain(POPUP); expect(later).not.toContain(TITLE);
+  });
+});
+
+describe("the tour of the rail of places after the update", () => {
+  const TOUR = "Tour of the rail";
+  const BOAT = "$50 of Boat credit for you";
+  const tourEvents = () => vi.mocked(track).mock.calls.filter(([name]) => name === "sidebar_tour").map(([, props]) => props);
+  const seenOnDesktop = () => desk.saved?.seen ?? [];
+  /** Someone who used the app before, the window's rail beside this computer's page, and the cards before the tour seen.
+   * No Cloud trial to offer, as for every plan but Team: the Cloud's own card after the update steps aside. */
+  const withRail = (rail = { available: true, hidden: false }) => { returning(); f.rail = rail; offer = { ...PLAIN_OFFER }; };
+  /** My Cloud's own page as home, its setup checklist done. */
+  const onMyCloud = () => {
+    desk.listeners.set("home:page", (event) => { event.returnValue = event.page === "cloud"; });
+    viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
+    f.state.config.onboarding.hintsSeen = [...f.state.config.onboarding.hintsSeen, "cloud-setup-hidden"];
+    showWindow(MY_CLOUD);
+  };
+  /** The tour shows a step, as SidebarTour reports it, and the page renders again. */
+  const shows = async (step: string) => { f.tour!.onShown(step); await settle(1); };
+  const moves = async (next: number) => { f.tour!.onStep(next); await settle(1); };
+
+  it("everyone with a rail gets it once, in a launch of its own after the Cloud Pro popup's and before Boat's offer; run to its end, it is kept for good", async () => {
+    withRail(); desk = desktopMachine(); storage.delete(BOAT_OFFER_NOTICE);
+    const first = await launch();
+    expect(first, "the Cloud Pro popup goes first").toContain("MausBot Cloud Pro");
+    expect(first).not.toContain(TOUR);
+    press("Not now"); await flush();
+    expect(await settle(), "never in the launch another popup took").not.toContain(TOUR);
+    session.clear();
+    const second = await launch();
+    expect(second).toContain(`${TOUR} at 0: places add menu strip`);
+    expect(second, "Boat's offer waits for a later launch").not.toContain(BOAT);
+    await shows("places"); await moves(1); await shows("add"); await moves(2); await shows("menu"); await moves(3); await shows("strip"); await moves(4);
+    expect(render()).toContain(`${TOUR} at 4`);
+    f.tour!.onEnd(); await flush();
+    expect(tourEvents()).toEqual([{ action: "shown", step: "places" }, { action: "completed", step: "strip" }]);
+    expect(seenOnDesktop()).toContain(SIDEBAR_TOUR_NOTICE); expect(hints()).toContain(SIDEBAR_TOUR_NOTICE);
+    expect(render(), "nothing else follows it in its launch").toBe("");
+    session.clear();
+    const third = await launch();
+    expect(third).not.toContain(TOUR); expect(third).toContain(BOAT.replace(/'/g, "&#x27;"));
+  });
+
+  it("never while a bot or a room is working: it steps aside for a turn and comes back at the step it was on", async () => {
+    withRail();
+    f.state.bots[0].busy = true;
+    expect(await launch()).not.toContain(TOUR);
+    f.state.bots[0].busy = false;
+    expect(await settle()).toContain(`${TOUR} at 0`);
+    await shows("places"); await moves(1); await shows("add");
+    f.state.groups = [{ working: true }];
+    expect(await settle(), "a room starts working").not.toContain(TOUR);
+    f.state.groups = [];
+    expect(await settle(), "back at the + once it is done").toContain(`${TOUR} at 1`);
+    f.state.bots[0].tasks[0].busy = true;
+    expect(await settle(), "a turn starts").not.toContain(TOUR);
+    f.state.bots[0].tasks[0].busy = false;
+    expect(await settle()).toContain(`${TOUR} at 1`);
+    expect(tourEvents(), "shown once").toEqual([{ action: "shown", step: "places" }]);
+    expect(seenOnDesktop()).not.toContain(SIDEBAR_TOUR_NOTICE);
+  });
+
+  it("Escape leaves it early: counted as left at its step, and kept closed on every page of this desktop", async () => {
+    withRail();
+    await launch();
+    await shows("places"); await moves(1); await shows("add");
+    f.tour!.onLeave("add"); await flush();
+    expect(tourEvents()).toEqual([{ action: "shown", step: "places" }, { action: "left", step: "add" }]);
+    expect(seenOnDesktop()).toContain(SIDEBAR_TOUR_NOTICE);
+    expect(render()).toBe("");
+    session.clear();
+    expect(await launch()).not.toContain(TOUR);
+    // My Cloud's page: its own storage and workspace record, the same desktop.
+    storage.clear(); storage.set(PRODUCT_HUNT_NOTICE, "1"); storage.set(SIMPLE_MODE_PROMPT_KEY, "1"); storage.set(BOAT_OFFER_NOTICE, "1");
+    f.state.config.onboarding.hintsSeen = withTourFinished(undefined);
+    onMyCloud();
+    expect(await launch(), "My Cloud's page in the same desktop").not.toContain(TOUR);
+    desk = desktopMachine(); desk.saved = { seen: [CLOUD_PRO_UPDATE_NOTICE] };
+    onMyCloud();
+    expect(await launch(), "a desktop that never closed it shows it there").toContain(TOUR);
+  });
+
+  it("on My Cloud's own page as home too, where it can mark the window's rail; never on a saved server's page, which can't", async () => {
+    withRail();
+    onMyCloud();
+    expect(await launch()).toContain(`${TOUR} at 0: places add menu strip`);
+    viewer = { hosted: true, canSave: true }; delete f.state.config.cloudHome;
+    showWindow(VPS);
+    expect(await launch()).not.toContain(TOUR);
+  });
+
+  it("claims the launch once a step shows, so MausBot's first-launch card waits for a later one", async () => {
+    withRail();
+    await launch();
+    expect(launchDialogShown()).toBeNull();
+    await shows("places");
+    expect(launchDialogShown()).toBe("notices");
+  });
+
+  it("waits for MausBot's first-launch card and never follows it in its launch; a new install gets it right after its first reply", async () => {
+    f.rail = { available: true, hidden: false };
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "MausBot's card is due").not.toContain(TOUR);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    expect(await launch(), "the launch MausBot's card took").not.toContain(TOUR);
+    session.clear();
+    expect(await launch(), "the next launch").toContain(TOUR);
+    session.clear(); f.viewerEmail = undefined;
+    markWelcomeFinished();
+    f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    expect(await launch(), "a new install's first chat, before its first reply").not.toContain(TOUR);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    expect(await launch(), "right after the first reply, in the launch its welcome finished in").toContain(TOUR);
+  });
+
+  it("only with a rail to point at: none, nothing (the cards after it go on); a hidden one, its button alone", async () => {
+    withRail({ available: false, hidden: false }); storage.delete(BOAT_OFFER_NOTICE);
+    const none = await launch();
+    expect(none).not.toContain(TOUR); expect(none).toContain(BOAT.replace(/'/g, "&#x27;"));
+    f.rail = null;
+    expect(await launch(), "until the window's rail answers, nothing after the tour shows either").toBe("");
+    f.rail = { available: true, hidden: true };
+    expect(await launch()).toContain(`${TOUR} at 0: strip`);
+  });
+
+  it("with nothing on screen to point at, it ends uncounted and unkept, and the next card goes on", async () => {
+    withRail(); storage.delete(BOAT_OFFER_NOTICE);
+    await launch();
+    f.tour!.onEnd();
+    const after = await settle();
+    expect(after).not.toContain(TOUR); expect(after).toContain(BOAT.replace(/'/g, "&#x27;"));
+    expect(tourEvents()).toEqual([]);
+    expect(seenOnDesktop()).not.toContain(SIDEBAR_TOUR_NOTICE);
+  });
+
+  it("never on a branded build, an organization's desktop or in a remote client's window; never over another dialog or a call", async () => {
+    withRail(); f.brand = "file";
+    expect(await launch()).not.toContain(TOUR);
+    f.brand = "default";
+    vi.stubGlobal("document", { activeElement: null, body: null, getElementById: () => null, querySelector: () => null,
+      querySelectorAll: () => [{ closest: () => null, checkVisibility: () => true }] });
+    expect(await launch(), "another dialog is open").not.toContain(TOUR);
+    vi.stubGlobal("document", { activeElement: null, body: null, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] });
+    f.state.liveCall = { status: "active" };
+    expect(await launch(), "a call").not.toContain(TOUR);
+    delete f.state.liveCall;
+    expect(await launch()).toContain(TOUR);
+    (window.ogb as Record<string, unknown>).organization = { state: async () => ({ status: "connected", organization: { id: "o", name: "Acme" } }), onState: () => () => {} };
+    expect(await launch()).not.toContain(TOUR);
+    showWindow(LOCAL_ORIGIN); (window.ogb as Record<string, any>).remoteClient.active = true;
+    expect(await launch()).not.toContain(TOUR);
+    expect(tourEvents()).toEqual([]);
   });
 });

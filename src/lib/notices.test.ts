@@ -3,7 +3,7 @@ import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, localDay, nextNotice, noticeSeen, NOTICES,
-  OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, type NoticeFacts } from "./notices";
+  OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, SIDEBAR_TOUR_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, type NoticeFacts } from "./notices";
 
 let storage: Map<string, string>;
 beforeEach(() => {
@@ -14,9 +14,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
 const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
-  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false): NoticeFacts =>
-  ({ [SIMPLE_MODE_NOTICE]: simple, [CLOUD_PRO_UPDATE_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
-    [BOAT_OFFER_NOTICE]: boat, [STAR_NOTICE]: star });
+  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false, tour: boolean | null = false): NoticeFacts =>
+  ({ [SIMPLE_MODE_NOTICE]: simple, [CLOUD_PRO_UPDATE_NOTICE]: popup, [SIDEBAR_TOUR_NOTICE]: tour, [UPDATES_CONSENT_NOTICE]: consent, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro,
+    [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud, [BOAT_OFFER_NOTICE]: boat, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
 
@@ -24,7 +24,8 @@ it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the pro
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), none)).toBe(SIMPLE_MODE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true, null), none), "nothing shows while the Simple mode popup waits").toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(CLOUD_PRO_UPDATE_NOTICE);
-  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE]);
+  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, SIDEBAR_TOUR_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE,
+    BOAT_OFFER_NOTICE, STAR_NOTICE]);
   expect(nextNotice(facts(true, true, true, true, true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === CLOUD_PRO_UPDATE_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null, true), none)).toBeNull();
@@ -52,8 +53,21 @@ it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the pro
   expect(nextNotice(facts(false, false, false, false), none)).toBeNull();
 });
 
-it("Boat's credit offer is one the desktop keeps for its every page, as the Cloud Pro popup is", () => {
-  expect(DESKTOP_NOTICES).toEqual([CLOUD_PRO_UPDATE_NOTICE, BOAT_OFFER_NOTICE]);
+it("the tour of the rail of places comes after the Cloud Pro popup and before Boat's credit offer, and holds the queue while unknown", () => {
+  const queue = (popup: boolean | null, tour: boolean | null, boat: boolean | null, consent: boolean | null = false) =>
+    facts(false, false, false, false, false, popup, consent, false, boat, tour);
+  expect(nextNotice(queue(true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
+  expect(nextNotice(queue(null, true, true), none), "the tour waits for the popup's answer").toBeNull();
+  expect(nextNotice(queue(true, true, true), id => id === CLOUD_PRO_UPDATE_NOTICE)).toBe(SIDEBAR_TOUR_NOTICE);
+  expect(nextNotice(queue(false, true, true, true), none), "before the product-updates question").toBe(SIDEBAR_TOUR_NOTICE);
+  expect(nextNotice(queue(false, false, true), none)).toBe(BOAT_OFFER_NOTICE);
+  expect(nextNotice(queue(false, null, true), none), "Boat's offer waits while the tour is unknown").toBeNull();
+  expect(nextNotice(queue(false, true, true), id => id === SIDEBAR_TOUR_NOTICE)).toBe(BOAT_OFFER_NOTICE);
+  expect(SIDEBAR_TOUR_NOTICE).toBe("sidebar-tour-2026-11");
+});
+
+it("Boat's credit offer and the tour of the rail are ones the desktop keeps for its every page, as the Cloud Pro popup is", () => {
+  expect(DESKTOP_NOTICES).toEqual([CLOUD_PRO_UPDATE_NOTICE, BOAT_OFFER_NOTICE, SIDEBAR_TOUR_NOTICE]);
 });
 
 it("waits while an earlier notice's answer is unknown, so a later one never shows first", () => {

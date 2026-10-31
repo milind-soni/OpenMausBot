@@ -169,6 +169,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_welcome_ended` | A new Cloud's welcome ends | `reason`: `done`, `skipped`; `at`: the step it ended on |
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
 | `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
+| `sidebar_tour` | The one-time tour of the rail of places at the window's left edge (once on each desktop with a rail, after the update that brings it) is shown, runs to its end, or is left early with Escape | `action`: `shown`, `completed`, `left`; `step`: the step on screen then: `places` (the rail's places), `add` (its ＋), `menu` (a right-click on a place), `strip` (the button that hides and shows the rail) |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
 
 `api_key_saved` reports `ok` for a key the server checks with its provider before saving it (Boat, Composio,

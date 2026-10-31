@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-import { CHROME_RAIL_PATH, CHROME_RAIL_WIDTH, RAIL_OFFER_GRACE_MS, createChromeRail } from "./chrome-rail.mjs";
+import { CHROME_RAIL_PATH, CHROME_RAIL_WIDTH, RAIL_MARKS, RAIL_OFFER_GRACE_MS, createChromeRail } from "./chrome-rail.mjs";
 
 const RAIL = "http://127.0.0.1:8799/rail";
 
@@ -32,13 +32,13 @@ function viewMaker() {
   return { made, createView };
 }
 
-function world({ wanted = true, hidden = false } = {}) {
+function world({ wanted = true, hidden = false, trusted = false } = {}) {
   const { win, page, children } = appWindow();
   const { made, createView } = viewMaker();
-  const state = { wanted, hidden, changes: 0 };
+  const state = { wanted, hidden, trusted, changes: 0 };
   const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; } };
   const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
-    wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; } });
+    wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; }, trusted: () => state.trusted });
   const handlers = new Map();
   rail.install({ handle: (channel, handler) => handlers.set(channel, handler) });
   /** The page beside the rail asks, from its main frame. */
@@ -151,6 +151,36 @@ test("only the page beside the rail, in its main frame, offers the button: never
   assert.deepEqual([w.state.hidden, w.rail.shown()], [false, true], "nothing hidden, nothing kept");
 });
 
+test("a tour on this app's own page beside the rail marks its places or its ＋, or shades it all; a new document clears the mark", () => {
+  const w = world({ trusted: true });
+  w.rail.attach(w.win);
+  const [view] = w.made;
+  const marks = () => view.webContents.sent.filter(([channel]) => channel === "rail:mark").map(([, part]) => part);
+  assert.deepEqual(RAIL_MARKS, ["places", "add", "dim"]);
+  for (const part of ["places", "add", "add", "dim", "<b>", null]) w.ask("rail:mark", part);
+  assert.deepEqual(marks(), ["places", "add", "dim", null], "the rail's page hears each change once; anything but a part clears the mark");
+  w.ask("rail:mark", "add");
+  view.webContents.emit("did-finish-load");
+  assert.deepEqual(marks().slice(-2), ["add", "add"], "a rail page that loaded again hears the mark again");
+  w.page.emit("did-navigate");
+  assert.equal(marks().at(-1), null, "the page beside it went to another document, and its tour with it");
+  w.page.emit("did-navigate");
+  assert.equal(marks().length, 7, "nothing more to clear");
+});
+
+test("only this app's own page beside the rail, in its main frame, marks it: never a server's page, a frame inside the page, the rail itself or another window", () => {
+  const w = world();
+  w.rail.attach(w.win);
+  const [view] = w.made, other = appWindow().page;
+  assert.throws(() => w.ask("rail:mark", "add"), /only available to this app's page beside the window's rail/, "a server's page beside the rail");
+  w.state.trusted = true;
+  for (const event of [{ sender: view.webContents, senderFrame: view.webContents.mainFrame }, { sender: w.page, senderFrame: { id: "an-iframe" } },
+    { sender: other, senderFrame: other.mainFrame }, {}]) {
+    assert.throws(() => w.handlers.get("rail:mark")(event, "add"), /only available to this app's page beside the window's rail/);
+  }
+  assert.deepEqual(view.webContents.sent.filter(([channel]) => channel === "rail:mark"), [], "the rail heard nothing");
+});
+
 test("after the page moves on, a hidden rail waits a few seconds for the new page's button: this app's page keeps it hidden, an older one gets it back", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const w = world({ hidden: true });
@@ -208,17 +238,24 @@ test("main's own wiring: the choice is this desktop's, and the pages hear the ra
     path: { join: (...parts) => parts.join("/") }, __dirname: "/app", slog: () => {}, desktopCompanionRendererArguments: () => [],
     app: { isPackaged: true, getVersion: () => "0.1.133" }, desktopRemoteAccess: null, rendererOrigin: () => "http://127.0.0.1:8799", serverReady: true,
     railList: () => [{ id: "local" }, { id: "home" }], desktopPrefs: { railHidden: () => kept.hidden, setRailHidden: (hidden) => { kept.hidden = hidden; } },
+    senderIsLocal: (event) => event.from === "local", homeWindow: { homePage: (event) => event.from === "home" },
     rail: { changed: () => signals.push("changed") }, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) } });
   const chromeRail = vm.runInContext(`${main.slice(start, end)}chromeRail.install(ipcMain); chromeRail`, context);
   const { win, page } = appWindow();
   chromeRail.attach(win);
   assert.deepEqual(made.map((view) => view.webContents.loaded), [["http://127.0.0.1:8799/rail"]]);
+  const beside = (from) => ({ sender: page, senderFrame: page.mainFrame, from });
+  handlers.get("rail:mark")(beside("local"), "add");
+  handlers.get("rail:mark")(beside("home"), "places");
+  assert.throws(() => handlers.get("rail:mark")(beside("server"), "dim"), /only available to this app's page/, "a server's page beside it marks nothing");
+  assert.deepEqual(made[0].webContents.sent.filter(([channel]) => channel === "rail:mark"), [["rail:mark", "add"], ["rail:mark", "places"]],
+    "this computer's page and My Cloud's as home mark the rail");
   handlers.get("rail:hide")({ sender: page, senderFrame: page.mainFrame }, true);
   assert.deepEqual([kept.hidden, chromeRail.shown(), signals], [true, false, ["changed", "changed"]]);
 });
 
 /** The app's preload in a page of the window, with what the room needs of the page: its document, size and zoom. */
-function pageWithPreload(origin = "https://bots.example.test", pathname = "/", answer = () => undefined) {
+function pageWithPreload(origin = "https://bots.example.test", pathname = "/", answer = () => undefined, sync = () => null) {
   const listeners = new Map(), handlers = new Map(), invoked = [];
   const head = { children: [], append(node) { this.children.push(node); node.isConnected = true; } };
   const document = { documentElement: { style: { zoom: "" } }, head, createElement: () => ({ textContent: "", isConnected: false, remove() { head.children.splice(head.children.indexOf(this), 1); this.isConnected = false; } }) };
@@ -230,7 +267,7 @@ function pageWithPreload(origin = "https://bots.example.test", pathname = "/", a
     window: { addEventListener: (type, listener) => listeners.set(type, listener) },
     require: () => ({ webUtils: {}, webFrame: { getZoomFactor: () => frame.zoom }, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
       ipcRenderer: { on: (channel, handler) => handlers.set(channel, handler), removeListener: (channel, handler) => { if (handlers.get(channel) === handler) handlers.delete(channel); },
-        send() {}, sendSync: () => null, invoke: (channel, ...values) => { invoked.push([channel, ...values]); return Promise.resolve(answer(channel, ...values)); } } }),
+        send() {}, sendSync: sync, invoke: (channel, ...values) => { invoked.push([channel, ...values]); return Promise.resolve(answer(channel, ...values)); } } }),
   });
   return { head, frame, root: document.documentElement, bridge, invoked, navigator, tell: (width) => handlers.get("rail:beside")({}, width), resize: () => listeners.get("resize")(),
     hear: (channel, ...values) => handlers.get(channel)?.({}, ...values) };
@@ -283,7 +320,27 @@ test("every page beside the rail, from any server, gets the button's bridge and 
   remote.hear("rail:state", { available: true, hidden: true });
   assert.deepEqual(plain(heard), [{ available: true, hidden: false }]);
   const local = pageWithPreload("http://127.0.0.1:8799", "/");
-  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "setHidden", "onState", "expand", "onSkin"]);
+  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "setHidden", "onState", "mark", "expand", "onSkin", "onMark"]);
   await local.bridge.rail.setHidden(false);
   assert.deepEqual(plain(local.invoked), [["rail:hide", false]], "this app's own page, as for its other choices");
+});
+
+test("a tour on this app's own page marks the window's rail, and the rail's page hears only a part or nothing", async () => {
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  const home = pageWithPreload("https://omb-u-1.fly.dev", "/", undefined, (channel) => channel === "home:page");
+  assert.deepEqual(Object.keys(home.bridge.rail), ["state", "setHidden", "onState", "mark"], "My Cloud's own page as home marks it too");
+  const local = pageWithPreload("http://127.0.0.1:8799", "/");
+  await local.bridge.rail.mark("add");
+  await local.bridge.rail.mark({ toString: () => "places" });
+  await local.bridge.rail.mark(null);
+  assert.deepEqual(plain(local.invoked), [["rail:mark", "add"], ["rail:mark", null], ["rail:mark", null]], "a part by its name only");
+  const rail = pageWithPreload("http://127.0.0.1:8799", "/rail");
+  const heard = [];
+  const stop = rail.bridge.rail.onMark((part) => heard.push(part));
+  rail.hear("rail:mark", "places");
+  rail.hear("rail:mark", { part: "add" });
+  rail.hear("rail:mark", null);
+  stop();
+  rail.hear("rail:mark", "add");
+  assert.deepEqual(heard, ["places", null, null]);
 });

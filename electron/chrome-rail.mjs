@@ -10,11 +10,17 @@
 // The person may hide it with a button on the page beside it. That page may be a Cloud or a server of their own on an
 // older release with no such button, so the rail hides only beside a document that offered one; a new document has a
 // few seconds to offer it, and the rail comes back beside one that doesn't, or that stops responding.
+//
+// A tour on the page beside it can't reach the rail's own page, so it asks main to mark a part of the rail: the rail's
+// page rings that part and shades the rest, in step with the page's own shade.
 
 export const CHROME_RAIL_WIDTH = 36;
 export const CHROME_RAIL_PATH = "/rail";
 /** How long a rail the person hid stays hidden for the page's next document to offer its button. */
 export const RAIL_OFFER_GRACE_MS = 5_000;
+/** What a tour on the page beside the rail may mark on it: its places, its ＋, or nothing while the tour points at the
+ * page (the whole rail shaded). */
+export const RAIL_MARKS = Object.freeze(["places", "add", "dim"]);
 /** Chromium's net::ERR_ABORTED: a load replaced by another, not a page that failed. */
 const ABORTED = -3;
 
@@ -27,15 +33,20 @@ const ABORTED = -3;
  *   wanted: () => boolean,
  *   prefs?: () => { railHidden(): boolean, setRailHidden(hidden: boolean): void } | null,
  *   changed?: () => void,
+ *   trusted?: (event: any) => boolean,
  *   log?: (line: string) => void,
  * }} deps `url()`: the rail's page on this app's own server; `wanted()`: whether the window has two places or more to
  * show it for (railPlaces); `args()`: the preload's arguments, as the window's own page gets them; `prefs()`: where this
- * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page.
+ * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page; `trusted(event)`:
+ * the page asking is this app's own (this computer's, or My Cloud's as home), the only pages whose tour marks the rail.
  */
-export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
+export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, trusted = () => false, log = () => {} }) {
   let view = null, win = null, shown = false, expanded = false;
   // The document beside the rail offered its button; a new one may still (`grace`); the page stopped responding.
   let offered = false, grace = null, hung = false, told = "";
+  // The part of the rail a tour on the page beside it points at (RAIL_MARKS), until that document goes.
+  let marked = null;
+  const tellMark = () => rail.send("rail:mark", marked);
   const alive = () => Boolean(win && !win.isDestroyed());
   const layout = () => {
     if (!view || !shown || !alive()) return;
@@ -61,10 +72,11 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     stopGrace();
     grace = setTimeout(() => { grace = null; rail.refresh(); }, RAIL_OFFER_GRACE_MS);
   };
-  /** The page beside the rail has another document, or lost the one it had. */
+  /** The page beside the rail has another document, or lost the one it had: its tour, if any, is gone too. */
   const nextDocument = () => {
     const keep = hidden();
     offered = false; hung = false; told = "";
+    if (marked) { marked = null; tellMark(); }
     if (keep) startGrace(); else stopGrace();
     rail.refresh();
   };
@@ -80,6 +92,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     contents.on("will-navigate", stay);
     contents.on("will-redirect", stay);
     contents.on("render-process-gone", () => { log("chrome rail: its page went away; loading it again"); void contents.loadURL(url()).catch(() => {}); });
+    contents.on("did-finish-load", () => { if (marked) tellMark(); });
     void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`));
     return view;
   };
@@ -87,7 +100,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     /** The window the rail stands beside: its size moves the rail, and each of its documents gets the room again. */
     attach(next) {
       win = next;
-      shown = false; expanded = false; offered = false; hung = false; told = "";
+      shown = false; expanded = false; offered = false; hung = false; told = ""; marked = null;
       // The window's first document has the same time as any other to offer the button.
       if (choseHidden()) startGrace(); else stopGrace();
       win.on("resize", layout);
@@ -158,6 +171,14 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       });
       fromPage("rail:offer", () => {});
       fromPage("rail:hide", (hide) => prefs()?.setRailHidden(hide === true));
+      // Security: only this app's own page beside the rail marks it, and only with one of RAIL_MARKS; anything else clears it.
+      ipcMain.handle("rail:mark", (event, part) => {
+        if (!pageBeside(event) || !trusted(event)) throw new Error("rail:mark is only available to this app's page beside the window's rail");
+        const next = RAIL_MARKS.includes(part) ? part : null;
+        if (next === marked) return;
+        marked = next;
+        tellMark();
+      });
     },
     /** Tells the rail's page something (the places changed, the skin of the page beside it). */
     send(channel, ...values) {

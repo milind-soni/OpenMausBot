@@ -10,8 +10,11 @@ import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
+import { useChromeRail } from "@/lib/chrome-rail";
 import { cornerPopupWaits, firstReplyPending } from "@/lib/corner-popup";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIDEBAR_TOUR_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
+import { usePlaces } from "@/lib/places";
+import { sidebarTourPlan, type SidebarTourStepId } from "@/lib/sidebar-tour";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
@@ -30,6 +33,7 @@ import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 import { useMausBotWelcomeDue } from "./MausBotWelcome";
 import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
+import { reportSidebarTour, SidebarTour } from "./onboarding/SidebarTour";
 
 function StarCard({ onDismiss }: { onDismiss: () => void }) {
   return <NoticeCard titleId="github-star-title" notice="github-star" icon={Star} title={t("star.title")} onDismiss={onDismiss}>
@@ -77,6 +81,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [popupShown, setPopupShown] = useState(false);
   const [simpleShown, setSimpleShown] = useState(false);
   const [boatShown, setBoatShown] = useState(false);
+  // Where the tour of the rail is (it comes back there after stepping aside), the last step it showed, and whether it
+  // found nothing on screen to point at.
+  const [tourAt, setTourAt] = useState(0);
+  const [tourShown, setTourShown] = useState<SidebarTourStepId | null>(null);
+  const [tourEmpty, setTourEmpty] = useState(false);
   const consentHere = (local || viewer?.cloudHome === true) && brandStatus().source !== "file";
   const consent = useUpdatesConsent(consentHere ? updatesConsentBridge() : undefined);
   const [consentDone, setConsentDone] = useState(false);
@@ -135,6 +144,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const simpleDue = !useSimpleModePromptSeen();
   const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   const boatHere = boatOfferRuns(now()) && brandStatus().source !== "file";
+  const railBeside = useChromeRail();
+  const railDrawn = usePlaces().places.length > 0;
+  const tourPlan = sidebarTourPlan({ rail: railBeside, asked: Boolean(window.ogb?.rail?.state), markable: typeof window.ogb?.rail?.mark === "function", drawn: railDrawn });
+  const tourDue = Boolean(desktop) && brandStatus().source !== "file" && !tourEmpty && tourPlan?.steps.length !== 0
+    && !noticeSeen(record, SIDEBAR_TOUR_NOTICE) && !desktopState?.seen.includes(SIDEBAR_TOUR_NOTICE);
+  const tourBlocked = useOtherDialogOpen(tourDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
 
   const trial = plan?.trial;
   const key = trial ? trialKey(trial) : null;
@@ -164,11 +179,15 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const mausBotFirst = mausBot.due;
   const consentNow = consentWaits === true || consentFact === false ? false : consentWaits === null || mausBotFirst ? null : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
-  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || simpleDue || boatHere ? nextNotice({
+  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || simpleDue || boatHere || tourDue ? nextNotice({
     // As the Cloud Pro popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
     [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
     [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome === true ? false
       : afterWelcome === null || mausBotFirst || popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    // Once on each desktop with a rail: never after MausBot's first-launch card, nor on a new install's first chat, which
+    // it follows once the first reply is in.
+    [SIDEBAR_TOUR_NOTICE]: !tourDue || moving || firstChat === true || launchDialogShown() === "mausbot" ? false
+      : organization === null || moving === null || firstChat === null || !desktopState || !tourPlan || mausBotFirst || tourBlocked ? null : !organization,
     [UPDATES_CONSENT_NOTICE]: consentNow,
     [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat === true || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null || moving === null || firstChat === null ? null : !organization,
@@ -228,6 +247,20 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       onSeePlans={() => plans("see_plans")}
       onNotNow={() => { report("not_now"); end(); }}
       onClose={() => { report("close"); end(); }} />;
+  }
+
+  if (notice === SIDEBAR_TOUR_NOTICE && tourPlan) {
+    const end = (action: "completed" | "left", step: SidebarTourStepId) => {
+      reportSidebarTour(action, step); close(); save(SIDEBAR_TOUR_NOTICE);
+      void desktop?.seen(SIDEBAR_TOUR_NOTICE).catch(() => {});
+    };
+    // The tour owns this launch once a step shows: MausBot's first-launch card waits for a later one.
+    const shown = (step: SidebarTourStepId) => {
+      if (!tourShown) { reportSidebarTour("shown", step); markLaunchDialog("notices"); }
+      setTourShown(step);
+    };
+    return <SidebarTour steps={tourPlan.steps} where={tourPlan.where} at={tourAt} onStep={setTourAt} onShown={shown}
+      onLeave={step => end("left", step)} onEnd={() => (tourShown ? end("completed", tourShown) : setTourEmpty(true))} />;
   }
 
   if (notice === UPDATES_CONSENT_NOTICE && consent.state) {

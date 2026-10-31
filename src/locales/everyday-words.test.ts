@@ -10,7 +10,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "notifications and alerts": ["attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
-  "the rail of Clouds and its ＋": ["rail."],
+  "the rail of Clouds and its ＋, and its tour": ["rail.", "sidebarTour."],
   "a place's color, in Settings": ["placeLook."],
   "the bot panel": [
     "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",

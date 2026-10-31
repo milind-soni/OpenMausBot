@@ -12,7 +12,8 @@ const GAP = 12;
 
 type Rect = { x: number; y: number; w: number; h: number };
 
-function measure(anchor: string): Rect | null {
+/** The anchor's box on screen, with `pad` around it: null while it is hidden, empty or off the window. */
+export function measureTourTarget(anchor: string, pad = PAD): Rect | null {
   const all = Array.from(
     document.querySelectorAll<HTMLElement>(`[data-tour="${anchor}"]`),
   ).filter((el) => el.getClientRects().length > 0);
@@ -21,10 +22,10 @@ function measure(anchor: string): Rect | null {
   const r = el.getBoundingClientRect();
   if (r.width === 0 || r.height === 0 || r.right <= 0 || r.left >= window.innerWidth || r.bottom <= 0 || r.top >= window.innerHeight) return null;
   return {
-    x: r.left - PAD,
-    y: r.top - PAD,
-    w: r.width + PAD * 2,
-    h: r.height + PAD * 2,
+    x: r.left - pad,
+    y: r.top - pad,
+    w: r.width + pad * 2,
+    h: r.height + pad * 2,
   };
 }
 
@@ -37,33 +38,9 @@ function cutout(r: Rect | null): string {
   return `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${x1}px ${y1}px, ${x1}px ${y2}px, ${x2}px ${y2}px, ${x2}px ${y1}px, ${x1}px ${y1}px)`;
 }
 
-interface Action {
-  label: string;
-  onClick: () => void;
-}
-
-export function Spotlight({
-  anchor,
-  placement,
-  mascot = "curious",
-  children,
-  progress,
-  primary,
-  secondary,
-  onDone,
-}: {
-  anchor: string | null;
-  placement: "above" | "below" | "right";
-  mascot?: MausState;
-  children: ReactNode;
-  progress?: string;
-  primary?: Action;
-  secondary?: Action;
-  onDone: () => void;
-}) {
+/** Follows the anchor as the page moves under it; keeps the last box while the anchor is briefly gone. */
+function useTourRect(anchor: string | null, pad = PAD): Rect | null {
   const [rect, setRect] = useState<Rect | null>(null);
-  const [settled, setSettled] = useState(false);
-
   useLayoutEffect(() => {
     if (!anchor) {
       setRect(null);
@@ -73,7 +50,7 @@ export function Spotlight({
     const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() =>
-        setRect((prev) => measure(anchor) ?? prev),
+        setRect((prev) => measureTourTarget(anchor, pad) ?? prev),
       );
     };
     update();
@@ -96,8 +73,12 @@ export function Spotlight({
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [anchor]);
+  }, [anchor, pad]);
+  return rect;
+}
 
+function useSettled(): boolean {
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (reducedMotion()) {
       setSettled(true);
@@ -106,6 +87,84 @@ export function Spotlight({
     const frame = requestAnimationFrame(() => setSettled(true));
     return () => cancelAnimationFrame(frame);
   }, []);
+  return settled;
+}
+
+/** The shade over the window, with a hole where `rect` is and a ring round it; no rect, no hole. */
+function Shade({ rect, settled }: { rect: Rect | null; settled: boolean }) {
+  return (
+    <>
+      <div
+        className="absolute inset-0 bg-black/55 transition-[clip-path] duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+        style={{ clipPath: cutout(settled ? rect : null) }}
+        aria-hidden="true"
+      />
+      {rect && (
+        <div
+          className="absolute ring-2 ring-accent transition-opacity duration-300"
+          style={{
+            left: rect.x,
+            top: rect.y,
+            width: rect.w,
+            height: rect.h,
+            opacity: settled ? 1 : 0,
+            borderRadius: RADIUS,
+            boxShadow:
+              "0 0 0 5px color-mix(in srgb, var(--color-accent) 28%, transparent), 0 0 36px 6px color-mix(in srgb, var(--color-accent) 30%, transparent)",
+          }}
+          aria-hidden="true"
+        />
+      )}
+    </>
+  );
+}
+
+/** A tour's shade alone, with no card: the window's rail draws it over itself while a tour on the page beside it points
+ * at the rail's `anchor` (null: the whole rail shaded, the tour pointing at the page). */
+export function SpotlightShade({ anchor, pad = PAD }: { anchor: string | null; pad?: number }) {
+  const rect = useTourRect(anchor, pad);
+  const settled = useSettled();
+  if (anchor && !rect) return null;
+  return createPortal(
+    <div data-spotlight-shade className="pointer-events-none fixed inset-0 z-[60]" aria-hidden="true">
+      <Shade rect={rect} settled={settled} />
+    </div>,
+    document.body,
+  );
+}
+
+interface Action {
+  label: string;
+  onClick: () => void;
+}
+
+/** `highlight` false: the card still stands beside the anchor, which is neither cut out of the shade nor ringed (it
+ * stands in for something another page of the window rings itself). `card` names the card (`data-tour-card`). */
+export function Spotlight({
+  anchor,
+  placement,
+  mascot = "curious",
+  children,
+  progress,
+  primary,
+  secondary,
+  onDone,
+  highlight = true,
+  card,
+}: {
+  anchor: string | null;
+  placement: "above" | "below" | "right";
+  mascot?: MausState;
+  children: ReactNode;
+  progress?: string;
+  primary?: Action;
+  secondary?: Action;
+  onDone: () => void;
+  highlight?: boolean;
+  card?: string;
+}) {
+  const rect = useTourRect(anchor);
+  const settled = useSettled();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -155,30 +214,10 @@ export function Spotlight({
       className="pointer-events-none fixed inset-0 z-[60]"
       aria-live="polite"
     >
-      <div
-        className="absolute inset-0 bg-black/55 transition-[clip-path] duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-        style={{ clipPath: cutout(settled ? rect : null) }}
-        aria-hidden="true"
-      />
-      {rect && (
-        <div
-          className="absolute ring-2 ring-accent transition-opacity duration-300"
-          style={{
-            left: rect.x,
-            top: rect.y,
-            width: rect.w,
-            height: rect.h,
-            opacity: settled ? 1 : 0,
-            borderRadius: RADIUS,
-            boxShadow:
-              "0 0 0 5px color-mix(in srgb, var(--color-accent) 28%, transparent), 0 0 36px 6px color-mix(in srgb, var(--color-accent) 30%, transparent)",
-          }}
-          aria-hidden="true"
-        />
-      )}
+      <Shade rect={highlight ? rect : null} settled={settled} />
       {/* Outer layer positions (transition), inner layer enters (keyframes): the two never fight over transform. */}
       <div
-        data-tour-card
+        data-tour-card={card ?? true}
         className="pointer-events-auto absolute left-0 top-0 w-[320px] transition-transform duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
         style={{ transform, width: cardWidth }}
       >
@@ -211,7 +250,7 @@ export function Spotlight({
             <div className="text-[14px] leading-relaxed text-ink">
               {children}
             </div>
-            <div className="mt-2.5 flex items-center gap-3">
+            {(primary || progress || secondary) && <div className="mt-2.5 flex items-center gap-3">
               {primary && (
                 <button
                   type="button"
@@ -236,7 +275,7 @@ export function Spotlight({
                   {secondary.label}
                 </button>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       </div>

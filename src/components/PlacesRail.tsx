@@ -5,6 +5,7 @@
 // never paid for (asked first; main takes it off their list on the Admin).
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { Laptop, MoreHorizontal, Plus, Search, Server } from "lucide-react";
+import type { RailMark } from "../../electron/chrome-rail.mjs";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { PlaceColorOutcome } from "../../electron/place-look.mjs";
 import { track } from "@/lib/analytics";
@@ -16,6 +17,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
+import { SpotlightShade } from "./onboarding/Spotlight";
 import { PlaceAddSheet } from "./PlaceAddSheet";
 import { SwatchRadios } from "./SwatchRadios";
 
@@ -23,6 +25,9 @@ import { SwatchRadios } from "./SwatchRadios";
 export const RAIL_SHOWN = 8;
 /** A place's tile on the rail: a small rounded square, so the rail stays as thin as it can (36px). */
 const TILE = 24;
+/** The tour's ring round a marked part, inside the rail's edges. */
+const MARK_PAD = 3;
+const MARKED: Record<RailMark, string | null> = { places: "rail-places", add: "rail-add", dim: null };
 /** A place's mark at any size: a rounded square, its corners in step with its size. */
 const tileRadius = (size: number) => Math.round(size * 0.3);
 
@@ -211,8 +216,9 @@ function MorePlaces({ places, canPair, onOpen, onMenu, onClose }: { places: Rail
 }
 
 /** `chrome`: the window's own rail (ChromeRail), drawn whatever the window's width, whose sheets ask main for the whole
- * window while open. Without it, a rail drawn on a page from a list main gave that page: wide windows only. */
-export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
+ * window while open. Without it, a rail drawn on a page from a list main gave that page: wide windows only. `mark`: the
+ * part a tour on the page beside the window's rail points at, ringed, the rest shaded (null: no tour). */
+export function PlacesRail({ chrome = false, mark = null }: { chrome?: boolean; mark?: RailMark | null }) {
   const state = usePlaces();
   const calm = !useAdvancedMode();
   const { capabilities } = useDesktopCapabilities();
@@ -257,7 +263,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     {/* In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the
         frame's top bar (the traffic lights' place), so its places start under that bar. */}
     <div aria-hidden="true" className={!framed ? "h-3 shrink-0" : chrome ? "h-[37px] shrink-0" : "h-[9px] shrink-0"} />
-    <ul className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto py-[3px]" style={noDrag}>
+    <ul data-tour="rail-places" className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto py-[3px]" style={noDrag}>
       {shown.map((place) => <li key={place.id} className="flex">
         <PlaceTile place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={openMenu} />
       </li>)}
@@ -269,7 +275,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
         <MoreHorizontal size={13} aria-hidden="true" />
       </button>}
       {more && <MorePlaces places={state.places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
-      {canAdd && <button type="button" aria-label={t("rail.add")} title={t("rail.add")} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
+      {canAdd && <button type="button" aria-label={t("rail.add")} title={t("rail.add")} aria-haspopup="dialog" data-rail-add data-tour="rail-add" onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
         className="grid size-6 place-items-center rounded-[7px] border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         <Plus size={13} aria-hidden="true" />
       </button>}
@@ -280,5 +286,6 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     </div>}
     {adding && <PlaceAddSheet choices={state.add} onClose={() => setAdding(false)} />}
     {connecting !== null && <PlaceAddSheet choices={state.add} connect={{ name: connecting }} onClose={() => setConnecting(null)} />}
+    {mark && !covering && <SpotlightShade anchor={MARKED[mark]} pad={MARK_PAD} />}
   </nav>;
 }

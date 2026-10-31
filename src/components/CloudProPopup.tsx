@@ -7,6 +7,7 @@ import { analyticsChoiceKnown, identifyEmail, track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { buyOfferAllowed, cloudIntroView, cloudPlanLabel, cloudPlanLine, cloudPlanView, moneyBackLine, trialRunning, usd, type CloudPlanView, type CloudSource } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
+import { SIDEBAR_TOUR_CARD } from "@/lib/sidebar-tour";
 import { cloudPlanFromAccount, cloudPlanFromSnapshot, type CloudPlanFacts } from "@/lib/usage-snapshot";
 import { NightCard } from "./cloud-buy/NightCard";
 import { CLOSE, ON_NIGHT, PRIMARY, QUIET, SHEET, Tag, TAG_ON_NIGHT } from "./cloud-buy/parts";
@@ -116,7 +117,7 @@ const OTHER_DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"
 
 /** Any dialog on screen counts, modal or not, and the card that says a new Cloud is set up; never the queue's own popups. */
 export function otherDialogOpen(): boolean {
-  return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(`${POPUP}, ${UPDATES_CONSENT_POPUP}, [data-simple-mode-prompt]`) && element.checkVisibility());
+  return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(`${POPUP}, ${UPDATES_CONSENT_POPUP}, [data-simple-mode-prompt], [data-tour-card="${SIDEBAR_TOUR_CARD}"]`) && element.checkVisibility());
 }
 
 export function useOtherDialogOpen(watch: boolean): boolean {

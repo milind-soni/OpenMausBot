@@ -156,7 +156,8 @@ const bridge = {
   },
   // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
   // covers the window; the skin of the page beside it comes from main. The page beside it, from whichever server,
-  // offers the button that hides and shows it, and learns only whether there is one to hide, never its places.
+  // offers the button that hides and shows it, and learns only whether there is one to hide, never its places. A tour
+  // on this app's own page beside it marks a part of it, and the rail's page hears which.
   rail: {
     state: () => ipcRenderer.invoke("rail:offer").then(railState),
     setHidden: (hidden) => isLocalPage || navigator.userActivation?.isActive === true
@@ -166,12 +167,18 @@ const bridge = {
       ipcRenderer.on("rail:state", handler);
       return () => ipcRenderer.removeListener("rail:state", handler);
     },
+    ...(isLocalPage || onHomePage ? { mark: (part) => ipcRenderer.invoke("rail:mark", typeof part === "string" ? part : null) } : {}),
     ...(isLocalPage ? {
       expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
       onSkin: (cb) => {
         const handler = (_event, skin) => cb(String(skin));
         ipcRenderer.on("rail:skin", handler);
         return () => ipcRenderer.removeListener("rail:skin", handler);
+      },
+      onMark: (cb) => {
+        const handler = (_event, part) => cb(typeof part === "string" ? part : null);
+        ipcRenderer.on("rail:mark", handler);
+        return () => ipcRenderer.removeListener("rail:mark", handler);
       },
     } : {}),
   },

@@ -23,7 +23,7 @@ export function ChromeRailToggle({ advanced = false, icons = false, bar, style }
   const rail = useChromeRail();
   if (!rail?.available) return null;
   const label = t(rail.hidden ? "rail.show" : "rail.hide");
-  return <button type="button" data-rail-toggle aria-label={label} title={label} aria-expanded={!rail.hidden} style={style}
+  return <button type="button" data-rail-toggle data-tour="rail-toggle" aria-label={label} title={label} aria-expanded={!rail.hidden} style={style}
     onClick={() => setChromeRailHidden(!rail.hidden)}
     className={bar ?? (advanced ? cn("flex shrink-0 items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
       icons ? "size-[46px] rounded-xl" : "size-8 rounded-full") : SIMPLE_TOP_TOGGLE)}>
