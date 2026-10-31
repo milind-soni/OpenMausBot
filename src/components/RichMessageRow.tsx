@@ -2,6 +2,7 @@ import { AppWindow, Crosshair } from "lucide-react";
 import type { Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { AppMessage } from "./app/AppMessage";
+import { BugReportNote } from "./BugReportNote";
 import { GoalRunRow } from "./GoalRunCard";
 import { HelperKeySuggestion } from "./HelperKeySuggestion";
 import { MessageBoundary } from "./MessageBoundary";
@@ -31,6 +32,8 @@ export function RichMessageRow({ botId, botName, threadId, message }: { botId: s
 }
 
 export function UserLineNote({ message }: { message: Message }) {
+  // A @devs message: its report's status ("Got it, we're looking", then "Fixed in 0.1.x").
+  if (message.bugReport) return <BugReportNote report={message.bugReport} />;
   if (message.pointed?.length) {
     const label = t("chat.preview.pointedAt", { parts: message.pointed.map((part) => part.label).join(", ") });
     return (

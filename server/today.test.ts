@@ -249,6 +249,19 @@ describe("needs you", () => {
     expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
   });
 
+  it("lists a harness question card by its question, and leaves out one a bot is deciding or decided", () => {
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    const asked = w.say(mia.threadId, { role: "bot", kind: "options", at: at(12, 3),
+      card: { title: "Your bot has a question", subtitle: "CSV or Excel?", options: [], requestType: "question", requestId: "needs-input-a1-1" } });
+    w.say(w.atlas.threadId, { role: "bot", kind: "options", at: at(12, 4), card: { title: "Your bot has a question", subtitle: "Which region?", options: [],
+      requestType: "question", requestId: "needs-input-a2-1", answered: "answer", answeredBy: { kind: "bot", name: "Luchs" } } });
+    w.parked.push({ id: "a2", botId: w.atlas.id, threadId: w.atlas.threadId, question: "Which region?", decide: {}, createdAt: at(12, 4) });
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: asked.id, at: at(12, 3), botId: mia.id, threadId: mia.threadId, text: "CSV or Excel?" },
+    ]);
+  });
+
   it("drops a question the person closed, and lists a request asked again only where it was asked last", () => {
     const w = world();
     const mia = w.store.createBot({ name: "Mia" });

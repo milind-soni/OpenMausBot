@@ -87,6 +87,13 @@ it("a plan, then its name and colour, then the Admin's checkout; the sheet then 
   expect(bridge.copyLink).toHaveBeenCalledTimes(1);
 });
 
+it("sends where the person started with the checkout, when the sheet was opened from somewhere that says", async () => {
+  await mount({ source: "app_whats_new_team" });
+  await click(host.querySelector("[data-plan-buy='pro']"));
+  await click(buttonNamed("Continue to checkout"));
+  expect(bridge.start.mock.calls).toEqual([["pro", "Cloud 2", "blue", "app_whats_new_team"]]);
+});
+
 it("another Cloud's checkout still open: the sheet follows that one, with its page to reopen, and sign-ups closed is said calmly", async () => {
   await mount();
   await click(host.querySelector("[data-plan-buy='pro']"));

@@ -829,7 +829,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
   const simpleHead = !advanced && !remoteClient;
-  const canWrite = useCanWriteIn(bot.threadId);
+  const canWrite = useCanWriteIn(bot.threadId, bot.yourAccess);
 
   const computerStarting = computerStartLine(state.computerStarts[bot.id], bot.name);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
@@ -1278,7 +1278,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       )}
       <LiveCallBar bot={bot} />
       {canWrite === false ? (
-        <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
+        <NewConversationInstead bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
       ) : (
       <Composer
         key={bot.threadId}

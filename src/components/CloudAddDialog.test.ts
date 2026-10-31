@@ -17,6 +17,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./cloud-buy/NightCard", () => ({ NightCard: ({ children }: { children: ReactNode }) => createElement("div", { "data-night-card": "" }, children) }));
+vi.mock("./cloud-buy/AddCloudFlow", () => ({ AddCloudFlow: ({ source }: { source?: string }) => createElement("div", { "data-add-cloud-flow": source ?? "" }) }));
 import { CloudAddDialog, CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } from "./CloudAddDialog";
 import { ChooseScreen } from "./cloud-buy/ChooseScreen";
 import { cloudAddView, type CloudAddView } from "@/lib/cloud-plan";
@@ -409,6 +410,16 @@ describe("the sheet", () => {
     expect([compare().props["aria-expanded"], hidden()]).toEqual([true, [false, false, false]]);
     compare().props.onClick();
     expect([compare().props["aria-expanded"], hidden()]).toEqual([false, [true, true, true]]);
+  });
+
+  it("someone with a Cloud buys another in the same sheet, which sends where they started with its checkout", async () => {
+    f.state = { ...f.state, cloudAdd: { source: "app_whats_new_team" } };
+    account = { ...free, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 86_400_000, version: 2 },
+      machine: { status: "ready", origin: "https://omb-c1.fly.dev" } as CloudAccountState["machine"],
+      clouds: [{ id: "c1", name: "My Cloud", color: null, role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: "https://omb-c1.fly.dev", teamId: null, primary: true, managed: true }] };
+    vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudAdd: { state: vi.fn(), start: vi.fn() } }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    await settle();
+    expect(render()).toContain('data-add-cloud-flow="app_whats_new_team"');
   });
 
   it("the Admin's word that new accounts are closed reaches the code step", async () => {

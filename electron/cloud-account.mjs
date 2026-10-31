@@ -30,7 +30,7 @@ const CHECKING_AFTER = 2;
 const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
-export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "update_popup", "app_onboarding"]);
+export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "app_whats_new_pro", "app_whats_new_team", "app_onboarding"]);
 export const UPGRADE_SOURCES = Object.freeze(["app_usage", "app_settings", "app_room"]);
 const UPGRADE_TIERS = Object.freeze(["starter", "personal", "pro", "max"]);
 const UPGRADE_REFUSALS = Object.freeze(["payment_failed", "not_subscribed", "already_on_plan", "plan_change_unavailable", "confirmation_required", "price_changed", "rate_limited"]);
@@ -683,9 +683,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * Admin's checkout opens in the browser and its page is kept here for Reopen and Copy link, as the first Cloud's is;
      * the session is then read every few seconds until the Cloud is paid for. `unsupported`: this Admin sells one Cloud
      * per account; `blocked` with the Admin's reason. */
-    async addCloud({ tier, interval = "month", name, color = null } = {}) {
+    async addCloud({ tier, interval = "month", name, color = null, source = null } = {}) {
       const cleanName = cleanCloudListName(name);
-      if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) {
+      if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))
+        || !(source === null || CHECKOUT_SOURCES.includes(source))) {
         throw new Error("Invalid Cloud to add.");
       }
       const signedIn = grant;
@@ -693,7 +694,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!value.clouds) return { outcome: "unsupported" };
       if (value.addCloud?.canAdd === false) return { outcome: "blocked", blocked: value.addCloud.blocked };
       let result;
-      try { result = await request("clouds", { method: "POST", body: { tier, interval, name: cleanName, ...(color ? { color } : {}) }, token: signedIn.token }); } catch (error) {
+      try { result = await request("clouds", { method: "POST", body: { tier, interval, name: cleanName, ...(color ? { color } : {}), ...(source ? { source } : {}) }, token: signedIn.token }); } catch (error) {
         if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
         // The Admin's own reason wins, whatever the status (409 cap or open checkout, 429 rate, 503 sign-ups closed).
         const blocked = !error?.opaque && ADD_BLOCKS.includes(error?.blocked) ? error.blocked : null;

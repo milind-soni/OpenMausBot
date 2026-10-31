@@ -14,6 +14,7 @@ export interface SteerStore {
   projectBotForTask?(botId: string, threadId: string): BotRecord | null;
   appendMessage(threadId: string, message: Omit<Message, "id" | "at">): Message;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null;
+  messagesFor?(threadId: string): Message[];
 }
 
 interface QueueEntry {
@@ -38,6 +39,9 @@ interface QueueEntry {
     fromApp?: Message["fromApp"];
     reaction?: string;
     relay?: Message["relay"];
+    /** The person's row already in the transcript, steered into a turn that was stopped before it read it: it runs as
+     * it is, never as a second copy. */
+    rowId?: string;
   }>;
 }
 
@@ -83,7 +87,7 @@ export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string
   Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>> {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
-    .map(([threadId, entry]) => [threadId, entry.items.map((item) => ({
+    .map(([threadId, entry]) => [threadId, entry.items.filter((item) => !item.rowId).map((item) => ({
       queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason } : {}),
     }))]));
 }
@@ -101,7 +105,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"] } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -119,14 +123,18 @@ export function queueSteeredMessage(
     ...(options.origin ? { origin: options.origin } : {}),
     sender: options.sender,
     trigger: options.trigger,
-    queuedAt: Date.now(),
+    queuedAt: options.queuedAt ?? Date.now(),
     ...spokenLineFields(options.via, options.callId),
     ...(options.fromApp ? { fromApp: options.fromApp } : {}),
     ...(options.reaction ? { reaction: options.reaction } : {}),
     ...(options.relay ? { relay: options.relay } : {}),
+    ...(options.rowId ? { rowId: options.rowId } : {}),
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
-  entry.items.push(item);
+  // `first`: ahead of everything queued but the person's own messages sent before it.
+  const ahead = options.first ? entry.items.findIndex((other) => other.peerAsk !== undefined || other.unattended === true || other.queuedAt > item.queuedAt) : -1;
+  if (ahead < 0) entry.items.push(item);
+  else entry.items.splice(ahead, 0, item);
   queues.set(threadId, entry);
   changed();
   return { id };
@@ -189,8 +197,9 @@ export function drainSteeredMessages(
     changed();
     const appended: Message[] = [];
     for (const item of group) {
+      const recorded = item.rowId ? store.messagesFor?.(threadId).find((message) => message.id === item.rowId) : undefined;
       appended.push(
-        store.appendMessage(threadId, {
+        recorded ?? store.appendMessage(threadId, {
           role: "user",
           kind: "text",
           text: item.text,

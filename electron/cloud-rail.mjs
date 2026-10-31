@@ -8,6 +8,7 @@
 // rail stands beside it. A circle names a saved place by its id; main opens or removes only an id it listed itself, and
 // the Cloud it acts on is main's own word for that circle (`cloudId`, which the page never sees).
 import environments from "./environments.cjs";
+import { CHECKOUT_SOURCES } from "./cloud-account.mjs";
 import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, cloudState, olderRelease, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
 import { machineSetup } from "./cloud-home.mjs";
 import { listedLook, placeLook, railPaint, SIGNED_IN } from "./place-look.mjs";
@@ -183,13 +184,13 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     return pasted ? add.run(choice, pasted) : add.run(choice);
   });
   handle("cloud-add:state", () => view());
-  handle("cloud-add:start", async (_event, tier, name, color) => {
+  handle("cloud-add:start", async (_event, tier, name, color, source) => {
     const client = account();
     if (!client) throw new Error("Sign in to MausBot Cloud first.");
     const plans = (await client.offer().catch(() => null))?.plans ?? [];
     const cleanName = cleanCloudListName(plain(name)), swatch = CLOUD_SWATCHES.includes(color) ? color : null;
     if (!plans.some(plan => plan.tier === plain(tier)) || !cleanName) throw new Error("Choose a plan and a name to continue.");
-    const result = await client.addCloud({ tier: plain(tier), interval: "month", name: cleanName, color: swatch });
+    const result = await client.addCloud({ tier: plain(tier), interval: "month", name: cleanName, color: swatch, ...(CHECKOUT_SOURCES.includes(source) ? { source } : {}) });
     return result.outcome === "blocked" ? { outcome: "blocked", blocked: result.blocked } : { outcome: result.outcome };
   });
   handle("cloud-add:organization", async (_event, name, color) => {

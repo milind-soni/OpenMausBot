@@ -147,14 +147,19 @@ function theirComputer(lent: ReadonlyArray<{ name: string; platform: "darwin" | 
   return { theirs: `their ${device} (${name})`, device };
 }
 
+/** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
-  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = []): string {
+  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = [], asks = false): string {
   const { theirs, device } = theirComputer(lent);
+  const unavailable = asks
+    ? ` If it isn't online, or doesn't lend what you need (its apps and screen, its files, running commands), call ask_for_computer with what you want to do and why: it shows them one card with a one-tap Turn on, and you carry on once it's on. Don't explain the fix yourself, and never do it on their cloud computer or in the built-in browser instead unless they ask you to.`
+    : ` If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise ask them to open OpenMausBot on that ${device}, signed in to MausBot Cloud: it shares that ${device} with you by itself.`;
   return ` You run on ${CLOUD_HOME_PLACE}.` + (sharedComputerTools
-    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows. If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise ask them to open OpenMausBot on that ${device}, signed in to MausBot Cloud: it shares that ${device} with you by itself.${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
+    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows.${unavailable}${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
       + ` While that ${device} is away, each folder it lends that the Cloud keeps a copy of still works from that copy: list_shared_computers lists them under away_computers (copy null means a folder only on the ${device}), every read says how fresh the copy is, and a write to a folder lent with editing is saved here and reaches the ${device} when it's on (tell them so in a few words). A file or folder that isn't in the copy is only on the ${device}: say you'll get it when it's on.`
     : ` You cannot see or use ${theirs}, its screen or its files from here. If they ask for something on it, say so in one sentence.`)
-    + " Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
+    + (asks ? " For work that doesn't need their own computer, use what works here:" : " Offer what works here:")
+    + " the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
     + syncedFoldersPrompt(synced);
 }
 
@@ -206,12 +211,17 @@ export function customMcpPrompt(names: string[], off: ReadonlyArray<{ name: stri
   const left = off.map(({ name, error }) => ` The MCP server "${name}" is off for you because it doesn't start for you (${error}); it is tried again on its own.`).join("");
   return mounted + left;
 }
+/** At Full access ("Just do it") nothing a bot can settle waits on the person; the cheapest way to find something out
+ * comes first, and the person last. */
+export const JUST_DO_IT_PROMPT =
+  " Just do it is on: do not stop to ask the person to confirm a step or choose between options. Use what you know, a connected app, the web, a signed-in browser, then the computer; take the sensible default for anything left, carry on, and say in one plain line what you chose. Ask them only for what only they can do: a sign-in, a payment, a secret or an account of theirs.";
+
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request; a 1Password service account token, for signing in with logins from a 1Password vault, is one too (credential_id onePasswordToken). Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. For any other secret (a Stripe or npm token, a webhook signing secret), give request_credential a label, reason and delivery: ref for add_mcp_server, file for your own commands. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 /** Ten minutes stays inside the 20-minute turn stall watchdog, which sees nothing while a command runs. */
 export const BASH_MAX_TIMEOUT_MS = 600_000;
 const LONG_COMMANDS_TEXT =
-  ` Long-running shell commands: a shell call is stopped after a default limit (2 minutes for a Bash call) and the output of a stopped command is lost. Before running anything that can take more than a minute, such as transcription (whisper), ffmpeg or ffprobe over long media, renders, large builds or big file transfers, either pass a longer per-call timeout (Bash takes \`timeout\` in milliseconds, up to ${BASH_MAX_TIMEOUT_MS}) or start it detached with its output in a file (\`nohup <command> > /tmp/<job>.log 2>&1 &\`) and check that file in later calls. Never scan the whole disk with \`find /\` or similar: search by name with \`mdfind -name\` on macOS, or search a specific folder such as your workspace or home with a depth limit. If a command times out, do not rerun it the same way.`;
+  ` Long-running shell commands: a shell call is stopped after a default limit (2 minutes for a Bash call) and the output of a stopped command is lost. Before running anything that can take more than a minute, such as transcription (whisper), ffmpeg or ffprobe over long media, renders, large builds or big file transfers, either pass a longer per-call timeout (Bash takes \`timeout\` in milliseconds, up to ${BASH_MAX_TIMEOUT_MS}) or start it detached with its output in a file (\`nohup <command> > /tmp/<job>.log 2>&1 &\`) and check that file in later calls. Never scan the whole disk with \`find /\` or similar: search by name with \`mdfind -name\` on macOS, or search a specific folder such as your workspace or home with a depth limit. If a command times out, do not rerun it the same way. Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once, and if it is still running, tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.`;
 const VM_LONG_COMMANDS_TEXT =
   " In your Local VM, vm_exec takes `timeout_seconds` instead (default 60, at most 300); start anything longer detached the same way, inside the VM, and check its log with later vm_exec calls.";
 export function longCommandsPrompt(computer: ComputerPromptKind | null): string {
