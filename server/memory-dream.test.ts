@@ -13,8 +13,8 @@ import { parseMemoryEntries } from "./memory-entries.ts";
 import { flushMemoryJournal, readMemoryJournal } from "./memory-journal.ts";
 import { closeMessageDb } from "./message-db.ts";
 import type { Message } from "./store.ts";
-import { createMemoryUpkeep, NO_DREAM_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
-import { ensureWorkspace, readMemoryTopic, workspaceDir, writeMemoryFile, WORKSPACES_DIR } from "./workspace.ts";
+import { createMemoryUpkeep, NO_DREAM_ENGINE, TOPIC_MAX_BYTES, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
+import { ensureWorkspace, readMemoryTopic, workspaceDir, writeMemoryFile, writeMemoryTopic, WORKSPACES_DIR } from "./workspace.ts";
 
 type Path = ReturnType<DreamSource["activePath"]>;
 const said = (text: string, extra: Partial<Path[number]> = {}): Path[number] => ({ role: "user", kind: "text", text, ...extra });
@@ -304,6 +304,21 @@ describe("dreaming in the upkeep loop", () => {
     expect(rows.map((row) => row.path)).toEqual(expect.arrayContaining(["MEMORY.md", "memory/work.md"]));
     expect(rows.every((row) => row.actor === "upkeep")).toBe(true);
     expect(upkeep().status(BOT.id)).toMatchObject({ lastDream: { conversations: 2 } });
+  });
+
+  it("tells About me only what it filed in the notes", async () => {
+    ensureWorkspace(BOT.id);
+    writeMemoryFile(BOT.id, "# Memory\n\n- 2026-09-01 · The person prefers plain words\n");
+    writeMemoryTopic(BOT.id, "family.md", `# family\n\n${"x".repeat(TOPIC_MAX_BYTES + 1)}\n`);
+    answers.push(JSON.stringify({ learned: [
+      { text: "The person prefers plain words", from: [1, 2], aboutUser: true, confidence: 0.9 },
+      { text: "The person visits family on Sundays", from: [1, 2], aboutUser: true, topic: "family", confidence: 0.9 },
+      { text: "The person works from Bangalore", from: [1, 2], aboutUser: true, confidence: 0.9 },
+    ] }));
+    const report = await upkeep().dream(BOT.id);
+    expect(report.learned).toEqual([{ text: "The person works from Bangalore", where: "MEMORY.md" }]);
+    expect(aboutMeAdded).toEqual(["The person works from Bangalore"]);
+    expect(report.aboutMe).toBe(1);
   });
 
   it("the next dream reads only the chats after the last one that answered", async () => {
