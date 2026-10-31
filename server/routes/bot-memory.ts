@@ -18,6 +18,8 @@ import {
   revertMemoryChange,
   type MemoryJournalEntry,
 } from "../memory-journal.ts";
+import { DreamMemoryError, listDreamBackups } from "../memory-dream-backups.ts";
+import { ownerOrAdmin } from "../request-auth.ts";
 import { upkeepEnabled, type MemoryUpkeep } from "../memory-upkeep.ts";
 import { listLearnedFacts, removeLearned } from "../profile-learned.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -26,7 +28,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface BotMemoryRouteDeps {
   bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
   taskByThread(botId: string, threadId: string): { title?: string } | undefined;
-  upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
+  upkeep: Pick<MemoryUpkeep, "status" | "tidy"> & Partial<Pick<MemoryUpkeep, "dreamNow" | "restoreDream">>;
   /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
   aboutMe(auth: RequestAuth): string;
   saveAboutMe(text: string, auth: RequestAuth): void;
@@ -56,6 +58,11 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
     const threadTitle = entry.threadId ? deps.taskByThread(botId, entry.threadId)?.title : undefined;
     return threadTitle ? { ...visible, threadTitle } : visible;
   }
+
+  const currentLearned = (auth: RequestAuth) => {
+    const lines = new Set(deps.aboutMe(auth).split("\n").map((line) => line.trim()));
+    return listLearnedFacts().filter((fact) => lines.has(fact.line.trim()));
+  };
 
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
@@ -169,19 +176,46 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       return json(res, 200, { ok: true, ...result.doc, entry: result.entry ? journalEntryForClient(m[1], result.entry) : null, overview: memoryOverview(m[1]) });
     }
     if (method === "GET" && path === "/api/profile/learned") {
-      return json(res, 200, { learned: listLearnedFacts() });
+      return json(res, 200, { learned: currentLearned(auth) });
     }
     m = path.match(/^\/api\/profile\/learned\/([\w-]+)\/remove$/);
     if (m && method === "POST") {
       const removed = removeLearned(m[1], deps.aboutMe(auth), (text) => deps.saveAboutMe(text, auth));
       if (!removed) return json(res, 404, { error: "That fact was already removed." });
-      return json(res, 200, { ok: true, aboutMe: deps.aboutMe(auth), learned: listLearnedFacts() });
+      return json(res, 200, { ok: true, aboutMe: deps.aboutMe(auth), learned: currentLearned(auth) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/upkeep$/);
     if (m && method === "GET") {
       const bot = deps.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       return json(res, 200, { enabled: upkeepEnabled(bot), ...deps.upkeep.status(bot.id) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/dream(?:\/(backups|restore))?$/);
+    if (m && ((method === "GET" && m[2] === "backups") || (method === "POST" && m[2] !== "backups"))) {
+      if (!ownerOrAdmin(auth)) return json(res, 403, { error: "forbidden" });
+      const botId = m[1];
+      if (!deps.bot(botId)) return json(res, 404, { error: "no such bot" });
+      try {
+        if (m[2] === "backups") return json(res, 200, { backups: listDreamBackups(botId) });
+        if (m[2] === "restore") {
+          const body = z.object({ id: z.string().uuid().optional(), expectedHash: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict().safeParse(await readBody(req));
+          if (!body.success) return json(res, 400, { error: "invalid" });
+          if (!deps.upkeep.restoreDream) return json(res, 409, { error: "disabled", code: "disabled" });
+          deps.upkeep.restoreDream(botId, body.data);
+          await flushMemoryJournal(botId);
+          return json(res, 200, { ok: true, overview: memoryOverview(botId) });
+        }
+        if (!deps.upkeep.dreamNow) return json(res, 409, { error: "disabled", code: "disabled" });
+        const report = await deps.upkeep.dreamNow(botId);
+        await flushMemoryJournal(botId);
+        return json(res, 200, { report, overview: memoryOverview(botId) });
+      } catch (error) {
+        if (error instanceof DreamMemoryError) return json(res, 409, { error: error.code, code: error.code, ...(error.currentHash ? { currentHash: error.currentHash } : {}) });
+        const status = (error as { status?: unknown }).status;
+        if (typeof status === "number") return json(res, status, { error: (error as Error).message });
+        console.warn(`memory ${m[2]} failed for bot ${botId}`, error);
+        return json(res, 409, { error: "backup", code: "backup" });
+      }
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/tidy$/);
     if (m && method === "POST") {

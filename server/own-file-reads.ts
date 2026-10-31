@@ -108,7 +108,7 @@ export function readsOnly(paths: readonly string[], cwd: string, roots: readonly
   if (!paths.length || !roots.length) return false;
   return paths.every((path) => {
     const full = real(resolve(cwd, path));
-    return full !== null && roots.some((root) => inside(full, root));
+    return full !== null && !full.split(/[\\/]/).includes(".dream-backups") && roots.some((root) => inside(full, root));
   });
 }
 

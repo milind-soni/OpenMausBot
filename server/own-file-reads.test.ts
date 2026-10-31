@@ -105,3 +105,14 @@ describe("a bot's own files", () => {
     expect(readsOwnFiles(data, "iris", { reads: [join(conversation, "paul", "MEMORY.md")] })).toBe(false);
   });
 });
+
+it("does not auto-approve a dream backup as a bot's own notes", () => {
+  const root = mkdtempSync(join(tmpdir(), "omb-dream-own-read-"));
+  try {
+    const backup = join(root, "workspaces", "b1", ".dream-backups");
+    mkdirSync(backup, { recursive: true });
+    const file = join(backup, "0");
+    writeFileSync(file, "old memory");
+    expect(readsOwnFiles(root, "b1", { reads: [file] })).toBe(false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

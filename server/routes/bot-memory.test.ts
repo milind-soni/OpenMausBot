@@ -70,6 +70,12 @@ describe("the bot-memory module through the route table", () => {
     expect(((await untitled.json()) as { entries: Array<Record<string, unknown>> }).entries[0]!.threadTitle).toBeUndefined();
   });
 
+  it("answers a broken restore request with its own status, not a backup failure", async () => {
+    const base = await serve({ upkeep: { status: () => ({ modelSteps: false }), tidy: async () => { throw new Error("unexpected tidy"); }, restoreDream: () => { throw new Error("unexpected restore"); } } });
+    const restore = await fetch(`${base}/api/bots/bot-123/memory/dream/restore`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+    expect(restore.status).toBe(400);
+  });
+
   it("keeps the 404 precheck on the store seam for every pattern", async () => {
     const base = await serve({ bot: () => undefined });
     for (const [method, path, body] of [
@@ -82,6 +88,9 @@ describe("the bot-memory module through the route table", () => {
       ["POST", "/api/bots/missing/memory/journal/e1/revert"],
       ["GET", "/api/bots/missing/memory/upkeep"],
       ["POST", "/api/bots/missing/memory/tidy"],
+      ["POST", "/api/bots/missing/memory/dream"],
+      ["GET", "/api/bots/missing/memory/dream/backups"],
+      ["POST", "/api/bots/missing/memory/dream/restore", {}],
       ["POST", "/api/bots/missing/memory/open", { target: "folder" }],
     ] as Array<[string, string, unknown?]>) {
       const response = await fetch(`${base}${path}`, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
@@ -194,6 +203,9 @@ describe("the bot-memory module through the route table", () => {
       ["POST", "/api/bots/b1/memory/journal/e1/revert"],
       ["GET", "/api/bots/b1/memory/upkeep"],
       ["POST", "/api/bots/b1/memory/tidy"],
+      ["POST", "/api/bots/b1/memory/dream"],
+      ["GET", "/api/bots/b1/memory/dream/backups"],
+      ["POST", "/api/bots/b1/memory/dream/restore", {}],
       ["GET", "/api/profile/learned"],
       ["POST", "/api/profile/learned/e1/remove"],
       ["POST", "/api/bots/b1/memory/open"],
@@ -215,6 +227,9 @@ describe("the bot-memory family behind the gate on a real server", () => {
     ["POST", "/api/bots/b1/memory/journal/e1/revert"],
     ["GET", "/api/bots/b1/memory/upkeep"],
     ["POST", "/api/bots/b1/memory/tidy"],
+    ["POST", "/api/bots/b1/memory/dream"],
+    ["GET", "/api/bots/b1/memory/dream/backups"],
+    ["POST", "/api/bots/b1/memory/dream/restore", {}],
     ["GET", "/api/profile/learned"],
     ["POST", "/api/profile/learned/e1/remove"],
     ["POST", "/api/bots/b1/memory/open", { target: "folder" }],
