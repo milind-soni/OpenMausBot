@@ -41,10 +41,10 @@ import {
 } from "../shared/approval-mode.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
-import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
+import { isPendingSignInRequest, normalizeSignInSite, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
-import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { serverLine } from "./server-lines.ts";
+import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
@@ -114,7 +114,7 @@ import { liveCardKind, liveDecisionRefusal } from "../shared/live-approval.ts";
 import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
-import { connectorCardText } from "./connector-card-text.ts";
+import { connectorCardDescription, connectorCardText, signInCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
@@ -293,7 +293,7 @@ import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngine
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
-import { outsideRoomNote, sentRow } from "./host/handoff-sent.ts";
+import { outsideRoomNote, sentRow, teammateResultRow } from "./host/handoff-sent.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
@@ -684,8 +684,8 @@ const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
 const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 const CLOUD_TEAM = CLOUD_HOME?.team ?? null, CLOUD_PERSONAL = CLOUD_HOME !== null && CLOUD_TEAM === null, TEAM_LABEL = CLOUD_TEAM ? { label: CLOUD_TEAM.name } : {};
-/** The language set on this server, else (on a Team Cloud) the team's default from the Admin. */
-const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage });
+/** The language set on this server, else (on a Team Cloud) the team's default from the Admin. threadLanguage: the one a line in a conversation is written in, its person's, else the place's (server/server-lines.ts). */
+const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage }); const threadLanguage = (threadId: string): string | undefined => personLanguages.forLine(teamConversationPerson(threadId) ?? threadPersonKey(threadId)); setConversationLanguage(threadLanguage);
 if (CLOUD_HOME) repairMovedWorkspacePaths(DATA_DIR);
 if (CLOUD_PERSONAL) sessions.requireAdmin(CLOUD_PERSONAL_REFUSAL);
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null || ownHome.here();
@@ -3842,7 +3842,7 @@ function noteQueuedBehindPerson(node: HandoffView): void {
   store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
     // A notice, not a step: nothing settles it, so it must never read as running.
-    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title), ok: true },
+    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title, threadLanguage(parent.threadId)), ok: true },
     threadRef: { botId: bot.id, threadId: card.threadId, title: card.title },
   });
 }
@@ -4000,7 +4000,7 @@ const coordinator: Coordinator = createCoordinator({
       if (child.mode === "notify") {
         if (child.status !== "completed" && store.taskByThread(child.botId, child.threadId)) {
           store.appendMessage(child.threadId, { role: "bot", kind: "activity",
-            tool: { name: `Send failed — ${child.result.split("\n", 1)[0]!.slice(0, 180)}`, ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
+            tool: { name: serverLine(threadLanguage(child.threadId), "server.teammates.sendFailed", { detail: child.result.split("\n", 1)[0]!.slice(0, 180) }), ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
         }
         return;
       }
@@ -4015,9 +4015,7 @@ const coordinator: Coordinator = createCoordinator({
         roomRequest: { id: child.id, phase: "result" },
         from: bot ? { botId: bot.id, name: bot.name, color: bot.color } : undefined,
         tool: {
-          name: problem ? `Result withheld: ${problem}`
-            : child.status === "completed" ? `${bot?.name ?? "Teammate"} replied${child.groupId ? ` · ${store.group(child.groupId)?.name ?? "Room"}` : ""}`
-            : `${bot?.name ?? "Teammate"} — ${child.status}: ${child.result.split("\n", 1)[0]!.slice(0, 180)}`,
+          name: teammateResultRow(threadLanguage(parent.threadId), child, bot?.name, problem, child.groupId ? store.group(child.groupId)?.name : undefined),
           ok: child.status === "completed" && !problem,
           ...(child.status === "completed" && !problem && child.result.trim()
             ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}),
@@ -4064,15 +4062,15 @@ const coordinator: Coordinator = createCoordinator({
       if (resumed && !group) {
         const asking = coordinator.children(node.id).filter(child => child.question !== undefined);
         const settledFrom = [...new Set((asking.length ? asking : coordinator.children(node.id)).map(child => store.bot(child.botId)?.name ?? "Teammate"))];
-        const who = settledFrom.length ? settledFrom.join(", ") : "delegated work";
+        const language = threadLanguage(node.threadId), who = settledFrom.length ? settledFrom.join(", ") : serverLine(language, "server.teammates.delegatedWork");
         store.appendMessage(node.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: `${asking.length ? `Resumed with a question from ${who}` : `Resumed with ${who} results`}${node.restart ? " after a restart" : ""}, reviewing`, ok: true },
+          tool: { name: serverLine(language, asking.length ? node.restart ? "server.teammates.resumedQuestionRestart" : "server.teammates.resumedQuestion" : !settledFrom.length ? node.restart ? "server.teammates.resumedWorkResultsRestart" : "server.teammates.resumedWorkResults" : node.restart ? "server.teammates.resumedResultsRestart" : "server.teammates.resumedResults", { who }), ok: true },
         });
         const quiet = turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet;
         const routineRoot = !node.parentId && activeRoutineRunForThread(node.threadId) !== null;
         if (node.restart !== "rerun" && !quiet && !routineRoot && asking.length === 0) {
-          notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }));
+          notify(buildNotification("delegation-settled", bot, node.threadId, serverLine(language, "server.notify.resultsFrom", { who }), { avatarUrl: bot.avatarUrl }));
         }
       if (!node.parentId && !quiet) reviewAnswerThreads.add(node.threadId);
       } else if (node.restart === "rerun" && !group) {
@@ -4336,7 +4334,7 @@ function noteHeldSkip(groupId: string, threadId: string, bot: BotRecord, message
     role: "bot",
     kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
-    tool: { name: heldMemberLine(bot.name), ok: false },
+    tool: { name: heldMemberLine(bot.name, threadLanguage(threadId)), ok: false },
   });
 }
 
@@ -4415,9 +4413,9 @@ async function waitForChatRoomMember(
   threadId: string,
   bot: BotRecord,
 ): Promise<"run" | "skip" | "stop"> {
-  const waitTool = {
-    name: `${bot.name} is finishing another conversation — will reply here when free`,
-    spoken: `${bot.name} is finishing another conversation`,
+  const language = threadLanguage(threadId), waitTool = {
+    name: serverLine(language, "server.rooms.finishingElsewhere", { bot: bot.name }),
+    spoken: serverLine(language, "server.rooms.finishingElsewhereSpoken", { bot: bot.name }),
   };
   let waitChip: Message | undefined;
   const availability = await waitForGroupMemberBot(bot, operation, () => {
@@ -4440,13 +4438,13 @@ async function waitForChatRoomMember(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} is no longer available — skipped this round`, ok: false },
+        tool: { name: serverLine(language, "server.rooms.unavailable", { bot: bot.name }), ok: false },
       });
       return "skip";
     case "timed_out": {
       const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
       const name =
-        `${bot.name} stayed busy in another conversation for ${minutes} minute${minutes === 1 ? "" : "s"} — skipped this round`;
+        serverLine(language, minutes === 1 ? "server.rooms.stayedBusy.one" : "server.rooms.stayedBusy.many", { bot: bot.name, count: minutes });
       if (waitChip) store.patchMessage(threadId, waitChip.id, { tool: { name, ok: false } });
       else {
         store.appendMessage(threadId, {
@@ -5657,7 +5655,7 @@ function isUnattended(botId?: string | null, threadId?: string): boolean {
 
 const reviewAnswerThreads = new Set<string>(); const firstHourHooks = createFirstHourHooks({ dataDir: DATA_DIR, personal: Boolean(CLOUD_PERSONAL) });
 let routines: RoutineManager | null = null;
-const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId),
+const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId), threadLanguage,
   notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }), { routine: true }) });
 const proactive = createProactive({ store, cfg, composio, registry, dataDir: DATA_DIR, ideas: (botId) => memoryUpkeep.ideas(botId), ...firstHourHooks.proactive, team: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), frozen: moveFreeze.frozen, routines: () => routines, mainThread: botMainThread, threadBusy, notify, helpers: { decider, extractor }, cloud: Boolean(CLOUD_HOME || HOSTED_WORKSPACE || CLOUD_TEAM),
   engineName: (instanceId) => engineName(instanceId), hostTimeZone: () => (CLOUD_HOME ? undefined : hostTimeZone()), decide: (row) => appendDecision(DATA_DIR, row), stale: shouldIgnoreProviderEvent, release: (threadId) => watchdog.setWaitingOnHuman(threadId, false),
@@ -7067,7 +7065,7 @@ function runtimeWorkPending(threadId: string): boolean {
 }
 
 const { reportIncident, reportEscalation, incidentRefused, retryThread } = createChiefNotices({
-  store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId),
+  store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId), threadLanguage,
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
@@ -7831,7 +7829,7 @@ async function startTurn(
     && !opts?.computerSelectionContinuation && !opts?.editedMessageId && !commsDepth && !opts?.peerAsk && !userMessage.peerAsk;
   if (personLine && (coordinator.answer(threadId, text) || signInSettle.answerInChat(bot.id, threadId, text))) {
     askCards.answeredInWords(threadId, text);
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Answer passed to the waiting work", ok: true } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.teammates.answerPassed"), ok: true } });
     opts?.onTurnSettled?.();
     queueMicrotask(drainQueuedSends);
     return userMessage;
@@ -8803,9 +8801,9 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   const card = existing || run.target === "room-goal" || (run.threadId !== sourceThreadId && !automationReports.speaksFor(run)) ? routineRunCard(run) : null;
   const statusChanged = card !== null && existing?.routineRun?.status !== run.status;
   if (existing && card) {
-    store.patchMessage(sourceThreadId, existing.id, { text: routineRunFallbackText(card), routineRun: card });
+    store.patchMessage(sourceThreadId, existing.id, { text: routineRunFallbackText(card, threadLanguage(sourceThreadId)), routineRun: card });
   } else if (card) {
-    const message: Omit<Message, "id" | "at"> = { role: "bot", kind: "routine.run", text: routineRunFallbackText(card), routineRun: card };
+    const message: Omit<Message, "id" | "at"> = { role: "bot", kind: "routine.run", text: routineRunFallbackText(card, threadLanguage(sourceThreadId)), routineRun: card };
     if (source.group) {
       message.from = { botId: source.bot.id, name: source.bot.name, color: source.bot.color };
     }
@@ -9839,7 +9837,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.busyElsewhere", { bot: bot.name }), ok: false },
     });
     onDispatchError?.(message);
     return true;
@@ -10010,7 +10008,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: readyBot.id, name: readyBot.name, color: readyBot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.settingsChanged", { bot: readyBot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10026,7 +10024,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.providerUpdating", { bot: bot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10041,7 +10039,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.cloudComputerChanging", { bot: bot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10056,7 +10054,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.becameBusy", { bot: bot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10306,7 +10304,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: briefCrossingLabel(bot.name, crossing.count), ok: true },
+        tool: { name: briefCrossingLabel(bot.name, crossing.count, threadLanguage(threadId)), ok: true },
       });
     }
   }
@@ -10400,7 +10398,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: roomTurnTimeoutMessage(bot.name, timeoutMinutes), ok: false },
+        tool: { name: roomTurnTimeoutMessage(bot.name, timeoutMinutes, threadLanguage(threadId)), ok: false },
       });
       finish("timed_out");
     });
@@ -10458,7 +10456,7 @@ async function runClaimedGroupMemberTurn(
     if (roomReset) {
       store.appendMessage(threadId, {
         role: "bot", kind: "activity", from: { botId: readyBot.id, name: readyBot.name, color: readyBot.color },
-        tool: { name: roomResetNote(readyBot.name, roomReset), ok: true },
+        tool: { name: roomResetNote(readyBot.name, roomReset, threadLanguage(threadId)), ok: true },
       });
     }
     if (roomReset || displaced) broadcast({ kind: "group", group: publicGroupState(store.group(groupId) ?? group) });
@@ -10621,7 +10619,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: finishedWithoutSummaryLine(bot.name, reasking), ok: false },
+      tool: { name: finishedWithoutSummaryLine(bot.name, reasking, threadLanguage(threadId)), ok: false },
     });
     if (!reasking) return true;
     summaryReasks.add(reaskKey);
@@ -10669,7 +10667,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         tool: {
-          name: `${peer.name} isn't in this room, so that mention didn't reach them — add them to the room to bring them in.`,
+          name: serverLine(threadLanguage(threadId), "server.rooms.mentionMissed", { bot: peer.name }),
           ok: false,
         },
       });
@@ -10971,7 +10969,7 @@ function startGroupTurn(
       role: "bot",
       kind: "activity",
       tool: {
-        name: `${mentionedArchived.name} is archived and can't respond — restore it or mention an active room member.`,
+        name: serverLine(threadLanguage(threadId), "server.rooms.archived", { bot: mentionedArchived.name }),
         ok: false,
       },
     });
@@ -11002,9 +11000,9 @@ function startGroupTurn(
     const defaultArchived = archived.find((member) => member.id === defaultArchivedId);
     let unavailableMessage: string | undefined;
     if (!mentionedArchived && !availableMembers.length) {
-      unavailableMessage = "No active room members can respond — restore an archived bot or add an active member.";
+      unavailableMessage = serverLine(threadLanguage(threadId), "server.rooms.noneActive");
     } else if (!mentionedArchived && defaultArchived) {
-      unavailableMessage = `${defaultArchived.name} is archived and can't respond — restore it or mention an active room member.`;
+      unavailableMessage = serverLine(threadLanguage(threadId), "server.rooms.archived", { bot: defaultArchived.name });
     }
     if (unavailableMessage) {
       store.appendMessage(threadId, {
@@ -11059,7 +11057,7 @@ function startGroupTurn(
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `${owner?.name ?? "A room member"} is still stopping — this message was not dispatched`, ok: false },
+        tool: { name: owner ? serverLine(threadLanguage(threadId), "server.rooms.stillStopping", { bot: owner.name }) : serverLine(threadLanguage(threadId), "server.rooms.someoneStillStopping"), ok: false },
       });
       return;
     }
@@ -11663,7 +11661,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, threadLanguage, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
 ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
@@ -11698,7 +11696,7 @@ function requestSignIn(from: BotRecord, threadId: string, rawSite: unknown, rawR
   const message = store.appendMessage(threadId, {
     role: "bot",
     kind: "signin",
-    text: signInFallbackText(from.name, target.site),
+    text: signInCardText(from.name, target.site, threadLanguage(threadId)),
     ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
     signIn: { url: target.url, site: target.site, place, ...(reason ? { reason } : {}) },
   });
@@ -11709,7 +11707,7 @@ function requestSignIn(from: BotRecord, threadId: string, rawSite: unknown, rawR
   }
   computerControl.requestHelp(signInControlKey(from, threadId, place), `sign in to ${target.site}`,
     { botId: from.id, threadId, messageId: message.id, site: target.site, place });
-  notify(buildNotification("sign-in", { ...from, threadId }, threadId, reason || `Open OpenMausBot to sign in to ${target.site}.`, {
+  notify(buildNotification("sign-in", { ...from, threadId }, threadId, reason || serverLine(threadLanguage(threadId), "server.notify.openToSignIn", { site: target.site }), {
     avatarUrl: from.avatarUrl,
     ...(owner.group ? { group: { id: owner.group.id, name: owner.group.name } } : {}),
     site: target.site,
@@ -13716,7 +13714,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           role: "bot",
           kind: "activity",
           from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: recallCrossingLabel(bot.name, crossing.count), ok: true },
+          tool: { name: recallCrossingLabel(bot.name, crossing.count, threadLanguage(roomThreadId)), ok: true },
         });
       };
       if (method === "GET" && path === "/api/internal/session-search") {
@@ -14003,7 +14001,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }));
             if (!duplicate) {
               if (!EXTERNAL) delegatedThisTurn(node.id);
-              store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via,
+              store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via, language: threadLanguage(address.threadId),
                 reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title }));
             }
           } catch (error) {
@@ -14262,7 +14260,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const chip: Omit<Message, "id" | "at"> = {
           role: "bot",
           kind: "activity",
-          tool: { name: `Posted in ${room.name}`, ok: true },
+          tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.postedIn", { room: room.name }), ok: true },
           comm: { groupId: room.id, withBotId: poster.id, withName: room.name, withColor: poster.color },
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
@@ -14316,7 +14314,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
             kind: "activity",
-            tool: { name: `Opened thread #${task.title}`, ok: true },
+            tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.openedThread", { title: task.title }), ok: true },
             threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
           };
           if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };
@@ -14805,13 +14803,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           requireActiveInternalCapability();
           const connected = connectionState[item.slug]?.connected === true;
           const status = item.alias ? "required" : connected ? "connected" : "required";
-          const description = item.alias
-            ? `Connect ${toolkit.label} as “${item.alias}” so the bot can continue`
-            : toolkit.blurb || `Connect ${toolkit.label} so the bot can continue`;
+          const language = threadLanguage(threadId);
+          // The app catalog's own words, when it has some, are English; ours are in the person's language.
+          const description = item.alias ? connectorCardDescription(toolkit.label, item.alias, language) : toolkit.blurb || connectorCardDescription(toolkit.label, undefined, language);
           const message = store.appendMessage(threadId, {
             role: "bot",
             kind: "connector",
-            text: connectorCardText(toolkit.label, item.alias),
+            text: connectorCardText(toolkit.label, item.alias, language),
             ...(owner.group ? { from: { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color } } : {}),
             connector: {
               slug: item.slug,
