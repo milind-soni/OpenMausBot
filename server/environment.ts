@@ -30,6 +30,9 @@ export interface EnvironmentDescriptor {
     deviceLink?: true;
     /** A personal Cloud home with lending on: a lent computer may lend its Chrome to the bots here. Never a team Cloud. */
     myChromeLink?: true;
+    /** The same: the app on the person's computer says how it is and hears what the bots here ask of it
+     * (POST /api/shared-computers/asks). */
+    computerAsks?: true;
     /** A lent computer may say it takes run_command's timeout_seconds; only then does this server send it. */
     commandTimeouts?: true;
     /** A lent computer may say it takes edit_file, append_file and delete_file; only then does this server send them. */
@@ -140,7 +143,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
       ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, fileEdits: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
-      ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const } : {}),
+      ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const, computerAsks: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       ...(input.ownHome === true && input.cloudHome !== true ? { move: 1 as const } : {}),
       ...(input.cloudHome === true && input.cloudTeam === true ? { cloudTeam: true as const } : {}),

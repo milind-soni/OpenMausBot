@@ -115,6 +115,8 @@ beforeAll(async () => {
   scout = await create({ name: "Scout", reportsTo: CLEO.email });
   expect((await team.as(cleo, "PATCH", `/api/bots/${scout.id}`, { chiefOfStaff: true })).status).toBe(200);
   ledger = await create({ name: "Ledger", reportsTo: CLEO.email });
+  // Questions reach the person on "Ask me first"; at Full access, the default, the requesting bot decides them instead.
+  for (const bot of [scout, ledger]) expect((await team.as(cleo, "PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
   const opened = await team.as(cleo, "POST", `/api/bots/${scout.id}/tasks`, { title: "Cleo and Scout" });
   expect(opened.status, JSON.stringify(opened.body)).toBe(201);
   inbox = opened.body.task.threadId as string;
@@ -158,7 +160,7 @@ it("asks Cleo a decision with set answers as a card in Ledger's chat and a copy 
   const answered = await team.as(cleo, "POST", `/api/threads/${inbox}/respond`, { requestId: row.card!.requestId, behavior: "answer", message: CHOICES[0] });
   expect(answered.status, JSON.stringify(answered.body)).toBe(200);
   await until(async () => (await messages(work)).some((line) => line.role === "bot" && line.text === `QC1-B: Done with: ${CHOICES[0]}`));
-  expect(told(ledger.id, "QC1-B"), "the envelope offered the card tool for set answers").toContain("ask it with ask_user, not show_widget");
+  expect(told(ledger.id, "QC1-B"), "the envelope offered the card tool for set answers, by the name Claude calls it").toContain("ask it with mcp__ogb__ask_user, not show_widget");
   await until(async () => (await messages(inbox)).some((line) => line.text === "QC1-L-DONE: Ledger is done."));
   expect((await messages(work)).find((line) => line.id === row.id)!.card).toMatchObject({ answered: "answer", answeredText: CHOICES[0] });
   expect((await messages(inbox)).find((line) => line.id === copy.id)!.card, "the copy follows").toMatchObject({ answered: "answer" });

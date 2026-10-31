@@ -15,7 +15,8 @@ too) into areas, and runs only the jobs some area can affect:
 | web | the rest of `src/`, `public/`, the root `*-preview.html` pages | the build, the eight Linux shards, the renderer smoke |
 | script tests | `scripts/**/*.test.*` | the Linux shards (and Windows', see Windows), the renderer smoke, browser identity |
 | server | `server/`, `shared/`, `enterprise/`, `companion/`, `evals/`, `skills/`, `deploy/`, the composio broker, the Dockerfile, and the renderer files the server or a smoke loads | the build, Linux shards (and Windows', see Windows), behavior evals, packaged server, open-source edition, the macOS smokes, renderer smoke, browser identity, browser driver, Linux package |
-| desktop | `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
+| Windows computer control | the `electron/` modules that start computer control and lend a PC's screen: `cua`, `cua-failure`, `cua-connection`, `capabilities`, `screen-status`, `shared-cua-connection`, `shared-computer-access`, `lent-screen-tools`, `lent-screen-failures`, `paced-typing` | the same as server, and Windows CUA |
+| desktop | the rest of `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
 | control plane | `cloudflare/control-plane/` | the control-plane job |
 | everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
 
@@ -35,9 +36,11 @@ areas run the union of their jobs. Why the mapping is what it is:
   catalogs are read only by `src/` tests, the locale generator's test and an
   Electron node test; `scripts/ci-scope.test.ts` fails if another test starts
   reading them, or the docs, without being listed.
-- Windows CUA and the Linux ARM64 cloudflared installer test only their own
-  scripts and pinned downloads, so only `scripts/` and dependency changes run
-  them.
+- Windows CUA starts computer control the way the installed app does and
+  takes a Cloud's first look at the PC through the lend path, so a change to
+  those Electron modules runs it, as do `scripts/` and dependency changes. The
+  Linux ARM64 cloudflared installer tests only its own script and pinned
+  download.
 
 ## Lanes: pull requests, main and the full lane
 
@@ -156,7 +159,8 @@ half hours. Now:
 Windows runners are slow to get and a Windows shard takes as long as a Linux
 one, so a pull request runs the Windows jobs (the eight shards, the packaged
 server smoke, browser identity, the browser driver and, for a change that can
-affect anything, the CUA smoke) only when its change can break Windows first
+affect anything or to the Electron modules it starts, the CUA smoke) only when
+its change can break Windows first
 (`windowsReason` in `scripts/ci-scope.mjs`):
 
 - the PR carries the `windows` label;

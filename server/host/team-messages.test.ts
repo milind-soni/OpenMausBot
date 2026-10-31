@@ -131,6 +131,17 @@ describe("message_person", () => {
   });
 });
 
+describe("a teammate who shares a bot's name", () => {
+  it("is still the one their tag reaches: a tie is the person's, and their tags are known", () => {
+    const f = fixture();
+    f.bots.push({ id: "ada-bot", name: "Ada", color: "blue", threadId: "ada-bot-main", tasks: [{ threadId: "ada-bot-main", title: "Ada" }] });
+    f.said("scout-main", "@Ada can you check the numbers?", { email: "bea@acme.test", name: "Bea" });
+    expect(f.notified.map((one) => [one.forPerson, one.title])).toEqual([[key(ADA.email), "Bea mentioned you in Scout"]]);
+    expect(f.team.people()).toContainEqual({ name: "Ada", tags: ["Ada"] });
+    expect(f.team.people().some((person) => person.name === "Carl"), "someone who left is no teammate").toBe(false);
+  });
+});
+
 describe("@Ben", () => {
   it("reaches Ben's inbox from a shared chat, with a link back, one notification, and a Needs you line until he opens it", () => {
     const f = fixture();

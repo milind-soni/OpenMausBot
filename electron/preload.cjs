@@ -182,8 +182,9 @@ const bridge = {
   // out; the account, the token and the checkout page stay in main. Only from the person's click where it opens anything.
   cloudAdd: {
     state: () => ipcRenderer.invoke("cloud-add:state"),
-    start: (tier, name, color) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color)) : Promise.reject(new Error("Choose Continue to checkout.")),
+    start: (tier, name, color, source) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color), ...(source == null ? [] : [String(source)]))
+      : Promise.reject(new Error("Choose Continue to checkout.")),
     reopen: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-add:reopen") : Promise.reject(new Error("Choose Reopen checkout.")),
     copyLink: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -471,6 +472,17 @@ const bridge = {
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
     },
   } : undefined,
+  // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.
+  twoPlaces: {
+    state: () => ipcRenderer.invoke("two-places:state"),
+    accept: key => ipcRenderer.invoke("two-places:accept", String(key)),
+    dismiss: key => ipcRenderer.invoke("two-places:dismiss", String(key)),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("two-places:changed", handler);
+      return () => ipcRenderer.removeListener("two-places:changed", handler);
+    },
+  },
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -560,7 +572,6 @@ const bridge = {
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
-    shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
   },
   desktopAnalytics: {
     enabled: () => {

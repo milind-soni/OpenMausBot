@@ -5,11 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import "../server-line-packs.ts";
 import type { DevsReportPayload } from "../devs-report.ts";
-import type { SendOutcome } from "../devs-report-send.ts";
+import type { ReportStatusAnswer, ReportStatusQuestion, SendOutcome } from "../devs-report-send.ts";
 import { personKey } from "../person-key.ts";
 import type { PublicSession } from "../sessions.ts";
 import type { Message, StoreChange } from "../store.ts";
-import { createDevsReports, DEVS_REPORTS_FILE, LONGEST_WAIT_MS, NO_ANSWER_MS, RETRY_MS, sentLine, type DevsReportsDeps } from "./devs-reports.ts";
+import { createDevsReports, DEVS_REPORTS_FILE, fixedLine, LONGEST_WAIT_MS, NO_ANSWER_MS, RETRY_MS, sentLine, STATUS_EVERY_MS, STATUS_FIRST_MS, TRACKED_MS,
+  type DevsReportsDeps } from "./devs-reports.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -18,12 +19,16 @@ const SCOUT = { id: "scout", name: "Scout", threadId: "scout-main", modelSelecti
 const ROVER = { id: "rover", name: "Rover", threadId: "rover-main", modelSelection: { instanceId: "codex", model: "gpt-5.5", effort: "high" } };
 
 function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions?: PublicSession[]; ownerKey?: string | null; team?: boolean;
-  profileEmail?: string; automated?: boolean; lineLanguage?: DevsReportsDeps["lineLanguage"] } = {}) {
+  profileEmail?: string; automated?: boolean; lineLanguage?: DevsReportsDeps["lineLanguage"]; appVersion?: string; clock?: number;
+  /** The conversations, kept across a restart (another fixture on the same data). */
+  threads?: Map<string, Message[]>;
+  /** The MausBot team's answer to each question about this app's reports; none: no answer (offline). */
+  answer?: (question: ReportStatusQuestion) => ReportStatusAnswer | null } = {}) {
   const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "omb-devs-reports-"));
   if (!options.dataDir) dirs.push(dataDir);
   const listeners = new Set<(change: StoreChange) => void>();
-  const threads = new Map<string, Message[]>();
-  let ids = 0, clock = Date.UTC(2026, 9, 27, 9, 0);
+  const threads = options.threads ?? new Map<string, Message[]>();
+  let ids = [...threads.values()].reduce((sum, lines) => sum + lines.length, 0), clock = options.clock ?? Date.UTC(2026, 9, 27, 9, 0);
   const busy = new Set<string>();
   const bots = [SCOUT, ROVER];
   const groups = [{ id: "launch", name: "Launch", threadId: "room", memberIds: ["scout", "rover"] }];
@@ -35,23 +40,34 @@ function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions
     projectBotForTask: () => null,
     activePath: (threadId: string) => threads.get(threadId) ?? [],
     appendMessage: (threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }) => {
-      const full = { id: `m${++ids}`, at: clock, ...message } as Message;
+      const full = { id: `${threadId}:m${++ids}`, at: clock, ...message } as Message;
       threads.set(threadId, [...(threads.get(threadId) ?? []), full]);
       for (const listener of listeners) listener({ type: "message", threadId, message: full });
       return full;
+    },
+    patchMessage: (threadId: string, messageId: string, patch: Partial<Message>) => {
+      const lines = threads.get(threadId);
+      if (!lines) throw new Error("no such conversation");
+      const index = lines.findIndex((line) => line.id === messageId);
+      if (index < 0) return null;
+      lines[index] = { ...lines[index]!, ...patch };
+      return lines[index]!;
     },
     onChange: (listener: (change: StoreChange) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
   };
   const sent: DevsReportPayload[] = [];
   const outcomes = [...(options.outcomes ?? [])];
+  const asked: ReportStatusQuestion[] = [], told: Array<{ threadId: string; text: string; person?: string }> = [];
   const deps: DevsReportsDeps = {
-    dataDir, store: store as never, installId: "4b7c1f2e-0a9d-4c2b-9f1e-6d5a4b3c2d1e", appVersion: "0.1.128", runsOn: "desktop app",
+    dataDir, store: store as never, installId: "4b7c1f2e-0a9d-4c2b-9f1e-6d5a4b3c2d1e", appVersion: options.appVersion ?? "0.1.128", runsOn: "desktop app",
     working: (threadId) => busy.has(threadId), automated: () => options.automated === true,
     engine: (instanceId) => ({ name: instanceId === "claude" ? "Claude Code" : "Codex", snapshot: { state: "available", authenticated: true } }),
     appsReady: () => false, sessions: () => options.sessions ?? [], ownerKey: options.ownerKey ?? null, team: options.team === true,
     profileEmail: () => options.profileEmail, language: () => "en", ...(options.lineLanguage ? { lineLanguage: options.lineLanguage } : {}),
     recentLog: () => ["2026-10-27T08:59:00.000Z warn engine probe slow"],
     send: async (payload) => { sent.push(payload); return outcomes.shift() ?? { ok: true, id: `report-${sent.length}` }; },
+    askStatus: async (question) => { asked.push(question); return options.answer?.(question) ?? null; },
+    tell: (threadId, text, person) => { told.push({ threadId, text, ...(person ? { person } : {}) }); },
     now: () => clock, timer: false,
   };
   const reports = createDevsReports(deps);
@@ -66,7 +82,11 @@ function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions
   };
   const settle = async () => { reports.tick(); await reports.idle(); };
   const notices = (threadId: string) => store.activePath(threadId).filter((line) => line.kind === "activity").map((line) => line.tool!.name);
-  return { reports, store, sent, busy, person, bot, call, settle, notices, dataDir, advance: (ms: number) => { clock += ms; }, stop: () => reports.stop() };
+  const line = (threadId: string, messageId: string) => store.activePath(threadId).find((one) => one.id === messageId);
+  /** The conversation is deleted, as the store says it. */
+  const drop = (threadId: string) => { threads.delete(threadId); for (const listener of listeners) listener({ type: "thread.deleted", threadId } as StoreChange); };
+  return { reports, store, sent, busy, person, bot, call, settle, notices, dataDir, asked, told, line, drop, threads, now: () => clock,
+    advance: (ms: number) => { clock += ms; }, stop: () => reports.stop() };
 }
 
 describe("a message that tags @devs", () => {
@@ -323,6 +343,152 @@ describe("a group chat", () => {
     expect(fx.sent).toHaveLength(1);
     expect(fx.sent[0]!.diagnostics).toContain("Bot: Scout (scout)");
     expect(fx.sent[0]!.diagnostics).toContain("Bot: Rover (rover)");
+    fx.stop();
+  });
+});
+
+describe("closing the loop on a report", () => {
+  /** Every report asked about, answered as the MausBot team would: `fixedIn` for all of them, `notify` as given. */
+  const team = (state: { status: "received" | "fixed"; fixedIn: string | null; notify: boolean }) => (question: ReportStatusQuestion): ReportStatusAnswer =>
+    ({ reports: question.ids.map((id) => ({ id, status: state.status, fixedIn: state.fixedIn })), notify: state.notify });
+  /** A report sent from Scout's chat by Bob, with Scout's summary; the person's message. */
+  async function reported(fx: ReturnType<typeof fixture>, words = "@devs the calendar never syncs") {
+    const message = fx.person("scout-main", words, { sender: { name: "Bob", id: "p_bob_bob_bob_bob_bob_bob_bob" } });
+    fx.busy.add("scout-main");
+    fx.reports.note("scout-main", true);
+    expect((await fx.call("scout", "scout-main", { went_wrong: "The calendar never syncs" })).status).toBe(200);
+    fx.busy.delete("scout-main");
+    await fx.settle();
+    return message;
+  }
+  const fixedLines = (fx: ReturnType<typeof fixture>) => fx.notices("scout-main").filter((name) => name.startsWith("notice: Fixed in"));
+  const later = async (fx: ReturnType<typeof fixture>, ms: number) => { fx.advance(ms); await fx.settle(); };
+
+  it("shows the person their report's status on the message that sent it: got it, then fixed and coming, without a word in the chat until it runs here", async () => {
+    const state = { status: "received" as "received" | "fixed", fixedIn: null as string | null, notify: true };
+    const fx = fixture({ appVersion: "0.1.128", answer: team(state) });
+    const message = await reported(fx);
+    expect(fx.line("scout-main", message.id)!.bugReport).toEqual({ id: "report-1", status: "received" });
+    const kept = JSON.parse(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8"));
+    expect(kept.tracked).toEqual([expect.objectContaining({ reportId: "report-1", threadId: "scout-main", messageId: message.id, status: "received",
+      installId: "4b7c1f2e-0a9d-4c2b-9f1e-6d5a4b3c2d1e", person: "p_bob_bob_bob_bob_bob_bob_bob", words: "the calendar never syncs" })]);
+    // The first question goes a minute after a start, with this install's id and its open reports.
+    await later(fx, STATUS_FIRST_MS - 1_000);
+    expect(fx.asked).toEqual([]);
+    await later(fx, 1_000);
+    expect(fx.asked).toEqual([{ installId: "4b7c1f2e-0a9d-4c2b-9f1e-6d5a4b3c2d1e", ids: ["report-1"] }]);
+    // Fixed, the release not known yet; then known, but this app runs an older one.
+    Object.assign(state, { status: "fixed", fixedIn: null });
+    await later(fx, STATUS_EVERY_MS);
+    expect(fx.line("scout-main", message.id)!.bugReport).toEqual({ id: "report-1", status: "fixed" });
+    Object.assign(state, { fixedIn: "0.1.129" });
+    await later(fx, STATUS_EVERY_MS);
+    expect(fx.line("scout-main", message.id)!.bugReport).toEqual({ id: "report-1", status: "fixed", fixedIn: "0.1.129" });
+    expect(fx.asked).toHaveLength(3);
+    expect([fixedLines(fx), fx.told]).toEqual([[], []]);
+    fx.stop();
+  });
+
+  it("tells the person once, in the chat they reported in, only once this app runs the fix's release, and the bot's next turn there knows why", async () => {
+    const state = { status: "fixed" as const, fixedIn: "0.1.129", notify: true };
+    const before = fixture({ appVersion: "0.1.128", answer: team(state) });
+    const message = await reported(before);
+    await later(before, STATUS_FIRST_MS);
+    expect(fixedLines(before)).toEqual([]);
+    before.stop();
+    // The app updates to the fix's release and starts again: one line, one notification, the message says it runs here.
+    const after = fixture({ dataDir: before.dataDir, threads: before.threads, appVersion: "0.1.129", clock: before.now(), answer: team(state) });
+    await later(after, STATUS_FIRST_MS);
+    expect(fixedLines(after)).toEqual([`notice: ${fixedLine("0.1.129")}`]);
+    expect(after.store.activePath("scout-main").at(-1)!.bugReport).toEqual({ id: "report-1", status: "fixed", fixedIn: "0.1.129", running: true });
+    expect(after.line("scout-main", message.id)!.bugReport).toEqual({ id: "report-1", status: "fixed", fixedIn: "0.1.129", running: true });
+    expect(after.told).toEqual([{ threadId: "scout-main", text: "Fixed in 0.1.129. Want to try again?", person: "p_bob_bob_bob_bob_bob_bob_bob" }]);
+    expect(JSON.parse(readFileSync(join(after.dataDir, DEVS_REPORTS_FILE), "utf8")).tracked[0].told).toBe(after.now());
+    // Never again: not on the next round, nor after another start.
+    for (let round = 0; round < 3; round++) await later(after, STATUS_EVERY_MS);
+    expect(after.asked).toHaveLength(1);
+    expect(fixedLines(after)).toHaveLength(1);
+    expect(after.told).toHaveLength(1);
+    // The bot's next turn in that chat is told why, once; another chat's isn't.
+    expect(after.reports.note("rover-main", true)).toBe("");
+    const note = after.reports.note("scout-main", true);
+    expect(note).toContain("is fixed in 0.1.129, which this app now runs");
+    expect(note).toContain('("the calendar never syncs")');
+    expect(after.reports.note("scout-main", true)).toBe("");
+    after.stop();
+    const again = fixture({ dataDir: before.dataDir, threads: before.threads, appVersion: "0.1.130", clock: after.now(), answer: team(state) });
+    await later(again, STATUS_FIRST_MS + STATUS_EVERY_MS);
+    // The same conversation: still the one line it got.
+    expect([again.asked, fixedLines(again), again.told]).toEqual([[], [`notice: ${fixedLine("0.1.129")}`], []]);
+    expect(again.reports.note("scout-main", true)).toBe("");
+    again.stop();
+  });
+
+  it("tells a former customer nothing: the team's answer says not to, or they left the team", async () => {
+    const state = { status: "fixed" as const, fixedIn: "0.1.128", notify: false };
+    const fx = fixture({ appVersion: "0.1.128", answer: team(state) });
+    const message = await reported(fx);
+    for (let round = 0; round < 3; round++) await later(fx, STATUS_EVERY_MS);
+    expect([fixedLines(fx), fx.told]).toEqual([[], []]);
+    // Its status still reads on their own message, which only they see.
+    expect(fx.line("scout-main", message.id)!.bugReport).toEqual({ id: "report-1", status: "fixed", fixedIn: "0.1.128", running: true });
+    // Back as a customer: told then, once.
+    state.notify = true;
+    await later(fx, STATUS_EVERY_MS);
+    expect(fixedLines(fx)).toEqual([`notice: ${fixedLine("0.1.128")}`]);
+    expect(fx.told).toHaveLength(1);
+    fx.stop();
+
+    const team2 = fixture({ appVersion: "0.1.128", answer: team({ ...state, notify: true }) });
+    await reported(team2);
+    team2.reports.forget("p_bob_bob_bob_bob_bob_bob_bob");
+    await later(team2, STATUS_FIRST_MS);
+    expect([team2.asked, fixedLines(team2), team2.told]).toEqual([[], [], []]);
+    team2.stop();
+  });
+
+  it("asks again after no answer, stops at a report the team doesn't know, and lets go of a report after its time or with its conversation", async () => {
+    let answer: ReportStatusAnswer | null = null;
+    const fx = fixture({ answer: () => answer });
+    await reported(fx);
+    await later(fx, STATUS_FIRST_MS);
+    await later(fx, STATUS_EVERY_MS);
+    expect(fx.asked).toHaveLength(2);
+    answer = { reports: [{ id: "report-1", status: "unknown", fixedIn: null }], notify: true };
+    await later(fx, STATUS_EVERY_MS);
+    await later(fx, STATUS_EVERY_MS);
+    expect(fx.asked).toHaveLength(3);
+    expect(JSON.parse(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8")).tracked).toEqual([]);
+    fx.stop();
+
+    const old = fixture({ answer: () => null });
+    await reported(old);
+    await later(old, TRACKED_MS);
+    expect(old.asked).toEqual([]);
+    old.stop();
+
+    const gone = fixture({ answer: () => null });
+    await reported(gone);
+    gone.drop("scout-main");
+    await later(gone, STATUS_FIRST_MS);
+    expect(gone.asked).toEqual([]);
+    expect(JSON.parse(readFileSync(join(gone.dataDir, DEVS_REPORTS_FILE), "utf8")).tracked).toEqual([]);
+    gone.stop();
+  });
+
+  it("follows a report that went later, from the outbox, as it follows one that went at once", async () => {
+    const fx = fixture({ outcomes: [{ ok: false, retry: true, why: "offline" }], answer: team({ status: "fixed", fixedIn: "0.1.128", notify: true }) });
+    const message = fx.person("scout-main", "@devs pictures never load", { sender: { name: "Bob", id: "p_bob_bob_bob_bob_bob_bob_bob" } });
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.line("scout-main", message.id)!.bugReport).toBeUndefined();
+    await later(fx, RETRY_MS[0]);
+    expect(fx.sent).toHaveLength(2);
+    expect(fx.line("scout-main", message.id)!.bugReport).toEqual({ id: "report-2", status: "received" });
+    await later(fx, STATUS_EVERY_MS);
+    expect(fixedLines(fx)).toEqual([`notice: ${fixedLine("0.1.128")}`]);
+    expect(fx.told).toEqual([{ threadId: "scout-main", text: fixedLine("0.1.128"), person: "p_bob_bob_bob_bob_bob_bob_bob" }]);
+    expect(fx.reports.note("scout-main", true)).toContain('("pictures never load")');
     fx.stop();
   });
 });

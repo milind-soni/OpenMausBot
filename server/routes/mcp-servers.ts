@@ -4,8 +4,9 @@ import type { AppConfig } from "../config.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
 import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
-import { probeMcpServer } from "../mcp-probe.ts";
-import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer } from "../mcp-registry.ts";
+import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
+import { probeMcpServer, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
+import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import { postizKeyHeaders } from "../postiz/connection.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
@@ -34,6 +35,25 @@ export interface McpServerRouteDeps {
   health?: { changed(name: string): void };
   /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
   connectionsChanged?(change: "added" | "removed"): void;
+  /** How bots' turns reach a URL server here: through the credential broker where turns are boxed (null: directly). */
+  botsPath?(): BrokerPath | null;
+}
+
+/** Where turns are boxed, a URL server is tested the way bots reach it: through the broker. If that fails but the server
+ * answers directly, the fault is ours, never the person's settings, and the test says so instead of "Connected". */
+async function probeAsBots(path: BrokerPath, name: string, target: StoredRemoteMcpServer, signal: AbortSignal, options: McpProbeOptions): Promise<McpProbeResult> {
+  const brokered = brokeredServer(path, name, target);
+  let result: McpProbeResult;
+  try {
+    result = await probeMcpServer(target, undefined, signal, { ...options, via: { url: brokered.url, fetch: brokered.fetch } });
+  } finally {
+    await brokered.done();
+  }
+  if (result.ok || result.auth === "required" || signal.aborted) return result;
+  const direct = await probeMcpServer(target, undefined, signal);
+  return direct.ok
+    ? { ok: false, reason: "unreachable", error: `Your bots can't reach this server: ${result.error.replace(/ Check [^.]*\.$/, "")} It answers when tested directly, so the fault is on our side, not in your settings: tell us with @devs in any chat.` }
+    : result;
 }
 
 /** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
@@ -104,7 +124,11 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
           if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
         }
-        const result = await probeMcpServer(target, undefined, controller.signal, personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {});
+        const options = personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {};
+        const viaBots = isRemoteMcpServer(target) ? deps.botsPath?.() ?? null : null;
+        const result = viaBots && isRemoteMcpServer(target)
+          ? await probeAsBots(viaBots, name, target, controller.signal, options)
+          : await probeMcpServer(target, undefined, controller.signal, options);
         if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) oauth.markNeedsSignIn(name, target.url);
         return json(res, 200, result);
       } finally {

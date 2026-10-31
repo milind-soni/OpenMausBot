@@ -158,6 +158,10 @@ test("buying another Cloud from a page: the plan must be on sale, the name is ch
   await assert.rejects(r.call("cloud-add:start", "pro", " ", "rose"), /Choose a plan/);
   assert.deepEqual(await r.call("cloud-add:start", "pro", "Client B", "url(x)"), { outcome: "opened" });
   assert.deepEqual(r.w.added, [{ tier: "pro", interval: "month", name: "Client B", color: null }], "an unknown swatch is none");
+  await r.call("cloud-add:start", "pro", "Client C", "rose", "app_whats_new_team");
+  await r.call("cloud-add:start", "pro", "Client D", "rose", "https://evil.example.test");
+  assert.deepEqual(r.w.added.slice(1), [{ tier: "pro", interval: "month", name: "Client C", color: "rose", source: "app_whats_new_team" },
+    { tier: "pro", interval: "month", name: "Client D", color: "rose" }], "the app's own source goes with it; anything else is left out");
   assert.equal(await r.call("cloud-add:copy-link"), true);
   assert.deepEqual(r.sent, ["https://test.checkout.dodopayments.com/x"]);
   r.w.state = session({ adding: { cloudId: "c-a", name: "Client A", color: "green", tier: "pro", startedAt: 1, link: true } });
@@ -344,6 +348,8 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await clicked.bridge.cloudAdd.organization({ toString: () => "Client C" }, null);
   assert.deepEqual(clicked.invoked, [["workspaces:open", "a"], ["workspaces:add", "link"], ["cloud-add:start", "pro", "Client B", null], ["workspaces:color", "rose"], ["workspaces:color", null],
     ["cloud-add:organization", "Client C", null]]);
+  await clicked.bridge.cloudAdd.start("team", "Studio", "blue", { toString: () => "app_whats_new_team" });
+  assert.deepEqual(clicked.invoked.at(-1), ["cloud-add:start", "team", "Studio", "blue", "app_whats_new_team"], "a source travels as plain text");
   assert.equal(page.bridge.cloudAccount, undefined, "never the account bridge");
   const local = preload(LOCAL);
   await local.bridge.workspaces.open("a");
