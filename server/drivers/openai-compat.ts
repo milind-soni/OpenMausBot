@@ -1,6 +1,6 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
-import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { isModelVariant, type ModelCatalog, type ModelVariantOption, type ProviderDriver } from "../contracts.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
@@ -86,6 +86,24 @@ export function advertisedContextWindow(row: Record<string, unknown>): number | 
   return valid.length ? Math.min(...valid) : undefined;
 }
 
+const DEFAULT_EFFORTS = ["low", "medium", "high"];
+const EFFORT_LABELS: Record<string, string> = { xhigh: "X-High" };
+
+const validEfforts = (list: unknown) => Array.isArray(list) ? [...new Set(list.filter(isModelVariant))] : [];
+
+/** The `reasoning_effort` values a /models row advertises: `reasoning_effort_levels`, OpenRouter's
+ * `reasoning.supported_efforts`, or OpenAI's three when `supported_parameters` only names the field. OpenRouter
+ * documents an omitted `supported_efforts` as no effort choice and a null one as every gateway effort. */
+export function advertisedEfforts(row: Record<string, unknown>, openRouter = false): ModelVariantOption[] | undefined {
+  const reasoning = row.reasoning && typeof row.reasoning === "object" ? row.reasoning as Record<string, unknown> : {};
+  const listed = [validEfforts(row.reasoning_effort_levels), validEfforts(reasoning.supported_efforts)].find((list) => list.length);
+  const anyEffort = openRouter
+    ? reasoning.supported_efforts === null
+    : Array.isArray(row.supported_parameters) && row.supported_parameters.includes("reasoning_effort");
+  const levels = listed ?? (anyEffort ? DEFAULT_EFFORTS : []);
+  return levels.length ? levels.map((id) => ({ id, label: EFFORT_LABELS[id] ?? id[0]!.toUpperCase() + id.slice(1) })) : undefined;
+}
+
 function isOpenRouterUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -167,6 +185,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       ? "No API key — open Settings → API keys."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
     const seeded = config.catalog === "openai" ? OPENAI_MODELS : DEFAULT_MODELS;
+    let catalogListed = Boolean(config.managedModels);
     let catalog: ModelCatalog = config.managedModels
       ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
@@ -204,6 +223,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
                 if (config.model && !options.some((model) => model.id === config.model)) {
                   options.unshift({ id: config.model, label: config.model, custom: true });
                 }
+                catalogListed = true;
                 catalog = {
                   default: config.model ?? options[0]!.id,
                   options,
@@ -237,10 +257,12 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           seen.add(id);
           const label = typeof row.name === "string" && row.name.trim() ? row.name : id;
           const contextWindow = advertisedContextWindow(row);
+          const variants = advertisedEfforts(row, isOpenRouterUrl(config.url));
           options.push({
             id,
             label: openRouter ? freeLabel(label, row) : label,
             ...(contextWindow ? { contextWindow } : {}),
+            ...(variants ? { variants } : {}),
             ...(config.catalog === "openai" ? {} : { custom: true }),
           });
         }
@@ -265,6 +287,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         if (config.model && !ordered.some((model) => model.id === config.model)) {
           ordered.unshift({ id: config.model, label: config.model, custom: true });
         }
+        catalogListed = true;
         catalog = { default: config.model ?? freeDefault(freeTools) ?? ordered[0].id, options: ordered };
       } catch {}
     };
@@ -274,6 +297,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       }),
       fetchModels(),
     ]) : null;
+    const offersEffort = (model: string, effort: string) =>
+      catalog.options.find((option) => option.id === model)?.variants?.some((variant) => variant.id === effort);
 
     const runtime = createOpenAIChatRuntime({
       input,
@@ -285,15 +310,23 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       nudgeAnnouncedAction: true,
       models: () => catalog,
       refreshModels: fetchModels,
-      requestBody: (model, messages, stream) => ({
-        model,
-        messages,
-        stream,
-        stream_options: stream ? { include_usage: true } : undefined,
-        ...(config.provider && isOpenRouterUrl(config.url)
-          ? { provider: { order: [config.provider], allow_fallbacks: false } }
-          : {}),
-      }),
+      modelVariants: true,
+      requestBody: (model, messages, stream, variant) => {
+        const effort = variant && (!catalogListed || offersEffort(model, variant)) ? variant : undefined;
+        // OpenRouter routes to a provider that ignores an unsupported parameter unless require_parameters is set.
+        const routing = isOpenRouterUrl(config.url) ? {
+          ...(config.provider ? { order: [config.provider], allow_fallbacks: false } : {}),
+          ...(effort ? { require_parameters: true } : {}),
+        } : {};
+        return {
+          model,
+          messages,
+          stream,
+          stream_options: stream ? { include_usage: true } : undefined,
+          ...(effort ? { reasoning_effort: effort } : {}),
+          ...(Object.keys(routing).length ? { provider: routing } : {}),
+        };
+      },
       httpErrorLabel: "upstream",
       missingKeyError: missingKey,
       unavailableReason: missingKey,
