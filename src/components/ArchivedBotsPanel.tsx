@@ -11,7 +11,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 export type BotConfirmKind = "archive" | "delete";
 
-export function botConfirmCopy(kind: BotConfirmKind, name: string) {
+/** `chief`: deleting a Chief of Staff, whose chats hold the team's whole setup, which archiving it would keep. */
+export function botConfirmCopy(kind: BotConfirmKind, name: string, chief = false) {
   return kind === "archive"
     ? {
         title: t("sidebar.confirm.archiveTitle", { name }),
@@ -21,7 +22,7 @@ export function botConfirmCopy(kind: BotConfirmKind, name: string) {
       }
     : {
         title: t("sidebar.confirm.deleteTitle", { name }),
-        body: t("sidebar.confirm.deleteBody", { name }),
+        body: t(chief ? "sidebar.confirm.deleteChiefBody" : "sidebar.confirm.deleteBody", { name }),
         confirmLabel: t("common.delete"),
         tone: "danger" as const,
       };

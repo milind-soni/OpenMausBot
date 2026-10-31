@@ -101,7 +101,7 @@ import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
-import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
+import { archivableChief, archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
 import { ArchivedBotsPanel, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel"; import { MovedBotRows } from "./MoveToTeam";
 import { NewRoomPanel } from "./SidebarNewRoomPanel";
 import { SectionPicker } from "./SidebarSectionPicker";
@@ -1624,8 +1624,13 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       }} />}
       <ConfirmDialog
         open={confirm !== null}
-        {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}
+        {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name, confirm.kind === "delete" && Boolean(archivableChief(state.bots, confirm.bot.id))) : botConfirmCopy("archive", ""))}
         icon={confirm?.kind === "delete" ? <Trash2 size={18} /> : <Archive size={18} />}
+        alternative={confirm?.kind === "delete" && archivableChief(state.bots, confirm.bot.id) ? { label: t("sidebar.confirm.archiveInstead"), onClick: () => {
+          const chief = archivableChief(state.bots, confirm.bot.id);
+          setConfirm(null);
+          if (chief) void archiveBotWithNotice(chief, { bots: state.bots, selectedId: state.selectedId, dispatch, showThreads, notify: setTeamFeedback });
+        } } : undefined}
         onCancel={cancelConfirm}
         returnFocusRef={sidebarRef}
         onConfirm={() => {
