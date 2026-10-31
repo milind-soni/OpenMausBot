@@ -61,3 +61,30 @@ mention a preference in passing, wait two minutes, and read the Memory panel.
 The `live-reply-*` scenarios of the live tier ([evals](../../evals/README.md))
 grade a real model's replies to "remember", a research question, "Plan my
 week.", a routine and a dead link with the `reply-habits-v1` judge.
+
+## Dream and restore
+
+Run the isolated workflow and backup checks:
+
+```sh
+pnpm exec vitest run server/memory-dream-on-demand.e2e.test.ts server/memory-dream-backups.test.ts server/memory-dream-controls.test.ts
+```
+
+The workflow uses two synthetic chats and scripted model output.
+It checks the chosen bot, backup manifests, overwrite confirmation, journal
+rows, restored notes and the current About me list.
+Backup tests cover hash tampering, path refusal, retention, rollback and
+interrupted-restore recovery. Controls tests cover busy bots, pauses and
+one dream at a time.
+
+For real renderer interaction, set `OMB_DREAM_CHROME` to a Chrome executable:
+
+```sh
+OMB_DREAM_CHROME=/path/to/chrome pnpm exec vitest run scripts/testing/memory-dream-ui.e2e.test.ts
+```
+
+This launches a fake-engine server and a disposable browser profile.
+It clicks Dream now, requests a restore, confirms replacement and reads
+the restored file through the server. A screenshot stays beside the fixture log.
+Without `OMB_DREAM_CHROME`, the browser test is skipped.
+It does not test a real model's judgement or contact a memory provider.

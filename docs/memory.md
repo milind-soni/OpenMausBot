@@ -462,3 +462,45 @@ Every panel edit, delete or acceptance carries the revision it was based on.
 Stale writes return 409; writes without a revision return 428. Reloading after a
 conflict retains the unsaved draft for comparison. Pending replacement cards
 also refuse approval if the accepted fact changed since the proposal.
+
+### Checks before a dream saves a fact
+
+A dream must quote the person's statements in each cited conversation.
+The host checks numbers, dates, months, paths, URLs, names and family
+relationships against those quotes. Unsupported entries are skipped.
+An outdated note stays unchanged when its replacement fails the check.
+Entries that look like secrets are rejected with the existing secret detector.
+Relative dates in English or Polish become dates from the quoted message,
+not from the night the dream runs. Missing or ambiguous dates refuse the entry.
+These checks also apply before a dream adds a fact to About me.
+They do not merge notes into summaries.
+
+### Dream now and restore
+
+**Bot Settings → Memory → Dream now** reads recent chats for the chosen bot.
+The panel shows when it last ran, chats read, result counts and any note.
+The existing nightly dream schedule stays the same.
+Only the owner or an admin can run a dream or restore a backup.
+Dreams refuse while the bot works, while another dream runs, or during backups.
+Memory upkeep must be on to start a dream.
+
+Before a dream writes, it saves `MEMORY.md`, all memory notes and daily logs,
+and About me. Each backup has file sizes and SHA-256 hashes.
+The last five backups stay in `.dream-backups/` inside that bot's workspace.
+This hidden folder is outside memory search, recall and team memory exports.
+File reads from it do not get the automatic permission for the bot's own notes.
+A whole workspace backup can still include it as recovery data.
+
+Choose **Restore backup** for the newest backup, or select an older one.
+A restore verifies every saved file before changing anything.
+If notes or About me changed since that backup, the panel asks for confirmation.
+Confirmation covers the current file hashes; another edit requires confirmation again.
+Restore replaces the saved files and removes notes created after the backup.
+It also restores About me, which is shared by all bots.
+A recovery snapshot saves the state before restore under the same five-backup limit.
+Each file is replaced atomically. A failed write rolls the transaction back.
+An interrupted restore rolls back at server startup before upkeep starts.
+Changes appear in the memory journal, and the word index is rebuilt.
+About me changes are recorded but cannot be undone as an individual memory file.
+The added-facts list shows only lines still present in About me.
+Restore does not erase records that prevent forgotten facts from returning.

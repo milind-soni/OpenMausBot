@@ -5198,6 +5198,7 @@ const memoryUpkeep = createMemoryUpkeep({
   engine: (botId) => sideJobs.text("memory", teamHost.baseBotId(botId)),
   busy: (botId) => botHasActiveTurn(teamHost.baseBotId(botId)),
   addToAboutMe: (from, texts) => aboutMeFacts.learn(from, texts),
+  profile: { read: () => cfg.profile?.aboutMe ?? "", write: (aboutMe) => { saveConfig({ profile: { ...cfg.profile, aboutMe } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } },
   sourceLabel: (botId, threadId) => memorySourceLabel({ room: store.groupByThread(threadId), task: store.taskByThread(teamHost.baseBotId(botId), threadId), threadId }),
   mayCapture: (botId, threadId) => {
     const room = store.groupByThread(threadId);

@@ -36,6 +36,7 @@ import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";
 import { api, ApiError, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { DreamMemoryCard } from "./DreamMemoryCard";
 import { inputCls } from "./field";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
@@ -153,6 +154,18 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
       cancelled = true;
     };
   }, [active, bot.id]);
+
+  const reloadAfterDream = async () => {
+    const opened = editing;
+    await refresh();
+    if (!opened) return;
+    const { path } = opened;
+    const doc = await fetchMemoryDoc(bot.id, path);
+    setEditing((current) => {
+      if (current?.path !== path || current.dirty || current.hash !== opened.hash) return current;
+      return doc.exists || path === MEMORY_INDEX ? { ...current, text: doc.text, hash: doc.hash } : null;
+    });
+  };
 
   const open = async (path: string) => {
     setError(null);
@@ -343,6 +356,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
 
       {overview && <MemoryGauge index={overview.index} />}
 
+      {active && <DreamMemoryCard key={bot.id} botId={bot.id} enabled={bot.memoryEnabled !== false && bot.memoryUpkeep !== false} onChange={reloadAfterDream} />}
       {bot.memoryEnabled !== false && <MemoryUpkeepCard
         enabled={bot.memoryUpkeep !== false}
         status={upkeep}

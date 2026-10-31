@@ -103,7 +103,7 @@ describe("scheduled memory upkeep", () => {
       expect(memory()).not.toContain("Prefers detailed project updates");
       expect(loop.dream(BOT.id)).toBe(current);
       expect(generateText).toHaveBeenCalledTimes(2);
-      releaseNew('{"learned":[{"text":"Prefers brief project updates","from":[1,2],"confidence":0.9}]}');
+      releaseNew('{"learned":[{"text":"Prefers brief project updates","from":[1,2],"evidence":["Keep project updates brief.","Keep project updates brief."],"confidence":0.9}]}');
       await current;
       await loop.idle();
       expect(loop.status(BOT.id).lastDream).toMatchObject({
@@ -152,7 +152,7 @@ describe("scheduled memory upkeep", () => {
       if (action === "freeze") freeze.freeze("https://fixture.example");
       else { loop.stop(); loop.start(); }
       release(step === "organize" ? '{"moves":[{"i":0,"topic":"project"}]}' : step === "dream"
-        ? '{"learned":[{"text":"Prefers brief project updates","from":[1,2],"confidence":0.9}]}' : '{"pairs":[]}');
+        ? '{"learned":[{"text":"Prefers brief project updates","from":[1,2],"evidence":["Keep project updates brief.","Keep project updates brief."],"confidence":0.9}]}' : '{"pairs":[]}');
       await vi.advanceTimersByTimeAsync(0);
       await loop.idle();
       expect(snapshot()).toEqual(before);
