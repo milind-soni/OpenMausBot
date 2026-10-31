@@ -117,6 +117,30 @@ describe("WebhookManager", () => {
     expect(h.manager.list()[0].resultsThreadId).toBeUndefined();
   });
 
+  it("rejects caller-supplied resultsThreadId on post webhooks while preserving allocated post threads", () => {
+    const h = harness();
+    expect(() =>
+      h.manager.create({
+        name: "Post hook",
+        prompt: "",
+        botId: "maus-1",
+        delivery: "post",
+        resultsThreadId: "caller-injected-thread",
+      })
+    ).toThrow('resultsThreadId cannot be configured for delivery "post" webhooks');
+
+    const created = h.manager.create({ name: "Post hook", prompt: "", botId: "maus-1", delivery: "post" });
+    expect(() =>
+      h.manager.update(created.webhook.id, { resultsThreadId: "caller-injected-thread" })
+    ).toThrow('resultsThreadId cannot be configured for delivery "post" webhooks');
+
+    h.manager.receive(created.webhook.endpointId, created.secret, { payload: { text: "msg" }, deliveryId: "d-post" });
+    expect(h.manager.list()[0].resultsThreadId).toBe("post-thread-1");
+
+    h.manager.update(created.webhook.id, { name: "Updated Post hook" });
+    expect(h.manager.list()[0].resultsThreadId).toBe("post-thread-1");
+  });
+
   it("rejects malformed management input before it reaches stored state", () => {
     const h = harness();
     expect(() => h.manager.create({ name: 42, prompt: "Review it", botId: "maus-1" })).toThrow("name");
