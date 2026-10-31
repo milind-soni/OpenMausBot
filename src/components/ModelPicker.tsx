@@ -249,7 +249,7 @@ export function ModelPicker({
   const ownerOrAdmin = useOwnerOrAdmin();
   // A guest changes only their own conversation's model, never the shared bot's default; thread-only until
   // authority loads.
-  const simpleUpdatesBotDefault = ownerOrAdmin === true;
+  const mayChangeBotDefault = ownerOrAdmin === true;
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
@@ -442,7 +442,7 @@ export function ModelPicker({
 
   const openFull = (instance: InstanceInfo, keyboard: boolean) => {
     selectRail(instance);
-    setScope(simpleUpdatesBotDefault ? "bot" : "thread");
+    setScope(mayChangeBotDefault ? "bot" : "thread");
     focusOnPlace.current = keyboard ? "[data-model-back]" : MENU_ITSELF;
     setFullView(true);
   };
@@ -482,7 +482,7 @@ export function ModelPicker({
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
     if (variant !== undefined) nextSelection.variant = variant;
-    const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
+    const updateBotDefault = !threadId || (mayChangeBotDefault && (simpleView || scope === "bot"));
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -505,7 +505,7 @@ export function ModelPicker({
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
     const { variant: _variant, ...nextSelection } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || mayChangeBotDefault, selection: nextSelection });
     close(true);
   } : undefined;
 
@@ -539,13 +539,13 @@ export function ModelPicker({
   const levels = active?.capabilities?.effortLevels ?? [];
   const writeEffort = (effort: EffortLevel | undefined) => {
     const { effort: _effort, ...model } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId, ...(threadId && simpleUpdatesBotDefault ? { updateBotDefault: true } : {}),
+    dispatch({ type: "setModel", botId: bot.id, threadId, ...(threadId && mayChangeBotDefault ? { updateBotDefault: true } : {}),
       selection: effort ? { ...model, effort } : model });
   };
   const thinking: SimpleThinking | null = contained ? null
     : variantChoices(state, selection, threadId ?? bot.threadId) ? {
       variants: (
-        <ModelVariantRow compact quiet bot={shown} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault} className="px-2 py-1"
+        <ModelVariantRow compact quiet bot={shown} threadId={threadId} updateBotDefault={Boolean(threadId) && mayChangeBotDefault} className="px-2 py-1"
           label={<span className="shrink-0 text-[12px] font-medium leading-4 text-ink-tertiary">{t("botSettings.simple.thinking")}</span>} />
       ),
     }
@@ -709,7 +709,7 @@ export function ModelPicker({
           onAddApiKeys={remote ? undefined : openApiKeys} />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-          {threadId && (
+          {threadId && mayChangeBotDefault && (
             <div className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2">
               <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
                 {(["thread", "bot"] as const).map((value) => (
@@ -898,7 +898,7 @@ export function ModelPicker({
                   compact
                   bot={shown}
                   threadId={threadId}
-                  updateBotDefault={Boolean(threadId && scope === "bot")}
+                  updateBotDefault={Boolean(threadId && mayChangeBotDefault && scope === "bot")}
                   className="shrink-0 border-t-[0.5px] border-ink/10 px-3.5 py-[5px]"
                   label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                 />
