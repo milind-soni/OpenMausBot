@@ -1,9 +1,11 @@
 /** A page a bot published to a public link, as its chat card shows it (WireMessage.publishedPage). The message's `text`
  * says the same in words, with the link, for every client that does not draw the card. */
 export interface PublishedPageCard {
-  /** live: the link works. unpublished: its owner took it down. limit: the plan's pages are used up, so nothing was
-   * published; `message` says so and `upgrade` offers a bigger plan. */
+  /** live: the link works, or may work when `uncertain` is true. unpublished: its owner took it down. limit: the plan's
+   * pages are used up, so nothing was published; `message` says so and `upgrade` offers a bigger plan. */
   state: "live" | "unpublished" | "limit";
+  /** The upload's answer was lost. The page may be live and can still be unpublished. */
+  uncertain?: boolean;
   title: string;
   pageId?: string;
   url?: string;

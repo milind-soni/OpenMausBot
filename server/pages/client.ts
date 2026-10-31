@@ -11,9 +11,12 @@ export type PagesFailure = {
   usage?: PageUsage;
   upgrade?: boolean;
   plan?: string;
+  /** The PUT may have committed even though its answer was lost. Keep this page removable. */
+  uncertain?: { pageId: string; url: string };
 };
-/** A bot's tool call: `assertActive` throws once its turn has ended, and `signal` aborts once its request is gone.
- * Security: each token and each upload or delete is preceded by `assertActive`, so a stopped turn changes no page. */
+/** A bot's tool call: `assertActive` throws once its turn has ended, and `signal` aborts once its turn ends or its request
+ * is gone. Security: each token and each upload or delete is preceded by `assertActive`, and `signal` aborts the one in
+ * flight. An upload the Worker may have stored keeps its id and a recovery card even after Stop. */
 export interface PagesCall { assertActive?: () => void; signal?: AbortSignal }
 export type Published = { ok: true; pageId: string; url: string; usage: PageUsage; badge: boolean };
 export type Unpublished = { ok: true; pageId: string; usage: PageUsage | null };
@@ -103,7 +106,9 @@ export function createPagesClient(options: { access: () => PagesAccess | null; n
 
   return {
     /** A new page (no `pageId`), or new files at an existing page's same link. */
-    async publish(input: { title: string; files: readonly PageFile[]; pageId?: string }, call: PagesCall = {}): Promise<Published | PagesFailure> {
+    async publish(input: { title: string; files: readonly PageFile[]; pageId?: string;
+      /** Persists the minted id before the PUT, so a lost answer cannot leave an unknown public page. */
+      beforeUpload: (page: { pageId: string; url: string }) => void }, call: PagesCall = {}): Promise<Published | PagesFailure> {
       const minted = await mint(input.pageId ? "update" : "create", call, input.pageId);
       if ("ok" in minted) return minted;
       const bytes = input.files.reduce((sum, file) => sum + file.data.byteLength, 0);
@@ -114,14 +119,23 @@ export function createPagesClient(options: { access: () => PagesAccess | null; n
       input.files.forEach((file, index) => form.set(`f${index}`, new Blob([new Uint8Array(file.data)])));
       let response: Response;
       call.assertActive?.();
+      const signal = callSignal(call, UPLOAD_TIMEOUT_MS);
+      if (signal.aborted) return fail("unavailable", UNAVAILABLE);
+      const page = { pageId: minted.pageId, url: minted.pageUrl };
+      input.beforeUpload(page);
+      const uncertain = () => fail("unavailable", UNAVAILABLE, { uncertain: page });
       try {
-        response = await http(`${minted.uploadUrl}/v1/pages/${minted.pageId}`, { method: "PUT", redirect: "error", signal: callSignal(call, UPLOAD_TIMEOUT_MS),
+        response = await http(`${minted.uploadUrl}/v1/pages/${minted.pageId}`, { method: "PUT", redirect: "error", signal,
           headers: { authorization: `Bearer ${minted.token}`, accept: "application/json" }, body: form });
       } catch {
-        return fail("unavailable", UNAVAILABLE);
+        return uncertain();
       }
       const body = await readJson(response);
-      if (!response.ok) return workerFailure(response.status, body, minted);
+      if (signal.aborted) return uncertain();
+      if (!response.ok) {
+        const failure = workerFailure(response.status, body, minted);
+        return failure.reason === "unavailable" ? uncertain() : failure;
+      }
       const usage = usageOf(body.usage);
       return { ok: true, pageId: minted.pageId, url: minted.pageUrl, usage: usage ?? { pages: 0, limit: minted.limits.pages }, badge: body.badge === true };
     },
