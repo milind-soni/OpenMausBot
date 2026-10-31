@@ -103,6 +103,23 @@ describe("pending assistant answers", () => {
       expect(f.team.inbox.view(key(BEN.email))!.rows[0]!.answers?.at(-1)).toMatchObject({ by: "person", text: "Actually, I am busy tomorrow." });
     } finally { unsubscribe(); }
   });
+
+  it("does not notify when shutdown begins during the assistant answer's write event", async () => {
+    const { f, inbox, row, complete } = await pending();
+    let stoppedDuringWrite = false;
+    const unsubscribe = f.store.onChange((change) => {
+      if (change.type !== "message.patch" || change.message.id !== row.id || stoppedDuringWrite || change.message.inbox?.answers?.at(-1)?.by !== "assistant") return;
+      stoppedDuringWrite = true;
+      f.team.stop();
+    });
+    try {
+      await complete();
+      expect(stoppedDuringWrite).toBe(true);
+      expect(f.continued.map((one) => one.relay?.kind)).toEqual(["assistant"]);
+      expect(f.lines(inbox)[0]!.inbox!.answers).toEqual([expect.objectContaining({ by: "assistant", text: "Ben is free tomorrow." })]);
+      expect(f.notified).toEqual([]);
+    } finally { unsubscribe(); }
+  });
 });
 
 describe("asks routed to a person", () => {

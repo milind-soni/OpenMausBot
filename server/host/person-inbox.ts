@@ -322,7 +322,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       || !deps.person(item.person) || personOf(item.threadId) !== item.person || !isHomeOf(item.threadId, item.person)
       || deps.starters.get(item.threadId) !== item.person) return;
     if (answer && answerItem(item, answer, "assistant").status === 200) {
-      if (line(item)?.inbox?.answers?.at(-1)?.by !== "assistant") return;
+      if (stopped || line(item)?.inbox?.answers?.at(-1)?.by !== "assistant") return;
       notifyItem(item, serverLine(conversationLanguage(item.threadId), "server.notify.assistantAnswered", { title: delivery.title }), delivery.notify, `${delivery.text} → ${answer}`);
     } else notifyItem(item, delivery.title, delivery.notify, delivery.text);
   }
