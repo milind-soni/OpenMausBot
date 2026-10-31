@@ -2,7 +2,7 @@
 // registered, schema-validated calls arrive here.
 import { createHash } from "node:crypto";
 import type { ValidateFunction } from "ajv";
-import { stripControlPlaneEnv } from "../config.ts";
+import { stripWorkspaceCredentialEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
@@ -69,10 +69,10 @@ function object(value: unknown): value is Record<string, unknown> {
 function aborted(): Error { return new Error("MCP operation cancelled"); }
 class McpRequestRefused extends Error {}
 
-/** A chat-runtime bot's tools never get the operator's control-plane secrets; the entry's own env is applied last. */
+/** A chat-runtime bot's tools never inherit workspace or control-plane secrets; the entry's own env is applied last. */
 export function chatMcpEnvironment(serverEnv: Record<string, string>, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...source, PATH: augmentedPath() };
-  stripControlPlaneEnv(env);
+  stripWorkspaceCredentialEnv(env);
   return { ...env, ...serverEnv };
 }
 

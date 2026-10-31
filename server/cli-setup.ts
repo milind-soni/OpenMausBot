@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { stripCredentialEnv } from "./credential-env.ts";
 import {
   DATA_DIR, instanceConfigs, loadConfig, parseStoredConfig, saveConfig,
   stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, type AppConfig,
@@ -42,7 +43,7 @@ async function inspect(id: string, entry: InstanceConfig): Promise<Inspection> {
 export async function runSetupCli(cli: string, args: string[], environment: Record<string, string> = {}): Promise<void> {
   const env: NodeJS.ProcessEnv = { ...process.env, ...environment, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
-  for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  stripCredentialEnv(env, PROVIDER_CREDENTIAL_ENV);
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
   const command = resolveCli(cli, args);

@@ -133,6 +133,35 @@ describe("holdIncludedServices", () => {
     vi.resetModules();
   });
 
+  it.each([
+    ["BOAT", "boatCredential"], ["VOICE", "voiceCredential"], ["DECIDER", "deciderCredential"],
+    ["AI", "trialCreditCredential"], ["X", "xCredential"],
+  ] as const)("selects the held %s token before scrubbing every spelling", async (service, reader) => {
+    vi.resetModules();
+    const services = await import("./included-services.ts");
+    const name = `OMB_CLOUD_${service}_TOKEN`;
+    const mixed = `Omb_Cloud_${service}_Token`;
+    const first = service === "AI" ? `omb_ai_${"a".repeat(43)}` : "selected-token";
+    const other = service === "AI" ? `omb_ai_${"b".repeat(43)}` : "other-token";
+    const api = `https://cloud.example.test/${service.toLowerCase()}`;
+    const cases: [Record<string, string>, string | null][] = [
+      [{ [name.toLowerCase()]: first }, first],
+      [{ [name.toLowerCase()]: other, [mixed]: first }, first],
+      [{ [name.toLowerCase()]: other, [mixed]: other, [name]: first }, first],
+      [{ [name.toLowerCase()]: other, [mixed]: other, [name]: "" }, null],
+    ];
+    for (const [tokens, expected] of cases) {
+      for (const entries of [Object.entries(tokens), Object.entries(tokens).toReversed()]) {
+        const env = { [`OMB_CLOUD_${service}_URL`]: api, ...Object.fromEntries(entries) };
+        services.holdIncludedServices(env);
+        const credential = reader === "deciderCredential" ? services[reader](undefined, undefined)
+          : reader === "boatCredential" || reader === "voiceCredential" ? services[reader](undefined) : services[reader]();
+        expect(credential, JSON.stringify(tokens)).toEqual(expected ? { token: expected, api, included: true } : null);
+        expect(env).toEqual({ [`OMB_CLOUD_${service}_URL`]: api });
+      }
+    }
+  });
+
   it("keeps the tokens in memory and removes them from the environment, so nothing started later inherits them", async () => {
     for (const [name, value] of Object.entries(cloud)) vi.stubEnv(name, value);
     // A fresh module: the hold is process-wide state.

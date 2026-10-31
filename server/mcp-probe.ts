@@ -1,4 +1,5 @@
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
+import { stripCredentialEnv } from "./credential-env.ts";
 import { augmentedPath } from "./env-path.ts";
 import {
   PROVIDER_CREDENTIAL_ENV,
@@ -43,7 +44,7 @@ export const REMOTE_PROBE_TIMEOUT_MS = REMOTE_MCP_STARTUP_MS;
 export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
-  for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  stripCredentialEnv(env, PROVIDER_CREDENTIAL_ENV);
   Object.assign(env, server.env);
   return env;
 }

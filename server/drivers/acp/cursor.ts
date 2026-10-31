@@ -1,6 +1,7 @@
 // Cursor Agent (`cursor-agent acp`) on the Cursor subscription (`cursor-agent login`, CURSOR_API_KEY or
 // CURSOR_AUTH_TOKEN). Per cursor.com/docs/cli/acp it advertises `cursor_login` and takes `--force` /
 // `--model` as global flags before `acp`.
+import { credentialEnvValue } from "../../credential-env.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
@@ -301,7 +302,7 @@ export async function probeCursorAuth(
   env: Record<string, string | undefined>,
   run: typeof execCli = execCli,
 ): Promise<boolean> {
-  if (nonBlank(env.CURSOR_API_KEY) || nonBlank(env.CURSOR_AUTH_TOKEN)) return true;
+  if (nonBlank(credentialEnvValue(env, "CURSOR_API_KEY")) || nonBlank(credentialEnvValue(env, "CURSOR_AUTH_TOKEN"))) return true;
   for (const args of [["status", "--format", "json"], ["status"]] as const) {
     const stdout = await execText(run, cli, [...args], env);
     if (stdout == null) continue;
@@ -448,7 +449,7 @@ const support = (run: typeof execCli): AcpSupport => ({
   // A key in the env already authenticates the session, and Cursor's cursor_login handler would then
   // delete the saved login and open a browser once the token expired, so it is not sent.
   pickAuthMethod: (methods, env) =>
-    nonBlank(env.CURSOR_API_KEY) || nonBlank(env.CURSOR_AUTH_TOKEN) ? null
+    nonBlank(credentialEnvValue(env, "CURSOR_API_KEY")) || nonBlank(credentialEnvValue(env, "CURSOR_AUTH_TOKEN")) ? null
       : methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null,
   authFailure: "continue",
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),

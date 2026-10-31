@@ -8,6 +8,7 @@ import { readFile, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { credentialEnvEntries, credentialEnvValue, stripCredentialEnv } from "../../credential-env.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { AcpDiscoveryRpcError, discoverAcpModels, DISCOVERY_CLIENT_NAME, type AcpDiscoveryOptions } from "./custom-model-catalog.ts";
@@ -93,8 +94,10 @@ const DISCOVERY: AcpDiscoveryOptions = {
 /** The home holds the CLI's stored login, GH_HOST picks the GitHub it signs in to, and a token in the
  * environment outranks both; only its digest is kept. */
 const signInKey = (env: Record<string, string | undefined>, cli: string) => {
-  const tokens = createHash("sha256").update(TOKEN_ENV.map((name) => env[name]?.trim() ?? "").join("\0")).digest("hex");
-  return [cli, copilotHome(env), env.GH_HOST ?? "", tokens].join("\0");
+  const entries = credentialEnvEntries(env, TOKEN_ENV);
+  const tokens = createHash("sha256").update(TOKEN_ENV.map((name) => credentialEnvValue(env, name) ?? "").join("\0"));
+  if (entries.some(([key]) => key !== key.toUpperCase())) tokens.update(JSON.stringify(entries));
+  return [cli, copilotHome(env), env.GH_HOST ?? "", tokens.digest("hex")].join("\0");
 };
 const signIns = new Map<string, { signedIn: Promise<boolean>; until: number }>();
 const lastSignIns = new Map<string, boolean>();
@@ -199,8 +202,8 @@ const SUPPORT: AcpSupport = {
     // COPILOT_ALLOW_ALL would approve every tool without asking the broker.
     deleteEnv(env, "COPILOT_ALLOW_ALL");
     // A general GitHub token on the server would outrank the Copilot login; only one set on this engine counts.
-    const own = new Set(Object.keys(instanceEnvironment).map((key) => key.toUpperCase()));
-    for (const name of ["GH_TOKEN", "GITHUB_TOKEN"]) if (!own.has(name)) deleteEnv(env, name);
+    stripCredentialEnv(env, ["GH_TOKEN", "GITHUB_TOKEN"]);
+    for (const [key, value] of credentialEnvEntries(instanceEnvironment, ["GH_TOKEN", "GITHUB_TOKEN"])) env[key] = value;
   },
   resolveModels: (env, config) => resolveCopilotModels(env, config),
   // Every fleet has this instance, and any `copilot` on PATH (VS Code's shim included) would otherwise be started

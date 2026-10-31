@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { credentialEnvValue } from "../../credential-env.ts";
 import { resolveCli } from "../../procs.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 import type { ModelCatalog } from "../../contracts.ts";
@@ -75,15 +76,15 @@ const SUPPORT: AcpSupport = {
     env.CLINE_PROVIDER ||= saved.provider;
     env.CLINE_MODEL ||= saved.model;
     // ACP restores OAuth accounts itself but needs CLINE_API_KEY for BYOK; never another account's key.
-    if (!OAUTH.has(saved.provider)) env.CLINE_API_KEY ||= saved.apiKey || saved.auth?.apiKey;
+    if (!OAUTH.has(saved.provider) && !credentialEnvValue(env, "CLINE_API_KEY")) env.CLINE_API_KEY = saved.apiKey || saved.auth?.apiKey;
   },
   spawnFingerprint: (env, config) => savedProvider(env, config)?.fingerprint ?? "unconfigured",
-  pickAuthMethod: (methods, env) => !env.CLINE_API_KEY && OAUTH.has(env.CLINE_PROVIDER ?? "")
+  pickAuthMethod: (methods, env) => !credentialEnvValue(env, "CLINE_API_KEY") && OAUTH.has(env.CLINE_PROVIDER ?? "")
     && methods.some((method) => method.id === env.CLINE_PROVIDER) ? env.CLINE_PROVIDER! : null,
   authFailure: "fail-request",
   // Missing credentials are rejected by session/new; never launch an interactive sign-in during a turn.
   isAuthenticated: (env, config) => {
-    if (env.CLINE_API_KEY?.trim()) return true;
+    if (credentialEnvValue(env, "CLINE_API_KEY")?.trim()) return true;
     const saved = savedProvider(env, config)?.settings;
     return Boolean(saved && OAUTH.has(saved.provider) &&
       (saved.auth?.accessToken?.trim() || saved.apiKey?.trim() || saved.auth?.apiKey?.trim()));

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { stripCredentialEnv } from "../../credential-env.ts";
 import { harnessHome } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
@@ -373,8 +374,7 @@ const support: AcpSupport = {
   resendsReasoningReply: true,
   transformEnv: (env) => {
     // A leftover OPENAI_API_KEY makes Hermes auto-resolve to OpenRouter with no Authorization header.
-    delete env.OPENAI_API_KEY;
-    delete env.OPENROUTER_API_KEY;
+    stripCredentialEnv(env, ["OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
   },
   pickAuthMethod: () => null,
   authFailure: "continue",

@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { credentialEnvValue } from "../../credential-env.ts";
 import { harnessHome } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -113,7 +114,7 @@ function dotenvValuePresent(path: string): boolean {
  * or its home .env (the layers dsh documents, read-only here). The stored
  * file outranks the env inside dsh; for "is there a key at all" any layer counts. */
 export function hasDeepSeekKey(env: Record<string, string | undefined>): boolean {
-  if (nonEmpty(env.DEEPSEEK_API_KEY)) return true;
+  if (nonEmpty(credentialEnvValue(env, "DEEPSEEK_API_KEY"))) return true;
   const home = dshHome(env);
   return storedCredentialPresent(join(home, ".credentials.yaml")) || dotenvValuePresent(join(home, ".env"));
 }

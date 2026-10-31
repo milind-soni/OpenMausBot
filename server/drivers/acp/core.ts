@@ -9,7 +9,7 @@ import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promi
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
-import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { stripCredentialEnv, PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../credential-env.ts";
 import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
@@ -331,9 +331,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const allowedCredentials = new Set(support.credentialEnv ?? []);
         // Foreign provider keys would flip billing off the CLI's login, and workspace credentials are
         // the harness's: only credentialEnv passes.
-        for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) {
-          if (!allowedCredentials.has(key)) delete env[key];
-        }
+        stripCredentialEnv(env, [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV].filter((key) => !allowedCredentials.has(key)));
         stripControlPlaneEnv(env);
         support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;

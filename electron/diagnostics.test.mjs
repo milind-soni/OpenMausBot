@@ -184,10 +184,12 @@ describe("buildDiagnosticsReport", () => {
 
   it.each(CREDENTIAL_ENV_NAMES)("masks any value riding on %s in the log tail", (name) => {
     const value = "s3cr3t-value-123456";
-    const line = `spawn env ${name}=${value} ready`;
-    const report = buildDiagnosticsReport({ appInfo, configSummary: {}, logTail: line });
-    expect(report).not.toContain(value);
-    expect(redactSecretsInLine(line)).toBe(`spawn env ${name}=«redacted ${value.length} chars» ready`);
+    for (const key of [name, name.toLowerCase(), name[0] + name.slice(1).toLowerCase()]) {
+      const line = `spawn env ${key}=${value} ready`;
+      const report = buildDiagnosticsReport({ appInfo, configSummary: {}, logTail: line });
+      expect(report).not.toContain(value);
+      expect(redactSecretsInLine(line)).toBe(`spawn env ${key}=«redacted ${value.length} chars» ready`);
+    }
   });
 
   it("masks generic key=value secrets and content-shaped tokens in the log tail", () => {

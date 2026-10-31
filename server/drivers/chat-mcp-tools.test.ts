@@ -240,6 +240,24 @@ describe("Chat MCP session", () => {
     for (const name of secrets) expect(seen).not.toHaveProperty(name);
   });
 
+  it("rejects inherited workspace credentials in every casing at the real MCP spawn", async () => {
+    for (const key of ["OMB_OPENAI_API_KEY", "omb_openai_api_key", "Omb_Tts_Key"]) vi.stubEnv(key, "synthetic-workspace-secret");
+    const f = fixture(`writeFileSync(receipt, JSON.stringify({pid:process.pid,path:process.env.PATH,omb:Object.fromEntries(Object.entries(process.env).filter(([name]) => ["OMB_OPENAI_API_KEY","OMB_TTS_KEY"].includes(name.toUpperCase()))),calls}));`);
+    const session = await f.mount();
+    expect(session.definitions).toHaveLength(1);
+    expect(f.read().calls.map(call => call.method)).toContain("tools/list");
+    expect(f.read().omb).toEqual({});
+  });
+
+  it.each(["OMB_OPENAI_API_KEY", "omb_openai_api_key", "Omb_Openai_Api_Key"])("preserves an explicit MCP descriptor credential %s without inherited aliases", async (key) => {
+    for (const alias of ["OMB_OPENAI_API_KEY", "omb_openai_api_key", "Omb_Openai_Api_Key"]) vi.stubEnv(alias, "synthetic-inherited-key");
+    const f = fixture(`writeFileSync(receipt, JSON.stringify({pid:process.pid,path:process.env.PATH,omb:Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() === "OMB_OPENAI_API_KEY")),calls}));`);
+    f.server.env[key] = "synthetic-descriptor-key";
+    const session = await f.mount();
+    expect(session.definitions).toHaveLength(1);
+    expect(f.read().omb).toEqual({ [key]: "synthetic-descriptor-key" });
+  });
+
   it("mounts only supported descriptors and preserves conversations with no tools", async () => {
     const controller = new AbortController();
     controllers.push(controller);

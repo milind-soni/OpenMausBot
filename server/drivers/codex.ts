@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { codexConfigMcp, codexConfigRunsServer, mountedMcpServerName } from "./codex-mcp-names.ts";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { credentialEnvEntries, credentialEnvValue, stripCredentialEnv, withoutCredentialEnv } from "../credential-env.ts";
 import { laterStartup, openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
@@ -115,14 +116,14 @@ function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
   return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
 }
 
-export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): string[] {
+export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>, environment: NodeJS.ProcessEnv = {}): string[] {
   // Credential stays in the instance environment, never argv or config.toml.
   // https://learn.chatgpt.com/docs/config-file/config-reference
   return [
     "-c", 'model_provider="openmaus_company"',
     "-c", 'model_providers.openmaus_company.name="Company"',
     "-c", `model_providers.openmaus_company.base_url=${JSON.stringify(config.url)}`,
-    "-c", 'model_providers.openmaus_company.env_key="OPENMAUSBOT_COMPANY_API_KEY"',
+    "-c", `model_providers.openmaus_company.env_key=${JSON.stringify(credentialEnvEntries(environment, ["OPENMAUSBOT_COMPANY_API_KEY"])[0]?.[0] ?? "OPENMAUSBOT_COMPANY_API_KEY")}`,
     "-c", 'model_providers.openmaus_company.wire_api="responses"',
     "-c", "model_providers.openmaus_company.requires_openai_auth=false",
     "-c", 'cli_auth_credentials_store="ephemeral"',
@@ -480,15 +481,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const planDirectory = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update(instanceId).digest("hex"));
     const childEnv = (): Record<string, string | undefined> => {
       const env: Record<string, string | undefined> = {
-        ...process.env,
+        ...(config.managed ? withoutCredentialEnv(process.env, ["OPENMAUSBOT_COMPANY_API_KEY"]) : process.env),
         ...input.environment,
         PATH: augmentedPath(),
         NPM_CONFIG_LOGLEVEL: "error",
       };
       // A leaked API key silently flips Codex's own ChatGPT login to pay-as-you-go.
-      delete env.OPENAI_API_KEY;
+      stripCredentialEnv(env, ["OPENAI_API_KEY", "OPENMAUSBOT_CHATGPT_TOKEN"]);
       stripWorkspaceCredentialEnv(env);
-      delete env.OPENMAUSBOT_CHATGPT_TOKEN;
       if (plan) env.CODEX_HOME = join(planDirectory, "codex");
       return env;
     };
@@ -612,7 +612,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (!config.managed.models.includes(turn.model)) {
           throw new Error("Company model access is unavailable: " + turn.model + " is not approved for your organization. Reconnect your organization; personal billing will not be used.");
         }
-        if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY) {
+        if (!credentialEnvValue(input.environment, "OPENMAUSBOT_COMPANY_API_KEY")) {
           throw new Error("Company model access is unavailable: OPENMAUSBOT_COMPANY_API_KEY is missing. Reconnect your organization; personal billing will not be used.");
         }
         if (!input.environment.CODEX_HOME) {
@@ -669,7 +669,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const env = childEnv();
         const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
-        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed, input.environment) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
@@ -1655,7 +1655,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const { version } = probe;
     if (planAuth) return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
       ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}) };
-    if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
+    if (config.managed) return { state: "available", version, authenticated: Boolean(credentialEnvValue(input.environment, "OPENMAUSBOT_COMPANY_API_KEY") && input.environment.CODEX_HOME), billing: "metered" };
     const previousCliVersion = modelsCliVersion;
     modelsCliVersion = version;
     if (previousCliVersion !== null && previousCliVersion !== version) await refreshModels();
@@ -1691,10 +1691,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
       providerArgs = chatgptPlanCodexArgs();
     } else if (config.managed) {
-      if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME) {
+      if (!credentialEnvValue(input.environment, "OPENMAUSBOT_COMPANY_API_KEY") || !input.environment.CODEX_HOME) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
       }
-      providerArgs = managedCodexArgs(config.managed);
+      providerArgs = managedCodexArgs(config.managed, input.environment);
     }
     const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback);
     if (!route) throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");

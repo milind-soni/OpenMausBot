@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { credentialEnvValue } from "../../credential-env.ts";
 import { userHome } from "../../env-path.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -96,7 +97,7 @@ export function applyDroidLocalAuthEnv(
   modelId: string | undefined,
 ): void {
   if (!decodeInjectId(modelId)) return;
-  if (env.FACTORY_API_KEY?.trim()) return;
+  if (credentialEnvValue(env, "FACTORY_API_KEY")?.trim()) return;
   // A placeholder FACTORY_API_KEY can take precedence over a login file.
   if (authFilePaths(env).some(existsSync)) return;
   env.FACTORY_API_KEY = "openmausbot-local";
@@ -194,7 +195,7 @@ const support: AcpSupport = {
   // device-pairing is a browser flow ACP cannot drive; factory-api-key is read from the env.
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: (env) => authFilePaths(env).some(existsSync) || Boolean(env.FACTORY_API_KEY),
+  isAuthenticated: (env) => authFilePaths(env).some(existsSync) || Boolean(credentialEnvValue(env, "FACTORY_API_KEY")),
   resolveModels,
   resolveTurnModel: (model, env) => (model ? ensureDroidInjectModel(model, env) : model),
   applyTurnEnv: (env, { requestedModel }) => {

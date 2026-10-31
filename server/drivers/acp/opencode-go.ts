@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 
+import { credentialEnvEntries, credentialEnvValue } from "../../credential-env.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
@@ -507,7 +508,7 @@ function withholdProviderKeysWhenManaged(
   instanceEnvironment: Readonly<Record<string, string>>,
 ): void {
   if (providerKeysAllowed()) return;
-  for (const key of OPENCODE_PROVIDER_ENV) {
+  for (const [key] of credentialEnvEntries(env, OPENCODE_PROVIDER_ENV)) {
     if (!Object.hasOwn(instanceEnvironment, key)) delete env[key];
   }
 }
@@ -623,7 +624,7 @@ function hasStoredOpenCodeAuth(env: Record<string, string | undefined>) {
 
 /** A login, a key or a provider key of the person's own: what makes OpenCode more than Zen's free models. */
 function ownOpenCodeAccess(env: Record<string, string | undefined>): boolean {
-  return Boolean(env.OPENCODE_API_KEY) || hasStoredOpenCodeAuth(env) || OPENCODE_PROVIDER_ENV.some((key) => Boolean(env[key]?.trim()));
+  return Boolean(credentialEnvValue(env, "OPENCODE_API_KEY")) || hasStoredOpenCodeAuth(env) || OPENCODE_PROVIDER_ENV.some((key) => Boolean(credentialEnvValue(env, key)?.trim()));
 }
 
 /** OpenCode's own providers: Zen (some models free without a login) and Go (a subscription). */
@@ -874,7 +875,7 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   authFailure: "continue",
   isAuthenticated: async (env, config, instanceId) => {
     ownAccess.set(instanceId, ownOpenCodeAccess(env));
-    return Boolean(env.OPENCODE_API_KEY)
+    return Boolean(credentialEnvValue(env, "OPENCODE_API_KEY"))
       || hasStoredOpenCodeAuth(env)
       || await canRunOpenCode(env, config.cli, loadCatalog);
   },

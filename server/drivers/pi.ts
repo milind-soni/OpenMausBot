@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
+import { stripCredentialEnv, PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../credential-env.ts";
 import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { augmentedPath } from "../env-path.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
@@ -372,7 +372,7 @@ function piEnvironment(source: Record<string, string | undefined>): Record<strin
   // pi reads provider keys from its env: an inherited key would flip billing, and workspace
   // credentials are the harness's secrets.
   stripWorkspaceCredentialEnv(env);
-  for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  stripCredentialEnv(env, PROVIDER_CREDENTIAL_ENV);
   return env;
 }
 

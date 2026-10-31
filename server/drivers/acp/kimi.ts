@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { stripCredentialEnv } from "../../credential-env.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -426,7 +427,7 @@ export function applyKimiLocalModelEnv(
 
 /** Drop leftover shell `KIMI_MODEL_*` so they cannot steal a cloud turn. */
 function stripKimiModelEnv(env: Record<string, string | undefined>): void {
-  for (const key of KIMI_MODEL_ENV) delete env[key];
+  stripCredentialEnv(env, KIMI_MODEL_ENV);
 }
 
 function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCatalog {

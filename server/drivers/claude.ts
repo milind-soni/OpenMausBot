@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, dirname, isAbsolute, normalize } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { credentialEnvEntries, credentialEnvValue, stripCredentialEnv } from "../credential-env.ts";
 import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -122,21 +123,19 @@ function claudeEnvironment(
   const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: "600000", ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
   if (configDir?.trim()) {
     env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, env);
-    for (const key of CLAUDE_ACCOUNT_ENV_KEYS) {
-      // Subscription OAuth always comes from this account's own login, never the parent's.
-      if (key.startsWith("CLAUDE_CODE_OAUTH_") || key.endsWith("_FILE_DESCRIPTOR") || !Object.hasOwn(instanceEnvironment, key)) {
-        delete env[key];
-      }
-    }
+    // Subscription OAuth always comes from this account's own login, never the parent's.
+    stripCredentialEnv(env, CLAUDE_ACCOUNT_ENV_KEYS);
+    const grants = CLAUDE_ACCOUNT_ENV_KEYS.filter(name => !name.startsWith("CLAUDE_CODE_OAUTH_") && !name.endsWith("_FILE_DESCRIPTOR"));
+    for (const [key, value] of credentialEnvEntries(instanceEnvironment, grants)) env[key] = value;
   } else if (env.CLAUDE_CONFIG_DIR) {
     env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(undefined, env);
   }
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
+  stripCredentialEnv(env, ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"]);
   stripWorkspaceCredentialEnv(env);
-  const applied = applyClaudeInject(env, model);
   // An inherited ANTHROPIC_API_KEY would flip a subscription login to pay-as-you-go.
-  if (!applied.injected && !instanceEnvironment.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
+  stripCredentialEnv(env, ["ANTHROPIC_API_KEY"]);
+  for (const [key, value] of credentialEnvEntries(instanceEnvironment, ["ANTHROPIC_API_KEY"])) env[key] = value;
+  applyClaudeInject(env, model);
   return env;
 }
 
@@ -165,7 +164,7 @@ export function readClaudeAuthSettings(
   env: NodeJS.ProcessEnv,
   instanceEnvironment: NodeJS.ProcessEnv = {},
 ): { env?: Record<string, string>; apiKeyHelper?: string } {
-  if (CLAUDE_ACCOUNT_ENV_KEYS.some((key) => instanceEnvironment[key])) return {};
+  if (CLAUDE_ACCOUNT_ENV_KEYS.some(name => credentialEnvValue(instanceEnvironment, name))) return {};
   try {
     const settings = JSON.parse(readFileSync(join(resolveClaudeConfigDir(undefined, env), "settings.json"), "utf8"));
     const authEnv: Record<string, string> = {};
@@ -1001,9 +1000,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (startupModelRefresh) await startupModelRefresh;
       turn = { ...turn, toolScope: assertToolScopeSupported(DRIVER_KIND, turn.toolScope) };
       if (config.managedModels && (!turn.model || !config.managedModels.includes(turn.model))) throw new Error("This model is not assigned to this workspace.");
-      if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) throw new Error(NO_ANTHROPIC_KEY);
+      if (config.requireApiKey && !credentialEnvValue(input.environment, "ANTHROPIC_API_KEY")) throw new Error(NO_ANTHROPIC_KEY);
       if (config.managed && (!turn.model || turn.model.includes("::") || !config.configDir ||
-          !input.environment.ANTHROPIC_API_KEY || !input.environment.ANTHROPIC_BASE_URL)) {
+          !credentialEnvValue(input.environment, "ANTHROPIC_API_KEY") || !credentialEnvValue(input.environment, "ANTHROPIC_BASE_URL"))) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
       }
       const { threadId, botId } = turn;
@@ -1217,14 +1216,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers,
         cwd,
         model: injected.model ?? null,
-        base: env.ANTHROPIC_BASE_URL ?? null,
+        base: credentialEnvValue(env, "ANTHROPIC_BASE_URL") ?? null,
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
         hooks: Boolean(hooks),
         toolSearch,
         // Rotating an account's key/helper must not reuse the old process.
         auth: createHash("sha256").update(JSON.stringify({
           settings: authSettings,
-          env: Object.fromEntries(CLAUDE_ACCOUNT_ENV_KEYS.map((key) => [key, env[key]])),
+          env: Object.fromEntries(credentialEnvEntries(env, CLAUDE_ACCOUNT_ENV_KEYS)),
         })).digest("hex"),
       });
 
@@ -1943,7 +1942,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (version !== cliHelpVersion) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
-      if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
+      if (config.requireApiKey && !credentialEnvValue(input.environment, "ANTHROPIC_API_KEY")) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
       const probed: typeof lastAuth = config.requireApiKey ? { authenticated: true } : await claudeAuthStatus(config.cli, env);
       const auth = probed.authenticated === undefined ? lastAuth : (lastAuth = probed);
       return { state: "available", version, ...auth, ...claudeBilling(env, auth.account), ...(update ? { update } : {}), ...(warning ? { warning } : {}) };
@@ -1953,7 +1952,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const generateReview = async (prompt: string, signal?: AbortSignal, onUsage?: TextGenerationOptions["onUsage"], timeoutMs?: number, named?: string): Promise<string> => {
       await ensureCliVersion(environment());
       return new Promise((resolve, reject) => {
-        if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) {
+        if (config.requireApiKey && !credentialEnvValue(input.environment, "ANTHROPIC_API_KEY")) {
           reject(new Error(NO_ANTHROPIC_KEY));
           return;
         }

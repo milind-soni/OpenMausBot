@@ -98,6 +98,14 @@ entry:
 
 ## Notes
 
+Known credential names match in every letter case. When spellings coexist,
+the exact documented uppercase name wins, including an empty value. Without
+that spelling, the first key in JavaScript code-unit sort order wins.
+Readiness, billing and credential selection use this order. Scrubbing removes
+every spelling. Restored grants keep their original names and values in this
+order. Credential fingerprints include every spelling passed to a child.
+Use one spelling per credential to avoid platform-specific child behaviour.
+
 - `config.json` is written with mode 0600; values in `environment` are stored
   as plaintext in that file. Prefer keys scoped to the one engine.
 - A typo'd `driver` or invalid `config` never breaks the app: the instance

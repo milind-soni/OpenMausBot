@@ -7,6 +7,7 @@
 // The person's own key always wins and is resolved per request; an included token goes only to its relay and is never
 // written to config.json or reported to a client.
 import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
+import { credentialEnvValue, stripCredentialEnv } from "./credential-env.ts";
 
 export const BOAT_API_DEFAULT = "https://boat.dev/api/v1";
 export const ELEVENLABS_API_DEFAULT = "https://api.elevenlabs.io/v1";
@@ -35,11 +36,11 @@ function includedService(url: string | undefined, token: string | undefined): Se
 }
 
 const includedFrom = (env: NodeJS.ProcessEnv): Included => ({
-  boat: includedService(env.OMB_CLOUD_BOAT_URL, env.OMB_CLOUD_BOAT_TOKEN),
-  voice: includedService(env.OMB_CLOUD_VOICE_URL, env.OMB_CLOUD_VOICE_TOKEN),
-  decider: includedService(env.OMB_CLOUD_DECIDER_URL, env.OMB_CLOUD_DECIDER_TOKEN),
-  ai: trialCreditService(env.OMB_CLOUD_AI_URL, env.OMB_CLOUD_AI_TOKEN),
-  x: includedService(env.OMB_CLOUD_X_URL, env.OMB_CLOUD_X_TOKEN),
+  boat: includedService(env.OMB_CLOUD_BOAT_URL, credentialEnvValue(env, "OMB_CLOUD_BOAT_TOKEN")),
+  voice: includedService(env.OMB_CLOUD_VOICE_URL, credentialEnvValue(env, "OMB_CLOUD_VOICE_TOKEN")),
+  decider: includedService(env.OMB_CLOUD_DECIDER_URL, credentialEnvValue(env, "OMB_CLOUD_DECIDER_TOKEN")),
+  ai: trialCreditService(env.OMB_CLOUD_AI_URL, credentialEnvValue(env, "OMB_CLOUD_AI_TOKEN")),
+  x: includedService(env.OMB_CLOUD_X_URL, credentialEnvValue(env, "OMB_CLOUD_X_TOKEN")),
 });
 
 /** The token is a key the chat engine sends here, so the address must be HTTPS (loopback for tests) and the token the Admin's shape. */
@@ -60,7 +61,7 @@ let held: Included | null = null;
 /** Dropped from the environment at startup so nothing the server starts can inherit them. */
 export function holdIncludedServices(env: NodeJS.ProcessEnv = process.env): void {
   held = includedFrom(env);
-  for (const name of INCLUDED_TOKEN_ENV) delete env[name];
+  stripCredentialEnv(env, INCLUDED_TOKEN_ENV);
 }
 
 function resolve(own: string | undefined, providerApi: string, included: ServiceCredential | null): ServiceCredential | null {

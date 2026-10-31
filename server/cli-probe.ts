@@ -1,5 +1,5 @@
 // Settings → engines "Test": run a CLI's `--version` with only PATH, never inherited credentials.
-import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
+import { stripCredentialEnv, PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./credential-env.ts";
 import { clientInstall } from "./contracts.ts";
 import type { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { augmentedPath } from "./env-path.ts";
@@ -46,7 +46,7 @@ export async function testCliBinary(
 export function cliProbeEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
-  for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  stripCredentialEnv(env, PROVIDER_CREDENTIAL_ENV);
   return env;
 }
 

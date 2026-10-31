@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { credentialEnvValue } from "../../credential-env.ts";
 import { userHome } from "../../env-path.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -35,8 +36,8 @@ const nonBlank = (value: string | undefined): boolean => Boolean(value?.trim());
 
 export function geminiIsAuthenticated(env: Record<string, string | undefined>): boolean {
   return (
-    nonBlank(env.GEMINI_API_KEY) ||
-    nonBlank(env.GOOGLE_API_KEY) ||
+    nonBlank(credentialEnvValue(env, "GEMINI_API_KEY")) ||
+    nonBlank(credentialEnvValue(env, "GOOGLE_API_KEY")) ||
     (existsSync(join(userHome(env), ".gemini", "oauth_creds.json")) && liveOauthCredential(env))
   );
 }

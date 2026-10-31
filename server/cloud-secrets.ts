@@ -12,7 +12,9 @@ export function cloudHomeSecrets(env: NodeJS.ProcessEnv): Record<string, string>
 
 export function withoutCloudSecrets(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const kept = { ...env };
-  for (const key of CLOUD_HOME_SECRET_KEYS) delete kept[key];
+  for (const key of Object.keys(kept)) {
+    if ((CLOUD_HOME_SECRET_KEYS as readonly string[]).includes(key.toUpperCase())) delete kept[key];
+  }
   return kept;
 }
 
