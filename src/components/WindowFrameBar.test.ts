@@ -10,8 +10,9 @@ const fixture = vi.hoisted(() => ({
   rail: { available: true, hidden: false } as { available: boolean; hidden: boolean } | null,
   update: null as UpdaterState | null,
   dispatch: vi.fn(),
+  frameDrawn: vi.fn(),
 }));
-vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: () => {} }));
+vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: () => {}, sayFrameDrawn: fixture.frameDrawn }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => fixture.update }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: {}, dispatch: fixture.dispatch }) }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
@@ -34,6 +35,7 @@ beforeEach(() => {
   fixture.rail = { available: true, hidden: false };
   fixture.update = null;
   fixture.dispatch.mockClear();
+  fixture.frameDrawn.mockClear();
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = null; host.remove(); });
 
@@ -62,6 +64,15 @@ describe("the window frame's top bar", () => {
     fixture.windowChrome = "native";
     await mount(createElement(WindowFrameBar));
     expect(bar()).toBeNull();
+  });
+
+  it("tells main it draws the frame, so the traffic lights move into its bar; a window with its own title bar says nothing", async () => {
+    await mount(createElement(WindowFrameBar));
+    expect(fixture.frameDrawn).toHaveBeenCalledTimes(1);
+    await act(async () => root!.unmount());
+    fixture.windowChrome = "native";
+    await mount(createElement(WindowFrameBar));
+    expect(fixture.frameDrawn).toHaveBeenCalledTimes(1);
   });
 
   it("opens the app's settings", async () => {
