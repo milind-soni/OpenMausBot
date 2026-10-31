@@ -472,6 +472,17 @@ const bridge = {
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
     },
   } : undefined,
+  // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.
+  twoPlaces: {
+    state: () => ipcRenderer.invoke("two-places:state"),
+    accept: key => ipcRenderer.invoke("two-places:accept", String(key)),
+    dismiss: key => ipcRenderer.invoke("two-places:dismiss", String(key)),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("two-places:changed", handler);
+      return () => ipcRenderer.removeListener("two-places:changed", handler);
+    },
+  },
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true

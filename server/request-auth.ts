@@ -412,6 +412,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // a teammate's picture: the handler serves it to the team's own members only
   { methods: ["GET"], path: /^\/api\/team\/people\/p_[\w-]{22}\/picture$/ },
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
+  // a Team Cloud bot's sharing: the handler lets only someone who can edit the bot change it
+  { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/access$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
@@ -459,6 +461,22 @@ export function adminOnlyBotSetting(fields: Record<string, unknown>): string | n
 
 export function botProfileSettings(fields: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(fields).filter(([key]) => BOT_PROFILE_SETTINGS.has(key)));
+}
+
+/** What a Team Cloud member who can edit a bot may change: its profile and model (as a bot they bring in), and which of
+ * the team's connected apps and MCP servers it uses. Never what it may do on its computer, where it runs, its department
+ * or whom it answers to or directs: those stay an admin's. */
+const EDITOR_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set([
+  ...BOT_PROFILE_SETTINGS, "threadId", "composio", "connectorTools", "connectorScopes", "mcpServers",
+]);
+/** A member who can only view a bot marks it read, nothing else. */
+const VIEWER_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set(["unread"]);
+
+export function memberBotPatchViolation(body: unknown, level: "view" | "chat" | "edit", ownMausBot = false, teamMember = false): string | null {
+  if (level === "chat") return clientBotPatchViolation(body, ownMausBot, teamMember);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
+  const allowed = level === "edit" ? EDITOR_BOT_PATCH_FIELDS : VIEWER_BOT_PATCH_FIELDS;
+  return Object.keys(body).find((key) => !allowed.has(key)) ?? null;
 }
 
 /** Same for a room: name and reading state, never its folder or who answers. */

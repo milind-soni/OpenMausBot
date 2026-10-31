@@ -121,6 +121,13 @@ const __APP_VERSION__: string;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       /** Either page in this app: the one-time move's line (on its way, what arrived, coming home). */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
+      /** This computer's page only: bots in two places, and the one tap that brings them together on one (electron/two-places.mjs). */
+      twoPlaces?: {
+        state(): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
+        accept(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
+        dismiss(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
+        onChanged(callback: () => void): () => void;
+      };
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */

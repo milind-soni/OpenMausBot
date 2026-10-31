@@ -106,6 +106,15 @@ describe("room delete confirmation copy", () => {
     expect(markup).toContain("bg-danger");
   });
 
+  it("offers a gentler way beside the destructive one when there is one, after Cancel", () => {
+    const markup = renderToStaticMarkup(createElement(ConfirmDialogCard, {
+      open: true, title: "Delete Chief?", body: "Its chats hold your setup.", confirmLabel: "Delete", tone: "danger",
+      onCancel: vi.fn(), onConfirm: vi.fn(), alternative: { label: "Archive instead", onClick: vi.fn() },
+    }));
+    expect(markup.indexOf(">Cancel</button>")).toBeLessThan(markup.indexOf(">Archive instead</button>"));
+    expect(markup.indexOf(">Archive instead</button>")).toBeLessThan(markup.indexOf(">Delete</button>"));
+  });
+
   it("keeps the room's name intact in other languages", () => {
     setLocale("pt-br");
     expect(roomDeleteCopy({ name: "Launch plan" }).title).toContain("Launch plan");

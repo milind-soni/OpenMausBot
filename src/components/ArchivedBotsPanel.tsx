@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Trash2, X } from "lucide-react";
+import { Archive, Loader2, Trash2, X } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { api, openBot, useStore, type Bot } from "@/state/store";
 
 import { BotAvatar } from "./Avatar";
+import { archivableChief } from "./bot-archive";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export type BotConfirmKind = "archive" | "delete";
 
-export function botConfirmCopy(kind: BotConfirmKind, name: string) {
+/** `chief`: deleting a Chief of Staff, whose chats hold the team's whole setup, which archiving it would keep. */
+export function botConfirmCopy(kind: BotConfirmKind, name: string, chief = false) {
   return kind === "archive"
     ? {
         title: t("sidebar.confirm.archiveTitle", { name }),
@@ -21,10 +23,30 @@ export function botConfirmCopy(kind: BotConfirmKind, name: string) {
       }
     : {
         title: t("sidebar.confirm.deleteTitle", { name }),
-        body: t("sidebar.confirm.deleteBody", { name }),
+        body: t(chief ? "sidebar.confirm.deleteChiefBody" : "sidebar.confirm.deleteBody", { name }),
         confirmLabel: t("common.delete"),
         tone: "danger" as const,
       };
+}
+
+/** The dialog that asks before a bot is archived or deleted; deleting a Chief of Staff offers to archive it instead. */
+export function botConfirmProps(confirm: { kind: BotConfirmKind; bot: Bot } | null, bots: readonly Bot[], act: {
+  archive: (bot: Bot) => void;
+  remove: (bot: Bot) => void;
+  archiveInstead: (chief: Bot) => void;
+}) {
+  const chief = confirm?.kind === "delete" ? archivableChief(bots, confirm.bot.id) : undefined;
+  return {
+    open: confirm !== null,
+    ...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name, Boolean(chief)) : botConfirmCopy("archive", "")),
+    icon: confirm?.kind === "delete" ? <Trash2 size={18} /> : <Archive size={18} />,
+    alternative: chief ? { label: t("sidebar.confirm.archiveInstead"), onClick: () => act.archiveInstead(chief) } : undefined,
+    onConfirm: () => {
+      if (!confirm) return;
+      if (confirm.kind === "archive") act.archive(confirm.bot);
+      else act.remove(confirm.bot);
+    },
+  };
 }
 
 export function archivedDeleteAllCopy() {
