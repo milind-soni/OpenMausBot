@@ -41,9 +41,11 @@ export function createAutomationDestinations(deps: AutomationDestinationDeps) {
       const threadId = cloud ? chatOfItsOwn(routine.botId, routine.name, opener!) : undefined;
       return threadId ? { threadId } : undefined;
     },
-    event({ webhookId, webhookName, botId }: { webhookId: string; webhookName: string; botId: string }): string | undefined {
+    event({ webhookId, webhookName, botId, resultsThreadId }: { webhookId: string; webhookName: string; botId: string; resultsThreadId?: string }): string | undefined {
       const bot = store.bot(botId);
       if (!bot || bot.hidden) return undefined;
+      const chosen = resultsThreadId ? store.taskByThread(botId, resultsThreadId) : undefined;
+      if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) return chosen.threadId;
       if (!cloud) return deps.mainThread(botId);
       const earlier = deps.runs().find((run) => run.webhookId === webhookId && run.botId === botId && run.resultsThreadId)?.resultsThreadId;
       const kept = earlier ? store.taskByThread(botId, earlier) : undefined;
