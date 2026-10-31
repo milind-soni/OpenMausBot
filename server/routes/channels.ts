@@ -31,7 +31,7 @@ import type { UsageTrigger } from "../usage-ledger.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
@@ -46,6 +46,7 @@ export interface ChannelRouteDeps {
   desktopManaged: boolean;
   routines(): Pick<RoutineManager, "disableForGroup"> | null;
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   actorKey(auth: RequestAuth & { kind: "session" }): string;
   threadStarters: Pick<ThreadStarters, "set">;
   phoneSecretSubmissions: Pick<PhoneSecretSubmissionRegistry, "hasGroup" | "hasThread">;
@@ -99,7 +100,7 @@ const createGroupTaskRequestSchema = z.object({ title: z.string().optional() });
 
 export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
   const {
-    store, cfg, broadcast, actorKey, threadStarters, phoneSecretSubmissions, sendSequencer, roomMemberContexts, skillReview,
+    store, cfg, broadcast, notificationListed, actorKey, threadStarters, phoneSecretSubmissions, sendSequencer, roomMemberContexts, skillReview,
     groupSpeakers, groupTurnOperations, lastReply, cloudThreadRefusal, messageSender, usageTriggerFor, publicGroupState,
     groupWithThread, updateChannel, groupIsWorking, groupThreadIsWorking, readCursor, pageSize, messagePage,
     resolveReplyTarget, runningTurnInstance, startGroupTurn, engineSteersImages, applyRoomHoldsFromMessage, cancelGroupTurnOperations,
@@ -189,7 +190,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
       deps.threadRead?.(auth, switched.threadId);
-      readThreadNotifications(switched.threadId, broadcast, auth);
+      readThreadNotifications(switched.threadId, broadcast, notificationListed(auth));
       const switchedSettings = own(publicGroupState(switched));
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
@@ -273,11 +274,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       deps.threadRead?.(auth, room.threadId);
       const personal = deps.personMarkRoom?.(auth, room, false);
       if (personal) {
-        readThreadNotifications(room.threadId, broadcast, auth);
+        readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
         return json(res, 200, { group: personal });
       }
       const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
-      readThreadNotifications(room.threadId, broadcast, auth);
+      readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: own(publicGroupState(group)) });
     }

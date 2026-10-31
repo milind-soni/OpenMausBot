@@ -18,7 +18,7 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -50,6 +50,7 @@ export interface TaskRouteDeps {
   supportsApprovalMode(selection: ModelSelection, mode: ApprovalMode): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   publicBot(bot: BotRecord): WireBot;
   wireBot(bot: BotRecord): WireBot;
   wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
@@ -77,7 +78,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
   const {
     store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
-    supportsApprovalMode, threadBusy, broadcast, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
+    supportsApprovalMode, threadBusy, broadcast, notificationListed, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
     revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
   } = deps;
@@ -231,7 +232,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
       deps.threadRead?.(auth, m[2]);
-      readThreadNotifications(m[2], broadcast, auth);
+      readThreadNotifications(m[2], broadcast, notificationListed(auth));
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).

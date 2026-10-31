@@ -334,12 +334,6 @@ export function markNotificationLogRead(ids: readonly string[]): void {
   db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
 }
 
-/** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
-export function markThreadNotificationLogRead(threadId: string, includeSpend = true): string[] {
-  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 AND (? OR kind != 'spend') RETURNING id").all(threadId, includeSpend ? 1 : 0) as Array<{ id: string }>;
-  return rows.map((row) => row.id);
-}
-
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   writeFollowups((connection) => connection.prepare(
     "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, ?, ?, ?, ?, 'pending', ?)",

@@ -17,7 +17,6 @@ import { closeMessageDb,
   openRescueMessages,
   latestSaidByBot,
   markNotificationLogRead,
-  markThreadNotificationLogRead,
   readMessageText,
   recentMessages,
   recentNotificationLog,
@@ -552,17 +551,6 @@ describe("notification_log", () => {
     rows = recentNotificationLog();
     expect(rows).toHaveLength(3);
     expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
-  });
-
-  it("reading a conversation reads only its own notifications, a pending question's included", () => {
-    insertNotificationLog(entry("n1", 1000));
-    insertNotificationLog(entry("n2", 2000, { kind: "question" }));
-    insertNotificationLog(entry("n3", 3000, { threadId: "thread-2" }));
-    expect(markThreadNotificationLogRead("thread-1").sort()).toEqual(["n1", "n2"]);
-    const rows = recentNotificationLog();
-    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
-    expect(rows.find((r) => r.id === "n3")?.read).toBe(false);
-    expect(markThreadNotificationLogRead("thread-1")).toEqual([]);
   });
 
   it("keeps only the newest 500 rows, FIFO", () => {
