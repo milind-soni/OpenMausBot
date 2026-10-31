@@ -927,6 +927,19 @@ beforeAll(async () => {
         config: { user_id: body.user_id },
       }));
     }
+    if (req.method === "GET" && req.url === "/broker/v1/connectors/connected") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        configured: true,
+        complete: true,
+        services: {
+          gmail: { connected: true },
+          slack: { connected: true },
+          github: { connected: true },
+          linear: { connected: true },
+        },
+      }));
+    }
     if (req.url?.startsWith("/broker/v1/mcp")) {
       let raw = "";
       for await (const chunk of req) raw += chunk;

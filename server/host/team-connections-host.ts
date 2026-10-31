@@ -46,7 +46,7 @@ export interface TeamConnectionsHostDeps {
   isSessionLive(id: string): boolean;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
-  composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "connectedServiceSlugs" | "authorizeService" | "removeService">;
+  composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "verifiedConnectedServiceSlugs" | "authorizeService" | "removeService">;
 }
 
 const list = (names: readonly string[]) => names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
@@ -222,7 +222,13 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       for (const call of calls) {
         if (call.slug === "COMPOSIO_PROXY_EXECUTE") {
           if (own) continue;
-          const held = await deps.composio.connectedServiceSlugs(deps.cfg()).catch(() => [] as readonly string[]);
+          let held: readonly string[];
+          try {
+            held = await deps.composio.verifiedConnectedServiceSlugs(deps.cfg());
+          } catch {
+            return "Code that calls apps can't run here because the team's connected-app inventory could not be verified. "
+              + "It may still include apps connected by each person. Nothing was run. Try again when discovery is available.";
+          }
           const kept = apps.filter((slug) => held.includes(slug));
           if (kept.length) return lines.opaque(kept.map(appLabel));
           continue;

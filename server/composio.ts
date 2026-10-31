@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { connectedAccountsPageSchema, toolkitPageSchema, toolkitInventoryPageSchema, type ConnectedAccountResponse, type ToolkitItem } from "./composio-inventory-schema.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason, managedCustomAuthReason } from "../shared/connector-availability.ts";
 import {
@@ -55,38 +56,13 @@ interface AccountLinkRequest {
   alias?: string;
 }
 
-const connectedAccountResponseSchema = z.object({
-  id: z.string().optional(),
-  alias: z.string().nullable().optional(),
-  status: z.string().optional(),
-  updated_at: z.string().optional(),
-  toolkit: z.object({ slug: z.string().optional() }).optional(),
-});
-type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
-
-const connectedAccountsPageSchema = z.object({
-  items: z.array(connectedAccountResponseSchema),
-  next_cursor: z.string().nullable().optional(),
-});
-
-const toolkitItemSchema = z.object({
-  slug: z.string().optional(),
-  is_no_auth: z.boolean().optional(),
-  connected_account: z.object({ id: z.string().optional(), status: z.string().optional() }).nullable().optional(),
-});
-type ToolkitItem = z.infer<typeof toolkitItemSchema>;
-const toolkitPageSchema = z.object({
-  items: z.array(toolkitItemSchema).optional(),
-  next_cursor: z.string().nullable().optional(),
-});
-
 const connectorServiceSchema = z.object({
   connected: z.boolean(),
   pending: z.boolean().optional(),
   status: z.string().optional(),
   accounts: z.array(z.object({ id: z.string(), alias: z.string().optional(), status: z.string() })).optional(),
 });
-const connectorServicesResponseSchema = z.object({ services: z.record(z.string(), connectorServiceSchema).optional() });
+const connectorServicesResponseSchema = z.object({ services: z.record(z.string(), connectorServiceSchema).optional(), complete: z.boolean().optional() });
 const removalResponseSchema = z.object({ removed: z.number() });
 const authUrlResponseSchema = z.object({ url: z.string().optional() });
 const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
@@ -362,7 +338,8 @@ async function listConnectedAccounts(
     const body = connectedAccountsPageSchema.parse(await response.json());
     accounts.push(...body.items);
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return accounts;
+    if (!next) return accounts;
+    if (seenCursors.has(next)) throw new Error("Composio account inventory contains a pagination cursor cycle");
     seenCursors.add(next);
     cursor = next;
   }
@@ -385,10 +362,11 @@ async function listSessionToolkits(
       { headers: projectHeaders(apiKey), signal: AbortSignal.timeout(15_000) },
     );
     if (!response.ok) throw new Error(await responseError(response, `Composio toolkits: HTTP ${response.status}`));
-    const body = toolkitPageSchema.parse(await response.json());
-    toolkits.push(...(body.items ?? []));
+    const body = toolkitInventoryPageSchema.parse(await response.json());
+    toolkits.push(...body.items);
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return toolkits;
+    if (!next) return toolkits;
+    if (seenCursors.has(next)) throw new Error("Composio toolkit inventory contains a pagination cursor cycle");
     seenCursors.add(next);
     cursor = next;
   }
@@ -475,8 +453,8 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
   if (!apiKey) {
     const response = await brokerRequest("/v1/connectors/connected", undefined, as);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
-    const body = connectorServicesResponseSchema.parse(await response.json());
-    const services = canonicalServiceRecord(body.services ?? {});
+    const body = connectorServicesResponseSchema.required({ services: true }).parse(await response.json());
+    const services = canonicalServiceRecord(body.services);
     return {
       services: Object.fromEntries(
         Object.entries(services).map(([slug, state]) => [slug, {
@@ -486,7 +464,7 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
           accounts: state.accounts ?? [],
         }]),
       ),
-      complete: true,
+      complete: body.complete === true,
     };
   }
   const session = await ensureProjectSession(cfg);
@@ -502,6 +480,12 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
     services: allServiceStates(summarizeAccounts(accountResult.accounts, []), toolkits),
     complete: accountResult.complete,
   };
+}
+
+export async function verifiedConnectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+  const { services, complete } = await connectedServicesInventory(cfg, as);
+  if (!complete) throw new Error("Connected-app inventory is incomplete; account discovery did not finish.");
+  return Object.keys(services);
 }
 
 export async function connectedServices(cfg: AppConfig, as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>> {
@@ -625,8 +609,7 @@ function connectorToolListing(tool: unknown): ConnectorToolListing | null {
 }
 
 async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, ConnectorToolListing[]>> {
-  const connected = await connectedServices(cfg).catch(() => null);
-  const candidates = connected ? Object.keys(connected) : [];
+  const candidates = await connectedServiceSlugs(cfg);
   const initialize = await relayMcp(cfg, {
     jsonrpc: "2.0",
     id: "omb-grants-initialize",

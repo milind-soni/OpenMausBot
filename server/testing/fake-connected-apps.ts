@@ -62,7 +62,7 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
     for await (const chunk of req) raw += chunk;
     res.setHeader("content-type", "application/json");
     if (req.method === "GET" && req.url === "/v1/connectors/connected") {
-      return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, { connected }])) }));
+      return res.end(JSON.stringify({ complete: true, services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, { connected }])) }));
     }
     // A connection card's status check: the services it names.
     if (req.method === "GET" && req.url?.startsWith("/v1/connectors?")) {

@@ -64,7 +64,7 @@ beforeAll(async () => {
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     res.setHeader("content-type", "application/json");
-    if (req.url === "/v1/connectors/connected") return res.end(JSON.stringify({ services: { gmail: { connected: true }, slack: { connected: true } } }));
+    if (req.url === "/v1/connectors/connected") return res.end(JSON.stringify({ complete: true, services: { gmail: { connected: true }, slack: { connected: true } } }));
     if (req.url === "/api/tool_router/session/fixture-session") {
       if (blockSession) {
         sessionEntered = true;
@@ -80,6 +80,9 @@ beforeAll(async () => {
         await new Promise<void>(resolve => { blockRelay = resolve; });
       }
       return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "relay-ok" }] } }));
+    }
+    if (req.url?.startsWith("/api/connected_accounts?")) {
+      return res.end(JSON.stringify({ items: [{ id: "fixture-account", toolkit: { slug: "gmail" }, status: "ACTIVE" }] }));
     }
     return res.end(JSON.stringify({ items: [{ slug: "gmail", connected_account: { id: "fixture-account", status: "ACTIVE" } }] }));
   });
@@ -190,7 +193,7 @@ it("shows each outbound batch recipient and amount with explicit preview truncat
   expect(relayed).toHaveLength(before);
 });
 
-it.each(["scope", "turn"])("rechecks %s revocation after project-session metadata and before the actual send", async (revocation) => {
+it.each(["scope", "inventory", "turn"])("rechecks %s revocation after project-session metadata and before the actual send", async (revocation) => {
   const b = await bot("Session race " + revocation);
   const token = await mint(b.id, b.threadId);
   const before = relayed.length;
@@ -201,11 +204,12 @@ it.each(["scope", "turn"])("rechecks %s revocation after project-session metadat
   await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
   await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
   if (revocation === "scope") await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  else if (revocation === "inventory") await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "write" } } });
   else await mint(b.id, b.threadId);
   blockSession();
   blockSession = undefined;
   const result = await held;
-  if (revocation === "scope") expect(result.body.result.isError).toBe(true);
+  if (revocation !== "turn") expect(result.body.result.isError).toBe(true);
   else expect(result.status).toBe(401);
   expect(relayed).toHaveLength(before);
 });
