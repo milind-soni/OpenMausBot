@@ -7,7 +7,8 @@
 // Each view is photographed in Daylight and Midnight (every skin with --skins all) at 1280x800, at twice that size,
 // and the views of the bar also as a strip of the bar alone. `tiles` draws each state of a rail tile with every pixel
 // as a square, at 1x and 2x; `colours` puts the frame's colour today, the colour derived from the app's and the app's
-// own side by side; `skins` shows the window's corner in every skin.
+// own side by side; `skins` shows the window's corner in every skin, and `corners` the card's three round corners in
+// every skin, three times their size.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -139,6 +140,13 @@ async function tiles(page: HeadlessPage, base: string, skin: string, file: strin
 }
 
 const CORNER = { x: 0, y: 0, width: 560, height: 300 };
+type Box = { x: number; y: number; width: number; height: number };
+/** The card's round corners, each with the frame round it. */
+const cardCorners = (card: Box): Array<[string, Box]> => [
+  ["top left", { x: card.x - 24, y: card.y - 16, width: 96, height: 64 }],
+  ["top right", { x: card.x + card.width - 72, y: card.y - 16, width: 72, height: 64 }],
+  ["bottom left", { x: card.x - 24, y: card.y + card.height - 48, width: 96, height: 48 }],
+];
 const FRAME_COLOURS: Array<[string, string]> = [["today's frame grey", "&framecolor=today"], ["derived from the app's colour", ""], ["the app's own colour", "&framecolor=app"]];
 
 const fixture = await launchVerificationServer();
@@ -191,6 +199,22 @@ try {
         }
         const file = join(shots, "skins.png");
         await sheet(page, "The frame in every skin", rows, file);
+        console.log(file);
+      }
+      if (wanted("corners")) {
+        const rows: Array<{ label: string; pictures: Picture[] }> = [];
+        for (let at = 0; at < ALL_SKINS.length; at += 2) {
+          const pictures: Picture[] = [];
+          for (const skin of ALL_SKINS.slice(at, at + 2)) {
+            await open(page, `${ui.previewUrl}?skin=${skin}&chrome=1`, RAIL_READY);
+            for (const [corner, clip] of cardCorners(await rectOf(page, "[data-window-card]"))) {
+              pictures.push({ label: `${skin}, ${corner}`, png: await page.capture(clip), width: clip.width * 3 });
+            }
+          }
+          rows.push({ label: "", pictures });
+        }
+        const file = join(shots, "corners.png");
+        await sheet(page, "The card's round corners in every skin, three times their size", rows, file);
         console.log(file);
       }
     } finally {
