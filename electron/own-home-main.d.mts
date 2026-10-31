@@ -54,6 +54,8 @@ export function installOwnHome(deps: {
   origin(): string | null;
   underWay(): { phase: string; name: string } | null;
   home(): { id: string; origin: string; environmentId: string; name: string } | null;
+  /** A server connected by hand whose fresh word is that it is this person's alone. */
+  owns(place: unknown): boolean;
   offers(place: unknown): boolean;
   refresh(): void;
   start(id: string): Promise<{ started: true }>;
