@@ -13,6 +13,11 @@ vi.mock("node:child_process", async () => ({
   spawn: spawnMock,
 }));
 
+vi.mock("./vps-ssh.ts", async () => ({
+  ...(await vi.importActual<typeof import("./vps-ssh.ts")>("./vps-ssh.ts")),
+  ensureVpsSshMaster: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   BASE_IMAGE,
   BASE_IMAGE_DIGEST,
@@ -1184,23 +1189,103 @@ describe("VPS computer", () => {
 
 // A real loopback listener stands in for SSH; no host or remote daemon is used.
 describe("remote desktop tunnel ownership", () => {
-  async function openFixture() {
-    let server: Server | undefined;
-    const child = Object.assign(new EventEmitter(), {
-      exitCode: null as number | null, killed: false, stderr: new PassThrough(),
-      kill: vi.fn(() => { child.killed = true; server?.close(); child.emit("close", 0); return true; }),
-    });
-    spawnMock.mockImplementation((_binary, args: string[]) => {
+  function tunnelFixture() {
+    const children: ReturnType<typeof fakeTunnel>[] = [];
+    function fakeTunnel(args: string[]) {
       const port = Number(args[args.indexOf("-L") + 1].split(":")[1]);
-      server = createServer(socket => socket.end()).listen(port, "127.0.0.1");
+      const server: Server = createServer(socket => socket.end()).listen(port, "127.0.0.1");
+      const child = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null, killed: false, stderr: new PassThrough(),
+        kill: vi.fn(() => { child.killed = true; server.close(); child.emit("close", 0); return true; }),
+      });
+      return child;
+    }
+    spawnMock.mockImplementation((_binary, args: string[]) => {
+      const child = fakeTunnel(args);
+      children.push(child);
       return child;
     });
-    const runner = fixture().runner;
+    return { children, runner: fixture().runner, cleanup: () => {
+      closeAllVpsDesktopTunnels();
+      for (const child of children) if (!child.killed) child.kill();
+    } };
+  }
+
+  async function openFixture() {
+    const { children, runner, cleanup } = tunnelFixture();
     try {
       await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
-      return { child, runner };
-    } catch (error) { child.kill(); throw error; }
+      return { child: children[0]!, runner };
+    } catch (error) { cleanup(); throw error; }
   }
+
+  it("shares one pending tunnel between concurrent remote and native joins", async () => {
+    const { children, runner, cleanup } = tunnelFixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const inspecting = new Promise<void>(resolve => { entered = resolve; });
+    let inspections = 0;
+    const blocked: VpsCommandRunner = async (args, options) => {
+      if (args[2] === "image") { inspections++; entered(); await gate; }
+      return runner(args, options);
+    };
+    try {
+      const first = vpsComputerJoin(CONFIG, BOT_ID, blocked, true);
+      await inspecting;
+      const second = vpsComputerJoin(CONFIG, BOT_ID, blocked);
+      release();
+      const joined = await Promise.all([first, second]);
+      expect(joined[0].joinUrl).toBe(joined[1].joinUrl);
+      expect(inspections).toBe(1);
+      expect(children).toHaveLength(1);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const leave = vpsDesktopConnection(BOT_ID)!.retain();
+      leave();
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(children[0]!.killed).toBe(false);
+      closeAllVpsDesktopTunnels();
+      expect(children.every(child => child.killed)).toBe(true);
+    } finally { release(); cleanup(); vi.useRealTimers(); }
+  });
+
+  it("ignores an old tunnel's queued expiry and close after replacement", async () => {
+    const { children, runner, cleanup } = tunnelFixture();
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    try {
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      const expired = timers.mock.calls.find(([, delay]) => delay === 30_000)![0] as () => void;
+      closeAllVpsDesktopTunnels();
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      expired();
+      children[0]!.emit("close", 0);
+      expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
+      expect(children[1]!.killed).toBe(false);
+    } finally { timers.mockRestore(); cleanup(); }
+  });
+
+  it("cancels pending joins when all tunnels close and allows a fresh join", async () => {
+    const { children, runner, cleanup } = tunnelFixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const inspecting = new Promise<void>(resolve => { entered = resolve; });
+    const blocked: VpsCommandRunner = async (args, options) => {
+      if (args[2] === "image") { entered(); await gate; }
+      return runner(args, options);
+    };
+    const first = vpsComputerJoin(CONFIG, BOT_ID, blocked, true);
+    const rejected = expect(first).rejects.toThrow(/closed|cancel/i);
+    try {
+      await inspecting;
+      closeAllVpsDesktopTunnels();
+      release();
+      await rejected;
+      expect(children).toHaveLength(0);
+      await expect(vpsComputerJoin(CONFIG, BOT_ID, runner, true)).resolves.toMatchObject({ state: "running" });
+      expect(children).toHaveLength(1);
+    } finally { release(); cleanup(); }
+  });
 
   it("retains multiple tabs, survives reconnect, then reclaims the idle tunnel", async () => {
     const { child } = await openFixture();

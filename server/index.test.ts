@@ -169,6 +169,8 @@ let setupAnswersDump: string;
 let fakeDockerFixture: string;
 let fakeVpsFixture: string;
 let fakeDockerLog: string;
+let fakeSshLog: string;
+let fakeSshUnavailable: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias?: string; status: string; toolkit: { slug: string } }> = [];
 let connectorAccountsGate: DeferredGate | null = null;
@@ -402,6 +404,8 @@ beforeAll(async () => {
   fakeDockerFixture = join(home, ".openmausbot", "fake-unmanaged-container");
   fakeVpsFixture = join(home, ".openmausbot", "fake-vps-container.json");
   fakeDockerLog = join(home, ".openmausbot", "fake-docker-calls.log");
+  fakeSshLog = join(home, ".openmausbot", "fake-ssh-calls.log");
+  fakeSshUnavailable = join(home, ".openmausbot", "fake-ssh-unavailable");
   mkdirSync(fakeDockerDir, { recursive: true });
   writeFileSync(fakeDockerProgram, [
     'import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";',
@@ -450,6 +454,22 @@ beforeAll(async () => {
       { mode: 0o755 },
     );
     chmodSync(join(fakeDockerDir, "docker"), 0o755);
+    const fakeSshProgram = join(fakeDockerDir, "ssh-empty.mjs");
+    writeFileSync(fakeSshProgram, [
+      'import { appendFileSync, existsSync } from "node:fs";',
+      'const args = process.argv.slice(2);',
+      `appendFileSync(${JSON.stringify(fakeSshLog)}, JSON.stringify(args) + "\\n");`,
+      `if (existsSync(${JSON.stringify(fakeSshUnavailable)})) { console.error("fixture SSH is unavailable"); process.exit(255); }`,
+      'if (args[0] === "-F") args.splice(0, 2);',
+      'if (args.length === 4 && args.slice(0, 3).join(" ") === "-O check --") process.exit(255);',
+      'if (args.length === 8 && args.slice(0, 6).join(" ") === "-o BatchMode=yes -o PermitLocalCommand=no -T --" && args[7] === "true") process.exit(0);',
+      'console.error("unexpected fixture SSH command"); process.exit(127);',
+    ].join("\n"));
+    writeFileSync(
+      join(fakeDockerDir, "ssh"),
+      `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeSshProgram)} "$@"\n`,
+      { mode: 0o755 },
+    );
   }
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
@@ -10640,6 +10660,7 @@ describe("harness HTTP API", () => {
       const deleted = await api("DELETE", `/api/bots/${bot.id}`);
 
       expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(deleted.body).not.toHaveProperty("notice");
       expect(readFileSync(fakeDockerLog, "utf8").split("\n")).toContain(
         `-H ssh://fixture-vps rm -f ${containerId}`,
       );
@@ -10652,6 +10673,43 @@ describe("harness HTTP API", () => {
       rmSync(fakeDockerLog, { force: true });
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
       await api("PUT", "/api/config", { vps: { sshAlias: "" } }).catch(() => undefined);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("saves a first VPS alias offline and reports its computer left behind on SSH failure", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const containerName = managedVpsNameForFixture(bot.id);
+    try {
+      writeFileSync(fakeSshUnavailable, "");
+      rmSync(fakeSshLog, { force: true });
+      rmSync(fakeDockerLog, { force: true });
+
+      const saved = await api("PUT", "/api/config", { vps: { sshAlias: "fixture-vps" } });
+      expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+      expect(existsSync(fakeSshLog)).toBe(false);
+      writeFileSync(fakeVpsFixture, JSON.stringify({ id: "a".repeat(64), name: containerName }));
+
+      const deleted = await api("DELETE", `/api/bots/${bot.id}`);
+      expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(deleted.body.notice).toContain("fixture-vps could not be reached");
+      expect(deleted.body.notice).toContain(`docker -H ssh://fixture-vps rm -f ${containerName}`);
+      expect(existsSync(fakeVpsFixture)).toBe(true);
+      expect(existsSync(fakeDockerLog)).toBe(false);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
+
+      const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
+      expect(cleared.status).toBe(503);
+      expect(cleared.body.error).toContain("fixture SSH is unavailable");
+      expect(cleared.body.error).toContain("Keep the current SSH config alias");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("fixture-vps");
+    } finally {
+      rmSync(fakeSshUnavailable, { force: true });
+      rmSync(fakeVpsFixture, { force: true });
+      rmSync(fakeDockerLog, { force: true });
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
     }
   });
 
