@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, posix, win32 } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../shared/redact.ts";
 import { BROWSER_VIEWPORT } from "./browser-page-size.ts";
@@ -1056,7 +1056,7 @@ describe("browser launch settings", () => {
     }
   });
 
-  it("keeps the Node version fnm selects part of the launch settings", () => {
+  it("keys the Node version fnm selects in both PATH forms", () => {
     const root = mkdtempSync(join(tmpdir(), "omb-fnm-"));
     try {
       const state = join(root, "state", "fnm_multishells");
@@ -1069,29 +1069,47 @@ describe("browser launch settings", () => {
         mkdirSync(state, { recursive: true });
         const path = join(state, id);
         symlinkSync(target, path, process.platform === "win32" ? "junction" : undefined);
-        return join(path, "bin");
+        return path;
       };
       const older = install("v20.18.0");
       const newer = install("v22.12.0");
-      const first = link("4101_1793469937867", older);
-      const second = link("4102_1793470001123", older);
-      const upgraded = link("4103_1793470009999", newer);
-      const key = (...entries: string[]) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: entries.join(delimiter) } });
-      expect(key(first, "/usr/bin")).toBe(key(second, "/usr/bin"));
-      expect(key(first, "/usr/bin")).not.toBe(key(upgraded, "/usr/bin"));
+      const firstLink = link("4101_1793469937867", older);
+      const secondLink = link("4102_1793470001123", older);
+      const upgradeLink = link("4103_1793470009999", newer);
+      // Unix puts the link's bin on PATH, Windows the link itself.
+      const forms = [(path: string) => join(path, "bin"), (path: string) => path];
+      for (const onPath of forms) {
+        const key = (...entries: string[]) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: entries.join(delimiter) } });
+        expect(key(onPath(firstLink), "/usr/bin")).toBe(key(onPath(secondLink), "/usr/bin"));
+        expect(key(onPath(firstLink), "/usr/bin")).not.toBe(key(onPath(upgradeLink), "/usr/bin"));
+      }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it("leaves ordinary PATH entries exactly as they were", () => {
     const key = (path: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: path } });
-    expect(key("/usr/bin:/bin")).toBe(JSON.stringify(["chrome", [], [["PATH", "/usr/bin:/bin"]]]));
-    expect(key("/usr/bin:/bin")).not.toBe(key("/usr/bin:/usr/bin:/bin"));
-    expect(key("/usr/bin:/bin")).not.toBe(key("/bin:/usr/bin"));
+    const path = joined("/usr/bin", "/bin");
+    expect(key(path)).toBe(JSON.stringify(["chrome", [], [["PATH", path]]]));
+    expect(key(path)).not.toBe(key(joined("/usr/bin", "/usr/bin", "/bin")));
+    expect(key(path)).not.toBe(key(joined("/bin", "/usr/bin")));
   });
 
   it("treats an fnm link that is already gone as one stable entry", () => {
-    const key = (id: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: `/nowhere/fnm_multishells/${id}/bin:/usr/bin` } });
-    expect(key("1_1")).toBe(key("2_2"));
+    // Literal paths so the case reads the same on every host: the link cannot resolve either way.
+    const forms: Array<[NodeJS.Platform, (id: string) => string]> = [
+      ["darwin", (id) => `/nowhere/fnm_multishells/${id}/bin`],
+      ["win32", (id) => `/nowhere/fnm_multishells/${id}`],
+    ];
+    for (const [platform, entry] of forms) {
+      const separator = (platform === "win32" ? win32 : posix).delimiter;
+      const key = (id: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: [entry(id), "/usr/bin"].join(separator) } }, platform);
+      expect(key("1_1"), platform).toBe(key("2_2"));
+    }
+  });
+
+  it("does not fold a directory below the link into the link's target", () => {
+    const key = (id: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: joined(`/nowhere/fnm_multishells/${id}/bin/extra`, "/usr/bin") } });
+    expect(key("1_1")).not.toBe(key("2_2"));
   });
 });
 

@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { delimiter } from "node:path";
+import { posix, win32 } from "node:path";
 import { killCliTree, spawnCli } from "./procs.ts";
 import { scrubHeldSecrets } from "../shared/redact.ts";
 import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
@@ -58,8 +58,9 @@ const RESTART_COST = "a restart closes every tab and loses page state such as fo
 const LATE = Symbol("late");
 
 /** fnm's shell hook (`fnm env`, which a person's profile runs) puts a per-shell `<pid>_<epoch-ms>` link to the active
- * Node version on PATH: the link's name says nothing, the installation it resolves to does. */
-const FNM_PER_SHELL = /(?:^|[\\/])fnm_multishells[\\/][^\\/]+[\\/]bin[\\/]?$/u;
+ * Node version on PATH: the link's name says nothing, the installation it resolves to does. Unix puts the link's
+ * `bin` on PATH, Windows the link itself. */
+const FNM_PER_SHELL = /(?:^|[\\/])fnm_multishells[\\/][^\\/]+(?:[\\/]bin)?[\\/]?$/u;
 const FNM_UNRESOLVED = "fnm-multishell";
 
 function fnmTarget(entry: string): string {
@@ -67,12 +68,10 @@ function fnmTarget(entry: string): string {
   catch { return FNM_UNRESOLVED; }
 }
 
-/** PATH with each fnm link replaced by the Node installation it points at, so the same version read from two shells
- * compares equal and another version does not. Every other entry stays as it is, duplicates included. */
-function stablePath(path: string): string {
+function stablePath(path: string, platform: NodeJS.Platform): string {
   const entries: string[] = [];
   const seen = new Set<string>();
-  for (const entry of path.split(delimiter)) {
+  for (const entry of path.split((platform === "win32" ? win32 : posix).delimiter)) {
     if (!FNM_PER_SHELL.test(entry)) {
       entries.push(entry);
       continue;
@@ -82,14 +81,14 @@ function stablePath(path: string): string {
     seen.add(target);
     entries.push(target);
   }
-  return entries.join(delimiter);
+  return entries.join((platform === "win32" ? win32 : posix).delimiter);
 }
 
 /** A running browser answers only the launch settings it started with: agent-browser relaunches Chrome without a word
  * when a command carries others, so a call with different ones is refused instead. */
-export function launchSettingsKey(spec: BrowserSpawnSpec): string {
+export function launchSettingsKey(spec: BrowserSpawnSpec, platform: NodeJS.Platform = process.platform): string {
   const env = Object.entries(spec.env)
-    .map(([name, value]) => [name, name === "PATH" && value !== undefined ? stablePath(value) : value] as const)
+    .map(([name, value]) => [name, name === "PATH" && value !== undefined ? stablePath(value, platform) : value] as const)
     .sort(([a], [b]) => a.localeCompare(b));
   return JSON.stringify([spec.command, spec.args, env]);
 }
