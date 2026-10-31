@@ -191,6 +191,43 @@ posixOnly("mid-turn steering e2e", () => {
     40_000,
   );
 
+  it("a message sent with queue: true during a Claude turn waits for it instead of steering, then runs as its own turn", async () => {
+    rmSync(steerFinishGate, { force: true });
+    let queued: Awaited<ReturnType<typeof api>>;
+    const created = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+      queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "a new task for later", queue: true });
+      expect((await getBot(created.id)).busy).toBe(true);
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
+    expect(queued.status).toBe(202);
+    expect(queued.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
+    expect(queued.body.steered).toBeUndefined();
+
+    await waitFor(async () => {
+      const bot = await getBot(created.id);
+      return !bot.busy && bot.messages.some((m: any) => m.role === "user" && m.text === "a new task for later");
+    }, "the queued message to run after the first turn");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the queued turn to settle");
+    const bot = await getBot(created.id);
+    const later = bot.messages.find((m: any) => m.role === "user" && m.text === "a new task for later");
+    expect(later.steered).toBeUndefined();
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("steered: a new task for later"))).toBe(false);
+    const users = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text);
+    expect(users).toEqual(["first", "a new task for later"]);
+  }, 40_000);
+
+  it("refuses a queue flag that is not a boolean", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    const refused = await api("POST", `/api/bots/${created.id}/messages`, { text: "hi", queue: "yes" });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe("queue must be true or false");
+  });
+
   it("a typed stop during a Claude turn ends it like Stop, and a longer message that starts with stop is still steered", async () => {
     rmSync(steerFinishGate, { force: true });
     try {

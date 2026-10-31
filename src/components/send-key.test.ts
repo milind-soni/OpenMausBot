@@ -225,6 +225,41 @@ describe("the send key in hints", () => {
     expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter queues your message");
   });
 
+  it("lets one message wait for a busy 1:1 bot that steers, by its button or Alt with the send key", () => {
+    fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo];
+    const queueButton = () => host.querySelector<HTMLButtonElement>("button[data-composer-queue-instead]");
+    render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
+    expect(queueButton()).toBeNull();
+
+    type(textarea(), "a new task for later");
+    expect(queueButton()?.getAttribute("title")).toContain("(Alt+Enter)");
+    expect(press(textarea(), { altKey: true }).defaultPrevented).toBe(true);
+    expect(sends().at(-1)).toMatchObject({ type: "send", text: "a new task for later", queue: true });
+
+    type(textarea(), "a correction for now");
+    press(textarea());
+    expect(sends().at(-1)).toMatchObject({ type: "send", text: "a correction for now" });
+    expect(sends().at(-1)).not.toHaveProperty("queue");
+
+    type(textarea(), "queued by the button");
+    flushSync(() => queueButton()!.click());
+    expect(sends().at(-1)).toMatchObject({ type: "send", text: "queued by the button", queue: true });
+  });
+
+  it("offers no queue-instead choice to a bot that cannot steer, or in a room", () => {
+    fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: false } } as unknown as InstanceInfo];
+    render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
+    type(textarea(), "hi");
+    expect(host.querySelector("button[data-composer-queue-instead]")).toBeNull();
+    press(textarea(), { altKey: true });
+    expect(sends().at(-1)).not.toHaveProperty("queue");
+
+    fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo];
+    render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [bot] }));
+    type(textarea(), "hi");
+    expect(host.querySelector("button[data-composer-queue-instead]")).toBeNull();
+  });
+
   it("names the key in Japanese hints too", () => {
     fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo];
     setSendKey("mod-enter");

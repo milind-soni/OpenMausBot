@@ -68,6 +68,7 @@ export interface BotMessageRouteDeps {
       botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
       trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
       app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
+      queueRequested?: boolean;
     },
     guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
   ): Promise<DirectSendReceipt>;
@@ -191,6 +192,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pressed && fromAnApp) return json(res, 400, { error: "send widgetAction or appMessage, not both" });
       const pointing = body.pointed !== undefined && body.pointed !== null;
       if (pointing && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry what the person pointed at" });
+      if (body.queue !== undefined && typeof body.queue !== "boolean") return json(res, 400, { error: "queue must be true or false" });
+      if (body.queue === true && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can wait for the running turn" });
       // A distinct route, so an older server answers 404 instead of ignoring the safety preconditions.
       const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
       if (guardedBody && !guardedBody.success) {
@@ -316,6 +319,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
           // paired session or the desktop capability proves a person and lifts the webhook block.
           personPresent: auth.kind === "session" || DESKTOP_MANAGED,
+          queueRequested: body.queue === true,
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();

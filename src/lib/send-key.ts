@@ -35,6 +35,18 @@ export function sendKeyLabel(mode: SendKey, mac: boolean = isMacPlatform()): str
   return mode === "enter" ? "Enter" : mode === "shift-enter" ? "Shift+Enter" : mac ? "⌘+Enter" : "Ctrl+Enter";
 }
 
+/** The send key held with Alt (Option on a Mac): while a bot works, the message waits for the running turn instead of joining it. */
+export function queuesMessage(
+  event: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey" | "isComposing" | "keyCode">,
+  mode: SendKey,
+): boolean {
+  return event.altKey && sendsMessage(event, mode);
+}
+
+export function queueKeyLabel(mode: SendKey, mac: boolean = isMacPlatform()): string {
+  return `${mac ? "⌥" : "Alt"}+${sendKeyLabel(mode, mac)}`;
+}
+
 let sessionChoice: SendKey | undefined;
 const listeners = new Set<() => void>();
 

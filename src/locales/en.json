@@ -2660,6 +2660,8 @@
   "composer.send.queueHint": "Sends when the current turn finishes",
   "composer.send.steerSimple": "Add this to what {name} is doing",
   "composer.send.queueSimple": "Sends when {name} is done",
+  "composer.send.queueInstead": "Queue for after this turn ({key})",
+  "composer.send.queueInsteadSimple": "Send when {name} is done instead ({key})",
   "attach.unavailableOld": "This older file reference is no longer available to download",
   "attach.downloadFailed": "Couldn't download that file. Try again.",
   "attach.saveFailed": "That file could not be saved",
