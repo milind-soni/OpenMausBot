@@ -247,6 +247,9 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_ASK_TIMING;
     delete process.env.FAKE_ACP_HOLD_ON_CANCELLED;
     delete process.env.FAKE_ACP_CANCEL_STOP_REASON;
+    delete process.env.omb_brave_search_api_key;
+    delete process.env.OmB_BrAvE_SeArCh_ApI_KeY;
+    delete process.env.OMB_BRAVE_SEARCH_API_KEY;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CLINE_API_KEY;
@@ -1089,6 +1092,9 @@ describe("ACP turns (fake CLI)", () => {
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_ACP_DUMP = dump;
+    process.env.OMB_BRAVE_SEARCH_API_KEY = "synthetic-brave";
+    process.env.omb_brave_search_api_key = "synthetic-brave-lower";
+    process.env.OmB_BrAvE_SeArCh_ApI_KeY = "synthetic-brave-mixed";
     process.env.XAI_API_KEY = "xai-should-not-leak";
     process.env.OPENCODE_API_KEY = "opencode-should-not-leak";
     process.env.CLINE_API_KEY = "cline-should-not-leak";
@@ -1105,6 +1111,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(seen.argv).toContain("agent");
     expect(seen.argv).toContain("stdio");
     expect(seen.argv).toContain("--permission-mode");
+    for (const name of ["OMB_BRAVE_SEARCH_API_KEY", "omb_brave_search_api_key", "OmB_BrAvE_SeArCh_ApI_KeY"]) expect(seen.env[name]).toBeUndefined();
     expect(seen.env.XAI_API_KEY).toBeUndefined();
     expect(seen.env.OPENCODE_API_KEY).toBeUndefined();
     expect(seen.env.CLINE_API_KEY).toBeUndefined();

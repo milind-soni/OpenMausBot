@@ -993,7 +993,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         capabilities: {
           sessionModelSwitch: "in-session",
           // pi core has no MCP client of its own.
-          agentsMcp: true,
+          agentsMcp: true, webSearch: true,
           computerMcp: true,
           composioMcp: true,
           phoneMcp: true,

@@ -201,6 +201,12 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
   });
 
+  it.each<JsonValue>([{ searxngUrl: "https://search.example/?q=oops" }, { braveApiKey: "invalid key" }, "not-an-object"])("drops invalid stored webSearch without losing other settings: %j", webSearch => {
+    const other = { profile: { name: "Ada" }, features: { browser: false }, instances: { local: { driver: "openai-compat" } } };
+    expect(parseStoredConfig({ ...other, webSearch })).toEqual({ ...other, webSearch: {} });
+    expect(() => parseConfigPatch({ webSearch })).toThrow("webSearch");
+  });
+
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
     expect(() => parseStoredConfig({ browserProfiles: [{ id: "../evil", name: "Unsafe" }] })).toThrow(
@@ -724,6 +730,23 @@ describe("saving the newer sections", () => {
         billing: { currency: "EUR", prices: { "gpt-5": { inputPerMillion: 3, outputPerMillion: 4 } } },
       });
       expect(disk.billing.prices.default).toBeUndefined();
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("drops a hand-edited invalid web search field instead of keeping it through every save", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ webSearch: { braveApiKey: "invalid key", searxngUrl: "https://search.example/" } }));
+    try {
+      saveConfig({ webSearch: { searxngUrl: "https://search2.example/" } });
+      let disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.webSearch).toEqual({ searxngUrl: "https://search2.example/" });
+      expect(parseStoredConfig(disk).webSearch).toEqual({ searxngUrl: "https://search2.example/" });
+      saveConfig({ webSearch: { braveApiKey: "good-key" } });
+      disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.webSearch).toEqual({ searxngUrl: "https://search2.example/", braveApiKey: "good-key" });
     } finally {
       rmSync(path, { force: true });
     }

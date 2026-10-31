@@ -25,6 +25,7 @@ type ChatMessage = { role: string; content?: unknown; tool_call_id?: string; too
 type ChatRequest = { messages: ChatMessage[]; tools?: Array<{ function: { name: string } }> };
 const requests: ChatRequest[] = [];
 let pendingSelect: { surface: string } | null = null;
+let pendingSearch = false;
 
 const frame = (delta: unknown, finish_reason: string | null) =>
   `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -108,6 +109,10 @@ beforeAll(async () => {
     res.writeHead(200, { "content-type": "text/event-stream" });
     if (toolResult) {
       res.end(frame({ content: "Selection acknowledged; waiting for the new surface." }, "stop") + "data: [DONE]\n\n");
+    } else if (pendingSearch) {
+      pendingSearch = false;
+      const call = { index: 0, id: "search-call", type: "function", function: { name: "agents_web_search", arguments: JSON.stringify({ query: "fixture" }) } };
+      res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
     } else if (pendingSelect) {
       const call = { index: 0, id: "select-call", type: "function", function: { name: "agents_select_computer", arguments: JSON.stringify({ surface: pendingSelect.surface }) } };
       pendingSelect = null;
@@ -176,6 +181,39 @@ afterAll(async () => {
 });
 
 describe("openai-compat Local VM tools", () => {
+  it("keeps web search listed after backend removal and misconfiguration, and explains failed calls", async () => {
+    requests.length = 0;
+    const { bot } = await api("POST", "/api/bots", { name: "search conversation" });
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" });
+    await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "openaiCompat", model: "fixture-model" });
+    try {
+      await api("PUT", "/api/config", { webSearch: { braveApiKey: "synthetic-search-key" } });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "First turn." });
+      await until(() => requests.length, count => count >= 1);
+      await idle(bot.id);
+      const tools = JSON.stringify(requests[0]!.tools);
+      expect(toolNames(requests[0])).toContain("agents_web_search");
+      for (const [settings, error] of [
+        [{ braveApiKey: "", searxngUrl: "" }, /web search is not configured/i],
+        [{ searxngUrl: "http://8.8.8.8/" }, /SearXNG HTTP requires loopback or private addresses/],
+      ] as const) {
+        await api("PUT", "/api/config", { webSearch: settings });
+        const start = requests.length;
+        pendingSearch = true;
+        await api("POST", `/api/bots/${bot.id}/messages`, { text: "Search for fixture." });
+        await until(() => requests.length, count => count >= start + 2);
+        await idle(bot.id);
+        for (const request of requests.slice(start)) expect(JSON.stringify(request.tools)).toBe(tools);
+        const result = requests.at(-1)!.messages.filter(message => message.role === "tool").at(-1);
+        expect(JSON.stringify(result?.content)).toMatch(error);
+      }
+    } finally {
+      pendingSearch = false;
+      await api("PUT", "/api/config", { webSearch: { braveApiKey: "", searxngUrl: "" } });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  }, 60_000);
+
   it("mounts the Local VM tools on a strict Works on: Local VM turn", async () => {
     vmState({ containers: [] });
     requests.length = 0;

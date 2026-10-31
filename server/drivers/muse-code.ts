@@ -278,7 +278,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
     /** `muse login`'s saved sign-in; META_API_KEY only when this instance was given one. */
     const childEnv = (): NodeJS.ProcessEnv => {
       const env: Record<string, string | undefined> = { ...process.env, ...input.environment, PATH: augmentedPath(), MUSE_NO_AUTO_UPDATE: "1" };
-      for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) delete env[key];
+      for (const key of Object.keys(env)) if (([...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV] as readonly string[]).includes(key.toUpperCase())) delete env[key];
       stripControlPlaneEnv(env);
       if (input.environment.META_API_KEY) env.META_API_KEY = input.environment.META_API_KEY;
       return env;

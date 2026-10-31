@@ -576,5 +576,48 @@
       "find_tool",
       "use_tool"
     ]
+  },
+  "default+search": {
+    "bytes": 16586,
+    "sha256": "8e4334c156da2dd28a9e02acda4331374de538d370abbac3ec699e582a15abf6",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice+escalations+x+team+search": {
+    "bytes": 17529,
+    "sha256": "1e92bdf759421b15911ef19e996616530a749607e7383da744d2af828f705823",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
   }
 }

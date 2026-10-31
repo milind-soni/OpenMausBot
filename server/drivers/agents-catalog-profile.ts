@@ -9,6 +9,8 @@ export interface CatalogProfile {
   /** A treg key or a Cloud plan's research credential is held and this bot's research switch is on: x_search is mounted.
    * Absent means off. */
   xResearch?: boolean;
+  /** The runtime needs configured search and the bot permits its agents tool. */
+  webSearch?: boolean;
   /** As xResearch, and research works for that credential (the person's treg key, or a plan whose relay has research
    * on): research_search, research_endpoint and research_call are mounted too. Absent means off. */
   research?: boolean;
@@ -39,6 +41,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
     xResearch: env.OMB_X_RESEARCH === "1",
+    webSearch: env.OMB_WEB_SEARCH === "1",
     research: env.OMB_RESEARCH === "1",
     cloudHome: env.OMB_CLOUD_HOME === "1",
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",

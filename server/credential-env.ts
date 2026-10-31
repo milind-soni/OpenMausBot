@@ -27,7 +27,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_WORKERS_AI_TOKEN",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
-  "OMB_OPENAI_LIVE_KEY", "OMB_TREG_KEY", "OMB_POSTIZ_API_KEY",
+  "OMB_OPENAI_LIVE_KEY", "OMB_TREG_KEY", "OMB_POSTIZ_API_KEY", "OMB_BRAVE_SEARCH_API_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_CLOUD_BOAT_TOKEN",
@@ -51,7 +51,7 @@ export function stripControlPlaneEnv(env: Record<string, string | undefined>): v
 }
 
 export function stripWorkspaceCredentialEnv(env: Record<string, string | undefined>): void {
-  for (const key of WORKSPACE_CREDENTIAL_ENV) delete env[key];
+  for (const key of Object.keys(env)) if ((WORKSPACE_CREDENTIAL_ENV as readonly string[]).includes(key.toUpperCase())) delete env[key];
   stripControlPlaneEnv(env);
 }
 

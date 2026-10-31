@@ -62,6 +62,8 @@ function profiles(): Record<string, Profile> {
   // A chat that can never pick its computer: its Works on is Off, or it works on its team's computer. A room is one too.
   all["default+no-computer-pick"] = { env: { ...all.default!.env, OMB_COMPUTER_SELECTION: "0" } };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { env: { ...all[name]!.env, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" } };
+  all["default+search"] = { env: { ...all.default!.env, OMB_WEB_SEARCH: "1" } };
+  all["skills+shared+voice+escalations+x+team+search"] = { env: { ...all["skills+shared+voice+escalations+x+team"]!.env, OMB_WEB_SEARCH: "1" } };
   return all;
 }
 
@@ -77,7 +79,7 @@ const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "res
 /** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
 const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
-const FULL = "skills+shared+voice+escalations+x+team";
+const FULL = "skills+shared+voice+escalations+x+team+search";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
@@ -108,6 +110,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+no-computer-pick": 55584,
   "default+room": 48666,
   "non-chief+room": 39609,
+  "default+search": 57937,
+  "skills+shared+voice+escalations+x+team+search": 69069,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -243,10 +247,15 @@ describe("agents proxy tools/list golden", () => {
 
   it("mounts message_person only on a Team Cloud, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires[FULL]!).filter((tool) => tool !== "message_person")).toEqual(names(wires["skills+shared+voice+escalations+x"]!));
+    expect(names(wires["skills+shared+voice+escalations+x+team"]!).filter((tool) => tool !== "message_person")).toEqual(names(wires["skills+shared+voice+escalations+x"]!));
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(wires[name]!).includes("message_person"), name).toBe(profile.env.OMB_TEAM_PEOPLE === "1");
     }
+  });
+
+  it("adds configured search only with its harness switch", () => {
+    for (const [name, profile] of Object.entries(PROFILES)) expect(toolsOf(wires[name]!).some(tool => tool.name === "web_search"), name).toBe(profile.env.OMB_WEB_SEARCH === "1");
+    expect(toolsOf(wires["default+search"]!).filter(tool => tool.name !== "web_search")).toEqual(toolsOf(wires.default!));
   });
 
   it("mounts ask_for_computer only on a person's own Cloud that is lent their computer, never a Team Cloud", () => {

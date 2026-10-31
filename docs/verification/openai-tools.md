@@ -199,3 +199,54 @@ The fixture also holds the Boat readiness response: the execution stays busy,
 `wait` cannot report it settled, and Stop prevents dispatch when the response
 arrives. Readiness is part of generation-owned setup, not an untracked wait
 before turn admission.
+
+## Configured web search
+
+API runtimes and Pi receive `web_search` when their engine capability and bot
+tool selection permit it. Backend settings do not change a conversation's tool list. Connections with `tools: false`, native-search
+engines and unknown ACP engines keep their existing tools. The adapter must opt
+in with `webSearch`; the harness sends only the `OMB_WEB_SEARCH` availability bit.
+
+In Settings → Connections, set a SearXNG base URL or a Brave Search API key.
+The same settings are `webSearch.searxngUrl` and `webSearch.braveApiKey` in
+`config.json`. `OMB_BRAVE_SEARCH_API_KEY` can supply the key on the server.
+SearXNG takes priority. With neither configured, the listed tool returns
+"Web search is not configured." Invalid backend settings return a specific error.
+A failed SearXNG request never falls back to Brave.
+
+OMB stores Brave result text in conversation history and keeps it for as long as
+that history. Choose a Brave API plan with **storage rights** that permit this
+retention. See Brave's [storage FAQ](https://brave.com/search/api/#faq) and
+[API terms](https://api-dashboard.search.brave.com/terms-of-service).
+
+Enable `json` in `search.formats` in the instance's `settings.yml`.
+SearXNG's [Search API](https://docs.searxng.org/dev/search_api.html) uses
+`/search?format=json`; a disabled format returns HTTP 403.
+Its [main results](https://docs.searxng.org/dev/result_types/main/mainresult.html)
+provide `title`, `url` and `content`.
+The [Brave API](https://api-dashboard.search.brave.com/app/documentation/web-search/get-started)
+provides `web.results` with `title`, `url` and `description`.
+
+The owner-set SearXNG base URL must contain no credentials, query or fragment.
+HTTPS endpoints are trusted. HTTP requires every resolved address to be loopback,
+RFC1918 private IPv4 or IPv6 ULA. The request pins one checked address.
+Brave uses a fixed HTTPS endpoint with only public DNS answers. IPv6-mapped,
+NAT64, 6to4, Teredo and non-global IPv6 answers are refused.
+No redirects, cookies, environment proxies or arbitrary page fetches are used.
+
+Each request has a 15-second elapsed deadline and a 1 MiB body limit.
+Responses must be UTF-8 JSON; invalid bytes and unsupported charsets fail.
+At most ten validated HTTP(S) result links are returned as untrusted source data.
+The server admits one active request per bot and four globally. Fixed one-minute
+windows permit six attempts per bot and thirty globally. Excess calls return 429
+before DNS. Failed searches consume an attempt; active slots release in `finally`.
+Limits belong to one server process and reset after its restart.
+
+Run local fixtures without contacting search providers:
+
+```sh
+pnpm exec vitest run server/web-search.test.ts server/web-search-config.test.ts server/routes/web-search.test.ts server/drivers/agents-web-tools.test.ts
+```
+
+The full `server/index.test.ts` verifies internal authentication and native-engine
+refusal. These tests do not prove a live instance's policy, ranking or availability.

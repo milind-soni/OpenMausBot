@@ -67,6 +67,8 @@ function profiles(): Record<string, Record<string, string>> {
   for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
   all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { ...all[name]!, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" };
+  all["default+search"] = { ...all.default!, OMB_WEB_SEARCH: "1" };
+  all["skills+shared+voice+escalations+x+team+search"] = { ...all["skills+shared+voice+escalations+x+team"]!, OMB_WEB_SEARCH: "1" };
   return all;
 }
 
@@ -74,7 +76,7 @@ const PROFILES = profiles();
 /** Refused by the server to every bot that is not a Chief of Staff. */
 const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 /** The profile that mounts the most: its bridged list is checked in whole. */
-const FULL = "skills+shared+voice+escalations+x+team";
+const FULL = "skills+shared+voice+escalations+x+team+search";
 
 /** Bytes of each bridged list when its budget was last set. A list may not
  * exceed this by more than 2%, and may not undercut it by more than 2%
@@ -108,6 +110,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+no-computer-pick": 15341,
   "default+room": 15301,
   "non-chief+room": 15184,
+  "default+search": 16586,
+  "skills+shared+voice+escalations+x+team+search": 17529,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };

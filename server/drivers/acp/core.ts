@@ -331,8 +331,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const allowedCredentials = new Set(support.credentialEnv ?? []);
         // Foreign provider keys would flip billing off the CLI's login, and workspace credentials are
         // the harness's: only credentialEnv passes.
-        for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) {
-          if (!allowedCredentials.has(key)) delete env[key];
+        for (const key of Object.keys(env)) {
+          if (([...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV] as readonly string[]).includes(key.toUpperCase()) && !allowedCredentials.has(key.toUpperCase())) delete env[key];
         }
         stripControlPlaneEnv(env);
         support.transformEnv?.(env, activeConfig, instanceId, input.environment);
