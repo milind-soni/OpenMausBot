@@ -236,6 +236,9 @@ describe("a read-and-draft run", () => {
     const decisions = readFileSync(join(fixture.info.dataDir, "decisions", `${month}.ndjson`), "utf8");
     const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
     expect(Object.keys(dump.mcpConfig.mcpServers).sort()).toEqual(["agents", "composio", "ogb"]);
+    expect(dump.systemPrompt).not.toContain("Your enabled automations");
+    expect(dump.systemPrompt).not.toContain("Pause a temporary monitor");
+    expect(dump.systemPrompt).toContain("within its read-and-draft limits");
     const read = transcript.find((message) => message.kind === "activity" && String(message.tool?.output).includes("GMAIL_FETCH_EMAILS"));
     expect(String(read.tool.output)).toContain("[Records from a connected app (Gmail or Google Calendar).");
 

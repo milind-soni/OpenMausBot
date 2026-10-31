@@ -109,6 +109,7 @@ test("buying another Cloud: the plan, the name and the swatch go to the Admin, i
   await assert.rejects(f.client.addCloud({ tier: "pro", name: "" }), /Invalid Cloud/);
   await assert.rejects(f.client.addCloud({ tier: "pro", name: "Client B", color: "url(x)" }), /Invalid Cloud/);
   await assert.rejects(f.client.addCloud({ tier: "pro", interval: "week", name: "Client B" }), /Invalid Cloud/);
+  await assert.rejects(f.client.addCloud({ tier: "pro", name: "Client B", source: "https://evil.example.test" }), /Invalid Cloud/, "a source is one of the app's own");
   f.add = () => [200, { cloudId: "c-b", checkoutUrl: "https://evil.example.test/pay" }];
   assert.deepEqual(await f.client.addCloud({ tier: "pro", name: "Client B", color: "rose" }), { outcome: "failed" }, "only Dodo's own checkout ever opens");
   assert.deepEqual(f.browsers, []);
@@ -121,6 +122,9 @@ test("buying another Cloud: the plan, the name and the swatch go to the Admin, i
   assert.equal(JSON.stringify(opened.state).includes(CHECKOUT), false, "the checkout page stays in main");
   assert.equal(f.client.addLink(), CHECKOUT);
   assert.equal(f.delay, 3_000);
+  f.add = () => [409, { error: "checkout_conflict", addBlocked: "cap" }];
+  await f.client.addCloud({ tier: "pro", name: "Client C", source: "app_whats_new_team" });
+  assert.deepEqual(f.requests.at(-1).body, { tier: "pro", interval: "month", name: "Client C", source: "app_whats_new_team" }, "where the person started, for the Admin's funnel");
   f.session = { ...f.session, clouds: [PRIMARY, entry({ id: "c-b", name: "Client B", status: "checkout", origin: null })] };
   f.timer(); await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(f.delay, 3_000, "still waiting for the payment");

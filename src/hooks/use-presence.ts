@@ -14,7 +14,14 @@ function selection(state: AppState): string {
   return `${state.selectedId}\n${threadId ?? ""}`;
 }
 
-/** Tells the server the person is here, and opens the chat the answer names: the brief the Chief posted for this arrival. */
+/** The bot conversation open in front of the person, if one is. */
+function openChat(state: AppState): string | undefined {
+  const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
+  return bot ? bot.switchingTo ?? bot.threadId : undefined;
+}
+
+/** Tells the server the person is here and which chat they have open, and opens the chat the answer names: the brief the
+ * Chief posted for this arrival. */
 export function usePresence(state: AppState, dispatch: (action: Action) => void): void {
   const showThreads = useShowThreads();
   const lastPing = useRef<number | null>(null);
@@ -31,7 +38,8 @@ export function usePresence(state: AppState, dispatch: (action: Action) => void)
       lastPing.current = now;
       const sentFrom = selection(latest.current.state);
       sentLanguage.current = latest.current.language;
-      void api("/api/presence/active", { method: "POST", body: JSON.stringify(presenceBody(Intl.DateTimeFormat().resolvedOptions().timeZone, sentLanguage.current)) }).then((answer) => {
+      const body = presenceBody(Intl.DateTimeFormat().resolvedOptions().timeZone, sentLanguage.current, openChat(latest.current.state));
+      void api("/api/presence/active", { method: "POST", body: JSON.stringify(body) }).then((answer) => {
         const live = latest.current;
         const target = existingThreadTarget(openTarget(answer), live.state);
         if (target && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);

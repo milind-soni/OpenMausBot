@@ -4,6 +4,7 @@
  */
 import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
 import type { RoomHold, RoomHeldMessage } from "../shared/wire.ts";
+import { isServerLine, serverLine } from "./server-lines.ts";
 
 const STOP_WINDOW = 2;
 const STOP_WORDS = new Set(["stop", "halt", "pause"]);
@@ -147,10 +148,11 @@ export function rememberHeldMessage(
   return { ...heldMessages, [botId]: [...current, entry].slice(-MAX_HELD_MESSAGES) };
 }
 
-export function heldMemberLine(name: string): string {
-  return `${name} is held (stopped by you) — @mention it or say resume`;
+/** The room's status row for a held member, in the room's language; a coordinator reads it in English. */
+export function heldMemberLine(name: string, language?: string): string {
+  return serverLine(language, "server.rooms.held", { bot: name });
 }
 
 export function isHeldMemberLine(text: string): boolean {
-  return text.endsWith(" is held (stopped by you) — @mention it or say resume");
+  return isServerLine("server.rooms.held", text);
 }

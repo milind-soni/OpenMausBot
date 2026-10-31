@@ -103,7 +103,55 @@ test("selected folders are read-only; writes require an explicit grant and fresh
   assert.equal(await readFile(path.join(dir, "note.txt"), "utf8"), "ok");
   await run({ action: "write_file", path: "new.txt", content: "new" });
   assert.equal(await readFile(path.join(dir, "new.txt"), "utf8"), "new");
-  await assert.rejects(run({ action: "delete_file", path: "note.txt" }), /Unsupported/);
+});
+
+test("a passage is edited, lines appended and a file deleted only where writes are lent, guarded like an overwrite", async t => {
+  const { dir, folder, run } = await fixture(t);
+  await writeFile(path.join(dir, "rules.md"), "keep\nWhere: Mac\nkeep\n");
+  await writeFile(path.join(dir, "old.tmp"), "");
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "Where: Mac", new_text: "Where: Cloud" }), /read-only/);
+  await assert.rejects(run({ action: "append_file", path: "log.txt", content: "x" }), /read-only/);
+  await assert.rejects(run({ action: "delete_file", path: "old.tmp", expected_sha256: "0".repeat(64) }), /read-only/);
+  folder.write = true;
+
+  const edited = payload(await run({ action: "edit_file", path: "rules.md", old_text: "Where: Mac", new_text: "Where: Cloud" }));
+  assert.equal(await readFile(path.join(dir, "rules.md"), "utf8"), "keep\nWhere: Cloud\nkeep\n");
+  assert.equal(edited.sha256, payload(await run({ action: "read_file", path: "rules.md" })).sha256);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "keep", new_text: "x" }), /more than once/);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "absent", new_text: "x" }), /not found/);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "Where", new_text: "x", expected_sha256: "0".repeat(64) }), /File changed/);
+  await assert.rejects(run({ action: "edit_file", path: "missing.md", old_text: "a", new_text: "b" }), /ENOENT/);
+  await writeFile(path.join(dir, "picture.bin"), Buffer.from([0xff, 0xfe, 0x00]));
+  await assert.rejects(run({ action: "edit_file", path: "picture.bin", old_text: "a", new_text: "b" }), /text files only/);
+
+  await run({ action: "append_file", path: "data/log.jsonl", content: "one\n" });
+  const appended = payload(await run({ action: "append_file", path: "data/log.jsonl", content: "two\n" }));
+  assert.equal(await readFile(path.join(dir, "data", "log.jsonl"), "utf8"), "one\ntwo\n");
+  assert.equal(appended.sha256, payload(await run({ action: "read_file", path: "data/log.jsonl" })).sha256);
+  await assert.rejects(run({ action: "append_file", path: "data/log.jsonl", content: "x".repeat(256 * 1024 + 1) }), /256 KiB/);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "Where", new_text: "x".repeat(256 * 1024 + 1) }), /256 KiB/);
+
+  await assert.rejects(run({ action: "delete_file", path: "old.tmp" }), /expected_sha256/);
+  await assert.rejects(run({ action: "delete_file", path: "old.tmp", expected_sha256: "0".repeat(64) }), /File changed since it was read/);
+  await mkdir(path.join(dir, "folder"));
+  const seenFolder = { action: "delete_file", path: "folder", expected_sha256: "0".repeat(64) };
+  await assert.rejects(run(seenFolder));
+  assert.ok((await stat(path.join(dir, "folder"))).isDirectory(), "a folder is never deleted");
+  const seen = payload(await run({ action: "read_file", path: "old.tmp" }));
+  assert.deepEqual(payload(await run({ action: "delete_file", path: "old.tmp", expected_sha256: seen.sha256 })), { deleted: true });
+  await assert.rejects(stat(path.join(dir, "old.tmp")), { code: "ENOENT" });
+
+  if (process.platform !== "win32") {
+    const outside = path.join(await realpath(await mkdtemp(path.join(tmpdir(), "omb-outside-"))), "secret.txt");
+    t.after(() => rm(path.dirname(outside), { recursive: true, force: true }));
+    await writeFile(outside, "kept");
+    await symlink(outside, path.join(dir, "pointer.txt"));
+    await assert.rejects(run({ action: "delete_file", path: "pointer.txt", expected_sha256: "0".repeat(64) }));
+    await assert.rejects(run({ action: "append_file", path: "pointer.txt", content: "x" }));
+    assert.equal(await readFile(outside, "utf8"), "kept", "a link is never followed out of the folder");
+  }
+  await assert.rejects(run({ action: "append_file", path: ".git/config", content: "x" }), /inside \.git/);
+  await assert.rejects(run({ action: "delete_file", path: ".git/HEAD", expected_sha256: "0".repeat(64) }), /inside \.git/);
 });
 
 test("a new file's missing folders are made inside the shared folder, never in a read-only, protected or linked one", async t => {
@@ -387,6 +435,25 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   assert.equal(next.content[0].text, "2"); assert.equal(next.content[1].type, "image");
   cua.close();
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
+});
+
+test("the lent screen's driver gets Windows' own folders, and never this app's keys", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-env-fixture.mjs");
+  await writeFile(script, `import readline from 'node:readline';
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const env={ LOCALAPPDATA: process.env.LOCALAPPDATA ?? null, APPDATA: process.env.APPDATA ?? null, OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null };
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'list_apps'}]}:{content:[{type:'text',text:JSON.stringify(env)}]};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  for (const [key, value] of [["LOCALAPPDATA", "C:\\Users\\you\\AppData\\Local"], ["APPDATA", "C:\\Users\\you\\AppData\\Roaming"], ["OPENAI_API_KEY", "sk-not-for-the-driver"]]) {
+    const before = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; });
+  }
+  const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] });
+  t.after(() => cua.close());
+  const seen = JSON.parse((await cua.call({ action: "computer_call", tool_name: "list_apps" }, new AbortController().signal)).content[0].text);
+  assert.deepEqual(seen, { LOCALAPPDATA: "C:\\Users\\you\\AppData\\Local", APPDATA: "C:\\Users\\you\\AppData\\Roaming", OPENAI_API_KEY: null });
 });
 
 test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {

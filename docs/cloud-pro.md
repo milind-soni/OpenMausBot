@@ -582,9 +582,12 @@ the person's own uses this computer by itself while the desktop app runs and is
 signed in as them (`lendAutomatically` in `electron/computer-sharing.mjs`): My
 Cloud and each other Cloud the verified session lists as theirs
 (`createLendingTarget` in `electron/lending-target.mjs`), never a Team Cloud and
-never a server that only signed in with their account. Other users (desktop only,
-self-hosted, hosted team workspaces) keep computer sharing exactly as before: off
-unless a maintainer sets `features.sharedComputers` by hand.
+never a server that only signed in with their account. A server of the person's
+own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
+is lent the same way, last, once the move is done and while that server says it
+is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
+keep computer sharing exactly as before: off unless a maintainer sets
+`features.sharedComputers` by hand.
 
 ### What each Cloud gets
 
@@ -1121,10 +1124,14 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   least), or the memory stall reaches 40% below the tenth, it stops an idle
   engine, else the newest of two or more busy ones, at most every 15 s, and
   not in the tick right after the kernel's own OOM killer acted.
-- **The kernel's order** (`server/oom-score.ts`): engines, and everything they
-  start, are born with `oom_score_adj` 1000; Chrome scores its tabs 200 and
-  up; the server is -800 and Caddy -900, so the health check is the last to
-  go.
+- **The kernel's order** (`server/oom-score.ts`): everything a bot runs is
+  born with `oom_score_adj` 1000: its engine and every tool and MCP server
+  that engine starts, the MCP servers the server runs for it, the helper
+  engines (background text, keep-warm pings), and its browser (agent-browser,
+  its daemon and Chrome, whose tabs Chrome then scores 200 and up). The
+  server is -800 and Caddy -900, so the health check is the last to go, and
+  the root supervisor that restarts them is -1000, never picked. When memory
+  runs out the kernel takes a bot's process, never the workspace.
 - **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
   browser, computer, Data and HighLevel servers are endpoints of this server
   (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
@@ -1132,13 +1139,25 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
   behind a tool selection keeps its stdio gate; the person's own servers are
   unchanged.
-- **The reason is said.** A turn whose engine was stopped for memory, by the
-  home or by the kernel (a SIGKILL while `/proc/vmstat`'s `oom_kill` rose),
-  fails with "This Cloud ran out of memory while N tasks ran at once, so this
-  one was stopped. It was not a problem with the AI provider. New tasks now
-  wait until there is memory for them.", and a turn that stalled while memory
-  was short says so after "no activity for 20 minutes". The health report
-  counts both as `out_of_memory`.
+- **The reason is said, in one line.** A turn whose engine was stopped for
+  memory, by the home or by the kernel (a SIGKILL while `/proc/vmstat`'s
+  `oom_kill` rose), ends with "Ran out of room, so I closed the browser to
+  keep everything else running." when its bot's browser was open (it is
+  closed too), else "Ran out of room, so I stopped this task to keep
+  everything else running."; a turn that stalled while memory was short says
+  so after "no activity for 20 minutes". The health report counts both as
+  `out_of_memory`.
+- **The work starts again when there is room.** A routine run gets its one
+  automatic retry, and a teammate's thread its Chief's; any other run stopped
+  for memory (the Chief's own chat, a bot without a Chief) starts once more by
+  itself 30 s later (`server/host/chief-notices.ts`), as a continuation of the
+  same request, and the memory gate holds it until it fits. The person hears
+  of it only if that run fails too.
+- **The day's pressure is reported** (`room` in the health report, below):
+  tasks that waited for memory and how long, turns stopped for it, processes
+  the kernel stopped, and minutes the machine stalled on memory (its `full
+  avg10` at 20% or more). The Admin offers a bigger plan from it
+  (openmaus-cloud `server/cloud-room.ts`).
 
 ### Why the server stays on loopback
 
@@ -1219,7 +1238,7 @@ For each service the Admin has configured, it also sets:
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 | `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
-| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
+| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
 
 A service is included only when both its URL and its token are set
@@ -1347,8 +1366,8 @@ credit, the Admin also sets:
   A bot runs on the credit's default model unless the person picks another;
   when the relay's default changes (Haiku to Sonnet), bots still on the old
   default follow it.
-- **Every bot runs.** While nothing of the person's own is signed in, a bot on
-  an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
+- **Every bot runs.** While nothing of the person's own has ever been signed in
+  here, a bot on an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
   out here, or an engine only that desktop has) moves onto the credit when the
   engines are read: at start, when the credit's list arrives, when the app
   reads the engines, and before a message to that bot is sent. Where it came
@@ -1360,7 +1379,13 @@ credit, the Admin also sets:
   each bot and conversation still on the credit moves to it, with one line in
   each, and the credit is not offered to bots any more. A bot that came from
   another engine goes back to that engine and model when it is the one signed
-  in; otherwise it takes the new-bot default among the person's own.
+  in; otherwise it takes the new-bot default among the person's own. From then
+  on the credit takes no bot by itself: signing out of the last engine (or a
+  sign-in that lapsed) leaves every bot where it is, so a message to one says
+  to sign in again and routines wait
+  ([Routines wait while the owner has left](#routines-wait-while-the-owner-has-left)).
+  A bot can still be put on the credit by hand. That an engine of the person's
+  own was signed in is kept in `providers/trial-credit/own.json`.
 - **Checked once connected.** Right after an engine is connected in the
   welcome's **Connect your AI** step or the engine sign-in, the app sends it
   one tiny real message (`POST /api/instances/:id/check`) and says
@@ -1479,9 +1504,18 @@ wait for the next read, `truncated: true`):
     "disk": { "totalBytes": 10737418240, "freeBytes": 8589934592 }, "eventLogWritable": true },
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
-  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 }
+  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
 }
 ```
+
+**`room`** is the last day's memory pressure where the home watches it (a Cloud
+home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to
+wait for memory and how long they waited in all (a wait still going counts its
+time so far), how many turns were stopped for memory (`stopped`), how many
+processes the kernel stopped (`killed`), and in how many minutes the machine
+stalled on memory. Counted in memory since boot, so a restart starts them
+again.
 
 **`firstHour`** is there on a personal Cloud that began with its first hour
 (`server/host/first-hour.ts`), else `null`: `startedAt` is the first boot,
@@ -1510,7 +1544,7 @@ place's state (`shared/place-view.ts`); a cause the server words itself
 `approval_undelivered`, `event_log`); the trial credit's refusal
 (`trial_used_up`, …); the turn's stop reason when it says more than "failed"
 (`auth_required`, `shutdown_timeout`, `provider_safety`, `update_required`,
-`spawn_error`, `quota`); the cause's class (`server/drivers/retry.ts`:
+`spawn_error`, `quota`, `tool_error`: a tool call that failed or wasn't allowed); the cause's class (`server/drivers/retry.ts`:
 `auth`, `quota`, `rate_limited`, …); the generic stop reason (`rpc_error`);
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
@@ -1612,6 +1646,38 @@ the server starts instead of answering 502, so a webhook or the app's first
 request after a stop is answered late rather than refused; Caddy dials the
 server again every 50 ms, so a held request reaches it within 50 ms of its
 listening. The Admin sets it only for a plan that sleeps.
+
+## Routines wait while the owner has left
+
+A Cloud home pauses its routines by itself when its owner has left
+(`server/host/routine-holds-host.ts`, `server/routine-holds.ts`), so nothing
+runs on an AI or a plan nobody uses any more, fails, and messages a person who
+left:
+
+- **No AI of theirs.** The person had an AI of their own signed in here, and
+  none of theirs can run now (signed out in Settings, a key removed, a sign-in
+  that lapsed). An engine whose sign-in can't be read yet counts as one that
+  might.
+- **Every connection removed.** The owner removed their last MCP server or
+  connected app and none is left. An app list that can't be read changes
+  nothing. Adding or connecting one, or one found connected again (read at
+  most every 15 minutes while none was), ends it.
+- **The plan was cancelled**, as the Admin says with the signed request below.
+
+A cause that begins turns every routine that is on off, stamped with it
+(`heldFor`, shown under the routine as "Paused because …"), cancels their
+queued runs, and writes one quiet line in the owner's Chief's chat; nothing
+else is sent. Once no cause holds a routine it turns back on from now, without
+the runs it skipped (a one-time run whose time passed stays over). Turning a
+routine on or off by hand clears its stamp, so the person's choice wins. What
+was last read is kept in `routine-holds.json` and the causes holding routines
+in `routines.json` (`holds`), so a restart neither pauses nor frees anything
+before the engines are read again.
+
+**`POST /api/cloud/plan`**, signed over its JSON body like the sleep request:
+`{"v":1,"cancelled":true}` when the customer cancels, `{"v":1,"cancelled":false}`
+when renewal is back on. `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
+without a boolean `cancelled`. The Admin does not send it yet.
 
 ## What the desktop reads from the Admin
 
@@ -1758,103 +1824,56 @@ fake bridge: `?view=settings|cloud&plan=trial|paid|team&cancelled=1&admin=old&sk
 
 #### One card at a time: the notice queue
 
-`components/AppNotices.tsx` is the one place for the Cloud Pro popup and the
-cards at the bottom left (`lib/notices.ts`), asked in order, one on screen at a
-time, and none after one closes until another launch:
+`components/AppNotices.tsx` is the one place for the What's new popup and the
+cards at the bottom left. `lib/notices.ts` keeps them in one ordered list,
+`NOTICES`, and the queue asks it in that order. **One notice a launch:** the
+first one due shows, and it takes the launch (`launchNotice`, kept for the
+window's session, so a reload is the same launch). After it, only the
+product-updates question may follow in that launch; every other notice waits for
+a later launch, in the list's order. A new notice is one entry in `NOTICES` and
+its fact in AppNotices. So What's new and Boat's credit offer never share a
+launch: What's new comes first, and the Boat card waits for a later one.
 
-1. **The Cloud Pro popup** (`CloudProPopup`, id `cloud-pro-update-2026-10`):
-   one centered dialog, once per installed desktop app whatever its plan (a
-   new install once its onboarding is done), on whichever page its window
-   shows: this computer's, My Cloud's or another saved server's. A server's
-   page shows it only once that server runs this version (My Cloud once the
-   Cloud is updated), so a window that only ever shows a server on an older
-   version does not get it. It does not wait for This computer's first-run
-   welcome there: a window that opens on My Cloud or a saved server may
-   never load This computer's page, and an install from before the welcome
-   kept a record has no record of finishing it, so waiting would leave those
-   desktops without the popup. Showing it never switches the window. Main keeps whether this desktop has seen it
-   (`electron/desktop-prefs.mjs`, a small file in the app's data folder,
-   written to a temporary file and renamed over the old one, so a failed
-   write keeps the last record), and every page and every port the app's own
-   page is served on agree. This computer's workspace record counts as seen
-   on every page, before its page has loaded on this build (main reads
-   `config.json` in its data folder): a close kept there earlier, or the
-   welcome's MausBot Cloud step, which also keeps the
-   card after the update away; a close kept only in this computer's page's
-   storage counts once that page has loaded, and is handed to main. The
-   welcome leaves its MausBot Cloud step out once main says this desktop has
-   seen the popup. Never in a window connected to another
-   computer as its remote client, which has no Cloud sign-in, Add a Cloud
-   dialog or Settings → MausBot Cloud to send anyone to, nor on a branded
-   build, which sells no Cloud. It waits while main, the plan or the Admin's
-   offer is loading; while another dialog (modal or not, the tour's
-   spotlight included), My Cloud's setup checklist or the card saying the
-   Cloud is set up, or a call is open; and, when the Cloud can't be reached,
-   for a later launch. Nothing in it opens a checkout or the browser:
-   - **On this computer's page**, with no plan, **Start free trial** (while
-     the Admin offers one) or **Upgrade to Cloud Pro** opens the Add a Cloud
-     dialog (source `update_popup`), and so does **Compare plans** (the dialog
-     lists every plan); on any plan (a trial, Starter, Personal, Pro, Max or
-     one that needs attention) **Manage plan** opens Settings → MausBot Cloud, and
-     there is no Compare plans. Personal → Pro is not self-serve yet, so
-     Personal gets Manage plan rather than an Upgrade that would end at
-     "write to us". Its numbers are the Admin's.
-   - **On My Cloud's page**, from the plan main tells that page
-     (`cloud-plan:state`, asked once main has restored the Cloud sign-in), a
-     plan, payment trouble or an ended sign-in gets **Manage plan**. It
-     switches the window to This computer, whose page opens at Settings →
-     MausBot Cloud (where an ended sign-in can sign in again). A plan still
-     being checked waits for a later launch; with none read, it is as on
-     another server.
-   - **On another saved server's page**, which is told nothing about the
-     plan, it shows no plan, price or Compare plans: **Continue on this
-     computer** switches the window to This computer, whose page finishes
-     the click from the plan it knows itself, without showing the popup a
-     second time. Someone who can buy (signed out, or signed in with no
-     plan) gets the Add a Cloud dialog (source `update_popup`), which loads
-     the Admin's offer itself; a plan, payment trouble, a payment being
-     linked or an ended sign-in gets Settings → MausBot Cloud. A sign-in
-     still restoring or connecting, or a plan This computer cannot check
-     right now, is waited on for ten seconds at most, then it is Settings →
-     MausBot Cloud, which says where it stands.
+1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11`):
+   one centered popup with slides, **Next** and **Back**, its dots and the arrow
+   keys, once per person: a close is kept in the workspace record, in the page's
+   storage and in this desktop's own record (`electron/desktop-prefs.mjs`), so
+   every port the app's page is served on agrees. A new campaign id shows it
+   once more. Only on this computer's page of the installed app (never My
+   Cloud's or a saved server's page, a remote client's window, a branded build
+   or a desktop signed in with an organization), never during setup (the welcome,
+   the tour), a call, another dialog, busy work or an update being offered,
+   never in the launch whose welcome finished or before a new install's first
+   reply, and after MausBot's first-launch card. `lib/whats-new.ts` decides the
+   slides from the account the app already holds (its plan, its trial, its
+   teams and its Clouds list):
+   - **No Cloud plan** (signed out, or signed in with none): **Meet the new
+     MausBot Cloud**, the Cloud website's Home pictured in the skin's light or
+     dark, then **Team**.
+   - **A Cloud plan of one's own**, in no team: the Team slide only.
+   - **In a team** (any role, a Team or Business plan, or a team's Cloud in the
+     Clouds list), a payment being linked or needing attention, a checkout or
+     another Cloud being bought, or a sign-in that can't be checked: nothing
+     (the last ones on a later launch).
 
-   Main makes either switch only for a popup this desktop has not seen, and
-   only when the page asks right after
-   a click or a key press on it (the preload checks
-   `navigator.userActivation`). It loads This computer's page on the click
-   (`?desktop-settings=cloud-settings` for Manage plan, `cloud-add` for
-   Continue on this computer, with `source=update_popup` and the page clicked,
-   `via=my_cloud` or `server`) and records the popup as seen once that page
-   has loaded. The preload and main refuse anything else: `cloud-pro`
-   (Continue on this computer) from My Cloud's or another saved server's
-   page, and `manage` (Manage plan) only from My Cloud's own page, as main
-   verifies it. This computer's page opens it at once, whatever else is
-   going on there (a bot at work, an update), and shows no card in the
-   corner for the rest of that page load. So another server's page can
-   bring the window to This computer and have that page do what its own
-   popup's main button would, but it cannot choose what opens there; like any
-   page of the window, it can close the popup for this desktop. While main
-   switches, the main button is held; a switch main cannot make (This
-   computer's server is not ready, another switch is under way, or the
-   switch fails) keeps the popup up with a line saying so and the button to
-   try again, and leaves the popup for a later launch, as does a page that
-   does not load.
-
-   Any button, its X, Escape or a click outside end it for good; until then
-   it comes back on a later launch. It takes focus at its title, keeps Tab
-   inside, takes Escape only while focus is in it, and gives focus back when
-   it closes unless focus has moved on. `cloud_pro_popup`
-   ([docs/analytics.md](analytics.md)) counts it as shown at most once a day
-   on a desktop, however often it comes back, and names the page each event
-   is counted on. Only `upgrade`, `manage` and `see_plans` by someone signed
-   in to MausBot Cloud first tie their analytics to their Cloud account's
-   email, and only on this computer's page, where the app knows the email;
-   My Cloud's Manage plan and a server page's Continue on this computer are
-   counted on that page as `continue`, and what they open on this
-   computer's page is counted there with the page they came from. While the
-   app has kept no analytics choice of its own yet and serves its page on a
-   port other than its first, such a click is counted without the email,
-   because an opt-out made before may be kept in the first port's storage.
+   A slide shows only while the Admin's offer sells its plan, with that plan's
+   price from the offer (the Team plan's free trial when it has one). Every
+   button carries the slide's tag on the Cloud's funnel (`app_whats_new_pro`,
+   `app_whats_new_team`): **Get Pro** opens the Add a Cloud dialog with
+   `source: app_whats_new_pro`, which its checkout sends; **See the new Cloud**
+   opens `https://cloud.openmausbot.com/cloud?src=app_whats_new_pro` (the plans,
+   for someone without one); **Start a Team** opens
+   `https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_team`, the
+   website's Get Team with this slide's tag (the staging Admin's site for an app
+   on staging), and for someone with a plan of their own, whom that page would
+   only tell to write in, the Add a Cloud dialog with `source:
+   app_whats_new_team`, which lists the Team plan. A browser that won't open
+   keeps the popup up and says so. Every
+   button, Not now, its X, Escape (while focus is inside) and a click outside
+   end it for good; until then it comes back on a later launch. It takes focus
+   at the slide's title, keeps Tab inside, and gives focus back when it closes
+   unless focus has moved on. `whats_new` ([docs/analytics.md](analytics.md))
+   counts each slide seen and each step.
 2. **The card after the update** (`CloudTrialIntro`, id `cloud-trial-intro-v1`):
    MausBot Cloud's free trial for someone signed out or with no plan who
    has used the app before this launch, only while the Admin offers a trial
@@ -1896,12 +1915,8 @@ again** (one step, the plan unaffected) instead of offering a plan. A `401` or
 other refusal, is a failed check like a dropped connection: it never ends the
 sign-in. Nobody signed in with a paid plan, in payment trouble, with a payment
 being linked, or whose state is unknown is offered a plan anywhere in the app.
-The Cloud Pro popup gives a plan, payment trouble and a payment being linked
-**Manage plan**; of the states it cannot verify, it waits while the sign-in is
-still restoring or connecting, waits for a later launch while the check is
-`unavailable`, and gives Manage plan to an ended sign-in (`reauth-required`)
-and to one the app could not read and removed (`restore-removed`): Settings →
-MausBot Cloud asks both to sign in again.
+What's new offers no plan to any of them; it waits while the sign-in is still
+restoring or connecting.
 
 In the Server menu, **My Cloud** goes through the same connection as
 **Open My Cloud** (no pairing code to type); when it cannot, the app
@@ -1985,10 +2000,32 @@ page alike (`ogb.cloudPlan`), so the meter reads the same on both (`src/componen
   changed, nothing charged; couldn't, nothing charged. Where the Admin can't change plans from the app (off, or an older
   Admin), Upgrade opens the Cloud page instead. Funnel source `app_usage` (the card) or `app_settings`.
 
+### Room card: short on memory or disk, and the plan that fixes it
+
+The session's `cloud.room` (additive, only beside `cloud.usage`; the Admin's `server/cloud-room.ts`, behind its
+`OMB_CLOUD_ROOM_OFFERS`) says this Cloud is short on room, from its health report's `room` and disk: `cause` is
+`{kind: "memory", waits, waitMinutes, stopped}` (the last day) or `{kind: "disk", usedGb, capGb}`, then either `plan`
+(the next plan up that fixes it: `tier`, `amount` in US cents a month, `memoryMb`/`fromMemoryMb`, `diskGb`/`fromDiskGb`)
+or `tip: true` on the top plan, and `id`. `electron/cloud-home.mjs` `parseCloudRoom` drops anything malformed; it is display
+only.
+
+- **Where:** the card sits where the usage meter's card is (the sidebar's foot and the phone bar, `src/components/CloudRoomCard.tsx`,
+  `src/lib/room-card.ts`), never while any bot is working (never mid-turn), never beside the usage meter's card, and on a
+  Team Cloud only for the team's own plan (its payer).
+- **What it says:** the cause ("3 tasks waited 6 minutes for memory today."), what the plan gives and costs ("Pro has twice
+  the memory. $49 a month. Today you pay only for the rest of this month."), **Upgrade** and **Not now**; on the top plan
+  a tip ("run fewer bots at once and close browsers you're not using") and **Got it**.
+- **Upgrade** is the usual one: the preview, then the person's confirm, with source `app_room`. After it the card offers
+  **Restart now** (`ogb.cloudPlan.restartNow()`, `POST /api/cloud/desktop/resize-now`, "Takes about a minute, and stops anything
+  running now"); otherwise the Cloud gets its new size the next time it's not busy.
+- **Not now** (`ogb.cloudPlan.roomNotNow(id)`, `POST /api/cloud/desktop/room`) hides it here at once and the Admin offers
+  nothing for two weeks. A new offer comes at most once a week. Both channels act only on the session's own Cloud, only from
+  a click.
+
 ## Add a Cloud
 
 The one way to buy MausBot Cloud in the app, the same for every way in:
-the Cloud Pro popup, the card after the update, **Show me how**, **Add a
+What's new, the card after the update, **Show me how**, **Add a
 Cloud…** in the server menu (the sidebar's and the menu bar's Server menu),
 Settings (the Cloud card in General, and MausBot Cloud), and the routine
 screen's note.
@@ -2087,8 +2124,9 @@ screen's note.
   again, `429` says to use the open checkout or wait, anything else says
   nothing was charged; `404`/`405`/`501` is an Admin before the route.
   `source` is one of `app_card`, `app_howto`, `app_menu`, `app_settings`,
-  `app_routines`, `update_popup` (main refuses any other, and any plan the
-  offer doesn't sell).
+  `app_routines`, `app_pages`, `app_whats_new_pro`, `app_whats_new_team`,
+  `app_onboarding` (main refuses any other, and any plan the offer doesn't
+  sell).
 - **Interest** `POST /api/cloud/desktop/interest` `{kind: "another_cloud"}` → `{ok: true}`.
 - Every signed-in request carries this app's version in `x-openmausbot-version`.
 
