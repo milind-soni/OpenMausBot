@@ -14,6 +14,7 @@ export const SEARCH_TOOL = "search_tools";
 export const DESCRIBE_TOOL = "describe_tool";
 export const CALL_TOOL = "call_tool";
 const DIRECTORY_TOOLS = new Set([SEARCH_TOOL, DESCRIBE_TOOL, CALL_TOOL]);
+export const DIRECTORY_TOOL_COUNT = DIRECTORY_TOOLS.size;
 
 /** The chat runtime's 128-tool cap is shared by every server of a turn plus the built-ins. */
 export const LISTED_TOOLS_MAX = 40;

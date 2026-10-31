@@ -366,6 +366,25 @@ describe("remote MCP tool directory", () => {
     expect(fake.toolsLists).toBe(8);
   });
 
+  it("searches a small catalog when the engine asks for search from the start", async () => {
+    fake = await startFakeHttpMcp({ tools: whopLikeCatalog(30) });
+    start(mcpStdioServer(spec(fake.url), { directory: { name: "whop", search: true } })!);
+    await initialize();
+    expect((await request("tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual([SEARCH_TOOL, DESCRIBE_TOOL, CALL_TOOL]);
+    expect(json(await call(SEARCH_TOOL, { query: "list payments" })).matches[0].name).toBe("payments_list");
+  });
+
+  it.each([false, "yes"])("refuses a search setting of %j rather than guess", async (search) => {
+    fake = await startFakeHttpMcp({ tools: whopLikeCatalog(5) });
+    const descriptor = mcpStdioServer(spec(fake.url), { directory: { name: "whop" } })!;
+    start({ ...descriptor, env: { ...descriptor.env, OMB_REMOTE_MCP_DIRECTORY: JSON.stringify({ name: "whop", search }) } });
+    let stderr = "";
+    child!.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    const [code] = await once(child!, "close");
+    expect(code).not.toBe(0);
+    expect(stderr).toContain("invalid tool directory configuration");
+  });
+
   it("merges a small paginated catalog into one page", async () => {
     const small = whopLikeCatalog(30);
     fake = await startFakeHttpMcp({ tools: small, pageSize: 7 });
