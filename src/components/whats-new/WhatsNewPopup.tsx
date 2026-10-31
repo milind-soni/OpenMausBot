@@ -17,7 +17,7 @@ const WORDS: Record<WhatsNewSlide, { title: LocaleKey; body: LocaleKey }> = {
   pro: { title: "whatsNew.cloud.title", body: "whatsNew.cloud.body" },
   team: { title: "whatsNew.team.title", body: "whatsNew.team.body" },
 };
-const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff"];
+const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff", "whatsNew.team.access"];
 const NAV = "ui-button ui-button-pill min-h-9 gap-1 px-3";
 
 const focusLost = (focus: Element | null) => !focus || focus === document.body || !focus.isConnected;
@@ -113,7 +113,7 @@ export function WhatsNewPopup({ view, report, onBuy, onDone }: {
               <p className="text-[12px] font-medium uppercase leading-4 tracking-[0.06em] text-ink-tertiary">{t("whatsNew.eyebrow")}</p>
               <h2 id={titleId(of)} tabIndex={-1} className="mt-1 text-[19px] font-semibold leading-6 tracking-[-0.012em] text-ink outline-none! [text-wrap:balance]">{t(WORDS[of].title)}</h2>
               <p className="mt-2 text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{t(WORDS[of].body)}</p>
-              {of === "team" && <ul className="mt-3 grid gap-x-4 gap-y-1.5 text-[13px] leading-[18px] text-ink sm:grid-cols-2">
+              {of === "team" && <ul className="mt-3 flex flex-col gap-1.5 text-[13px] leading-[18px] text-ink">
                 {TEAM_POINTS.map(point => <li key={point} className="flex items-start gap-2"><Check size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-tertiary" aria-hidden="true" />{t(point)}</li>)}
               </ul>}
               <div className="mt-5 flex flex-wrap items-start gap-2">{actions(of)}</div>
