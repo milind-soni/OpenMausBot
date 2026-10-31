@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, RotateCcw, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
 import {
@@ -109,8 +109,6 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
   const [overview, setOverview] = useState<MemoryOverview | null>(null);
   const [journal, setJournal] = useState<MemoryJournalRow[] | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
-  const latestEditing = useRef(editing);
-  latestEditing.current = editing;
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [savedDraft, setSavedDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +154,17 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
       cancelled = true;
     };
   }, [active, bot.id]);
+
+  const reloadAfterDream = async () => {
+    const path = editing?.path;
+    await refresh();
+    if (!path) return;
+    const doc = await fetchMemoryDoc(bot.id, path);
+    setEditing((current) => {
+      if (current?.path !== path || current.dirty) return current;
+      return doc.exists || path === MEMORY_INDEX ? { ...current, text: doc.text, hash: doc.hash } : null;
+    });
+  };
 
   const open = async (path: string) => {
     setError(null);
@@ -346,7 +355,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
 
       {overview && <MemoryGauge index={overview.index} />}
 
-      {active && <DreamMemoryCard key={bot.id} botId={bot.id} enabled={bot.memoryEnabled !== false && bot.memoryUpkeep !== false} onChange={() => { const open = latestEditing.current; return refresh(open && !open.dirty ? open.path : undefined).catch(() => { setEditing(null); return refresh(); }); }} />}
+      {active && <DreamMemoryCard key={bot.id} botId={bot.id} enabled={bot.memoryEnabled !== false && bot.memoryUpkeep !== false} onChange={reloadAfterDream} />}
       {bot.memoryEnabled !== false && <MemoryUpkeepCard
         enabled={bot.memoryUpkeep !== false}
         status={upkeep}
