@@ -158,10 +158,12 @@ const bridge = {
     },
   },
   // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
-  // covers the window; the skin of the page beside it comes from main. The page beside it, from whichever server,
-  // offers the button that hides and shows it, and learns only whether there is one to hide, never its places.
+  // covers the window; the skin of the page beside it comes from main, and whether that page draws the window's frame.
+  // The page beside it, from whichever server, offers the button that hides and shows it, and learns only whether there
+  // is one to hide, never its places; it says when it draws the frame, so main puts the traffic lights in its top bar.
   rail: {
     state: () => ipcRenderer.invoke("rail:offer").then(railState),
+    drawsFrame: () => ipcRenderer.invoke("rail:draws-frame"),
     setHidden: (hidden) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("rail:hide", hidden === true).then(railState) : Promise.reject(new Error("Choose to hide or show your computers.")),
     onState: (cb) => {
@@ -175,6 +177,11 @@ const bridge = {
         const handler = (_event, skin) => cb(String(skin));
         ipcRenderer.on("rail:skin", handler);
         return () => ipcRenderer.removeListener("rail:skin", handler);
+      },
+      onFramed: (cb) => {
+        const handler = (_event, framed) => cb(framed === true);
+        ipcRenderer.on("rail:framed", handler);
+        return () => ipcRenderer.removeListener("rail:framed", handler);
       },
     } : {}),
   },

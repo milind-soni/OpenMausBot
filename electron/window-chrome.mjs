@@ -5,10 +5,14 @@ export function windowBackground(prefersDark) {
   return prefersDark ? "#121212" : "#fcfcfc";
 }
 
-/** macOS: the traffic lights (14px) centred in the page's 28px top bar (src/components/WindowFrameBar.tsx), 12px in. */
+/** macOS: where the traffic lights (14px) sit. In the frame's 28px top bar, 12px in, while the page beside the rail draws
+ * that frame (src/components/WindowFrameBar.tsx); where an older page made room for them otherwise. The window opens with
+ * them in the bar, and main moves them as each page says (chrome-rail.mjs). */
+export const TRAFFIC_LIGHTS = { framed: { x: 12, y: 7 }, unframed: { x: 16, y: 16 } };
+
 export function windowChromeOptions(platform) {
   if (platform === "darwin") {
-    return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 12, y: 7 } };
+    return { titleBarStyle: "hiddenInset", trafficLightPosition: TRAFFIC_LIGHTS.framed };
   }
   if (platform === "win32") {
     return { titleBarStyle: "hidden" };

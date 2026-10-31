@@ -33,6 +33,19 @@ export function useChromeRail(): ChromeRailState | null {
   return state;
 }
 
+/** On the rail's own page: whether the page beside it draws the window's frame, as main hears from each of its documents.
+ * The window opens framed. */
+export function useBesideFramed(): boolean {
+  const [framed, setFramed] = useState(true);
+  useEffect(() => bridge()?.onFramed?.(setFramed), []);
+  return framed;
+}
+
+/** The page beside the rail draws the window's frame: main puts the traffic lights in its top bar. */
+export function sayFrameDrawn(): void {
+  void bridge()?.drawsFrame?.()?.catch(() => {});
+}
+
 /** From the person's click: main hides or shows the rail, and this desktop keeps the choice. */
 export function setChromeRailHidden(hidden: boolean): void {
   const rail = bridge(), before = current;
