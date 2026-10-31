@@ -45,6 +45,7 @@ import { WindowFrameBar } from "@/components/WindowFrameBar";
 import { cn } from "@/lib/cn";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { CloudIntent } from "@/components/CloudIntent";
 import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-intent";
 import { CloudSetup } from "@/components/CloudSetup";
@@ -308,6 +309,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <div className={cn("flex h-full flex-col", framed && "bg-frame")}>
       <WindowFrameBar />
+      <WorkspaceSwitcher />
       {/* A framed window shows the app in a rounded card under its top bar, beside the window's rail: the corners that
           meet the frame are round, and the card runs to the window's right and bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
