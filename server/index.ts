@@ -23,7 +23,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, UnansweredApprovals } from "./waiting-on-person.ts";
-import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts";
+import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -3802,15 +3802,15 @@ function coordinationSystemInstructions(): string {
 function outstandingAssignmentsPrompt(threadId: string): string {
   const pending = coordinator.outstandingDirect(threadId);
   if (!pending.length) return "";
-  const listed = pending.map(node => ({
-    requestId: node.id,
-    bot: store.bot(node.botId)?.name ?? "Teammate",
-    assignment: node.text.slice(0, 1_000),
-    status: node.status === "queued" ? queuedStatus(node)
-      : openPersonCard(node.threadId) ? "stopped on a card waiting for the person's approval or answer in that teammate's thread; tell the person to open it"
-      : "working on it now",
-  }));
-  return ` Assignments you already sent are still outstanding, and nothing in this conversation cancelled them: ${JSON.stringify(listed)}. Do not resend them, do not poll or wait for them, and do not tell the user they were lost. Each result returns to this conversation on its own and resumes you then. To change or add to one, send the change to the same teammate with coordinate_bots; it runs after the current work. Answer the message above with that work still in flight.`;
+  const listed = pending.map(node => {
+    const card = node.status === "queued" ? undefined : openPersonCard(node.threadId);
+    return { requestId: node.id, bot: store.bot(node.botId)?.name ?? "Teammate", threadId: node.threadId, assignment: node.text.slice(0, 1_000),
+      status: node.status === "queued" ? queuedStatus(node)
+        : card?.kind === "question" ? "stopped on its question in that teammate's thread; once you have the answer, send it there with coordinate_bots, or tell the person to open it"
+        : card ? "stopped on a card waiting for the person's approval in that teammate's thread; tell the person to open it" : "working on it now",
+      ...(card?.kind === "question" && card.question ? { question: escapeNotes(card.question).slice(0, 400) } : {}) };
+  });
+  return ` Assignments you already sent are still outstanding, and nothing in this conversation cancelled them: ${JSON.stringify(listed)}. Do not resend them, do not poll or wait for them, and do not tell the user they were lost. Each result returns to this conversation on its own and resumes you then. To change or add to one, send the change to the same teammate with coordinate_bots, with its threadId as thread: it goes into that work, answering the question it waits on or reaching the turn running it. Answer the message above with that work still in flight.`;
 }
 
 function queuedBehindPerson(node: HandoffView): { threadId: string; kind: "approval" | "question" | "review"; title: string } | undefined {
@@ -3942,7 +3942,8 @@ const askCards = createAskCards({ store, node: (id) => coordinator.node(id), del
   copiedInto: (inboxThreadId, botId, threadId) => Boolean(CLOUD_TEAM) && teamMessages.inbox.isHomeOf(inboxThreadId, teamOwners.routing.askedPerson(botId, threadId)) });
 const questionRouting = createQuestionRouting({ store, active: () => coordinator.active(), node: (id) => coordinator.node(id), parkedFor: (botId) => coordinator.parkedFor(botId), answerNode: (id, text, by) => coordinator.answerNode(id, text, by), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
   answerLive: async (threadId, requestId, text) => await answerRequest(threadId, botForThread(store.botByThread(threadId)?.id ?? "", threadId)?.modelSelection.instanceId ?? "", requestId, "answer", text) === "answered", settleSignIns: (node) => signInSettle.answeredElsewhere(node),
-  keptPrivate: (node, requester) => keptPrivate({ child: teamHost.privateTo(node.threadId), parent: teamHost.privateTo(requester.threadId) }) });
+  keptPrivate: (node, requester) => keptPrivate({ child: teamHost.privateTo(node.threadId), parent: teamHost.privateTo(requester.threadId) }),
+  steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused" });
 const coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR,
   now: Date.now,
@@ -7009,12 +7010,12 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
-function openPersonCard(threadId: string): { kind: "approval" | "question" | "review"; tool?: string } | undefined {
+function openPersonCard(threadId: string): { kind: "approval" | "question" | "review"; tool?: string; question?: string } | undefined {
   const messages = store.messagesFor(threadId);
   for (let i = messages.length - 1; i >= 0; i--) {
     const card = messages[i]!.kind === "options" ? messages[i]!.card : undefined;
     const kind = liveCardKind(card);
-    if (kind) return { kind, tool: card?.tool };
+    if (kind) return { kind, tool: card?.tool, question: card?.subtitle };
   }
   return undefined;
 }
@@ -7218,17 +7219,18 @@ const roomSessions = createRoomSessions({ settings: () => cfg.context, messagesF
 const nativeCompactTokens = (instance: { driverKind: string; instanceId: string }) => instance.driverKind === "claudeAgent" ? Number(autoCompactWindow({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment })) : undefined;
 
 const loopingEngine = (threadId: string, bot = store.botByThread(threadId)) => bot ? runningTurnInstance(botForThread(bot.id, threadId), threadId)?.adapter : undefined;
+const canSteerThread = (threadId: string) => {
+  const engine = loopingEngine(threadId);
+  return admit("direct-busy", { pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
+    engineCanSteer: Boolean(engine?.capabilities.queueing && engine.steer) }).action === "steer";
+};
+const steerThread = async (threadId: string, text: string) => (await loopingEngine(threadId)?.steer?.(threadId, text)) ?? "refused";
 const repeats = createLoopGuard({
   settings: () => loopGuardSettings(cfg),
   append: (threadId, tool) => void store.appendMessage(threadId, { role: "bot", kind: "activity", tool }),
   live: (threadId) => { const bot = store.botByThread(threadId); return Boolean(bot && threadBusy(bot.id, threadId)); },
   waiting: (threadId) => watchdog.waiting(threadId),
-  canSteer: (threadId) => {
-    const engine = loopingEngine(threadId);
-    return admit("direct-busy", { pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
-      engineCanSteer: Boolean(engine?.capabilities.queueing && engine.steer) }).action === "steer";
-  },
-  steer: async (threadId, note) => (await loopingEngine(threadId)?.steer?.(threadId, note)) ?? "refused",
+  canSteer: canSteerThread, steer: steerThread,
   interrupt: async (threadId, cause) => {
     const bot = store.botByThread(threadId);
     if (!bot) return;
@@ -13948,9 +13950,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!recipient) throw new Error("The recipient no longer exists");
             // Work a person's request hands on opens in the receiving bot's chat with them when it may use their own apps.
             const opener = (room ? null : handOnFor) ?? openerFrom(address.threadId);
-            const continued = room || fresh ? undefined : store.workThread(target.botId, internalSender.id, address.threadId, false, CLOUD_TEAM ? (task) => threadStarters.get(task.threadId) === opener : undefined);
-            const relayed = EXTERNAL || (!call.answers && (room || fresh || call.rework || mode === "consult")) ? undefined : await questionRouting.relay({ sender: internalSender, senderThreadId: address.threadId,
-              senderNode: coordinator.node(internalCapability.roomHandoffId ?? generation), target: recipient, message: call.message, ...(call.answers ? { answers: call.answers } : {}) });
+            const continued = room || fresh ? undefined : workThreadFor(store, { botId: target.botId, botName: recipient.name, fromBotId: internalSender.id, fromThreadId: address.threadId, thread: call.thread,
+              also: (task) => !CLOUD_TEAM || threadStarters.get(task.threadId) === opener });
+            const relayed = EXTERNAL || (!call.answers && (room || fresh || mode === "consult")) ? undefined : await questionRouting.relay({ sender: internalSender, senderThreadId: address.threadId,
+              senderNode: coordinator.node(internalCapability.roomHandoffId ?? generation), target: recipient, message: call.message, ...(call.answers ? { answers: call.answers } : {}), ...(continued ? { threadId: continued.threadId } : {}),
+              ...(internalCapability.delegatedThisTurn ? { sentThisTurn: internalCapability.delegatedThisTurn } : {}) });
             if (relayed) { if (relayed.outcome === "failed") refused.push(relayed.detail); receipts.push(relayed); continue; }
             const lane = room && lanes ? roomJobs.openLane(room, target.threadId, target.botId, internalSender, call.message) : undefined;
             const via = lane ? "lane" : room ? "room" : "direct";
@@ -13968,7 +13972,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             const routed = lane ? { botId: target.botId, threadId: lane.threadId } : target;
             const { node, duplicate } = coordinator.enqueue(address, generation, internalCapability.roomHandoffId, routed, call.message, {
-              mode, reply, thread: lane ? "new" : call.thread, approvalGranted, rework: call.rework, ...(lane ? {} : { requestBatchKey }),
+              mode, reply, thread: lane || fresh ? "new" : "standing", approvalGranted, rework: call.rework, ...(lane ? {} : { requestBatchKey }),
               ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}),
             });
             usageTrace.link(node.id, node.parentId, { threadId: internalCapability.threadId, turnId: liveTurnByThread.get(internalCapability.threadId) ?? "" }); if (!duplicate) actingPeople.handOn(internalCapability, node);
@@ -14081,13 +14085,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           message: z.string().trim().min(1).max(4000),
           reason: z.string().trim().max(200).optional(),
           rework: z.boolean().default(false),
-          thread: z.enum(["standing", "new"]).default("standing"), title: z.string().trim().max(80).refine(fitsOnOneLine).optional(),
+          thread: z.string().trim().min(1).max(128).default("standing"), title: z.string().trim().max(80).refine(fitsOnOneLine).optional(),
           reply: z.enum(["resume", "none"]).default("resume"),
           consult: z.boolean().default(false),
           inMyFolder: z.boolean().optional(),
           done_when: z.string().trim().max(1000).optional(), answers: z.string().trim().min(1).max(128).optional(),
         }).safeParse(await readInternalBody());
-        if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing or new, title one line of at most 80 characters, reply is resume or none, consult is a boolean, done_when at most 1000 characters." });
+        if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing, new or the id of a thread you opened on that teammate, title one line of at most 80 characters, reply is resume or none, consult is a boolean, done_when at most 1000 characters." });
         const { groupId, botIds, message, reason, rework, thread, title, reply, consult, inMyFolder, done_when: doneWhen, answers } = parsed.data;
         const result = await coordinateBots({ groupId, botIds, message, reason: reason || undefined, rework, thread, title: title || undefined, reply, consult, inMyFolder, doneWhen: doneWhen || undefined, ...(answers ? { answers } : {}) });
         return json(res, result.status, result.body);
