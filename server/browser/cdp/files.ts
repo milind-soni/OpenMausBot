@@ -82,15 +82,17 @@ export class FileChoosers {
   }
 
   /** Hands files to the open picker; an empty list cancels it. */
-  async answer(paths: readonly string[], { waitMs = 1_000 }: { waitMs?: number } = {}): Promise<void> {
+  async answer(paths: readonly string[], { waitMs = 1_000, isCurrent = () => true }: { waitMs?: number; isCurrent?: () => boolean } = {}): Promise<boolean> {
     const open = await this.opened(waitMs);
     if (!open) {
       throw new DriverError("refused", "No file picker is open. Click the page's upload control first, or pass the file input's ref.");
     }
     if (paths.length > 1 && !open.multiple) throw new DriverError("refused", "This file picker accepts one file.");
     checkUploadPaths(paths);
+    if (!isCurrent()) return false;
     await open.session.send("DOM.setFileInputFiles", { files: [...paths], backendNodeId: open.backendNodeId });
     if (this.#open === open) this.#set(null);
+    return true;
   }
 
   forget(session?: CdpSession): void {

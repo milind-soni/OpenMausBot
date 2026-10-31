@@ -631,8 +631,8 @@ export class BrowserService {
   }
 
   /** A person's files for the page's open picker, which their view was offered as `chooserId`. */
-  answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
-    return this.#bySession(session)?.hub.answerFileChooser(owner, chooserId, paths) ?? Promise.resolve(false);
+  answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[], isCurrent: () => boolean = () => true): Promise<boolean> {
+    return this.#bySession(session)?.hub.answerFileChooser(owner, chooserId, paths, isCurrent) ?? Promise.resolve(false);
   }
 
   /** A file this session's browser finished downloading. */

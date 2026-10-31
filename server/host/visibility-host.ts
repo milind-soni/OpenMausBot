@@ -2,7 +2,7 @@
 // room or conversation change), the one check every request naming a bot, conversation, room, routine or file passes, and
 // the per-conversation filter a list uses. On a Team Cloud an admin is a viewer with a person too: every bot and room, but
 // only their own private chats (audience.ts).
-import { audienceEquals, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
+import { audienceEquals, narrowestAudience, notFoundFor, pathSubject, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
@@ -92,8 +92,14 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     }
   }
 
+  function hiddenPath(path: string, visible: VisibleSet): string | null {
+    const subject = visible.everything ? null : pathSubject(path);
+    return subject && !subjectVisible(subject, visible) ? notFoundFor(subject) : null;
+  }
+
   /** A member may schedule a routine only for a bot or room they can see. */
-  function hiddenRoutineTarget(body: unknown, visible: VisibleSet): string | null {
+  function hiddenRoutineTarget(body: unknown, auth: RequestAuth): string | null {
+    const visible = visibleTo(viewerFor(auth));
     if (visible.everything || !body || typeof body !== "object") return null;
     const { botId, groupId } = body as { botId?: unknown; groupId?: unknown };
     if (typeof botId === "string" && store.bot(botId) && !visible.bot(botId)) return "no such bot";
@@ -119,5 +125,5 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     deps.store().patchGroup(group.id, { audienceFloor: next === "everyone" ? undefined : next });
   }
 
-  return { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, roomMemberAudiences, settleRoomFloor };
+  return { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, hiddenPath, hiddenRoutineTarget, roomFeedsBot, roomMemberAudiences, settleRoomFloor };
 }

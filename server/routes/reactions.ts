@@ -11,6 +11,7 @@ export interface ReactionRouteDeps {
   /** Who is reacting, from their session alone: a request body never names them. */
   reactorFor(auth: RequestAuth): Reactor;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
+  threadVisible(auth: RequestAuth, threadId: string): boolean;
 }
 
 export function createReactionRoutes(deps: ReactionRouteDeps): RouteHandler {
@@ -23,8 +24,11 @@ export function createReactionRoutes(deps: ReactionRouteDeps): RouteHandler {
     if (body.on !== undefined && typeof body.on !== "boolean") return json(res, 400, { error: "on must be true or false" });
     const notYours = deps.cloudGuestSendRefusal(auth, m[1]);
     if (notYours) return json(res, 403, { error: notYours });
+    if (!deps.threadVisible(auth, m[1])) return json(res, 404, { error: "no such conversation" });
     try {
-      return json(res, 200, await deps.react({ auth, threadId: m[1], messageId: m[2], emoji, reactor: deps.reactorFor(auth), on: body.on }));
+      const result = await deps.react({ auth, threadId: m[1], messageId: m[2], emoji, reactor: deps.reactorFor(auth), on: body.on });
+      if (!deps.threadVisible(auth, m[1])) return json(res, 404, { error: "no such conversation" });
+      return json(res, 200, result);
     } catch (error) {
       const { status, code } = error as { status?: unknown; code?: unknown };
       if (typeof status !== "number") throw error;

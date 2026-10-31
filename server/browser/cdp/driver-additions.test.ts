@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTH_WAIT_MS, AuthChallenges } from "./auth.ts";
 import { CdpConnection, type CdpSession, type Params } from "./connection.ts";
 import { DriverError, isUnanswered } from "./errors.ts";
+import { FileChoosers } from "./files.ts";
 import { FrameTree } from "./frames.ts";
 import { methodRefusal } from "./policy.ts";
 import type { CdpTransport } from "./transport.ts";
@@ -76,6 +77,21 @@ describe("HTTP authentication challenges", () => {
     await vi.advanceTimersByTimeAsync(AUTH_WAIT_MS);
     expect(auth.pending).toBeNull();
     expect(sent.at(-1)).toEqual({ method: "Fetch.continueWithAuth", params: { requestId: "s1", authChallengeResponse: { response: "CancelAuth" } } });
+  });
+});
+
+describe("file picker delivery", () => {
+  it("refuses files when access is revoked while waiting for the picker", async () => {
+    const { session, sent, emit } = eventSession();
+    const pickers = new FileChoosers();
+    pickers.watch(session);
+    let current = true;
+    const answering = pickers.answer([], { isCurrent: () => current });
+    current = false;
+    emit("Page.fileChooserOpened", { frameId: "main", backendNodeId: 1, mode: "selectMultiple" });
+    expect.soft(await answering).toBe(false);
+    expect(sent).toEqual([]);
+    expect(pickers.open).not.toBeNull();
   });
 });
 

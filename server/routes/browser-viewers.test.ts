@@ -11,7 +11,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserHostError, SETUP_COMMAND } from "../browser/chrome/host-setup.ts";
 import type { Audience } from "../audience.ts";
 import type { Download } from "../browser/cdp/downloads.ts";
-import type { BrowserService } from "../browser/service.ts";
+import { BrowserService } from "../browser/service.ts";
+import { LiveRouter, type ChromeEngine } from "../browser/engines.ts";
+import { FakeBackend } from "../browser/testing/fake-chrome.ts";
+import type { BrowserLive } from "../browser-live.ts";
 import type { Viewer, ViewerOptions, ViewerOutput } from "../browser/viewers/core.ts";
 import { STREAM_CLOSE, StreamV2 } from "../browser/viewers/stream-v2.ts";
 import { json, readBody } from "../harness/http.ts";
@@ -66,13 +69,17 @@ interface Fixture {
 
 const servers: Server[] = [];
 const folders: string[] = [];
+const services: BrowserService[] = [];
 afterEach(async () => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  for (const service of services.splice(0)) await service.closeAll();
   for (const server of servers.splice(0)) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
 
-async function serve({ attach, current = () => true, download, audience = () => "team" }: {
+async function serve({ attach, current = () => true, download, audience = () => "team", viewers }: {
+  viewers?: Partial<BrowserViewerRouteDeps["viewers"]>;
   attach?: (options: ViewerOptions, push: (output: ViewerOutput) => void) => Promise<Viewer>;
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
@@ -117,6 +124,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
         return chooser === "chooser-1";
       },
       download: (_browser, id) => download?.(id),
+      ...viewers,
     },
     audience: (_auth, threadId) => audience(threadId),
     browser: async (botId, opened) => {
@@ -355,6 +363,68 @@ describe("the page's file picker and downloads", () => {
     expect(readdirSync(join(fixture.dataDir, "browser-uploads"))).toHaveLength(1);
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/upload?chooser=chooser-1`, { method: "POST", body: "plain" })).status).toBe(415);
     expect((await fetch(`http://${fixture.origin}/api/bots/nobody/browser/upload?chooser=chooser-1`, { method: "POST" })).status).toBe(404);
+  });
+
+  it.each(["allowed", "revoked", "closed"] as const)("rechecks a queued picker upload at delivery when access is %s", async (access) => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-upload-access-"));
+    folders.push(dataDir);
+    const backend = new FakeBackend();
+    const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 1, idleMs: () => 600_000 });
+    services.push(service);
+    const target = { session: "bot-pepper", key: "bot:pepper" };
+    const outputs: ViewerOutput[] = [];
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 800, pace: "hi" }, (output) => {
+      outputs.push(output);
+      if (output.type === "frame") output.ack();
+    });
+    await viewer.input({ type: "takeControl" });
+    const profile = service.profile(target);
+    const tab = profile.tabs.list()[0]!;
+    backend.chrome.event("Page.fileChooserOpened", { frameId: tab.page.targetId, mode: "selectMultiple", backendNodeId: 1 }, tab.page.session.id!);
+    await profile.hub.offerFileChooser();
+    const chooser = outputs.find((output): output is Extract<ViewerOutput, { type: "fileChooser" }> => output.type === "fileChooser");
+    expect(chooser).toBeDefined();
+    const router = new LiveRouter({} as BrowserLive, { service } as ChromeEngine);
+    let current = true;
+    const fixture = await serve({ current: () => current, viewers: {
+      fileChooserOffered: router.fileChooserOffered.bind(router),
+      answerFileChooser: router.answerFileChooser.bind(router),
+    } });
+    const entered = withResolvers();
+    const release = withResolvers();
+    const blocked = tab.control.system(async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    const queued = withResolvers();
+    const answer = service.answerFileChooser.bind(service);
+    vi.spyOn(service, "answerFileChooser").mockImplementation((...args) => {
+      const pending = answer(...args);
+      queued.resolve();
+      return pending;
+    });
+    const body = new FormData();
+    body.append("file", new File(["private upload"], "private.txt"));
+    const response = fetch(`http://${fixture.origin}/api/bots/pepper/browser/upload?chooser=${chooser!.id}`, { method: "POST", body });
+    let closing: Promise<void> | undefined;
+    try {
+      await queued.promise;
+      const uploads = join(fixture.dataDir, "browser-uploads");
+      expect(readdirSync(uploads)).toHaveLength(1);
+      if (access === "revoked") current = false;
+      if (access === "closed") closing = viewer.close();
+      release.resolve();
+      await blocked;
+      const result = await response;
+      await closing;
+      expect.soft(result.status).toBe(access === "allowed" ? 204 : 409);
+      const delivered = backend.chrome.sent.filter((sent) => sent.method === "DOM.setFileInputFiles");
+      expect.soft(delivered).toHaveLength(access === "allowed" ? 1 : 0);
+      expect(readdirSync(uploads)).toHaveLength(access === "allowed" ? 1 : 0);
+    } finally {
+      release.resolve();
+      await blocked;
+      await closing;
+      await response;
+    }
   });
 
   it("refuses an upload for a picker this person was not offered before reading any of it", async () => {
