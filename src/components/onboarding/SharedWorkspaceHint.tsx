@@ -37,7 +37,7 @@ export function SharedWorkspaceHint({
   return (
     <aside
       aria-labelledby={titleId}
-      className="fixed inset-x-3 top-14 z-40 flex items-start gap-3 rounded-2xl border border-hairline/50 bg-panel p-3.5 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.6)] sm:inset-x-auto sm:right-5 sm:top-16 sm:w-[360px]"
+      className="fixed left-[calc(var(--rail-beside,0px)_+_0.75rem)] right-3 top-14 z-40 flex items-start gap-3 rounded-2xl border border-hairline/50 bg-panel p-3.5 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.6)] sm:inset-x-auto sm:right-5 sm:top-16 sm:w-[360px]"
     >
       <div className="shrink-0">
         <MausAvatar color="green" state="happy" size={36} trackPointer={false} />
