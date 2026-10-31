@@ -9,8 +9,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 
 - **Signing in.** Each person pairs from the app with a link the Admin signs for them; the machine shows the team's name
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
-  app); a Member (User) chats with the team's bots, uses rooms and makes routines, and changes no bot's setup, connects
-  no app and makes no webhook.
+  app); a Member (User) uses each bot as far as it is shared with them (below, "Who can use a bot"), uses rooms and
+  makes routines, and connects no app and makes no webhook.
 - **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. Teammates are
   in the @ list too, and whatever is addressed to one of them reaches their inbox (below, "One inbox per person"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
@@ -322,8 +322,8 @@ result. In a member's private chat it is that member's alone: never the owner's,
 bot's shared chats, a group chat, a routine nobody opened) it is the owner's, or the Admins' when nobody owns the bot.
 The asked person alone gets it in their Needs you (`/api/needs-you`, `/api/today`) and in their inbox (below), with the
 one notification about it (live and in the feed). The card itself stays in its conversation, where everyone who sees it
-may answer it, and says "Asking Ada"; the asked person may answer it too, there or from their inbox. Everyone can still
-chat with every shared bot: routing decides only whose inbox a bot's own asks reach.
+may answer it, and says "Asking Ada"; the asked person may answer it too, there or from their inbox. Routing decides only
+whose inbox a bot's own asks reach; who may chat with the bot is its sharing's (below).
 
 **One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
 person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
@@ -344,6 +344,50 @@ or posts in one.
 
 On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
 Every bot still reaches every bot there.
+
+## Who can use a bot
+
+Each team bot is shared like a document: what everyone in the team gets, and a level for each person added. A person's
+level is the higher of the two. Admins (the Super admin included) and the bot's owner can always edit it and are never
+listed.
+
+| Level | What they can do |
+|---|---|
+| No access | Nothing: the bot is not listed for them, and every route naming it, its conversations, its rooms, routines and files answers 404 as for one that does not exist |
+| Can view | See the bot, its main chat and the conversations shared with them (rooms, their own earlier chats), read only; open them and mark them read |
+| Can chat | Also write to it, start their own conversations, answer its cards, react, stop it, write in its rooms, run its routines and make routines for it (and change or delete their own) |
+| Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
+
+Can edit never reaches what only an admin sets on any bot: what it may do on its computer (approval level, always
+allow, folders), where it runs, its department, whom it answers to or directs, connecting an app or making a webhook.
+
+- **Sharing.** `bot.access` is `{ everyone: "none" | "view" | "chat" | "edit", people: { <address>: "view" | "chat" |
+  "edit" } }` (`shared/bot-access.ts`); "none" for everyone is "Only people added". It is sent only on the copy of
+  someone who can edit the bot; everyone's copy carries `yourAccess`, their own level. `PUT /api/bots/<id>/access` with
+  the whole value sets it (Undo puts the previous one back): someone who can edit it only, a new person must be a
+  current member of the team (an older list's address or `@domain` may stay), and the owner is never stored. The bot's
+  `visibility` follows in the same write (everyone when everyone may at least view it, else the owner and the people
+  added), so every rule of the audience rule above that reads who sees a bot holds unchanged. A new team bot is
+  Everyone · Can chat. A member's own MausBot stays theirs alone, as before.
+- **Before levels.** A bot whose sharing was never set is read from its visibility, exactly as it was: everyone →
+  Everyone · Can chat; admins only → Only people added (admins still edit); a list of addresses → those people · Can
+  chat. Nothing is rewritten on disk; the first change in the Share dialog stores the sharing. An older app's
+  visibility change on a team sets the matching sharing.
+- **The owner.** Handing a bot on (`PUT /api/bots/<id>/reports-to`) keeps the previous owner at Can edit, as a document
+  handed on does, and the new owner sees it.
+- **Where it is enforced** (`server/host/bot-access-gate.ts`, after the visibility gate): every member request naming
+  a bot, a conversation (by path, query or body), a room (needing the level on every bot in it), a routine or a run.
+  Reads need Can view, everything that writes Can chat, sharing Can edit; `PATCH /api/bots/<id>` takes each level's own
+  fields (`memberBotPatchViolation`), a routine needs Can edit unless its writer is changing it, a new room or routine
+  needs Can chat on what it names, and a card that changes the bot needs Can edit to answer (`cardAnswerRefusal`). A
+  message another app relays for a person (the guarded route's `onBehalfOf`) needs that person to be able to chat; one
+  that names nobody needs everyone to be able to. The live stream sends each person their own `yourAccess` with every
+  bot frame, withdraws a bot that stops being shown (`bot.deleted`, and their stream ends to start fresh) and sends one
+  that becomes shown whole.
+- **The app.** The bot's Share button (the bot panel in Simple, the settings header in Advanced) opens the Share
+  dialog on a team; the conversation's copy and download sit at its foot. Someone who can only view a bot sees "You
+  can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens its main chat
+  rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
 
 ## One inbox per person
 

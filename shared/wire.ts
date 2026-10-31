@@ -11,7 +11,7 @@ import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
-import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts";
+import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { BotAccessFields } from "./bot-access.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts"; import type { ComputerAskField } from "./computer-ask.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
@@ -266,7 +266,7 @@ export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => b
 
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
-export interface WireBot extends DefaultBotFields {
+export interface WireBot extends DefaultBotFields, BotAccessFields {
   waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
