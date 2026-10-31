@@ -24,6 +24,8 @@ it.each(["direct mention", "standing handoff", "new handoff", "one-way handoff",
     const suffix = ++serial;
     const lead = (await cli("new-bot", "--name", `Scout${suffix}`)).bot;
     const ledger = (await cli("new-bot", "--name", `Ledger${suffix}`)).bot;
+    // Questions reach the person on "Ask me first"; at Full access, the default, the requesting bot decides them instead.
+    for (const bot of [lead, ledger]) await api(`/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true }, "PATCH");
     const roomRoute = route.includes("room");
     const room = roomRoute ? (await cli("new-channel", "--name", "Review", "--members", `${lead.id},${ledger.id}`)).channel : undefined;
     const question = `Which footer for ${route}?`;

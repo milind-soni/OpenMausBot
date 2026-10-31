@@ -48,6 +48,8 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     };
     await ui("eval", "--js", "localStorage.setItem('omb-advanced-mode', '0'); window.dispatchEvent(new StorageEvent('storage', { key: 'omb-advanced-mode' })); true");
     const ledger = (await api("/api/bots", { name: "Ledger" })).bot;
+    // Questions reach the person on "Ask me first"; at Full access, the default, the requesting bot decides them instead.
+    for (const id of [info.botId, ledger.id]) await api(`/api/bots/${id}`, { approvalMode: "ask", applyToAllThreads: true }, "PATCH");
     writeFileSync(planPath, JSON.stringify({
       [info.botId]: { steps: [{ arguments: { bot_ids: [ledger.id], message: "Check the footer" } }], reply: "Assigned", resumeReply: "Ledger checked the footer" },
       [ledger.id]: { script: [{ key: "greeting", match: ["Hello Ledger."], reply: "Hello from Ledger" }, { key: "ask", match: ["Check the footer"], steps: [{ server: "ogb", tool: "ask_user", arguments: { question: "Which footer should I use?", choices: ["Short footer", "Long footer"] }, capture: { answer: "([\\s\\S]+)" } }], reply: "I used {{answer}}" }] },
