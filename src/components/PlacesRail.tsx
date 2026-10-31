@@ -16,7 +16,7 @@ import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
 import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
-import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
+import { captionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
 import { SwatchRadios } from "./SwatchRadios";
@@ -277,11 +277,12 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     track("rail_place_opened", { kind: place.kind });
     void bridge?.open?.(place.id).catch(() => {});
   };
-  const framed = windowFramed(capabilities), draggable = framed;
+  const framed = windowFramed(capabilities), draggable = captionChrome(capabilities.windowChrome).draggable;
   // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
-  // top bar (the traffic lights' place), so its places start under that bar. Beside a page that doesn't draw the frame
-  // (an older release), they start where that release left them: under the traffic lights' old place on macOS.
-  const above = !framed ? "h-3" : !chrome ? "h-[9px]" : besideFramed ? "h-[37px]" : capabilities.windowChrome === "mac-inset" ? "h-[52px]" : "h-3";
+  // top bar (the traffic lights' place), so its places start under that bar. With the frame turned off, or beside a page
+  // that doesn't draw it (an older release), they start under the traffic lights on macOS.
+  const lights = capabilities.windowChrome === "mac-inset" ? "h-[52px]" : "h-3";
+  const above = !framed ? lights : !chrome ? "h-[9px]" : besideFramed ? "h-[37px]" : lights;
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline style.
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
@@ -294,7 +295,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   };
   return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
-      "bg-frame [--rail-surface:var(--color-frame)]", !framed && (calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50"))}>
+      framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-ink/[0.04]" : "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />
     {/* As wide as the rail, so nothing round a tile is cut off at the sides: a list that scrolls clips its overflow. */}
     <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>

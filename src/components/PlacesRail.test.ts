@@ -316,7 +316,8 @@ it("the window's own rail: drawn at every width, 36px wide with small rounded ti
   await mount(createElement(PlacesRail, { chrome: true }));
   const nav = host.querySelector("[data-places-rail]")!;
   expect(nav.className).toContain("flex h-full");
-  expect(nav.className.split(" "), "as thin as its tiles allow, in the frame's colour").toEqual(expect.arrayContaining(["w-9", "shrink-0", "flex-col", "items-center", "bg-frame"]));
+  expect(nav.className.split(" "), "as thin as its tiles allow; beside a window with its own title bar, in the sidebar's colour as before the frame")
+    .toEqual(expect.arrayContaining(["w-9", "shrink-0", "flex-col", "items-center", "bg-panel"]));
   expect(nav.className, "never hidden on a narrow window").not.toContain("hidden");
   expect(nav.textContent, "no name under the place on screen: its tile's ring marks it").toBe("MCCAACBCCO");
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");

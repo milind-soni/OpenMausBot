@@ -1,7 +1,7 @@
 // The window's own frame in the real app, as the desktop window draws it on macOS and Windows: the top bar (the
 // traffic lights or the caption buttons, the rail's button, the place on screen in its middle, an update, Settings),
 // the rail of places beside it, the sidebar on the frame's colour beside the app's card, the sidebar's edge dragged to
-// its avatars and back, and the rail's tiles up close. Against a disposable fake-engine server, with the desktop bridge
+// its avatars and back, the same window with the frame turned off, and the rail's tiles up close. Against a disposable fake-engine server, with the desktop bridge
 // of scripts/testing/rail-preview.tsx (the window's own rail drawn by its own page, in a frame).
 // Run: node --experimental-strip-types scripts/verify-window-frame.ts --shots <dir> [--only <view,view>] [--skins all]
 // Each view is photographed in Daylight and Midnight (every skin with --skins all) at 1280x800, at twice that size,
@@ -50,6 +50,13 @@ const VIEWS: Array<{ name: string; query: string; ready: string; width?: number;
   { name: "frame-drag-avatars", query: "chrome=1", ready: `${RAIL_READY} && document.querySelector('[data-sidebar-resize]')`, act: (page) => dragEdge(page, 110) },
   { name: "frame-drag-out", query: "chrome=1&density=icons", ready: `${RAIL_READY} && document.querySelector('[data-sidebar-resize]')`, act: (page) => dragEdge(page, 170, true) },
   { name: "frame-edge-hover", query: "chrome=1&density=icons&mode=simple", ready: `${RAIL_READY} && document.querySelector('[data-sidebar-resize]')`, act: hoverEdge },
+  // The frame turned off: macOS's window as it was before the frame, and Windows' own title bar once the app started again.
+  { name: "frame-off", query: "chrome=1&frame=off", ready: RAIL_READY },
+  { name: "frame-off-simple", query: "chrome=1&frame=off&mode=simple", ready: RAIL_READY },
+  { name: "frame-off-icons", query: "chrome=1&frame=off&density=icons", ready: RAIL_READY },
+  { name: "frame-off-windows", query: "chrome=1&frame=off&platform=win32", ready: RAIL_READY },
+  { name: "frame-setting", query: "chrome=1&settings=frame", ready: `${RAIL_READY} && document.querySelector('[data-window-frame-switch]')` },
+  { name: "frame-setting-windows", query: "chrome=1&settings=frame&platform=win32&framepending=1", ready: `${RAIL_READY} && document.querySelector('[data-window-frame-restart]')` },
 ];
 
 /** Where an element of the window's rail page is, in the window. */

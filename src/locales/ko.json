@@ -7067,5 +7067,9 @@
   "botAccess.yours.chat": "{bot}와 대화하고 나만의 대화를 시작할 수 있어요. 접근 권한은 편집할 수 있는 사람이 정해요.",
   "botAccess.yours.other": "접근 권한은 {bot}를 편집할 수 있는 사람이 정해요.",
   "botAccess.viewOnly": "{bot}는 볼 수만 있고 대화할 수는 없어요.",
-  "botAccess.viewOnlyRoom": "{bot}는 볼 수만 있어서 이 대화방을 읽을 수는 있지만 쓸 수는 없어요."
+  "botAccess.viewOnlyRoom": "{bot}는 볼 수만 있어서 이 대화방을 읽을 수는 있지만 쓸 수는 없어요.",
+  "settings.windowFrame.title": "창 프레임",
+  "settings.windowFrame.subtitle": "위쪽에 지금 있는 곳을 알려 주는 얇은 막대가 생기고, 채팅은 모서리가 둥근 카드 안에 보여요. 끄면 창이 예전 모습으로 돌아가요.",
+  "settings.windowFrame.restart": "{app}을(를) 다시 시작하면 적용돼요.",
+  "settings.windowFrame.restartNow": "지금 다시 시작"
 }

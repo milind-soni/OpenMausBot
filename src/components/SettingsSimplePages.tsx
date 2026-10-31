@@ -25,6 +25,7 @@ import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
 import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
+import { WindowFrameRow } from "./WindowFrameRow";
 import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
@@ -63,6 +64,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ThemeRow simple />
             <PlaceLookRows />
             <ChromeRailRow />
+            <WindowFrameRow />
             <ColorUserBubblesRow simple />
             <LanguageRow simple />
             <SendKeyRow simple />

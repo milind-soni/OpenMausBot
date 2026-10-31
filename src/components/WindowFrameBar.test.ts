@@ -8,6 +8,7 @@ import type { UpdaterState } from "@/types/ogb";
 type Place = { local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string };
 const fixture = vi.hoisted(() => ({
   windowChrome: "mac-inset" as "mac-inset" | "win-caption" | "native",
+  windowFrame: undefined as boolean | undefined,
   rail: { available: true, hidden: false } as { available: boolean; hidden: boolean } | null,
   update: null as UpdaterState | null,
   dispatch: vi.fn(),
@@ -21,7 +22,7 @@ vi.mock("@/lib/place-look", () => ({ usePlaceLook: () => fixture.look }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }) }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { windowChrome: fixture.windowChrome }, ready: true }),
+  useDesktopCapabilities: () => ({ capabilities: { windowChrome: fixture.windowChrome, windowFrame: fixture.windowFrame }, ready: true }),
 }));
 
 import { setLocale } from "@/lib/i18n";
@@ -37,6 +38,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   fixture.windowChrome = "mac-inset";
+  fixture.windowFrame = undefined;
   fixture.rail = { available: true, hidden: false };
   fixture.update = null;
   fixture.config = {};
@@ -126,6 +128,17 @@ describe("the window frame's top bar", () => {
     fixture.windowChrome = "native";
     await mount(createElement(WindowFrameBar));
     expect(fixture.frameDrawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws nothing once the person turned the frame off, and tells main it draws none, so the traffic lights go back", async () => {
+    fixture.windowFrame = false;
+    await mount(createElement(WindowFrameBar));
+    expect(bar()).toBeNull();
+    expect(fixture.frameDrawn).toHaveBeenLastCalledWith(false);
+    fixture.windowFrame = true;
+    await act(async () => root!.render(createElement(WindowFrameBar)));
+    expect(bar()).not.toBeNull();
+    expect(fixture.frameDrawn).toHaveBeenLastCalledWith(true);
   });
 
   it("opens the app's settings", async () => {

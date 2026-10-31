@@ -36,6 +36,9 @@ const __APP_VERSION__: string;
       packaged: boolean;
     };
     windowChrome: "mac-inset" | "win-caption" | "native";
+    /** The page draws the window's frame: false once the person turned it off. Absent on an older app, whose window
+     * draws it. */
+    windowFrame?: boolean;
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";
@@ -338,6 +341,12 @@ const __APP_VERSION__: string;
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
+      /** The window's own frame, this desktop's choice (Settings → Appearance). Absent on an older app. */
+      windowFrame?: {
+        state(): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
+        /** From the person's click on another server's page. */
+        set(on: boolean): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
+      };
       /** The renderer-drawn Windows caption buttons; absent outside the
        * frameless Windows shell (macOS/Linux/browser keep native chrome). */
       windowControls?: {

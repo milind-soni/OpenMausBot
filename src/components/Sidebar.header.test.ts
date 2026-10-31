@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   density: "comfortable" as SidebarDensity,
   advanced: true,
   windowChrome: undefined as "mac-inset" | "win-caption" | "native" | undefined,
+  windowFrame: undefined as boolean | undefined,
   hostLabel: undefined as string | undefined,
   rail: null as { available: boolean; hidden: boolean } | null,
 }));
@@ -26,7 +27,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => {
     const capabilities = initialDesktopCapabilities();
     const host = { ...capabilities.host, label: fixture.hostLabel ?? capabilities.host.label };
-    return { capabilities: { ...capabilities, host, windowChrome: fixture.windowChrome }, ready: true };
+    return { capabilities: { ...capabilities, host, windowChrome: fixture.windowChrome, windowFrame: fixture.windowFrame }, ready: true };
   },
 }));
 
@@ -40,6 +41,7 @@ beforeEach(() => {
   fixture.density = "comfortable";
   fixture.advanced = true;
   fixture.windowChrome = undefined;
+  fixture.windowFrame = undefined;
   fixture.hostLabel = undefined;
   fixture.rail = null;
   vi.stubGlobal("window", { innerWidth: 1280, location: { protocol: "http:", search: "" } });
@@ -171,6 +173,33 @@ describe("sidebar top row", () => {
       expect(html.match(/Switch server:/g)).toHaveLength(1);
     },
   );
+
+  it("with the frame turned off on macOS, makes room for the traffic lights in its corner again, the rail's button after them", () => {
+    fixture.windowChrome = "mac-inset";
+    fixture.windowFrame = false;
+    fixture.rail = { available: true, hidden: false };
+    desktop();
+    const advanced = topRow(render());
+    expect(advanced).toMatch(/^data-sidebar-top-row="true" class="[^"]*" style="-webkit-app-region:drag;height:46px"/);
+    expect(classesOf(advanced, "data-traffic-light-space")).toEqual(["w-[72px]", "shrink-0", "md:w-[calc(72px_-_var(--rail-beside,0px))]"]);
+    expect(advanced.indexOf("data-traffic-light-space")).toBeLessThan(advanced.indexOf("data-rail-toggle"));
+    fixture.advanced = false;
+    const simple = topRow(render());
+    expect(simple, "Simple keeps its own top row, not the frame's corner").toMatch(/^data-sidebar-top-row="true"/);
+    expect(simple.indexOf("data-traffic-light-space")).toBeLessThan(simple.indexOf("data-rail-toggle"));
+    fixture.density = "icons";
+    expect(classesOf(render(), "data-traffic-light-space"), "the column of avatars keeps a strip above for them").toEqual(["h-5", "w-full"]);
+  });
+
+  it("with the frame turned off on Windows, its own title bar is back: nothing makes room and nothing drags", () => {
+    fixture.windowChrome = "native";
+    fixture.windowFrame = false;
+    fixture.hostLabel = "Windows";
+    desktop();
+    const row = topRow(render());
+    expect(row).not.toContain("data-traffic-light-space");
+    expect(row).not.toContain("app-region:drag");
+  });
 
   it("draws no window buttons in a browser, where the browser has its own", () => {
     const row = topRow(render());

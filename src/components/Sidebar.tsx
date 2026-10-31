@@ -25,7 +25,7 @@ import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect
 import { StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
-import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
+import { captionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
@@ -109,6 +109,9 @@ import { SectionPicker } from "./SidebarSectionPicker";
 export { PinnedBotCircle, PinnedCircleThreadPanel, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 export { ArchivedBotRow, ArchivedBotsPanel, archivedDeleteAllCopy, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel";
 import { roomDeleteCopy } from "./room-delete-copy"; export { roomDeleteCopy };
+
+/** The centre of macOS's traffic lights (14px tall) with the window's frame off, where the window puts them at 16,16. */
+export const MAC_TRAFFIC_LIGHT_CENTER_Y = 23;
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
   [PINNED_SECTION_ID]: "sidebar.section.pinned",
@@ -1072,9 +1075,11 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   };
 
   // A framed window (WindowFrameBar) holds the traffic lights and the rail's button in its top bar, so the top row keeps
-  // no room for them; in Simple it is only the corner holding Search and New, with the bot tiles beside it.
+  // no room for them; in Simple it is only the corner holding Search and New, with the bot tiles beside it. With the
+  // frame off on macOS, the traffic lights sit in the top row's corner.
   const framed = windowFramed(capabilities), corner = framed && simpleDesk;
-  const draggableChrome = framed;
+  const lights = capabilities.windowChrome === "mac-inset" && !framed;
+  const draggableChrome = captionChrome(capabilities.windowChrome).draggable;
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline
   // style.
   const windowDragStyle = draggableChrome
@@ -1272,12 +1277,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           "flex items-center",
           // The corner is no drag region and takes no clicks but its buttons': the tiles rise into the rest of it.
           density === "icons" ? "flex-col gap-1 px-2 pt-3.5 pb-1" : corner ? "pointer-events-none relative h-[34px] items-start justify-end px-1.5 pt-1.5" : simpleDesk ? "relative h-[60px] items-start pl-4 pr-4 pt-3" : "relative pl-4 pr-2",
-          density !== "icons" && !simpleDesk && "h-12 max-md:h-16",
+          density !== "icons" && !simpleDesk && !lights && "h-12 max-md:h-16",
         )}
-        style={corner ? undefined : windowDragStyle}
+        style={corner ? undefined : density !== "icons" && lights && !simpleDesk ? { ...windowDragStyle, height: MAC_TRAFFIC_LIGHT_CENTER_Y * 2 } : windowDragStyle}
       >
         {phone ? (
           <div className="shrink-0" style={windowNoDragStyle}><SidebarProfileMenu iconOnly circle /></div>
+        ) : lights ? (
+          // The traffic lights span 16-76px of the window; nothing clickable starts before 88px, with the window's rail
+          // beside the page or not.
+          <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : "w-[72px] shrink-0 md:w-[calc(72px_-_var(--rail-beside,0px))]"} />
         ) : null}{!phone && !framed && <ChromeRailToggle advanced={advanced} icons={density === "icons"} style={windowNoDragStyle} />}
         {rail && <div data-sidebar-rail-top className="flex flex-col items-center gap-2 pt-1" style={windowNoDragStyle}>
           <button type="button" onClick={railSearch} aria-label={t("sidebar.searchAria")} title={t("sidebar.searchAria")} className={SIMPLE_TOP_BUTTON}>

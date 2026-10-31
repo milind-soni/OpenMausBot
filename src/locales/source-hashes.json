@@ -2547,7 +2547,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -8003,7 +8007,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -10510,7 +10518,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -13017,7 +13029,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -19396,7 +19412,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -25533,7 +25553,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -28891,7 +28915,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -33229,7 +33257,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -36179,7 +36211,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -41126,7 +41162,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -46073,7 +46113,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -52349,7 +52393,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -58706,7 +58754,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -64859,7 +64911,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -71736,7 +71792,11 @@
       "botPanel.backups.hint": "70b8fdefbc134b1039c00dfa2c9e14a4b449b727eddad64b2dec852e92f81782",
       "botPanel.backups.row": "40d023d91b8e0864e975c5e8e5099e3267f148d114c2b3831b5b5932e37de9eb",
       "botPanel.backups.remove": "439fc54ae2233f808bb3514d6f90cc0a5075fe0856112a48a5efe28c8e737597",
-      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf"
+      "botPanel.backups.choose": "43857778c944d0b87720e26a1c5b48f978dbe0a411b6937fe258f5c3491ef4bf",
+      "settings.windowFrame.title": "deeb39467d5a42e3b771fe51c8090b58cda7d10f29b63c2a452e399bc3307026",
+      "settings.windowFrame.subtitle": "9c73958af72ede9828b57959a19a74be08ad99782311a474fbece66a07909784",
+      "settings.windowFrame.restart": "f24e00b29dcf80e5c821798ddcff6a3b0a41226d69d3c6292fd62bd2debb231a",
+      "settings.windowFrame.restartNow": "09af1002abafb2dadfd2a9e61d7b0493c2a1da0e4859645116db0d462d175b08"
     }
   }
 }

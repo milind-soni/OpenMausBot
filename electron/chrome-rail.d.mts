@@ -6,11 +6,12 @@ export declare const RAIL_OFFER_GRACE_MS: number;
 export interface ChromeRailState { available: boolean; hidden: boolean }
 /** `window.ogb.rail`. The page beside the rail offers the button that hides and shows it: `state()` from a document is
  * that offer, and main hides the rail only beside a document that made it. `drawsFrame()` from a document says it draws
- * the window's frame, so main puts the traffic lights in its top bar. `expand`, `onSkin` and `onFramed` are the rail's
+ * the window's frame, so main puts the traffic lights in its top bar; `drawsFrame(false)`, that it draws none (the
+ * person turned the frame off), so they go back at once. `expand`, `onSkin` and `onFramed` are the rail's
  * own page's, on this app's pages only. Each is absent on an older app. */
 export interface ChromeRailBridge {
   state?(): Promise<ChromeRailState>;
-  drawsFrame?(): Promise<void>;
+  drawsFrame?(drawn?: boolean): Promise<void>;
   /** From the person's click. */
   setHidden?(hidden: boolean): Promise<ChromeRailState>;
   onState?(callback: (state: ChromeRailState) => void): () => void;
@@ -36,7 +37,7 @@ export declare function createChromeRail(deps: {
   args: () => string[];
   url: () => string;
   wanted: () => boolean;
-  prefs?: () => { railHidden(): boolean; setRailHidden(hidden: boolean): void } | null;
+  prefs?: () => { railHidden(): boolean; setRailHidden(hidden: boolean): void; windowFrame?(): boolean } | null;
   changed?: () => void;
   log?: (line: string) => void;
 }): ChromeRail;

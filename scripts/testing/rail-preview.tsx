@@ -26,8 +26,11 @@ import "../../src/styles.css";
 // in a frame of the rail's width at the left (?railpage, the rail's own page with the list main gives it alone), and
 // the room the app's preload leaves for it. ?platform=win32 is a Windows window, its caption buttons drawn by the app;
 // ?update=downloading|downloaded an update on its way; ?team a team's Cloud its admin is on, ?teamname= the team's name.
-// ?framecolor=today|app paints the frame in another colour to compare: the grey it had, or the app's own. Each page
-// starts with the sidebar at its own width.
+// ?framecolor=today|app paints the frame in another colour to compare: the grey it had, or the app's own. ?frame=off is
+// the window with its frame turned off (macOS's traffic lights back in the sidebar's corner; Windows' own title bar, as
+// after the app started again), and ?framepending a Windows window whose frame was just turned off, until the app
+// starts again. ?settings=frame opens Settings at the window frame's switch. Each page starts with the sidebar at its
+// own width.
 const params = new URLSearchParams(location.search);
 setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
@@ -47,6 +50,8 @@ if (frameColour) {
   paint.textContent = `html[data-skin], html { --color-frame: ${frameColour} !important; }`;
   document.head.append(paint);
 }
+
+const frameOff = params.get("frame") === "off", framePending = params.has("framepending");
 
 const team = params.has("team");
 const teamName = params.get("teamname") ?? "Acme team";
@@ -102,9 +107,12 @@ const RAIL_WIDTH = 36;
 let hidden = params.has("hidden");
 const placesHeard = new Set<() => void>(), stripHeard = new Set<(state: { available: boolean; hidden: boolean }) => void>();
 const strip = () => ({ available: listed.length > 1, hidden });
+let frameOn = !frameOff && !framePending;
+const capabilitiesHeard = new Set<(next: object) => void>();
 const capabilities = async () => ({
   host: windows ? { platform: "win32", label: "Windows", session: "unknown", packaged: true } : { platform: "darwin", label: "macOS", session: "unknown", packaged: true },
-  windowChrome: windows ? "win-caption" : "mac-inset",
+  windowChrome: windows ? (frameOff ? "native" : "win-caption") : "mac-inset",
+  windowFrame: windows ? !frameOff : frameOn,
   screenPreview: { available: false, interaction: "none" }, dictation: { available: false, engine: "none", onDevice: false },
   localComputer: { available: false, support: "unsupported", enabled: false, status: "unavailable" },
 });
@@ -130,7 +138,8 @@ if (params.has("railpage")) {
   railPage.setAttribute("data-rail-page", "");
   railPage.title = "The window's rail";
   railPage.src = `${location.pathname}?${new URLSearchParams([...params, ["railpage", "1"]])}`;
-  railPage.style.cssText = `position:fixed;left:0;top:0;width:${RAIL_WIDTH}px;height:100vh;border:0;z-index:90;background:transparent;color-scheme:normal`;
+  const titleBar = windows && frameOff ? 31 : 0;
+  railPage.style.cssText = `position:fixed;left:0;top:${titleBar}px;width:${RAIL_WIDTH}px;height:calc(100vh - ${titleBar}px);border:0;z-index:90;background:transparent;color-scheme:normal`;
   const besidePage = () => {
     if (chrome && !hidden) { document.head.append(room); document.body.append(railPage); } else { room.remove(); railPage.remove(); }
   };
@@ -140,7 +149,7 @@ if (params.has("railpage")) {
     platform: windows ? "win32" : "darwin",
     app: { version: "0.1.130", ownPage: computer },
     getCapabilities: capabilities,
-    onCapabilitiesChanged: () => () => {},
+    onCapabilitiesChanged: (heard: (next: object) => void) => { capabilitiesHeard.add(heard); return () => { capabilitiesHeard.delete(heard); }; },
     onOpenAppSettings: (callback: (section?: string) => void) => { openSettings = callback; return () => {}; },
     applySkin: ok, setUnreadCount: () => {}, permStatus: async () => ({}),
     workspaces: {
@@ -155,6 +164,11 @@ if (params.has("railpage")) {
       color: async (swatch: CloudSwatch) => { look = { ...look, swatch: COLOR[swatch] ? swatch : null, color: COLOR[swatch] }; return { outcome: "saved", look }; },
     },
     cloudAdd,
+    windowFrame: {
+      state: async () => ({ on: frameOn, restart: windows && framePending }),
+      set: async (on: boolean) => { frameOn = on; for (const heard of capabilitiesHeard) heard(await capabilities()); return { on, restart: windows }; },
+    },
+    ...(framePending ? { relaunch: async () => true } : {}),
     rail: {
       state: async () => strip(),
       setHidden: async (next: boolean) => {
@@ -166,7 +180,7 @@ if (params.has("railpage")) {
       },
       onState: (heard: (state: { available: boolean; hidden: boolean }) => void) => { stripHeard.add(heard); return () => { stripHeard.delete(heard); }; },
     },
-    ...(windows ? { windowControls: { minimize: async () => true, toggleMaximize: async () => true, close: async () => true, state: async () => ({ maximized: false }), onMaximizedChanged: () => () => {} } } : {}),
+    ...(windows && !frameOff ? { windowControls: { minimize: async () => true, toggleMaximize: async () => true, close: async () => true, state: async () => ({ maximized: false }), onMaximizedChanged: () => () => {} } } : {}),
     ...(update ? { updater: { check: ok, install: ok, onState: (heard: (state: object) => void) => {
       heard(update === "downloaded" ? { status: "downloaded", version: "0.1.136" } : { status: "downloading", percent: 45 });
       return () => {};
@@ -197,13 +211,24 @@ if (params.has("railpage")) {
   if (!windows) {
     const lights = document.createElement("div");
     lights.setAttribute("aria-hidden", "true");
-    lights.style.cssText = "position:fixed;left:12px;top:7px;display:flex;gap:9px;z-index:100;pointer-events:none";
+    lights.style.cssText = `position:fixed;left:${frameOn ? 12 : 16}px;top:${frameOn ? 7 : 16}px;display:flex;gap:9px;z-index:100;pointer-events:none`;
     for (const color of ["#ff5f57", "#febc2e", "#28c840"]) {
       const dot = document.createElement("span");
       dot.style.cssText = `width:14px;height:14px;border-radius:50%;background:${color};display:block`;
       lights.append(dot);
     }
     document.body.append(lights);
+  } else if (frameOff) {
+    // Windows' own title bar is drawn outside the page; this stands in for it, above the page.
+    const bar = document.createElement("div");
+    bar.setAttribute("aria-hidden", "true");
+    const dark = ["midnight", "foundry", "graphite", "dusk", "halloween"].includes(params.get("skin") ?? "midnight");
+    bar.style.cssText = `position:fixed;inset:0 0 auto 0;height:31px;display:flex;align-items:center;z-index:100;font:12px "Segoe UI",sans-serif;padding-left:12px;${dark ? "background:#202020;color:#fff" : "background:#f3f3f3;color:#000"}`;
+    bar.innerHTML = `<span style="flex:1">MausBot</span>${["\u2013", "\u2610", "\u2715"].map((glyph) => `<span style="width:46px;text-align:center">${glyph}</span>`).join("")}`;
+    document.body.append(bar);
+    const below = document.createElement("style");
+    below.textContent = "html { padding-top: 31px !important; box-sizing: border-box !important; } #root { height: calc(100vh - 31px) !important; }";
+    document.head.append(below);
   }
 
   const click = (selector: string) => new Promise<void>((resolve) => {
@@ -222,6 +247,7 @@ if (params.has("railpage")) {
       .then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)))
       .then(() => {
         if (settings === "general") return document.querySelector("[data-settings-block='appearance']")?.scrollIntoView({ block: "start" });
+        if (settings === "frame") return document.querySelector("[data-window-frame-switch]")?.scrollIntoView({ block: "center" });
         // The rail's switch closes the picture, with the sidebar's own rows above it.
         if (settings === "strip") return document.querySelector("[data-rail-switch]")?.scrollIntoView({ block: "end" });
         const shown = document.querySelector("[data-place-look], [data-place-picture]");

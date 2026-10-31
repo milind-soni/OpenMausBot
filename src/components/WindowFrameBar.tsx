@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { ChromeRailToggle } from "./ChromeRailToggle";
-import { captionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
+import { captionChrome, useDesktopCapabilities, windowFrameable, windowFramed } from "./DesktopCapabilities";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { WindowPlaceTitle } from "./WindowPlaceTitle";
 
@@ -21,8 +21,8 @@ export const FRAME_BAR_BUTTON = "flex size-[22px] shrink-0 items-center justify-
 export function WindowFrameBar() {
   const { capabilities } = useDesktopCapabilities();
   const { dispatch } = useStore();
-  const framed = windowFramed(capabilities);
-  useEffect(() => { if (framed) sayFrameDrawn(); }, [framed]);
+  const frameable = windowFrameable(capabilities), framed = windowFramed(capabilities);
+  useEffect(() => { if (frameable) sayFrameDrawn(framed); }, [frameable, framed]);
   if (!framed) return null;
   const mac = capabilities.windowChrome === "mac-inset";
   const { dragProps } = captionChrome(capabilities.windowChrome);
