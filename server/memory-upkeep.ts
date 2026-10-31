@@ -744,7 +744,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       const { kept } = candidates.length ? fileCandidates(botId, candidates, { source, via: "dream" }) : { kept: [] };
       return { outdated, kept, stale };
     });
-    const aboutUser = dreamt.learned.filter((item) => item.aboutUser).map((item) => item.text);
+    const filed = new Set(written.kept.map((entry) => entry.text));
+    const aboutUser = dreamt.learned.filter((item) => item.aboutUser && filed.has(item.text)).map((item) => item.text);
     const aboutMe = aboutUser.length ? deps.addToAboutMe({ botId, botName: bot.name }, aboutUser) : 0;
     const done: DreamReport = {
       at,
