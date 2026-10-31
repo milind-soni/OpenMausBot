@@ -37,6 +37,18 @@ test("a frozen copy with its journal lost counts as moved, to the Cloud it names
   assert.deepEqual(homeOf({ journal: { ...done(), phase: "freeze" }, frozenCloud: CLOUD, state: connected() }), { kind: "computer" }, "a move under way is not a move done");
 });
 
+test("a server of the person's own their bots moved to is no Cloud: no sign-in, the window shows it as any saved server, and the frozen screen names it", async () => {
+  const garage = "https://garage.example.test";
+  const w = world({ journal: null, marker: { frozen: true, cloud: garage, place: "Garage server" }, state: { status: "signed-out" }, url: `${garage}/` });
+  await w.home.show();
+  assert.deepEqual([w.local, w.went, w.fetched, w.pairs], [[false], [], [], 0], "never the sign-in screen, nor any Cloud or the Admin asked");
+  assert.equal(w.home.cloudOrigin(), null);
+  const moving = world({ journal: null, marker: { frozen: true, cloud: garage, place: "Garage server" }, state: { status: "signed-out" }, ownMove: { phase: "final", name: "Garage server" } });
+  assert.deepEqual(moving.home.view(), { screen: "moving", name: "Garage server" });
+  moving.ownMove = { phase: "copy", name: "Garage server" };
+  assert.deepEqual(moving.home.view(), { screen: "opening" }, "still home here: nothing is stopped yet");
+});
+
 test("a sign-in keeps only a path of My Cloud's own", () => {
   assert.equal(routeOf(`${CLOUD}/chats/b1?view=2#x`, CLOUD), "/chats/b1?view=2");
   assert.equal(routeOf(`${CLOUD}/`, CLOUD), null);

@@ -56,7 +56,8 @@ export function moveQuietUntil(move: OneHomeView | null | undefined): number {
  * day (with Try again), what arrived (on My Cloud's page, once), coming home, where the bots came home instead, or this
  * computer's bots on their way home and home because the person keeps them here.
  * `page`: which page shows it; `reason`: why a failing move failed, in main's words, when it said. */
-export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true; reason?: string } | null {
+export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true; reason?: string; place?: string } | null {
+  if (move.place) return ownMoveLine(move, move.place, page);
   if (move.phase === "done") {
     if (page !== "cloud") return null;
     const list = move.counts ? arrivedList(move.counts) : [];
@@ -91,6 +92,25 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   const chats = move.phase === "copy" ? move.chats : undefined;
   const key = page === "cloud" ? (chats ? "cloudSend.move.bringingChats" : "cloudSend.move.bringing") : (chats ? "cloudSend.move.copyChats" : "cloudSend.move.copy");
   return { kind: "sending", text: t(key, chats ? { done: chats.done, total: chats.total } : {}), extra: [] };
+}
+
+/** The move to a server of the person's own, named `place`, on this computer's page: on its way, almost done, waiting for
+ * that server's update, or failing for a day with Try again. Once done the window shows that server, which says nothing
+ * of it here. */
+function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"): ReturnType<typeof moveLine> {
+  if (page !== "local" || !["copy", "wait", "finishing"].includes(move.phase)) return null;
+  const line = (kind: "sending" | "failed", text: string, more: { retry?: true; reason?: string } = {}) => ({ kind, text, extra: [], place, ...more });
+  const failing = "failing" in move ? move.failing : undefined;
+  if (failing) return failing.error ? line("failed", t("cloudSend.move.failingNamed", { place, error: failing.error }), { retry: true, reason: failing.error })
+    : line("failed", t("cloudSend.move.failingPlainNamed", { place }), { retry: true });
+  if (move.phase === "copy" && move.updating) return line("sending", t("cloudSend.move.updatingNamed", { place }));
+  if (move.phase === "finishing") return line("sending", t("cloudSend.move.finishingNamed", { place }));
+  if (move.phase === "wait" && move.waitingFor !== undefined) {
+    return line("sending", move.waitingFor ? t("cloudSend.move.waitingNamed", { place, name: move.waitingFor })
+      : t(move.waitingWhat === "sign-in" ? "cloudSend.move.waitingSignInNamed" : "cloudSend.move.waitingAnyNamed", { place }));
+  }
+  const chats = move.phase === "copy" ? move.chats : undefined;
+  return line("sending", chats ? t("cloudSend.move.copyChatsNamed", { place, done: chats.done, total: chats.total }) : t("cloudSend.move.copyNamed", { place }));
 }
 
 /** A bot moving from My Cloud into a team, on My Cloud's page: on its way, failed (it is still here, unchanged), or done. */
