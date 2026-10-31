@@ -672,7 +672,7 @@ export function TeamLibraryPanel({
               )}
               {tab === "explore" && (
                 <div>
-                  <ReadyBotGallery search={search} onDialog={setNestedDialog} onAdded={onClose} />
+                  <ReadyBotGallery search={search} onDialog={setNestedDialog} onAdded={onClose} stats={catalog?.templateStats} />
                   <div className="mb-3 text-[12px] font-medium text-ink-secondary">
                     {search ? t("templates.searchResults") : t("templates.communityTemplates")}
                   </div>
