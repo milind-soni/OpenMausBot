@@ -100,7 +100,7 @@ try {
   oauth.options.deny = false;
   await connect();
   await complete();
-  await row.getByText("Connected", { exact: true }).waitFor();
+  await row.getByLabel("Connected", { exact: true }).waitFor();
   const connected = (await status()).find((server: any) => server.name === "whop-2");
   assert.equal(connected.auth, "signed-in");
   assert.equal(connected.enabled, true);
@@ -113,14 +113,14 @@ try {
   mkdirSync(output, { recursive: true });
   await page.screenshot({ path: join(output, "connected.png"), fullPage: true });
   await page.locator('[data-apps-filter="connected"]').click();
-  await row.getByText("Connected", { exact: true }).waitFor();
-  assert.equal(await page.locator('[data-apps-filter="connected"]').innerText(), "Connected 1");
+  await row.getByLabel("Connected", { exact: true }).waitFor();
+  assert.equal(await page.locator('[data-apps-filter="connected"]').innerText(), "1 connected");
   assert.equal(await page.locator('[data-app-tile="gmail"]').count(), 0);
   await row.getByRole("button", { name: "Disconnect Whop", exact: true }).click();
   await row.waitFor({ state: "hidden" });
   await page.locator('[data-apps-filter="all"]').click();
   await connect(); await complete();
-  await row.getByText("Connected", { exact: true }).waitFor();
+  await row.getByLabel("Connected", { exact: true }).waitFor();
   await page.reload();
   await row.getByRole("button", { name: "Disconnect Whop", exact: true }).waitFor();
   assert.equal(await page.locator("[data-whop-setup]").count(), 0);
@@ -133,10 +133,10 @@ try {
   // A successful login alone must not claim the tool connection is ready.
   failTest = true;
   await connect(); await complete();
-  await page.getByText("Signed in, but Whop’s tools could not be loaded. Please connect again to retry.", { exact: true }).waitFor();
+  await page.getByText("Signed in, but Whop’s tools could not be loaded: Synthetic discovery failure. Please connect again to retry.", { exact: true }).waitFor();
   assert.equal((await status()).find((server: any) => server.name === "whop-2").enabled, false);
   await connect(); await complete();
-  await row.getByText("Connected", { exact: true }).waitFor();
+  await row.getByLabel("Connected", { exact: true }).waitFor();
   const search = page.getByRole("textbox", { name: "Search apps", exact: true });
   await search.fill("whop");
   assert.equal(await row.isVisible(), true);
