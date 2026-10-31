@@ -15,6 +15,7 @@
     "allowImportingTsExtensions": true,
     "types": ["vite/client", "node"],
     "noEmit": true,
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

@@ -1,13 +1,13 @@
-// Dev-only gallery of Cancel trial / Cancel plan, served at /cancel-plan-preview.html; not in the packaged app.
+// Dev-only gallery of Cancel trial / Cancel plan, served at /previews/cancel-plan-preview.html; not in the packaged app.
 // ?view=settings|cloud&plan=trial|paid|team&cancelled=1&admin=old&skin=midnight|daylight&lang=de
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot, CloudRenewalResult } from "../electron/cloud-account.mjs";
-import type { CloudRenewal } from "../electron/cloud-list.mjs";
+import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot, CloudRenewalResult } from "../../electron/cloud-account.mjs";
+import type { CloudRenewal } from "../../electron/cloud-list.mjs";
 import { CloudAccountSettings, CloudPlanOnCloud } from "@/components/CloudAccountSettings";
 import { setLocale } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
-import "./styles.css";
+import "../styles.css";
 
 const DAY = 86_400_000, ENDS = Date.UTC(2026, 10, 4, 12);
 const params = new URLSearchParams(location.search);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
+import { localizedContainerProblem } from "@/lib/vm-problem";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import type { LocaleKey } from "@/locales";
 import {
@@ -1259,7 +1260,7 @@ export function LocalComputerSection() {
                     ? t("vm.main.perBotUnsupported")
                   : ready
                     ? t("vm.main.ready")
-                    : (status?.problem ?? t("vm.main.notReady"))}
+                    : (localizedContainerProblem(status?.problem) ?? t("vm.main.notReady"))}
           </span>
           <button
             onClick={() => {
@@ -1390,7 +1391,7 @@ export function LocalComputerSection() {
               <>
                 <div className="flex gap-2 text-[13px] text-warning">
                   <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                  <span>{status?.problem}</span>
+                  <span>{localizedContainerProblem(status?.problem)}</span>
                 </div>
                 {status?.image ? (
                   <ActionButton action="recreate" pending={pending} onClick={() => void act("recreate")} danger>

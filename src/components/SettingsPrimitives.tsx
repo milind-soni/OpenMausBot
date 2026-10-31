@@ -74,12 +74,12 @@ export function SettingRow({
   const titleId = useId();
   return (
     <div role="group" aria-labelledby={titleId} className={cn("px-4 in-data-[settings-look=simple]:py-2.5", className)}>
-      <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6 in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:min-h-6 in-data-[settings-look=simple]:flex-wrap in-data-[settings-look=simple]:gap-x-5 in-data-[settings-look=simple]:gap-y-2">
+      <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6 in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:min-h-11 in-data-[settings-look=simple]:flex-wrap in-data-[settings-look=simple]:items-center in-data-[settings-look=simple]:gap-x-5 in-data-[settings-look=simple]:gap-y-2">
         <div className="min-w-0 in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:min-w-[min(100%,15rem)] in-data-[settings-look=simple]:flex-1 in-data-[settings-look=simple]:flex-col in-data-[settings-look=simple]:gap-0.5">
           <div id={titleId} className="text-[14px] font-medium text-ink in-data-[settings-look=simple]:font-normal in-data-[settings-look=simple]:leading-5">{title}</div>
           {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-pretty text-ink-secondary in-data-[settings-look=simple]:mt-0 in-data-[settings-look=simple]:text-[13px] in-data-[settings-look=simple]:leading-[18px]">{subtitle}</div>}
         </div>
-        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ml-auto in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
+        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ml-auto in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:self-center in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
       </div>
       {message && <div className="mt-2 text-[12px]">{message}</div>}
     </div>
@@ -135,13 +135,13 @@ export function SettingsDisclosureRow({ id, title, subtitle, trailing, block, op
           aria-expanded={open}
           aria-controls={regionId}
           onClick={onToggle}
-          className="group flex w-full cursor-pointer flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 text-left"
+          className="group flex min-h-11 w-full cursor-pointer flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 text-left"
         >
-          <span className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-0.5">
-            <span className="text-[14px] leading-5 text-ink">{title}</span>
+          <span className={cn("flex min-h-6 min-w-0 flex-1 basis-[min(100%,15rem)]", subtitle ? "flex-col justify-center gap-0.5" : "items-center")}>
+            <span className="text-pretty text-[14px] leading-5 break-words text-ink">{title}</span>
             {subtitle && <span className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</span>}
           </span>
-          <span className="ml-auto flex shrink-0 items-center gap-3">
+          <span className="ml-auto flex shrink-0 items-center gap-3 self-center">
             {trailing}
             <ChevronRight size={14} aria-hidden="true" className={cn("text-ink-secondary transition-transform motion-reduce:transition-none", open && "rotate-90")} />
           </span>

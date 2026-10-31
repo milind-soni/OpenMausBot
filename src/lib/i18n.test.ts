@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applyBrand, DEFAULT_BRAND } from "./brand";
-import { documentLanguage, resolveLocale, setLocale, t, tFromServer } from "./i18n";
+import { documentLanguage, resolveLocale, setLocale, t, tFromServer, workspacePlaceName } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
 afterEach(() => {
@@ -61,6 +61,28 @@ describe("t", () => {
     expect(t("engines.local")).toBe("Lokal");
     expect(setLocale("xx-YY")).toBe("en");
     expect(t("engines.local")).toBe("Local");
+  });
+
+  it("localizes the built-in place name main sends in English", () => {
+    setLocale("it");
+    expect(workspacePlaceName(en["place.local"])).toBe("Questo computer");
+    expect(workspacePlaceName("APRS Chat")).toBe("APRS Chat");
+    expect(workspacePlaceName("APRS Chat", { local: true })).toBe("APRS Chat");
+    expect(workspacePlaceName(en["place.local"], { local: true })).toBe("Questo computer");
+    expect(workspacePlaceName(en["place.local"], { workspaceId: "workspace-local" })).toBe("Questo computer");
+    expect(workspacePlaceName(en["place.local"], { workspaceId: "local" })).toBe("Questo computer");
+    expect(workspacePlaceName(en["place.local"], { workspaceId: "remote-office" })).toBe(en["place.local"]);
+    expect(workspacePlaceName(en["place.local"], { local: false })).toBe(en["place.local"]);
+    setLocale("en");
+    expect(workspacePlaceName(en["place.local"])).toBe("This computer");
+  });
+
+  it("localizes Simple settings AI disclosure labels in Italian", () => {
+    setLocale("it");
+    expect(t("settings.simple.ai.more", { count: 20 })).toBe("Altri provider AI (20)");
+    expect(t("settings.simple.ai.keys")).toBe("Chiavi API e connessioni");
+    expect(t("settings.simple.ai.setUp")).toBe("Configura");
+    setLocale("en");
   });
 
   it("resolves every registered locale to itself", () => {

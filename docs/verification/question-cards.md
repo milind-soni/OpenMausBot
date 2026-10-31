@@ -64,8 +64,8 @@ card tool), `src/components/QuestionCard.test.ts`, `src/components/QuestionCard.
 pnpm exec vite --port 5287
 ```
 
-`http://127.0.0.1:5287/question-cards-preview.html` mounts the real chat, inbox card and inbox panel over a fixed store
-(`src/question-cards-preview.tsx`): `?state=question|approval|open|answered`, `surface=chat|inbox|panel`,
+`http://127.0.0.1:5287/previews/question-cards-preview.html` mounts the real chat, inbox card and inbox panel over a fixed store
+(`src/previews/question-cards-preview.tsx`): `?state=question|approval|open|answered`, `surface=chat|inbox|panel`,
 `skin=midnight|daylight`, `mode=simple|advanced`, `lang=de`; `state=others` shows the key, sign-in, connection and
 first-run cards that share the card's shell.
 

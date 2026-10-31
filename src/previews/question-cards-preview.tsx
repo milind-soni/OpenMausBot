@@ -1,9 +1,9 @@
-// Dev-only gallery of the question and approval cards on a Team Cloud, served at /question-cards-preview.html; not in
+// Dev-only gallery of the question and approval cards on a Team Cloud, served at /previews/question-cards-preview.html; not in
 // the packaged app. It mounts the real chat and inbox components over a fixed store, with no server behind it.
 // ?state=question|approval|open|answered|others&surface=chat|inbox|panel&skin=midnight|daylight&mode=simple|advanced&lang=de
 import { StrictMode, useMemo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import type { InboxRow, InboxView } from "../shared/inbox";
+import type { InboxRow, InboxView } from "../../shared/inbox";
 import { ChatView } from "@/components/ChatView";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { setLocale } from "@/lib/i18n";
@@ -12,7 +12,7 @@ import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { openInbox, setInboxView } from "@/state/inbox";
 import { initialState, StoreContext, type AppState, type Bot, type Message } from "@/state/store";
 import { setTeamPeople } from "@/state/team-people";
-import "./styles.css";
+import "../styles.css";
 
 const params = new URLSearchParams(location.search);
 const stateName = params.get("state") ?? "question";

@@ -47,7 +47,7 @@ import { cloudColor } from "@/lib/cloud-look";
 import { cn } from "@/lib/cn";
 import { meterPercent, resetLine } from "@/lib/usage-meter";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, t, workspacePlaceName } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
 import { useOtherServerName } from "@/lib/other-server";
 import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
@@ -384,7 +384,7 @@ export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" 
   const icon = cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} />
     : current?.local === false || (place.cloudHome && !current) ? <Cloud size={16} /> : <Laptop size={16} />;
   return [
-    ...(current ? [{ key: "place", label: current.name, ...(place.cloudHome && place.onLine ? { subtitle: place.onLine } : {}), icon, trailing: here, onSelect: place.openMenu }] : []),
+    ...(current ? [{ key: "place", label: workspacePlaceName(current.name, { local: current.local }), ...(place.cloudHome && place.onLine ? { subtitle: place.onLine } : {}), icon, trailing: here, onSelect: place.openMenu }] : []),
     ...(besideRail ? [] : [{ key: "switch-place", label: t("sidebar.menu.switchTo"), icon: <ArrowLeftRight size={16} />, onSelect: place.openMenu }]),
   ];
 }

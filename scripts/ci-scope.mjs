@@ -82,7 +82,7 @@ const AREAS = [
   [/^(?:apps\/)?docs\//, "docs"],
   [/^scripts\/.+\.test\.[cm]?[jt]sx?$/, "script-tests"],
   [/^src\/locales\/(?:(?!en\.json$)[^/]+\.json|[^/]+\.test\.ts)$/, "locales"],
-  [/^(?:src|public)\/|^[^/]+-preview\.html$/, "web"],
+  [/^(?:src|public)\/|^previews\/[^/]+-preview\.html$/, "web"],
   [/^(?:server|shared|enterprise|companion|evals|skills|deploy|cloudflare\/composio-broker)\/|^(?:Dockerfile|\.dockerignore|compose\.yaml)$/, "server"],
   [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
   [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html)$/, "desktop"],
