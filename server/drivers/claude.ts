@@ -894,6 +894,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         retryAbort: AbortController;
         settled: boolean;
         sawStreamDelta: boolean;
+        sawActivity?: boolean;
         /** sent to a warm process that has not yet sent this turn's `init`; if it exits first it
          * never took the prompt */
         awaitingInit?: boolean;
@@ -1461,6 +1462,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         } catch {
           return;
         }
+        if (session.turn && (o.type !== "result" || o.origin?.kind === "task-notification") &&
+            !(o.type === "system" && o.subtype === "init")) session.turn.sawActivity = true;
         authRecovery.frame(threadId, o, session.costTotal);
         // A replayed stdin message carries its images again: keep their bytes out of the log.
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o?.type === "user" && o.isReplay === true && o.message ? diagnosticClaudeUserMessage(o) : o });
@@ -1721,6 +1724,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         if (closeFinalized) return;
         closeFinalized = true;
+        const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}${session.turn?.sawActivity ? " A tool action may have run. Check its effects before trying again." : ""}`;
         if (session.turn?.stopRequested && !session.turn.settled) {
           settle(false, "interrupted");
         } else if (session.turn?.deferred && !session.turn.settled) {
@@ -1732,23 +1736,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             emit({
               ...base(threadId, currentTurnId()),
               type: "runtime.error",
-              message: `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
+              message,
             });
             settleResult({ ...held, ok: false, stopReason: "exit_before_result" });
           }
         } else if (session.turn && !session.turn.settled) {
           const { turnId, input: turn, retryAbort } = session.turn;
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
-          const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
           const endedBeforeTurn = session.turn.awaitingInit === true;
           if (
-            !retry.cancelled &&
+            !retry.cancelled && !session.turn.sawActivity &&
             (endedBeforeTurn || (
-              code !== 0 &&
-              verdict.transient &&
-              !session.turn.sawStreamDelta &&
-              retry.attempt < RETRY_MAX_ATTEMPTS - 1
+              code !== 0 && verdict.transient && retry.attempt < RETRY_MAX_ATTEMPTS - 1
             ))
           ) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
@@ -1825,7 +1825,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             attempted: Boolean(sessionId),
             rejected: !session.sawInit,
             promptSubmitted: session.sawInit,
-            producedOutput: session.turn.sawStreamDelta,
+            producedOutput: Boolean(session.turn.sawActivity),
           });
           if (mayReplay(resumeFailure) && !retry.cancelled) {
             const recovery = recoveryPromptFor({

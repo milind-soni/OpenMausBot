@@ -3155,6 +3155,47 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     ]);
   }, 20_000);
 
+  it.each(([
+    ["tool use", [{ type: "assistant", message: { content: [{ type: "tool_use", id: "effect", name: "Bash", input: { command: "append synthetic effect" } }] } }]],
+    ["tool draft", [{ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "effect", name: "Bash", input: {} } } }]],
+    ["tool result", [{ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "effect", content: "done" }] } }]],
+    ["tool progress", [{ type: "tool_progress", tool_use_id: "effect" }]],
+    ["subagent activity", [{ type: "stream_event", parent_tool_use_id: "effect", event: { type: "content_block_delta", delta: { type: "text_delta", text: "working" } } }]],
+    ["completed text", [
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "done" } } },
+      { type: "assistant", message: { content: [{ type: "text", text: "done" }] } },
+    ]],
+    ["reasoning", [{ type: "stream_event", event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "working" } } }]],
+    ["prompt acknowledgement", [{ type: "user", isReplay: true, uuid: "prompt" }]],
+    ["background task", [{ type: "system", subtype: "task_started", task_id: "effect" }]],
+    ["background completion", [{ type: "result", origin: { kind: "task-notification" }, is_error: false }]],
+    ["unknown activity", [{ type: "future_tool_event" }]],
+  ] as const).flatMap(([label, frames]) => [true, false].map((initialized) => ({ label, frames, initialized }))))(
+    "never replays after $label (init: $initialized)", async ({ frames, initialized }) => {
+      const cli = join(dirname(FAKE_CLI), "fake-claude-retry-cli.ts");
+      chmodSync(cli, 0o755);
+      const effects = join(scratch, "effects");
+      process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+      await create(undefined, {
+        FAKE_CLAUDE_EFFECTS: effects,
+        FAKE_CLAUDE_FAILURE_FRAMES: JSON.stringify([
+          ...(initialized ? [{ type: "system", subtype: "init", session_id: "synthetic-session", model: "synthetic" }] : []),
+          ...frames,
+        ]),
+      }, { cli });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-effect", text: "Do this effect once", cwd: scratch, resumeCursor: "synthetic-session" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      expect(readFileSync(effects, "utf8")).toBe("effect\n");
+      expect(recorder.events.filter((event) => event.type === "turn.retrying")).toEqual([]);
+      expect(recorder.events.filter((event) => event.type === "turn.completed")).toMatchObject([
+        { turnId, ok: false, stopReason: "exit_before_result" },
+      ]);
+      expect(recorder.events.filter((event) => event.type === "runtime.error")).toMatchObject([
+        { message: expect.stringContaining("A tool action may have run. Check its effects before trying again.") },
+      ]);
+    },
+  );
+
   it("consumes a context reset once and resumes the replacement on a transient retry", async () => {
     const dump = join(scratch, "reset-retry.json");
     const state = join(scratch, "reset-retry-count");
