@@ -85,10 +85,10 @@ export function useSidebarWidth({ simple, sidePanelOpen, sidebarRef }: {
       setSnapping(true);
       snapTimer.current = setTimeout(() => setSnapping(false), 220);
     },
-    /** The drag ends; `keep` saves the width it left. */
-    finishResize: (keep: boolean) => {
+    /** The drag ends, and the width it left is kept. */
+    finishResize: () => {
       setResizing(false);
-      if (keep && widthRef.current !== null) save(widthRef.current);
+      if (widthRef.current !== null) save(widthRef.current);
     },
     stepResize: (step: number) => {
       const next = resizeTo(current() + step);
@@ -113,7 +113,7 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
     const ended = drag.current;
     drag.current = null;
     setDragging(false);
-    if (ended) sizing.finishResize(ended.state.following && !ended.state.avatars);
+    if (ended) sizing.finishResize();
   };
   return (
     <div
