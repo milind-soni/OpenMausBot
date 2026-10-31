@@ -33,6 +33,15 @@ describe("dream memory backups", () => {
     writeFileSync(join(workspaceDir(bot), ".dream-backups", newest.id, "0"), "tampered");
     expect(() => restoreDreamMemory(bot, { id: newest.id }, { read: () => about, write: () => {} })).toThrow();
   });
+  it("leaves notes a restore would refuse out of the backup", () => {
+    ensureWorkspace("hidden-note");
+    writeMemoryFile("hidden-note", "kept");
+    mkdirSync(join(workspaceDir("hidden-note"), "memory"), { recursive: true });
+    writeFileSync(join(workspaceDir("hidden-note"), "memory", ".draft.md"), "hidden");
+    const backup = backupDreamMemory("hidden-note");
+    expect(backup.files.map((f) => f.path)).toEqual(["MEMORY.md"]);
+    expect(listDreamBackups("hidden-note").map((b) => b.id)).toContain(backup.id);
+  });
   it("rejects links and traversal before reading or changing live files", () => {
     ensureWorkspace("links");
     mkdirSync(join(workspaceDir("links"), ".dream-backups"));

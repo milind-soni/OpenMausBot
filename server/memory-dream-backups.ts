@@ -15,7 +15,8 @@ export class DreamMemoryError extends Error {
   constructor(code: DreamErrorCode, currentHash?: string) { super(code); this.code = code; this.currentHash = currentHash; }
 }
 export interface DreamProfile { read(): string; write(text: string): void }
-const pathSchema = z.string().refine((p) => p === "MEMORY.md" || p === "About me" || /^memory\/(?:log\/)?[^/.][^/]*\.md$/.test(p));
+const backedUp = (path: string) => path === "MEMORY.md" || path === "About me" || /^memory\/(?:log\/)?[^/.][^/]*\.md$/.test(path);
+const pathSchema = z.string().refine(backedUp);
 const manifestSchema = z.object({
   version: z.literal(1), id: z.string().uuid(), at: z.number(),
   files: z.array(z.object({ path: pathSchema, size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/) })),
@@ -66,8 +67,8 @@ function snapshot(botId: string, aboutMe?: string): Snapshot {
     for (const file of readdirSync(notes)) {
       if (file === "log") {
         plain(join(notes, file), true);
-        for (const log of readdirSync(join(notes, file))) if (log.endsWith(".md")) read(`memory/log/${log}`);
-      } else if (file.endsWith(".md")) read(`memory/${file}`);
+        for (const log of readdirSync(join(notes, file))) if (backedUp(`memory/log/${log}`)) read(`memory/log/${log}`);
+      } else if (backedUp(`memory/${file}`)) read(`memory/${file}`);
     }
   }
   if (aboutMe !== undefined) files.set("About me", Buffer.from(aboutMe));

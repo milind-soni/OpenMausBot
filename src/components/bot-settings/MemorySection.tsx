@@ -344,7 +344,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
 
       {overview && <MemoryGauge index={overview.index} />}
 
-      {active && <DreamMemoryCard key={bot.id} botId={bot.id} enabled={bot.memoryEnabled !== false && bot.memoryUpkeep !== false} onChange={() => refresh()} />}
+      {active && <DreamMemoryCard key={bot.id} botId={bot.id} enabled={bot.memoryEnabled !== false && bot.memoryUpkeep !== false} onChange={() => refresh(editing && !editing.dirty ? editing.path : undefined).catch(() => { setEditing(null); return refresh(); })} />}
       {bot.memoryEnabled !== false && <MemoryUpkeepCard
         enabled={bot.memoryUpkeep !== false}
         status={upkeep}

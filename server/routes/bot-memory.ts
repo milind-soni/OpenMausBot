@@ -211,6 +211,9 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
         return json(res, 200, { report, overview: memoryOverview(botId) });
       } catch (error) {
         if (error instanceof DreamMemoryError) return json(res, 409, { error: error.code, code: error.code, ...(error.currentHash ? { currentHash: error.currentHash } : {}) });
+        const status = (error as { status?: unknown }).status;
+        if (typeof status === "number") return json(res, status, { error: (error as Error).message });
+        console.warn(`memory ${m[2]} failed for bot ${botId}`, error);
         return json(res, 409, { error: "backup", code: "backup" });
       }
     }

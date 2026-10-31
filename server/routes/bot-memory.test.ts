@@ -70,6 +70,12 @@ describe("the bot-memory module through the route table", () => {
     expect(((await untitled.json()) as { entries: Array<Record<string, unknown>> }).entries[0]!.threadTitle).toBeUndefined();
   });
 
+  it("answers a broken restore request with its own status, not a backup failure", async () => {
+    const base = await serve({ upkeep: { status: () => ({ modelSteps: false }), tidy: async () => { throw new Error("unexpected tidy"); }, restoreDream: () => { throw new Error("unexpected restore"); } } });
+    const restore = await fetch(`${base}/api/bots/bot-123/memory/dream/restore`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+    expect(restore.status).toBe(400);
+  });
+
   it("keeps the 404 precheck on the store seam for every pattern", async () => {
     const base = await serve({ bot: () => undefined });
     for (const [method, path, body] of [
