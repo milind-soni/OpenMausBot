@@ -134,6 +134,7 @@
   "notice.dismiss": "Dismiss for good",
   "notice.notNow": "Not now",
   "notice.openFailed": "Could not open your browser. Please try again.",
+  "server.moves.webhookMoved": "Now that I live on {place}, my webhook \"{name}\" has a new address. Open Automations, choose Copy address on \"{name}\", and paste it into the app that sends to it.",
   "server.teammates.sameRequest": "Another teammate asked the same a moment ago, so this gets that answer instead of a second one.",
   "server.reports.sent": "Sent to the MausBot team (report {report}). Milind and Omkar get it by email.",
   "server.reports.sentReply": "Sent to the MausBot team (report {report}). Milind and Omkar get it by email and will reply to {contact}.",

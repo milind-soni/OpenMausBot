@@ -21,6 +21,7 @@ import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
 import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
+import type { LineLanguage } from "../server-lines.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -29,6 +30,7 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
   logins: Pick<LoginStore, "changes" | "get" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
+  lineLanguage?: LineLanguage;
   chats?: CloudSendChatsDeps;
   /** This server is the person's own Cloud: it answers what a move asks of the Cloud it moves to. */
   cloudHome?: boolean;
@@ -81,7 +83,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (move && await moveKindsRoute(move, ctx)) return;
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
     if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
-    if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner }, ctx)) return;
+    if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language) }, ctx)) return;
     if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
     if (move && !deps.cloudHome && await homeRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks }, ctx)) return;
     if (path === "/api/cloud-send/manifest") {
