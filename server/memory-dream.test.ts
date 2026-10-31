@@ -212,6 +212,11 @@ describe("the dream prompt and its answer", () => {
     expect(answer.ideas).toHaveLength(MAX_IDEAS);
   });
 
+  it("keeps cited conversations in the order their quotes were given", () => {
+    const answer = parseDream(JSON.stringify({ learned: [{ text: "The person wants short replies", from: [2, 1], evidence: ["two", "one"], confidence: 0.9 }] }), 2, 0);
+    expect(answer.learned[0]).toMatchObject({ from: [2, 1], evidence: ["two", "one"] });
+  });
+
   it("reads nothing out of an answer that is not JSON", () => {
     expect(parseDream("I could not find anything.", 3, 0)).toEqual({ learned: [], outdated: [], ideas: [] });
   });

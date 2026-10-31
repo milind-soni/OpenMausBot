@@ -142,7 +142,7 @@ export function dreamPrompt(input: {
     `ideas: at most ${MAX_IDEAS} things ${input.botName} could set up so the Person stops asking by hand, such as an automation for a request they repeat on a schedule or a saved skill for steps they keep walking through. One sentence each, with "from" (at least two conversations). Only for a clear repeat.`,
     "",
     "Answer with one JSON object and nothing else. Empty lists are the normal answer when the conversations show no lasting pattern:",
-    '{"learned": [{"text": "...", "from": [1, 3], "aboutUser": false, "topic": "optional", "topicAliases": ["..."], "confidence": 0..1}], "outdated": [{"line": 0, "now": "...", "from": [2]}], "ideas": [{"text": "...", "from": [1, 4]}]}',
+    '{"learned": [{"text": "...", "from": [1, 3], "evidence": ["quote from 1", "quote from 3"], "aboutUser": false, "topic": "optional", "topicAliases": ["..."], "confidence": 0..1}], "outdated": [{"line": 0, "now": "...", "from": [2], "evidence": ["quote from 2"]}], "ideas": [{"text": "...", "from": [1, 4]}]}',
   ].join("\n");
 }
 
@@ -177,11 +177,11 @@ function sentence(raw: unknown): string {
   return typeof raw === "string" ? raw.replace(/\s+/g, " ").replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/~~/g, "").trim().slice(0, TEXT_MAX) : "";
 }
 
-/** Distinct 1-based conversation numbers that were really given, or null when fewer than `min` remain. */
+/** Distinct 1-based conversation numbers that were really given, in the given order, or null when fewer than `min` remain. */
 function cited(raw: unknown, conversations: number, min: number): number[] | null {
   if (!Array.isArray(raw)) return null;
   const numbers = [...new Set(raw.map((n) => (typeof n === "string" && /^\d+$/.test(n.trim()) ? Number(n) : n))
-    .filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= conversations))].sort((a, b) => a - b);
+    .filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= conversations))];
   return numbers.length >= min ? numbers : null;
 }
 

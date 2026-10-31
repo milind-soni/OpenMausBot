@@ -37,4 +37,10 @@ describe("dream fact checks", () => {
     expect(checkDreamFacts("Anna today", [1], ["Anna today"], [{ threadId: "x", lines: [{ by: "person", text: "Anna today" }] }])).toBeNull();
     expect(checkDreamFacts("Anna today", [1, 2], ["Anna today", "Anna today"], [0, 1].map((i) => ({ threadId: String(i), lines: [{ by: "person" as const, text: "Anna today", at: Date.parse(`2026-10-2${i}T12:00:00Z`) }] })))).toBeNull();
   });
+  it("leaves relative-date words inside paths and URLs alone", () => {
+    const text = "Anna keeps notes in /notes/today.md and https://example.test/today";
+    expect(checkDreamFacts(text, [1], [text], [{ threadId: "p", lines: [{ by: "person", text }] }])).toBe(text);
+    const dated = "Anna wrote /notes/today.md today";
+    expect(checkDreamFacts(dated, [1], [dated], [{ threadId: "p", lines: [{ by: "person", text: dated, at: Date.parse("2026-03-01T12:00:00Z") }] }])).toBe("Anna wrote /notes/today.md 2026-03-01");
+  });
 });

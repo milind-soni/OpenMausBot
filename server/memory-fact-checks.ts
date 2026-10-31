@@ -12,11 +12,14 @@ const NAME = /(?<!\p{L})\p{Lu}[\p{L}\p{M}]+(?!\p{L})/gu;
 const SENTENCE_WORDS = new Set("The A An I User Owner Person Client Prefers Keep New Old Uses Use Run Note Remember Works My Her His Their They He She It Shorter Too Also".toLowerCase().split(" "));
 const matches = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].map((m) => m[0].toLowerCase());
 const subset = (a: readonly string[], b: readonly string[]) => a.every((value) => b.includes(value));
+const relativeWords = (text: string) => matches(text.replace(LOCATION, " "), RELATIVE);
+const RELATIVE_OUTSIDE_LOCATIONS = new RegExp(`${LOCATION.source}|${RELATIVE.source}`, "giu");
 
 function absolute(text: string, at?: number): string | null {
-  if (!matches(text, RELATIVE).length) return text;
+  if (!relativeWords(text).length) return text;
   if (at === undefined || !Number.isFinite(at)) return null;
-  return text.replace(RELATIVE, (word) => {
+  return text.replace(RELATIVE_OUTSIDE_LOCATIONS, (match, word?: string) => {
+    if (!word) return match;
     const date = new Date(at);
     const lower = word.toLowerCase();
     const shift = ["yesterday", "wczoraj"].includes(lower) ? -1 : ["tomorrow", "jutro"].includes(lower) ? 1 : 0;
@@ -36,8 +39,8 @@ export function checkDreamFacts(text: string, from: readonly number[], evidence:
     if (!lines?.length) return null;
     sources.push(...lines.map((line) => ({ text: quote, at: line.at })));
   }
-  const relative = matches(text, RELATIVE);
-  const anchors = relative.length ? sources.filter((source) => subset(relative, matches(source.text, RELATIVE))) : sources;
+  const relative = relativeWords(text);
+  const anchors = relative.length ? sources.filter((source) => subset(relative, relativeWords(source.text))) : sources;
   const prepared = anchors.map((source) => absolute(text, source.at));
   if (!prepared.length || prepared.some((value) => value === null || value !== prepared[0])) return null;
   const entry = prepared[0]!;
