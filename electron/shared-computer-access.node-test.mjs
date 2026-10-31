@@ -299,13 +299,38 @@ test("a command runs up to the time the call asks for, and a time out of range i
   const run = operation => executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", ...operation }, new AbortController().signal);
   const command = process.platform === "win32" ? "Start-Sleep -Seconds 5" : "sleep 5";
   const started = Date.now();
-  await assert.rejects(run({ command, timeout_seconds: 1 }), /timed out after 1 second/);
+  assert.match(payload(await run({ command, timeout_seconds: 1 })).stopped, /1-second limit/);
   assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
-  for (const timeout_seconds of [0, 241, 1.5, "60"]) {
-    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 240/);
+  for (const timeout_seconds of [0, 901, 1.5, "60"]) {
+    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 900/);
   }
   assert.equal(payload(await run({ command: "echo fixture-default" })).exitCode, 0);
+  assert.equal(payload(await run({ command: "echo fixture-long", timeout_seconds: 900 })).exitCode, 0);
   void dir;
+});
+
+test("a command stopped at its time limit returns what it printed and says it was stopped", async t => {
+  const { grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const command = process.platform === "win32"
+    ? "Write-Output first-line; [Console]::Error.WriteLine('second-line'); Start-Sleep -Seconds 20"
+    : "echo first-line; echo second-line >&2; sleep 20";
+  const stopped = await executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", command, timeout_seconds: 2 }, new AbortController().signal);
+  assert.equal(stopped.isError, true);
+  const result = payload(stopped);
+  assert.equal(result.exitCode, null);
+  assert.match(result.output, /first-line[\s\S]*second-line/);
+  assert.match(result.stopped, /Stopped at its 2-second limit/);
+});
+
+test("a command stopped for too much output returns the output it kept", { skip: process.platform === "win32" }, async t => {
+  const { grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const stopped = await executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", command: "echo first-line; head -c 300000 /dev/zero | tr '\\0' a; sleep 20", timeout_seconds: 30 }, new AbortController().signal);
+  assert.equal(stopped.isError, true);
+  const result = payload(stopped);
+  assert.match(result.output, /^first-line/);
+  assert.match(result.stopped, /Stopped after 256 KB of output/);
 });
 
 /** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */

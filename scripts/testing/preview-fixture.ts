@@ -3,7 +3,9 @@
 // server. vite.config.ts is inherited on purpose (react, tailwind, the @ alias)
 // so the page renders exactly what the app renders; only the host, the port
 // and the /api target are pinned here.
+import { realpathSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
@@ -59,7 +61,8 @@ export async function mountPreview(
   const ui = await createServer({
     root: REPO_ROOT,
     ...(logLevel ? { logLevel } : {}),
-    server: { host: "127.0.0.1", port: 0, proxy: {
+    // A worktree's node_modules may be a link to another checkout's: its files (the fonts) are served from there.
+    server: { host: "127.0.0.1", port: 0, fs: { allow: [REPO_ROOT, realpathSync(join(REPO_ROOT, "node_modules"))] }, proxy: {
       "/api": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
       "/.well-known/openmausbot/environment": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
     } },

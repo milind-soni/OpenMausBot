@@ -49,13 +49,15 @@ export function createComputerAsksHost(deps: ComputerAsksHostDeps) {
   deps.lending.changed = () => asks.lendingChanged();
   deps.lending.askTool = ASK_FOR_COMPUTER_TOOL;
 
+  const roomMember = (turn: Turn) => store.groupByThread(turn.threadId)?.memberIds.includes(turn.botId) ? store.bot(turn.botId) ?? null : null;
+
   /** POST /api/internal/computer-asks: { need, why } from a bot's turn. */
   async function call(turn: Turn, body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
     const input = body && typeof body === "object" ? body as { need?: unknown; why?: unknown } : {};
     if (!deps.active(turn)) return { status: 401, body: { error: "This turn has ended." } };
     const need = COMPUTER_NEEDS.find((candidate) => candidate === input.need);
     if (!need) return { status: 400, body: { error: `need must be one of ${COMPUTER_NEEDS.join(", ")}` } };
-    const bot = store.projectBotForTask(turn.botId, turn.threadId);
+    const bot = store.projectBotForTask(turn.botId, turn.threadId) ?? roomMember(turn);
     if (!bot) return { status: 404, body: { error: "This bot no longer exists." } };
     if (need === "screen" && bot.computer === "off") {
       return { status: 403, body: { error: "This bot has no computer. Change its Computer setting to use their computer's apps and screen." } };

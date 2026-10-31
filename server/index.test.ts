@@ -2788,6 +2788,34 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const create = async (name: string, instructions: string) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name, role: "Analyst", instructions }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; error?: string } };
+      };
+      const role = `You own the weekly numbers.\n${"Check every figure against its source and say where it came from. ".repeat(80)}`.slice(0, 3999) + ".";
+      const made = await create(`Analyst ${chief.id}`, role);
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      createdId = made.body.id;
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.soul).toBe(role);
+      const longer = await create(`Longer analyst ${chief.id}`, `${role}x`);
+      expect(longer).toEqual({ status: 400, body: { error: "instructions must be at most 4000 characters; these are 4001. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to 24000 bytes." } });
+    } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
   it("tells the Chief, and the bot in its own chat, when a bot it adds takes the person's own name", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     const profile = (await api("GET", "/api/config")).body.profile as { name?: string } | undefined;

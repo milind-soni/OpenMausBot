@@ -72,7 +72,10 @@ describe("caption chrome", () => {
   );
 
   it("frames the window on macOS and Windows: nothing under the frame's top bar moves out of the window's buttons", () => {
-    expect([windowFramed("mac-inset"), windowFramed("win-caption"), windowFramed("native"), windowFramed(undefined)]).toEqual([true, true, false, false]);
+    expect([windowFramed({ windowChrome: "mac-inset" }), windowFramed({ windowChrome: "win-caption" }), windowFramed({ windowChrome: "native" }), windowFramed(undefined)])
+      .toEqual([true, true, false, false]);
+    expect(windowFramed({ windowChrome: "mac-inset", windowFrame: false }), "the person turned it off").toBe(false);
+    expect(captionChrome("mac-inset").draggable, "the headers still drag a window with no title bar of its own").toBe(true);
     for (const chrome of ["mac-inset", "win-caption", "native"] as const) {
       expect(Object.keys(captionChrome(chrome))).not.toContain("padClass");
       expect(Object.keys(captionChrome(chrome))).not.toContain("controlsShiftStyle");

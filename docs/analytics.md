@@ -140,7 +140,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `bot_created` | You create a bot with New bot, or from a ready-made bot in Templates | `source`: `blank` (New bot), `template` (a starting role), `preset`; `template`: starting role, only when `source` is `template` |
 | `api_key_saved` | You save a key in Settings → API keys, in the Screen panel, in the model picker, on the X card in Apps, from a bot's request in a chat, or by adding an OpenAI-compatible server | `provider`: key provider; `via`: `settings`, `computer_panel`, `model_picker`, `apps`, `chat_request`; `result`: `ok` (the provider accepted it), `rejected` (the provider refused it), `unverified` (saved, not checked), `error` (not saved) |
 | `api_key_removed` | You clear a key of your own in Settings → API keys, the Screen panel, the model picker or the X card in Apps | `provider`: key provider; `via`: `settings`, `computer_panel`, `model_picker`, `apps` |
-| `engine_signed_in` | You finish signing in to an engine inside the app | `engine`: `claude`, `codex`, `grok`; `method`: `code`, `device_code`, `browser` |
+| `engine_signed_in` | You finish signing in to an engine inside the app | `engine`: `claude`, `codex`, `grok`, `kimi`; `method`: `code`, `device_code`, `browser` |
 | `connector_connect` | A Connect you started in Connected apps ends | `app`: app; `result`: `connected` (the account it added works), `failed` or `expired` (that account failed or expired), `timed_out` (neither within two minutes) |
 | `app_snapshot` | Once a day, as described above | The properties in the snapshot table |
 | `cloud_card_shown` | The MausBot Cloud card is shown | `variant`: `signed_out`, `free` |

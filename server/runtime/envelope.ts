@@ -193,6 +193,16 @@ export function composeQuestion(a: Assignment, names: EnvelopeNames): string {
   ].join("\n");
 }
 
+/** A requester's message to the turn already working on its request, read at that turn's next step. */
+export function composeAddition(id: string, requester: string, text: string): string {
+  const who = `@${label(requester, "your requester")}`;
+  return [
+    `${ENVELOPE_MARK} ${label(id, "unknown")}: ${who} adds this while you work on it]`,
+    JSON.stringify(escapeEnvelope(text)),
+    `It is part of ${who}'s brief for this work: take it into what you are doing now. Your one reply when you finish still goes to ${who}.`,
+  ].join("\n");
+}
+
 const RESUME_QUOTE_MAX = 2_000;
 
 export function composeResume(a: Assignment, names: EnvelopeNames, reports: readonly string[], questions: readonly string[] = []): string {

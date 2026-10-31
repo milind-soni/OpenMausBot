@@ -80,6 +80,13 @@ describe("desktop capabilities", () => {
     });
 
     expect(capabilities.windowChrome).toBe("win-caption");
+    expect(capabilities.windowFrame).toBe(true);
+  });
+
+  it("reports the frame as the window draws it: macOS keeps its inset title bar, Windows its own title bar once made without the frame", () => {
+    expect(desktopCapabilities({ platform: "darwin", frame: false })).toMatchObject({ windowChrome: "mac-inset", windowFrame: false });
+    expect(desktopCapabilities({ platform: "win32", frame: false })).toMatchObject({ windowChrome: "native", windowFrame: false });
+    expect(desktopCapabilities({ platform: "linux", frame: false })).toMatchObject({ windowChrome: "native", windowFrame: false });
   });
 
   it("offers Windows local control once the driver is connected", () => {
