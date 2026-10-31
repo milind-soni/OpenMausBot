@@ -19,12 +19,17 @@ interface Deps {
 
 const POLL_MS = 1_500;
 
-/** Only an https page may be opened as a sign-in link. */
+// Same rule as the server's isAllowedAuthUrl: a sign-in page on this machine may be plain http.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** Only an https page, or an http page on a loopback host, may be opened as a sign-in link. */
 export function mcpSignInLink(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+    if (url.username || url.password) return null;
+    if (url.protocol === "https:") return url.href;
+    return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname) ? url.href : null;
   } catch {
     return null;
   }
