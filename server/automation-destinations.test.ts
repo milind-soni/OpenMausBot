@@ -86,6 +86,19 @@ describe("createAutomationDestinations", () => {
       expect(resolved).toBe("main-bot-1");
     });
 
+    it("falls back to mainThread when resultsThreadId points to an archived task", () => {
+      const { destinations, addTask } = fixture();
+      const task = addTask("bot-1", "archived-thread", "Archived Thread");
+      task.archivedAt = Date.now();
+      const resolved = destinations.event({
+        webhookId: "wh-1",
+        webhookName: "Lead",
+        botId: "bot-1",
+        resultsThreadId: "archived-thread",
+      });
+      expect(resolved).toBe("main-bot-1");
+    });
+
     it("falls back to mainThread when resultsThreadId does not exist in store", () => {
       const { destinations } = fixture();
       const resolved = destinations.event({

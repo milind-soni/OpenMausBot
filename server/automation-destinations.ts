@@ -45,7 +45,7 @@ export function createAutomationDestinations(deps: AutomationDestinationDeps) {
       const bot = store.bot(botId);
       if (!bot || bot.hidden) return undefined;
       const chosen = resultsThreadId ? store.taskByThread(botId, resultsThreadId) : undefined;
-      if (chosen && !chosen.routineRunId) return chosen.threadId;
+      if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) return chosen.threadId;
       if (!cloud) return deps.mainThread(botId);
       const earlier = deps.runs().find((run) => run.webhookId === webhookId && run.botId === botId && run.resultsThreadId)?.resultsThreadId;
       const kept = earlier ? store.taskByThread(botId, earlier) : undefined;

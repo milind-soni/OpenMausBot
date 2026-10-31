@@ -783,7 +783,7 @@ export class RoutineManager {
       triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
       resultsThreadId: input.eventSource === "wait"
         ? input.resultsThreadId ?? this.options.eventResultsThread?.(input)
-        : (this.options.eventResultsThread?.(input) ?? input.resultsThreadId), ...(input.eventSource ? { eventSource: input.eventSource } : {}),
+        : this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}),
     };
     this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
     return cloneRun(run);
