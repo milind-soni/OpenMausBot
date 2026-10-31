@@ -1,5 +1,7 @@
 import { Settings } from "lucide-react";
+import { useEffect } from "react";
 
+import { sayFrameDrawn } from "@/lib/chrome-rail";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
@@ -19,7 +21,9 @@ export const FRAME_BAR_BUTTON = "flex size-[22px] shrink-0 items-center justify-
 export function WindowFrameBar() {
   const { capabilities } = useDesktopCapabilities();
   const { dispatch } = useStore();
-  if (!windowFramed(capabilities)) return null;
+  const framed = windowFramed(capabilities);
+  useEffect(() => { if (framed) sayFrameDrawn(); }, [framed]);
+  if (!framed) return null;
   const mac = capabilities.windowChrome === "mac-inset";
   const { dragProps } = captionChrome(capabilities.windowChrome);
   return (

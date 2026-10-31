@@ -14,6 +14,7 @@ import { cloudColor, cloudColorFill } from "@/lib/cloud-look";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useBesideFramed } from "@/lib/chrome-rail";
 import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
@@ -250,6 +251,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const state = usePlaces();
   const calm = !useAdvancedMode();
   const { capabilities } = useDesktopCapabilities();
+  const besideFramed = useBesideFramed();
   const [more, setMore] = useState(false);
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -276,6 +278,10 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     void bridge?.open?.(place.id).catch(() => {});
   };
   const framed = windowFramed(capabilities), draggable = framed;
+  // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
+  // top bar (the traffic lights' place), so its places start under that bar. Beside a page that doesn't draw the frame
+  // (an older release), they start where that release left them: under the traffic lights' old place on macOS.
+  const above = !framed ? "h-3" : !chrome ? "h-[9px]" : besideFramed ? "h-[37px]" : capabilities.windowChrome === "mac-inset" ? "h-[52px]" : "h-3";
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline style.
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
@@ -289,9 +295,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
       "bg-frame [--rail-surface:var(--color-frame)]", !framed && (calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50"))}>
-    {/* In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the
-        frame's top bar (the traffic lights' place), so its places start under that bar. */}
-    <div aria-hidden="true" className={!framed ? "h-3 shrink-0" : chrome ? "h-9 shrink-0" : "h-2 shrink-0"} />
+    <div aria-hidden="true" className={cn(above, "shrink-0")} />
     {/* As wide as the rail, so nothing round a tile is cut off at the sides: a list that scrolls clips its overflow. */}
     <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>
       {shown.map((place) => <li key={place.id} className="flex">

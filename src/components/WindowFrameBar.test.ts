@@ -13,8 +13,9 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   config: {} as { team?: { name: string } },
   look: null as { color: string | null } | null,
+  frameDrawn: vi.fn(),
 }));
-vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: () => {} }));
+vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: () => {}, sayFrameDrawn: fixture.frameDrawn }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => fixture.update }));
 vi.mock("@/lib/place-look", () => ({ usePlaceLook: () => fixture.look }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }) }));
@@ -41,6 +42,7 @@ beforeEach(() => {
   fixture.config = {};
   fixture.look = null;
   fixture.dispatch.mockClear();
+  fixture.frameDrawn.mockClear();
   place = { local: false, name: "My Cloud", origin: "https://cloud.example", color: "blue" };
   Object.assign(window, { ogb: { workspaces: { state: async () => place, onChanged: () => () => {}, menu: async () => {} } } });
 });
@@ -115,6 +117,15 @@ describe("the window frame's top bar", () => {
     fixture.windowChrome = "native";
     await mount(createElement(WindowFrameBar));
     expect(bar()).toBeNull();
+  });
+
+  it("tells main it draws the frame, so the traffic lights move into its bar; a window with its own title bar says nothing", async () => {
+    await mount(createElement(WindowFrameBar));
+    expect(fixture.frameDrawn).toHaveBeenCalledTimes(1);
+    await act(async () => root!.unmount());
+    fixture.windowChrome = "native";
+    await mount(createElement(WindowFrameBar));
+    expect(fixture.frameDrawn).toHaveBeenCalledTimes(1);
   });
 
   it("opens the app's settings", async () => {
