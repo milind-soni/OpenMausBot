@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RoutineRunReport } from "../shared/routines.ts";
+import "./server-line-packs.ts";
 import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText } from "./automation-reports.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
@@ -47,7 +48,7 @@ describe("what the chat's own session reads", () => {
 });
 
 /** A real Store; the routine runs live in a stand-in for the RoutineManager, which keeps their report states. */
-function fixture() {
+function fixture(options: { threadLanguage?: (threadId: string) => string | undefined } = {}) {
   const store = new Store(selection);
   const bot = store.createBot({ name: "Pepper" });
   const main = bot.threadId;
@@ -74,6 +75,7 @@ function fixture() {
     store, routines: () => manager, busy: (_botId, threadId) => busy.has(threadId),
     wrote: (_bot: BotRecord, threadId) => wrote.push(threadId),
     notify: (kind, _bot, threadId, detail) => notified.push({ kind, threadId, detail }),
+    ...(options.threadLanguage ? { threadLanguage: options.threadLanguage } : {}),
   });
   const reports = create();
   let serial = 0;
@@ -246,6 +248,25 @@ describe("automation reports", () => {
     expect(f.notified).toEqual([]);
   });
 
+  it("says a failed run and its recovery in the language of the chat's person", () => {
+    const asked = new Set<string>();
+    const f = fixture({ threadLanguage: (threadId) => { asked.add(threadId); return "de"; } });
+    const failed = f.finished(null, "Posteingang", { status: "failed", error: "Timed out" });
+    f.reports.runFailed(failed, "it ran past its 25-minute limit.");
+    const finishedAt = Date.UTC(2026, 9, 26, 2, 40);
+    const ok = f.finished("NOTHING NEW", "Posteingang", { finishedAt });
+    f.reports.runSettled(ok, `turn-${ok.id}`);
+    const plain = f.finished(null, "Posteingang", { status: "failed" });
+    f.reports.runFailed(plain, "");
+    expect(f.lines().map((line) => line.text)).toEqual([
+      "Diese Ausführung wurde nicht beendet: it ran past its 25-minute limit.",
+      recoveredText("Posteingang", finishedAt, "de"),
+      "Diese Ausführung wurde nicht beendet.",
+    ]);
+    expect(recoveredText("Posteingang", finishedAt, "de")).toMatch(/^Wieder in Ordnung: Posteingang wurde um \d{1,2}:\d\d \S+ erfolgreich beendet$/);
+    expect([...asked]).toEqual([f.main]);
+  });
+
   it("says when a recovered run finished, in the host's clock", () => {
     expect(recoveredText("PAC flow driver", Date.UTC(2026, 9, 26, 2, 40))).toMatch(/^Recovered: PAC flow driver finished OK at \d{1,2}:\d\d [AP]M \S+$/);
   });
@@ -358,6 +379,19 @@ describe("automation reports", () => {
     f.reports.runSettled(f.runs.get(run.id)!, "last");
     expect(f.lines().at(-1)).toMatchObject({ text: "The dashboard looks fine.", automation: { runId: run.id } });
     expect(f.lines().at(-1)?.automation).not.toHaveProperty("copyOf");
+  });
+
+  it("names a card the run waits on in the language of the chat's person", () => {
+    const f = fixture({ threadLanguage: () => "de" });
+    const run = f.finished(null, "Dashboard check", { status: "running" });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "signin", text: "Sign in", signIn: { url: "https://example.com", site: "example.com", place: "browser", reason: "das Dashboard braucht eine Anmeldung" } });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "connector", connector: { slug: "clarity", label: "Microsoft Clarity", description: "", status: "required", resumeKey: "resume-key-1" } });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "secret", secret: { target: "xaiApiKey", label: "xAI API key", description: "", placeholder: "", helpUrl: "", requestKey: "secret-1" } });
+    expect(f.lines().map((line) => line.text)).toEqual([
+      "Bitte melde dich bei example.com an: das Dashboard braucht eine Anmeldung.",
+      "Bitte verbinde Microsoft Clarity.",
+      "Bitte hinterlege xAI API key.",
+    ]);
   });
 
   it("copies a card into a busy chat only after its turn, and not at all once it was answered elsewhere", () => {

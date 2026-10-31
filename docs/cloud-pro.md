@@ -1238,7 +1238,7 @@ For each service the Admin has configured, it also sets:
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 | `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
-| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
+| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
 
 A service is included only when both its URL and its token are set
@@ -1824,103 +1824,56 @@ fake bridge: `?view=settings|cloud&plan=trial|paid|team&cancelled=1&admin=old&sk
 
 #### One card at a time: the notice queue
 
-`components/AppNotices.tsx` is the one place for the Cloud Pro popup and the
-cards at the bottom left (`lib/notices.ts`), asked in order, one on screen at a
-time, and none after one closes until another launch:
+`components/AppNotices.tsx` is the one place for the What's new popup and the
+cards at the bottom left. `lib/notices.ts` keeps them in one ordered list,
+`NOTICES`, and the queue asks it in that order. **One notice a launch:** the
+first one due shows, and it takes the launch (`launchNotice`, kept for the
+window's session, so a reload is the same launch). After it, only the
+product-updates question may follow in that launch; every other notice waits for
+a later launch, in the list's order. A new notice is one entry in `NOTICES` and
+its fact in AppNotices. So What's new and Boat's credit offer never share a
+launch: What's new comes first, and the Boat card waits for a later one.
 
-1. **The Cloud Pro popup** (`CloudProPopup`, id `cloud-pro-update-2026-10`):
-   one centered dialog, once per installed desktop app whatever its plan (a
-   new install once its onboarding is done), on whichever page its window
-   shows: this computer's, My Cloud's or another saved server's. A server's
-   page shows it only once that server runs this version (My Cloud once the
-   Cloud is updated), so a window that only ever shows a server on an older
-   version does not get it. It does not wait for This computer's first-run
-   welcome there: a window that opens on My Cloud or a saved server may
-   never load This computer's page, and an install from before the welcome
-   kept a record has no record of finishing it, so waiting would leave those
-   desktops without the popup. Showing it never switches the window. Main keeps whether this desktop has seen it
-   (`electron/desktop-prefs.mjs`, a small file in the app's data folder,
-   written to a temporary file and renamed over the old one, so a failed
-   write keeps the last record), and every page and every port the app's own
-   page is served on agree. This computer's workspace record counts as seen
-   on every page, before its page has loaded on this build (main reads
-   `config.json` in its data folder): a close kept there earlier, or the
-   welcome's MausBot Cloud step, which also keeps the
-   card after the update away; a close kept only in this computer's page's
-   storage counts once that page has loaded, and is handed to main. The
-   welcome leaves its MausBot Cloud step out once main says this desktop has
-   seen the popup. Never in a window connected to another
-   computer as its remote client, which has no Cloud sign-in, Add a Cloud
-   dialog or Settings → MausBot Cloud to send anyone to, nor on a branded
-   build, which sells no Cloud. It waits while main, the plan or the Admin's
-   offer is loading; while another dialog (modal or not, the tour's
-   spotlight included), My Cloud's setup checklist or the card saying the
-   Cloud is set up, or a call is open; and, when the Cloud can't be reached,
-   for a later launch. Nothing in it opens a checkout or the browser:
-   - **On this computer's page**, with no plan, **Start free trial** (while
-     the Admin offers one) or **Upgrade to Cloud Pro** opens the Add a Cloud
-     dialog (source `update_popup`), and so does **Compare plans** (the dialog
-     lists every plan); on any plan (a trial, Starter, Personal, Pro, Max or
-     one that needs attention) **Manage plan** opens Settings → MausBot Cloud, and
-     there is no Compare plans. Personal → Pro is not self-serve yet, so
-     Personal gets Manage plan rather than an Upgrade that would end at
-     "write to us". Its numbers are the Admin's.
-   - **On My Cloud's page**, from the plan main tells that page
-     (`cloud-plan:state`, asked once main has restored the Cloud sign-in), a
-     plan, payment trouble or an ended sign-in gets **Manage plan**. It
-     switches the window to This computer, whose page opens at Settings →
-     MausBot Cloud (where an ended sign-in can sign in again). A plan still
-     being checked waits for a later launch; with none read, it is as on
-     another server.
-   - **On another saved server's page**, which is told nothing about the
-     plan, it shows no plan, price or Compare plans: **Continue on this
-     computer** switches the window to This computer, whose page finishes
-     the click from the plan it knows itself, without showing the popup a
-     second time. Someone who can buy (signed out, or signed in with no
-     plan) gets the Add a Cloud dialog (source `update_popup`), which loads
-     the Admin's offer itself; a plan, payment trouble, a payment being
-     linked or an ended sign-in gets Settings → MausBot Cloud. A sign-in
-     still restoring or connecting, or a plan This computer cannot check
-     right now, is waited on for ten seconds at most, then it is Settings →
-     MausBot Cloud, which says where it stands.
+1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11`):
+   one centered popup with slides, **Next** and **Back**, its dots and the arrow
+   keys, once per person: a close is kept in the workspace record, in the page's
+   storage and in this desktop's own record (`electron/desktop-prefs.mjs`), so
+   every port the app's page is served on agrees. A new campaign id shows it
+   once more. Only on this computer's page of the installed app (never My
+   Cloud's or a saved server's page, a remote client's window, a branded build
+   or a desktop signed in with an organization), never during setup (the welcome,
+   the tour), a call, another dialog, busy work or an update being offered,
+   never in the launch whose welcome finished or before a new install's first
+   reply, and after MausBot's first-launch card. `lib/whats-new.ts` decides the
+   slides from the account the app already holds (its plan, its trial, its
+   teams and its Clouds list):
+   - **No Cloud plan** (signed out, or signed in with none): **Meet the new
+     MausBot Cloud**, the Cloud website's Home pictured in the skin's light or
+     dark, then **Team**.
+   - **A Cloud plan of one's own**, in no team: the Team slide only.
+   - **In a team** (any role, a Team or Business plan, or a team's Cloud in the
+     Clouds list), a payment being linked or needing attention, a checkout or
+     another Cloud being bought, or a sign-in that can't be checked: nothing
+     (the last ones on a later launch).
 
-   Main makes either switch only for a popup this desktop has not seen, and
-   only when the page asks right after
-   a click or a key press on it (the preload checks
-   `navigator.userActivation`). It loads This computer's page on the click
-   (`?desktop-settings=cloud-settings` for Manage plan, `cloud-add` for
-   Continue on this computer, with `source=update_popup` and the page clicked,
-   `via=my_cloud` or `server`) and records the popup as seen once that page
-   has loaded. The preload and main refuse anything else: `cloud-pro`
-   (Continue on this computer) from My Cloud's or another saved server's
-   page, and `manage` (Manage plan) only from My Cloud's own page, as main
-   verifies it. This computer's page opens it at once, whatever else is
-   going on there (a bot at work, an update), and shows no card in the
-   corner for the rest of that page load. So another server's page can
-   bring the window to This computer and have that page do what its own
-   popup's main button would, but it cannot choose what opens there; like any
-   page of the window, it can close the popup for this desktop. While main
-   switches, the main button is held; a switch main cannot make (This
-   computer's server is not ready, another switch is under way, or the
-   switch fails) keeps the popup up with a line saying so and the button to
-   try again, and leaves the popup for a later launch, as does a page that
-   does not load.
-
-   Any button, its X, Escape or a click outside end it for good; until then
-   it comes back on a later launch. It takes focus at its title, keeps Tab
-   inside, takes Escape only while focus is in it, and gives focus back when
-   it closes unless focus has moved on. `cloud_pro_popup`
-   ([docs/analytics.md](analytics.md)) counts it as shown at most once a day
-   on a desktop, however often it comes back, and names the page each event
-   is counted on. Only `upgrade`, `manage` and `see_plans` by someone signed
-   in to MausBot Cloud first tie their analytics to their Cloud account's
-   email, and only on this computer's page, where the app knows the email;
-   My Cloud's Manage plan and a server page's Continue on this computer are
-   counted on that page as `continue`, and what they open on this
-   computer's page is counted there with the page they came from. While the
-   app has kept no analytics choice of its own yet and serves its page on a
-   port other than its first, such a click is counted without the email,
-   because an opt-out made before may be kept in the first port's storage.
+   A slide shows only while the Admin's offer sells its plan, with that plan's
+   price from the offer (the Team plan's free trial when it has one). Every
+   button carries the slide's tag on the Cloud's funnel (`app_whats_new_pro`,
+   `app_whats_new_team`): **Get Pro** opens the Add a Cloud dialog with
+   `source: app_whats_new_pro`, which its checkout sends; **See the new Cloud**
+   opens `https://cloud.openmausbot.com/cloud?src=app_whats_new_pro` (the plans,
+   for someone without one); **Start a Team** opens
+   `https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_team`, the
+   website's Get Team with this slide's tag (the staging Admin's site for an app
+   on staging), and for someone with a plan of their own, whom that page would
+   only tell to write in, the Add a Cloud dialog with `source:
+   app_whats_new_team`, which lists the Team plan. A browser that won't open
+   keeps the popup up and says so. Every
+   button, Not now, its X, Escape (while focus is inside) and a click outside
+   end it for good; until then it comes back on a later launch. It takes focus
+   at the slide's title, keeps Tab inside, and gives focus back when it closes
+   unless focus has moved on. `whats_new` ([docs/analytics.md](analytics.md))
+   counts each slide seen and each step.
 2. **The card after the update** (`CloudTrialIntro`, id `cloud-trial-intro-v1`):
    MausBot Cloud's free trial for someone signed out or with no plan who
    has used the app before this launch, only while the Admin offers a trial
@@ -1962,12 +1915,8 @@ again** (one step, the plan unaffected) instead of offering a plan. A `401` or
 other refusal, is a failed check like a dropped connection: it never ends the
 sign-in. Nobody signed in with a paid plan, in payment trouble, with a payment
 being linked, or whose state is unknown is offered a plan anywhere in the app.
-The Cloud Pro popup gives a plan, payment trouble and a payment being linked
-**Manage plan**; of the states it cannot verify, it waits while the sign-in is
-still restoring or connecting, waits for a later launch while the check is
-`unavailable`, and gives Manage plan to an ended sign-in (`reauth-required`)
-and to one the app could not read and removed (`restore-removed`): Settings →
-MausBot Cloud asks both to sign in again.
+What's new offers no plan to any of them; it waits while the sign-in is still
+restoring or connecting.
 
 In the Server menu, **My Cloud** goes through the same connection as
 **Open My Cloud** (no pairing code to type); when it cannot, the app
@@ -2076,7 +2025,7 @@ only.
 ## Add a Cloud
 
 The one way to buy MausBot Cloud in the app, the same for every way in:
-the Cloud Pro popup, the card after the update, **Show me how**, **Add a
+What's new, the card after the update, **Show me how**, **Add a
 Cloud…** in the server menu (the sidebar's and the menu bar's Server menu),
 Settings (the Cloud card in General, and MausBot Cloud), and the routine
 screen's note.
@@ -2175,8 +2124,9 @@ screen's note.
   again, `429` says to use the open checkout or wait, anything else says
   nothing was charged; `404`/`405`/`501` is an Admin before the route.
   `source` is one of `app_card`, `app_howto`, `app_menu`, `app_settings`,
-  `app_routines`, `update_popup` (main refuses any other, and any plan the
-  offer doesn't sell).
+  `app_routines`, `app_pages`, `app_whats_new_pro`, `app_whats_new_team`,
+  `app_onboarding` (main refuses any other, and any plan the offer doesn't
+  sell).
 - **Interest** `POST /api/cloud/desktop/interest` `{kind: "another_cloud"}` → `{ok: true}`.
 - Every signed-in request carries this app's version in `x-openmausbot-version`.
 

@@ -360,6 +360,25 @@ describe("server-side scope check (audit M1)", () => {
     expect(lending.screenNotLent(alice.person)).toEqual({});
     broker.close(); lending.close();
   });
+  it("on the person's own Cloud, every computer that can't give what's needed sends the bot to ask with a card, never to explain the fix", async () => {
+    const ask = 'call ask_for_computer with need "screen"';
+    expect(sharedComputerScopeRefusal({ ...lent, platform: "win32" }, { action: "computer_call" }, "ask_for_computer"))
+      .toBe("Apps and screen are not lent to this Cloud right now. Call ask_for_computer with need \"screen\" and what you want to do: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat, and don't use your own cloud computer instead unless they ask.");
+    expect(sharedComputerScopeRefusal({ ...lent, name: "HOME-PC" }, { action: "run_command" }, "ask_for_computer")).toContain('Call ask_for_computer with need "terminal"');
+    const broker = new SharedComputers(() => true);
+    broker.askTool = "ask_for_computer";
+    const changes: number[] = [];
+    broker.changed = () => changes.push(Date.now());
+    const pc = { ...registration(), platform: "win32" as const };
+    broker.register(pc, alice, secret);
+    expect(broker.screenNotLent(alice.person).screen).toBe(`Desktop doesn't lend its apps and screen right now. To use them, ${ask} and what you want to do: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat, and don't use your own cloud computer instead unless they ask.`);
+    expect(broker.lendingNow(alice.person)).toEqual([{ id: pc.id, name: "Desktop", platform: "win32", computer: false, terminal: false }]);
+    expect(broker.lendingNow(bob.person)).toEqual([]);
+    broker.disconnect(pc.id, alice.session, secret);
+    expect(changes, "connecting and stopping both tell the asks").toHaveLength(2);
+    await expect(broker.request({ computer_id: pc.id, action: "computer_call", tool_name: "list_apps" }, alice.person, () => false)).rejects.toThrow(/Call ask_for_computer with need "screen"/);
+    broker.close();
+  });
   it("never queues an out-of-scope operation for the desktop", async () => {
     const broker = new SharedComputers(() => true);
     broker.register(lent, alice, secret);

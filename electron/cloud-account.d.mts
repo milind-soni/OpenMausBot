@@ -288,7 +288,8 @@ export interface CloudAccountClient {
   /** `origin` is a Cloud the person owns (My Cloud or another of theirs), by the verified session only. */
   isOwnCloud(origin: string | null | undefined): boolean;
   /** Buys another Cloud (POST /api/cloud/desktop/clouds): its checkout opens in the browser. */
-  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<CloudAddResult>;
+  /** `source`: where the checkout started (CHECKOUT_SOURCES), for the Admin's funnel. */
+  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null; source?: string | null }): Promise<CloudAddResult>;
   /** A new organization on the Team plan this account pays for (POST /api/cloud/desktop/organizations): no checkout. */
   addOrganization(input: { name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<OrganizationAddResult>;
   /** A Cloud's colour on the Admin (PATCH /api/cloud/desktop/clouds/:id), for its owner or its team's Super admin and Admins. */

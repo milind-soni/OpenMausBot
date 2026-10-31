@@ -18,14 +18,8 @@ sent.
   `server` for a page a server serves (MausBot Cloud, a self-hosted server, or the app in a browser).
 - PostHog adds its standard device facts to every event: operating system, browser and its version, device type,
   screen and window size, language and time zone. Like any server, PostHog sees the IP address a request comes from.
-- Events are tied to a random id that PostHog keeps in the page's storage. The first-run screen asks for a name only and
-  ties no email to your events. If you are signed in to MausBot Cloud in
-  the desktop app and choose the Cloud Pro popup's main button or Compare plans, your events on this computer's page are
-  tied to your Cloud account's email from then on (`cloud_pro_popup`); My Cloud's Manage plan, and Continue on this
-  computer on a server's page, are counted on that page as `continue` and finish on this computer's page, which counts
-  what they open there. A server's page, My Cloud's included, is never told that email. While the desktop app has
-  kept no analytics choice of its own yet, such a click on its page served on a port other than its first ties nothing,
-  because an opt-out made before may be kept in the first port's storage. Nothing else identifies you.
+- Events are tied to a random id that PostHog keeps in the page's storage. Nothing ties them to you: the app never sends
+  your email or your name with them.
 
 ## Turning it off
 
@@ -45,8 +39,7 @@ on there lasts until that page reloads. In a browser, switch it off on each serv
 
 - API keys, tokens or passwords, or anything derived from them: no length, prefix, hash or last characters.
 - Names of bots, rooms, teams, people, routines, files, devices, models, presets or accounts.
-- Emails, except your Cloud account's email once a click on the Cloud Pro popup's main button or Compare plans is
-  counted on this computer's page while you are signed in to MausBot Cloud.
+- Emails.
 - URLs, hosts and addresses. PostHog's own `$current_url`, `$host`, `$pathname`, `$referrer`, `$referring_domain`,
   campaign parameters (`utm_*`, `gclid` and the like) and their `$initial_*` and `$session_entry_*` copies are removed
   before an event leaves the app.
@@ -137,7 +130,6 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_first_open` | The first time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser`; `mode`: `simple`, `advanced`, the look this app page is in when it counts the day |
-| `$identify` | PostHog's own event, sent before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
 | `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
 | `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
 | `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import | `skills`, `tools`: how many were added. Never their names or where they came from |
@@ -157,9 +149,9 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_snapshot` | Once a day, as described above | The properties in the snapshot table |
 | `cloud_card_shown` | The MausBot Cloud card is shown | `variant`: `signed_out`, `free` |
 | `cloud_card_action` | You act on the MausBot Cloud card | `action`: `start`, `howto`, `signin`, `not_now`, `close` |
-| `cloud_pro_popup` | The Cloud Pro popup (once on each desktop after an update, on whichever page its window shows) is shown, counted at most once a day on that desktop until it is closed, or you choose one of its buttons. On this computer's page, signed in to MausBot Cloud, `upgrade`, `manage` or `see_plans` first ties your events to your Cloud account's email (`$identify`); `shown`, `continue`, `not_now`, `close` and anything counted on a server's page never do. A server's page counts its main button there as `continue`: Manage plan on My Cloud's page, or Continue on this computer on a page that is not told your plan (a saved server's other than My Cloud's, or My Cloud's while it reads no plan). It switches the window to this computer, whose page counts what it opens there, with `via` naming the page clicked: `manage` for Manage plan; for Continue on this computer, from the plan this computer knows, `upgrade` with no plan, and `manage` with one or when its sign-in or plan is not known in time | `action`: `shown`, `upgrade` (Start free trial, Upgrade to Cloud Pro, or Continue on this computer with no plan), `manage` (Manage plan, or Continue on this computer with a plan), `see_plans` (Compare plans), `continue` (the main button on a server's page), `not_now`, `close` (the X, Escape or a click outside); `plan`: `none`, `trial`, `starter`, `personal`, `pro`, `max`, `other` (a plan newer than the app), `unknown` (the sign-in ended or is not known yet, or a page that is not told the plan); `signed_in`: true/false, signed in to MausBot Cloud in the app (false on a page that is not told); `page`: where it was counted: `local` (this computer's page), `my_cloud`, `server` (another saved server's); `via`: on this computer's page, the page whose click it finishes: `my_cloud`, `server` |
+| `whats_new` | The What's new popup (once per person after an update, on this computer's page): a slide comes on screen, counted once per slide each time the popup is up, or you act on it | `action`: `seen`, `next`, `back` (the slide changed, by its buttons, its dots or the arrow keys), `get_pro` (Get Pro, which opens Add a Cloud), `see_cloud` (See the new Cloud, which opens the Cloud website), `start_team` (Start a Team, which opens the Team plan's checkout on the Cloud website, or Add a Cloud for someone with a plan of their own), `not_now`, `close` (the X, Escape or a click outside); `slide`: the slide it happened on: `pro` (the new MausBot Cloud), `team` (Team); `audience`: `no_plan` (both slides), `own_plan` (a Cloud plan of one's own: the Team slide only); `signed_in`: true/false, signed in to MausBot Cloud in the app; `campaign`: the popup's campaign, `whats-new-2026-11` |
 | `cloud_howto` | The "Show me how" tip ends | `result`: `no_button`, `skipped`, `closed` |
-| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `update_popup` (the Cloud Pro popup), `app_onboarding` (Try Cloud under MausBot's first messages); `view`: the dialog's first screen |
+| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `app_whats_new_pro` (Get Pro in the What's new popup), `app_whats_new_team` (Start a Team in it, for someone with a plan of their own), `app_onboarding` (Try Cloud under MausBot's first messages); `view`: the dialog's first screen |
 | `cloud_dialog_view` | The Add a Cloud dialog reaches a step | `view`: `received`, `starting`, `ready` |
 | `cloud_signin` | Signing in to MausBot Cloud inside the Add a Cloud dialog takes a step | `step`: `code_sent` (a sign-in code was emailed), `signed_in`, `browser` (Continue in browser); `source`: as for `cloud_dialog_shown` |
 | `cloud_checkout_opened` | A Cloud checkout opens in the browser | `plan`: Cloud plan; `trial`: true/false; `source`: as for `cloud_dialog_shown` |
@@ -174,6 +166,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
 | `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
+| `two_places_card` | You act on the card that says your bots live in two places (this computer and a server of your own, or My Cloud) | `action`: `bring`, `not_now`; `kind`: `server`, `cloud`, the place it offered |
 
 `api_key_saved` reports `ok` for a key the server checks with its provider before saving it (Boat, Composio,
 ElevenLabs, Fish Audio), and for a model provider key whose test passed right after saving. A key nothing checks before
