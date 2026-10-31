@@ -643,7 +643,7 @@ describe("lines the server writes for a person", () => {
 describe("the guard", () => {
   const ROOT_HERE = "/repo";
   const scan = (files: Record<string, string>) =>
-    findServerLines(Object.keys(files).map((file) => `${ROOT_HERE}/${file}`), (path) => files[relative(ROOT_HERE, path)] ?? null, ROOT_HERE)
+    findServerLines(Object.keys(files).map((file) => `${ROOT_HERE}/${file}`), (path) => files[relative(ROOT_HERE, path).split("\\").join("/")] ?? null, ROOT_HERE)
       .map((finding) => `${finding.file} ${finding.sink.replace(/ at \S+$/, "")}: ${finding.text}`);
 
   it("finds a new English line in each place a line is made", () => {
