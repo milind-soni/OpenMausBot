@@ -6176,7 +6176,6 @@
   "settings.simple.diagnostics": "A file for support, with secrets removed. Check it before you send it.",
   "settings.simple.ai.yours": "Your AI",
   "settings.simple.ai.more": "More AI providers ({count})",
-  "settings.simple.ai.keys": "API keys and connections",
   "settings.simple.ai.manage": "Manage",
   "settings.simple.ai.setUp": "Set up",
   "settings.simple.billing.summary": "{percent}% of this month's included use",
