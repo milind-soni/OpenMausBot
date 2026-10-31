@@ -128,7 +128,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     key: typeof config.key === "string" && config.key ? config.key : undefined,
     model: typeof config.model === "string" && config.model
       ? config.model
-      : ownKey ? undefined : process.env.OPENAI_COMPAT_MODEL || undefined,
+      : ownKey || config.managedModels ? undefined : process.env.OPENAI_COMPAT_MODEL || undefined,
     // An explicit empty override disables inherited routing; absent still inherits the global pin.
     provider: typeof config.provider === "string"
       ? config.provider || undefined
@@ -168,7 +168,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
     const seeded = config.catalog === "openai" ? OPENAI_MODELS : DEFAULT_MODELS;
     let catalog: ModelCatalog = config.managedModels
-      ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
+      ? { default: config.model && config.managedModels.includes(config.model) ? config.model : config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
       ? {
           default: config.model,

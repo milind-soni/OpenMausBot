@@ -19,6 +19,7 @@ export const instanceSettingsSchema = z.object({
   tools: z.boolean().optional(),
   /** null goes back to the server's default wait. */
   replyWaitMinutes: z.number().int().min(1).max(60).nullable().optional(),
+  model: z.string().trim().min(1).max(200).refine((value) => !/\p{Cc}/u.test(value), "Model cannot contain control characters").optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 function rawConfig(entry: InstanceConfig): Record<string, unknown> {

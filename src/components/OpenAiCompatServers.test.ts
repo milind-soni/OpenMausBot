@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as store from "@/state/store";
 import { modelIds, OtherOpenAiCompatServers, LmStudioServer, lmStudioBaseUrl } from "./OpenAiCompatServers";
+import { Select } from "./Select";
 
 const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn(), track: vi.fn() }));
 vi.mock("react", async (original) => {
@@ -240,5 +241,98 @@ describe("LM Studio and Bionic setup", () => {
     const html = renderToStaticMarkup(createElement(LmStudioServer));
     expect(html).toContain("This server is already added.");
     expect(html).toContain("disabled");
+  });
+});
+
+describe("a server's default model", () => {
+  type Props = {
+    children?: ReactNode;
+    servers?: unknown;
+    value?: unknown;
+    "aria-label"?: string;
+    onChange?: (event: { target: { value: string } }) => void;
+    onBlur?: (event: { target: { value: string } }) => void;
+    onKeyDown?: (event: { key: string; currentTarget: { value: string }; preventDefault: () => void }) => void;
+  };
+  const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
+    Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  const field = (tree: ReactNode) => nodes(tree).find((node) => node.props["aria-label"] === "Default model for Flatt");
+  function server(models: { default: string; fixed?: boolean; options: Array<{ id: string; label: string }> }) {
+    vi.stubGlobal("window", {});
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, instances: [instance("openai-compat-1", "Flatt", { url: "https://flatt.example/v1", models })] },
+      dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+    });
+    const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
+    return () => {
+      fixture.counting = true;
+      fixture.index = 0;
+      try {
+        return nodes((added.type as (props: Props) => ReactNode)(added.props));
+      } finally {
+        fixture.counting = false;
+      }
+    };
+  }
+  const options = [{ id: "automode", label: "automode" }, { id: "deepseek-v4.1-flash", label: "deepseek-v4.1-flash" }];
+
+  it("shows the current default and saves the one picked", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [] });
+    const select = field(server({ default: "automode", options })())!;
+    expect(select.props.value).toBe("automode");
+    select.props.onChange!({ target: { value: "deepseek-v4.1-flash" } });
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ model: "deepseek-v4.1-flash" }) });
+  });
+
+  it("lets a model the server did not list be typed in, then saves it", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [] });
+    const draw = server({ default: "automode", options });
+    const custom = nodes(field(draw()!)!.props.children as ReactNode).find((node) => node.props.children === "Custom model ID…")!;
+    expect(custom).toBeDefined();
+    field(draw()!)!.props.onChange!({ target: { value: custom.props.value as string } });
+    const input = field(draw()!)!;
+    expect(input.type).toBe("input");
+    expect(input.props.value).toBe("automode");
+    input.props.onChange!({ target: { value: "qwen3-coder" } });
+    input.props.onKeyDown!({ key: "Enter", currentTarget: { value: "qwen3-coder" }, preventDefault: vi.fn() });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ model: "qwen3-coder" }) });
+    expect(field(draw()!)!.type).toBe(Select);
+  });
+
+  it("asks for a model ID itself when the server lists none", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [] });
+    const draw = server({ default: "", options: [] });
+    const input = field(draw()!)!;
+    expect(input.type).toBe("input");
+    input.props.onBlur!({ target: { value: "qwen3-coder" } });
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ model: "qwen3-coder" }) });
+  });
+
+  it("offers no custom ID when config fixes the model list", () => {
+    fixture.values = [];
+    const draw = server({ default: "automode", fixed: true, options });
+    const custom = nodes(field(draw()!)!.props.children as ReactNode).find((node) => node.props.children === "Custom model ID…");
+    expect(custom).toBeUndefined();
+  });
+
+  it("says so and saves nothing for a model ID the route would refuse", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockReset();
+    const draw = server({ default: "", options: [] });
+    field(draw()!)!.props.onBlur!({ target: { value: "a\nb" } });
+    await Promise.resolve();
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(nodes(draw()).some((node) => node.props.children === "Enter a model ID of 1 to 200 characters, without control characters.")).toBe(true);
   });
 });

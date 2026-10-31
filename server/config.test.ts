@@ -1309,6 +1309,18 @@ describe("credential env narrowing", () => {
     expect(instances.openai.access).toBe("api");
   });
 
+  it("leaves an added server's own model list and chosen model alone", () => {
+    const instances = instanceConfigs({
+      openaiCompat: { model: "glm-5" },
+      instances: {
+        "openai-compat-managed": { driver: "openai-compat", config: { url: "https://open.bigmodel.cn/api/paas/v4", key: "k", managedModels: ["glm-4.6", "glm-5"] } },
+        "openai-compat-chosen": { driver: "openai-compat", config: { url: "https://flatt.example/v1", key: "k", model: "deepseek-v4.1-flash" } },
+      },
+    });
+    expect(instances["openai-compat-managed"].config).not.toHaveProperty("model");
+    expect(instances["openai-compat-chosen"].config).toMatchObject({ model: "deepseek-v4.1-flash" });
+  });
+
   it("runs only Claude (API key) on a key saved from Settings, and every Claude bot when asked", () => {
     const own = instanceConfigs({ anthropic: { key: "SECRET-ANT", everyClaudeBot: false } });
     expect(own.claudeApi.environment).toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
