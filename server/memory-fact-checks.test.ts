@@ -42,5 +42,7 @@ describe("dream fact checks", () => {
     expect(checkDreamFacts(text, [1], [text], [{ threadId: "p", lines: [{ by: "person", text }] }])).toBe(text);
     const dated = "Anna wrote /notes/today.md today";
     expect(checkDreamFacts(dated, [1], [dated], [{ threadId: "p", lines: [{ by: "person", text: dated, at: Date.parse("2026-03-01T12:00:00Z") }] }])).toBe("Anna wrote /notes/today.md 2026-03-01");
+    const slashed = "Anna works remotely today/tomorrow";
+    expect(checkDreamFacts(slashed, [1], [slashed], [{ threadId: "p", lines: [{ by: "person", text: slashed, at: Date.parse("2026-03-01T12:00:00Z") }] }])).toBe("Anna works remotely 2026-03-01/2026-03-02");
   });
 });

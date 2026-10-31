@@ -6,7 +6,7 @@ import { redactSecretsInText } from "./redact.ts";
 const RELATIVE = /(?<!\p{L})(today|yesterday|tomorrow|dziś|dzisiaj|wczoraj|jutro)(?!\p{L})/giu;
 const MONTH = /(?<!\p{L})(?:january|february|march|april|may|june|july|august|september|october|november|december|stycz\p{L}*|lutego|luty|marca|marzec|kwiet\p{L}*|maja|maj|czerw\p{L}*|lip\p{L}*|sierp\p{L}*|wrze\p{L}*|paździer\p{L}*|listopad\p{L}*|grud\p{L}*)(?!\p{L})/giu;
 const RELATION = /(?<!\p{L})(?:mother|mom|mum|father|dad|wife|husband|partner|son|daughter|sister|brother|matk\p{L}*|mam\p{L}*|ojciec|ojca|żon\p{L}*|mąż|męża|córk\p{L}*|syn\p{L}*|siostr\p{L}*|brat\p{L}*)(?!\p{L})/giu;
-const LOCATION = /https?:\/\/[^\s<>[\]()]+|(?:~\/|\/[\p{L}_.]|[A-Za-z]:\\)[^\s<>[\](),;]*/gu;
+const LOCATION = /https?:\/\/[^\s<>[\]()]+|(?:~\/|(?<![\p{L}\p{N}])\/[\p{L}_.]|[A-Za-z]:\\)[^\s<>[\](),;]*/gu;
 const NUMBER = /\p{N}+(?:[.,:/-]\p{N}+)*%?/gu;
 const NAME = /(?<!\p{L})\p{Lu}[\p{L}\p{M}]+(?!\p{L})/gu;
 const SENTENCE_WORDS = new Set("The A An I User Owner Person Client Prefers Keep New Old Uses Use Run Note Remember Works My Her His Their They He She It Shorter Too Also".toLowerCase().split(" "));
