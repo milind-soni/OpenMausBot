@@ -16,6 +16,7 @@ type SavedEnvironment = {
 type EnvironmentsState = {
   activeId: string;
   environments: SavedEnvironment[];
+  packaged?: boolean;
 };
 
 type WebEnvironment = {
@@ -30,9 +31,6 @@ const SWITCHER_BUTTON =
 
 const ITEM =
   "flex w-full items-center gap-3 px-3 py-2 text-[13px] text-ink hover:bg-raised hover:text-ink";
-
-const ITEM_ACTIVE =
-  "flex w-full items-center gap-3 px-3 py-2 text-[13px] text-ink bg-raised";
 
 export function WorkspaceSwitcher() {
   const { dispatch } = useStore();
@@ -57,7 +55,6 @@ export function WorkspaceSwitcher() {
       }).catch(() => { if (generation.current === current) setError("Could not load workspaces."); });
       return;
     }
-    // Web fallback: read the current environment from the server's well-known endpoint.
     void fetch("/.well-known/openmausbot/environment")
       .then((res) => res.ok ? res.json() : null)
       .then((data) => { if (data && typeof data === "object" && "label" in data) setWebEnv(data as WebEnvironment); })
@@ -72,7 +69,12 @@ export function WorkspaceSwitcher() {
     return () => window.removeEventListener("mousedown", away);
   }, []);
 
-  const locals = (envs?.environments.filter((e) => e.kind === "local") ?? []);
+  const packaged = envs?.packaged === true;
+  const namedLocals = (envs?.environments.filter((e) => e.kind === "local") ?? []);
+  const locals = bridge ? [
+    { id: "local", kind: "local" as const, name: t("workspaceSwitcher.thisComputer"), dataDir: undefined },
+    ...namedLocals,
+  ] : namedLocals;
   const active = envs ? locals.find((e) => e.id === envs.activeId) : null;
   const isWeb = !bridge;
 
@@ -101,6 +103,8 @@ export function WorkspaceSwitcher() {
       if (result && typeof result === "object" && "ok" in result && result.ok === false) throw new Error(t("workspaceSwitcher.forgetError"));
       setForgetId(null);
       setOpen(false);
+      const state = await bridge.state();
+      setEnvs(state as EnvironmentsState);
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
     } finally {
@@ -132,7 +136,7 @@ export function WorkspaceSwitcher() {
 
   const openInDesktop = () => {
     setOpen(false);
-    void window.ogb?.openExternal?.("openmausbot://desktop");
+    window.location.href = "openmausbot://desktop";
   };
 
   const currentName = active?.name ?? webEnv?.label ?? t("workspaceSwitcher.thisComputer");
@@ -166,24 +170,35 @@ export function WorkspaceSwitcher() {
           <div className="py-1">
             {locals.map((entry) => {
               const isActive = entry.id === envs?.activeId;
+              const isDefault = entry.id === "local";
               return (
-                <button
-                  key={entry.id}
-                  role="menuitem"
-                  type="button"
-                  onClick={() => switchTo(entry.id)}
-                  disabled={busy || isActive}
-                  className={cn(ITEM, isActive ? ITEM_ACTIVE : "", (busy || isActive) && "opacity-50 cursor-not-allowed")}
-                >
-                  <span className="shrink-0 w-5 text-ink-secondary">
-                    {isActive ? <Check size={13} /> : entry.missing === true ? <Trash2 size={13} strokeWidth={1.5} /> : <div className="w-3 h-3 rounded-full border border-ink/20" />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className={cn("text-[13px]", isActive ? "font-medium text-ink" : "text-ink-secondary")}>{entry.name}</div>
-                    <div className="text-[11px] truncate text-ink-tertiary">{entry.dataDir ?? t("workspaceSwitcher.defaultFolder")}</div>
-                  </div>
-                  {isActive && <span className="shrink-0 text-[11px] text-ink-secondary">{t("workspaceSwitcher.current")}</span>}
-                </button>
+                <div key={entry.id} className="flex w-full items-center justify-between gap-3 px-3 py-2">
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() => switchTo(entry.id)}
+                    disabled={busy || isActive}
+                    className={cn("flex w-full items-center gap-3 px-0 py-0 text-[13px] hover:bg-raised hover:text-ink", isActive ? "bg-raised" : "", (busy || isActive) && "opacity-50 cursor-not-allowed")}
+                  >
+                    <span className="shrink-0 w-5 text-ink-secondary">
+                      {isActive ? <Check size={13} /> : entry.missing === true ? <Trash2 size={13} strokeWidth={1.5} /> : <div className="w-3 h-3 rounded-full border border-ink/20" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className={cn("text-[13px]", isActive ? "font-medium text-ink" : "text-ink-secondary")}>{entry.name}</div>
+                      {isDefault ? <div className="text-[11px] truncate text-ink-tertiary">{t("workspaceSwitcher.defaultFolder")}</div> : <div className="text-[11px] truncate text-ink-tertiary">{entry.dataDir ?? t("workspaceSwitcher.defaultFolder")}</div>}
+                    </div>
+                    {isActive && <span className="shrink-0 text-[11px] text-ink-secondary">{t("workspaceSwitcher.current")}</span>}
+                  </button>
+                  {!isDefault && !isActive && !busy && (
+                    <button
+                      type="button"
+                      onClick={() => { setForgetId(entry.id); setPurge(false); }}
+                      className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
               );
             })}
             {isWeb && webEnv && (
@@ -206,16 +221,18 @@ export function WorkspaceSwitcher() {
           <div className="border-t border-hairline/40 py-2 px-3">
             {bridge && (
               <>
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => { setCreating(true); }}
-                  disabled={busy}
-                  className={cn(ITEM, busy && "opacity-50 cursor-not-allowed")}
-                >
-                  <Plus size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
-                  <span>{t("workspaceSwitcher.newWorkspace")}</span>
-                </button>
+                {packaged && (
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() => { setCreating(true); }}
+                    disabled={busy}
+                    className={cn(ITEM, busy && "opacity-50 cursor-not-allowed")}
+                  >
+                    <Plus size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+                    <span>{t("workspaceSwitcher.newWorkspace")}</span>
+                  </button>
+                )}
                 <div className="mt-2 px-2">
                   <button
                     type="button"

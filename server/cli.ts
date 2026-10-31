@@ -16,7 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, basename, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
@@ -90,6 +90,7 @@ export interface CliOptions {
   workspaceAction?: "list" | "create" | "switch" | "delete" | "forget";
   workspaceId?: string;
   workspaceName?: string;
+  workspaceDataDir?: string;
   workspacePurge?: boolean;
   operator?: string;
   socket?: string;
@@ -194,6 +195,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (options.command === "fleet" && arg === "--keep-data") options.keepData = true;
       else if (options.command === "workspace" && !options.workspaceAction && (arg === "list" || arg === "create" || arg === "switch" || arg === "delete" || arg === "forget")) options.workspaceAction = arg;
       else if (options.command === "workspace" && options.workspaceAction === "create" && !options.workspaceName && !arg.startsWith("--")) options.workspaceName = arg;
+      else if (options.command === "workspace" && options.workspaceAction === "create" && arg === "--workspace-dir") options.workspaceDataDir = resolve(value());
       else if (options.command === "workspace" && options.workspaceAction && arg === "--purge") options.workspacePurge = true;
       else if (options.command === "workspace" && ["switch", "delete", "forget"].includes(options.workspaceAction ?? "") && !options.workspaceId && !arg.startsWith("--")) options.workspaceId = arg;
       else if (options.command === "fleet" && arg === "--chat-only") options.chatOnly = true;
@@ -216,7 +218,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     if (options.fleetAction === "users" && !options.fleetUserAction) return { error: "fleet users needs: NAME add|remove EMAIL [--chat-only]" };
     if (options.cap !== undefined && (!Number.isFinite(options.cap) || options.cap < 0)) return { error: "--cap must be a dollar amount of 0 or more" };
   }
-  if (options.command === "workspace" && !options.workspaceAction) return { error: "workspace needs one of: list, create NAME [--data-dir DIR], switch ID, delete ID [--purge], forget ID [--purge]" };
+  if (options.command === "workspace" && !options.workspaceAction) return { error: "workspace needs one of: list, create NAME [--workspace-dir DIR], switch ID, delete ID [--purge], forget ID [--purge]" };
   if (options.command === "workspace" && options.workspaceAction === "create" && !options.workspaceName) return { error: "workspace create needs a name" };
   if (options.command === "workspace" && (options.workspaceAction === "switch" || options.workspaceAction === "delete" || options.workspaceAction === "forget") && !options.workspaceId) return { error: `workspace ${options.workspaceAction} needs an id` };
   return options;
@@ -1017,19 +1019,30 @@ export async function runOnboardingCommand(
 
 async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
   const { join } = await import("node:path");
-  const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+  const { readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync } = await import("node:fs");
   const environmentsFilePath = join(options.dataDir, "environments.json");
   let state: { environments: Array<{ id: string; kind: string; name: string; dataDir?: string; missing?: boolean; color?: string; origin?: string; home?: boolean; cloud?: { id: string; role: string } }>; activeId: string } | null = null;
   try {
     state = JSON.parse(readFileSync(environmentsFilePath, "utf8"));
-  } catch {
-    state = { environments: [], activeId: "local" };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      state = { environments: [], activeId: "local" };
+    } else {
+      io.error(`Cannot read environments registry: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
   }
   if (!state) state = { environments: [], activeId: "local" };
 
   const save = () => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
-    writeFileSync(environmentsFilePath, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
+    const tmp = environmentsFilePath + ".tmp";
+    writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
+    try {
+      renameSync(tmp, environmentsFilePath);
+    } catch {
+      writeFileSync(environmentsFilePath, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
+    }
   };
 
   if (options.workspaceAction === "list") {
@@ -1049,10 +1062,16 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
     const id = options.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || (Math.random().toString(36).slice(2, 10));
     const dup = state.environments.find((e) => e.id === id);
     if (dup) { io.error(`A workspace with id “${id}” already exists`); return 1; }
-    state.environments.push({ id, kind: "local", name });
+    let dataDir: string | undefined;
+    if (options.workspaceDataDir) {
+      dataDir = resolve(options.workspaceDataDir);
+      const existing = state.environments.find((e) => e.kind === "local" && e.dataDir === dataDir);
+      if (existing) { io.error(`A local workspace already uses ${dataDir}`); return 1; }
+    }
+    state.environments.push({ id, kind: "local", name, dataDir });
     state.activeId = id;
     save();
-    io.log(`Created workspace “${name}” (id: ${id}) and switched to it.`);
+    io.log(`Created workspace “${name}” (id: ${id})${dataDir ? ` at ${dataDir}` : ""} and switched to it.`);
     return 0;
   }
 
@@ -1073,8 +1092,21 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
     if (env.id === state.activeId) { io.error(`Cannot delete the active workspace; switch away first.`); return 1; }
     if (env.kind === "local" && options.workspacePurge && env.dataDir) {
       const { rmSync } = await import("node:fs");
+      const resolved = resolve(env.dataDir);
+      const root = resolve(options.dataDir);
+      const canonical = (dir: string) => { try { return realpathSync(dir); } catch { return dir; } };
+      const resolvedCanon = canonical(resolved);
+      const rootCanon = canonical(root);
+      if (!basename(resolved).startsWith(".openmausbot")) {
+        io.error(`Refusing to purge a folder not named .openmausbot-* (${resolved})`);
+        return 1;
+      }
+      if (resolvedCanon === rootCanon || resolvedCanon.startsWith(rootCanon + sep)) {
+        io.error(`Refusing to purge inside the registry root (${resolved})`);
+        return 1;
+      }
       try {
-        rmSync(env.dataDir, { recursive: true, force: true });
+        rmSync(resolved, { recursive: true, force: true });
       } catch (error) {
         io.error(`Could not delete data folder: ${error instanceof Error ? error.message : String(error)}`);
         return 1;
