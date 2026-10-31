@@ -37,6 +37,15 @@ describe("Plan usage presentation", () => {
     expect(html).not.toContain('role="meter"');
     expect(html).not.toContain("100% left");
   });
+
+  it("leaves out a Copilot engine nobody signed in to, but keeps a Copilot check that failed", () => {
+    const copilot = (reason: string) => ({ id: `copilot-${reason}`, name: "GitHub Copilot", driver: "copilot", ok: false, reason, error: `Copilot ${reason}` });
+    fixture.report = { providers: [copilot("signedOut"), copilot("noPlan"), copilot("failed")] };
+    const html = renderToStaticMarkup(createElement(PlanUsage));
+    expect(html).not.toContain("Copilot signedOut");
+    expect(html).not.toContain("Copilot noPlan");
+    expect(html).toContain("Copilot failed");
+  });
 });
 
 describe("Usage & billing in Simple mode", () => {
@@ -52,5 +61,12 @@ describe("Usage & billing in Simple mode", () => {
       .toMatchObject({ provider: { id: "codex" }, used: 61 });
     expect(busiestWeekly({ providers: [provider("grok", false, 90)] })).toBeNull();
     expect(busiestWeekly(null)).toBeNull();
+  });
+
+  it("falls back to the fullest monthly allowance, such as Copilot's premium requests", async () => {
+    const { busiestMonthly } = await import("./PlanUsage");
+    const copilot = { ...provider("copilot", true, null), extra: [{ label: "Monthly", kind: "monthly" as const, usedPercent: 31, remainingPercent: 69, resetsAt: null }] };
+    expect(busiestMonthly({ providers: [provider("claude", true, null), copilot] })).toMatchObject({ provider: { id: "copilot" }, extra: { usedPercent: 31 } });
+    expect(busiestMonthly({ providers: [{ ...copilot, ok: false }] })).toBeNull();
   });
 });

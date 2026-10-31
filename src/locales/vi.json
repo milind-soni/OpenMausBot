@@ -2696,6 +2696,7 @@
   "planUsage.subtitle": "Hạn mức còn lại trên mỗi nhà cung cấp đã đăng nhập. Khung thời gian 5 giờ và hàng tuần, nếu gói đó có áp dụng.",
   "planUsage.fiveHour": "5 giờ",
   "planUsage.weekly": "Hàng tuần",
+  "planUsage.monthly": "Hàng tháng",
   "planUsage.left": "Còn lại {remaining}%",
   "planUsage.used": "Đã dùng {used}%",
   "planUsage.byModel": "Theo mô hình",

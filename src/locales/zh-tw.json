@@ -2264,6 +2264,7 @@
   "planUsage.subtitle": "每個已登入供應商的剩餘額度。若方案有 5 小時與每週時段限制，也會一併顯示。",
   "planUsage.fiveHour": "5 小時",
   "planUsage.weekly": "每週",
+  "planUsage.monthly": "每月",
   "planUsage.left": "剩餘 {remaining}%",
   "planUsage.used": "已使用 {used}%",
   "planUsage.byModel": "依模型",

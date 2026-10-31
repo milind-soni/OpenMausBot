@@ -3025,6 +3025,7 @@
   "planUsage.subtitle": "Margen restante en cada proveedor con sesión iniciada. Ventanas de 5 horas y semanales, cuando el plan las tiene.",
   "planUsage.fiveHour": "5 horas",
   "planUsage.weekly": "Semanal",
+  "planUsage.monthly": "Mensual",
   "planUsage.left": "{remaining}% restante",
   "planUsage.used": "{used}% usado",
   "planUsage.byModel": "Por modelo",
