@@ -588,6 +588,8 @@ describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts
     expect(registry.redeemStreamTicket(ticket)).toBeNull();
     expect(registry.isLive(stored.session.id)).toBe(false);
     expect(registry.authenticate(owner.token)?.id).toBe(owner.session.id);
+    expect(() => registry.setView(owner.session.id, { sections: [], bots: ["b1"], groups: [] }), "a view would lock the owner's own device out").toThrow(PERSONAL);
+    expect(registry.authenticate(owner.token)).toMatchObject({ scopes: ["admin", "client"] });
     expect(registry.isLive(owner.session.id)).toBe(true);
     const next = registry.exchange({ code: registry.openPairing({ scopes: ["admin"] }).credential, label: "Phone", source: "c" });
     expect(next.ok).toBe(true);
@@ -690,5 +692,105 @@ describe("a member's own phone on a Team Cloud", () => {
     const later = phoneOf(fromAdmin());
     clock = registry.authenticate(later.token)!.expiresAt;
     expect(registry.memberPhones(), "an ended phone is not listed").toEqual([]);
+  });
+});
+
+describe("a device's view (departments, bots and group chats)", () => {
+  it("is carried from its pairing code to its session, which is never an admin", () => {
+    const { code } = registry.openPairing({ label: "Kitchen tablet", scopes: ["admin", "client"], view: { sections: ["Ops"], bots: [], groups: [] } });
+    expect(registry.openPairings()[0]).toMatchObject({ scopes: ["client"], view: { sections: ["Ops"], bots: [], groups: [] } });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(paired.session).toMatchObject({ scopes: ["client"], view: { sections: ["Ops"], bots: [], groups: [] } });
+    expect(registry.authenticate(paired.token)).toMatchObject({ scopes: ["client"], view: { sections: ["Ops"], bots: [], groups: [] } });
+  });
+
+  it("an ordinary pairing has none", () => {
+    const { code } = registry.openPairing({ label: "Phone" });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(paired.session.view).toBeUndefined();
+    expect(paired.session.scopes).toEqual(["admin", "client"]);
+  });
+
+  it("can be set later, taking admin away, and cleared without giving it back", () => {
+    const { code } = registry.openPairing({ label: "Phone" });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(registry.setView(paired.session.id, { sections: [], bots: ["b1"], groups: [] })).toMatchObject({ scopes: ["client"], view: { sections: [], bots: ["b1"], groups: [] } });
+    expect(registry.authenticate(paired.token)).toMatchObject({ scopes: ["client"], view: { sections: [], bots: ["b1"], groups: [] } });
+    const cleared = registry.setView(paired.session.id, null);
+    expect(cleared?.view).toBeUndefined();
+    expect(cleared?.scopes).toEqual(["client"]);
+    expect(registry.setView("nope", { sections: [], bots: ["b1"], groups: [] })).toBeNull();
+  });
+
+  it("tells listeners a session's view changed", () => {
+    const changed: string[] = [];
+    registry.onSessionChanged((id) => changed.push(id));
+    const { code } = registry.openPairing({ label: "Phone" });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    registry.setView(paired.session.id, { sections: [], bots: [], groups: ["g1"] });
+    expect(changed).toEqual([paired.session.id]);
+  });
+
+  it("still tells listeners when the change cannot be saved, so open streams drop what the device lost", () => {
+    const changed: string[] = [];
+    registry.onSessionChanged((id) => changed.push(id));
+    const paired = pair();
+    rmSync(file());
+    mkdirSync(file()); // An atomic file replace cannot overwrite a directory.
+    expect(() => registry.setView(paired.session.id, { sections: [], bots: [], groups: ["g1"] })).toThrow();
+    expect(changed).toEqual([paired.session.id]);
+  });
+
+  it("forgets a department that no longer exists, so one made again under its name grants nothing", () => {
+    const changed: string[] = [];
+    registry.onSessionChanged((id) => changed.push(id));
+    const { code } = registry.openPairing({ view: { sections: ["", "Finance", "Ops"], bots: ["b1"], groups: [] } });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    const untouched = pair();
+    registry.dropMissingSections((name) => name === "Ops");
+    expect(registry.authenticate(paired.token)?.view).toEqual({ sections: ["", "Ops"], bots: ["b1"], groups: [] });
+    expect(changed).toEqual([paired.session.id]);
+    registry.dropMissingSections((name) => name === "Ops");
+    expect(changed, "nothing left to forget").toHaveLength(1);
+    expect(registry.authenticate(untouched.token)?.view).toBeUndefined();
+    registry.close();
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    expect(registry.authenticate(paired.token)?.view?.sections).toEqual(["", "Ops"]);
+  });
+
+  it("survives a restart, and a damaged one shows nothing rather than everything", () => {
+    const { code } = registry.openPairing({ view: { sections: [], bots: [], groups: ["g1"] } });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    registry.close();
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    expect(registry.authenticate(paired.token)?.view).toEqual({ sections: [], bots: [], groups: ["g1"] });
+    registry.close();
+
+    const stored = JSON.parse(readFileSync(file(), "utf8"));
+    stored.sessions[0].view = { everything: true };
+    stored.sessions[0].scopes = ["admin", "client"];
+    writeFileSync(file(), JSON.stringify(stored));
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    const reloaded = registry.authenticate(paired.token);
+    expect(reloaded?.view).toEqual({ sections: [], bots: [], groups: [] });
+    expect(reloaded?.scopes).toEqual(["client"]);
+  });
+
+  it("reads a view saved in the one-target form as a list", () => {
+    const { code } = registry.openPairing({ label: "Phone" });
+    const paired = registry.exchange({ code, label: "", source: "10.0.0.9" });
+    if (!paired.ok) throw new Error(paired.error);
+    registry.close();
+    const stored = JSON.parse(readFileSync(file(), "utf8"));
+    stored.sessions[0].view = { group: "g1" };
+    writeFileSync(file(), JSON.stringify(stored));
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    expect(registry.authenticate(paired.token)).toMatchObject({ scopes: ["client"], view: { sections: [], bots: [], groups: ["g1"] } });
   });
 });

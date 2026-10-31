@@ -850,6 +850,36 @@ apps and cloud desktops — those stay with the owner. A server reinstalled at
 the same address has a new identity; the app then asks to pair again rather
 than present the old session to it.
 
+A device can also be limited to **the departments, bots and group chats you
+pick**: choose **Only what I pick** under **This device sees** and switch them
+on before creating the code, or use **Limit**/**Change** on the device's row
+in the same list, where each switch applies at once. Turning every switch off
+leaves the device paired but seeing nothing. Over the API it is `view` on
+`POST /api/auth/pairing` and `PATCH /api/auth/sessions/:id` (admin only):
+`{ "sections": ["Ops"], "bots": [id], "groups": [id] }` (`""` is General;
+any list may be left out, at most 50 per list; pairing needs at least one
+target, while `PATCH` takes all lists empty for "sees nothing"), the one-target
+form `{ "section": "Ops" }`, `{ "bot": id }` or `{ "group": id }`, or `null`
+to lift it. A limited device is always chat and approvals only, and lifting
+the limit never gives admin back. It sees the union of what it names, inside
+what [Who can see a bot](#who-can-see-a-bot) already allows it:
+
+- a department: its bots, their conversations;
+- a bot: that bot and its conversations;
+- a group chat: that room and its conversations; a bot that is not also
+  picked (by name or department) comes only as the room's member, so its own
+  chats, settings, tasks, routines and webhooks answer `404` exactly like an
+  unknown id;
+- any other group chat shows only when every one of its bots is picked.
+
+Everything else answers `404` the same way, lists leave it out, and the live
+stream never names it. A deleted or renamed target drops out, and a department
+made again under the same name later grants nothing; when nothing it names is
+left, the device sees nothing until an admin picks again. General follows the
+bots that have no department, so it gains the bots of a department that is
+deleted. The companion
+sidecar below has its own credentials and does not apply a view.
+
 Both native apps pair this way. `openmausbot pair --phone android` prints the
 app-scheme QR that Android's scanner needs, and the iOS app accepts either
 that QR or the web link. Pass `--phone` whenever nothing is watching the

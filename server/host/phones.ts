@@ -34,7 +34,7 @@ export interface PhonesDeps {
   loopbackTrust: LoopbackTrust;
   sharedMembership(): boolean;
   store: Pick<Store, "appendMessage" | "bot" | "groupByThread" | "messagesFor">;
-  sessions: Pick<SessionRegistry, "list" | "isLive" | "onSessionRevoked">;
+  sessions: Pick<SessionRegistry, "list" | "isLive" | "onSessionRevoked" | "onSessionChanged">;
   routines(): { listRoutines(): Routine[] } | null;
   ownerOrAdmin(auth: RequestAuth): boolean;
   cloudOwnerSession(auth: RequestAuth): boolean;
@@ -60,10 +60,15 @@ export function createPhones(deps: PhonesDeps) {
   const registry = new PhoneRegistry(join(deps.dataDir, "phones.json"));
   const sends = createPhoneSends();
   const jobs = new PhoneJobs((phone, id) => deps.nudge({ kind: "device.job", phone, id }));
-  const unsubscribe = deps.sessions.onSessionRevoked((id) => {
+  const forgetSession = (id: string) => {
     const key = `session:${id}`;
     try { registry.remove(key); } catch {}
     jobs.drop(key, PHONE_ACCESS_CHANGED);
+  };
+  const unsubscribeRevoked = deps.sessions.onSessionRevoked(forgetSession);
+  // A device limited to a view is never the owner's phone.
+  const unsubscribeChanged = deps.sessions.onSessionChanged((id) => {
+    if (deps.sessions.list().some((session) => session.id === id && session.view)) forgetSession(id);
   });
   const ownerRoutinesFile = join(deps.dataDir, "owner-routines.json");
   const routineRecordsExisted = existsSync(ownerRoutinesFile);
@@ -160,6 +165,6 @@ export function createPhones(deps: PhonesDeps) {
       if (!deps.ownerOrAdmin(auth)) routineAuthors.forget(routine.id);
       else if (ownersAgain) routineAuthors.record(routine.id, routine);
     },
-    close: () => { unsubscribe(); jobs.close(); },
+    close: () => { unsubscribeRevoked(); unsubscribeChanged(); jobs.close(); },
   };
 }

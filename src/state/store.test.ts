@@ -2827,6 +2827,22 @@ describe("restoring the open conversation", () => {
     expect(hydrating({ ...initialState, selectedId: "deleted" }).selectedId).toBe("bot-1");
   });
 
+  it("hydrate keeps a bot whose selected chat is someone else's, so its own chat can still be opened", () => {
+    const scout = { ...bot("scout"), threadId: undefined } as unknown as Bot;
+    expect(hydrating({ ...initialState, selectedId: "scout" }, undefined, [first, scout]).selectedId).toBe("scout");
+    expect(hydrating(initialState, "scout", [first, scout]).selectedId).toBe("scout");
+  });
+
+  it("never opens a bot a device sees only as a room member", () => {
+    const member = { ...bot("member"), threadId: undefined, roomOnly: true } as unknown as Bot;
+    expect(hydrating(initialState, "member", [member, first]).selectedId).toBe("bot-1");
+    expect(hydrating({ ...initialState, selectedId: "member" }, undefined, [member, first]).selectedId).toBe("bot-1");
+    const open = hydrating({ ...initialState, selectedId: "room-1" }, undefined, [member, first]);
+    expect(reducer(open, { type: "groupDeleted", groupId: "room-1" }).selectedId).toBe("bot-1");
+    const onMember = { ...open, selectedId: "bot-1" };
+    expect(reducer(onMember, { type: "deleteBot", botId: "bot-1" }).selectedId).not.toBe("member");
+  });
+
   describe("the provider's own effect", () => {
     // The provider opens the one stream and pulls the snapshot itself, so the fixture answers both.
     class FixtureEventSource {
@@ -3160,5 +3176,28 @@ describe("fleet order from the server", () => {
   it("ignores ids it does not know and leaves an unchanged order alone", () => {
     expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c", "d"]);
     expect(reducer(hydrated, { type: "botsOrdered", botIds: ["a", "b", "c", "d"] })).toBe(hydrated);
+  });
+});
+
+describe("a device limited to one group chat", () => {
+  const member = (id: string) => ({ id, name: id, title: "", description: "", notifications: true, color: "purple", unread: false,
+    modelSelection: { instanceId: "claude", model: "default" }, messages: [], tasks: [], roomOnly: true }) as unknown as Bot;
+  const room: Group = { id: "room", name: "Room", threadId: "room-thread", memberIds: ["a", "b"], createdAt: 1,
+    defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [] };
+
+  it("opens on the room, never on a member bot it has no conversation with", () => {
+    const hydrated = reducer(initialState, { type: "hydrate", bots: [member("a"), member("b")], groups: [room], computerControl: {} });
+    expect(hydrated.selectedId).toBe("room");
+  });
+
+  it("still opens on the first bot everywhere else", () => {
+    const bot = { ...member("a"), threadId: "t-a", roomOnly: false } as Bot;
+    expect(reducer(initialState, { type: "hydrate", bots: [bot], groups: [room], computerControl: {} }).selectedId).toBe("a");
+  });
+
+  it("leaves a bot's chat once a narrowed view keeps that bot only as a room member", () => {
+    const wide = reducer(initialState, { type: "hydrate", bots: [{ ...member("a"), threadId: "t-a", roomOnly: false } as Bot], groups: [], computerControl: {} });
+    expect(wide.selectedId).toBe("a");
+    expect(reducer(wide, { type: "hydrate", bots: [member("a"), member("b")], groups: [room], computerControl: {} }).selectedId).toBe("room");
   });
 });

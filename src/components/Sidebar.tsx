@@ -1112,7 +1112,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() });
 
   const matchingBots = state.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && !b.roomOnly)
     .filter(
       (b) =>
         !q ||

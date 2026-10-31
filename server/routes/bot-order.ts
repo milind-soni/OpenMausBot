@@ -24,7 +24,7 @@ export function createBotOrderRoutes(deps: BotOrderRouteDeps): RouteHandler {
     // A restricted viewer gets the same answer for a hidden bot as for a missing one, so the id list cannot probe the fleet.
     const visible = visibleFor(auth);
     for (const id of botIds as string[]) {
-      if (!store.bot(id) || !visible.bot(id)) return json(res, 400, { error: `unknown bot: ${id}` });
+      if (!store.bot(id) || !visible.reaches(id)) return json(res, 400, { error: `unknown bot: ${id}` });
     }
     const bots = store.reorderBots(botIds as string[]);
     if (!bots) return json(res, 400, { error: "botIds must be a non-empty array of distinct bot ids" });

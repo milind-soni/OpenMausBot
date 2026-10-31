@@ -104,7 +104,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           return visible.everything || !visible.member ? room : memberGroup(room);
         }),
         computerControl: Object.fromEntries(
-          shownBots.map((bot) => {
+          shownBots.filter((bot) => visible.reaches(bot.id)).map((bot) => {
             const snapshot = botComputerControlSnapshot(bot.id);
             // A plea from someone else's private chat (a Team Cloud) names its site and reason: held is all that is shared.
             if (snapshot.help && visible.hides(snapshot.help.threadId)) return [bot.id, { held: snapshot.held, helpReason: null }];

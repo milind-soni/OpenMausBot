@@ -191,7 +191,7 @@ import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import { adminAuditPlan, type AuditPlan } from "./admin-audit-plan.ts";
+import { adminAuditPlan, sessionAuditRows, type AuditPlan } from "./admin-audit-plan.ts";
 import { onKeyRejectionChange } from "./key-rejections.ts";
 import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAlert } from "./spend.ts";
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
@@ -555,6 +555,7 @@ import {
 } from "./admin-activity.ts";
 import {
   frameForMember,
+  roomMemberMissing,
   memberBody, memberFramePayload,
   noteSeen,
   notFoundFor,
@@ -581,6 +582,7 @@ import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
 import { createBotOrderRoutes } from "./routes/bot-order.ts";
+import { createDeviceViewRoutes, keepViewsToDepartments, pairingView } from "./routes/device-views.ts";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.ts";
 import { createBotSkillsRoutes } from "./routes/bot-skills.ts";
 import { createSkillShareRoutes } from "./routes/skill-share.ts";
@@ -1373,14 +1375,10 @@ function adminAuditRows(
       }
     }
   }
-  if (before.session && !sessions.list().some((session) => session.id === before.session!.id)) {
-    const session = before.session;
-    rows.push({ category: "session", action: "session.revoke", target: { kind: "session", id: session.id, name: session.email ?? session.label },
-      before: { label: session.label, ...(session.email ? { email: session.email } : {}), scopes: session.scopes } });
-  }
+  rows.push(...sessionAuditRows(before.session, sessions.list()));
   if (plan.pairing) {
     const pairing = sessions.openPairings().find((candidate) => candidate.id === reply.id);
-    if (pairing) rows.push({ category: "session", action: "pairing.create", target: { kind: "pairing", name: pairing.label }, after: { label: pairing.label, scopes: pairing.scopes } });
+    if (pairing) rows.push({ category: "session", action: "pairing.create", target: { kind: "pairing", name: pairing.label }, after: { label: pairing.label, scopes: pairing.scopes, ...(pairing.view ? { view: pairing.view } : {}) } });
   }
   if (plan.engineAction) rows.push({ category: "engine", action: `engine.${plan.engineAction.action}`, target: { kind: "engine", id: plan.engineAction.id } });
   const roomBody = plan.roomId ? parsedBodyOf(req) : undefined;
@@ -4765,6 +4763,8 @@ const desktopViewer = createDesktopViewer({
     return holds() ? holds : undefined;
   },
 });
+/** A session whose streams ended because what it may see changed: reconnecting from before this seq gets a snapshot, since a replay cannot withdraw or add what it was never sent. */
+const sessionSnapshotFrom = new Map<string, number>();
 function closeSessionStreams(sessionId: string): void {
   browserLive.closeForOwner(sessionId);
   desktopViewer.closeForOwner(sessionId);
@@ -4772,7 +4772,13 @@ function closeSessionStreams(sessionId: string): void {
     if (client.sessionId === sessionId) client.close();
   }
 }
+sessions.onSessionChanged((sessionId) => {
+  sessionSnapshotFrom.set(sessionId, lastSeq);
+  closeSessionStreams(sessionId);
+});
+keepViewsToDepartments(sessions, store);
 sessions.onSessionRevoked((sessionId) => {
+  sessionSnapshotFrom.delete(sessionId);
   providerAuthSessions.revokeOwner(sessionId);
   mcpOAuth.revokeOwner(sessionId);
   closeSessionStreams(sessionId);
@@ -4857,6 +4863,11 @@ function memberFrame(client: SseClient, seq: number, payload: Record<string, unk
   if (visible.everything) {
     noteSeen(payload, client.seen);
     return clientFrame;
+  }
+  if (roomMemberMissing(payload, visible, client.seen)) {
+    if (client.sessionId) sessionSnapshotFrom.set(client.sessionId, lastSeq);
+    client.close();
+    return null;
   }
   const narrowed = frameForMember(payload, memberFrameContext(visible), client.seen);
   if (!narrowed) return null;
@@ -9646,7 +9657,7 @@ const webhooks = new WebhookManager({
   }, ...createWebhookRoomPost({ store, cfg, roomTalks }) });
 const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" });
 const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => webhookIngressStatus().baseUrl, routines: () => routines!, botState: unattendedDispatchState, timeZone: routineTimeZone, emit: broadcast, connectionMode: () => composio.connectionMode(cfg),
-  access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId),
+  access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).reaches(botId),
   audit: (row) => appendDecision(DATA_DIR, { ...row, decision: "auto-approved", source: "routine" }) });
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager, waits: botWaits });
 ROUTES.push(appTriggers.routes); ROUTES.unshift(createMoveFreezeRoutes({ freeze: moveFreeze, automationsOff: () => switchAutomationsOff({ routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }), restart: () => { restartRequested = true; gracefulShutdown(); }, busy: createMoveWaits({ bots: () => store.bots, rooms: () => store.groups, answering: (id) => watchdog.answering(id), turn: botHasActiveTurn, runs: () => routines?.listRuns() ?? [], roomWorking: (id) => { const group = store.group(id); return Boolean(group && groupIsWorking(group)); }, handoffs: () => coordinator.active(), exists: (node) => !(!node.parentId && node.groupId ? roomRootProblem(node) : roomHandoffProblem(node)), signingIn: () => providerAuthSessions.active }) }));
@@ -12316,6 +12327,7 @@ ROUTES.push(createBotSettingsRoutes({
   canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal, threadRead: teamMessages.seen,
 }));
 ROUTES.push(createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }));
+ROUTES.push(createDeviceViewRoutes({ sessions, store, team: Boolean(CLOUD_TEAM) }));
 ROUTES.push(createBotPatchRoutes({
   store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
@@ -12594,7 +12606,7 @@ ROUTES.push(createBrowserViewerRoutes({
   current: (botId, session, auth, audience) => {
     const current = store.bot(botId);
     return !!current && current.browser !== false && builtInBrowserEnabled(cfg) && currentBrowserSession(current.id, current.browserProfile, audience) === session
-      && (auth.kind !== "session" || (sessions.isLive(auth.session.id) && visibleTo(viewerFor(auth)).bot(botId)));
+      && (auth.kind !== "session" || (sessions.isLive(auth.session.id) && visibleTo(viewerFor(auth)).reaches(botId)));
   },
   restartRefusal: (session) => browserRestartRefusal(browserRuntime.interrupted(session), store.bots.filter((candidate) => candidate.busy
     && browserSessionsOf(candidate.id, candidate.browserProfile).includes(session)).map((candidate) => ({ waitingOnBrowser: computerControl.snapshot(candidate.id).help?.place === "browser" }))),
@@ -12677,6 +12689,7 @@ const liveCalls = new LiveCallController({
   log: (line) => console.log(line),
 });
 sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId));
+sessions.onSessionChanged((sessionId) => liveCalls.sessionRevoked(sessionId));
 ROUTES.push(createDataRoutes({
   bot: (id) => store.bot(id),
   engine: dataEngine,
@@ -12934,6 +12947,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               environmentId: ENVIRONMENT_ID,
               ...(auth.session.email ? { email: auth.session.email } : {}),
               ...(auth.session.owner ? { owner: auth.session.owner } : {}),
+              ...(auth.session.view ? { view: auth.session.view } : {}),
               ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
               ...(CLOUD_HOME ? { cloudHome: true } : {}), ...(ownHome.owner(auth) ? { own: true } : {}), ...(teamHost.sessionInfo(auth.session) ? { team: teamHost.sessionInfo(auth.session), openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
               ...(CLOUD_PERSONAL && !cloudOwnerSession(auth) ? { cloudGuest: true, openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
@@ -12958,9 +12972,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+      const view = pairingView(body?.view, store, Boolean(CLOUD_TEAM));
+      if (!view.ok) return json(res, view.status, { error: view.error });
       let opened: ReturnType<typeof sessions.openPairing>;
       try {
-        opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
+        opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes, ...(view.view ? { view: view.view } : {}) });
       } catch (error) {
         if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal" });
         throw error;
@@ -14837,7 +14853,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // Prompts and replies never leave their transcripts: this projection carries only ids, relationships, labels and timestamps.
     if (method === "GET" && path === "/api/team-map") {
-      const mapped = new Set(store.bots.filter((bot) => !bot.hidden && visible.bot(bot.id)).map((bot) => bot.id));
+      const mapped = new Set(store.bots.filter((bot) => !bot.hidden && visible.reaches(bot.id)).map((bot) => bot.id));
       const collaborations = store.groups
         .filter(
           (group) =>
@@ -15025,7 +15041,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         since <= lastSeq &&
         replayBuffer.covers(since, lastSeq) &&
         // A replay is judged by today's audience and cannot withdraw what an audience change hid: snapshot instead.
-        !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
+        !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt) &&
+        // A device's view also follows departments and room members, which change without an audience change: it always starts over.
+        !(auth.kind === "session" && (auth.session.view || since <= (sessionSnapshotFrom.get(auth.session.id) ?? -1)));
       res.write(
         `data: ${JSON.stringify({
           kind: "hello",

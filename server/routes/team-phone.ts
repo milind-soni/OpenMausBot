@@ -10,6 +10,7 @@ import { phonePairingLink } from "../../shared/pairing-link.ts";
 import { teamRoleScopes, type CloudTeam, type TeamMember } from "../cloud-team.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { formatPairingCode, type PublicSession, type SessionRecord, type SessionRegistry } from "../sessions.ts";
+import { TEAM_VIEW_REFUSAL } from "./device-views.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export const TEAM_PHONE_PAIRING_PATH = "/api/team/phone-pairing";
@@ -68,7 +69,7 @@ async function phones(deps: TeamPhoneRouteDeps, { res, auth, json }: RouteContex
   return json(res, 200, { ok: true });
 }
 
-async function pairing(deps: TeamPhoneRouteDeps, { req, res, path, method, auth, json }: RouteContext): Promise<typeof PASS | void> {
+async function pairing(deps: TeamPhoneRouteDeps, { req, res, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> {
   if (method !== "POST" || (path !== TEAM_PHONE_PAIRING_PATH && path !== "/api/auth/pairing")) return PASS;
   const team = deps.team;
   if (!team) return PASS;
@@ -77,6 +78,10 @@ async function pairing(deps: TeamPhoneRouteDeps, { req, res, path, method, auth,
     return path === TEAM_PHONE_PAIRING_PATH ? json(res, 403, { error: `Sign in to ${team.name} in the app first.` }) : PASS;
   }
   if (!deps.sessions.isLive(auth.session.id)) return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
+  if (path === "/api/auth/pairing") {
+    const body = await readBody(req);
+    if (body && typeof body === "object" && "view" in body && (body as { view: unknown }).view != null) return json(res, 409, { error: TEAM_VIEW_REFUSAL });
+  }
   const scopes = teamRoleScopes(owner.member.role).filter((scope) => auth.scopes.includes(scope));
   if (!scopes.length) return json(res, 403, { error: `Sign in to ${team.name} in the app first.` });
   const opened = deps.sessions.openPairing({ scopes, label: PHONE_LABEL, member: owner.member, memberCheckedAt: owner.checkedAt });

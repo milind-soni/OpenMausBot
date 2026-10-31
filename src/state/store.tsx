@@ -279,6 +279,8 @@ export interface TaskUsage {
 }
 
 export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor"> {
+  /** Sent only as a member of a room this device's view lists: it has no chat of its own here. */
+  roomOnly?: boolean;
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -895,6 +897,11 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
+/** Where to land when nothing is selected: never a bot this device sees only as a room member. */
+function firstChat(bots: readonly Bot[], groups: readonly Group[]): string {
+  return bots.find((bot) => !bot.roomOnly)?.id ?? groups[0]?.id ?? "";
+}
+
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
     const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
@@ -909,11 +916,12 @@ export function reducer(state: AppState, action: Action): AppState {
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
+      const known = (id: string) => action.bots.some((b) => b.id === id && !b.roomOnly) || action.groups.some((g) => g.id === id);
       const resume = action.resumeId;
       const resumed =
-        resume && (action.bots.some((b) => b.id === resume && !b.hidden) || action.groups.some((g) => g.id === resume)) ? resume : "";
-      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (action.bots[0]?.id ?? "");
+        resume && (action.bots.some((b) => b.id === resume && !b.hidden && !b.roomOnly) || action.groups.some((g) => g.id === resume)) ? resume : "";
+      const firstConversation = firstChat(action.bots, action.groups);
+      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || firstConversation;
       const hydrated = {
         ...state,
         bots: action.bots.map((sent) => {
@@ -1066,7 +1074,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
-      const selectedId = state.selectedId === action.groupId ? (state.bots[0]?.id ?? "") : state.selectedId;
+      const selectedId = state.selectedId === action.groupId ? firstChat(state.bots, groups) : state.selectedId;
       return { ...state, groups, selectedId };
     }
     case "instances":
@@ -1158,7 +1166,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "deleteBot": {
       const bots = state.bots.filter((b) => b.id !== action.botId);
       const selectedId =
-        state.selectedId === action.botId ? (bots.find((b) => !b.hidden)?.id ?? bots[0]?.id ?? "") : state.selectedId;
+        state.selectedId === action.botId ? (bots.find((b) => !b.hidden && !b.roomOnly)?.id ?? firstChat(bots, state.groups)) : state.selectedId;
       const { [action.botId]: _deleted, ...deletingBots } = state.deletingBots;
       return reconcileModelVariantSessions({ ...state, bots, selectedId, deletingBots });
     }

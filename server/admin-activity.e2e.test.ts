@@ -167,13 +167,14 @@ posixOnly("admin activity log", () => {
     const hook = await api("POST", "/api/webhooks", { name: "Audit feed", botId, prompt: "Read it.", enabled: false }, BOSS);
     expect(hook.status).toBe(201);
     expect((await api("DELETE", `/api/webhooks/${hook.body.webhook.id}`, undefined, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/auth/sessions/${oldPhone}`, { view: { bot: botId } }, BOSS)).status).toBe(200);
     expect((await api("DELETE", `/api/auth/sessions/${oldPhone}`, undefined, BOSS)).status).toBe(200);
     expect((await api("POST", "/api/auth/pairing", { label: "Reception iPad", scopes: ["client"] }, BOSS)).status).toBe(200);
     expect((await api("DELETE", `/api/bots/${botId}`, undefined, BOSS)).status).toBe(200);
 
     const rows = (await activity("?what=all")).filter((entry) => entry.type === "admin");
     const actions = rows.map((entry) => entry.action);
-    for (const action of ["mcp.update", "bot.create", "visibility.update", "bot.update", "webhook.create", "webhook.delete", "session.revoke", "pairing.create", "bot.delete"]) {
+    for (const action of ["mcp.update", "bot.create", "visibility.update", "bot.update", "webhook.create", "webhook.delete", "session.view", "session.revoke", "pairing.create", "bot.delete"]) {
       expect(actions, action).toContain(action);
     }
     expect(actions.filter((action) => action === "bot.update")).toHaveLength(1);
@@ -186,6 +187,8 @@ posixOnly("admin activity log", () => {
     expect(JSON.stringify(mcpRow)).not.toContain(ARG_SECRET);
     expect(JSON.stringify(mcpRow)).toContain("--api-key");
     expect(JSON.stringify(mcpRow)).toContain("FIXTURE_TOKEN");
+    expect(rows.find((entry) => entry.action === "session.view")).toMatchObject({ who: BOSS, target: { id: oldPhone, name: "Old phone" },
+      before: { view: "everything" }, after: { scopes: ["client"], view: { sections: [], bots: [botId], groups: [] } } });
     expect(rows.find((entry) => entry.action === "session.revoke")).toMatchObject({ target: { id: oldPhone, name: "Old phone" } });
     expect(rows.find((entry) => entry.action === "pairing.create")).toMatchObject({ after: { label: "Reception iPad", scopes: ["client"] } });
     expect(rows.find((entry) => entry.action === "bot.delete")).toMatchObject({ target: { id: botId }, before: { visibility: { people: [ADA] } } });
