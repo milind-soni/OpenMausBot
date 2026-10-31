@@ -41,6 +41,14 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   a hidden rail waits 5 seconds for the new document to offer it and comes back
   if none does (an older Cloud or server of the person's own), without changing
   the choice. It comes back too while the page stops responding.
+- A tour on this app's own page beside the rail (this computer's, or My Cloud's
+  as home) marks a part of it through `window.ogb.rail.mark`: its places, its ＋,
+  or `dim` while the tour points at the page. Main forwards only those three to
+  the rail's page (`rail:mark`), clears the mark when the page beside it moves to
+  another document, and sends it again when the rail's page loads again. A
+  server's page has no such channel. The rail rings the marked part and shades
+  the rest, never over a sheet of its own (see
+  [the tour of the rail](onboarding.md#the-tour-of-the-rail-of-places-nov-2026)).
 - The rail's list carries names, colours and states, never an address, and goes
   only to the rail's own page. No place's page reads it, not even this
   computer's or a Cloud's; a page learns only that the rail stands beside it. A

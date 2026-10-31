@@ -202,3 +202,76 @@ no-AI first screen, the Chief screen with bots to choose and narrow windows were
 checked in `onboarding-preview.html` (`?ai=0`, `?screen=chief&bots=3`,
 `?w=840&h=620`) in Midnight and Daylight. Before and after screenshots are in
 `evidence/onboarding/`.
+
+## The tour of the rail of places (Nov 2026)
+
+Once on each desktop with a rail at the window's left edge, after the update
+that brings it, a short tour in the app tour's Spotlight look points at the
+rail. Its campaign is `sidebar-tour-2026-11` (`SIDEBAR_TOUR_NOTICE` in
+`src/lib/notices.ts`); a later release names a new one to show a new tour.
+
+1. The places: "Your places: this computer, your Clouds and your own servers.
+   Click one to switch."
+2. The ＋: "Add a place with the + button: buy a new Cloud that's always on, or
+   connect your own server with its pairing link."
+3. A right-click on a place: "Right-click a place for more: its color, making
+   your own server your home, or removing a Cloud you don't use."
+4. The button that hides and shows the rail: "Hide or show your places any
+   time with this button." With the rail hidden it is the only step: "Your
+   places are hidden. Show them again with this button, then use + to add a new
+   Cloud or your own server."
+
+It has no buttons. Each step stays for its reading time (3 to 10 seconds, by its
+words in the app's language), then the tour moves on; Escape leaves; a step
+whose target isn't on screen gets 400 ms to appear and is passed over.
+
+It is one entry in the notices queue, after the Cloud Pro popup and before
+Boat's offer, so a launch shows one of the three at most (the product-updates
+question may still follow it). It needs a rail it can point at: with none, there
+is no tour, and it stays unseen until there is one. It never shows while a bot
+or a room is working (it steps aside and comes back at the step it was on), nor
+during the welcome, the app tour, Settings, another dialog or a call, nor on a
+branded build, a desktop signed in with an organization or a remote client's
+window, nor after MausBot's first-launch card in that card's launch. A new
+install gets it once its first chat has had a reply. Run to its end or left
+with Escape, it is kept in the workspace record, the page's storage and the
+desktop's own record (`DESKTOP_NOTICES`), so no page of the window shows it
+again. It is counted as `sidebar_tour` ([analytics](../analytics.md)).
+
+The window's rail is a page of its own, in a view the page beside it can't
+reach. The tour asks main to mark a part of it (`window.ogb.rail.mark`, on this
+computer's page and on My Cloud's as home only): the rail's page rings that
+part and shades the rest, in step with the page's own shade. A rail drawn on
+the page itself (an older app's) is ringed by the page.
+
+```sh
+pnpm exec vitest run src/lib/sidebar-tour.test.ts src/components/onboarding/SidebarTour.test.ts src/components/AppNotices.test.ts src/lib/notices.test.ts src/components/ChromeRail.test.ts src/components/CloudProPopup.test.ts
+node --test electron/chrome-rail.node-test.mjs electron/desktop-prefs.node-test.mjs
+```
+
+The rendered workflow:
+
+```sh
+node --experimental-strip-types scripts/verify-sidebar-tour.ts --shots .omb-scratch/verify-evidence/sidebar-tour
+```
+
+It starts a disposable fake-engine server whose bot has answered once, and the
+real app in a Vite preview (`scripts/testing/sidebar-tour-preview.tsx`), beside
+the real rail page in a frame at the left edge that stands in for the window's
+rail view: the page's `rail.mark` reaches the frame as main's `rail:mark`
+reaches the rail. A headless Chrome photographs every step as the tour moves on
+by itself, in Advanced and Simple mode, on My Cloud's page and on this
+computer's, with the rail hidden and in a narrow window, each in the Daylight
+and Midnight skins. `--only advanced,simple` picks views; without `--shots` it
+prints the preview's address and waits.
+
+| Step | Daylight | Midnight |
+| --- | --- | --- |
+| The places | ![Places, Daylight](evidence/sidebar-tour/advanced-places-light.jpg) | ![Places, Midnight](evidence/sidebar-tour/advanced-places-dark.jpg) |
+| The ＋ | ![The + button, Daylight](evidence/sidebar-tour/advanced-add-light.jpg) | ![The + button, Midnight](evidence/sidebar-tour/advanced-add-dark.jpg) |
+| A right-click | ![Right-click, Daylight](evidence/sidebar-tour/advanced-menu-light.jpg) | ![Right-click, Midnight](evidence/sidebar-tour/advanced-menu-dark.jpg) |
+| The rail's button | ![The rail's button, Daylight](evidence/sidebar-tour/advanced-strip-light.jpg) | ![The rail's button, Midnight](evidence/sidebar-tour/advanced-strip-dark.jpg) |
+
+Simple mode's steps, the rail hidden, a narrow window and this computer's page
+are in `evidence/sidebar-tour/` too. Not covered here: the real Electron window
+and its rail view (the frame stands in for it), and real places.
