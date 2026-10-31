@@ -52,6 +52,12 @@ function linuxLocalControlSupport(platform, env) {
   });
 }
 
+/** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security
+ * found it unsafe (os error 225, ERROR_VIRUS_INFECTED). */
+function driverBlocked(reason) {
+  return /binary not found|is missing|ENOENT|EPERM|EACCES|os error (?:2|5|225)\b|access is denied|virus/i.test(String(reason ?? ""));
+}
+
 function localComputerReady(platform, connection) {
   const validLegacyConnection = connection &&
     (!Object.hasOwn(connection, "status") || connection.status === "ready") &&
@@ -156,7 +162,9 @@ function desktopCapabilities({
   if (!localAvailable) {
     localComputer.reasonCode =
       localConnection?.reasonCode ??
-      (hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform");
+      (hostPlatform === "darwin" || hostPlatform === "win32"
+        ? driverBlocked(localConnection?.reason) ? "cua-driver-blocked" : "cua-driver-unavailable"
+        : "unsupported-platform");
   }
 
   if (remote) {
@@ -212,6 +220,7 @@ function connectionEnabled(platform, connection) {
 module.exports = {
   connectionEnabled,
   desktopCapabilities,
+  driverBlocked,
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,

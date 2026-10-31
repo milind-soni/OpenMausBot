@@ -70,6 +70,17 @@ describe("a lent folder while its computer is away", () => {
     expect(copies.answer({ action: "read_file", folder_id: notes, path: "plan.md" }, "someone-else")).toBeNull();
   });
 
+  it("asks for the computer for a passage edit, an append or a delete, and offers a whole write instead", async () => {
+    for (const action of ["edit_file", "append_file", "delete_file"]) {
+      const refused = await op(action, { path: "plan.md" });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toBe(`${action} needs their Mac on. While it's away, read the file and write it whole with write_file.`);
+      expect((await copies.answer({ action, computer_id: lending, folder_id: docs, path: "a.md" }, OWNER)!).content[0].text).toBe("This folder is read-only.");
+      expect((await copies.answer({ action, computer_id: randomUUID(), folder_id: notes, path: "plan.md" }, OWNER)!).content[0].text).toContain("use its computer_id");
+      expect((await copies.answer({ action, computer_id: lending, folder_id: notes, path: "plan.md" }, OWNER, [{ id: randomUUID(), name: "Ash-MBP" }])!).content[0].text).toContain("is on again");
+    }
+  });
+
   it("reads and lists from the copy and says how fresh it is", async () => {
     const read = body(await op("read_file", { path: "plan.md" }));
     expect(read).toMatchObject({ content: "the plan", bytes: 8, sha256: sha("the plan"), from: "the Cloud's copy, from 2 h ago" });

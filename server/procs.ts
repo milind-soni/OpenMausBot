@@ -19,7 +19,7 @@ import { engineMemory } from "./engine-memory.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
-import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
+import { spawnBotWork } from "./oom-score.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -164,6 +164,9 @@ export interface BoxSpawnOptions {
   box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "allowEnv">;
   /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
   engineHome?: boolean;
+  /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
+   * spawn (oom-score.ts), with no box and no engine tracking. */
+  botWork?: boolean;
 }
 export type CliSpawnOptions = SpawnOptions & BoxSpawnOptions;
 
@@ -186,7 +189,7 @@ export function spawnCli(
   const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
   const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
-  const { box: _box, engineHome: _engineHome, ...spawnOpts } = options;
+  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = options;
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
@@ -197,7 +200,7 @@ export function spawnCli(
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
   let child: ChildProcessByStdio<Writable, Readable, Readable>;
   try {
-    child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+    child = owner === "bot" || botWork ? spawnBotWork(start) : start();
   } finally {
     closeMountFds(boxed?.extraFds ?? []);
   }

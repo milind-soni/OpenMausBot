@@ -9,7 +9,7 @@ vi.mock("@/state/store", async (original) => {
   return { ...actual, useStore: () => ({ state: actual.initialState, dispatch: vi.fn() }), api: vi.fn(() => new Promise(() => {})) };
 });
 const { TraceWaterfall } = await import("../components/usage/TraceWaterfall");
-const { usageGroupLabel } = await import("../components/UsageSection");
+const { GroupBars, usageGroupLabel } = await import("../components/UsageSection");
 
 const T0 = Date.UTC(2026, 9, 22, 9, 0, 0);
 const turn = (id: string, botName: string, start: number, end: number | undefined, children: TraceTurn["children"], extra: Partial<TraceTurn> = {}): TraceTurn => ({
@@ -69,6 +69,16 @@ describe("trace helpers", () => {
     expect(usageGroupLabel("user", { key: "routine:r1", label: "Routine: Morning digest" })).toBe("Routine: Morning digest");
     expect(usageGroupLabel("user", { key: "user:ada@example.test", label: "ada@example.test" })).toBe("ada@example.test");
     expect(usageGroupLabel("routine", { key: "manual", label: "Not from a routine" })).toBe("Not from a routine");
+  });
+
+  it("ranks models by tokens, so a subscription model with no price still shows", () => {
+    const group = (label: string, input: number, costUsd: number | null) => ({ key: label, label, turns: 1, input, output: 0, cachedInput: 0, costUsd });
+    const priced = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "gemini-3.8-pro", "claude-opus-4-8", "claude-sonnet-4-8"].map((label, index) => group(label, 1_000 * (index + 1), 10 + index));
+    const html = renderToStaticMarkup(createElement(GroupBars, { groupBy: "model", groups: [...priced, group("gpt-5.5", 5_000_000, null)] }));
+    expect(html).toContain("gpt-5.5");
+    expect(html).toContain("5M");
+    expect(html).not.toContain("claude-opus-5-5");
+    expect(html).toContain("$15.00");
   });
 
   it("picks calendar periods in UTC days", () => {

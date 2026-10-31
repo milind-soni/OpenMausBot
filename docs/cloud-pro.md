@@ -582,9 +582,12 @@ the person's own uses this computer by itself while the desktop app runs and is
 signed in as them (`lendAutomatically` in `electron/computer-sharing.mjs`): My
 Cloud and each other Cloud the verified session lists as theirs
 (`createLendingTarget` in `electron/lending-target.mjs`), never a Team Cloud and
-never a server that only signed in with their account. Other users (desktop only,
-self-hosted, hosted team workspaces) keep computer sharing exactly as before: off
-unless a maintainer sets `features.sharedComputers` by hand.
+never a server that only signed in with their account. A server of the person's
+own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
+is lent the same way, last, once the move is done and while that server says it
+is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
+keep computer sharing exactly as before: off unless a maintainer sets
+`features.sharedComputers` by hand.
 
 ### What each Cloud gets
 
@@ -1121,10 +1124,14 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   least), or the memory stall reaches 40% below the tenth, it stops an idle
   engine, else the newest of two or more busy ones, at most every 15 s, and
   not in the tick right after the kernel's own OOM killer acted.
-- **The kernel's order** (`server/oom-score.ts`): engines, and everything they
-  start, are born with `oom_score_adj` 1000; Chrome scores its tabs 200 and
-  up; the server is -800 and Caddy -900, so the health check is the last to
-  go.
+- **The kernel's order** (`server/oom-score.ts`): everything a bot runs is
+  born with `oom_score_adj` 1000: its engine and every tool and MCP server
+  that engine starts, the MCP servers the server runs for it, the helper
+  engines (background text, keep-warm pings), and its browser (agent-browser,
+  its daemon and Chrome, whose tabs Chrome then scores 200 and up). The
+  server is -800 and Caddy -900, so the health check is the last to go, and
+  the root supervisor that restarts them is -1000, never picked. When memory
+  runs out the kernel takes a bot's process, never the workspace.
 - **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
   browser, computer, Data and HighLevel servers are endpoints of this server
   (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
@@ -1132,13 +1139,25 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
   behind a tool selection keeps its stdio gate; the person's own servers are
   unchanged.
-- **The reason is said.** A turn whose engine was stopped for memory, by the
-  home or by the kernel (a SIGKILL while `/proc/vmstat`'s `oom_kill` rose),
-  fails with "This Cloud ran out of memory while N tasks ran at once, so this
-  one was stopped. It was not a problem with the AI provider. New tasks now
-  wait until there is memory for them.", and a turn that stalled while memory
-  was short says so after "no activity for 20 minutes". The health report
-  counts both as `out_of_memory`.
+- **The reason is said, in one line.** A turn whose engine was stopped for
+  memory, by the home or by the kernel (a SIGKILL while `/proc/vmstat`'s
+  `oom_kill` rose), ends with "Ran out of room, so I closed the browser to
+  keep everything else running." when its bot's browser was open (it is
+  closed too), else "Ran out of room, so I stopped this task to keep
+  everything else running."; a turn that stalled while memory was short says
+  so after "no activity for 20 minutes". The health report counts both as
+  `out_of_memory`.
+- **The work starts again when there is room.** A routine run gets its one
+  automatic retry, and a teammate's thread its Chief's; any other run stopped
+  for memory (the Chief's own chat, a bot without a Chief) starts once more by
+  itself 30 s later (`server/host/chief-notices.ts`), as a continuation of the
+  same request, and the memory gate holds it until it fits. The person hears
+  of it only if that run fails too.
+- **The day's pressure is reported** (`room` in the health report, below):
+  tasks that waited for memory and how long, turns stopped for it, processes
+  the kernel stopped, and minutes the machine stalled on memory (its `full
+  avg10` at 20% or more). The Admin offers a bigger plan from it
+  (openmaus-cloud `server/cloud-room.ts`).
 
 ### Why the server stays on loopback
 
@@ -1219,7 +1238,7 @@ For each service the Admin has configured, it also sets:
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 | `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
-| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
+| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
 
 A service is included only when both its URL and its token are set
@@ -1347,8 +1366,8 @@ credit, the Admin also sets:
   A bot runs on the credit's default model unless the person picks another;
   when the relay's default changes (Haiku to Sonnet), bots still on the old
   default follow it.
-- **Every bot runs.** While nothing of the person's own is signed in, a bot on
-  an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
+- **Every bot runs.** While nothing of the person's own has ever been signed in
+  here, a bot on an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
   out here, or an engine only that desktop has) moves onto the credit when the
   engines are read: at start, when the credit's list arrives, when the app
   reads the engines, and before a message to that bot is sent. Where it came
@@ -1360,7 +1379,13 @@ credit, the Admin also sets:
   each bot and conversation still on the credit moves to it, with one line in
   each, and the credit is not offered to bots any more. A bot that came from
   another engine goes back to that engine and model when it is the one signed
-  in; otherwise it takes the new-bot default among the person's own.
+  in; otherwise it takes the new-bot default among the person's own. From then
+  on the credit takes no bot by itself: signing out of the last engine (or a
+  sign-in that lapsed) leaves every bot where it is, so a message to one says
+  to sign in again and routines wait
+  ([Routines wait while the owner has left](#routines-wait-while-the-owner-has-left)).
+  A bot can still be put on the credit by hand. That an engine of the person's
+  own was signed in is kept in `providers/trial-credit/own.json`.
 - **Checked once connected.** Right after an engine is connected in the
   welcome's **Connect your AI** step or the engine sign-in, the app sends it
   one tiny real message (`POST /api/instances/:id/check`) and says
@@ -1479,9 +1504,18 @@ wait for the next read, `truncated: true`):
     "disk": { "totalBytes": 10737418240, "freeBytes": 8589934592 }, "eventLogWritable": true },
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
-  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 }
+  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
 }
 ```
+
+**`room`** is the last day's memory pressure where the home watches it (a Cloud
+home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to
+wait for memory and how long they waited in all (a wait still going counts its
+time so far), how many turns were stopped for memory (`stopped`), how many
+processes the kernel stopped (`killed`), and in how many minutes the machine
+stalled on memory. Counted in memory since boot, so a restart starts them
+again.
 
 **`firstHour`** is there on a personal Cloud that began with its first hour
 (`server/host/first-hour.ts`), else `null`: `startedAt` is the first boot,
@@ -1510,7 +1544,7 @@ place's state (`shared/place-view.ts`); a cause the server words itself
 `approval_undelivered`, `event_log`); the trial credit's refusal
 (`trial_used_up`, …); the turn's stop reason when it says more than "failed"
 (`auth_required`, `shutdown_timeout`, `provider_safety`, `update_required`,
-`spawn_error`, `quota`); the cause's class (`server/drivers/retry.ts`:
+`spawn_error`, `quota`, `tool_error`: a tool call that failed or wasn't allowed); the cause's class (`server/drivers/retry.ts`:
 `auth`, `quota`, `rate_limited`, …); the generic stop reason (`rpc_error`);
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
@@ -1612,6 +1646,38 @@ the server starts instead of answering 502, so a webhook or the app's first
 request after a stop is answered late rather than refused; Caddy dials the
 server again every 50 ms, so a held request reaches it within 50 ms of its
 listening. The Admin sets it only for a plan that sleeps.
+
+## Routines wait while the owner has left
+
+A Cloud home pauses its routines by itself when its owner has left
+(`server/host/routine-holds-host.ts`, `server/routine-holds.ts`), so nothing
+runs on an AI or a plan nobody uses any more, fails, and messages a person who
+left:
+
+- **No AI of theirs.** The person had an AI of their own signed in here, and
+  none of theirs can run now (signed out in Settings, a key removed, a sign-in
+  that lapsed). An engine whose sign-in can't be read yet counts as one that
+  might.
+- **Every connection removed.** The owner removed their last MCP server or
+  connected app and none is left. An app list that can't be read changes
+  nothing. Adding or connecting one, or one found connected again (read at
+  most every 15 minutes while none was), ends it.
+- **The plan was cancelled**, as the Admin says with the signed request below.
+
+A cause that begins turns every routine that is on off, stamped with it
+(`heldFor`, shown under the routine as "Paused because …"), cancels their
+queued runs, and writes one quiet line in the owner's Chief's chat; nothing
+else is sent. Once no cause holds a routine it turns back on from now, without
+the runs it skipped (a one-time run whose time passed stays over). Turning a
+routine on or off by hand clears its stamp, so the person's choice wins. What
+was last read is kept in `routine-holds.json` and the causes holding routines
+in `routines.json` (`holds`), so a restart neither pauses nor frees anything
+before the engines are read again.
+
+**`POST /api/cloud/plan`**, signed over its JSON body like the sleep request:
+`{"v":1,"cancelled":true}` when the customer cancels, `{"v":1,"cancelled":false}`
+when renewal is back on. `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
+without a boolean `cancelled`. The Admin does not send it yet.
 
 ## What the desktop reads from the Admin
 
@@ -1984,6 +2050,28 @@ page alike (`ogb.cloudPlan`), so the meter reads the same on both (`src/componen
   lines for what happened: on the new plan; still going through; the card was declined, nothing changed; the price
   changed, nothing charged; couldn't, nothing charged. Where the Admin can't change plans from the app (off, or an older
   Admin), Upgrade opens the Cloud page instead. Funnel source `app_usage` (the card) or `app_settings`.
+
+### Room card: short on memory or disk, and the plan that fixes it
+
+The session's `cloud.room` (additive, only beside `cloud.usage`; the Admin's `server/cloud-room.ts`, behind its
+`OMB_CLOUD_ROOM_OFFERS`) says this Cloud is short on room, from its health report's `room` and disk: `cause` is
+`{kind: "memory", waits, waitMinutes, stopped}` (the last day) or `{kind: "disk", usedGb, capGb}`, then either `plan`
+(the next plan up that fixes it: `tier`, `amount` in US cents a month, `memoryMb`/`fromMemoryMb`, `diskGb`/`fromDiskGb`)
+or `tip: true` on the top plan, and `id`. `electron/cloud-home.mjs` `parseCloudRoom` drops anything malformed; it is display
+only.
+
+- **Where:** the card sits where the usage meter's card is (the sidebar's foot and the phone bar, `src/components/CloudRoomCard.tsx`,
+  `src/lib/room-card.ts`), never while any bot is working (never mid-turn), never beside the usage meter's card, and on a
+  Team Cloud only for the team's own plan (its payer).
+- **What it says:** the cause ("3 tasks waited 6 minutes for memory today."), what the plan gives and costs ("Pro has twice
+  the memory. $49 a month. Today you pay only for the rest of this month."), **Upgrade** and **Not now**; on the top plan
+  a tip ("run fewer bots at once and close browsers you're not using") and **Got it**.
+- **Upgrade** is the usual one: the preview, then the person's confirm, with source `app_room`. After it the card offers
+  **Restart now** (`ogb.cloudPlan.restartNow()`, `POST /api/cloud/desktop/resize-now`, "Takes about a minute, and stops anything
+  running now"); otherwise the Cloud gets its new size the next time it's not busy.
+- **Not now** (`ogb.cloudPlan.roomNotNow(id)`, `POST /api/cloud/desktop/room`) hides it here at once and the Admin offers
+  nothing for two weeks. A new offer comes at most once a week. Both channels act only on the session's own Cloud, only from
+  a click.
 
 ## Add a Cloud
 

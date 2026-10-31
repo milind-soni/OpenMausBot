@@ -22,7 +22,26 @@ export function serverAccessDetail(env, { folders, terminal, computer }) {
  * }} deps
  */
 export function createLendingDialogs({ dialog, window, validate, isHome = async () => false }) {
+  let askingTerminal = false;
   return {
+    /** Turning the terminal on runs `lend` only once the person confirms, one question at a time; turning it off never asks.
+     * True once `lend` ran. */
+    async lendTerminal(on, lend) {
+      if (on) {
+        if (askingTerminal) return false;
+        askingTerminal = true;
+        try {
+          const { response } = await dialog.showMessageBox({
+            type: "warning", buttons: ["Let them run commands", "Cancel"], defaultId: 1, cancelId: 1,
+            message: "Let your Clouds run commands on this computer?",
+            detail: "Bots on your own Clouds could run any command on this computer as you, including reading and changing any file you can. You can turn this off from the OpenMausBot icon's menu.",
+          });
+          if (response !== 0) return false;
+        } finally { askingTerminal = false; }
+      }
+      await lend();
+      return true;
+    },
     /** The folder or drive the person picks, read only and checked as every lent folder is; null when they cancel. The
      * home folder is lent only when it is picked here and confirmed here: the folders above it and the system disk never are. */
     async chooseFolder(title) {

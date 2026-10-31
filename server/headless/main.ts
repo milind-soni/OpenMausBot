@@ -67,7 +67,7 @@ export const VERB_HELP: Record<string, string> = {
   "team export": "openmausbot team export [--team NAME]… --out FILE\n  Write the workspace (or some teams) as a team file; skills go beside it, keys as placeholders,\n  and a key written into a soul, brief or skill is taken out.",
   engine: "openmausbot engine set KIND … | engine list   (see help engine set)",
   "engine set": `openmausbot engine set KIND (--key-env VAR | --key-file FILE) [--base-url URL] [--only-claude-api] [--install] [--rotate] [--dry-run]
-  Give the workspace an engine key: claude, openai, openrouter, openai-compatible, xai, groq, mistral or cerebras.
+  Give the workspace an engine key: claude, openai, openrouter, openai-compatible, xai, groq, greenference, mistral or cerebras.
   The key is never printed. One already set is kept unless --rotate. --install installs the engine's
   command if it is not running already, so a script can run this on every start.
   claude: the key runs every Claude bot; --only-claude-api keeps it to "Claude (API key)" bots.`,
