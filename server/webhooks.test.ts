@@ -456,6 +456,31 @@ describe("WebhookManager", () => {
       expect(h.roomPosts).toHaveLength(0);
     });
 
+    it("refuses a retry that waited on an in-flight room post when the secret was rotated meanwhile", async () => {
+      const h = harness();
+      let fail: () => void = () => {};
+      const gate = new Promise<void>((_resolve, reject) => (fail = () => reject(new Error("voice engine down"))));
+      let calls = 0;
+      const manager = new WebhookManager({
+        ...h.options,
+        roomPost: async (trigger) => {
+          if (calls++ === 0) await gate;
+          h.roomPosts.push({ webhookId: trigger.id, payload: null });
+          return { posted: true as const, attachments: 0, threadId: `${trigger.groupId}-thread` };
+        },
+      });
+      const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-inflight-rotated" };
+      const first = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      const retry = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      expect(manager.rotateSecret(webhook.id)).not.toBeNull();
+      fail();
+
+      await expect(first).rejects.toThrow("voice engine down");
+      await expect(retry).rejects.toMatchObject({ status: 401 });
+      expect(h.roomPosts).toHaveLength(0);
+    });
+
     it("runs a retry that waited on an in-flight room post as a task when the webhook was switched to runs meanwhile", async () => {
       const h = harness();
       let fail: () => void = () => {};
