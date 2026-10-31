@@ -109,7 +109,11 @@ beforeAll(async () => {
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
-    JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
+    JSON.stringify({ instances: {
+      ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
+      fixture: { driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") } },
+      codexFixture: { driver: "codex", config: { cli: join(ROOT, "server/testing/fake-codex-app-server.ts") } },
+    } }),
   );
 
   harness = spawn(process.execPath, [join(ROOT, "server", "index.ts")], {
@@ -346,6 +350,25 @@ describe("the sidecar in front of an unmodified harness", () => {
     });
     expect(made.status, JSON.stringify(made.body)).toBe(201);
     expect(made.body.bot).toMatchObject({ name: "From the phone", color: "teal", mascotBody: "star" });
+  });
+
+  it("creates and changes a bot's model through a paired device", async () => {
+    const instances = (await device("GET", "/api/instances")).body.instances as Array<{ instanceId: string; snapshot: { state: string }; models: { options: Array<{ id: string }> } }>;
+    const firstInstance = instances.find(item => item.instanceId === "fixture" && item.snapshot.state === "available")!;
+    const secondInstance = instances.find(item => item.instanceId === "codexFixture" && item.snapshot.state === "available")!;
+    expect(firstInstance).toBeDefined();
+    expect(secondInstance).toBeDefined();
+    const first = { instanceId: firstInstance.instanceId, model: firstInstance.models.options[0]!.id };
+    const second = { instanceId: secondInstance.instanceId, model: secondInstance.models.options[0]!.id };
+    const made = await device("POST", "/api/bots", { body: { name: "Remote model", modelSelection: first, requireAvailableModel: true } });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body.bot.modelSelection).toMatchObject(first);
+    const bot = made.body.bot;
+    const changed = await device("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { body: { modelSelection: second, updateBotDefault: true } });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body.bot.modelSelection).toMatchObject(second);
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id).modelSelection).toMatchObject(second);
   });
 
   it("saves the avatar panel's reset and shape choices from a paired device", async () => {

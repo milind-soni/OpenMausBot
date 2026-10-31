@@ -29,6 +29,7 @@ import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
+import { RemoteNewBotDialog } from "./RemoteNewBotDialog";
 import { openCommandPalette } from "./CommandPalette";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { TeamSettingsDialog } from "./TeamSettingsDialog";
@@ -920,10 +921,11 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
-export function Sidebar({ open, onClose, collapseToIcons = false }: {
+export function Sidebar({ open, onClose, collapseToIcons = false, onRemoteNewBot }: {
   open: boolean;
   onClose: () => void;
   collapseToIcons?: boolean;
+  onRemoteNewBot?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const now = useRelativeNow();
@@ -977,6 +979,13 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   };
   const [newRoom, setNewRoom] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [remoteNewBotOpen, setRemoteNewBotOpen] = useState(false);
+  const newBot = () => {
+    if (remoteClient) {
+      if (onRemoteNewBot) onRemoteNewBot();
+      else setRemoteNewBotOpen(true);
+    } else dispatch({ type: "newBot" });
+  };
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
   const [newTaskFolderBotId, setNewTaskFolderBotId] = useState<string | null>(null);
   const newTaskFolderBot = state.bots.find((bot) => bot.id === newTaskFolderBotId);
@@ -1187,7 +1196,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {t("sidebar.newChat.title")}
           </button>}
           <button
-            onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
+            onClick={() => { setPlusOpen(false); newBot(); }}
             role="menuitem"
             className={plusItem}
           >
@@ -1676,13 +1685,14 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           }}
         />
       {newRoom && <NewRoomPanel onClose={() => setNewRoom(false)} />}
+      {remoteNewBotOpen && createPortal(<RemoteNewBotDialog onClose={() => setRemoteNewBotOpen(false)} />, document.body)}
       {/* Portaled: below md the sidebar's translate makes it the containing block for fixed children. */}
       {newChatOpen && createPortal(
         <SidebarNewChatPanel
           anchor={sidebarRef.current}
           style={windowNoDragStyle}
           onClose={() => setNewChatOpen(false)}
-          onNewBot={() => { setNewChatOpen(false); dispatch({ type: "newBot" }); }}
+          onNewBot={() => { setNewChatOpen(false); newBot(); }}
           onNewGroup={() => { setNewChatOpen(false); setNewRoom(true); }}
         />,
         document.body,
