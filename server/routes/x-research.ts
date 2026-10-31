@@ -27,8 +27,8 @@ export interface XResearchDeps {
   /** The bot's research switch: on unless switched off. */
   botEnabled: (botId: string) => boolean;
   /** Tests pass fakes; the server builds the real clients per call. */
-  client?: (credential: ServiceCredential) => XResearchClient;
-  research?: (credential: ServiceCredential) => ResearchClient;
+  client?: (credential: ServiceCredential, assertAllowed: () => void) => XResearchClient;
+  research?: (credential: ServiceCredential, assertAllowed: () => void) => ResearchClient;
   /** This server is a Cloud home: a refused relay token is the Admin's to replace, not a sign-in to redo. */
   cloudHome?: boolean;
 }
@@ -48,6 +48,8 @@ const X_PREFIX = "/api/internal/x/";
 const X_ACTIONS = new Set(["search", "user-posts", "post", "profile"]);
 const RESEARCH_PREFIX = "/api/internal/research/";
 const RESEARCH_ACTIONS = new Set(["search", "endpoint", "call"]);
+
+class ResearchAccessRefused extends Error {}
 
 /** 401 is never used: on internal routes it means the capability expired. */
 function statusFor(code: XResearchErrorCode): number {
@@ -117,9 +119,11 @@ async function research(action: string, body: unknown, client: ResearchClient): 
   return { result: answer.result, ...(cost ? { cost } : {}), ...(answer.callId ? { callId: answer.callId } : {}), ...(answer.upstreamFailed ? { upstreamFailed: answer.upstreamFailed } : {}) };
 }
 
+const sameCredential = (a: ServiceCredential, b: ServiceCredential) => a.token === b.token && a.api === b.api && a.included === b.included;
+
 export function createXResearchInternalRoutes(deps: XResearchDeps) {
-  const xClientFor = deps.client ?? ((credential: ServiceCredential) => createXClient(credential));
-  const researchClientFor = deps.research ?? ((credential: ServiceCredential) => createResearchClient(credential));
+  const xClientFor = deps.client ?? ((credential, assertAllowed) => createXClient(credential, { assertAllowed }));
+  const researchClientFor = deps.research ?? ((credential, assertAllowed) => createResearchClient(credential, { assertAllowed }));
   return async (ctx: XInternalContext): Promise<typeof PASS | void> => {
     if (ctx.method !== "POST") return PASS;
     const prefix = ctx.path.startsWith(X_PREFIX) ? X_PREFIX : ctx.path.startsWith(RESEARCH_PREFIX) ? RESEARCH_PREFIX : null;
@@ -129,9 +133,17 @@ export function createXResearchInternalRoutes(deps: XResearchDeps) {
     if (!credential) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.noKey });
     if (!deps.botEnabled(ctx.botId)) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.botOff });
     const body = await ctx.readBody();
+    const assertAllowed = () => {
+      const current = deps.credential();
+      if (!current) throw new ResearchAccessRefused(X_MESSAGES.noKey);
+      if (!sameCredential(current, credential)) throw new ResearchAccessRefused(X_MESSAGES.keyChanged);
+      if (!deps.botEnabled(ctx.botId)) throw new ResearchAccessRefused(X_MESSAGES.botOff);
+    };
     try {
-      ctx.json(ctx.res, 200, prefix === X_PREFIX ? await run(action, body, xClientFor(credential)) : await research(action, body, researchClientFor(credential)));
+      assertAllowed();
+      ctx.json(ctx.res, 200, prefix === X_PREFIX ? await run(action, body, xClientFor(credential, assertAllowed)) : await research(action, body, researchClientFor(credential, assertAllowed)));
     } catch (error) {
+      if (error instanceof ResearchAccessRefused) return void ctx.json(ctx.res, 403, { error: error.message });
       if (!(error instanceof XResearchError)) throw error;
       const message = error.code === "bad_key" && deps.cloudHome && credential.included ? X_MESSAGES.homeBadKey : error.message;
       ctx.json(ctx.res, statusFor(error.code), { error: message, code: error.code });

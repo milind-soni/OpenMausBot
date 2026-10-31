@@ -48,6 +48,7 @@ export const TREG_TOP_UP_URL = "https://treg.to";
 export const X_MESSAGES = {
   noKey: "Research isn't set up on this server. Add a treg key in Settings → API keys, or use a paid MausBot Cloud plan.",
   botOff: "Research is off for this bot. Turn it on in this bot's settings under Access.",
+  keyChanged: "The research key changed while this request ran, so it stopped before using the old one. Try again.",
   badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
   ownBadKey: "treg rejected your key. Check it in Settings → API keys.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
@@ -401,7 +402,7 @@ export function tregAuthHeaders(credential: ServiceCredential): Record<string, s
 
 /** `url` and `token` are the relay's (OMB_CLOUD_X_URL, or a desktop's from its Cloud sign-in), or, with `own`, treg's
  * own base URL and the person's treg key. */
-export function createXRelayClient(options: { url: string; token: string; own?: boolean; fetcher?: typeof fetch; timeoutMs?: number }): XResearchClient {
+export function createXRelayClient(options: { url: string; token: string; own?: boolean; fetcher?: typeof fetch; timeoutMs?: number; assertAllowed?: () => void }): XResearchClient {
   const fetcher = options.fetcher ?? fetch;
   const base = options.url.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? X_CLIENT_TIMEOUT_MS;
@@ -412,6 +413,7 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
     let ok: boolean;
     let raw: string;
     let headers: Headers;
+    options.assertAllowed?.();
     try {
       const response = await fetcher(`${base}${path}`, {
         method: "POST",
@@ -550,6 +552,6 @@ export async function readIncludedXUsage(credential: ServiceCredential, options:
 }
 
 /** The X client for a research credential: straight to treg with the person's own key, else through the plan's relay. */
-export function createXClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number } = {}): XResearchClient {
+export function createXClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number; assertAllowed?: () => void } = {}): XResearchClient {
   return createXRelayClient({ url: credential.api, token: credential.token, own: !credential.included, ...options });
 }

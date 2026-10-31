@@ -134,7 +134,7 @@ function relayError(status: number, body: unknown): XResearchError {
 /** The research client for a credential: treg's own API with the person's key (`included` false), else the plan's
  * relay. One retry, with the same Idempotency-Key, when a call's answer is lost on the way or treg says it is still
  * running; anything else is answered once. */
-export function createResearchClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number; retryDelayMs?: number } = {}): ResearchClient {
+export function createResearchClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number; retryDelayMs?: number; assertAllowed?: () => void } = {}): ResearchClient {
   const fetcher = options.fetcher ?? fetch;
   const base = credential.api.replace(/\/+$/, "");
   const own = !credential.included;
@@ -142,6 +142,7 @@ export function createResearchClient(credential: ServiceCredential, options: { f
 
   async function send(method: string, path: string, init: { body?: string; headers?: Record<string, string> } = {}) {
     let response: Response;
+    options.assertAllowed?.();
     try {
       response = await fetcher(`${base}${path}`, {
         method,
