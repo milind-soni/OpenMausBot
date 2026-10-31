@@ -61,7 +61,7 @@ import * as checkpoints from "./checkpoints.ts";
 import { commandReceipt } from "./commands.ts";
 import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
 import { appendDecision, bindDecisionRetention, decisionRetentionDays, flushDecisionLog, pruneDecisions, withDecisionActor, type DecisionActor, type DecisionVia } from "./decision-log.ts";
-import { inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
+import { folderToFollow, inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
 import {
   ATTACHMENTS_DIR,
   attachmentExists,
@@ -345,6 +345,7 @@ import {
   TASK_WORKSPACES_DIR,
   readMemoryOnlyFromRegularFiles,
   workspaceDir,
+  botSettingsFile,
 } from "./workspace.ts";
 import { listMemoryTopics, memoryDate, readMemoryFile, readMemoryTopic, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
 import {
@@ -1660,6 +1661,7 @@ type InternalCapability = {
 const MAX_ATTACHED_FILES_PER_TURN = 10;
 const MAX_ROOM_POSTS_PER_TURN = 3;
 const MAX_CREATED_BOTS_PER_TURN = 4;
+const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 // Only an orphan backstop: normal terminal paths revoke a capability synchronously.
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
 const internalCapabilities = new Map<string, InternalCapability>();
@@ -7951,6 +7953,8 @@ async function startTurn(
       const transcript = selection.transcript.map(({ role, text }) => ({ role, text }));
       const contextReset = selection.compacted > 0 && record?.id !== task.appliedCompactionId;
       if (contextReset) store.patchTask(bot.id, threadId, { resumeCursors: {} });
+      // Engines keep a session in the folder it started in, so a thread that follows its bot to the bot's working folder starts a new one there.
+      const followed = folderToFollow(bot, threadId, task.cwd, { worksInFolders: supportsWorkspaceFiles(instance.driverKind), keepsPrivateFolder: guestConfined || cloudGuestOpened(threadId) }); if (followed) store.patchTask(bot.id, threadId, { cwd: followed, resumeCursors: {} });
 
       // After a rewind the native session still holds the abandoned branch; the flag clears only once dispatched, or a failed dispatch loses the next attempt's history.
       const rewound = Boolean(task.rewound);
@@ -8585,6 +8589,7 @@ async function startTurn(
         ...(integrations.browser && browserIsThePlace(turnSurfacePlan(bot, undefined, threadId, true)) ? { preloadBrowserTools: true } : {}),
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
         cwd,
+        botSettingsFile: botSettingsFile(bot),
       }, (input) => quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await (runningTurnEngines.get(threadId) ?? instance).adapter.interruptTurn(threadId).catch(() => {});
       });
@@ -10486,6 +10491,7 @@ async function runClaimedGroupMemberTurn(
         integrations,
         ...(integrations.browser && browserIsThePlace(roomPlan) ? { preloadBrowserTools: true } : {}),
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
+        botSettingsFile: botSettingsFile(readyBot),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
           : { model: instance.models.default }),
@@ -14363,8 +14369,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // Both fields are quoted into every other room member's system prompt, one line each.
         if (!fitsOnOneLine(name)) return json(res, 400, { error: "name must fit on one line" });
         if (!fitsOnOneLine(role)) return json(res, 400, { error: "role must fit on one line" });
-        if (instructions.length > 1_000) {
-          return json(res, 400, { error: "instructions must be at most 1000 characters" });
+        if (instructions.length > MAX_CREATED_BOT_INSTRUCTIONS) {
+          return json(res, 400, { error: `instructions must be at most ${MAX_CREATED_BOT_INSTRUCTIONS} characters; these are ${instructions.length}. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to ${BOT_PROFILE_LIMITS.soul} bytes.` });
         }
         let selection: ModelSelection;
         if (body.modelSelection === undefined) {
