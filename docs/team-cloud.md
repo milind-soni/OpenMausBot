@@ -402,6 +402,20 @@ teammate or a bot), the bot that passed it on, and the conversation it came from
 it. The person gets **one notification** for it, from the inbox (`forPerson`, the usual live and phone path), and the
 inbox is unread.
 
+Save the recipient's owner record before publishing into a new inbox.
+If that save fails, remove the provisional conversation and propagate the error without publishing content or a success notification.
+Inbox conversations also keep a saved `private` flag. A flagged conversation without an owner stays hidden from every person.
+At startup, classify saved inbox homes, item destinations, and legacy `team-messages.json` relay destinations as private before engine homes migrate.
+Use only `relays[].threadId` from the legacy file; its waiting items can refer to shared conversations.
+Retain the legacy file as evidence. Do not resume its delivery logic.
+Move invalid or unreadable evidence to a timestamped `.unreadable-` file and log the problem. Keep the host running.
+Keep unclassifiable threads hidden while evidence sits aside or its directory cannot be listed.
+If moving the inbox aside fails, defer its writes until the move succeeds.
+Save all new private flags in one registry write before processing messages.
+If the write fails, log it and keep the private flags in memory.
+Keep the delivery state on disk until a registry save succeeds, so cleanup cannot erase classification evidence.
+Do not reuse it for later deliveries. Refuse new owner records when the registry is full; never evict an existing owner.
+
 | What | Line | It answers back to |
 |---|---|---|
 | `message_person` ("tell Ben that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |

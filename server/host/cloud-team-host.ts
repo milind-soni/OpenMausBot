@@ -10,6 +10,8 @@ import { personKey } from "../person-key.ts";
 import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.ts";
 import type { EngineHomes } from "../engine-homes/engine-homes.ts";
 import { storeThreads, type StoreBotThreads } from "../engine-homes/migrate.ts";
+import { loadLegacyRelayState } from "./private-delivery-state.ts";
+import { loadPersonInboxState } from "./person-inbox.ts";
 
 export interface CloudTeamHostDeps {
   team: CloudTeam | null;
@@ -40,8 +42,23 @@ type MemberSession = { id: string; email?: string };
 export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   const team = deps.team;
   const people: PeopleAbout = createPeopleAbout(deps.dataDir);
-  const audienceOf = (threadId: string): Audience =>
-    threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter: deps.starters.get(threadId), markers: deps.markers });
+  const inbox = team ? loadPersonInboxState(deps.dataDir) : { state: { homes: {}, items: [] }, unreadable: false };
+  const legacy = team ? loadLegacyRelayState(deps.dataDir) : { state: { relays: [] }, unreadable: false };
+  const evidenceMissing = inbox.unreadable || legacy.unreadable;
+  const privateDeliveries = new Set([...Object.values(inbox.state.homes), ...inbox.state.items, ...legacy.state.relays].map((at) => at.threadId));
+  const audienceOf = (threadId: string): Audience => {
+    const starter = deps.starters.get(threadId);
+    let privateThread = false;
+    if (!starter || deps.markers.has(starter)) {
+      if (privateDeliveries.has(threadId)) privateThread = true;
+      else {
+        const owner = deps.store.bots?.find((bot) => bot.tasks?.some((task) => task.threadId === threadId));
+        const task = owner?.tasks?.find((one) => one.threadId === threadId);
+        privateThread = Boolean(task?.private) || (evidenceMissing && owner?.threadId !== threadId && !task?.routineRunId);
+      }
+    }
+    return threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter, markers: deps.markers, privateThread: privateThread ? threadId : undefined });
+  };
   if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
   /** The layer a turn in this conversation writes into: the bot's own folder off a team or for the team's conversations,
    * a sibling folder for a room's or a member's. The folder exists before the turn starts, so the box can bind it. */
@@ -104,7 +121,7 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
     /** Captured facts about the person, into that person's own "About you"; nothing for the team's or a room's layer. */
     learnAbout(layerOrBotId: string, plan: (current: string) => { next: string; count: number } | null): number {
       const person = team ? audienceMember(layerAudience(layerOrBotId)) : null;
-      if (!person) return 0;
+      if (!person || person.startsWith("unowned-")) return 0;
       const planned = plan(people.read(person));
       if (!planned) return 0;
       people.write(person, planned.next);
