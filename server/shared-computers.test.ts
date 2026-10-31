@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerScopeRefusal } from "./shared-computers.ts";
+import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerScopeRefusal } from "./shared-computers.ts";
 import { hostScreenBusyText, SharedComputerControl } from "./shared-computer-control.ts";
 import { TurnResources } from "./turn-resources.ts";
 
@@ -98,6 +98,27 @@ describe("shared computer authority and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(45_000);
     await expect(tools.result).rejects.toThrow(/timed out/);
     tools.close();
+  });
+  it("runs a command up to 900 seconds on a desktop that takes long commands, and refuses past 240 on one that does not", async () => {
+    expect(sharedComputerOperation.safeParse({ computer_id: randomUUID(), action: "run_command", command: "./scan", timeout_seconds: 900 }).success).toBe(true);
+    expect(sharedComputerOperation.safeParse({ computer_id: randomUUID(), action: "run_command", command: "./scan", timeout_seconds: 901 }).success).toBe(false);
+    vi.useFakeTimers();
+    const broker = new SharedComputers(() => true);
+    const computer = { ...registration({ terminal: true }), commandTimeouts: true as const, longCommands: true as const }; broker.register(computer, alice, secret);
+    const result = broker.request({ computer_id: computer.id, action: "run_command", command: "./evals", timeout_seconds: 900 }, alice.person, () => true);
+    result.catch(() => {});
+    const job = await broker.poll(computer.id, alice.session, secret);
+    expect(job!.operation).toMatchObject({ timeout_seconds: 900 });
+    broker.liveJob(computer.id, alice.session, secret, job!.id);
+    await vi.advanceTimersByTimeAsync(899_000);
+    broker.complete(computer.id, alice.session, secret, job!.id, { exitCode: 0 });
+    await expect(result).resolves.toEqual({ exitCode: 0 });
+    broker.close();
+    const older = new SharedComputers(() => true);
+    const capped = { ...registration({ terminal: true }), commandTimeouts: true as const }; older.register(capped, alice, secret);
+    await expect(older.request({ computer_id: capped.id, action: "run_command", command: "./evals", timeout_seconds: 241 }, alice.person, () => true))
+      .rejects.toThrow(/at most 240 seconds/);
+    older.close();
   });
   it("never sends a timeout to a desktop that did not say it takes one, and waits for it as before", async () => {
     const broker = new SharedComputers(() => true);
