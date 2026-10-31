@@ -70,6 +70,17 @@ export function buildNotification(
   return notification;
 }
 
+export function unaskedBotThread(
+  task: { openedBy?: unknown } | undefined,
+  path: readonly { role: string; kind: string; at: number; peerAsk?: { incident?: unknown } }[],
+  assignedAt?: number,
+): boolean {
+  if (!task?.openedBy) return false;
+  const asked = path.findLast((message) => message.role === "user" && message.kind === "text");
+  if (!asked || (assignedAt !== undefined && asked.at < assignedAt)) return true;
+  return Boolean(asked.peerAsk && !asked.peerAsk.incident);
+}
+
 type MentionSource = {
   activePath(threadId: string): readonly { role: string; kind: string; text?: string; turnId?: string; from?: { botId: string } }[];
   bot(id: string): { name: string; hidden?: boolean } | null | undefined;

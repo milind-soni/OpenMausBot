@@ -195,20 +195,15 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
 }), 45_000);
 
-it("announces a settled delegation and its resume in the parent thread", () => fixture(async f => {
+it("announces a settled delegation in the parent thread, not in the thread the Chief opened for its lead", () => fixture(async f => {
   const stream = await openSse(`${f.session.info.url}/api/events`);
   try {
     await f.start();
     expect((await f.wait()).status).toBe("settled");
-    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves both settles are stored first.
-    await Promise.all([
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.chief.id),
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.lead.id),
-    ]);
+    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves the Chief's settle is stored first.
+    await stream.until(frame => frame.kind === "notify"
+      && frame.notification?.kind === "delegation-settled"
+      && frame.notification.botId === f.chief.id);
     const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
     const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
     expect(chiefFrames).toHaveLength(1);
@@ -217,9 +212,7 @@ it("announces a settled delegation and its resume in the parent thread", () => f
       title: "Clive resumed with results",
       body: "Results in from Engineering lead",
     });
-    const leadFrames = settles().filter(frame => frame.notification.botId === f.lead.id);
-    expect(leadFrames).toHaveLength(1);
-    expect(leadFrames[0].notification.threadId).not.toBe(f.lead.activeTaskId);
+    expect(settles().some(frame => frame.notification.botId === f.lead.id)).toBe(false);
     expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
     expect(stream.frames.some(frame => frame.kind === "notify" && frame.notification?.kind === "done"
       && (frame.notification.botId === f.lead.id || frame.notification.botId === f.specialist.id))).toBe(false);

@@ -399,6 +399,62 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     }
   }, 60_000);
 
+  it("does not announce results coming back into a thread a bot opened", async () => {
+    const boss = await createBot("Ledger", "quick");
+    const asker = await createBot("Stylus", "asker");
+    const peer = await createBot("Quill", "quick");
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      expect((await api("PATCH", `/api/bots/${asker.id}`, { peers: [peer.id] })).status).toBe(200);
+      const assigned = await api(
+        "POST",
+        "/api/internal/coordinate-bots",
+        { botIds: [asker.id], message: "Stylus, ask Quill whether the deploy can go.", thread: "new" },
+        await capability(boss.id, boss.threadId),
+      );
+      expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
+      const work = await consultation(assigned.body.receipts[0].requestId);
+      expect(work.threadId).not.toBe(asker.threadId);
+      await expect.poll(() => handoffs().some((node) => node.parentId === work.id && node.botId === peer.id), { timeout: 30_000 }).toBe(true);
+      await expect.poll(async () => ((await state(40)).bots.find((bot: { id: string }) => bot.id === asker.id)?.tasks ?? [])
+        .find((task: { threadId: string }) => task.threadId === work.threadId)?.busy, { timeout: 30_000 }).toBeFalsy();
+      await expect.poll(() => handoffs().find((node) => node.id === work.id)?.status, { timeout: 30_000 }).toBe("completed");
+
+      expect((await api("PATCH", `/api/bots/${asker.id}`, { name: "Stylus observed" })).status).toBe(200);
+      await stream.until(
+        (candidate) => candidate.kind === "bot" && candidate.bot?.id === asker.id && candidate.bot?.name === "Stylus observed",
+      );
+      const notified = stream.frames.filter((candidate) => candidate.kind === "notify").map((candidate) => candidate.notification);
+      expect(notified.filter((notification) => notification?.threadId === work.threadId), JSON.stringify(notified)).toEqual([]);
+    } finally {
+      stream.close();
+      await cleanup([], [boss.id, asker.id, peer.id]);
+    }
+  }, 90_000);
+
+  it("announces a thread a bot opened for itself only once the person asks in it", async () => {
+    const bot = await createBot("Margin", "quick");
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      const opened = await api("POST", "/api/internal/threads", { title: "Sort the notes", message: "Sort the notes by date." }, await capability(bot.id, bot.threadId));
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      await expect.poll(async () => ((await botState(bot.id))?.tasks ?? [])
+        .find((task: { threadId: string }) => task.threadId === opened.body.threadId)?.unread, { timeout: 20_000 }).toBe(true);
+
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { name: "Margin observed" })).status).toBe(200);
+      await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.id === bot.id && candidate.bot?.name === "Margin observed");
+      const notified = stream.frames.filter((candidate) => candidate.kind === "notify").map((candidate) => candidate.notification);
+      expect(notified.filter((notification) => notification?.threadId === opened.body.threadId), JSON.stringify(notified)).toEqual([]);
+
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "and the old ones?", threadId: opened.body.threadId })).status).toBe(202);
+      const frame = await stream.until((candidate) => candidate.kind === "notify" && candidate.notification?.threadId === opened.body.threadId, 20_000);
+      expect(frame.notification).toMatchObject({ kind: "done", title: "Margin observed finished" });
+    } finally {
+      stream.close();
+      await cleanup([], [bot.id]);
+    }
+  }, 45_000);
+
   it("still announces the person's own next message after a hop that finished", async () => {
     const asker = await createBot("Nib", "quick");
     const peer = await createBot("Vellum", "quick");

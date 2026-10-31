@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { buildNotification, buildSpendNotification, summarize, unaskedBotThread } from "./notify.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
@@ -123,5 +123,28 @@ describe("buildSpendNotification", () => {
       kind: "spend", botId: "bot-1", botName: "Scout", threadId: "thread-9",
       title: "Monthly spend limit reached", body: "$100.00 of $100.00 spent this month (2026-09).",
     });
+  });
+});
+
+describe("unaskedBotThread", () => {
+  const opened = { openedBy: { botId: "chief" } };
+  const person = (at: number) => ({ role: "user", kind: "text", at });
+  const peer = (at: number) => ({ role: "user", kind: "text", at, peerAsk: {} });
+  const reply = (at: number) => ({ role: "bot", kind: "text", at });
+
+  it("is quiet while the newest request in a bot-opened thread is a bot's", () => {
+    expect(unaskedBotThread(opened, [])).toBe(true);
+    expect(unaskedBotThread(opened, [peer(1), reply(2)])).toBe(true);
+    expect(unaskedBotThread(opened, [peer(1), reply(2), person(3), reply(4), peer(5)])).toBe(true);
+    expect(unaskedBotThread(opened, [person(1), reply(2)], 3)).toBe(true);
+  });
+
+  it("speaks for the person's own request, a failure report, and any thread a person opened", () => {
+    expect(unaskedBotThread(opened, [peer(1), reply(2), person(3), reply(4)])).toBe(false);
+    expect(unaskedBotThread(opened, [reply(2), person(3)], 1)).toBe(false);
+    expect(unaskedBotThread(opened, [{ ...peer(1), peerAsk: { incident: {} } }])).toBe(false);
+    expect(unaskedBotThread({}, [peer(1)])).toBe(false);
+    expect(unaskedBotThread({}, [person(1)], 2)).toBe(false);
+    expect(unaskedBotThread(undefined, [])).toBe(false);
   });
 });
