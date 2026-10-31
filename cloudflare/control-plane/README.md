@@ -7,7 +7,7 @@ tool output.
 
 ## What is included
 
-- Better Auth 1.7.1 with email OTP, signed bearer sessions, hashed OTP storage,
+- Better Auth 1.7.7 with email OTP, signed bearer sessions, hashed OTP storage,
   and D1-backed IP plus recipient rate limits.
 - A Cloudflare Email Sending binding that produces both HTML and plain-text OTP
   messages. Authentication responses remain generic even when delivery fails;
