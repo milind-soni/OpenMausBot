@@ -149,6 +149,11 @@ describe("redactSecretsInText", () => {
       [`groq ${"gsk_"}${alpha}ABCD`, /gsk_/],
       [`meta ${"LLM|"}607358788850350|${alpha}`, /LLM\|6073/],
       [`huggingface ${"hf_"}${alpha}`, /hf_/],
+      [`gitlab ${"glp" + "at-"}${alpha.slice(0, 20)}`, /glpat-[a-z]/],
+      [`gitlab routable ${"glp" + "at-"}${alpha.slice(0, 27)}.01.0r03gxo7a`, /glpat-[a-z]|r03gxo7a/],
+      [`gitlab deploy ${"gld" + "t-"}${alpha.slice(0, 20)}`, /gldt-[a-z]/],
+      [`gitlab runner ${"glr" + "t-"}${alpha.slice(0, 20)}`, /glrt-[a-z]/],
+      [`gitlab registered runner ${"glr" + "tr-"}${alpha.slice(0, 20)}`, /glrtr-[a-z]/],
       [`stripe ${"sk_" + "live_"}${alpha}`, /sk_live_[a-z]/],
       [`stripe test ${"sk_" + "test_"}${alpha}`, /sk_test_[a-z]/],
       [`stripe restricted ${"rk_" + "live_"}${alpha}`, /rk_live_[a-z]/],
@@ -273,11 +278,11 @@ describe("holdsCredential", () => {
   it("knows a provider key or a private key block, never a name, a placeholder or code that reads one", () => {
     for (const text of [
       '{"apiKey": "sk-ant-api03-0123456789abcdefABCD"}', "GITHUB_TOKEN=ghp_0123456789abcdefghij0123", "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n",
-      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
+      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `git clone https://oauth2:${"glp" + "at-"}0123456789abcdefABCD@gitlab.example.com/x.git`, `runner token ${"glr" + "tr-"}0123456789abcdefABCD`, `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
     ]) expect(holdsCredential(text), text).toBe(true);
     for (const text of [
       "token = os.environ['GITHUB_TOKEN']", "API_KEY=your-key-here", "Authorization: Bearer YOUR_TOKEN_HERE", "Keep credentials out of the repo.",
-      "-----BEGIN PUBLIC KEY-----",
+      "-----BEGIN PUBLIC KEY-----", "GITLAB_TOKEN=glpat-your-token-here",
     ]) expect(holdsCredential(text), text).toBe(false);
   });
 });
