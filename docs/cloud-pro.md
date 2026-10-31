@@ -696,7 +696,9 @@ internet connection then, and becomes automatic like anyone else's.
 
 Anyone else gets the automatic grant at the next start. A grant kept from before
 keeps its folders, gains the home folder, the internet connection and Chrome, and
-loses a terminal it had; a **Settings → Servers → Computer access** grant kept for
+keeps a terminal it had: when every grant of one account lent the terminal and
+nobody said no to lending, **Let Clouds run commands on this Mac** starts on for
+that account and no other; a **Settings → Servers → Computer access** grant kept for
 a Cloud's own entry gives way to it. Only a kept grant that already lends what it
 should runs as it is: one that doesn't never connects, even for a moment.
 

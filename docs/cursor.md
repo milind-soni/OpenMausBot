@@ -36,11 +36,16 @@ missing login shows as unauthenticated rather than crashing the fleet.
 
 ## Models
 
-The picker starts from a small static catalog and refreshes from plain
-`cursor-agent models` output (`slug - Label`, with `(default)` / `(current)` markers).
-Live ids are merged into the main cloud rail (not the local-models pane). A
-failed listing keeps the last usable catalog (then the static fallback) rather
-than emptying the rail.
+The picker starts from a small static catalog and refreshes from the models an
+ACP session advertises: OpenMausBot opens `cursor-agent acp`, sends
+`initialize` and `session/new` in an empty folder, and stops, so the refresh
+sends no prompt. Each advertised model shows once under its plain slug
+(`grok-4.7[...]` as `grok-4.7`, `default[]` as `auto`). A static entry stays
+only when the session offers its model. `cursor-agent models` lists only `auto`
+on CLI 2026.10.22, so it answers only when no session opens (`slug - Label`,
+with `(default)` / `(current)` markers). Live ids are merged into the main cloud
+rail (not the local-models pane). A failed listing keeps the last usable
+catalog (then the static fallback) rather than emptying the rail.
 
 `--model <id>` is passed as a global CLI flag before `acp`. Current CLIs
 (checked with 2026.09.28) ignore that flag in ACP sessions: every session
