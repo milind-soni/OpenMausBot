@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Globe, Hand, Loader2, LockKeyhole, Moon, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
@@ -37,6 +37,8 @@ function tabsOf(value: unknown): BrowserTab[] {
  * it, else over the v1 live view. Security: a new connection never replays old input. Only the server gives this view a
  * hold: one of the same person's, when none of their views uses it or when they take it over here.
  */
+const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as CSSProperties;
+
 export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
   const [fallback, setFallback] = useState(false);
@@ -222,8 +224,17 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   }, []);
   const toggleFullscreen = () => {
     const leaving = Boolean(panel.current) && document.fullscreenElement === panel.current;
+    if (leaving && maximized) {
+      setMaximized(false);
+    }
     const request = leaving ? document.exitFullscreen() : panel.current?.requestFullscreen();
     void request?.catch(() => setError(leaving ? "Could not leave full screen. Press Esc instead." : "Full screen is unavailable in this browser."));
+  };
+  const toggleMaximize = () => {
+    if (fullscreen && document.fullscreenElement === panel.current) {
+      void document.exitFullscreen().catch(() => {});
+    }
+    setMaximized((value) => !value);
   };
   // The maximized panel swallows its Escape (defaultPrevented) so the same press cannot close a dialog beneath.
   // Capture: listeners registered before this panel must see the key already refused.
@@ -232,11 +243,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
+      if (fullscreen && document.fullscreenElement === panel.current) {
+        void document.exitFullscreen().catch(() => {});
+      }
       setMaximized(false);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [maximized]);
+  }, [maximized, fullscreen]);
 
   const restart = () => {
     if (!window.confirm(t("browser.panel.confirmRestart"))) return;
@@ -268,7 +282,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized
     ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-card text-ink"
-    : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
+    : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"} style={NO_DRAG_STYLE}>
     <ChromeRow
       ref={address}
       botName={bot.name}
@@ -291,7 +305,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       onTake={takeControl}
       onHandBack={handBack}
       onFullscreen={toggleFullscreen}
-      onMaximize={() => setMaximized((value) => !value)}
+      onMaximize={toggleMaximize}
       onProfiles={() => { browserControl.current?.handBack(); setShowProfiles(true); }}
       menu={<MoreMenu
         stream={stream}

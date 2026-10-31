@@ -2,7 +2,7 @@
 // apps/web/src/components/preview/PreviewChromeRow.tsx, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
 // third_party/t3-code/LICENSE); modified: OpenMausBot's tabs, control pill and profile button.
 import { ArrowLeft, ArrowRight, Expand, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
-import { forwardRef, useState, type ReactNode } from "react";
+import { forwardRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import type { PreviewStreamControl } from "@/lib/browser-stream-client";
 import type { BrowserTakeStatus } from "@/lib/browser-control";
@@ -49,6 +49,8 @@ const PILL_TEXT: Record<PillState, (bot: string) => string> = {
   waiting: (bot) => t("browser.control.waiting", { name: bot }),
 };
 
+const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as CSSProperties;
+
 export const ChromeRow = forwardRef<HTMLInputElement, {
   botName: string;
   tabs: BrowserTab[];
@@ -82,7 +84,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
   const handsBack = yours || pill === "held";
   const shown = nav.url === "about:blank" ? "" : nav.url;
   return (
-    <div className="shrink-0 border-b border-hairline/40">
+    <div className="shrink-0 border-b border-hairline/40" style={NO_DRAG_STYLE}>
       <div className="flex min-h-10 items-center gap-1 px-2 pt-1">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="Browser tabs">
           {tabs.length ? tabs.map((tab) => (

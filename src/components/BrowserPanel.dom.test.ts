@@ -86,4 +86,46 @@ describe("the browser panel's Maximize", () => {
     expect(skyward()).toBe(false);
     expect(dialogCloses).toHaveBeenCalledTimes(1);
   });
+
+  it("restores the panel when clicking Restore size", async () => {
+    click(maximizeButton());
+    expect(skyward()).toBe(true);
+    expect(maximizeButton()?.getAttribute("aria-label")).toBe("Restore size");
+
+    click(maximizeButton());
+    await settle();
+    expect(skyward()).toBe(false);
+    expect(maximizeButton()?.getAttribute("aria-label")).toBe("Maximize");
+  });
+
+  it("opts out of window dragging so toolbar clicks reach buttons instead of moving the window", () => {
+    expect(panel().matches("[data-browser-transport]")).toBe(true);
+  });
+});
+
+describe("the browser panel's Full screen", () => {
+  it("toggles full screen and exits cleanly", async () => {
+    const fullscreenButton = () => host.querySelector<HTMLButtonElement>('[aria-label="Full screen"], [aria-label="Exit full screen"]');
+    expect(fullscreenButton()?.getAttribute("aria-label")).toBe("Full screen");
+
+    const p = panel();
+    p.requestFullscreen = vi.fn().mockImplementation(() => {
+      Object.defineProperty(document, "fullscreenElement", { value: p, configurable: true, writable: true });
+      document.dispatchEvent(new Event("fullscreenchange"));
+      return Promise.resolve();
+    });
+    document.exitFullscreen = vi.fn().mockImplementation(() => {
+      Object.defineProperty(document, "fullscreenElement", { value: null, configurable: true, writable: true });
+      document.dispatchEvent(new Event("fullscreenchange"));
+      return Promise.resolve();
+    });
+
+    click(fullscreenButton());
+    await settle();
+    expect(fullscreenButton()?.getAttribute("aria-label")).toBe("Exit full screen");
+
+    click(fullscreenButton());
+    await settle();
+    expect(fullscreenButton()?.getAttribute("aria-label")).toBe("Full screen");
+  });
 });
