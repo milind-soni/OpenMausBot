@@ -1,10 +1,11 @@
 // The rail at the window's left edge once a person has two places or more: one tile per Cloud, team's Cloud or server,
 // the place on screen marked, ⋯ for the rest past eight, ＋ last. Main lists the places and opens one by its id; the rail
 // never names an address. A right-click on a tile (or its row past eight) opens that place's menu: its colour, changed
-// here for every place whatever its server runs, and Remove from list for a Cloud of the person's own that ended or was
-// never paid for (asked first; main takes it off their list on the Admin).
+// here for every place whatever its server runs, Remove from list for a Cloud of the person's own that ended or was
+// never paid for (asked first; main takes it off their list on the Admin), and Make … my home for a server of theirs that
+// main says this computer's bots may move to (one tap: main starts the move).
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
-import { Laptop, MoreHorizontal, Plus, Search, Server } from "lucide-react";
+import { House, Laptop, Loader2, MoreHorizontal, Plus, Search, Server } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { PlaceColorOutcome } from "../../electron/place-look.mjs";
 import { track } from "@/lib/analytics";
@@ -13,7 +14,7 @@ import { cloudColor, cloudColorFill } from "@/lib/cloud-look";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
+import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
@@ -149,6 +150,30 @@ function RemoveRow({ place, onRemoved }: { place: RailPlace; onRemoved: () => vo
   </div>;
 }
 
+/** Make … my home in a server's menu: one tap starts the move, and the menu closes once main has started it; the account
+ * area then says how it goes. Main's own words when it can't start. */
+function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  const start = () => {
+    setBusy(true); setSaid(null);
+    void makeHome(place.id).then((outcome) => {
+      setBusy(false);
+      if (outcome === true) onStarted(); else setSaid(outcome);
+    });
+  };
+  return <div data-rail-make-home className="flex flex-col gap-0.5 border-t border-hairline/50 px-0.5 pt-1.5">
+    <button type="button" data-rail-make-home-start className={cn(MENU_ROW, "h-auto min-h-[30px] items-start py-1.5 touch:h-auto")} disabled={busy} aria-busy={busy || undefined} onClick={start}>
+      {busy ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin motion-reduce:animate-none" /> : <House size={15} aria-hidden="true" className="mt-0.5 shrink-0" />}
+      <span className="flex min-w-0 flex-col text-start">
+        <span className="text-[13px] text-ink">{t("rail.makeHome", { name: place.name })}</span>
+        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })}</span>
+      </span>
+    </button>
+    {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{said}</p>}
+  </div>;
+}
+
 /** A place's own menu on the window's rail: its name and its colour, in the six swatches, saved by main for every place
  * whatever its server runs (on the Admin for a Cloud), and Remove from list for a Cloud its owner may take off their list.
  * A team member sees who may change its colour. */
@@ -157,8 +182,8 @@ function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask]"))?.focus(); }, []);
-  if (!paint && !place.removable) return null;
+  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
+  if (!paint && !place.removable && !place.makeHome) return null;
   const name = place.kind === "computer" ? t("rail.thisComputer") : place.name;
   const choose = (swatch: CloudSwatch) => {
     if (!paint || paint.locked || pending || swatch === paint.swatch) return;
@@ -181,6 +206,7 @@ function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
       {note && <p data-rail-menu-note className="px-2 pb-1 text-[12px] text-ink-secondary">{note}</p>}
       {outcome === "failed" && <p role="alert" className="px-2 pb-1 text-[12px] text-danger">{t("placeLook.failed")}</p>}
     </>}
+    {place.makeHome && <MakeHomeRow place={place} onStarted={onClose} />}
     {place.removable && <RemoveRow place={place} onRemoved={onClose} />}
   </div>;
 }

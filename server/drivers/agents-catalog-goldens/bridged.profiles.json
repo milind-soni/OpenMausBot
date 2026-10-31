@@ -344,8 +344,8 @@
     ]
   },
   "skills+shared+voice+cloud-home": {
-    "bytes": 17248,
-    "sha256": "f8cf96cf2eed4d6dac28bc178f5017df7c7adb2b505f81cd5536ee80c9efe1fa",
+    "bytes": 17266,
+    "sha256": "d88a513cc1bad7358f3cd27db3da71171f470caeb737d934a1d49bd1d9667c9e",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -366,8 +366,8 @@
     ]
   },
   "skills+shared+voice+non-chief+cloud-home": {
-    "bytes": 17131,
-    "sha256": "b8fed5a5dfaec1de4f5133d85bcdbd82ef3ae30403f4181d260c191dcf35abe1",
+    "bytes": 17149,
+    "sha256": "6543a09b99a7a08be472169d328c5b8186d02cd1b40a10424b5a4b6010b85c22",
     "tools": [
       "tool_result_read",
       "list_room_targets",

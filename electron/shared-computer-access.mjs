@@ -172,6 +172,9 @@ function killTree(child) {
 /** No inherited API keys or provider credentials. On Windows a child without SystemRoot cannot start Winsock, one
  * without USERPROFILE has no home, and one without TEMP or TMP puts temporary files in the Windows folder. */
 const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
+/** cua-driver 0.28.2 keeps its settings, history and cursor themes under Windows' own folders, which hold no secret. */
+const driverEnvironment = () => ({ ...hostEnvironment(), ...Object.fromEntries(["LOCALAPPDATA", "APPDATA", "ProgramData", "SystemDrive", "windir"]
+  .filter(key => process.env[key]).map(key => [key, process.env[key]])) });
 
 export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
 
@@ -228,7 +231,7 @@ export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECO
 export function createSharedCua(connection, { platform = process.platform } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
-    env: { ...hostEnvironment(), ...connection.mcpEnv },
+    env: { ...driverEnvironment(), ...connection.mcpEnv },
   });
   let sequence = 0; let closed = false; let bytes = 0;
   const pending = new Map();

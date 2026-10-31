@@ -286,6 +286,24 @@ test("Remove from list from a circle's menu: only the rail's own page, only a ci
   assert.deepEqual(making.opened, ["cloud:c-b"], "its own screen, never a saved place or an address");
 });
 
+test("Make … my home: only on a server connected by hand that main offers it for, from the rail's own page, by main's own word for it", async () => {
+  const offered = new Set(["vps"]), made = [];
+  const r = rail({ places: () => railPlaces({ saved: saved("home", [{ id: "box", kind: "remote", name: "Box", origin: "https://box.example.test" }]), home: HOME, mine: HOME, state: session(),
+    offers: entry => offered.has(entry.id) || entry.id === "home" || entry.id === "a" || entry.id === "acme" }), makeHome: id => { made.push(id); return { started: true }; } });
+  const places = (await r.call("workspaces:places")).places;
+  assert.deepEqual(places.filter(place => place.makeHome).map(place => place.id), ["vps"], "never My Cloud, another Cloud or a team's, whatever main says");
+  assert.deepEqual(await r.call("workspaces:make-home", "vps"), { started: true });
+  for (const id of ["box", "home", "a", "acme", "https://box.example.test", { toString: () => "vps" }]) {
+    assert.throws(() => r.call("workspaces:make-home", id), /can't be your bots' home/, String(id));
+  }
+  assert.deepEqual(made, ["vps"]);
+  offered.clear();
+  assert.throws(() => r.call("workspaces:make-home", "vps"), /can't be your bots' home/, "no longer offered: refused");
+  r.w.lists = false;
+  assert.throws(() => r.call("workspaces:make-home", "vps"), /only available/, "any other page: refused");
+  assert.throws(() => rail().call("workspaces:make-home", "vps"), /can't be your bots' home/, "a main that offers it nowhere");
+});
+
 const PRELOAD = readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
 function preload(origin, { activation = false } = {}) {
   let bridge; const invoked = [];
@@ -300,7 +318,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "remove", "onChanged"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "remove", "makeHome", "onChanged"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet", "organization"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -314,6 +332,7 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.workspaces.color("rose"), /Choose a color/, "a page changes its place's colour only from the person's click");
   await assert.rejects(page.bridge.workspaces.recolor("vps", "rose"), /Choose a color/);
   await assert.rejects(page.bridge.workspaces.remove("old"), /Choose Remove from list/, "Remove from list only from the person's click");
+  await assert.rejects(page.bridge.workspaces.makeHome("vps"), /Choose Make my home/, "a move starts only from the person's click");
   await page.bridge.workspaces.look();
   assert.deepEqual(page.invoked.at(-1), ["workspaces:look"]);
   const clicked = preload(HOME, { activation: true });
