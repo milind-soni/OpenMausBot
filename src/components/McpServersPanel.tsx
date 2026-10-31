@@ -129,6 +129,8 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   /** Each server a passing test just switched on, and when; and the one being tested to switch it on. */
   const switchedOn = useRef<Record<string, number>>({});
   const [connecting, setConnecting] = useState<string | null>(null);
+  /** A failed card action belongs to that card alone: the cards share one instance, and `error` shows on every one. */
+  const [cardFailure, setCardFailure] = useState<{ id: HostedMcpAppId; message: string } | null>(null);
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const hostedOf = (server: McpServerListing) => isRemoteMcpListing(server) ? hostedMcpApp(server) : undefined;
@@ -333,6 +335,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     setCallbackUrl("");
     setCallbackError(null);
     setError(null);
+    setCardFailure(null);
     setNotice(null);
     forgetProbe(server.name);
     const hosted = hostedOf(server);
@@ -378,6 +381,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     setBusy(`hosted:${app.id}`);
     loadGeneration.current += 1;
     setError(null);
+    setCardFailure(null);
     setNotice(null);
     let added: McpServerListing | undefined;
     try {
@@ -387,7 +391,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
       added = listed(result.servers).find((server: McpServerListing) => server.name === name && hostedOf(server) === app);
       if (!added) throw new Error(t("hostedMcp.setupFailed", { service: app.label }));
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
+      if (mounted.current) setCardFailure({ id: app.id, message: cause instanceof Error ? cause.message : String(cause) });
     } finally { if (mounted.current) setBusy(null); }
     if (added && mounted.current) await signIn(added);
   };
@@ -407,10 +411,11 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     }
   };
 
-  const signOut = async (server: McpServerListing) => {
+  const signOut = async (server: McpServerListing, card?: HostedApp) => {
     setBusy(`signout:${server.name}`);
     loadGeneration.current += 1;
     setError(null);
+    setCardFailure(null);
     setNotice(null);
     forgetProbe(server.name);
     try {
@@ -419,7 +424,8 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
       }
       listed((await api(`/api/mcp/servers/${server.name}/sign-out`, { method: "POST" })).servers);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (card) setCardFailure({ id: card.id, message }); else setError(message);
     } finally {
       setBusy(null);
     }
@@ -492,7 +498,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const server = servers?.find((listed) => hostedOf(listed) === app);
     const connected = Boolean(connections?.[app.id]);
     const result = server && probe[server.name];
-    const failed = error || (result && !result.ok ? result.error : null);
+    const failed = error || (cardFailure?.id === app.id ? cardFailure.message : null) || (result && !result.ok ? result.error : null);
     const pending = busy !== null || signingIn !== null;
     const mine = busy === `hosted:${app.id}` || (server !== undefined && (signingIn === server.name || busy === `signout:${server.name}`));
     return <div data-app-tile={app.id} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
@@ -508,7 +514,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         {server && signingIn === server.name ? <button type="button" onClick={() => signInAbort.current?.abort()} className="inline-flex h-7 shrink-0 items-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink">{t("mcp.auth.cancel")}</button> :
           <button type="button" aria-label={t(connected ? "hostedMcp.disconnect" : "hostedMcp.connect", { service: app.label })}
             disabled={pending || (servers !== null && !connected && (Boolean(server?.managedBy) || (restricted && !policy?.mcp.allowlist.length)))}
-            onClick={() => void (servers === null ? load() : connected && server ? signOut(server) : connectHosted(app))}
+            onClick={() => void (servers === null ? load() : connected && server ? signOut(server, app) : connectHosted(app))}
             className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
             {pending && (mine || busy === "load") ? <Loader2 size={14} className="animate-spin" /> : servers === null ? t("connectors.action.retry") : t(connected ? "connectors.disconnect" : "connectors.action.connect")}
           </button>}

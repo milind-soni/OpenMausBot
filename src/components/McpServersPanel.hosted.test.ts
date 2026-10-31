@@ -165,6 +165,17 @@ describe.each(HOSTED_MCP_APPS)("The $label card", (app) => {
     expect(fixture.api.mock.invocationCallOrder[testCall]).toBeGreaterThan(fixture.runMcpSignIn.mock.invocationCallOrder[0]!);
   });
 
+  it("shows a failed save on its own card only", async () => {
+    await mount();
+    const save = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string, init?: RequestInit) => init?.method === "POST" && path === "/api/mcp/servers"
+      ? Promise.reject(new Error("Synthetic save failure"))
+      : save(path, init));
+    await connect();
+    expect([...card(app).querySelectorAll('[role="alert"]')].map((element) => element.textContent)).toEqual(["Synthetic save failure"]);
+    for (const other of HOSTED_MCP_APPS.filter((candidate) => candidate !== app)) expect(card(other).querySelector('[role="alert"]')).toBeNull();
+  });
+
   it("signs in to the server it already has, under any name, instead of adding another", async () => {
     servers = [listing(app, { name: "business" })];
     await mount();
@@ -208,6 +219,17 @@ describe.each(HOSTED_MCP_APPS)("The $label card", (app) => {
     await mount();
     expect(card(app).querySelector("img") !== null).toBe("image" in app.icon);
     expect(card(app).querySelector("svg") !== null).toBe("glyph" in app.icon);
+  });
+});
+
+describe("the Agentcard tile", () => {
+  it("draws a glyph and never an Agentcard logo, and says Agentcard keeps the cards", async () => {
+    await mount();
+    const tile = card(HOSTED_MCP_APPS.find((app) => app.id === "agentcard")!);
+    expect(tile.querySelector("img")).toBeNull();
+    expect(tile.querySelector("svg")).not.toBeNull();
+    expect(tile.textContent).toContain("Shop and pay from your own Agentcard account.");
+    expect(tile.textContent).toContain("OpenMausBot stores no card details");
   });
 });
 

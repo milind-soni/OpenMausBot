@@ -32,6 +32,9 @@ has no alternate endpoint or test switch. It checks:
   token reaches the synthetic provider without appearing in the renderer list.
 - Failed post-login tool discovery does not enable the server and is retryable.
 - Reload keeps the connection; disconnect disables it and revokes sign-in.
+- The Agentcard card, from the same table of hosted apps, draws a glyph with
+  no logo, connects and disconnects beside Whop, and each stays connected
+  while the other changes.
 - Narrow layout has no page overflow; no business tools execute during setup.
 
 Screenshots default to `/tmp/omb-whop-evidence`; override with

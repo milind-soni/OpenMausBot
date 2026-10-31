@@ -32,6 +32,8 @@
   "hostedMcp.setupFailed": "{service} could not be added. Refresh and try again.",
   "hostedMcp.testFailed": "Signed in, but {service}’s tools could not be loaded: {reason} Please connect again to retry.",
   "hostedMcp.loadingTools": "Signed in. Loading {service}’s tools…",
+  "agentcard.description": "Shop and pay from your own Agentcard account.",
+  "agentcard.notice": "Sign in with your Agentcard account. No API key needed. Agentcard keeps your cards and handles purchase approvals; OpenMausBot stores no card details. A bot that can use Agentcard can call all of its tools, including buying and showing card details, so choose which bots get it under Bot access.",
   "highlevel.title": "HighLevel",
   "highlevel.description": "Also Growably and other HighLevel-based CRMs.",
   "highlevel.connect": "Connect HighLevel",

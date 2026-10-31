@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import { CreditCard, type LucideIcon } from "lucide-react";
 
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
@@ -30,6 +30,16 @@ export const HOSTED_MCP_APPS = [
     description: "whop.description",
     notice: "whop.notice",
     keywords: "whop checkout memberships",
+  },
+  {
+    id: "agentcard",
+    label: "Agentcard",
+    url: "https://mcp.agentcard.sh/mcp",
+    // Agentcard's packages are "SEE LICENSE IN LICENSE" and it publishes no logo licence, so a neutral glyph stands in.
+    icon: { glyph: CreditCard },
+    description: "agentcard.description",
+    notice: "agentcard.notice",
+    keywords: "agentcard agent card opencommerce shopping payments buy virtual debit card",
   },
 ] as const satisfies readonly HostedMcpApp[];
 

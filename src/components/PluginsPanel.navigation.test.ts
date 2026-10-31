@@ -153,6 +153,20 @@ describe("Apps pop-up", () => {
     expect(html).toContain(`data-hosted-app="${HOSTED_MCP_APPS[0].id}"`);
     for (const other of HOSTED_MCP_APPS.slice(1)) expect(html).not.toContain(`data-hosted-app="${other.id}"`);
   });
+  it.each(["agentcard", "opencommerce"])("finds Agentcard by %s and shows no other hosted card", (word) => {
+    fixture.overrides.set(SEARCH, word);
+    const html = render().html;
+    expect(html).toContain('data-hosted-app="agentcard"');
+    expect(html.match(/data-hosted-app="/g)).toHaveLength(1);
+  });
+  it("counts Whop and Agentcard both under Connected", () => {
+    fixture.overrides.set(HOSTED_CONNECTED, { whop: true, agentcard: true });
+    expect(render().html).toContain("3 connected");
+    fixture.overrides.set(TAB, "connected");
+    const html = render().html;
+    expect(html).toContain('data-hosted-app="whop"');
+    expect(html).toContain('data-hosted-app="agentcard"');
+  });
   it("names the connected hosted apps in the setup notice", () => {
     fixture.overrides.set(CONFIGURED, false);
     fixture.overrides.set(HOSTED_CONNECTED, Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, true])));
