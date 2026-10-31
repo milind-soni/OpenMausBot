@@ -6,7 +6,9 @@
 // new token on its next turn, so the engine starts again and reconnects instead of keeping that failed connection.
 import { createHash } from "node:crypto";
 
+import { listNames } from "../../shared/place-view.ts";
 import type { McpServerSpec } from "../contracts.ts";
+import { serverLine } from "../server-lines.ts";
 import { botBox, type BoxBroker } from "./box.ts";
 import { brokerUrl } from "./broker.ts";
 
@@ -67,10 +69,9 @@ export function retryBrokeredMcp(turn: BrokerTurn, failed: readonly string[]): s
   return retried;
 }
 
-/** What the chat says when URL servers didn't connect as the engine started, and when they will. */
-export function mcpReconnectLine(names: readonly string[]): string {
-  const listed = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+/** What the chat says when URL servers didn't connect as the engine started, and when they will, in `language`. */
+export function mcpReconnectLine(names: readonly string[], language?: string): string {
   return names.length === 1
-    ? `The MCP server ${listed} didn't connect, so its tools weren't available this time. It connects again on your next message.`
-    : `The MCP servers ${listed} didn't connect, so their tools weren't available this time. They connect again on your next message.`;
+    ? serverLine(language, "server.mcp.reconnect.one", { name: names[0]! })
+    : serverLine(language, "server.mcp.reconnect.many", { names: listNames(names, language) });
 }

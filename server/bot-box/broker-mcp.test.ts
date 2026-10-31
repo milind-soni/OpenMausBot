@@ -71,7 +71,7 @@ describe("remote MCP servers through the broker", () => {
 
   it("says which servers didn't connect, and that they connect again on the next message", () => {
     expect(mcpReconnectLine(["notion"])).toBe("The MCP server notion didn't connect, so its tools weren't available this time. It connects again on your next message.");
-    expect(mcpReconnectLine(["notion", "hq", "mail"])).toBe("The MCP servers notion, hq and mail didn't connect, so their tools weren't available this time. They connect again on your next message.");
+    expect(mcpReconnectLine(["notion", "hq", "mail"])).toBe("The MCP servers notion, hq, and mail didn't connect, so their tools weren't available this time. They connect again on your next message.");
   });
 
   withBroker("takes a gateway's two service-token headers to it, while the engine's server list holds neither", async () => {

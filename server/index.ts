@@ -6487,7 +6487,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (bot && event.sessionId && event.providerInstanceId) {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
       }
-      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model); if (bot && event.mcpFailed?.length) mcpServersHost.health.engineFailed(bot.id, event.mcpFailed); const reconnecting = event.mcpFailed?.length && (bot ?? speaker) ? retryBrokeredMcp({ botId: bot?.id ?? speaker!.botId, threadId: event.threadId }, event.mcpFailed) : []; if (reconnecting.length) pushMessage({ role: "bot", kind: "activity", tool: { name: mcpReconnectLine(reconnecting), ok: false } });
+      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model); if (bot && event.mcpFailed?.length) mcpServersHost.health.engineFailed(bot.id, event.mcpFailed); const reconnecting = event.mcpFailed?.length && (bot ?? speaker) ? retryBrokeredMcp({ botId: bot?.id ?? speaker!.botId, threadId: event.threadId }, event.mcpFailed) : []; if (reconnecting.length) pushMessage({ role: "bot", kind: "activity", tool: { name: mcpReconnectLine(reconnecting, threadLanguage(event.threadId)), ok: false } });
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {

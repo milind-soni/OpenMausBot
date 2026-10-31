@@ -142,8 +142,8 @@ function notYetLine(outcome: Extract<SendOutcome, { retry: true }>, language: st
 }
 const refusedLine = (detail: string, language: string | undefined) => serverLine(language, "server.reports.refused", { detail: detail.replace(/[.\s]+$/, "") });
 const fullLine = (language: string | undefined) => serverLine(language, "server.reports.full", { count: MAX_OUTBOX });
-/** The one line in the chat once this app runs the fix (clients say it from `bugReport` in the person's language). */
-export const fixedLine = (version: string) => `Fixed in ${version}. Want to try again?`;
+/** The one line in the chat once this app runs the fix, in the reporter's language (clients say it from `bugReport`). */
+export const fixedLine = (version: string, language?: string) => serverLine(language, "server.reports.fixed", { version });
 /** Rides on the bot's next turn in that chat, once, so an answer to the line above makes sense to it. */
 const fixedNote = (entry: Tracked, version: string) => `\n\n[From OpenMausBot, not the person: the problem they reported with @devs on ${new Date(entry.at).toISOString().slice(0, 10)}${
   entry.words ? ` ("${entry.words}")` : ""} is fixed in ${version}, which this app now runs. The chat told them so and asked whether they want to try again; if their message answers that, help them try it again.]`;
@@ -247,7 +247,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function tellFixed(entry: Tracked, version: string) {
     entry.told = now();
     save();
-    const text = fixedLine(version);
+    const text = fixedLine(version, languageFor(entry.person));
     try {
       store.appendMessage(entry.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok: true },
         bugReport: { id: entry.reportId, status: "fixed", fixedIn: version, running: true } });
