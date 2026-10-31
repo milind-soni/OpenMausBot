@@ -9,7 +9,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
+import { imeComposing, queueKeyLabel, queuesMessage, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import {
   draftRevision,
   appendDraftAttachments,
@@ -62,7 +62,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, SIMPLE_CONTROL, slotColors } from "./composer-simple";
+import { composerPlaceholder, queueInsteadLabel, sendLabels, SIMPLE_CONTROL, slotColors } from "./composer-simple";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
@@ -134,6 +134,7 @@ export function Composer({
   const simpleDock = !advanced && !singleRow;
   const sendKey = useSendKey();
   const sendLabel = sendKeyLabel(sendKey);
+  const queueLabel = queueKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const threadId = group?.threadId ?? bot?.threadId ?? "";
   const currentGroupTask = group?.tasks?.find((task) => task.threadId === threadId);
@@ -539,6 +540,8 @@ export function Composer({
   const callShown = !simpleDock || (!hasContent && !stopInSlot);
   const slot = slotColors(bot?.color, Boolean(group));
   const sendNames = sendLabels({ simple: !advanced, busy, canSteer, name: busyName, sendLabel });
+  const canQueueInstead = Boolean(bot) && !group && busy && canSteer;
+  const queueInsteadName = queueInsteadLabel({ simple: !advanced, name: busyName, queueLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -568,7 +571,7 @@ export function Composer({
       dispatch({ type: "send", botId: bot.id, mode: failedMode, ...retry });
     }
   };
-  const send = () => {
+  const send = ({ queue = false }: { queue?: boolean } = {}) => {
     if (locked || attachmentPending) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
@@ -611,9 +614,10 @@ export function Composer({
       dispatch({
         type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode,
         ...(points ? { pointed: points.pointed } : {}),
+        ...(queue ? { queue: true } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && !canSteer);
+      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && (!canSteer || queue));
     }
     setText("");
     setAttachments([]);
@@ -918,6 +922,10 @@ export function Composer({
             }
             if (sendsMessage(e.nativeEvent, sendKey)) {
               e.preventDefault();
+              if (canQueueInstead && queuesMessage(e.nativeEvent, sendKey)) {
+                send({ queue: true });
+                return;
+              }
               if (
                 canSteer &&
                 doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
@@ -983,9 +991,24 @@ export function Composer({
         )}
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
+        {hasContent && !locked && canQueueInstead && (
+          <button
+            onClick={() => send({ queue: true })}
+            disabled={attachmentPending}
+            aria-label={queueInsteadName}
+            title={queueInsteadName}
+            data-composer-queue-instead
+            className={cn(
+              "flex shrink-0 items-center justify-center rounded-full disabled:cursor-default",
+              advanced || singleRow ? "size-8 text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL,
+            )}
+          >
+            <Clock size={simpleDock ? 14 : 15} />
+          </button>
+        )}
         {hasContent && !locked && (
           <button
-            onClick={send}
+            onClick={() => send()}
             disabled={attachmentPending}
             aria-label={sendNames.label}
             title={sendNames.title}

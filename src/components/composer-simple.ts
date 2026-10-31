@@ -81,3 +81,10 @@ export function sendLabels({ simple, busy, canSteer, name, sendLabel }: { simple
   }
   return { label: t("composer.send.message"), title: `${t("chat.send")} (${sendLabel})` };
 }
+
+/** The button beside Send while a 1:1 bot steers: this one message waits for the running turn instead. */
+export function queueInsteadLabel({ simple, name, queueLabel }: { simple: boolean; name: string; queueLabel: string }): string {
+  return simple
+    ? t("composer.send.queueInsteadSimple", { name, key: queueLabel })
+    : t("composer.send.queueInstead", { key: queueLabel });
+}

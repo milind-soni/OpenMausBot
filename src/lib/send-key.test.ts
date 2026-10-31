@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { imeComposing, SEND_KEYS, sendKeyLabel, sendsMessage, type SendKey } from "./send-key";
+import { imeComposing, queueKeyLabel, queuesMessage, SEND_KEYS, sendKeyLabel, sendsMessage, type SendKey } from "./send-key";
 
 const hook = vi.hoisted(() => ({
   subscribe: undefined as undefined | ((listener: () => void) => () => void),
@@ -20,7 +20,7 @@ vi.mock("react", () => ({
 }));
 
 const key = (overrides: Partial<KeyboardEvent> = {}) => ({
-  key: "Enter", shiftKey: false, ctrlKey: false, metaKey: false, isComposing: false, keyCode: 13, ...overrides,
+  key: "Enter", shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, keyCode: 13, ...overrides,
 });
 
 describe("which Enter sends", () => {
@@ -67,6 +67,22 @@ describe("which Enter sends", () => {
     expect(sendKeyLabel("shift-enter", false)).toBe("Shift+Enter");
     expect(sendKeyLabel("mod-enter", true)).toBe("⌘+Enter");
     expect(sendKeyLabel("mod-enter", false)).toBe("Ctrl+Enter");
+  });
+
+  it("queues on the send key held with Alt, and only on it", () => {
+    expect(queuesMessage(key({ altKey: true }), "enter")).toBe(true);
+    expect(queuesMessage(key(), "enter")).toBe(false);
+    expect(queuesMessage(key({ altKey: true, shiftKey: true }), "enter")).toBe(false);
+    expect(queuesMessage(key({ altKey: true, shiftKey: true }), "shift-enter")).toBe(true);
+    expect(queuesMessage(key({ altKey: true }), "mod-enter")).toBe(false);
+    expect(queuesMessage(key({ altKey: true, ctrlKey: true }), "mod-enter")).toBe(true);
+    expect(queuesMessage(key({ altKey: true, isComposing: true }), "enter")).toBe(false);
+  });
+
+  it("names the queue key with Alt, or Option on a Mac", () => {
+    expect(queueKeyLabel("enter", true)).toBe("⌥+Enter");
+    expect(queueKeyLabel("enter", false)).toBe("Alt+Enter");
+    expect(queueKeyLabel("mod-enter", false)).toBe("Alt+Ctrl+Enter");
   });
 
   it("leaves an input method's keys to it, Enter or not", () => {
