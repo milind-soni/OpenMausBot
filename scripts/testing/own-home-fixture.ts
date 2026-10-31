@@ -34,6 +34,8 @@ export interface OwnHomeFixture {
   root: string;
   desktopBase: string;
   desktopDataDir: string;
+  /** This computer's server's owner header, as main sends it. */
+  ownerCapability: string;
   local: Side;
   /** A server of the person's own, added and paired; `env`: more of its environment (a sign-in list, say). */
   addServer(name: string, env?: NodeJS.ProcessEnv): Promise<OwnServer>;
@@ -179,7 +181,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   listen();
 
   return {
-    root, desktopBase, desktopDataDir: join(root, "desktop", ".openmausbot"), local, addServer, journalFile, spies, windowFetch, logs: () => logs,
+    root, desktopBase, desktopDataDir: join(root, "desktop", ".openmausbot"), ownerCapability: capability, local, addServer, journalFile, spies, windowFetch, logs: () => logs,
     get main() { return main; },
     get beforeJournalWrite() { return fixture.beforeJournalWrite; },
     set beforeJournalWrite(hook) { fixture.beforeJournalWrite = hook; },

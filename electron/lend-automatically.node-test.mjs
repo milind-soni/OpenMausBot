@@ -209,7 +209,7 @@ test("Pause stops every Cloud at once and lasts across restarts; Resume lends ag
   await until(() => homes[HOME].connects.length === 1 && homes[OTHER].connects.length === 1, "both Clouds to be lent");
   mac.sharing.pause();
   await until(() => homes[HOME].disconnects.length === 1 && homes[OTHER].disconnects.length === 1, "both Clouds to be told");
-  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, terminal: false, busy: null });
+  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, terminal: false, busy: null, screen: null });
   assert.equal(mac.sharing.lentToCloud(myCloud).paused, true, "Files keeps My Cloud's copies, and holds bots' changes there");
   const plans = path.join(mac.dir, "Plans");
   await mkdir(plans);
@@ -473,7 +473,7 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   indicator.update({ clouds: [], using: [], paused: true });
   assert.equal(trays[0].destroyed, true, "gone once there is no Cloud to resume");
   assert.deepEqual(indicatorText({ clouds: ["A", "B", "C"], using: ["A", "B", "C"], paused: false }, "PC"),
-    { line: "A, B and C are using this PC", title: "3 Clouds are using this PC" });
+    { line: "A, B and C are using this PC", title: "3 Clouds are using this PC", screen: null });
 });
 
 test("See activity shows this computer's own record in the app's language: every value escaped, no script, nothing loaded", async () => {

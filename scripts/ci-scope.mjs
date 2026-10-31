@@ -30,6 +30,8 @@ export const AREA_CHECKS = {
   "script-tests": ["linux-tests", "host-tests", "ui-smoke", "browser-identity"],
   server: SERVER_CHECKS,
   desktop: SERVER_CHECKS,
+  // The Windows CUA job starts these the way the installed app does, then lends the PC's screen through them.
+  "windows-computer-control": [...SERVER_CHECKS, "windows-cua"],
   "control-plane": ["control-plane"],
   everything: EVERY_CHECK,
 };
@@ -45,7 +47,10 @@ export const VITEST_SUBSETS = {
   "locale-tests": {
     part: "locale tests",
     files: ["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts", "scripts/server-locale-plugin.test.ts",
-      "server/server-lines.test.ts", "server/host/devs-reports.test.ts"],
+      "server/server-lines.test.ts", "server/host/devs-reports.test.ts", "server/automation-reports.test.ts", "server/incidents.test.ts",
+      "server/routine-run-card.test.ts", "server/host/chief-notices-retry.test.ts", "server/connector-card-text.test.ts", "server/host/secret-cards.test.ts",
+      "server/notify.test.ts", "server/room-lines.test.ts", "server/post-to-room.test.ts",
+      "server/teammate-lines.test.ts"],
     shards: 2,
     nodeTests: true,
   },
@@ -79,6 +84,7 @@ const AREAS = [
   [/^src\/locales\/(?:(?!en\.json$)[^/]+\.json|[^/]+\.test\.ts)$/, "locales"],
   [/^(?:src|public)\/|^[^/]+-preview\.html$/, "web"],
   [/^(?:server|shared|enterprise|companion|evals|skills|deploy|cloudflare\/composio-broker)\/|^(?:Dockerfile|\.dockerignore|compose\.yaml)$/, "server"],
+  [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
   [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html)$/, "desktop"],
   [/^cloudflare\/control-plane\//, "control-plane"],
 ];

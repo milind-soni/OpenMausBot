@@ -468,6 +468,11 @@ Try again. Afterwards the server is what the window opens, and this computer
 works for it by itself as it does for My Cloud: no access dialog, only the
 menu bar's item with Pause.
 
+Until then, a bot that asks for a teammate living in your other place says where
+that teammate lives and how to bring them together, instead of only that it
+can't reach it: the app tells each place of yours the names of the bots your
+other places have, and nothing more.
+
 This is offered only for a server that is yours alone: you paired with it as an
 admin, and its sign-in list names no members and no other admin (Settings →
 People). A server other people sign in to keeps the explicit **Share this

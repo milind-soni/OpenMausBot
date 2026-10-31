@@ -157,21 +157,27 @@ export function createActingPeople(deps: ActingPeopleDeps) {
 
 export type ActingPeople = ReturnType<typeof createActingPeople>;
 
-type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] } };
+type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean };
+type Place = { child: string | null; parent: string | null };
+
+/** Work in one person's private chat, for a requester whose chat is not that one: its words stay with that person. */
+export const keptPrivate = (place: Place): boolean => Boolean(place.child) && place.parent !== place.child;
 const lastLineAsks = (text: string) => /^needs input:/i.test(text.trimEnd().split(/\r?\n/).at(-1)?.trim() ?? "");
 
 /** What work that ran in one person's private chat hands back to a place others read: where its result is, never the
  * result, which may hold what their own apps brought back or their private notes (a private chat never reaches a room:
  * server/host/room-access.ts). A question it ends on stays a question, with its words left in their chat. Work handed
  * back into the same person's private chat keeps everything. */
-export function privateHandBack<T extends HandedBack>(outcome: T, place: { child: string | null; parent: string | null; bot: string; person: string }): T {
-  if (!place.child || place.parent === place.child) return outcome;
+export function privateHandBack<T extends HandedBack>(outcome: T, place: Place & { bot: string; person: string }): T {
+  if (!keptPrivate(place)) return outcome;
   const where = `${place.bot}'s chat with ${place.person}`;
   const question = `${place.bot} has a question for ${place.person}, in ${where}.`;
   const { evidence: _evidence, ...rest } = outcome;
+  const asks = lastLineAsks(outcome.text);
   return {
     ...rest,
-    text: lastLineAsks(outcome.text) ? `NEEDS INPUT: ${question}` : `${outcome.ok ? "Done" : "It stopped before it finished"}. The result is in ${where}.`,
+    text: asks ? `NEEDS INPUT: ${question}` : `${outcome.ok ? "Done" : "It stopped before it finished"}. The result is in ${where}.`,
     ...(outcome.cards ? { cards: { ...outcome.cards, question } } : {}),
+    ...(asks || outcome.cards ? { privateQuestion: true } : {}),
   } as T;
 }

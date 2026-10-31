@@ -1,5 +1,6 @@
 import type { Notification, NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
@@ -28,6 +29,19 @@ export function buildNoticeNotification(bot: Pick<NotifyBot, "id" | "name">, thr
   return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
 }
 
+
+const TITLE: Partial<Record<NotifyKind, ServerLineKey>> = {
+  approval: "server.notify.approval",
+  question: "server.notify.question",
+  "routine-failed": "server.notify.routineFailed",
+  "routine-deferred": "server.notify.routineDeferred",
+  "turn-failed": "server.notify.turnFailed",
+  incident: "server.notify.incident",
+  "delegation-settled": "server.notify.delegationSettled",
+  mention: "server.notify.mention",
+  wait: "server.notify.wait",
+};
+
 export function buildNotification(
   kind: NotifyKind,
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
@@ -38,29 +52,11 @@ export function buildNotification(
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
-  const who = extra?.group ? `${bot.name} in ${extra.group.name}` : bot.name;
-  const title =
-    kind === "approval"
-      ? `${who} needs approval`
-      : kind === "question"
-        ? `${who} has a question`
-        : kind === "sign-in"
-          ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-          : kind === "routine-failed"
-            ? `${who}'s routine failed`
-            : kind === "routine-deferred"
-              ? `${who}'s routine is waiting`
-            : kind === "turn-failed"
-              ? `${who} couldn't start`
-              : kind === "incident"
-                ? `${who} hit a problem`
-                : kind === "delegation-settled"
-                  ? `${who} resumed with results`
-                  : kind === "mention"
-                    ? `${who} mentioned you`
-                    : kind === "wait"
-                      ? `${who}'s wait is over`
-                      : `${who} finished`;
+  const language = conversationLanguage(threadId);
+  const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
+  const title = kind === "sign-in"
+    ? extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
+    : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

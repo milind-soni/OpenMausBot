@@ -8,14 +8,16 @@ export const CLOUD_INTRO = "cloud-trial-intro-v1";
 export const CLOUD_TRIAL_NOTICE = "cloud-trial-notice";
 export const CLOUD_NOTICE = "cloud-notice";
 export const STAR_NOTICE = "github-star-dismissed";
+/** Bots on this computer and on another place of the person's (two-places.ts): dismissed per place, by main. */
+export const TWO_PLACES_NOTICE = "two-places";
 export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
 
-export type NoticeId = typeof SIMPLE_MODE_NOTICE | typeof CLOUD_PRO_UPDATE_NOTICE | typeof UPDATES_CONSENT_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof BOAT_OFFER_NOTICE | typeof STAR_NOTICE;
+export type NoticeId = typeof SIMPLE_MODE_NOTICE | typeof CLOUD_PRO_UPDATE_NOTICE | typeof UPDATES_CONSENT_NOTICE | typeof TWO_PLACES_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof BOAT_OFFER_NOTICE | typeof STAR_NOTICE;
 
-export const NOTICES: readonly NoticeId[] = [SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE];
+export const NOTICES: readonly NoticeId[] = [SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 

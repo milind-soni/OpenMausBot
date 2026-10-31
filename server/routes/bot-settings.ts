@@ -36,6 +36,8 @@ export interface BotSettingsRouteDeps {
   notificationListed: NotificationListed;
   wireBot(bot: BotRecord): WireBot;
   cloudOwnerSession(auth: RequestAuth): boolean;
+  /** On a Team Cloud a member who can edit the bot changes its profile as its owner would. */
+  levelOf?(auth: RequestAuth, botId: string): string;
   storedAvatarExists(avatarUrl: string): boolean;
   requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord;
   threadBusy(botId: string, threadId: string): boolean;
@@ -102,7 +104,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       }
       const existingBot = store.bot(m[1]);
       // On a Cloud home these fields ride every owner turn: only the owner's own devices change them.
-      if (CLOUD_HOME && existingBot && !cloudOwnerSession(auth)) {
+      if (CLOUD_HOME && existingBot && !cloudOwnerSession(auth) && deps.levelOf?.(auth, existingBot.id) !== "edit") {
         const changed = CLOUD_OWNER_PROFILE_FIELDS.find((field) => parsed.patch[field] !== undefined && (field === "notifications"
           ? (parsed.patch.notifications !== false) !== (existingBot.notifications !== false)
           : parsed.patch[field] !== (existingBot[field] ?? "")));

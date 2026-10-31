@@ -3,6 +3,7 @@
  * message is the reply, and an empty or "(pass)" reply is no reply.
  */
 import type { WireMessage as Message } from "../shared/wire.ts";
+import { serverLine } from "./server-lines.ts";
 
 export function isPassText(text: string | undefined): boolean {
   const trimmed = (text ?? "").trim();
@@ -36,8 +37,6 @@ export function roomTurnNarrationIds(messages: readonly Message[]): Set<string> 
 export const ROOM_SUMMARY_REASK =
   "Your last turn in this room ended without a final message to the room. Reply now with one short message (1–3 lines): your result, or that you could not finish and why. Do not start new work.";
 
-export function finishedWithoutSummaryLine(name: string, reasking: boolean): string {
-  return reasking
-    ? `${name} finished without a summary — asking for a short result`
-    : `${name} finished without a summary`;
+export function finishedWithoutSummaryLine(name: string, reasking: boolean, language?: string): string {
+  return serverLine(language, reasking ? "server.rooms.finishedNoSummaryAsking" : "server.rooms.finishedNoSummary", { bot: name });
 }
