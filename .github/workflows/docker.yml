@@ -31,7 +31,7 @@ permissions:
 jobs:
   build-and-smoke:
     name: build image + boot smoke
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -313,7 +313,7 @@ jobs:
     # Release dispatches on its published tag because GITHUB_TOKEN-created
     # tags do not start another workflow. A manual branch run is smoke-only.
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v'))
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     permissions:
       contents: read
       packages: write

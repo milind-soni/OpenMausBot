@@ -20,7 +20,7 @@ concurrency:
 jobs:
   stop:
     name: stop this PR's CI
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 1
     steps:
       - run: echo "PR closed; its CI run (if any) was cancelled."

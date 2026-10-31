@@ -36,7 +36,7 @@ jobs:
   # aggregates the required jobs (see docs/ci.md for ruleset migration).
   static:
     name: typecheck + lint
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 15
     permissions:
       contents: read
@@ -144,7 +144,7 @@ jobs:
     # env, and the last step proves the offline gate holds by asserting the
     # skip line is what CI gets.
     name: behavior evals (offline tiers 1-3)
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -267,7 +267,7 @@ jobs:
     # Still report failed/skipped dependencies, but don't keep a superseded
     # workflow alive just to schedule its summary jobs.
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 5
     steps:
       - name: Every required job passed
@@ -316,7 +316,7 @@ jobs:
     # open-source edition. Prove it on runtime changes: typecheck, the edition
     # tests, and a boot that reports "oss" even with a key set.
     name: open-source edition builds without enterprise/
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -346,7 +346,7 @@ jobs:
     needs: static
     if: needs.static.outputs.runtime == 'true'
     name: control-plane check + workerd tests + dry run
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -371,7 +371,7 @@ jobs:
     needs: [control-plane]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: deploy composio broker (Cloudflare Worker)
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 10
     steps:
       # A repo without the secret (a fork, or before the token is created)
