@@ -177,7 +177,6 @@ function sentence(raw: unknown): string {
   return typeof raw === "string" ? raw.replace(/\s+/g, " ").replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/~~/g, "").trim().slice(0, TEXT_MAX) : "";
 }
 
-/** Distinct 1-based conversation numbers that were really given, in the given order, or null when fewer than `min` remain. */
 function cited(raw: unknown, conversations: number, min: number): number[] | null {
   if (!Array.isArray(raw)) return null;
   const numbers = [...new Set(raw.map((n) => (typeof n === "string" && /^\d+$/.test(n.trim()) ? Number(n) : n))
