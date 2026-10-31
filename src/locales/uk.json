@@ -37,6 +37,7 @@
   "notice.dismiss": "Приховати назавжди",
   "notice.notNow": "Не зараз",
   "notice.openFailed": "Не вдалося відкрити браузер. Спробуйте ще раз.",
+  "server.teammates.sameRequest": "Інший учасник команди щойно запитав те саме, тому тут буде та сама відповідь, а не друга.",
   "server.reports.sent": "Надіслано команді MausBot (звіт {report}). Milind і Omkar отримають його електронною поштою.",
   "server.reports.sentReply": "Надіслано команді MausBot (звіт {report}). Milind і Omkar отримають його електронною поштою і відповідять на {contact}.",
   "server.reports.sentLater": "Надіслано команді MausBot (звіт {report}) після невдалої попередньої спроби. Milind і Omkar отримають його електронною поштою.",

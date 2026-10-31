@@ -437,6 +437,25 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
 });
 
+test("the lent screen's driver gets Windows' own folders, and never this app's keys", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-env-fixture.mjs");
+  await writeFile(script, `import readline from 'node:readline';
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const env={ LOCALAPPDATA: process.env.LOCALAPPDATA ?? null, APPDATA: process.env.APPDATA ?? null, OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null };
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'list_apps'}]}:{content:[{type:'text',text:JSON.stringify(env)}]};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  for (const [key, value] of [["LOCALAPPDATA", "C:\\Users\\you\\AppData\\Local"], ["APPDATA", "C:\\Users\\you\\AppData\\Roaming"], ["OPENAI_API_KEY", "sk-not-for-the-driver"]]) {
+    const before = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; });
+  }
+  const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] });
+  t.after(() => cua.close());
+  const seen = JSON.parse((await cua.call({ action: "computer_call", tool_name: "list_apps" }, new AbortController().signal)).content[0].text);
+  assert.deepEqual(seen, { LOCALAPPDATA: "C:\\Users\\you\\AppData\\Local", APPDATA: "C:\\Users\\you\\AppData\\Roaming", OPENAI_API_KEY: null });
+});
+
 test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {
   const { dir } = await fixture(t);
   const script = path.join(dir, "cua-windows-fixture.mjs");

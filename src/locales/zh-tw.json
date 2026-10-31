@@ -68,6 +68,7 @@
   "notice.dismiss": "永久關閉",
   "notice.notNow": "暫時不要",
   "notice.openFailed": "無法開啟瀏覽器，請再試一次。",
+  "server.teammates.sameRequest": "另一位隊友剛剛問了同樣的問題，所以這裡會使用那個回答，而不是再產生一個。",
   "server.reports.sent": "已傳送給 MausBot 團隊（回報 {report}）。Milind 和 Omkar 會透過電子郵件收到。",
   "server.reports.sentReply": "已傳送給 MausBot 團隊（回報 {report}）。Milind 和 Omkar 會透過電子郵件收到，並回覆到 {contact}。",
   "server.reports.sentLater": "先前的一次嘗試沒有成功，現已傳送給 MausBot 團隊（回報 {report}）。Milind 和 Omkar 會透過電子郵件收到。",

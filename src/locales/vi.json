@@ -69,6 +69,7 @@
   "notice.dismiss": "Bỏ qua vĩnh viễn",
   "notice.notNow": "Để sau",
   "notice.openFailed": "Không thể mở trình duyệt của bạn. Vui lòng thử lại.",
+  "server.teammates.sameRequest": "Một đồng đội khác vừa hỏi điều tương tự, nên việc này nhận câu trả lời đó thay vì một câu trả lời thứ hai.",
   "server.reports.sent": "Đã gửi cho đội MausBot (báo cáo {report}). Milind và Omkar sẽ nhận qua email.",
   "server.reports.sentReply": "Đã gửi cho đội MausBot (báo cáo {report}). Milind và Omkar sẽ nhận qua email và trả lời tới {contact}.",
   "server.reports.sentLater": "Đã gửi cho đội MausBot (báo cáo {report}) sau khi một lần thử trước đó không thành công. Milind và Omkar sẽ nhận qua email.",
