@@ -6470,5 +6470,6 @@
   "botAccess.yours.chat": "Możesz rozmawiać z {bot} i zaczynać z nim własne rozmowy. O dostępie decydują osoby, które mogą go edytować.",
   "botAccess.yours.other": "O dostępie decydują osoby, które mogą edytować {bot}.",
   "botAccess.viewOnly": "Możesz wyświetlać {bot}, ale nie rozmawiać z nim.",
-  "botAccess.viewOnlyRoom": "Możesz tylko wyświetlać {bot}, więc możesz czytać ten pokój, ale nie pisać w nim."
+  "botAccess.viewOnlyRoom": "Możesz tylko wyświetlać {bot}, więc możesz czytać ten pokój, ale nie pisać w nim.",
+  "task.bulk.selectForDeletion": "Wybierz do usunięcia"
 }

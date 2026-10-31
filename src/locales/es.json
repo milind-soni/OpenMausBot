@@ -5650,5 +5650,6 @@
   "botAccess.yours.chat": "Puedes chatear con {bot} y empezar tus propias conversaciones con él. Quienes pueden editarlo eligen quién tiene acceso.",
   "botAccess.yours.other": "Quienes pueden editar {bot} eligen quién tiene acceso.",
   "botAccess.viewOnly": "Puedes ver {bot}, pero no chatear con él.",
-  "botAccess.viewOnlyRoom": "Solo puedes ver {bot}, así que puedes leer este grupo pero no escribir en él."
+  "botAccess.viewOnlyRoom": "Solo puedes ver {bot}, así que puedes leer este grupo pero no escribir en él.",
+  "task.bulk.selectForDeletion": "Seleccionar para eliminar"
 }

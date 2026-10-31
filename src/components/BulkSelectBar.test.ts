@@ -63,16 +63,17 @@ describe("select mode controls", () => {
 describe("thread list footer", () => {
   const footer = (active: boolean, extra: Record<string, unknown>) => renderToStaticMarkup(createElement(ThreadListFooter, {
     bulk: { active, start: noop, finish: noop, forRows: () => new Set<string>(), setSelected: noop, toggle: noop } as ReturnType<typeof useBulkSelect>,
-    rows, selected: new Set<string>(), total: 5, canShowAll: false, canSelect: false, onShowAll: noop, freshConversation: true, onDelete: noop, ...extra,
+    rows, selected: new Set<string>(), browser: createElement("button", null, "All threads 5"), canSelect: false, freshConversation: true, onDelete: noop, ...extra,
   }));
-  it("offers Show all and Select threads outside select mode", () => {
-    const markup = footer(false, { canShowAll: true, canSelect: true });
-    expect(markup).toContain("Show all 5 threads");
-    expect(markup).toContain("Select threads");
-    expect(footer(false, {})).toBe("");
+  it("keeps the browser available and labels deletion separately", () => {
+    const markup = footer(false, { canSelect: true });
+    expect(markup).toContain("All threads 5");
+    expect(markup).toContain("Select to delete");
+    expect(footer(false, {})).toContain("All threads 5");
   });
   it("shows the delete bar in select mode", () => {
     expect(footer(true, {})).toContain("0 selected");
+    expect(footer(true, {})).not.toContain("All threads 5");
   });
 });
 

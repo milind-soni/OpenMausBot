@@ -7071,5 +7071,6 @@
   "settings.windowFrame.title": "창 프레임",
   "settings.windowFrame.subtitle": "위쪽에 지금 있는 곳을 알려 주는 얇은 막대가 생기고, 채팅은 모서리가 둥근 카드 안에 보여요. 끄면 창이 예전 모습으로 돌아가요.",
   "settings.windowFrame.restart": "{app}을(를) 다시 시작하면 적용돼요.",
-  "settings.windowFrame.restartNow": "지금 다시 시작"
+  "settings.windowFrame.restartNow": "지금 다시 시작",
+  "task.bulk.selectForDeletion": "삭제할 대화 선택"
 }

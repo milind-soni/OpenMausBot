@@ -7251,5 +7251,6 @@
   "botAccess.yours.chat": "You can chat with {bot} and start your own conversations with it. People who can edit it choose who has access.",
   "botAccess.yours.other": "People who can edit {bot} choose who has access.",
   "botAccess.viewOnly": "You can view {bot}, not chat with it.",
-  "botAccess.viewOnlyRoom": "You can only view {bot}, so you can read this room but not write in it."
+  "botAccess.viewOnlyRoom": "You can only view {bot}, so you can read this room but not write in it.",
+  "task.bulk.selectForDeletion": "Select to delete"
 }

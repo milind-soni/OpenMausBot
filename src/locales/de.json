@@ -2752,5 +2752,6 @@
   "botAccess.yours.chat": "Du darfst mit {bot} chatten und eigene Unterhaltungen mit ihm beginnen. Wer ihn bearbeiten darf, legt fest, wer Zugriff hat.",
   "botAccess.yours.other": "Wer {bot} bearbeiten darf, legt fest, wer Zugriff hat.",
   "botAccess.viewOnly": "Du darfst {bot} ansehen, aber nicht mit ihm chatten.",
-  "botAccess.viewOnlyRoom": "Du darfst {bot} nur ansehen: Du kannst diesen Raum lesen, aber nicht darin schreiben."
+  "botAccess.viewOnlyRoom": "Du darfst {bot} nur ansehen: Du kannst diesen Raum lesen, aber nicht darin schreiben.",
+  "task.bulk.selectForDeletion": "Zum Löschen auswählen"
 }
