@@ -25,7 +25,7 @@ import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect
 import { StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
-import { captionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
+import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
@@ -1079,7 +1079,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   // frame off on macOS, the traffic lights sit in the top row's corner.
   const framed = windowFramed(capabilities), corner = framed && simpleDesk;
   const lights = capabilities.windowChrome === "mac-inset" && !framed;
-  const draggableChrome = captionChrome(capabilities.windowChrome).draggable;
+  const draggableChrome = capabilities.windowChrome !== "native";
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline
   // style.
   const windowDragStyle = draggableChrome

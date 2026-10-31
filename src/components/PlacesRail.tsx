@@ -16,7 +16,7 @@ import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
 import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
-import { captionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
+import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
 import { SwatchRadios } from "./SwatchRadios";
@@ -277,7 +277,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     track("rail_place_opened", { kind: place.kind });
     void bridge?.open?.(place.id).catch(() => {});
   };
-  const framed = windowFramed(capabilities), draggable = captionChrome(capabilities.windowChrome).draggable;
+  const framed = windowFramed(capabilities), draggable = capabilities.windowChrome !== "native";
   // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
   // top bar (the traffic lights' place), so its places start under that bar. With the frame turned off, or beside a page
   // that doesn't draw it (an older release), they start under the traffic lights on macOS.
