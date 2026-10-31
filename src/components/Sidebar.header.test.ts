@@ -52,34 +52,24 @@ afterEach(() => {
 });
 
 describe("sidebar header", () => {
-  it.each(["comfortable", "compact", "icons"] as const)(
-    "keeps collapse, activity and add but no density menu at %s density in Advanced mode",
-    (density) => {
-      fixture.density = density;
-      const html = render();
-      expect(html).toContain(density === "icons" ? 'aria-label="Expand sidebar"' : 'aria-label="Collapse sidebar to avatars"');
-      expect(html).toContain('aria-label="Active Threads"');
-      expect(html).toContain('aria-label="New or share"');
-      expect(html).not.toContain("Choose sidebar density");
-      expect(html).not.toContain('title="Sidebar density"');
-    },
-  );
+  const collapse = /aria-label="(Collapse sidebar to avatars|Expand sidebar)"|data-sidebar-edge-toggle/;
 
-  it.each(["comfortable", "compact"] as const)("keeps collapse and add but no activity menu in Simple mode at %s density", (density) => {
+  it.each(["comfortable", "icons"] as const)("keeps activity and add, and no button collapses or expands it, at %s density in Advanced mode", (density) => {
+    fixture.density = density;
+    const html = render();
+    expect(html).toContain('aria-label="Active Threads"');
+    expect(html).toContain('aria-label="New or share"');
+    expect(html).not.toMatch(collapse);
+  });
+
+  it.each(["comfortable", "icons"] as const)("keeps add, no activity menu and no collapse button in Simple mode at %s density: its edge is dragged instead", (density) => {
     fixture.advanced = false;
     fixture.density = density;
     const html = render();
-    expect(html).toContain('aria-label="Collapse sidebar to avatars"');
     expect(html).not.toContain('aria-label="Active Threads"');
     expect(html).toContain('aria-label="New or share"');
-  });
-
-  it("still offers Expand on an icons rail in Simple mode, so the rail is never a dead end", () => {
-    fixture.advanced = false;
-    fixture.density = "icons";
-    const html = render();
-    expect(html).toContain('aria-label="Expand sidebar"');
-    expect(html).not.toContain('aria-label="Active Threads"');
+    expect(html).not.toMatch(collapse);
+    expect(html, "the edge that is dragged, open or as avatars, so the avatars are never a dead end").toMatch(/role="separator" aria-label="Resize sidebar"/);
   });
 });
 
@@ -121,7 +111,7 @@ describe("sidebar top row", () => {
     expect(spacer).toBeGreaterThan(slot);
     expect(switcher).toBeGreaterThan(spacer);
     expect(buttons).toBeGreaterThan(switcher);
-    expect(row.slice(buttons).match(/<button/g)).toHaveLength(3);
+    expect(row.slice(buttons).match(/<button/g)).toHaveLength(2);
     const rowClasses = classesOf(row, "data-sidebar-top-row");
     expect(rowClasses).toEqual(expect.arrayContaining(["relative", "pl-4", "pr-2"]));
     expect(rowClasses).not.toContain("px-4");
@@ -135,13 +125,11 @@ describe("sidebar top row", () => {
     expect(row).toContain('<span class="min-w-0 truncate @max-[96px]/sidebar-top:hidden">Servers</span>');
     expect(row).toContain("focus-visible:outline-2");
     expect(html).toContain('title="New or share"');
-    expect(row).toContain('title="Collapse to avatars"');
-    expect(row).toContain('aria-label="Collapse sidebar to avatars"');
     expect(row).toContain('title="Active Threads"');
     expect(html.match(/Switch server:/g)).toHaveLength(1);
   });
 
-  it.each(["mac-inset", "win-caption"] as const)("in Simple mode on %s keeps only the top corner: plain search and + at its right end, no drag region, no server pill, and the collapse bump on the edge until hover", (windowChrome) => {
+  it.each(["mac-inset", "win-caption"] as const)("in Simple mode on %s keeps only the top corner: plain search and + at its right end, no drag region, no server pill, nothing on the edge", (windowChrome) => {
     fixture.advanced = false;
     fixture.windowChrome = windowChrome;
     desktop();
@@ -159,7 +147,7 @@ describe("sidebar top row", () => {
     expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-expanded="false" title="Search bots and messages" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b[^"]*\btext-ink-secondary\b/);
     expect(row, "no round box round either").not.toContain("bg-composer");
     expect(html).toMatch(/aria-label="New or share" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b/);
-    expect(html).toMatch(/data-sidebar-edge-toggle="true" aria-label="Collapse sidebar to avatars" aria-expanded="true" title="Collapse to avatars" style="-webkit-app-region:no-drag" class="[^"]*\babsolute\b[^"]*\bpointer-events-none opacity-0\b[^"]*\btouch:pointer-events-auto touch:opacity-100\b[^"]*\btop-\[14px\]/);
+    expect(html).not.toContain("data-sidebar-edge-toggle");
     expect(html).not.toContain('title="Active Threads"');
     expect(html).not.toContain("data-sidebar-search-pill");
   });
@@ -192,7 +180,7 @@ describe("sidebar top row", () => {
     expect(buttons).toBeGreaterThan(spacer);
   });
 
-  it("collapses Simple mode to a rail: round search and + on top (the frame's top bar holds the lights), the expand bump on the edge, and Apps and the account at the foot", () => {
+  it("collapses Simple mode to a rail: round search and + on top (the frame's top bar holds the lights), nothing on the edge, and Apps and the account at the foot", () => {
     fixture.advanced = false;
     fixture.density = "icons";
     fixture.windowChrome = "mac-inset";
@@ -211,8 +199,7 @@ describe("sidebar top row", () => {
       expect(index, marker).toBeGreaterThan(-1);
       return index;
     };
-    expect(html).toMatch(/data-sidebar-edge-toggle="true" aria-label="Expand sidebar" aria-expanded="false"[^>]*class="[^"]*\bopacity-100\b[^"]*"><svg[^>]*lucide-chevron-right/);
-    expect(foot).not.toContain('aria-label="Expand sidebar"');
+    expect(html).not.toContain("data-sidebar-edge-toggle");
     expect(foot).not.toContain('aria-label="Search bots and messages"');
     const positions = [
       at('data-sidebar-nav="apps"'),
@@ -304,7 +291,7 @@ describe("the button that hides and shows the window's rail of places", () => {
 });
 
 describe("sidebar head and foot", () => {
-  it.each(["comfortable", "compact", "icons"] as const)(
+  it.each(["comfortable", "icons"] as const)(
     "puts the top row and search in the head, the places in the foot, and the fading list between at %s density",
     (density) => {
       fixture.density = density;
@@ -335,9 +322,8 @@ describe("sidebar head and foot", () => {
 });
 
 describe("sidebar foot in Simple mode", () => {
-  it.each(["comfortable", "compact"] as const)("puts the account avatar then the Connect apps pill in the foot, with Automations and Team map in the account menu (%s)", (density) => {
+  it("puts the account avatar then the Connect apps pill in the foot, with Automations and Team map in the account menu", () => {
     fixture.advanced = false;
-    fixture.density = density;
     const html = render();
     const foot = html.slice(html.indexOf('data-glass-bar="bottom"'));
     expect(foot).toContain('data-sidebar-footer="simple"');

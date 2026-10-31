@@ -14,8 +14,6 @@ const fixture = vi.hoisted(() => ({
   setShowThreads: vi.fn(),
   showRunCard: true,
   setShowRunCard: vi.fn(),
-  sidebarDensity: "comfortable" as "comfortable" | "compact" | "icons",
-  setSidebarDensity: vi.fn(),
   toolsLayout: "rows" as "rows" | "toolbar",
   setSidebarToolsLayout: vi.fn(),
   notificationSounds: true,
@@ -52,8 +50,6 @@ vi.mock("@/lib/run-card-preferences", () => ({
 }));
 vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
-  useSidebarDensity: () => fixture.sidebarDensity,
-  setSidebarDensity: fixture.setSidebarDensity,
   useSidebarToolsLayout: () => fixture.toolsLayout,
   setSidebarToolsLayout: fixture.setSidebarToolsLayout,
 }));
@@ -97,7 +93,6 @@ beforeEach(() => {
   fixture.section = "appearance";
   fixture.showThreads = true;
   fixture.showRunCard = true;
-  fixture.sidebarDensity = "comfortable";
   fixture.toolsLayout = "rows";
   fixture.notificationSounds = true;
   fixture.sendKey = "enter";
@@ -181,7 +176,7 @@ describe("Settings → Appearance", () => {
     fixture.rail = { available: true, hidden: true };
     const html = render();
     const at = html.indexOf('aria-label="Show your computers"');
-    expect(at).toBeGreaterThan(html.indexOf(">Sidebar density<"));
+    expect(at).toBeGreaterThan(html.indexOf('aria-label="Choose tools layout"'));
     expect(at).toBeLessThan(html.indexOf('aria-label="Show threads"'));
     const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
     expect(toggle.checked).toBe(false);
@@ -213,33 +208,20 @@ describe("Settings → Appearance", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["comfortable", "Comfortable"],
-    ["compact", "Compact"],
-    ["icons", "Avatars only"],
-  ] as const)("shows the saved sidebar density (%s) in Appearance", (density, label) => {
-    fixture.sidebarDensity = density;
+  it("has no choice of sidebar density: the sidebar's edge is dragged instead", () => {
     const html = render();
-    expect(html).toContain('aria-label="Choose sidebar density"');
-    expect(html).toContain("Sidebar density");
-    expect(html).toContain("collapsing the sidebar from its header");
-    expect(html).toContain(`<option value="${density}" selected="">${label}</option>`);
-    for (const option of ["Comfortable", "Compact", "Avatars only"]) expect(html).toContain(`>${option}</option>`);
-    expect(fixture.setSidebarDensity).not.toHaveBeenCalled();
-    expect(fixture.api).not.toHaveBeenCalled();
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(html).not.toContain("Sidebar density");
+    expect(html).not.toContain(">Compact</option>");
+    expect(html).not.toContain(">Avatars only</option>");
   });
 
-  it("offers the tools layout row right under the density row", () => {
+  it("offers the tools layout row", () => {
     const html = render();
     expect(html).toContain('aria-label="Choose tools layout"');
     expect(html).toContain("Tools layout");
-    expect(html).toContain("Icons density always shows icons");
+    expect(html).toContain("As a column of avatars, the sidebar always shows icons.");
     expect(html).toContain('<option value="rows" selected="">Rows</option>');
     expect(html).toContain('<option value="toolbar">Toolbar</option>');
-    expect(html.indexOf('aria-label="Choose sidebar density"')).toBeLessThan(
-      html.indexOf('aria-label="Choose tools layout"'),
-    );
     expect(fixture.setSidebarToolsLayout).not.toHaveBeenCalled();
   });
 
@@ -362,7 +344,7 @@ describe("Settings → Appearance", () => {
     expect(html).toContain('aria-label="App language"');
     expect(html).toContain("Diagnostics");
     expect(html).not.toContain('aria-label="Show threads"');
-    expect(html).not.toContain('aria-label="Choose sidebar density"');
+    expect(html).not.toContain('aria-label="Choose tools layout"');
     expect(html).not.toContain('aria-label="Show tool calls in chat"');
     expect(html).not.toContain("Midnight");
   });
@@ -379,7 +361,7 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("Midnight");
     expect(html).toContain('aria-label="Show threads"');
     expect(html).toContain('aria-label="Notification sounds"');
-    expect(html).toContain('aria-label="Choose sidebar density"');
+    expect(html).toContain('aria-label="Choose tools layout"');
     expect(html).not.toContain('aria-label="Show tool calls in chat"');
   });
 
