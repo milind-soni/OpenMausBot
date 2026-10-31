@@ -3,7 +3,8 @@
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import type { LauncherBox } from "../browser/chrome/wrapper.ts";
 
 import { engineInstallRoots } from "../engine-roots.ts";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
@@ -15,7 +16,8 @@ import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
-import { bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { bwrapArgs, describeBoxArgs, physicalPath, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { closeMountFds } from "./pin.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
@@ -36,7 +38,7 @@ export interface WrappedSpawn {
   release(): void;
   /** Keys left raw in the environment because their CLI takes no base URL. */
   unbrokered: string[];
-  /** Descriptors to hand the child after stdio (the seccomp filter), in order from 3; the caller closes them after the spawn. */
+  /** Descriptors for seccomp and pinned mounts, in order from 3; the caller closes them after spawn. */
   extraFds: number[];
 }
 
@@ -45,6 +47,7 @@ export interface BoxBroker {
   port: number;
   mintForThread: CredentialBroker["mintForThread"];
   touchThread: CredentialBroker["touchThread"];
+  revoke: CredentialBroker["revoke"];
   revokeThread: CredentialBroker["revokeThread"];
   lookup: CredentialBroker["lookup"];
 }
@@ -87,7 +90,6 @@ export class BoxRunner {
     const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
-    if (seccomp) extraFds.push(openSync(seccomp, "r"));
     const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
@@ -104,7 +106,10 @@ export class BoxRunner {
     const brokered = this.broker(env, plan, request);
     const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
     const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
-    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    try {
+      if (seccomp) extraFds.push(openSync(seccomp, "r"));
+      return { command: this.options.bwrap, args: [...bwrapArgs(plan, extraFds), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    } catch (error) { closeMountFds(extraFds); brokered.release(); throw error; }
   }
 
   /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
@@ -228,7 +233,7 @@ export class BotBox {
   /** The broker for callers that mint conversation-bound grants, or null when the box (and so the broker) is off. */
   broker(): BoxBroker | null {
     const credentials = this.credentials;
-    return credentials ? { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup } : null;
+    return credentials ? { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revoke: credentials.revoke, revokeThread: credentials.revokeThread, lookup: credentials.lookup } : null;
   }
 
   /** The broker's socket, for a self-check that bridges it. */
@@ -251,14 +256,17 @@ export class BotBox {
   /** The box a bot's Chrome runs in: the system read-only, private /tmp and /run, the host's network (the browser's own
    * gate filters it), `ro` paths, and nothing of HOME or the data folder; the launcher binds the one profile it starts
    * Chrome on. bubblewrap's options before `--`; null when turns are not boxed here. */
-  browserBox(seccompFd: number, ro: readonly string[]): { bwrap: string; options: string[]; seccomp: string | null } | null {
+  browserBox(seccompFd: number, ro: readonly string[]): LauncherBox | null {
     if (!this.runner || !this.detection.tools) return null;
     const setup = { ...this.runner.setup, engineRoots: [] };
     const seccomp = this.seccompFile && !setup.mutate?.has("no-seccomp") ? this.seccompFile : null;
-    const plan = planBox({ ...setup, seccompFd: seccomp ? seccompFd : undefined }, { command: "chrome", args: [], env: {}, net: "shared", ro });
-    const home = resolve(setup.home), dataDir = resolve(setup.dataDir);
-    const mounts = plan.mounts.filter((mount) => !(mount.kind === "bind" && mount.target === home) && !(mount.kind === "tmpfs" && mount.target === dataDir));
-    return { bwrap: this.detection.tools.bwrap, options: bwrapArgs({ ...plan, mounts }), seccomp };
+    const plan = planBox({ ...setup, seccompFd: seccomp ? seccompFd : undefined }, { command: "chrome", args: [], env: {}, net: "shared", home: false, ro });
+    const bwrap = this.detection.tools.bwrap;
+    return { bwrap, options: describeBoxArgs(plan), seccomp, launch: {
+      command: process.execPath,
+      args: ["--experimental-strip-types", resolveProxy("bot-box/box-launch"), JSON.stringify({ bwrap, plan, seccomp,
+        dataDir: { path: setup.dataDir, physical: physicalPath(setup.dataDir) } })],
+    } };
   }
 
   /** More read-write folders for one conversation's boxes (a memory layer); nothing without a runner. */

@@ -34,12 +34,13 @@ linuxBox("the credential broker", () => {
     seen.length = 0;
   });
 
-  async function start(): Promise<number> {
+  async function start(exactPath?: string): Promise<number> {
     upstream = createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
         seen.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers, body });
+        if (exactPath !== undefined && req.url !== exactPath) { res.writeHead(404).end(); return; }
         if (req.url?.includes("/stream")) {
           res.writeHead(200, { "content-type": "text/event-stream" });
           res.write("event: message_start\ndata: {}\n\n");
@@ -76,6 +77,21 @@ linuxBox("the credential broker", () => {
     expect(brokerUrl(18080, minted.token, "anthropic")).toBe(`http://127.0.0.1:18080/b/${minted.token}/anthropic`);
   });
 
+  it.each([
+    { endpoint: "/mcp", suffix: "", expected: "/mcp" },
+    { endpoint: "/mcp?key=x", suffix: "", expected: "/mcp?key=x" },
+    { endpoint: "/mcp/?key=x%2Fy", suffix: "", expected: "/mcp/?key=x%2Fy" },
+    { endpoint: "/mcp?key=x/", suffix: "", expected: "/mcp?key=x/" },
+    { endpoint: "/mcp?key=x", suffix: "?session=1", expected: "/mcp?key=x&session=1" },
+    { endpoint: "/v1/?key=x", suffix: "/messages?beta=1", expected: "/v1/messages?key=x&beta=1" },
+  ])("forwards $endpoint with suffix '$suffix' to its exact pathname and query", async ({ endpoint, suffix, expected }) => {
+    const port = await start(expected);
+    const minted = broker.mintForThread({ threadId: "t1", grants: { mcp: { upstream: `http://127.0.0.1:${port}${endpoint}`, headers: { "x-api-key": REAL_KEY } } } });
+    const answer = await call(broker.socketPath, "POST", `/b/${minted.token}/mcp${suffix}`, {}, "{}");
+    expect(answer.status).toBe(200);
+    expect(seen[0]!.url).toBe(expected);
+  });
+
   it("refuses a wrong token, another bot's grant name, a revoked token and an expired one", async () => {
     const port = await start();
     const grants = { anthropic: { upstream: `http://127.0.0.1:${port}`, headers: { "x-api-key": REAL_KEY } } };
@@ -104,16 +120,26 @@ linuxBox("the credential broker", () => {
     await start();
     const grants = { g: { upstream: "http://127.0.0.1:9", headers: {} } };
     const forThread = broker.mintForThread({ threadId: "t9", grants });
+    const unused = broker.mintForThread({ threadId: "t9", grants });
     const forProcess = broker.mintForProcess({ threadId: "t9", grants });
     expect(forThread.expiresAt).toBe(clock + BROKER_THREAD_TTL_MS);
     expect(forProcess.expiresAt).toBe(clock + BROKER_PROCESS_TTL_MS);
     clock += BROKER_THREAD_TTL_MS - 1_000;
-    broker.touchThread("t9");
+    broker.touchThread("t9", forThread.token);
     clock += 2_000;
     expect(broker.lookup(forThread.token, "g").ok).toBe(true);
+    expect(broker.lookup(unused.token, "g").ok).toBe(false);
     expect(broker.lookup(forProcess.token, "g")).toMatchObject({ ok: false, error: "expired_token" });
     broker.revokeThread("t9");
     expect(broker.lookup(forThread.token, "g")).toMatchObject({ ok: false, error: "unknown_token" });
+  });
+
+  it("does not revive an expired thread token when another turn starts", async () => {
+    await start();
+    const minted = broker.mintForThread({ threadId: "t9", grants: { g: { upstream: "http://127.0.0.1:9", headers: {} } } });
+    clock += BROKER_THREAD_TTL_MS + 1;
+    broker.touchThread("t9", minted.token);
+    expect(broker.lookup(minted.token, "g").ok).toBe(false);
   });
 
   it("refuses a grant name it cannot put in a URL", async () => {

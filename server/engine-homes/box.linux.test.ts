@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { bwrapArgs, planBox, type BoxRequest } from "../bot-box/plan.ts";
 import { detectBox } from "../bot-box/detect.ts";
+import { closeMountFds } from "../bot-box/pin.ts";
 import { audienceHome, engineHomesRoot, homedSpawn } from "./layout.ts";
 import { syncSignIns } from "./sign-ins.ts";
 
@@ -23,10 +24,14 @@ const cwd = join(dataDir, "task-workspaces", "bot-a", "t-owner");
 
 function runInBox(request: Omit<BoxRequest, "command" | "args" | "cwd">, script: string): string {
   const plan = planBox({ dataDir, home: serverHome, codeRoots: [], engineRoots: [], bridges: [] }, { command: "/bin/sh", args: [], cwd, ...request });
-  const ran = spawnSync(detection.tools!.bwrap, [...bwrapArgs(plan), "--", "/bin/sh", "-c", script], {
-    env: Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), encoding: "utf8", timeout: 30_000,
-  });
-  return `${ran.stdout}${ran.stderr}`;
+  const fds: number[] = [];
+  try {
+    const ran = spawnSync(detection.tools!.bwrap, [...bwrapArgs(plan, fds), "--", "/bin/sh", "-c", script], {
+      env: Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), encoding: "utf8", timeout: 30_000,
+      stdio: ["ignore", "pipe", "pipe", ...fds],
+    });
+    return `${ran.stdout}${ran.stderr}`;
+  } finally { closeMountFds(fds); }
 }
 
 describe.skipIf(!available)(`engine homes in a real box (${available ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {

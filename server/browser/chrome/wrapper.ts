@@ -27,8 +27,10 @@ export interface LauncherSettings {
 export interface LauncherBox {
   bwrap: string;
   options: string[];
-  /** The seccomp filter, read on LAUNCHER_SECCOMP_FD; bubblewrap closes that descriptor before Chrome runs. */
+  /** The seccomp filter; the launcher passes its descriptor to bubblewrap, which closes it before Chrome runs. */
   seccomp: string | null;
+  /** A launcher that pins the mount sources when agent-browser starts Chrome. */
+  launch?: { command: string; args: string[] };
 }
 
 /** agent-browser hands Chrome only stdio (it speaks to it over a port), so 9 is free for the filter. */
@@ -78,9 +80,16 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
 
 /** Chrome in its box: its profile (agent-browser's --user-data-dir=) bound back read-write, and nothing else of the home
  * or the data folder; HOME is the box's private /tmp. Without a profile it still runs boxed, on a throwaway one. The shell
- * stays bubblewrap's parent rather than exec'ing it: --die-with-parent ends the box with the thread that started it, and
+ * keeps a parent for bubblewrap: --die-with-parent ends the box with the thread that started it, and
  * agent-browser 0.37 starts Chrome from a worker thread that ends right after. */
 function boxedLaunch(box: LauncherBox, chrome: string): string[] {
+  if (box.launch) return [
+    "profile=",
+    'for arg in "$@"; do case "$arg" in --user-data-dir=*) profile=${arg#--user-data-dir=} ;; esac; done',
+    'if [ -n "$profile" ]; then mkdir -p "$profile" || exit 70; fi',
+    "export ELECTRON_RUN_AS_NODE=1",
+    `exec ${shellQuote(box.launch.command)} ${box.launch.args.map(shellQuote).join(" ")} "$profile" -- ${chrome}`,
+  ];
   return [
     "profile=",
     'for arg in "$@"; do case "$arg" in --user-data-dir=*) profile=${arg#--user-data-dir=} ;; esac; done',

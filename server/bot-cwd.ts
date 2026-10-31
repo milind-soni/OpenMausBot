@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
+import { under } from "./bot-box/plan.ts";
 
 export type CwdValidation = { ok: true; cwd: string | null } | { ok: false; error: string };
 
@@ -26,8 +27,7 @@ export function validateBotCwd(input: unknown): CwdValidation {
 export function sharedProjectFolder(cwd: string | null | undefined, dataDir: string): string | undefined {
   const checked = cwd ? validateBotCwd(cwd) : undefined;
   if (!checked?.ok || !checked.cwd) return undefined;
-  const inside = relative(resolve(dataDir), checked.cwd);
-  return inside === "" || (!inside.startsWith("..") && !isAbsolute(inside)) ? undefined : checked.cwd;
+  return under(checked.cwd, resolve(dataDir)) ? undefined : checked.cwd;
 }
 
 /** coordinate_bots' in_my_folder: the sender's project folder for the teammate threads it opens outside a room, or why an explicit true cannot be honoured. Omitted means on whenever there is a folder to share. */

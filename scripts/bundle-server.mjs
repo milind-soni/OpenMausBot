@@ -61,6 +61,7 @@ const ENTRY_POINTS = [
   "bot-box/box-bridge.ts",
   "bot-box/box-probe.ts",
   "bot-box/box-check.ts",
+  "bot-box/box-launch.ts",
 ];
 
 await build({

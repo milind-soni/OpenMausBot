@@ -485,6 +485,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       const mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
       const scopeReadyPath = toolScope !== undefined ? join(mcpTempDir, "scope-ready.json") : undefined;
       try {
+        if (scopeReadyPath) writeFileSync(scopeReadyPath, "", { mode: 0o600 });
         writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers: mcpServers ?? {}, toolScope, scopeReadyPath, approvalMode: turn.approvalMode, askUser }), { mode: 0o600 });
       } catch (err) {
         // A partial file could still hold credentials.
@@ -493,14 +494,13 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         } catch {}
         throw err;
       }
-      const childArgs = [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension];
-
       // spawnCli can throw synchronously, before settle() could remove the credential file.
       const child = (() => {
         try {
-          return spawnCli(config.cli, childArgs, {
+          return spawnCli(config.cli, [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension], {
             stdio: ["pipe", "pipe", "pipe"],
             cwd: turn.cwd,
+            box: { ro: [join(mcpTempDir, "mcp.json")], rw: scopeReadyPath ? [scopeReadyPath] : [] },
             env: piEnvironment({
               ...process.env,
               ...input.environment,
