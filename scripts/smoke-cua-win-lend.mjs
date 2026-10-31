@@ -19,7 +19,8 @@ if (process.platform !== "win32") {
 }
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const builder = readFileSync(join(root, "electron-builder.yml"), "utf8");
+// git checks text out with CRLF on Windows unless .gitattributes says otherwise.
+const builder = readFileSync(join(root, "electron-builder.yml"), "utf8").replace(/\r\n/g, "\n");
 const winSection = /^win:\n([\s\S]*?)^\S/m.exec(builder)?.[1] ?? "";
 const resources = [...winSection.matchAll(/- from: (dist-native\/cua-win32-x64\/\S+)\s+to: (\S+)/g)].map(([, from, to]) => ({ from, to }));
 if (resources.length < 3) throw new Error("electron-builder.yml no longer names the Windows CUA resources this smoke places");
