@@ -39,7 +39,7 @@ export type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; ope
 
 export const SIMPLE_ADVANCED_ONLY: readonly LocaleKey[] = [
   "settings.newBotEffort.title", "newBot.defaults", "settings.roomTurns.title", "settings.mcpCalls.title", "settings.threads.title",
-  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title", "sidebar.density.title",
+  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title",
   "settings.pinnedCircles.title", "settings.universalPins.title", "settings.toolCalls.title", "settings.runCard.title", "settings.keepWarm.title",
 ];
 
