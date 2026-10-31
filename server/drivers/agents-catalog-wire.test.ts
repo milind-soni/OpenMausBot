@@ -51,7 +51,7 @@ function profiles(): Record<string, Profile> {
   }
   all["skills+shared+voice+escalations"] = { env: { ...all["skills+shared+voice"]!.env, OMB_ESCALATIONS: "1" } };
   // Research is on only with a treg key or a Cloud plan and the bot's switch; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x"] = { env: { ...all["skills+shared+voice+escalations"]!.env, OMB_X_RESEARCH: "1" } };
+  all["skills+shared+voice+escalations+x"] = { env: { ...all["skills+shared+voice+escalations"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
   // A Team Cloud mounts message_person; the fullest profile carries it.
   all["skills+shared+voice+escalations+x+team"] = { env: { ...all["skills+shared+voice+escalations+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
   all["default+legacy-switches"] = {
@@ -81,33 +81,33 @@ const FULL = "skills+shared+voice+escalations+x+team";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 56624,
-  "voice": 57405,
-  "shared": 58855,
-  "shared+voice": 59636,
-  "skills": 59443,
-  "skills+voice": 60224,
-  "skills+shared": 61674,
-  "skills+shared+voice": 62455,
-  "non-chief": 47567,
-  "voice+non-chief": 48348,
-  "shared+non-chief": 49798,
-  "shared+voice+non-chief": 50579,
-  "skills+non-chief": 50386,
-  "skills+voice+non-chief": 51167,
-  "skills+shared+non-chief": 52617,
-  "skills+shared+voice+non-chief": 53398,
-  "skills+shared+voice+cloud-home": 61536,
-  "skills+shared+voice+non-chief+cloud-home": 53675,
-  "default+legacy-switches": 56624,
-  "default+mausbot": 57275,
-  "skills+shared+voice+mausbot": 63106,
-  "skills+shared+voice+escalations": 63285,
-  "skills+shared+voice+escalations+x": 67124,
-  "skills+shared+voice+escalations+x+team": 67756,
-  "default+no-computer-pick": 55412,
-  "default+room": 48494,
-  "non-chief+room": 39437,
+  "default": 56796,
+  "voice": 57577,
+  "shared": 59027,
+  "shared+voice": 59808,
+  "skills": 59615,
+  "skills+voice": 60396,
+  "skills+shared": 61846,
+  "skills+shared+voice": 62627,
+  "non-chief": 47739,
+  "voice+non-chief": 48520,
+  "shared+non-chief": 49970,
+  "shared+voice+non-chief": 50751,
+  "skills+non-chief": 50558,
+  "skills+voice+non-chief": 51339,
+  "skills+shared+non-chief": 52789,
+  "skills+shared+voice+non-chief": 53570,
+  "skills+shared+voice+cloud-home": 61708,
+  "skills+shared+voice+non-chief+cloud-home": 53847,
+  "default+legacy-switches": 56796,
+  "default+mausbot": 57447,
+  "skills+shared+voice+mausbot": 63278,
+  "skills+shared+voice+escalations": 63457,
+  "skills+shared+voice+escalations+x": 67296,
+  "skills+shared+voice+escalations+x+team": 67928,
+  "default+no-computer-pick": 55584,
+  "default+room": 48666,
+  "non-chief+room": 39609,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -224,7 +224,7 @@ describe("agents proxy tools/list golden", () => {
       for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools.has(alias), `${name}: ${alias}`).toBe(false);
       expect(JSON.stringify([...tools.values()])).not.toMatch(/Deprecated alias|works for this release/);
       const coordinate = tools.get("coordinate_bots")!.inputSchema.properties;
-      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
+      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
       expect(coordinate.thread!.enum).toEqual(["standing", "new"]);
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
       expect(Object.keys(tools.get("assignment_status")!.inputSchema.properties)).toEqual(["id", "wait_ms"]);
@@ -328,13 +328,16 @@ describe("agents proxy tools/list golden", () => {
   it("shows the X and research tools only where research is on, and adds nothing else", () => {
     for (const [name, profile] of Object.entries(PROFILES)) {
       const names = toolsOf(wires[name]!).map((tool) => tool.name);
-      for (const tool of RESEARCH_TOOLS) expect(names.includes(tool), `${name}: ${tool}`).toBe(profile.env.OMB_X_RESEARCH === "1");
+      for (const tool of RESEARCH_TOOLS) expect(names.includes(tool), `${name}: ${tool}`).toBe(profile.env.OMB_X_RESEARCH === "1" && profile.env.OMB_RESEARCH === "1");
     }
     const switchedOn = Object.keys(PROFILES).filter((name) => name.endsWith("+x"));
     expect(switchedOn).toHaveLength(1);
     for (const name of switchedOn) {
       const without = toolsOf(wires[name.slice(0, -"+x".length)]!).map((tool) => tool.name);
       expect(toolsOf(wires[name]!).map((tool) => tool.name).filter((tool) => !RESEARCH_TOOLS.includes(tool))).toEqual(without);
+      // A plan's relay can have X without research: x_search alone, and nothing else changes.
+      const xOnly = availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "bot-golden", ...PROFILES[name]!.env, OMB_RESEARCH: "0" })).map((tool) => tool.name);
+      expect(xOnly).toEqual(toolsOf(wires[name]!).map((tool) => tool.name).filter((tool) => tool === "x_search" || !RESEARCH_TOOLS.includes(tool)));
     }
   });
 

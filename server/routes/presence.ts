@@ -11,12 +11,16 @@ export interface PresenceRouteDeps {
   /** The language the app of a ping that counts shows (the owner's, or a member's), for the lines the server writes for
    * that person (host/person-languages.ts). */
   heard?(auth: RequestAuth, language: string): void;
+  /** The conversation open in the app while the person was active: it is the one in front of them. */
+  sawChat?(auth: RequestAuth, threadId: string): void;
 }
 
 const IANA_ZONE = /^(?:UTC|[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+)$/;
 const LANGUAGE_TAG = /^[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}$/i;
+const THREAD_ID = /^[\w-]{1,100}$/;
 
-/** POST /api/presence/active {source, timeZone, language}: the person opened or used the app. Only the owner's counts. */
+/** POST /api/presence/active {source, timeZone, language, threadId}: the person opened or used the app, with that
+ * conversation open. Only the owner's counts. */
 export function createPresenceRoutes(deps: PresenceRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method !== "POST" || path !== "/api/presence/active") return PASS;
@@ -26,6 +30,7 @@ export function createPresenceRoutes(deps: PresenceRouteDeps): RouteHandler {
     const timeZone = typeof given.timeZone === "string" && given.timeZone.length <= 128 && IANA_ZONE.test(given.timeZone) ? validZone(given.timeZone) : undefined;
     const language = typeof given.language === "string" && LANGUAGE_TAG.test(given.language) ? given.language.toLowerCase() : undefined;
     if (language && (deps.member || deps.isOwner(auth))) deps.heard?.(auth, language);
+    if (typeof given.threadId === "string" && THREAD_ID.test(given.threadId)) deps.sawChat?.(auth, given.threadId);
     if (deps.member) return json(res, 200, { ok: true, ...deps.member(auth, language) });
     // A guest's activation is not the person's: answered, never recorded.
     if (!deps.isOwner(auth)) return json(res, 200, { ok: true, returned: false });

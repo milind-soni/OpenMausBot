@@ -1198,3 +1198,66 @@ describe("the Simple mode popup after the update", () => {
     expect(later).toContain(POPUP); expect(later).not.toContain(TITLE);
   });
 });
+
+describe("bots in two places", () => {
+  const GARAGE = { key: "server:https://garage.example.test", name: "Garage server", kind: "server" as const };
+  const BODY = "Your bots live in two places, so they can&#x27;t work together. Bring them together on Garage server?";
+  let suggest: typeof GARAGE | null;
+  let accepted: string[], dismissed: string[];
+  beforeEach(() => {
+    suggest = GARAGE; accepted = []; dismissed = [];
+    desk.handlers.set("two-places:state", async () => ({ suggest }));
+    desk.handlers.set("two-places:accept", async (_event, key) => { accepted.push(String(key)); suggest = null; return { suggest }; });
+    desk.handlers.set("two-places:dismiss", async (_event, key) => { dismissed.push(String(key)); suggest = null; return { suggest }; });
+  });
+
+  it("one plain card on this computer's page, before any promotion; its one tap asks main to bring them together there", async () => {
+    returning();
+    storage.delete(PRODUCT_HUNT_NOTICE);
+    const html = await launch();
+    expect(html).toContain('data-notice="two-places"');
+    expect(html).toContain("Bring your bots together");
+    expect(html).toContain(BODY);
+    expect(html).not.toContain(STAR);
+    press("Bring them together");
+    await flush();
+    expect(accepted).toEqual([GARAGE.key]);
+    expect(track).toHaveBeenCalledWith("two_places_card", { action: "bring", kind: "server" });
+    expect(await settle()).not.toContain('data-notice="two-places"');
+  });
+
+  it("Not now hands main the place to remember, and the card goes", async () => {
+    returning();
+    expect(await launch()).toContain(BODY);
+    press("Not now");
+    await flush();
+    expect(dismissed).toEqual([GARAGE.key]);
+    expect(await settle()).not.toContain('data-notice="two-places"');
+    expect(await launch(), "main remembers it: never asked again").not.toContain('data-notice="two-places"');
+  });
+
+  it("never during the welcome or the tour, on a Cloud's or a server's page, or when main suggests nothing", async () => {
+    returning();
+    f.state.welcomeOpen = true;
+    expect(await launch()).not.toContain('data-notice="two-places"');
+    f.state.welcomeOpen = false; f.state.tourOpen = true;
+    expect(await launch()).not.toContain('data-notice="two-places"');
+    f.state.tourOpen = false;
+    for (const origin of [MY_CLOUD, VPS]) {
+      showWindow(origin);
+      expect(await launch(), origin).not.toContain('data-notice="two-places"');
+    }
+    showWindow(LOCAL_ORIGIN);
+    suggest = null;
+    expect(await launch()).not.toContain('data-notice="two-places"');
+  });
+
+  it("is this computer's page's alone: no other page gets the bridge, and none would show it", async () => {
+    returning();
+    expect(windowOn(LOCAL_ORIGIN).twoPlaces).toBeDefined();
+    for (const origin of [MY_CLOUD, VPS]) expect(windowOn(origin).twoPlaces, origin).toBeUndefined();
+    const ask = vi.fn(async () => ({ suggest: GARAGE }));
+    vi.stubGlobal("window", { ogb: { ...windowOn(MY_CLOUD), twoPlaces: { state: ask, accept: ask, dismiss: ask, onChanged: () => () => {} } }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    expect(await launch(), "a Cloud's page handed the bridge anyway").not.toContain('data-notice="two-places"');
+  });
+});
