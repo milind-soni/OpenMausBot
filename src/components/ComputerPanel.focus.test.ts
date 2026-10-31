@@ -64,7 +64,7 @@ let nextFrame = 1;
 const value = (): Parameters<typeof BotEditorStore>[0]["value"] => ({
   state: { ...initialState, instances: [engine("claude")], config: { box: { configured: true } } as AppState["config"] } as AppState,
   dispatch: vi.fn(),
-  flushBotPatches: async () => null,
+  navigationRevision: { current: 0 }, flushBotPatches: async () => null,
   refreshInstances: async () => {},
   refreshModels: async () => {},
 });

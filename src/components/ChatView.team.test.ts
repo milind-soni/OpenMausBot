@@ -44,7 +44,7 @@ const luna = (messages: Message[], extra: Partial<Bot> = {}): Bot => ({
 });
 const draw = (bot: Bot) => {
   const state: AppState = { ...initialState, connected: true, selectedId: bot.id, bots: [bot], instances, config: { team } as AppState["config"] };
-  const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: () => {}, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
 };
 const row = (text: string) => [...container.querySelectorAll<HTMLElement>("[data-message-row]")].find((element) => element.textContent?.includes(text))!;

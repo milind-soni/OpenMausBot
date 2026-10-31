@@ -84,7 +84,7 @@ beforeAll(async () => {
     instances: [engine],
     config: { box: { configured: true } } as AppState["config"],
   };
-  value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  value = { state, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

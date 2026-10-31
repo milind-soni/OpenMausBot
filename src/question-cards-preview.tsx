@@ -123,7 +123,7 @@ function Gallery() {
   if (surface === "panel") openInbox(view.rows[0]?.kind === "ask" && stateName !== "answered" ? { reading: view.rows[0].id } : { tab: stateName === "answered" ? "done" : "needs-you" });
   const shown = surface === "chat" ? all[0]! : all[1]!;
   const state: AppState = { ...initialState, bots: all, selectedId: shown.id, connected: true };
-  const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: () => {}, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   return (
     <StoreContext.Provider value={value}>
       <Frame>

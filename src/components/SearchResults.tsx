@@ -11,7 +11,7 @@ export const MIN_QUERY = 2;
 const DEBOUNCE_MS = 250;
 
 export function SearchResults({ query, onLanded }: { query: string; onLanded: () => void }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, navigationRevision } = useStore();
   const showThreads = useShowThreads();
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
 
   const land = async (hit: SearchHit) => {
     try {
-      await landOnSearchHit(hit, state, dispatch, showThreads);
+      await landOnSearchHit(hit, state, dispatch, showThreads, navigationRevision);
       onLanded();
     } catch (e) {
       dispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });

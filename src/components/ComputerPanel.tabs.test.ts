@@ -62,7 +62,7 @@ const value = (): Parameters<typeof BotEditorStore>[0]["value"] => ({
   state: { ...initialState, instances: [engine("claude"), engine("codex")], config: { box: { configured: true },
     ...(fixture.browser ? { features: { browser: true }, browserEngine: { kind: "engine" } } : {}) } as AppState["config"] } as AppState,
   dispatch: vi.fn(),
-  flushBotPatches: async () => null,
+  navigationRevision: { current: 0 }, flushBotPatches: async () => null,
   refreshInstances: async () => {},
   refreshModels: async () => {},
 });

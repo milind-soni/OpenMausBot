@@ -40,7 +40,7 @@ function Probe() {
 }
 
 async function draw(state: AppState) {
-  const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   await act(async () => root.render(createElement(store.BotEditorStore, { value, children: createElement(Probe) })));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }

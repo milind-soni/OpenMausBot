@@ -29,38 +29,46 @@ async function loadThroughMessage(
   if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
 }
 
+let latestChoice = 0;
+
 export async function landOnSearchHit(
   hit: SearchHit,
   state: Pick<AppState, "bots" | "groups" | "transcriptGeneration">,
   dispatch: React.Dispatch<Action>,
   threadsShown: boolean,
+  navigationRevision: Readonly<{ current: number }>,
 ): Promise<void> {
   const ownerId = hit.botId ?? hit.groupId;
   const bot = hit.botId ? state.bots.find((candidate) => candidate.id === hit.botId) : undefined;
   const group = hit.groupId ? state.groups.find((candidate) => candidate.id === hit.groupId) : undefined;
   if (!ownerId || (!bot && !group)) throw new Error("That conversation is no longer available.");
 
+  const choice = ++latestChoice;
+  if (bot) dispatch({ type: "searchNavigationStarted", botId: bot.id });
   const switchAlone = bot && bot.threadId !== hit.threadId && !threadsShown ? bot : undefined;
   if (!switchAlone) dispatch({ type: "select", id: ownerId });
+  if (group && !group.dm) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
+  const revision = navigationRevision.current;
+  const current = () => choice === latestChoice && navigationRevision.current === revision;
   if (bot && bot.threadId !== hit.threadId && !switchAlone) {
     const result = await api(`/api/bots/${bot.id}/tasks/${hit.threadId}`, { method: "POST" });
+    if (!current()) return;
     if (result?.bot) dispatch({ type: "taskSwitched", bot: result.bot });
-  }
-  if (group && group.threadId !== hit.threadId) {
-    const result = await api(`/api/groups/${group.id}/tasks/${hit.threadId}`, { method: "POST" });
-    if (result?.group) dispatch({ type: "groupPatched", group: result.group });
   }
   const open = bot?.threadId === hit.threadId ? bot : group?.threadId === hit.threadId ? group : undefined;
   if (open) await loadThroughMessage(open, hit.messageId, state.transcriptGeneration[hit.threadId] ?? 0, dispatch);
+  if (!current()) return;
   if (bot && !hit.onActivePath) {
     const branch = await api(`/api/bots/${bot.id}/active-branch`, {
       method: "POST",
       body: JSON.stringify({ messageId: hit.messageId, threadId: hit.threadId }),
     });
+    if (!current()) return;
     if (branch?.activeLeafId) {
       dispatch({ type: "threadActive", threadId: hit.threadId, activeLeafId: branch.activeLeafId });
     }
   }
+  if (!current()) return;
   if (switchAlone) dispatch({ type: "switchTask", botId: switchAlone.id, threadId: hit.threadId, whole: true });
   dispatch({
     type: "focusMessage",

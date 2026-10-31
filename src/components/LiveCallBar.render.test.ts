@@ -27,7 +27,7 @@ const render = (element: ReturnType<typeof createElement>) =>
   renderToStaticMarkup(createElement(StoreProvider, null, element));
 const renderOnCloud = (element: ReturnType<typeof createElement>) => {
   const config = { cloudHome: true, live: { configured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 } } as AppState["config"];
-  const value = { state: { ...initialState, config }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state: { ...initialState, config }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   return renderToStaticMarkup(createElement(BotEditorStore, { value, children: element }));
 };
 const CLOUD_DISCLOSURE = `A Live call sends your voice to OpenAI, along with the chat&#x27;s recent messages, the bot&#x27;s answers and the details of any approval it asks for. The OpenAI key stays in the Cloud.`;
@@ -146,7 +146,7 @@ describe("LiveCallSettings", () => {
 
   it("says which key Live calls use, and removes only a separate Live key", () => {
     const withLive = (live: LiveSettings) => {
-      const value = { state: { ...initialState, config: { live } as AppState["config"] }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+      const value = { state: { ...initialState, config: { live } as AppState["config"] }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
       return renderToStaticMarkup(createElement(BotEditorStore, { value, children: createElement(LiveCallSettings, { onClose: vi.fn() }) }));
     };
     const base = { voice: "marin", readTypedReplies: true, idleMinutes: 5 };

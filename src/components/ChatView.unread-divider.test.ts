@@ -44,7 +44,7 @@ const dispatched: Action[] = [];
 const dispatch = (action: Action) => { dispatched.push(action); };
 let root: Root;
 async function draw() {
-  const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   const children = createElement(ChatView, { bot: state.bots.find((bot) => bot.id === state.selectedId)! });
   flushSync(() => root.render(createElement(BotEditorStore, { value, children })));
   await vi.advanceTimersByTimeAsync(0);
