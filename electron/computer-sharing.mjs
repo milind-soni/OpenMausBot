@@ -145,6 +145,16 @@ export function saidNo(record) {
   return record.internet === false;
 }
 
+/** Security: the menu's switch lends the terminal to every Cloud of one account, so grants from before it stand for it
+ * only when one account's grants all lent the terminal, as the person confirmed then, and nobody said no to lending. */
+function terminalLentBeforeAutomatic(records) {
+  const grants = Object.values(records).filter(record => record?.enabled === true && typeof record.cloud?.accountId === "string" && !saidNo(record));
+  const accounts = new Set(grants.filter(grant => grant.terminal === true).map(grant => grant.cloud.accountId));
+  if (accounts.size !== 1) return null;
+  const [account] = accounts;
+  return grants.every(grant => grant.cloud.accountId !== account || grant.terminal === true) ? account : null;
+}
+
 /** What each Cloud of the person's own gets by itself: the internet connection, their Chrome, apps and screen once
  * computer control works here (`screen`), and the home folder with editing (`home`, null when it can't be lent), on top
  * of the folders lent to it already (`kept`, which Files may keep copies of) and the project folders the move adds. The
@@ -210,6 +220,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (parsed?.version === 1 && parsed.records && typeof parsed.records === "object") records = parsed.records;
     paused = parsed?.automatic ? parsed.automatic.paused === true : Object.values(records).some(saidNo);
     if (typeof parsed?.automatic?.terminalAccount === "string") terminalAccount = parsed.automatic.terminalAccount;
+    else if (!parsed?.automatic) terminalAccount = terminalLentBeforeAutomatic(records);
   } catch {}
   const running = new Map();
   const grantVersions = new Map();
