@@ -46,7 +46,11 @@ or by a Worker deployed before it, keep their account) and moves capacity
 state to one row per account (`managed_endpoint_account_capacity`, seeded from
 the `0006` row, which stays but is no longer written). Endpoint rows
 deliberately do not cascade away with a hard installation deletion: losing the
-tunnel and DNS IDs would make operator cleanup impossible.
+tunnel and DNS IDs would make operator cleanup impossible. `0011` drops
+`account.issuer` and its unique index: `0001` created them for Better Auth
+1.7.1, and from 1.7.3 Better Auth never writes the column, so it would refuse
+any new account row. Apply `0011` before deploying a Worker on Better Auth
+1.7.7.
 
 ## API surface
 
