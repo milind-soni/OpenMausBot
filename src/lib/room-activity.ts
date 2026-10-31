@@ -6,5 +6,5 @@ export function roomActivityVisible(message: Message, showToolCalls: boolean): b
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
   if (message.comm || message.threadRef || message.relay || message.dataResult || isStatusActivity(message)) return true;
-  return tool.ok === false || failedTurnCause(tool.name) !== null || showToolCalls;
+  return failedTurnCause(tool.name) !== null || showToolCalls;
 }

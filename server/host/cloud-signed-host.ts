@@ -20,6 +20,8 @@ export interface CloudSignedHostDeps {
   teamAdmin?: { summary(): Promise<TeamAdminSummary> };
   /** A Team Cloud's member left (the Admin's signed request): delete what was theirs alone. */
   memberLeft?: (email: string) => Promise<Record<string, unknown>>;
+  /** The plan was cancelled, or renews again (the Admin's signed request): routines wait while it is cancelled. */
+  plan?: (cancelled: boolean) => void;
 }
 
 export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth: CloudHealth | null; cloudSigned: ReturnType<typeof createCloudSignedRoutes> | null } {
@@ -27,7 +29,7 @@ export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth:
   const cloudSigned = deps.cloudHome && cloudHealth
     ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, health: cloudHealth, power: deps.power, box: deps.box,
       ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}),
-      ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}) })
+      ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}), ...(deps.plan ? { plan: deps.plan } : {}) })
     : null;
   return { cloudHealth, cloudSigned };
 }

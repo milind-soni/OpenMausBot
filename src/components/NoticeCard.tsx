@@ -26,10 +26,10 @@ export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel
 
 export const PRIMARY_BUTTON = "ui-button ui-button-primary min-h-9 gap-1.5 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function LinkButton({ url, label, onOpened }: { url: string; label: string; onOpened?: () => void }) {
+export function LinkButton({ url, label, onOpened, className = PRIMARY_BUTTON }: { url: string; label: string; onOpened?: () => void; className?: string }) {
   const [failed, setFailed] = useState(false);
   return <div>
-    <button type="button" className={PRIMARY_BUTTON} onClick={() => {
+    <button type="button" className={className} onClick={() => {
       setFailed(false);
       void openExternalLink(url).then(onOpened).catch(() => setFailed(true));
     }}>

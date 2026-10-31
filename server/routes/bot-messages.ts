@@ -134,6 +134,8 @@ export interface BotMessageRouteDeps {
   inboxReply?(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender }): { status: number; message?: Message; error?: string } | null;
   /** A typed line that answers a bot's question card; null sends it as usual. */
   typedCardAnswer?(auth: RequestAuth, threadId: string, text: string, target: Message | undefined, line: { sendId?: string; sender?: ResolvedSender }): Promise<{ status: number; message?: Message; error?: string } | null>;
+  /** On a Team Cloud: why the person a relayed message names may not chat with this bot; null when they may. */
+  relayRefusal?(bot: BotRecord, email: string | undefined): string | null;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -228,6 +230,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 202, { ok: true, threadId, message });
       }
       const onBehalfOf = guardedBody?.data?.onBehalfOf;
+      const relayRefused = guardedBody && (onBehalfOf || auth.kind === "loopback") ? deps.relayRefusal?.(bot, onBehalfOf?.email) : null;
+      if (relayRefused) return json(res, 403, { error: relayRefused });
       const trigger: UsageTrigger = onBehalfOf
         ? { kind: "user", ...(onBehalfOf.email ? { email: onBehalfOf.email } : {}), ...(onBehalfOf.name ? { label: onBehalfOf.name } : {}) }
         : usageTriggerFor(auth);

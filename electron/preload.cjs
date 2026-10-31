@@ -148,6 +148,9 @@ const bridge = {
     // Remove from list, for a Cloud the window's rail lists as removable, from a click on the rail's own page (main refuses any other page).
     remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:remove", String(id)) : Promise.reject(new Error("Choose Remove from list.")),
+    // Make a server of the person's own their bots' home, from a click on the rail's own page (main refuses any other page).
+    makeHome: (id) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:make-home", String(id)) : Promise.reject(new Error("Choose Make my home.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
@@ -179,8 +182,9 @@ const bridge = {
   // out; the account, the token and the checkout page stay in main. Only from the person's click where it opens anything.
   cloudAdd: {
     state: () => ipcRenderer.invoke("cloud-add:state"),
-    start: (tier, name, color) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color)) : Promise.reject(new Error("Choose Continue to checkout.")),
+    start: (tier, name, color, source) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color), ...(source == null ? [] : [String(source)]))
+      : Promise.reject(new Error("Choose Continue to checkout.")),
     reopen: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-add:reopen") : Promise.reject(new Error("Choose Reopen checkout.")),
     copyLink: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -468,6 +472,17 @@ const bridge = {
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
     },
   } : undefined,
+  // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.
+  twoPlaces: {
+    state: () => ipcRenderer.invoke("two-places:state"),
+    accept: key => ipcRenderer.invoke("two-places:accept", String(key)),
+    dismiss: key => ipcRenderer.invoke("two-places:dismiss", String(key)),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("two-places:changed", handler);
+      return () => ipcRenderer.removeListener("two-places:changed", handler);
+    },
+  },
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -485,6 +500,11 @@ const bridge = {
       ? ipcRenderer.invoke("cloud-plan:cancel", survey ?? null) : Promise.reject(new Error("Choose Cancel to cancel your plan.")),
     keep: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:keep") : Promise.reject(new Error("Choose Keep my plan to keep it.")),
+    // The room card's Not now, and Restart now after its upgrade: only from the person's click.
+    roomNotNow: id => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:room-not-now", String(id)) : Promise.reject(new Error("Choose Not now.")),
+    restartNow: () => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:restart-now") : Promise.reject(new Error("Choose Restart now to restart the Cloud.")),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),
@@ -552,7 +572,6 @@ const bridge = {
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
-    shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
   },
   desktopAnalytics: {
     enabled: () => {

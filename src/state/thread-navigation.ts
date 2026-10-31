@@ -70,7 +70,7 @@ export function awayFromMainThread(bot: Pick<NotificationThreadOwner, "threadId"
 /** On a team's Cloud, the person's own conversation with the bot, never the team's main chat (team-chats.ts). */
 export function openBot(
   dispatch: (action: Action) => void,
-  bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks">,
+  bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
   threadsShown: boolean,
 ) {
   if (openOwnTeamChat(dispatch, bot, (threadId) => openBotThread(dispatch, bot, threadId, threadsShown))) return;
