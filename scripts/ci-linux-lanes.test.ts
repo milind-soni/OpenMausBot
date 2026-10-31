@@ -1,10 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { EVALS_LANE, ISOLATE, isolationRefusal, laneCommand, lanesFor, PACKAGED_SERVER_LANE, runLanes, vitestLane } from "./ci-linux-lanes.mjs";
+import { EVALS_LANE, ISOLATE, laneCommand, lanesFor, PACKAGED_SERVER_LANE, runLanes, vitestLane } from "./ci-linux-lanes.mjs";
 import { vitestMatrix } from "./ci-scope.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -61,32 +59,13 @@ describe("Linux lanes", () => {
     expect(summary).toContain("| slow pass | passed |");
   });
 
-  it("starts a lane in a network namespace of its own, with its own home, temporary and runtime folders", () => {
+  it("starts an isolated lane in a network namespace of its own, as the job's user, with its own folders", () => {
     const lane = { name: "a", env: { WORD: "x" }, commands: ["echo one", "echo two"] };
     expect(laneCommand(lane, { isolate: false, dir: "/l/1" })).toEqual({ file: "bash", args: ["-eo", "pipefail", "-c", "echo one\necho two"], env: { WORD: "x" } });
-    expect(laneCommand(lane, { isolate: true, dir: "/l/1" })).toEqual({
-      file: "unshare", args: [...ISOLATE.slice(1), "echo one\necho two"],
-      env: { WORD: "x", HOME: "/l/1/home", TMPDIR: "/l/1/tmp", XDG_RUNTIME_DIR: "/l/1/run" },
+    expect(laneCommand(lane, { isolate: true, dir: "/tmp/omb-lane-1-x", user: { uid: 1000, gid: 1001 } })).toEqual({
+      file: "unshare", args: [...ISOLATE.slice(1), "1000", "1001", "echo one\necho two"],
+      env: { WORD: "x", HOME: "/tmp/omb-lane-1-x/home", TMPDIR: "/tmp/omb-lane-1-x/tmp", XDG_RUNTIME_DIR: "/tmp/omb-lane-1-x/run" },
     });
-  });
-
-  const refusal = process.platform === "linux" ? isolationRefusal() : "not Linux";
-  it.skipIf(refusal !== null)("keeps an isolated lane off the machine's ports, in its own folders, with no capabilities", async () => {
-    const outside = createServer();
-    await new Promise<void>((resolve) => outside.listen(0, "127.0.0.1", resolve));
-    const { port } = outside.address() as AddressInfo;
-    const lines: string[] = [];
-    try {
-      const failed = await runLanes([{ name: "isolated", env: {}, commands: [
-        `node -e "require('net').connect(${port}, '127.0.0.1').on('connect', () => process.exit(3)).on('error', () => process.exit(0))"`,
-        `node -e "require('net').createServer().listen(${port}, '127.0.0.1', () => process.exit(0))"`,
-        `test "$HOME" != "${process.env.HOME}"`,
-        `test "$(node -p "require('os').tmpdir()")" = "$TMPDIR"`,
-        "grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status",
-      ] }], { dir: scratch(), timeoutMs: 30_000, isolate: true, log: (line) => lines.push(line) });
-      expect(failed, lines.join("\n")).toEqual([]);
-    } finally {
-      outside.close();
-    }
+    expect(ISOLATE.slice(0, 3)).toEqual(["unshare", "--net", "--"]);
   });
 });

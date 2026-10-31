@@ -339,7 +339,7 @@ describe("CI on Boat", () => {
       "steps.scope.outputs.linux_lanes", "steps.scope.outputs.linux_lanes", "steps.scope.outputs.linux_lanes",
       "${{ !cancelled() && steps.scope.outputs.linux_lanes }}", "failure() && steps.scope.outputs.linux_lanes",
     ]);
-    const lanes = boatOnly.find((step) => step.run === "node scripts/ci-linux-lanes.mjs")!;
+    const lanes = boatOnly.find((step) => step.run === 'sudo -n -E env "PATH=$PATH" node scripts/ci-linux-lanes.mjs')!;
     expect(lanes.env).toMatchObject({
       OMB_CI_LINUX_LANES: "${{ steps.scope.outputs.linux_lanes }}", OMB_CI_ISOLATE_LANES: "1", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", TZ: "UTC",
     });
