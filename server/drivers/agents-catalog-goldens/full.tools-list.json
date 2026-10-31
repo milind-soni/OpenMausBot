@@ -182,6 +182,10 @@
           "done_when": {
             "type": "string",
             "description": "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it."
+          },
+          "answers": {
+            "type": "string",
+            "description": "Only to answer a teammate's question instead of sending work: the assignment id its question note names. message is the answer."
           }
         },
         "required": [

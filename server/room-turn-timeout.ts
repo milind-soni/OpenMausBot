@@ -3,6 +3,7 @@ import {
   MIN_ROOM_TURN_TIMEOUT_MINUTES,
 } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { serverLine } from "./server-lines.ts";
 
 /** What the engine sends while it works. Retries, session news and cards are not progress. */
 export const ROOM_TURN_PROGRESS = new Set<RuntimeEvent["type"]>([
@@ -154,7 +155,7 @@ export class RoomTurnStallRegistry {
   }
 }
 
-export function roomTurnTimeoutMessage(botName: string, minutes: number): string {
-  const unit = minutes === 1 ? "minute" : "minutes";
-  return `${botName}'s room turn made no progress for ${minutes} ${unit} and was stopped`;
+/** In the room's language for its status row; a coordinator reads it in English. */
+export function roomTurnTimeoutMessage(botName: string, minutes: number, language?: string): string {
+  return serverLine(language, minutes === 1 ? "server.rooms.turnStalled.one" : "server.rooms.turnStalled.many", { bot: botName, count: minutes });
 }
