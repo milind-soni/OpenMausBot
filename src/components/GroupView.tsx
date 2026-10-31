@@ -25,7 +25,7 @@ import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
-import { StatusActivityRow } from "@/components/StatusActivityRow";
+import { StatusActivityRow } from "@/components/StatusActivityRow"; import { BugReportNote } from "@/components/BugReportNote";
 import { normalizeState } from "@/lib/mascot";
 import { botTextShowsSpeaker, laterTextOwns, runShowsSpeaker } from "@/lib/room-speaker";
 import { defaultResponderName, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
@@ -252,7 +252,7 @@ function RoomTextMessage({
                 data-citation-thread={group.threadId}
               >
                 <ThreadRefText text={display} peers={peers} everyone={!group.dm} />
-              </div>
+              </div>{m.bugReport && <BugReportNote report={m.bugReport} />}
               {cited && <SentCitations
                 citations={cited.citations}
                 onNavigate={async (citation: CitationAttachment) => {
