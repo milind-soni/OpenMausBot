@@ -1861,7 +1861,6 @@
   "sidebar.density.compact": "コンパクト",
   "sidebar.density.iconsOnly": "アバターのみ",
   "sidebar.toolsLayout.title": "ツールのレイアウト",
-  "sidebar.toolsLayout.subtitle": "ルーティン、トリガー、チームマップを、行として表示するか、アイコンを1行に並べて表示するかを選びます。アイコン密度では常にアイコンで表示されます。",
   "sidebar.toolsLayout.rows": "行",
   "sidebar.toolsLayout.toolbar": "ツールバー",
   "sidebar.toolsLayout.chooseAria": "ツールのレイアウトを選択",

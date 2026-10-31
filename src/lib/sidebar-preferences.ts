@@ -2,10 +2,10 @@ import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
 export type SidebarDensity = "comfortable" | "compact" | "icons";
-export type SidebarToolsLayout = "rows" | "toolbar";
+export type SidebarToolsLayout = "rows" | "toolbar" | "bottom";
 
 export const SIDEBAR_DENSITIES: readonly SidebarDensity[] = ["comfortable", "compact", "icons"];
-export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar"];
+export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar", "bottom"];
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
 export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
@@ -54,6 +54,7 @@ export function parseSidebarToolsLayout(value: string | null): SidebarToolsLayou
   switch (value) {
     case "rows":
     case "toolbar":
+    case "bottom":
       return value;
     default:
       return "rows";

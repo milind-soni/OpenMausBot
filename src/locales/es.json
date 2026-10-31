@@ -1696,7 +1696,6 @@
   "sidebar.density.compact": "Compacta",
   "sidebar.density.iconsOnly": "Solo avatares",
   "sidebar.toolsLayout.title": "Diseño de las herramientas",
-  "sidebar.toolsLayout.subtitle": "Muestra Rutinas, Disparadores y Mapa del equipo como filas o como una sola fila de iconos. La densidad «Solo avatares» siempre muestra iconos.",
   "sidebar.toolsLayout.rows": "Filas",
   "sidebar.toolsLayout.toolbar": "Barra de herramientas",
   "sidebar.toolsLayout.chooseAria": "Elegir el diseño de las herramientas",
