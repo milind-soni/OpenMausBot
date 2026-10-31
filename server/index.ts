@@ -634,7 +634,7 @@ import { createThreadRoutes } from "./routes/threads.ts";
 import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorRequestItems } from "./connector-request-items.ts";
-import { personAsks as personAskAt } from "./thread-presence.ts";
+import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -5260,6 +5260,13 @@ const keepWarmContext = new Map<string, number>();
 function keepWarmBotFor(threadId: string): BotRecord | null {
   return store.botByThread(threadId) ?? (groupSpeakers.get(threadId) ? store.bot(groupSpeakers.get(threadId)!.botId) : null);
 }
+/** A keep-warm ping's or a warm summary's own model call, booked to the bot. */
+function bookForkUsage({ threadId, botId, instanceId }: KeepWarmTarget, result: { input: number; cacheRead: number; cacheWrite: number; output: number; costUsd: number | null; model: string | null }) {
+  const bot = store.bot(botId), instance = registry.get(instanceId);
+  if (bot && instance) bookTurnUsage({ botId: bot.id, botName: bot.name, threadId, instanceId, driverKind: instance.driverKind,
+    model: result.model ?? store.taskByThread(bot.id, threadId)?.modelSelection?.model ?? bot.modelSelection.model,
+    input: result.input + result.cacheRead + result.cacheWrite, output: result.output, cachedInput: result.cacheRead, costUsd: result.costUsd, trigger: { kind: "bot", botId: bot.id } });
+}
 const cacheKeepWarm = createCacheKeepWarm({
   now: () => Date.now(),
   after: (ms, fn) => {
@@ -5290,30 +5297,22 @@ const cacheKeepWarm = createCacheKeepWarm({
     return warm ? warm.ping(threadId, { signal }) : { ok: false, reason: "this engine cannot keep its cache warm" };
   },
   hold: ({ threadId, instanceId }, until) => { registry.get(instanceId)?.adapter.cacheKeepWarm?.hold(threadId, until); },
-  book: ({ threadId, botId, instanceId }, result) => {
-    const bot = store.bot(botId);
-    const instance = registry.get(instanceId);
-    if (!bot || !instance) return;
-    bookTurnUsage({
-      botId: bot.id,
-      botName: bot.name,
-      threadId,
-      instanceId,
-      driverKind: instance.driverKind,
-      model: result.model ?? store.taskByThread(bot.id, threadId)?.modelSelection?.model ?? bot.modelSelection.model,
-      input: result.input + result.cacheRead + result.cacheWrite,
-      output: result.output,
-      cachedInput: result.cacheRead,
-      costUsd: result.costUsd,
-      trigger: { kind: "bot", botId: bot.id },
-    });
-  },
+  book: bookForkUsage,
   changed: ({ threadId }) => {
     const bot = store.botByThread(threadId);
     if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
   },
 });
 cacheKeepWarmStatus = (threadId) => cacheKeepWarm.status(threadId);
+// Warm summaries (server/host/warm-summary-host.ts): a long conversation is summarized while it is idle, not at its next turn.
+const warmSummaries = createWarmSummaryHost({ store, instance: (id) => registry.get(id), queued: hasQueuedSteeredMessages, coordinator, waits: () => botWaits, routines: () => routines,
+  enabled: () => cfg.context?.autoCompact !== false && process.env.OMB_WARM_SUMMARY !== "0" && spendState(cfg, DATA_DIR)?.exceeded !== true, memoryShort: () => engineMemory.headroom() < 0.3,
+  nativeCompactAt: (id) => { const instance = registry.get(id), at = instance ? nativeCompactTokens(instance) : undefined; return at && Number.isFinite(at) ? at : undefined; },
+  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line), language: (threadId) => personLanguages.forLine(threadStarters.get(threadId)),
+  fold: async ({ botId, threadId, instanceId }, idle) => { const bot = store.projectBotForTask(botId, threadId), model = store.taskByThread(botId, threadId)?.lastContextModel, instance = registry.get(instanceId), before = latestCompaction(store.activePath(threadId))?.id;
+    if (bot && instance && model?.startsWith(`${instanceId}:`)) await compactConversation({ bot, threadId, generation: `idle:${randomUUID()}`, instance, model: model.slice(instanceId.length + 1), excludedIds: new Set(), manual: false, idle });
+    return latestCompaction(store.activePath(threadId))?.id !== before; } });
+onThreadSeen((threadId) => warmSummaries.sawThread(threadId));
 onConfigSaved((before, after) => {
   if (JSON.stringify(before.cacheKeepWarm ?? null) !== JSON.stringify(after.cacheKeepWarm ?? null)) setImmediate(() => cacheKeepWarm.refresh());
 });
@@ -5326,14 +5325,14 @@ bus.subscribe((event: RuntimeEvent) => {
       keepWarmContext.delete(event.threadId);
       const bot = keepWarmBotFor(event.threadId);
       if (bot && event.providerInstanceId) keepWarmTargets.set(event.threadId, { threadId: event.threadId, botId: bot.id, instanceId: event.providerInstanceId });
-      cacheKeepWarm.noteTurnStarted(event.threadId);
+      cacheKeepWarm.noteTurnStarted(event.threadId); warmSummaries.turnStarted(event.threadId);
     } else if (event.type === "turn.completed") {
       const target = keepWarmTargets.get(event.threadId);
       const contextTokens = keepWarmContext.get(event.threadId);
       keepWarmTargets.delete(event.threadId);
       keepWarmContext.delete(event.threadId);
       if (!target || routines?.runForThread(event.threadId)) return;
-      cacheKeepWarm.noteTurnCompleted(target, { ok: event.ok, stopReason: event.stopReason, contextTokens });
+      cacheKeepWarm.noteTurnCompleted(target, { ok: event.ok, stopReason: event.stopReason, contextTokens }); warmSummaries.turnCompleted(target, { ok: event.ok, contextTokens });
     }
   } catch (error) {
     console.warn(`cache keep-warm: ${(error as Error).message}`);
@@ -7155,9 +7154,9 @@ function peerReplayText(m: Message, name: string, text: string): string {
 async function compactConversation(input: {
   bot: BotRecord; threadId: string; generation: string;
   instance: NonNullable<ReturnType<typeof registry.get>>; model: string;
-  excludedIds: ReadonlySet<string>; manual: boolean;
+  excludedIds: ReadonlySet<string>; manual: boolean; idle?: AbortSignal;
 }): Promise<void> {
-  const { bot, threadId, generation, instance, model, excludedIds, manual } = input;
+  const { bot, threadId, generation, instance, model, excludedIds, manual, idle } = input;
   const task = store.taskByThread(bot.id, threadId);
   if (!task || (!manual && cfg.context?.autoCompact === false)) return;
   const messages = store.activePath(threadId);
@@ -7182,7 +7181,7 @@ async function compactConversation(input: {
   }
   const nativeCompactAt = nativeCompactTokens(instance);
   if (!manual && !shouldCompact({ contextTokens: measurement?.tokens, estimatedBytes: bytes,
-    budget: compactBudget(window, cfg.context?.compactAt, nativeCompactAt), floor, window, nativeCompactAt })) return;
+    budget: compactBudget(window, cfg.context?.compactAt, nativeCompactAt) * (idle ? HARNESS_IDLE_FRACTION : 1), floor, window, nativeCompactAt })) return;
   const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
   if (!fold) return;
   const foldedThroughId = manual
@@ -7190,11 +7189,11 @@ async function compactConversation(input: {
     : fold.folded.at(-1)?.id;
   if (!foldedThroughId) return;
   const prefix = JSON.stringify(messages);
-  const controller = new AbortController();
+  const controller = new AbortController(); idle?.addEventListener("abort", () => controller.abort(), { once: true }); if (idle?.aborted) controller.abort();
   compactionControllers.set(threadId, { generation, controller });
   try {
     const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: sideJobs.text("compaction", bot.id, { instance })?.generateText });
-    if (!directTurnClaimIsCurrent(bot.id, generation, threadId)) throw new DirectTurnSetupCancelled("context summarization stopped");
+    if (!idle && !directTurnClaimIsCurrent(bot.id, generation, threadId)) throw new DirectTurnSetupCancelled("context summarization stopped");
     controller.signal.throwIfAborted();
     if (prefix !== JSON.stringify(store.activePath(threadId).slice(0, messages.length))) {
       if (manual) throw new Error("the conversation changed during summarization — please retry");
@@ -7922,6 +7921,7 @@ async function startTurn(
         }
         if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
       }
+      await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId));
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
         excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
@@ -9276,7 +9276,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           memoryUpkeep.forgetBot(bot.id);
           calendarCalls!.removeBot(bot.id);
           browserLive.closeForBot(bot.id);
-          cacheKeepWarm.cancelBot(bot.id);
+          cacheKeepWarm.cancelBot(bot.id); warmSummaries.forgetBot(bot.id);
           await forgetTemporaryBrowser(bot.id);
           dataSheets.delete(bot.id);
           if (dataEngine.unavailable() === null) await dataEngine.deleteBot(bot.id).catch((error) => console.warn(`data: could not delete ${bot.id}'s database`, error));
@@ -12359,7 +12359,7 @@ ROUTES.push(createBotMemoryRoutes({
 }));
 const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : (CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin")) || ownHome.owner(auth) ? { person: actorKey(auth as RequestAuth & { kind: "session" }), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createSetupRequestRoutes({ store, language: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, sendRefusal: cloudGuestSendRefusal, presser: (auth) => setupPresser(sharedMembership(), auth, messageSender(auth)), canSetUp: (botId, threadId) => registry.get(store.projectBotForTask(botId, threadId)?.modelSelection.instanceId ?? "")?.adapter.capabilities.agentsMcp === true, send: (auth, botId, threadId, text) => acceptDirectSend({ botId, threadId, text, sender: messageSender(auth), trigger: usageTriggerFor(auth), personPresent: auth.kind === "session" || DESKTOP_MANAGED }) }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), ownHome: ownHome.owner, automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks, messages: teamMessages.needsYou } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }), createInboxRoutes(teamMessages));
 if (CLOUD_TEAM) teamHost.adoptServerProfile(sessions.list().flatMap((session) => session.email ? [session.email] : []));
-ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }), createPresenceRoutes({ isOwner: ownerOrAdmin, heard: (auth, language) => personLanguages.heard(auth.kind === "session" ? actorKey(auth) : THIS_COMPUTER, language), active: async (source, zone, language) => { const answer = await proactive.brief.active(source, zone, language); firstHourHooks.arrived(); return answer; }, ...(CLOUD_TEAM ? { member: teamMessages.arrived } : {}) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
+ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }), createPresenceRoutes({ isOwner: ownerOrAdmin, heard: (auth, language) => personLanguages.heard(auth.kind === "session" ? actorKey(auth) : THIS_COMPUTER, language), sawChat: (auth, threadId) => { if (ownerOrAdmin(auth) && store.botByThread(threadId)) sawThread(threadId); }, active: async (source, zone, language) => { const answer = await proactive.brief.active(source, zone, language); firstHourHooks.arrived(); return answer; }, ...(CLOUD_TEAM ? { member: teamMessages.arrived } : {}) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
   createTeamConnectionRoutes({ host: teamConnections, cfg: () => cfg, composio, publicOrigin: CLOUD_HOME?.publicOrigin ?? null, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), createSignInCardRoutes({ settle: signInSettle.settle, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: { error: memberLoginRefusal(CLOUD_TEAM) } }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
 ROUTES.push(createRoomHoldRoutes({
   group: (id) => store.group(id),
@@ -15747,7 +15747,7 @@ const gracefulShutdown = createGracefulShutdown({
       routines?.close(); void appTriggers.stop();
       calendarCalls?.stop(); botWaits.stop();
       memoryUpkeep.stop();
-      cacheKeepWarm.dispose();
+      cacheKeepWarm.dispose(); warmSummaries.dispose();
       skillReview.stop();
       webhookIngress?.server.close();
       tunnelListener?.close(); stopCloudHomeConnectedApps();

@@ -149,6 +149,7 @@
   "server.reports.refused": "MausBot 팀 서버가 이 버그 리포트를 거절해서 아무것도 보내지 않았어요: {detail}.",
   "server.reports.full": "보내지 않았어요: MausBot 팀으로 보내길 기다리는 버그 리포트가 이미 {count}건 있어요. 전송이 끝난 뒤 다시 @devs를 입력하세요.",
   "server.reports.dropped": "이 대화의 버그 리포트가 일주일 동안 MausBot 팀에 전달되지 못해 삭제됐어요. 새로 보내려면 다시 @devs를 입력하세요.",
+  "server.warmSummary.summarized": "대화가 쉬는 동안 요약했습니다. 최근 메시지는 그대로 이어집니다",
   "star.title": "{app}이 마음에 드세요?",
   "star.body": "GitHub에 별을 눌러 주시면 더 많은 사람이 찾을 수 있어요.",
   "star.button": "GitHub에서 별 주기",

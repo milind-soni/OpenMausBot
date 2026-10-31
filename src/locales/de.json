@@ -53,6 +53,7 @@
   "server.reports.full": "Nicht gesendet: {count} Fehlerberichte warten schon darauf, an das MausBot-Team zu gehen. Schreib noch einmal @devs, sobald sie gesendet sind.",
   "server.reports.dropped": "Ein Fehlerbericht aus dieser Unterhaltung konnte das MausBot-Team eine Woche lang nicht erreichen und wurde deshalb verworfen. Schreib noch einmal @devs, um einen neuen zu senden.",
   "server.questions.notAsked": "Nicht gefragt (Just do it): {question}",
+  "server.warmSummary.summarized": "diese Unterhaltung wurde in einer Pause zusammengefasst; die letzten Nachrichten bleiben wörtlich erhalten",
   "star.title": "Gefällt dir {app}?",
   "star.body": "Ein Stern auf GitHub hilft mehr Menschen, es zu finden.",
   "star.button": "Stern auf GitHub geben",

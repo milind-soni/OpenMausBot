@@ -106,6 +106,7 @@
   "server.reports.refused": "MausBot チームのサーバーがこのバグレポートを拒否したため、何も送信されていません：{detail}。",
   "server.reports.full": "送信していません：MausBot チームへの送信を待っているバグレポートがすでに {count} 件あります。それらが送信されてから、もう一度 @devs と入力してください。",
   "server.reports.dropped": "この会話のバグレポートは 1 週間 MausBot チームに届かなかったため、破棄されました。新しく送るには、もう一度 @devs と入力してください。",
+  "server.warmSummary.summarized": "会話が止まっている間に要約しました。最新のメッセージはそのまま残ります",
   "star.title": "{app} を気に入っていただけましたか？",
   "star.body": "GitHub でスターを付けていただくと、より多くの人に見つけてもらえます。",
   "star.button": "GitHub でスターを付ける",

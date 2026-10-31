@@ -104,6 +104,7 @@
   "server.reports.refused": "Il server del team di MausBot ha rifiutato questa segnalazione di bug, quindi non è stato inviato nulla: {detail}.",
   "server.reports.full": "Non inviata: ci sono già {count} segnalazioni di bug in attesa di essere inviate al team di MausBot. Scrivi di nuovo @devs quando saranno partite.",
   "server.reports.dropped": "Una segnalazione di bug di questa conversazione non è riuscita a raggiungere il team di MausBot per una settimana, quindi è stata scartata. Scrivi di nuovo @devs per inviarne una nuova.",
+  "server.warmSummary.summarized": "questa conversazione è stata riassunta mentre era inattiva; gli ultimi messaggi restano parola per parola",
   "star.title": "Ti piace {app}?",
   "star.body": "Una stella su GitHub aiuta più persone a trovarlo.",
   "star.button": "Stella su GitHub",

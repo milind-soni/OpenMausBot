@@ -106,6 +106,7 @@
   "server.reports.refused": "Serwer zespołu MausBot odrzucił to zgłoszenie błędu, więc nic nie zostało wysłane: {detail}.",
   "server.reports.full": "Nie wysłano: {count} zgłoszeń błędów czeka już na wysłanie do zespołu MausBot. Wpisz ponownie @devs, gdy zostaną wysłane.",
   "server.reports.dropped": "Zgłoszenie błędu z tej rozmowy przez tydzień nie mogło dotrzeć do zespołu MausBot, więc zostało odrzucone. Wpisz ponownie @devs, aby wysłać nowe.",
+  "server.warmSummary.summarized": "podsumowano tę rozmowę podczas przerwy; najnowsze wiadomości zostają słowo w słowo",
   "star.title": "Podoba ci się {app}?",
   "star.body": "Gwiazdka na GitHubie pomaga większej liczbie osób go znaleźć.",
   "star.button": "Dodaj gwiazdkę na GitHubie",

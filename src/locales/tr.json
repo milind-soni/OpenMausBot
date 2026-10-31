@@ -84,6 +84,7 @@
   "server.reports.refused": "MausBot ekibinin sunucusu bu hata raporunu reddetti, bu yüzden hiçbir şey gönderilmedi: {detail}.",
   "server.reports.full": "Gönderilmedi: {count} hata raporu zaten MausBot ekibine gönderilmeyi bekliyor. Onlar gönderildikten sonra tekrar @devs yazın.",
   "server.reports.dropped": "Bu konuşmadaki bir hata raporu bir hafta boyunca MausBot ekibine ulaşamadığı için silindi. Yeni bir rapor göndermek için tekrar @devs yazın.",
+  "server.warmSummary.summarized": "bu konuşma boşta kaldığı sırada özetlendi; en son mesajlar kelimesi kelimesine korunuyor",
   "star.title": "{app}'u beğendiniz mi?",
   "star.body": "GitHub'da vereceğiniz bir yıldız, daha fazla kişinin onu bulmasına yardımcı olur.",
   "star.button": "GitHub'da yıldız ver",

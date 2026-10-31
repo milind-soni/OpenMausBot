@@ -99,6 +99,7 @@
   "server.reports.refused": "El servidor del equipo de MausBot rechazó este informe de error, así que no se envió nada: {detail}.",
   "server.reports.full": "No enviado: ya hay {count} informes de error esperando para ir al equipo de MausBot. Vuelve a escribir @devs cuando se hayan enviado.",
   "server.reports.dropped": "Un informe de error de esta conversación no pudo llegar al equipo de MausBot durante una semana, así que se descartó. Vuelve a escribir @devs para enviar uno nuevo.",
+  "server.warmSummary.summarized": "se resumió esta conversación mientras estaba inactiva; los últimos mensajes se conservan palabra por palabra",
   "star.title": "¿Te gusta {app}?",
   "star.body": "Una estrella en GitHub ayuda a que más personas lo encuentren.",
   "star.button": "Dar una estrella en GitHub",
