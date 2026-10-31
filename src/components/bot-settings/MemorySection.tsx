@@ -156,12 +156,13 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
   }, [active, bot.id]);
 
   const reloadAfterDream = async () => {
-    const path = editing?.path;
+    const opened = editing;
     await refresh();
-    if (!path) return;
+    if (!opened) return;
+    const { path } = opened;
     const doc = await fetchMemoryDoc(bot.id, path);
     setEditing((current) => {
-      if (current?.path !== path || current.dirty) return current;
+      if (current?.path !== path || current.dirty || current.hash !== opened.hash) return current;
       return doc.exists || path === MEMORY_INDEX ? { ...current, text: doc.text, hash: doc.hash } : null;
     });
   };
