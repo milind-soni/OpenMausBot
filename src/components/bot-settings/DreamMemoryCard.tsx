@@ -60,7 +60,7 @@ export function DreamMemoryCard({ botId, enabled, onChange }: { botId: string; e
       else setError(t(details?.code === "busy" ? "memory.dream.busy" : details?.code === "paused" ? "memory.dream.paused" : "memory.dream.failed"));
     } finally { if (alive.current) setBusy(false); }
   };
-  return <section className="rounded-xl border border-line bg-card p-4">
+  return <section className="rounded-xl border border-hairline bg-card p-4">
     <h3 className="text-[15px] font-medium text-ink">{t("memory.dream.title")}</h3>
     <p className="mt-1 text-[13px] text-ink-secondary">{t("memory.dream.help")}</p>
     {last && <DreamMemoryResult report={last} />}
