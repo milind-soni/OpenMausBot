@@ -23,7 +23,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, UnansweredApprovals } from "./waiting-on-person.ts";
-import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts";
+import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -1966,33 +1966,7 @@ const teamSetupDecisionText = (request: TeamSetupRequest): string =>
 const connectionUpdateText = (labels: readonly string[]): string =>
   `OpenMausBot connection update: the user securely connected ${labels.join(", ")}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
 
-/** In a room (`memberId`) only this member's cards: one member's park never swallows another's. */
-function resumableCards(threadId: string, since: number, memberId?: string): Array<{ id: string; waits: string }> {
-  const open: Array<{ id: string; waits: string }> = [];
-  const path = store.activePath(threadId).filter((message) => message.at >= since && (memberId === undefined || message.from?.botId === memberId));
-  for (const message of path) {
-    const card = message.card;
-    if (card?.teamSetupRequest && !card.teamSetupRequest.resumed && (card.teamSetupRequest.result || (!card.answered && !card.dismissed && !card.expired))) {
-      open.push({ id: message.id, waits: `team setup decision: ${card.title}` });
-      continue;
-    }
-    const connector = message.connector;
-    if (connector && !connector.dismissed && !connector.resumed) {
-      open.push({ id: message.id, waits: `connect ${connector.label}` });
-      continue;
-    }
-    const secret = message.secret;
-    if (secret && !secret.resumed && !secret.superseded) {
-      open.push({ id: message.id, waits: `provide ${secret.label}` });
-      continue;
-    }
-    const signIn = message.signIn;
-    if (signIn && !signIn.resumed && !signIn.superseded && !signIn.answeredInChat) {
-      open.push({ id: message.id, waits: `sign in to ${signIn.site}` });
-    }
-  }
-  return open;
-}
+function resumableCards(threadId: string, since: number, memberId?: string) { return cardsWaitedOn(store, threadId, since, memberId); }
 
 function turnRows(node: HandoffView): Message[] {
   const since = node.startedAt ?? node.createdAt;
