@@ -15,6 +15,8 @@ import type { Store } from "../store.ts";
 type Target = { botId?: unknown; groupId?: unknown };
 
 export interface BotAccessGateDeps {
+  /** The member's visibility as it stands when asked; body fields are weighed against it when the body lands. */
+  visibleFor(auth: RequestAuth): VisibleSet;
   botName(botId: string): string | undefined;
   roomBots(groupId: string): readonly string[] | undefined;
   threadOwner(threadId: string): ThreadOwner | undefined;
@@ -79,7 +81,7 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
       const added = path === "/api/groups" && Array.isArray(record.memberIds) ? record.memberIds.filter((id): id is string => typeof id === "string") : [];
       const targeted = path === "/api/routines" || routine !== null ? targetBots(record) : [];
       const threads = bodyThreadIds(body).flatMap((threadId) => ownerBots(deps.threadOwner(threadId)));
-      const error = short(visible, [...added, ...targeted, ...threads], bodyNeeds);
+      const error = short(deps.visibleFor(auth), [...added, ...targeted, ...threads], bodyNeeds);
       return error ? { status: 403, error } : null;
     });
     return null;
@@ -117,6 +119,7 @@ export interface BotAccessHostDeps {
 export function createBotAccessHost(deps: BotAccessHostDeps) {
   const levelOf = (auth: RequestAuth, botId: string): BotAccessLevel => deps.visibleFor(auth).level(botId);
   const accessRefusal = createBotAccessGate({
+    visibleFor: deps.visibleFor,
     botName: (id) => deps.store().bot(id)?.name,
     roomBots: (id) => deps.store().group(id)?.memberIds,
     threadOwner: deps.threadOwner,

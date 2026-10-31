@@ -1,9 +1,12 @@
+import type { IncomingMessage } from "node:http";
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { accessFromVisibility, atLeast, sharedLevel, visibilityFromAccess } from "../shared/bot-access.ts";
 import { accessOf, memberBot, memberLevel, parseBotAccess, VisibleSet } from "./bot-visibility.ts";
-import { levelNeeded, relayedSendRefusal, setupCardRefusal } from "./host/bot-access-gate.ts";
-import { memberBotPatchViolation } from "./request-auth.ts";
+import { readBody } from "./harness/http.ts";
+import { createBotAccessGate, levelNeeded, relayedSendRefusal, setupCardRefusal } from "./host/bot-access-gate.ts";
+import { memberBotPatchViolation, type RequestAuth } from "./request-auth.ts";
 import { settledAccess } from "./routes/bot-access.ts";
 import type { BotRecord } from "./store.ts";
 import type { BotVisibility } from "../shared/wire.ts";
@@ -136,5 +139,29 @@ describe("setting a bot's sharing", () => {
     expect(parseBotAccess({ everyone: "chat", people: {}, extra: 1 }).ok).toBe(false);
     expect(atLeast("edit", "chat")).toBe(true);
     expect(atLeast("view", "chat")).toBe(false);
+  });
+});
+
+describe("the parsed-body gate", () => {
+  it("weighs body targets against visibility as it stands when the body lands, not when the request arrived", async () => {
+    const audiences = { of: () => undefined, person: null };
+    const hidden = { id: "pay", threadId: "t-pay", visibility: { people: [CARA] }, access: { everyone: "none", people: {} } };
+    const sharedAt = (level: "view" | "chat") => ({ id: "pay", threadId: "t-pay", visibility: { people: [BOB, CARA] }, access: { everyone: "none", people: { [BOB]: level } } });
+    let current = new VisibleSet([hidden], [], { kind: "member", email: BOB }, undefined, audiences);
+    expect(current.level("pay")).toBe("none");
+    const gate = createBotAccessGate({ visibleFor: () => current, botName: () => "Payroll", roomBots: () => undefined,
+      threadOwner: () => undefined, routine: () => undefined, run: () => undefined, routineWriter: () => undefined });
+    const auth = { kind: "session", session: { email: BOB }, via: "cookie", scopes: [] } as unknown as RequestAuth;
+    const request = () => {
+      const req = Readable.from([JSON.stringify({ memberIds: ["pay"] })]) as unknown as IncomingMessage;
+      expect(gate(req, auth, "POST", "/api/groups", current)).toBeNull();
+      return req;
+    };
+    const refused = request();
+    current = new VisibleSet([sharedAt("view")], [], { kind: "member", email: BOB }, undefined, audiences);
+    await expect(readBody(refused)).rejects.toMatchObject({ status: 403 });
+    const allowed = request();
+    current = new VisibleSet([sharedAt("chat")], [], { kind: "member", email: BOB }, undefined, audiences);
+    await expect(readBody(allowed)).resolves.toEqual({ memberIds: ["pay"] });
   });
 });
