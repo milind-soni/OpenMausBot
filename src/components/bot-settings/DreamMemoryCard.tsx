@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { api, ApiError } from "@/state/store";
+import { Select } from "../Select";
 
 interface DreamResult {
   at: number;
@@ -67,10 +68,10 @@ export function DreamMemoryCard({ botId, enabled, onChange }: { botId: string; e
     <div className="mt-3 flex flex-wrap items-center gap-2">
       <button type="button" className={buttonCls} disabled={busy || !enabled} onClick={() => void act(false)}>{t(busy ? "memory.dream.working" : "memory.dream.now")}</button>
       {backups.length > 0 && <>
-        <select aria-label={t("memory.dream.backup")} className={buttonCls} value={selected} disabled={busy} onChange={(e) => { setSelected(e.target.value); setConfirmation(undefined); }}>
+        <Select size="sm" aria-label={t("memory.dream.backup")} value={selected} disabled={busy} onChange={(e) => { setSelected(e.target.value); setConfirmation(undefined); }}>
           <option value="">{t("memory.dream.newest")}</option>
           {backups.map((backup) => <option key={backup.id} value={backup.id}>{new Date(backup.at).toLocaleString(activeLocale())}</option>)}
-        </select>
+        </Select>
         <button type="button" className={buttonCls} disabled={busy} onClick={() => void act(true)}>{t("memory.dream.restore")}</button>
       </>}
     </div>
