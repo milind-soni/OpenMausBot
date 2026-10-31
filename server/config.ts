@@ -20,7 +20,7 @@ import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-ico
 import { helperStoredShape, type HelperConfig } from "./side-jobs.ts";
 import { loopGuardConfigSchema, type LoopGuardConfig } from "./host/loop-guard.ts";
 import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
-import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { webSearchConfigSchema, type WebSearchConfig } from "./web-search-config.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
+import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { validStoredWebSearch, webSearchConfigSchema, type WebSearchConfig } from "./web-search-config.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
@@ -950,15 +950,8 @@ export function saveConfig(
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  const storedSearch = jsonObjectSchema.safeParse(disk.webSearch);
-  if (storedSearch.success) {
-    const clean: JsonObject = {};
-    for (const field of ["searxngUrl", "braveApiKey"] as const) {
-      const parsed = webSearchConfigSchema.shape[field].safeParse(storedSearch.data[field]);
-      if (parsed.success && parsed.data !== undefined) clean[field] = parsed.data;
-    }
-    disk.webSearch = clean;
-  }
+  const storedSearch = validStoredWebSearch(disk.webSearch);
+  if (storedSearch) disk.webSearch = storedSearch;
   for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "webSearch", "groq", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;

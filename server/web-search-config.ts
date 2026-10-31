@@ -18,6 +18,17 @@ export const webSearchConfigSchema = z.object({
   braveApiKey: z.string().trim().max(4096).regex(/^[\x21-\x7e]*$/).optional(),
 });
 
+export function validStoredWebSearch(value: unknown): Record<string, string> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const stored = value as Record<string, unknown>;
+  const clean: Record<string, string> = {};
+  for (const field of ["searxngUrl", "braveApiKey"] as const) {
+    const parsed = webSearchConfigSchema.shape[field].safeParse(stored[field]);
+    if (parsed.success && parsed.data !== undefined) clean[field] = parsed.data;
+  }
+  return clean;
+}
+
 export function configuredWebSearch(config?: WebSearchConfig): "searxng" | "brave" | null {
   return config?.searxngUrl?.trim() ? "searxng" : config?.braveApiKey?.trim() ? "brave" : null;
 }
