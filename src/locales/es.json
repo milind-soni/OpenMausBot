@@ -327,7 +327,7 @@
   "rail.showSub": "Un círculo por cada lugar donde viven tus bots, en el borde izquierdo de la ventana.",
   "sidebarTour.places": "Tus lugares: este equipo, tus Clouds y tus propios servidores. Haz clic en uno para cambiar.",
   "sidebarTour.add": "Añade un lugar con el botón +: compra una Cloud nueva que siempre está encendida o conecta tu propio servidor con su enlace de vinculación.",
-  "sidebarTour.menu": "Haz clic derecho en un lugar para ver más, como su color, o para quitar una Cloud que ya no usas.",
+  "sidebarTour.menu": "Haz clic derecho en un lugar para ver más: su color, convertir tu propio servidor en la casa de tus bots o quitar una Cloud que ya no usas.",
   "sidebarTour.strip": "Oculta o muestra tus lugares cuando quieras con este botón.",
   "sidebarTour.stripHidden": "Tus lugares están ocultos. Vuelve a mostrarlos con este botón y luego usa + para añadir una Cloud nueva o tu propio servidor.",
   "placeLook.title": "Color",

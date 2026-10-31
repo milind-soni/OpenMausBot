@@ -31,6 +31,7 @@ const ph = vi.hoisted(() => {
 vi.mock("posthog-js", () => ph.module());
 import { CloudProPopup, cloudProCloudPageView, cloudProPopupView, otherDialogOpen, useOtherDialogOpen, type CloudProPopupView } from "./CloudProPopup";
 import { Spotlight } from "./onboarding/Spotlight";
+import { SIDEBAR_TOUR_CARD } from "@/lib/sidebar-tour";
 
 const DAY = 86_400_000, NOW = Date.UTC(2026, 9, 16);
 const plans = [
@@ -229,6 +230,14 @@ describe("the popup as a dialog", () => {
     const inside = container.querySelector('[role="dialog"]')!.appendChild(document.createElement("div"));
     inside.setAttribute("role", "alertdialog");
     expect(otherDialogOpen(), "inside the popup").toBe(false);
+  });
+
+  it("the tour of the rail is the queue's own: its card never counts as another dialog, so it never waits for itself", () => {
+    const tourRoot = createRoot(document.body.appendChild(document.createElement("div")));
+    flushSync(() => tourRoot.render(createElement(Spotlight, { anchor: null, placement: "below", card: SIDEBAR_TOUR_CARD, onDone: () => {}, children: "Your places" })));
+    expect(document.querySelector(`[data-tour-card="${SIDEBAR_TOUR_CARD}"] [role="dialog"]`)).not.toBeNull();
+    expect(otherDialogOpen()).toBe(false);
+    tourRoot.unmount();
   });
 
   it("the first conversation's spotlight is a dialog it waits for, and an Escape meant for the spotlight reaches it", () => {

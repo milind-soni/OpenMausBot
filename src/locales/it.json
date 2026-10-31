@@ -330,7 +330,7 @@
   "rail.showSub": "Un cerchio per ogni posto in cui vivono i tuoi bot, sul bordo sinistro della finestra.",
   "sidebarTour.places": "I tuoi posti: questo computer, i tuoi Cloud e i tuoi server. Clicca su uno per passarci.",
   "sidebarTour.add": "Aggiungi un posto con il pulsante +: compra un nuovo Cloud sempre acceso, oppure collega il tuo server con il suo link di abbinamento.",
-  "sidebarTour.menu": "Clicca con il tasto destro su un posto per altre opzioni, come il suo colore, o per togliere un Cloud che non usi più.",
+  "sidebarTour.menu": "Clicca con il tasto destro su un posto per altre opzioni: il suo colore, fare del tuo server la casa dei tuoi bot o togliere un Cloud che non usi più.",
   "sidebarTour.strip": "Nascondi o mostra i tuoi posti quando vuoi con questo pulsante.",
   "sidebarTour.stripHidden": "I tuoi posti sono nascosti. Mostrali di nuovo con questo pulsante, poi usa + per aggiungere un nuovo Cloud o il tuo server.",
   "placeLook.title": "Colore",

@@ -4297,7 +4297,7 @@
   "rail.showSub": "在視窗左側邊緣，為你的機器人所在的每個地方顯示一個圓圈。",
   "sidebarTour.places": "你的機器人所在的地方：這台電腦、你的 Cloud 和你自己的伺服器。點擊即可切換。",
   "sidebarTour.add": "用 + 按鈕新增地方：購買一個隨時在線的新 Cloud，或用配對連結連接你自己的伺服器。",
-  "sidebarTour.menu": "在地方上按右鍵可以做更多事，例如更改它的顏色，或移除你不再使用的 Cloud。",
+  "sidebarTour.menu": "在地方上按右鍵可以做更多事，例如更改它的顏色、把你自己的伺服器設為機器人的家，或移除你不再使用的 Cloud。",
   "sidebarTour.strip": "隨時用這個按鈕隱藏或顯示這些地方。",
   "sidebarTour.stripHidden": "這些地方已隱藏。用這個按鈕重新顯示它們，再用 + 新增新的 Cloud 或你自己的伺服器。",
   "placeLook.title": "顏色",

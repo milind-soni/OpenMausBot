@@ -62,7 +62,13 @@ it("rings the part a tour on the page beside it points at and shades the rest; t
   expect(ring()).toBeNull();
   act(() => markOf("<script>")); await settle();
   expect(shade(), "anything but a part clears it").toBeNull();
+  // Zoomed in, the rail's page zooms its root to take the app's zoom back out, and its boxes come back zoomed.
+  document.documentElement.style.zoom = "0.8";
+  boxes["rail-add"] = { left: 4.8, top: 83.2, width: 19.2, height: 19.2 };
+  act(() => markOf("dim")); await settle();
   act(() => markOf("add")); await settle();
+  expect([ring()?.style.left, ring()?.style.top, ring()?.style.width], "still round ＋ at any zoom").toEqual(["3px", "101px", "30px"]);
+  document.documentElement.style.zoom = "";
   await act(async () => { host.querySelector<HTMLElement>("[data-rail-add]")!.click(); });
   expect(shade(), "never over ＋'s own sheet").toBeNull();
   vi.restoreAllMocks();

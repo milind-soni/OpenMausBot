@@ -21,11 +21,14 @@ export function measureTourTarget(anchor: string, pad = PAD): Rect | null {
   if (!el) return null;
   const r = el.getBoundingClientRect();
   if (r.width === 0 || r.height === 0 || r.right <= 0 || r.left >= window.innerWidth || r.bottom <= 0 || r.top >= window.innerHeight) return null;
+  // Chromium (128 on) reports boxes under a CSS-zoomed root in zoomed pixels, and lays out the shade in the root's own:
+  // the window's rail zooms its root to take the app's zoom back out.
+  const zoom = Number.parseFloat(document.documentElement.style.zoom) || 1;
   return {
-    x: r.left - pad,
-    y: r.top - pad,
-    w: r.width + pad * 2,
-    h: r.height + pad * 2,
+    x: r.left / zoom - pad,
+    y: r.top / zoom - pad,
+    w: r.width / zoom + pad * 2,
+    h: r.height / zoom + pad * 2,
   };
 }
 
