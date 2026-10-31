@@ -674,7 +674,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   /** Turn on, from this app's prompt or the card: what the ask needs, done here. */
   const turnOn = async (env, ask) => {
-    if (paused) await resumeLending();
+    if (paused) {
+      await resumeLending();
+      if (paused) return { ok: false, reason: "paused" };
+    }
     if (ask.need === "screen") {
       let status = await Promise.resolve().then(screen).catch(() => null);
       if (status && typeof status === "object" && !status.ready) status = await startScreen();
