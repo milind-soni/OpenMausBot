@@ -1454,7 +1454,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
               : [];
-            if (support.modelVariants && cliTurn.model && !modelControls.usesAgentDefault() && modelControls.modelOf(session.sessionConfigResult) !== cliTurn.model) {
+            if (support.modelVariants && !modelControls.confirms(cliTurn.model)) {
               throw new Error(`${support.displayName} changed model before the prompt`);
             }
             if (variant !== undefined && requestedVariantOption().currentValue !== variant) {
