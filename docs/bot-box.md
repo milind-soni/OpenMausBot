@@ -75,7 +75,9 @@ drops whatever credential header the client sent, adds the real key, and forward
 (the base URL the server had, or the provider's default); the box cannot choose the upstream. A URL MCP server's
 headers ride the same way (`server/bot-box/broker-mcp.ts`): the turn's server list carries
 `http://127.0.0.1:18080/b/<token>/mcp-<name>` with no headers, and that token is kept for the conversation's later
-turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. A request for the grant
+turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. A URL server the engine
+reports as failed when it started gets the conversation a new token on its next turn, so the engine starts again and
+reconnects; the chat says the server didn't connect and that it connects again on the next message. A request for the grant
 itself goes to the upstream exactly as it was given (a server at `/mcp` is reached at `/mcp`, never `/mcp/`, which a
 Cloudflare Worker answers with 404), anything below it below that address, with the client's query beside the
 upstream's own. Connected apps (Composio,
