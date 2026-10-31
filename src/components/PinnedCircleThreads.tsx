@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
-import { openBot, visibleMessages, type Bot, type Message } from "@/state/store";
+import { visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
@@ -12,7 +12,7 @@ import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
 import { BotProjectDialog } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { openSidebarBot, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { setPinnedCircleOrder, usePinnedCircleOrder, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { PINNED_CIRCLE_DRAG_TYPE, pinnedCircleDropPlace, rankPinnedCircles, reorderPinnedCircles, type PinnedCircleDrop, type PinnedCircleDropPlace } from "@/lib/pinned-circle-order";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
@@ -201,7 +201,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
         aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
         aria-label={`${bot.name}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`}
         title={bot.name}
-        onClick={() => openBot(dispatch, bot, showThreads)}
+        onClick={() => openSidebarBot(dispatch, bot, showThreads)}
         {...pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId })}
         onContextMenu={(event) => {
           event.preventDefault();

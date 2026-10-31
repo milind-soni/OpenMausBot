@@ -1660,7 +1660,7 @@ export class Store {
     }
     return { ok: true, bots: this.bots.filter(bot => ids.has(bot.id)) };
   }
-
+  nonTaskActivity(botId: string): BotActivity { return this.legacyActivities.get(botId) ?? "idle"; }
   setActivity(botId: string, activity: BotActivity): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;

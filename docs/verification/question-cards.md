@@ -58,6 +58,29 @@ chip that stays out of the inbox, typed answers), `server/runtime/envelope.test.
 card tool), `src/components/QuestionCard.test.ts`, `src/components/QuestionCard.answer.test.ts` and
 `src/components/AskCard.test.ts` (the card family, its buttons and settled lines).
 
+## Finding a teammate's question in Simple mode
+
+A direct-chat mention tells the current bot which teammate the person named.
+The bot hands work on with `coordinate_bots`; the teammate asks in its work conversation.
+Simple shows the existing **Waiting for you…** marker on that teammate's row or tile.
+Text-only questions use the runtime's pending-answer state for the same marker.
+Select it to open the waiting conversation and answer its question card.
+After answering all waiting cards, selecting the bot opens its usual chat again.
+The chat header's **Back to your chat** action also remains available.
+
+```sh
+pnpm exec vitest run src/components/Sidebar.teammate-question.test.ts server/simple-teammate-question.e2e.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/simple-teammate-question-ui.e2e.test.ts
+```
+
+The server fixture checks direct mentions, standing and new work conversations,
+one-way handoffs, text-only questions, room mentions, chained mentions, and handoffs within or into a room.
+The UI fixture starts with a person's own chat with each bot.
+It sends a mention from the first bot's composer and scripts the teammate's real `ask_user` call.
+It opens the question through Advanced's work link, then through Simple's waiting row, and answers it.
+The component tests cover rows, compact rows, the avatar rail, tiles and keyboard selection.
+They also check multiple waiting conversations and exclude archived conversations and hidden routine runs.
+
 ## The cards, side by side
 
 ```sh

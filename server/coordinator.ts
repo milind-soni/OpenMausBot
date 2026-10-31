@@ -193,6 +193,8 @@ export interface Coordinator {
   /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
   answer(threadId: string, text: string): boolean;
   awaitingAnswer(threadId: string): boolean;
+  /** Threads with parked questions the person answers by typing; credential, connector and sign-in cards have their own cards instead. */
+  awaitingTypedAnswerThreads(): ReadonlySet<string>;
 }
 
 export interface CoordinatorOptions {

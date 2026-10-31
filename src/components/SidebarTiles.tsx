@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { stateForBot } from "@/lib/mascot";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBot, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 import { useChiefStepOpen } from "@/lib/default-bot";
 
 import { BotAvatar } from "./Avatar";
@@ -16,7 +16,7 @@ import { liveBadgeFor } from "./LiveCallPill";
 import { pinnedCircleDragClass, pinnedCircleDragHandlers, usePinnedCircleDrag, type PinnedCircleDragProps } from "./PinnedCircleThreads";
 import { RenameTitle } from "./RenameTitle";
 import { openBotContextMenu, useVisibleMessages, type BotRowProps } from "./Sidebar";
-import { sidebarBotStatus } from "./SidebarBotActivity";
+import { openSidebarBot, sidebarBotStatus } from "./SidebarBotActivity";
 import { SIMPLE_ROW_FOCUS } from "./SidebarSimpleTop";
 
 const RING = "ring-2 ring-[var(--tile)]";
@@ -37,7 +37,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
   const label = [bot.name, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : "", onLiveCall ? t("call.live.badge") : "", status, unread ? t("task.unread") : ""].filter(Boolean).join(" · ");
   const reorder = pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId });
-  const open = () => openBot(dispatch, bot, showThreads);
+  const open = () => openSidebarBot(dispatch, bot, showThreads);
   const rename = (name: string) => {
     if (!remoteClient) return dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
     void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
