@@ -95,6 +95,7 @@ export interface ConfigRouteDeps {
   ownProfile?(auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }): boolean;
   resyncOpenCodeProviderKeys(): void;
   revokeEngineCapabilities(engines: ReadonlySet<string>): void;
+  hasPendingProviderReload(): boolean;
   reloadProviders(before: Record<string, unknown>): Promise<void>;
   broadcast(payload: Record<string, unknown>): void;
   drainQueuedSends(): void;
@@ -109,7 +110,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
-    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
+    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, hasPendingProviderReload, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     // API keys are never echoed back: booleans only.
@@ -612,7 +613,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
               mandatoryError = error;
             }
           }
-          if (changedEngines.size > 0) {
+          if (changedEngines.size > 0 || hasPendingProviderReload()) {
             try {
               await reloadProviders(enginesBefore);
             } catch (error) {

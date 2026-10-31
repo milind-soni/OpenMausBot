@@ -2596,6 +2596,7 @@ describe("ACP turns (fake CLI)", () => {
         expect(recorder.events.some((event) => event.type === "runtime.error")).toBe(true);
       } finally {
         await Promise.all(stop.mock.calls.map(([child]) => kill(child, 0)));
+        stop.mockRestore();
       }
     });
 
@@ -2988,6 +2989,13 @@ describe("ACP turns (fake CLI)", () => {
       const integration = (token: string) => ({ agents: { command: process.execPath, args: [FAKE_CLI], env: { OMB_COMMS_TOKEN: token } } });
       try {
         const first = await instance.adapter.sendTurn({ threadId: "qwen-retry", text: "one", integrations: integration("one") });
+        if (reason === "prompt stall") {
+          await startedStopping;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(recorder.events.some((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toBe(false);
+          expect(instance.adapter.hasSession("qwen-retry")).toBe(true);
+          release();
+        }
         expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId))
           .toMatchObject({ ok: reason !== "prompt stall" });
         if (reason !== "prompt stall") {
@@ -3009,9 +3017,10 @@ describe("ACP turns (fake CLI)", () => {
         const retry = await instance.adapter.sendTurn({
           threadId: "qwen-retry", text: "retry", resumeCursor: "fake-acp-session", integrations: integration("three"),
         });
-        // Observe writes directly: the retry must not even initialize while cleanup is unconfirmed.
-        expect(calls().filter((call) => call.method === "initialize")).toHaveLength(1);
-        expect(calls().filter((call) => call.method === "session/load")).toHaveLength(0);
+        if (reason !== "prompt stall") {
+          expect(calls().filter((call) => call.method === "initialize")).toHaveLength(1);
+          expect(calls().filter((call) => call.method === "session/load")).toHaveLength(0);
+        }
         release();
         expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === retry.turnId)).toMatchObject({ ok: true });
         expect(calls().filter((call) => call.method === "session/new")).toHaveLength(1);
