@@ -1,6 +1,6 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices someone
-// closed, its usage-analytics switch, the app's language, its answer to the product-updates email question and
-// whether the person hid the window's rail of places.
+// closed, its usage-analytics switch, the app's language, its answer to the product-updates email question, whether
+// the person hid the window's rail of places and whether they turned the window's frame off.
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { onboardingHints } from "./onboarding-record.mjs";
@@ -53,6 +53,7 @@ function parse(raw) {
     ...(typeof record.talkShortcut === "boolean" ? { talkShortcut: record.talkShortcut } : {}),
     ...(isTalkKey(record.talkKey) ? { talkKey: record.talkKey } : {}),
     ...(typeof record.railHidden === "boolean" ? { railHidden: record.railHidden } : {}),
+    ...(typeof record.windowFrame === "boolean" ? { windowFrame: record.windowFrame } : {}),
     ...(Object.keys(quickAsks).length ? { quickAsks } : {}) };
 }
 
@@ -119,6 +120,12 @@ export function createDesktopPrefs({ read, write }) {
       const railHidden = hidden === true;
       if ((current().railHidden === true) !== railHidden) save({ ...current(), railHidden });
     },
+    /** The window draws its own frame until the person turns it off. */
+    windowFrame: () => current().windowFrame !== false,
+    setWindowFrame(on) {
+      const windowFrame = on !== false;
+      if ((current().windowFrame !== false) !== windowFrame) save({ ...current(), windowFrame });
+    },
   };
 }
 
@@ -130,7 +137,7 @@ export function createDesktopPrefs({ read, write }) {
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
  */
-export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now, systemName = accountFullName }) {
+export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, frame = null, now = Date.now, systemName = accountFullName }) {
   let prefs = given ?? null;
   const store = () => prefs ??= createDesktopPrefs({ read, write });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -172,6 +179,15 @@ export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page,
     }
     return store().language() === language;
   });
+  // Every page of this desktop's window reads and sets the frame; a server's page sets it only from the person's click,
+  // which the preload checks.
+  const frameState = () => ({ on: store().windowFrame(), restart: Boolean(frame?.restarts) && frame.made() !== null && frame.made() !== store().windowFrame() });
+  ipcMain.handle("window-frame:state", from("window-frame:state", ANY, () => frameState()));
+  ipcMain.handle("window-frame:set", from("window-frame:set", ANY, (_, on) => {
+    store().setWindowFrame(on === true);
+    try { frame?.changed(); } catch {}
+    return frameState();
+  }));
   if (!cloudAccount) return null;
   const consent = createUpdatesConsent({ prefs: { installId: () => store().installId(), updatesConsent: () => store().updatesConsent(), setUpdatesConsent: value => store().setUpdatesConsent(value) },
     account: cloudAccount, available: cloudOffered, now });

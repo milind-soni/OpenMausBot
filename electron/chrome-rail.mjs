@@ -33,7 +33,7 @@ const ABORTED = -3;
  *   args: () => string[],
  *   url: () => string,
  *   wanted: () => boolean,
- *   prefs?: () => { railHidden(): boolean, setRailHidden(hidden: boolean): void } | null,
+ *   prefs?: () => { railHidden(): boolean, setRailHidden(hidden: boolean): void, windowFrame?(): boolean } | null,
  *   changed?: () => void,
  *   log?: (line: string) => void,
  * }} deps `url()`: the rail's page on this app's own server; `wanted()`: whether the window has two places or more to
@@ -113,6 +113,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     attach(next) {
       win = next;
       shown = false; expanded = false; offered = false; hung = false; told = "";
+      framed = prefs()?.windowFrame?.() !== false;
       // The window's first document has the same time as any other to offer the button and to draw the frame.
       if (choseHidden()) startGrace(); else stopGrace();
       awaitFrame();
@@ -185,9 +186,9 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       });
       fromPage("rail:offer", () => {});
       fromPage("rail:hide", (hide) => prefs()?.setRailHidden(hide === true));
-      ipcMain.handle("rail:draws-frame", (event) => {
+      ipcMain.handle("rail:draws-frame", (event, drawn) => {
         if (!pageBeside(event)) throw new Error("rail:draws-frame is only available to the page beside the window's rail");
-        frameDrawn(true);
+        frameDrawn(drawn !== false);
       });
     },
     /** Tells the rail's page something (the places changed, the skin of the page beside it). */
