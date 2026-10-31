@@ -81,7 +81,7 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
       const added = path === "/api/groups" && Array.isArray(record.memberIds) ? record.memberIds.filter((id): id is string => typeof id === "string") : [];
       const targeted = path === "/api/routines" || routine !== null ? targetBots(record) : [];
       const threads = bodyThreadIds(body).flatMap((threadId) => ownerBots(deps.threadOwner(threadId)));
-      const error = short(deps.visibleFor(auth), [...added, ...targeted, ...threads], bodyNeeds);
+      const error = short(deps.visibleFor(auth), [...(needed ? named : []), ...added, ...targeted, ...threads], bodyNeeds);
       return error ? { status: 403, error } : null;
     });
     return null;

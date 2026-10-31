@@ -164,4 +164,23 @@ describe("the parsed-body gate", () => {
     current = new VisibleSet([sharedAt("chat")], [], { kind: "member", email: BOB }, undefined, audiences);
     await expect(readBody(allowed)).resolves.toEqual({ memberIds: ["pay"] });
   });
+
+  it("weighs the bot the path names again when the body lands", async () => {
+    const audiences = { of: () => undefined, person: null };
+    const sharedAt = (level: "view" | "edit") => ({ id: "pay", threadId: "t-pay", visibility: { people: [BOB, CARA] }, access: { everyone: "none", people: { [BOB]: level } } });
+    let current = new VisibleSet([sharedAt("edit")], [], { kind: "member", email: BOB }, undefined, audiences);
+    const gate = createBotAccessGate({ visibleFor: () => current, botName: () => "Payroll", roomBots: () => undefined,
+      threadOwner: () => undefined, routine: () => undefined, run: () => undefined, routineWriter: () => undefined });
+    const auth = { kind: "session", session: { email: BOB }, via: "cookie", scopes: [] } as unknown as RequestAuth;
+    const request = () => {
+      const req = Readable.from([JSON.stringify({ everyone: "chat" })]) as unknown as IncomingMessage;
+      expect(gate(req, auth, "PUT", "/api/bots/pay/access", current)).toBeNull();
+      return req;
+    };
+    const refused = request();
+    current = new VisibleSet([sharedAt("view")], [], { kind: "member", email: BOB }, undefined, audiences);
+    await expect(readBody(refused)).rejects.toMatchObject({ status: 403 });
+    current = new VisibleSet([sharedAt("edit")], [], { kind: "member", email: BOB }, undefined, audiences);
+    await expect(readBody(request())).resolves.toEqual({ everyone: "chat" });
+  });
 });
