@@ -157,6 +157,17 @@ describe("CI concurrency", () => {
     expect(sparse.sort()).toEqual(["scripts/release-ci.mjs", ...imports].sort());
   });
 
+  it("builds the Windows Defender check's installer exactly as the release's Windows job does", () => {
+    const release = parse(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
+    const check = parse(readFileSync(new URL("../.github/workflows/windows-defender-check.yml", import.meta.url), "utf8"));
+    type Step = { uses?: string; with?: unknown; run?: string; shell?: string };
+    const toolchainToInstaller = (steps: Step[]) => steps.slice(1, steps.findIndex((step) => step.run === "pnpm package:win") + 1)
+      .map(({ uses, with: inputs, run, shell }) => ({ uses, with: inputs, run, shell }));
+    expect(toolchainToInstaller(check.jobs.check.steps).at(-1)?.run).toBe("pnpm package:win");
+    expect(toolchainToInstaller(check.jobs.check.steps)).toEqual(toolchainToInstaller(release.jobs.windows.steps));
+    expect(check.jobs.check["runs-on"]).toBe(release.jobs.windows["runs-on"]);
+  });
+
   it("lets the scope read the previous commit's CI and a pull request's labels, and nothing more", () => {
     // ci-scope.mjs runs a push's docs- or version-only diff without the runtime
     // jobs only when the commit before it has its own green run, and a PR's

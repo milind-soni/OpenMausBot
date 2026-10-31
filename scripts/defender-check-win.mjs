@@ -1,21 +1,11 @@
 #!/usr/bin/env node
-// Windows Security and the real installer, on a fresh Windows machine: GitHub's windows-latest, right after
-// `pnpm package:win` built the installer the way the release does (.github/workflows/windows-defender-check.yml).
-//
-//   1. Defender's protection is turned on the way a home PC has it, as far as the machine allows (GitHub's image turns
-//      most of it off and excludes every drive), and its signatures are updated.
-//   2. The installer is saved to Downloads the way a browser saves a download (a Zone.Identifier stream, ZoneId=3) and
-//      scanned.
-//   3. It is installed silently, started first the way a double-click starts it, and the app is opened and watched for
-//      two minutes.
-//   4. Start screen control is pressed the way the app's button presses it: window.ogb.localControl.retry() in the
-//      app's own window, through its DevTools port.
-//   5. report.md and report.json say what Defender found (threat detections, and the Operational log's events 1116,
-//      1117, 1006-1008 and 1015), whether cua-driver-background.exe runs, what the app's log says about computer control
-//      and whether Start screen control worked. The run fails when any of those went wrong.
-//
-// It changes Windows Security's settings and installs the app for the signed-in user, so it refuses to run anywhere but
-// a GitHub Windows runner.
+// How Windows Security treats the real installer on a fresh GitHub Windows runner, after `pnpm package:win`
+// (.github/workflows/windows-defender-check.yml). GitHub's image turns most of Defender off and excludes every drive, so
+// its protection is first set to a home PC's defaults. The installer is saved with a browser download's Zone.Identifier
+// (ZoneId=3), started the way a double-click starts it, and the app opened for two minutes; Start screen control is
+// then pressed through the app's DevTools port. report.md says what Defender found, whether cua-driver-background.exe
+// runs and whether Start screen control worked; the run fails when any of those went wrong. It changes Defender's
+// settings and installs the app, so it runs only on a GitHub Windows runner.
 //
 //   node scripts/defender-check-win.mjs --installer release/OpenMausBot-<version>-setup.exe --out <folder> [--wait 120]
 import { execFile, execFileSync, spawn } from "node:child_process";
@@ -55,10 +45,9 @@ const say = (line) => console.log(`[defender-check] ${line}`);
 const list = (value) => (Array.isArray(value) ? value : value == null ? [] : [value]);
 const firstLines = (text) => String(text ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 6).join(" | ");
 
-/** Runs a program to its end (or `timeout`); never throws. `code` is null when it never ran or was stopped. */
-function run(file, args, timeout = 120_000) {
+function run(file, args, timeout = 120_000, signal = undefined) {
   return new Promise((resolve) => {
-    execFile(file, args, { timeout, windowsHide: true, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(file, args, { timeout, signal, windowsHide: true, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
       resolve({
         code: error ? (typeof error.code === "number" ? error.code : null) : 0,
         timedOut: Boolean(error?.killed),
@@ -76,9 +65,8 @@ $WarningPreference = 'SilentlyContinue'
 Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue`;
 let scriptCount = 0;
 
-/** Windows PowerShell 5.1 (where the Defender cmdlets live) runs `script`; what it outputs comes back as an array. The
- * scripts and their answers stay in the report's powershell folder. */
-async function ps(script, timeout = 120_000) {
+/** Windows PowerShell 5.1, where the Defender cmdlets live. */
+async function ps(script, timeout = 120_000, signal = undefined) {
   const base = path.join(SCRIPTS, String(++scriptCount).padStart(2, "0"));
   writeFileSync(`${base}.ps1`, `\uFEFF${PRELUDE}
 try {
@@ -91,7 +79,7 @@ ConvertTo-Json -InputObject $result -Depth 6 -Compress | Set-Content -LiteralPat
 exit 1
 }
 `);
-  const result = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", `${base}.ps1`], timeout);
+  const result = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", `${base}.ps1`], timeout, signal);
   if (result.code !== 0 || !existsSync(`${base}.json`)) {
     throw new Error(result.timedOut ? `no answer within ${timeout / 1000} s` : firstLines(result.err || result.error || result.out) || `PowerShell ended with ${result.code}`);
   }
@@ -101,7 +89,6 @@ exit 1
 
 const report = { started: STARTED.toISOString(), commit: git(["rev-parse", "HEAD"]), version: appVersion(), errors: [] };
 
-/** One part of the check: what it found, or `{ error }` (also listed in the report) when it couldn't find out. */
 async function step(name, check) {
   say(name);
   try {
@@ -138,7 +125,6 @@ $os = Get-CimInstance Win32_OperatingSystem
   defenderService = "$((Get-Service WinDefend -ErrorAction SilentlyContinue).Status)"
 }`;
 
-/** Defender's state, as `Get-MpComputerStatus` and `Get-MpPreference` report it; their full lists go beside the report. */
 const defenderNow = (label) => ps(String.raw`
 Get-MpComputerStatus | Format-List * | Out-File -LiteralPath ${quote(path.join(OUT, `defender-status-${label}.txt`))} -Width 200
 Get-MpPreference | Format-List * | Out-File -LiteralPath ${quote(path.join(OUT, `defender-preferences-${label}.txt`))} -Width 200
@@ -155,7 +141,7 @@ $policies = foreach ($key in 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender
   realTimeProtection = $status.RealTimeProtectionEnabled; onAccessProtection = $status.OnAccessProtectionEnabled
   behaviourMonitoring = $status.BehaviorMonitorEnabled; downloadScanning = $status.IoavProtectionEnabled
   antivirus = $status.AntivirusEnabled; runningMode = "$($status.AMRunningMode)"; tamperProtected = $status.IsTamperProtected
-  signatureVersion = "$($status.AntivirusSignatureVersion)"; signatureUpdated = "$($status.AntivirusSignatureLastUpdated)"
+  signatureVersion = "$($status.AntivirusSignatureVersion)"; signatureAge = $status.AntivirusSignatureAge; signatureUpdated = "$($status.AntivirusSignatureLastUpdated)"
   engineVersion = "$($status.AMEngineVersion)"; productVersion = "$($status.AMProductVersion)"
   cloudProtection = [int]$preferences.MAPSReporting; sampleSubmission = [int]$preferences.SubmitSamplesConsent
   blockAtFirstSight = -not $preferences.DisableBlockAtFirstSeen; puaProtection = [int]$preferences.PUAProtection
@@ -207,6 +193,23 @@ async function waitForRealTime(ms) {
   }
 }
 
+const screenshot = (file) => ps(String.raw`
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+$bitmap.Save(${quote(file)}, [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose()
+$bitmap.Dispose()
+[pscustomobject]@{ file = ${quote(path.basename(file))}; width = $bounds.Width; height = $bounds.Height }`).then(([shot]) => shot, (error) => ({ error: error.message }));
+
+/** The windows on screen, and whether the installer or SmartScreen runs. */
+const onScreen = (installer) => ps(String.raw`
+$windows = @(Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { [pscustomobject]@{ pid = $_.Id; name = $_.ProcessName; title = $_.MainWindowTitle } })
+$processes = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'smartscreen.exe', 'consent.exe', ${quote(path.basename(installer))} } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; name = "$($_.Name)" } })
+[pscustomobject]@{ windows = $windows; processes = $processes }`).then(([seen]) => ({ windows: list(seen.windows), processes: list(seen.processes) }));
+
 /** Saved to Downloads with the mark a browser gives a download (the Internet zone), so Windows treats it as one. */
 async function saveAsDownload(installer) {
   const [saved] = await ps(String.raw`
@@ -248,17 +251,27 @@ function installedFolder() {
   return name ? path.join(programs, name) : null;
 }
 
-/** First the way a double-click starts it (through the Windows shell, which checks a downloaded file), then, if that
- * didn't install it, directly. A prompt nobody can click on this machine shows up as the shell start never ending. */
+/** First the way a double-click starts it: Windows' shell checks a downloaded file before it runs, and a prompt it shows
+ * waits for a click nobody gives here, with no installer running. Then, if that didn't install it, directly. */
 async function install(installer) {
   const began = Date.now();
-  const shell = await ps(String.raw`
+  const stop = new AbortController();
+  const shellStart = ps(String.raw`
 $process = Start-Process -FilePath ${quote(installer)} -ArgumentList '/S' -PassThru
 $null = $process.Handle
 $exited = $process.WaitForExit(240000)
 if (-not $exited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
-[pscustomobject]@{ exited = $exited; exitCode = $(if ($exited) { $process.ExitCode } else { $null }) }`, 300_000)
+[pscustomobject]@{ exited = $exited; exitCode = $(if ($exited) { $process.ExitCode } else { $null }) }`, 300_000, stop.signal)
     .then((answer) => answer[0], (error) => ({ error: error.message }));
+  const settled = await Promise.race([shellStart, sleep(30_000).then(() => null)]);
+  let held = null;
+  if (!settled) {
+    const [seen, shot] = await Promise.all([onScreen(installer).catch((error) => ({ error: error.message })), screenshot(path.join(OUT, "shell-start.png"))]);
+    const installing = seen.processes?.some((entry) => entry.name.toLowerCase() === path.basename(installer).toLowerCase());
+    held = { windows: seen.windows ?? [], processes: seen.processes ?? [], screenshot: shot, error: seen.error };
+    if (seen.processes && !installing) stop.abort();
+  }
+  const shell = { ...(await shellStart), held: Boolean(held && stop.signal.aborted), seen: held };
   const shellSeconds = Math.round((Date.now() - began) / 1000);
   let folder = installedFolder();
   let direct = null;
@@ -323,13 +336,15 @@ async function watchApp(exe) {
     const line = describe(now);
     if (line !== last) timeline.push(`${elapsed} s: ${line}`);
     last = line;
-    if (second >= WAIT_SECONDS) return { opened: true, timeline, driverFirstSeen, appRunning: now.app > 0, driver: now.driver };
+    if (second >= WAIT_SECONDS) {
+      const shot = await screenshot(path.join(OUT, "app-open.png"));
+      return { opened: true, timeline, driverFirstSeen, appRunning: now.app > 0, driver: now.driver, screenshot: shot };
+    }
     const wait = began + (second + 10) * 1000 - Date.now();
     if (wait > 0) await sleep(wait);
   }
 }
 
-/** A DevTools connection to one page of the app. */
 async function devtools(url) {
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
@@ -388,7 +403,7 @@ async function appPage(ms) {
 
 const SHOWN = "window.ogb.getCapabilities().then(({ localComputer }) => localComputer)";
 
-/** What the Start screen control button does (WindowsLocalControl, the icon's menu and a card's Turn on all end here). */
+/** The call the Start screen control button makes. */
 async function pressStart() {
   const page = await appPage(90_000);
   if (!page) return { pressed: false, error: "the app's window never showed its page on the DevTools port" };
@@ -426,7 +441,6 @@ async function closeApp() {
   return { closed: true };
 }
 
-/** Everything Defender recorded since the check started: its threat detections and the Operational log's events. */
 async function findings() {
   const [found] = await ps(String.raw`
 $since = [datetime]::Parse(${quote(STARTED.toISOString())}).ToLocalTime()
@@ -460,11 +474,14 @@ $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Window
   };
 }
 
-// ── The check ───────────────────────────────────────────────────────────────────────────────────────────────────
 report.machine = await step("the machine", async () => (await ps(MACHINE))[0]);
 report.asFound = await step("Defender as GitHub's machine has it", () => defenderNow("as-found"));
 report.turnOn = await step("turn Defender's protection on as a home PC has it", turnOn);
 report.realTimeOn = await step("wait for real-time protection", () => waitForRealTime(45_000));
+report.cloud = await step("Defender's cloud connection", async () => {
+  const result = await run(MPCMDRUN, ["-ValidateMapsConnection"], 180_000);
+  return { reached: result.code === 0, output: firstLines(`${result.out}\n${result.err}`) || result.error || `ended with ${result.code}` };
+});
 report.signatureUpdate = await step("update Defender's signatures", async () => (await ps("Update-MpSignature\n'updated'", 900_000))[0]);
 report.protection = await step("Defender after turning it on", () => defenderNow("turned-on"));
 report.smartScreen = await step("SmartScreen on this machine", async () => (await ps(SMART_SCREEN))[0]);
@@ -493,7 +510,6 @@ if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMM
 for (const problem of verdict.problems) console.log(`::error title=Windows Defender check::${problem}`);
 process.exitCode = verdict.problems.length ? 1 : 0;
 
-/** What went wrong for a person installing the app, and how much protection the machine really had on. */
 function judge(r) {
   const problems = [];
   const ourEvents = (r.findings?.events ?? []).filter((event) => OURS.test(`${event.path} ${event.process}`));
@@ -523,6 +539,7 @@ function judge(r) {
   if (p.realTimeProtection !== true) weaker.push("real-time protection stayed off");
   if (p.runningMode && !/normal/i.test(p.runningMode)) weaker.push(`Defender ran in ${p.runningMode}, so it reports without blocking`);
   if (p.cloudProtection !== 2) weaker.push("cloud protection wasn't on");
+  else if (r.cloud && !r.cloud.reached) weaker.push("Defender couldn't reach its cloud, so cloud verdicts and block at first sight couldn't work");
   if (p.exclusions?.length) weaker.push(`exclusions stayed: ${p.exclusions.join(", ")}`);
   return { problems, weaker, ourEvents, otherEvents: (r.findings?.events ?? []).filter((event) => !ourEvents.includes(event)) };
 }
@@ -567,8 +584,12 @@ function render(r, verdict) {
   if (failed(r.protection)) add(`- Defender after turning it on: ${failed(r.protection)}`);
   else {
     add(`- During the check: real-time protection ${yesNo(after.realTimeProtection)}, running mode ${after.runningMode || "unknown"}, behaviour monitoring ${yesNo(after.behaviourMonitoring)}, download scanning ${yesNo(after.downloadScanning)}, cloud protection ${cloud(after.cloudProtection)} (${samples(after.sampleSubmission)}), block at first sight ${after.blockAtFirstSight ? "on" : "off"}, unwanted-app blocking ${unwanted(after.puaProtection)}, exclusions ${after.exclusions?.length ? after.exclusions.join(", ") : "none"}.`);
-    add(`- Signatures: ${before.signatureVersion || "unknown"} before, ${after.signatureVersion || "unknown"} after the update${r.signatureUpdate?.error ? ` (the update failed: ${r.signatureUpdate.error})` : ""}; engine ${after.engineVersion || "unknown"}, platform ${after.productVersion || "unknown"}.`);
-    if (after.policies?.length) add(`- Defender policies set on this machine: ${after.policies.join("; ")}.`);
+    add(`- Signatures: ${before.signatureVersion || "unknown"} before, ${after.signatureVersion || "unknown"} after the update${r.signatureUpdate?.error ? ` (the update failed: ${r.signatureUpdate.error})` : ""}, ${after.signatureAge ?? "unknown"} day(s) old; engine ${after.engineVersion || "unknown"}, platform ${after.productVersion || "unknown"}.`);
+    if (r.cloud) add(`- Defender's cloud (\`MpCmdRun -ValidateMapsConnection\`): ${r.cloud.error ? `couldn't tell: ${r.cloud.error}` : r.cloud.reached ? "reached" : `**not reached**: ${r.cloud.output}`}.`);
+    if (after.policies?.length) {
+      const passive = after.policies.some((policy) => /ForceDefenderPassiveMode = 1/.test(policy)) && /normal/i.test(after.runningMode ?? "");
+      add(`- Defender policies GitHub sets on this machine: ${after.policies.join("; ")}${passive ? ". Passive mode applies only to a machine enrolled in Microsoft Defender for Endpoint; Defender reported Normal mode, so it acts on what it finds" : ""}.`);
+    }
   }
   if (r.end && !r.end.error) add(`- At the end: real-time protection ${yesNo(r.end.realTimeProtection)}, running mode ${r.end.runningMode || "unknown"}.`);
   add();
@@ -582,12 +603,17 @@ function render(r, verdict) {
   if (failed(r.install)) add(`- Installing: ${failed(r.install)}`);
   else if (r.install) {
     const shell = r.install.shell ?? {};
-    const shellLine = shell.error
-      ? (/no answer within/.test(shell.error) ? `still waiting after ${shell.seconds} s, so a Windows prompt nobody could click was likely holding it` : `refused: ${shell.error}`)
-      : shell.exited
-        ? `finished in ${shell.seconds} s with exit code ${shell.exitCode}`
-        : `still running after 4 minutes, so a Windows prompt nobody could click was likely holding it`;
+    const titles = (shell.seen?.windows ?? []).map((window) => `"${window.title}" (${window.name})`);
+    const running = (shell.seen?.processes ?? []).map((entry) => entry.name);
+    const shellLine = shell.held
+      ? `held: 30 s later no installer was running${titles.length ? `; the windows on screen were ${titles.join(", ")}` : ""}${running.length ? `; running: ${running.join(", ")}` : ""}. A prompt was waiting for a click nobody gives here`
+      : shell.error
+        ? (/no answer within/.test(shell.error) ? `still waiting after ${shell.seconds} s` : `refused: ${shell.error}`)
+        : shell.exited
+          ? `finished in ${shell.seconds} s with exit code ${shell.exitCode}`
+          : "still running after 4 minutes";
     add(`- Started the way a double-click starts it (\`/S\`, through the Windows shell): ${shellLine}.`);
+    if (shell.seen?.screenshot) add(`- The screen 30 s after that start: ${shotLine(shell.seen.screenshot)}.`);
     if (r.install.direct) {
       add(`- Started directly instead: ${r.install.direct.code === 0 ? "finished" : `ended with ${r.install.direct.code ?? r.install.direct.error ?? "a timeout"}`}.`);
     }
@@ -608,6 +634,7 @@ function render(r, verdict) {
     else {
       add(`- ${DRIVER} ${r.app.driver?.length ? `was running ${WAIT_SECONDS} s after the app opened (pid ${r.app.driver.map((entry) => entry.pid).join(", ")}, \`${r.app.driver[0].path}\`)` : `**wasn't running** ${WAIT_SECONDS} s after the app opened`}${r.app.driverFirstSeen !== null ? `; first seen ${r.app.driverFirstSeen} s after opening` : ""}.`);
       add(`- What ran, second by second: ${r.app.timeline.join(" → ")}.`);
+      if (r.app.screenshot) add(`- The screen ${WAIT_SECONDS} s after the app opened: ${shotLine(r.app.screenshot)}.`);
     }
   }
   if (failed(r.log)) add(`- The app's log: ${failed(r.log)}`);
@@ -661,6 +688,10 @@ function render(r, verdict) {
   }
   add();
   return `${lines.join("\n")}\n`;
+}
+
+function shotLine(shot) {
+  return shot.error ? `no screenshot (${shot.error})` : `\`${shot.file}\` in the artifact (${shot.width}×${shot.height})`;
 }
 
 function scanLine(result) {

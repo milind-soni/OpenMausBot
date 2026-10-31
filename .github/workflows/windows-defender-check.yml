@@ -29,7 +29,6 @@ jobs:
           # the pull request's own commit, not its merge with main
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      # The release's Windows build, step for step (release.yml), so this is the installer people download.
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
