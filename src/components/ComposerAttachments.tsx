@@ -25,6 +25,7 @@ export function ComposerAttachments({
   onChangeCitation,
   onDisplayInChatBox,
   allowImages = true,
+  imageSlots,
   notice,
   onNotice,
   onPendingChange,
@@ -36,6 +37,8 @@ export function ComposerAttachments({
   onChangeCitation: (citation: CitationAttachment) => void;
   onDisplayInChatBox: (attachment: PasteAttachment) => void;
   allowImages?: boolean;
+  /** Images the message can still take; a drop past it is left out with a notice. */
+  imageSlots?: number;
   notice: string | null;
   onNotice: (notice: string | null) => void;
   onPendingChange?: (pending: boolean) => void;
@@ -45,8 +48,8 @@ export function ComposerAttachments({
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   // dragenter/dragleave fire once per element crossed, so the overlay tracks depth.
   const depth = useRef(0);
-  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, uploadImage });
-  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, uploadImage };
+  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, imageSlots, uploadImage });
+  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, imageSlots, uploadImage };
   const pendingDrops = useRef(new Set<symbol>());
 
   useEffect(() => {
@@ -80,6 +83,7 @@ export function ComposerAttachments({
           allowImages: callbacks.current.allowImages,
           getPath: pathForFile,
           uploadImage: callbacks.current.uploadImage,
+          imageSlots: callbacks.current.imageSlots,
         });
         if (attachments.length) callbacks.current.onAdd(attachments);
         if (message) callbacks.current.onNotice(message);

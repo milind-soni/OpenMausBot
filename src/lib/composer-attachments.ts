@@ -105,6 +105,14 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 /** Must match the server's IMAGE_MAX_BYTES. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
+export const TURN_IMAGE_MAX_COUNT = 4;
+
+export function imageLimitNotice(leftOut: readonly string[]): string {
+  return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
+}
+
+const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   txt: "text/plain",
@@ -715,10 +723,22 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
     uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** Images the message can still take; the rest are left out and named in the notice. */
+    imageSlots?: number;
   },
 ): Promise<{ attachments: Attachment[]; notice: string | null }> {
-  const files = [..._files];
   const { allowImages, getPath, uploadImage } = _opts;
+  let imageSlots = _opts.imageSlots ?? Infinity;
+  const leftOut: string[] = [];
+  const files = _files.filter((file) => {
+    if (!allowImages || !isImageFile(file)) return true;
+    if (imageSlots > 0) {
+      imageSlots -= 1;
+      return true;
+    }
+    leftOut.push(file.name);
+    return false;
+  });
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
@@ -757,14 +777,19 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   }));
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);
+  const archives = rejectedNames.filter((name) => ARCHIVE_NAME.test(name));
+  const unsupported = rejectedNames.filter((name) => !ARCHIVE_NAME.test(name));
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
-  const pathless = rejectedNames.length
-    ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
-    : null;
+  const pathless = [
+    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, or audio file.` : "",
+    archives.length ? `Archives can't be attached: unzip ${archives.join(", ")} and attach the files inside.` : "",
+  ].filter(Boolean).join(" ") || null;
   const failed = uploadErrors.length ? uploadErrors.join("; ") : null;
+  const notice = pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed);
+  const limited = leftOut.length ? imageLimitNotice(leftOut) : null;
   return {
     attachments,
-    notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
+    notice: limited && notice ? `${limited} ${notice}` : (limited ?? notice),
   };
 }
 

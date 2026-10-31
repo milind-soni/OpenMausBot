@@ -52,12 +52,14 @@ import {
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
+  imageLimitNotice,
   replyTargetTakesFocus,
   intakeFiles,
   isLongPaste,
   optimisticImageAttachment,
   pasteAttachment,
   releaseAttachmentImagePreview,
+  TURN_IMAGE_MAX_COUNT,
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
@@ -167,6 +169,7 @@ export function Composer({
     !group && bot ? `bot:${bot.id}` : undefined,
   );
   const attachmentPending = useDraftAttachmentPending(draftId);
+  const imageSlots = Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
   const failedSends = useFailedComposerSends(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
   const editText = useCallback(
@@ -519,6 +522,7 @@ export function Composer({
         allowImages: engineSupportsImages,
         getPath: pathForFile,
         uploadImage,
+        imageSlots,
       });
       if (added.length) addAttachments(added);
       if (notice) setAttachmentNotice(notice);
@@ -637,10 +641,14 @@ export function Composer({
         return;
       }
       if (imageFiles.length > 0) {
+        const kept = imageFiles.slice(0, imageSlots);
+        const leftOut = imageFiles.slice(imageSlots);
+        if (leftOut.length) setAttachmentNotice(imageLimitNotice(leftOut.map((file) => file.name)));
+        if (!kept.length) return;
         changeDraftAttachmentPending(draftId, true);
         void (async () => {
           try {
-            const results = await Promise.allSettled(imageFiles.map(uploadImage));
+            const results = await Promise.allSettled(kept.map(uploadImage));
             for (const result of results) {
               if (result.status === "rejected") {
                 dispatch({
@@ -763,6 +771,7 @@ export function Composer({
           onChangeCitation={(citation: CitationAttachment) => editAttachments((current) => current.map((attachment) => attachment.id === citation.id ? citation : attachment))}
           onDisplayInChatBox={displayPasteInChatBox}
           allowImages={engineSupportsImages}
+          imageSlots={imageSlots}
           notice={attachmentNotice}
           onNotice={setAttachmentNotice}
           onPendingChange={(pending) => changeDraftAttachmentPending(draftId, pending)}
