@@ -949,9 +949,7 @@ export function saveConfig(
   const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() }).parse(patch);
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
-  if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  const storedSearch = validStoredWebSearch(disk.webSearch);
-  if (storedSearch) disk.webSearch = storedSearch;
+  if (storedProfiles.success) disk.browserProfiles = storedProfiles.data; disk.webSearch = validStoredWebSearch(disk.webSearch) ?? disk.webSearch;
   for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "webSearch", "groq", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;

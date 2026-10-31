@@ -768,8 +768,8 @@
     ]
   },
   "skills+shared+voice+cloud-home": {
-    "bytes": 62047,
-    "sha256": "ba173aa0ed0983aac23caae398251275e11c2d9f31a38cff224b0c364f3e8ae7",
+    "bytes": 62732,
+    "sha256": "ac6ae243a2d73135798c328c217de50cb9cd807aa8022ccafd89254a079766a3",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -812,6 +812,7 @@
       "wait_until",
       "list_waits",
       "cancel_wait",
+      "ask_for_computer",
       "propose_profile",
       "propose_model",
       "propose_team_memory",
@@ -821,8 +822,8 @@
     ]
   },
   "skills+shared+voice+non-chief+cloud-home": {
-    "bytes": 52990,
-    "sha256": "c4e8af27c527477c8ffa2404b37f44778f20aa0af9ef68c8362a881fdeb06fe0",
+    "bytes": 53675,
+    "sha256": "b2b2d4b9a6db6b49f99751f7569d8b19201736606803724528fa6227a20610b1",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -858,6 +859,7 @@
       "wait_until",
       "list_waits",
       "cancel_wait",
+      "ask_for_computer",
       "propose_profile",
       "propose_model",
       "propose_team_memory",
