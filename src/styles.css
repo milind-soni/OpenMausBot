@@ -1592,6 +1592,9 @@ body {
   .place-banner img { --place-banner-strength: 0.26; filter: blur(1.5px) saturate(0.85) brightness(0.8); }
 }
 .place-tint[data-under-banner] { display: none; }
+/* In a framed window the sidebar sits on the frame, under the top bar and beside the rail: its colour or picture rounds
+   its top-left corner where the two meet, as the card beside it does. */
+[data-sidebar][data-framed] :is(.place-tint, .place-banner) { border-top-left-radius: 12px; }
 @media (prefers-reduced-transparency: reduce) {
   .place-banner { display: none; }
   .place-tint[data-under-banner] { display: block; }
