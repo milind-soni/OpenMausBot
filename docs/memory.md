@@ -462,3 +462,15 @@ Every panel edit, delete or acceptance carries the revision it was based on.
 Stale writes return 409; writes without a revision return 428. Reloading after a
 conflict retains the unsaved draft for comparison. Pending replacement cards
 also refuse approval if the accepted fact changed since the proposal.
+
+### Checks before a dream saves a fact
+
+A dream must quote the person's statements in each cited conversation.
+The host checks numbers, dates, months, paths, URLs, names and family
+relationships against those quotes. Unsupported entries are skipped.
+An outdated note stays unchanged when its replacement fails the check.
+Entries that look like secrets are rejected with the existing secret detector.
+Relative dates in English or Polish become dates from the quoted message,
+not from the night the dream runs. Missing or ambiguous dates refuse the entry.
+These checks also apply before a dream adds a fact to About me.
+They do not merge notes into summaries.
