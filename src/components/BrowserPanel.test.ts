@@ -480,3 +480,48 @@ describe("a sign-in that stops at a passkey", () => {
     expect(notice()?.textContent).toContain(t("browser.passkey.lendPc", { name: "Pepper" }));
   });
 });
+
+describe("closing the last tab", () => {
+  const tab = (tabId: string) => ({ tabId, title: tabId, url: `https://${tabId}.example.test/`, active: tabId === "t1" });
+  // Only the Close buttons that sit beside a tab; the panel has other "Close …" buttons.
+  const closes = () => [...host.querySelectorAll('[role="tab"]')].map((tab) => tab.nextElementSibling?.getAttribute("aria-label")).filter((label): label is string => !!label);
+
+  it("offers no Close on agent-browser's only tab, which it refuses to close, but still closes one of two", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
+    await render();
+    const live = FixtureEventSource.instances.at(-1)!;
+    await act(async () => { live.emit("ready", { viewerId: "viewer" }); live.emit("tabs", { tabs: [tab("t1")] }); });
+    await flush();
+    expect(host.textContent).toContain("t1");
+    expect(closes()).toEqual([]);
+    await act(async () => live.emit("tabs", { tabs: [tab("t1"), tab("t2")] }));
+    await flush();
+    expect(closes()).toEqual(["Close t1", "Close t2"]);
+  });
+
+  it("offers Close on the only tab on the Chrome engine, which opens a blank one first", async () => {
+    const socket = await streaming("you");
+    await act(async () => socket.message({ type: "tabs", tabs: [tab("t1")] }));
+    await flush();
+    expect(closes()).toEqual(["Close t1"]);
+    await act(async () => button("Close t1").click());
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "tabClose", tabId: "t1" });
+  });
+
+  it.each([
+    ["available", { myChrome: true }],
+    ["lendable on My Cloud", { myChrome: false, myChromeLendable: true as const }],
+  ])("offers no Close on the only tab of a My Chrome profile (%s), which stays on agent-browser under the Chrome engine", async (_, myChrome) => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "chrome", ...myChrome };
+    fixture.state.config.browserProfiles = [{ id: "mine", name: "Mine", browser: "chrome" }];
+    await render({ bot: { ...bot, browserProfile: "mine" } });
+    await act(async () => FakeSocket.instances.at(-1)!.refuse());
+    await flush();
+    const live = FixtureEventSource.instances.at(-1)!;
+    await act(async () => { live.emit("ready", { viewerId: "viewer" }); live.emit("tabs", { tabs: [tab("t1")] }); });
+    await flush();
+    expect(host.textContent).toContain("t1");
+    expect(closes()).toEqual([]);
+  });
+});

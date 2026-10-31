@@ -266,6 +266,8 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const typingReady = connected && you;
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
+  // A My Chrome profile stays on agent-browser even when the Chrome engine is on, including one My Cloud could lend.
+  const myChrome = (state.config?.browserEngine?.myChrome === true || state.config?.browserEngine?.myChromeLendable === true) && (state.config?.browserProfiles ?? []).some((profile) => profile.id === bot.browserProfile && profile.browser === "chrome");
   return <div ref={panel} className={maximized
     ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-card text-ink"
     : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
@@ -279,6 +281,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       takeStatus={takeStatus}
       hint={t(kept || signInOpen ? "browser.control.keptHint" : "browser.control.yoursHint", { name: bot.name })}
       commandsReady={commandsReady}
+      closesLastTab={state.config?.browserEngine?.engine === "chrome" && !myChrome}
       profileName={profileName}
       fullscreen={fullscreen}
       maximized={maximized}
