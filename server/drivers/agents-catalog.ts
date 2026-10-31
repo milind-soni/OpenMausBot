@@ -9,7 +9,7 @@ import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
-import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES, X_TOOL_NAMES } from "./agents-research-tools.ts";
 import type { CatalogProfile } from "./agents-catalog-profile.ts";
 import { advertisedSchema } from "./agents-schema.ts";
 export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
@@ -911,9 +911,8 @@ function catalogTools(profile: CatalogProfile) {
   const VOICE_READY_TOOLS = profile.voiceNotes
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
-  const RESEARCH_READY_TOOLS = profile.xResearch === true
-    ? VOICE_READY_TOOLS
-    : VOICE_READY_TOOLS.filter((tool) => !RESEARCH_TOOL_NAMES.has(tool.name));
+  const RESEARCH_READY_TOOLS = VOICE_READY_TOOLS.filter((tool) => !RESEARCH_TOOL_NAMES.has(tool.name) ||
+    (profile.xResearch === true && (profile.research === true || X_TOOL_NAMES.has(tool.name))));
   const ROLE_TOOLS = profile.chief
     ? RESEARCH_READY_TOOLS
     : RESEARCH_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
