@@ -336,7 +336,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       .catch(error => { throw error.status === 401 || error.status === 403 ? Object.assign(error, { problem: "connect-first" }) : error; });
     if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw Object.assign(new Error("Complete server pairing or sign-in first"), { problem: "connect-first" });
     if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
-    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: descriptor.capabilities?.lendingDetails === true, link: descriptor.capabilities?.deviceLink === true, chrome: descriptor.capabilities?.myChromeLink === true, timeouts: descriptor.capabilities?.commandTimeouts === true, edits: descriptor.capabilities?.fileEdits === true, asks: descriptor.capabilities?.computerAsks === true };
+    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: descriptor.capabilities?.lendingDetails === true, link: descriptor.capabilities?.deviceLink === true, chrome: descriptor.capabilities?.myChromeLink === true, timeouts: descriptor.capabilities?.commandTimeouts === true, long: descriptor.capabilities?.longCommands === true, edits: descriptor.capabilities?.fileEdits === true, asks: descriptor.capabilities?.computerAsks === true };
   };
   const identity = async env => {
     await requireEnabled();
@@ -349,7 +349,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
    * server the move chose (lending-target.mjs `own:<environment id>`). */
   const ownHomeId = env => { const current = cloud(env); return current?.origin === env.origin && current.accountId?.startsWith("own:") ? current.accountId.slice(4) : null; };
   const cloudIdentity = async env => {
-    const { auth, info, details, link, chrome: takesChrome, timeouts, edits } = await describe(env);
+    const { auth, info, details, link, chrome: takesChrome, timeouts, long, edits } = await describe(env);
     const own = ownHomeId(env);
     if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error("This server is not your bots' home any more"), { problem: "not-cloud" });
     if ((own === null && auth.cloudHome !== true) || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
@@ -357,6 +357,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (link) supportsLink.add(env.id); else supportsLink.delete(env.id);
     if (takesChrome) supportsChrome.add(env.id); else supportsChrome.delete(env.id);
     if (timeouts) supportsTimeouts.add(env.id); else supportsTimeouts.delete(env.id);
+    if (long) supportsLong.add(env.id); else supportsLong.delete(env.id);
     if (edits) supportsEdits.add(env.id); else supportsEdits.delete(env.id);
     return info;
   };
@@ -365,6 +366,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   /** The Clouds that take the person's Chrome over the device link. */
   const supportsChrome = new Set();
   const supportsTimeouts = new Set();
+  const supportsLong = new Set();
   const supportsEdits = new Set();
   /** My Cloud's browsers reach the web through this computer while lending runs; never while My Cloud sleeps, so a
    * sleeping Cloud is never dialled. */
@@ -434,6 +436,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             ...(grant.cloud && supportsLink.has(env.id) ? { internet: lendsInternet(grant) } : {}),
             ...(grant.cloud && supportsChrome.has(env.id) ? { chrome: grant.chrome === true } : {}),
             ...(supportsTimeouts.has(env.id) ? { commandTimeouts: true } : {}),
+            ...(supportsLong.has(env.id) ? { longCommands: true } : {}),
             ...(supportsEdits.has(env.id) ? { fileEdits: true } : {}),
           }, signal, grant.secret);
           if (signal.aborted) break;
