@@ -37,6 +37,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
                     [--sentinel]   (the health scan below, every two minutes, instead of the server)
   openmausbot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]   (read-only health scan; see --help)
   openmausbot browser install [--with-deps] | status
+  openmausbot workspace list | create NAME [--data-dir DIR] | switch ID | delete ID [--purge] | forget ID [--purge]
   openmausbot fleet init --domain HOST [--operator USER] | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
                     [--anthropic-key-file FILE] [--cap USD] [--license-key KEY] [--memory 1G]
                   | list | users NAME add|remove EMAIL [--chat-only] | suspend NAME | resume NAME
