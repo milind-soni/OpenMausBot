@@ -18,9 +18,9 @@ export const json = (body, status = 200, headers = {}) => new Response(JSON.stri
  * sign-in (its power word, wake, pairing code), My Cloud's answers (`cloud`), the window (where it went), the startup
  * screen and a manual clock.
  */
-export function world({ journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, client = {}, splash = true, url = "", remembered = null } = {}) {
+export function world({ journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, client = {}, splash = true, url = "", remembered = null, ownMove = null } = {}) {
   const w = {
-    journal, marker, state, power, clock: 1_000_000, typed: 0, now: () => w.clock,
+    journal, marker, state, power, ownMove, clock: 1_000_000, typed: 0, now: () => w.clock,
     cloud: { down: false, signedIn: true, version: "0.1.130", health: 200, wakes: true, ...cloud },
     /** The team's Cloud, answering at TEAM; `gone`: the Admin's team pairing says this person is no longer in it. */
     team: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...team },
@@ -76,6 +76,7 @@ export function world({ journal = done(), marker = null, state = connected(), po
   w.home = createHomeWindow({
     journal: () => w.journal,
     frozen: async () => w.marker,
+    ownMove: () => w.ownMove,
     account: () => account,
     window: () => w.window,
     ensureWindow: () => { w.calls.push("ensure"); },

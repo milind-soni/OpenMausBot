@@ -21,6 +21,7 @@ import type { json as sendJson } from "../harness/http.ts";
 import { personKey } from "../person-key.ts";
 import type { RecentLog } from "../recent-log.ts";
 import { PASS } from "../routes/table.ts";
+import { serverLine, type LineLanguage } from "../server-lines.ts";
 import type { PublicSession } from "../sessions.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import { clip } from "./text-clip.ts";
@@ -45,7 +46,9 @@ const waitingSchema = z.object({ messageId: id, threadId: id, at: z.number(), te
   sender: z.object({ name: z.string().max(200), id: z.string().max(200).optional() }).optional() });
 const payloadSchema = z.object({ installId: z.string(), source: z.literal("bot"), description: z.string(), appVersion: z.string(), platform: z.string(),
   diagnostics: z.string(), contactEmail: z.string().optional(), contact: z.string().optional() });
-const queuedSchema = z.object({ messageId: id, threadId: id, payload: payloadSchema, firstAt: z.number(), attempts: z.number().int().min(0), nextAt: z.number() });
+const queuedSchema = z.object({ messageId: id, threadId: id, payload: payloadSchema, firstAt: z.number(), attempts: z.number().int().min(0), nextAt: z.number(),
+  /** Who wrote @devs, so a later try's line reads in their language. */
+  person: z.string().max(200).optional() });
 const fileSchema = z.object({ version: z.literal(1), waiting: z.array(waitingSchema).max(MAX_WAITING), outbox: z.array(queuedSchema).max(MAX_OUTBOX) });
 const bodySchema = z.object({
   went_wrong: z.string().trim().min(1).max(2_000), you_saw: z.string().trim().max(3_000).optional(), steps: z.string().trim().max(2_000).optional(),
@@ -77,6 +80,8 @@ export interface DevsReportsDeps {
   team: boolean;
   profileEmail(): string | undefined;
   language(): string | undefined;
+  /** The language a line for this person is written in; absent, the one set on this server. */
+  lineLanguage?: LineLanguage;
   recentLog: RecentLog;
   send(payload: DevsReportPayload): Promise<SendOutcome>;
   now?: () => number;
@@ -94,19 +99,23 @@ export interface DevsReportContext {
   readBody: () => Promise<unknown>;
 }
 
-export const sentLine = (reportId: string, contact?: string) =>
-  `Sent to the MausBot team (report ${reportId}). Milind and Omkar get it by email${contact ? ` and will reply to ${contact}` : ""}.`;
-const laterLine = (reportId: string, contact?: string) =>
-  `Sent to the MausBot team (report ${reportId}) after an earlier try did not go through. Milind and Omkar get it by email${contact ? ` and will reply to ${contact}` : ""}.`;
-function notYetLine(outcome: Extract<SendOutcome, { retry: true }>): string {
+// What the person is told, in their language (server/server-lines.ts). The bot passes it on word for word.
+export const sentLine = (reportId: string, contact?: string, language?: string) => contact
+  ? serverLine(language, "server.reports.sentReply", { report: reportId, contact }) : serverLine(language, "server.reports.sent", { report: reportId });
+const laterLine = (reportId: string, contact: string | undefined, language: string | undefined) => contact
+  ? serverLine(language, "server.reports.sentLaterReply", { report: reportId, contact }) : serverLine(language, "server.reports.sentLater", { report: reportId });
+function notYetLine(outcome: Extract<SendOutcome, { retry: true }>, language: string | undefined): string {
   const minutes = outcome.retryAfterMs ? Math.max(1, Math.ceil(outcome.retryAfterMs / 60_000)) : 0;
-  const why = outcome.why === "limited" ? "the MausBot team takes only a few reports an hour from each app"
-    : outcome.why === "offline" ? "the MausBot team's server could not be reached" : "the MausBot team's server could not take it right now";
-  return `Not sent yet: ${why}. The report is saved and goes on its own${minutes ? ` in about ${minutes} minute${minutes === 1 ? "" : "s"}` : " as soon as it can"}, so there is no need to send it again.`;
+  const why = serverLine(language, outcome.why === "limited" ? "server.reports.why.limited" : outcome.why === "offline" ? "server.reports.why.offline" : "server.reports.why.busy");
+  const when = minutes ? serverLine(language, minutes === 1 ? "server.reports.when.minute" : "server.reports.when.minutes", { count: minutes })
+    : serverLine(language, "server.reports.when.soon");
+  return serverLine(language, "server.reports.notYet", { why, when });
 }
-const refusedLine = (detail: string) => `The MausBot team's server refused this bug report, so nothing was sent: ${detail.replace(/[.\s]+$/, "")}.`;
-const fullLine = `Not sent: ${MAX_OUTBOX} bug reports are already waiting to go to the MausBot team. Type @devs again once they have gone.`;
-const droppedLine = "A bug report from this conversation could not reach the MausBot team for a week, so it was dropped. Type @devs again to send a new one.";
+const refusedLine = (detail: string, language: string | undefined) => serverLine(language, "server.reports.refused", { detail: detail.replace(/[.\s]+$/, "") });
+const fullLine = (language: string | undefined) => serverLine(language, "server.reports.full", { count: MAX_OUTBOX });
+const droppedLine = (language: string | undefined) => serverLine(language, "server.reports.dropped");
+/** A failure line names MausBot in every language: a bot reply that does has passed it on. */
+const FAILED_MARKER = "MausBot";
 
 /** Rides on the turn that answers a @devs message. */
 const TURN_NOTE = "\n\n[From OpenMausBot, not the person: this message tags @devs, so it is a bug report for the MausBot team, OpenMausBot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; OpenMausBot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
@@ -177,6 +186,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
   };
   const botNames = () => store.bots.map((bot) => bot.name);
   const secrets = () => environmentSecrets();
+  const languageFor = (person: string | undefined) => (deps.lineLanguage ? deps.lineLanguage(person) : deps.language());
 
   function contactFor(sender: ResolvedSender | undefined): string | undefined {
     const person = sender?.id;
@@ -228,16 +238,17 @@ export function createDevsReports(deps: DevsReportsDeps) {
   }
 
   /** The words for the person after one attempt; a report worth trying again joins the outbox. */
-  function settle(entry: { messageId: string; threadId: string }, payload: DevsReportPayload, outcome: SendOutcome, contact?: string): Told {
+  function settle(entry: Pick<Waiting, "messageId" | "threadId" | "sender">, payload: DevsReportPayload, outcome: SendOutcome, contact?: string): Told {
+    const person = entry.sender?.id, language = languageFor(person);
     if (outcome.ok) {
       lastSent.set(entry.threadId, { reportId: outcome.id, at: now() });
-      return { ok: true, line: sentLine(outcome.id, contact), marker: outcome.id };
+      return { ok: true, line: sentLine(outcome.id, contact, language), marker: outcome.id };
     }
-    if (!outcome.retry) return { ok: false, line: refusedLine(outcome.detail), marker: "MausBot team" };
-    if (outbox.length >= MAX_OUTBOX) return { ok: false, line: fullLine, marker: "MausBot team" };
+    if (!outcome.retry) return { ok: false, line: refusedLine(outcome.detail, language), marker: FAILED_MARKER };
+    if (outbox.length >= MAX_OUTBOX) return { ok: false, line: fullLine(language), marker: FAILED_MARKER };
     outbox.push({ messageId: entry.messageId, threadId: entry.threadId, payload, firstAt: now(), attempts: 1,
-      nextAt: now() + (outcome.retryAfterMs ?? RETRY_MS[0]) });
-    return { ok: false, line: notYetLine(outcome), marker: "MausBot team" };
+      nextAt: now() + (outcome.retryAfterMs ?? RETRY_MS[0]), ...(person ? { person } : {}) });
+    return { ok: false, line: notYetLine(outcome, language), marker: FAILED_MARKER };
   }
 
   function deliver(entry: Waiting, author: Author): Promise<Told> {
@@ -269,17 +280,17 @@ export function createDevsReports(deps: DevsReportsDeps) {
   async function retry(queued: Queued): Promise<void> {
     retrying.add(queued);
     const outcome = await deps.send(queued.payload).catch((): SendOutcome => ({ ok: false, retry: true, why: "offline" })).finally(() => retrying.delete(queued));
-    const contact = queued.payload.contactEmail ?? queued.payload.contact;
+    const contact = queued.payload.contactEmail ?? queued.payload.contact, language = languageFor(queued.person);
     if (outcome.ok) {
       outbox = outbox.filter((one) => one !== queued);
       lastSent.set(queued.threadId, { reportId: outcome.id, at: now() });
-      notice(queued.threadId, { ok: true, line: laterLine(outcome.id, contact), marker: outcome.id });
+      notice(queued.threadId, { ok: true, line: laterLine(outcome.id, contact, language), marker: outcome.id });
     } else if (!outcome.retry) {
       outbox = outbox.filter((one) => one !== queued);
-      notice(queued.threadId, { ok: false, line: refusedLine(outcome.detail), marker: "" });
+      notice(queued.threadId, { ok: false, line: refusedLine(outcome.detail, language), marker: "" });
     } else if (now() - queued.firstAt > KEPT_MS) {
       outbox = outbox.filter((one) => one !== queued);
-      notice(queued.threadId, { ok: false, line: droppedLine, marker: "" });
+      notice(queued.threadId, { ok: false, line: droppedLine(language), marker: "" });
     } else {
       queued.attempts += 1;
       queued.nextAt = now() + (outcome.retryAfterMs ?? RETRY_MS[Math.min(queued.attempts - 1, RETRY_MS.length - 1)]!);
@@ -330,7 +341,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     if (!tagsDevs(line.text, botNames())) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
-    if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine, marker: "" });
+    if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(languageFor(line.sender?.id)), marker: "" });
     const redact = (text: string) => clip(redactReportText(text, secrets()), 3_000);
     waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(withoutDevsTags(line.text, botNames())),
       ...(line.sender ? { sender: { name: line.sender.name, ...(line.sender.id ? { id: line.sender.id } : {}) } } : {}) });

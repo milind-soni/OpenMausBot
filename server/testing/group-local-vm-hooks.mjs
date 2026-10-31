@@ -128,8 +128,8 @@ registerHooks({
     }
     if (url.endsWith('/room-turn-timeout.ts')) {
       return { ...result, source: `import { readFileSync as readVmDeadline } from 'node:fs';\n` +
-        String(result.source).replace('this.remainingMs = roomTurnTimeoutMs(minutes);',
-          `this.remainingMs = JSON.parse(readVmDeadline(${JSON.stringify(state)}, 'utf8')).timeout ? 5000 : roomTurnTimeoutMs(minutes);`) };
+        String(result.source).replace('this.limitMs = roomTurnTimeoutMs(minutes);',
+          `this.limitMs = JSON.parse(readVmDeadline(${JSON.stringify(state)}, 'utf8')).timeout ? 5000 : roomTurnTimeoutMs(minutes);`) };
     }
     return result;
   },
