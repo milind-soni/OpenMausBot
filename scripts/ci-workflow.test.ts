@@ -80,7 +80,7 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.gate.strategy).toBeUndefined();
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(workflow.jobs.vitest.strategy.matrix).toBe("${{ fromJSON(needs.static.outputs.vitest_matrix) }}");
-    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 20 || 30 }}");
+    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}");
   });
 
   it("runs each selected platform's own shards, and its e2e files, from ci-scope's matrix", () => {
