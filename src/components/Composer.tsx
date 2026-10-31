@@ -51,6 +51,7 @@ import {
   discardUnsentUpload,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
+  fitImagesToSlots,
   imageAttachmentFromFile,
   imageLimitNotice,
   replyTargetTakesFocus,
@@ -641,8 +642,7 @@ export function Composer({
         return;
       }
       if (imageFiles.length > 0) {
-        const kept = imageFiles.slice(0, imageSlots);
-        const leftOut = imageFiles.slice(imageSlots);
+        const { kept, leftOut } = fitImagesToSlots(imageFiles, imageSlots);
         if (leftOut.length) setAttachmentNotice(imageLimitNotice(leftOut.map((file) => file.name)));
         if (!kept.length) return;
         changeDraftAttachmentPending(draftId, true);

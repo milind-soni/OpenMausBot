@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TURN_IMAGE_MAX_COUNT as SERVER_TURN_IMAGE_MAX_COUNT } from "../../server/turn-images";
-import { intakeFiles, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
+import { fitImagesToSlots, IMAGE_MAX_BYTES, intakeFiles, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
 
 type Fake = { name: string; size: number; type: string; text: () => Promise<string> };
 const file = (name: string, type: string, size = 10): Fake => ({
@@ -129,6 +129,26 @@ describe("intakeFiles", () => {
     expect(out.attachments.map((a) => "name" in a ? a.name : "")).toEqual(["1.png", "notes.txt"]);
     expect(uploadImage).toHaveBeenCalledTimes(1);
     expect(out.notice).toBe(`A message takes up to ${TURN_IMAGE_MAX_COUNT} images. 2.png, 3.png weren't attached.`);
+  });
+
+  it("lets an oversized image fail on its own without taking the last slot", async () => {
+    const out = await intakeFiles([file("huge.png", "image/png", IMAGE_MAX_BYTES + 1), file("ok.png", "image/png")], {
+      allowImages: true,
+      getPath: onDisk,
+      uploadImage: async (f) => {
+        if (f.size > IMAGE_MAX_BYTES) throw new Error(`${f.name} exceeds 10 MB`);
+        return upload(f);
+      },
+      imageSlots: 1,
+    });
+    expect(out.attachments.map((a) => "name" in a ? a.name : "")).toEqual(["ok.png"]);
+    expect(out.notice).toBe("huge.png: huge.png exceeds 10 MB");
+  });
+
+  it("splits pasted images by the slots left, passing oversized ones through", () => {
+    const images = [{ size: 1 }, { size: IMAGE_MAX_BYTES + 1 }, { size: 2 }, { size: 3 }];
+    expect(fitImagesToSlots(images, 2)).toEqual({ kept: [images[0], images[1], images[2]], leftOut: [images[3]] });
+    expect(fitImagesToSlots(images, 0)).toEqual({ kept: [images[1]], leftOut: [images[0], images[2], images[3]] });
   });
 
   it("leaves images uncounted when the engine takes them as plain files", async () => {

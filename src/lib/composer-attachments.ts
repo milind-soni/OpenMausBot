@@ -112,6 +112,21 @@ export function imageLimitNotice(leftOut: readonly string[]): string {
   return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
 }
 
+/** Splits images by the slots left: an image over IMAGE_MAX_BYTES is kept to fail with its own size error but takes no slot. */
+export function fitImagesToSlots<T extends { size: number }>(images: readonly T[], slots: number): { kept: T[]; leftOut: T[] } {
+  const kept: T[] = [];
+  const leftOut: T[] = [];
+  let room = slots;
+  for (const image of images) {
+    if (image.size > IMAGE_MAX_BYTES) kept.push(image);
+    else if (room > 0) {
+      room -= 1;
+      kept.push(image);
+    } else leftOut.push(image);
+  }
+  return { kept, leftOut };
+}
+
 const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
@@ -728,17 +743,10 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   },
 ): Promise<{ attachments: Attachment[]; notice: string | null }> {
   const { allowImages, getPath, uploadImage } = _opts;
-  let imageSlots = _opts.imageSlots ?? Infinity;
-  const leftOut: string[] = [];
-  const files = _files.filter((file) => {
-    if (!allowImages || !isImageFile(file)) return true;
-    if (imageSlots > 0) {
-      imageSlots -= 1;
-      return true;
-    }
-    leftOut.push(file.name);
-    return false;
-  });
+  const images = allowImages ? _files.filter((file) => isImageFile(file)) : [];
+  const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity).leftOut);
+  const leftOut = [...overflow].map((file) => file.name);
+  const files = _files.filter((file) => !overflow.has(file));
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
