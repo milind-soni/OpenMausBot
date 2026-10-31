@@ -24,3 +24,4 @@ onlyBuiltDependencies:
 overrides:
   dompurify: 3.4.17
   fast-uri: 3.1.9
+  'better-auth': '1.7.7'
