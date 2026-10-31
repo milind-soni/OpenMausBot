@@ -17,6 +17,7 @@ import {
   discoverOpenCodeModels,
   openCodeFreeFallback,
   openCodeOwnedDirectories,
+  openCodePromptUnreachedModel,
   OpenCodeDriver,
   openCodeProviderKeysAllowed,
   openMausOwnsWorkingFolder,
@@ -321,6 +322,26 @@ describe("OpenCode catalog", () => {
     "Internal error: 429 Too Many Requests: rate limit has been exceeded, retry in 20s",
   ])("leaves a transient rate limit unclassified: %s", (message) => {
     expect(classifyOpenCodeError(apiError(message))).toBeUndefined();
+  });
+
+  it.each([
+    // opencode 1.19.4, then 1.18.27, with the model server's port closed
+    "Internal error: Cannot connect to API: ECONNREFUSED: Unable to connect. Is the computer able to access the url?",
+    "Internal error: Cannot connect to API: Unable to connect. Is the computer able to access the url?",
+    "Internal error: ConnectionRefused: Unable to connect. Is the computer able to access the url?",
+  ])("knows a prompt that never reached its model: %s", (message) => {
+    expect(openCodePromptUnreachedModel(apiError(message))).toBe(true);
+  });
+
+  it.each([
+    apiError("Internal error: Invalid API key."),
+    apiError("Internal error: socket hang up"),
+    // OpenCode issue 27270: only the refusal wording is proven, other connect failures stay ordinary errors
+    apiError("Internal error: Cannot connect to API: Connect Timeout Error"),
+    Object.assign(new Error("Cannot connect to API: ECONNREFUSED"), { code: -32602 }),
+    new Error("ECONNREFUSED"),
+  ])("does not take another prompt error as unreached: %s", (error) => {
+    expect(openCodePromptUnreachedModel(error)).toBe(false);
   });
 
   it("classifies OpenCode 2's authentication refusal and leaves real internal errors alone", () => {

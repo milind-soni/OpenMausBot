@@ -14,6 +14,7 @@ import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-spli
 import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
 import { DEFAULT_ACP_PROMPT_IDLE_MS } from "./quiet-status.ts";
 import { GrokAgentDriver, grokAcceptsUnadvertisedImages } from "./grok.ts";
+import { openCodePromptUnreachedModel } from "./opencode-go.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
 import { DroidAgentDriver } from "./droid.ts";
@@ -2619,6 +2620,108 @@ describe("ACP turns (fake CLI)", () => {
       await failStartup();
       const ack = await instance.adapter.sendTurn({ threadId: "startup-activity", text: "go", startupRecovery: true });
       expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId)).toMatchObject({ ok: false });
+    });
+
+    describe("a prompt that never reached its model", () => {
+      const UnreachedModelDriver = createAcpDriver({
+        ...SELECT_MODEL_SUPPORT, driverKind: "unreachedModelTest", selectModel: undefined, promptUnreachedModel: openCodePromptUnreachedModel,
+      });
+      // opencode 1.19.4 with its OpenAI-compatible baseURL on a closed port
+      const refused = { code: -32603, message: "Internal error: Cannot connect to API: ECONNREFUSED: Unable to connect. Is the computer able to access the url?", data: { service: "session", errorName: "APIError" } };
+      const refusePrompt = async (error: object = refused, mode?: string) => {
+        const failureFile = join(scratch, "prompt-failure.json");
+        process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+        process.env.FAKE_ACP_RPC_FAILURE_METHOD = "session/prompt";
+        process.env.FAKE_ACP_RPC_FAILURE_GATE = join(scratch, "release-prompt-failure");
+        writeFileSync(failureFile, JSON.stringify(error));
+        await create(UnreachedModelDriver, mode);
+      };
+      const releaseFailure = () => writeFileSync(process.env.FAKE_ACP_RPC_FAILURE_GATE!, "");
+      const acknowledged = (pending: Promise<unknown>) => {
+        let settled = false;
+        void pending.then(() => { settled = true; }, () => { settled = true; });
+        return () => settled;
+      };
+      afterEach(() => {
+        delete process.env.FAKE_ACP_RPC_FAILURE_GATE; delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT;
+        delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE; delete process.env.FAKE_ACP_UPDATES_FILE; delete process.env.OMB_ACP_QUIET_TICK_MS;
+      });
+
+      it("holds the ACK through the prompt and rejects once its child stops, without terminal events", async () => {
+        process.env.FAKE_ACP_RPC_DUMP = join(scratch, "rpc.json");
+        await refusePrompt();
+        const kill = vi.spyOn(procs, "killCliTree");
+        const pending = instance.adapter.sendTurn({ threadId: "unreached", text: "go", startupRecovery: true });
+        const settled = acknowledged(pending);
+        await vi.waitFor(() => expect(readFileSync(process.env.FAKE_ACP_RPC_DUMP!, "utf8")).toContain("session/prompt"));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(settled()).toBe(false);
+        releaseFailure();
+        const failed = await pending.catch((error) => error);
+        expect(failed).toBeInstanceOf(TurnNotStartedError);
+        expect(failed.message).toContain("ECONNREFUSED");
+        expect(recorder.events.some((event) => event.type === "runtime.error" || event.type === "turn.completed")).toBe(false);
+        expect(await kill.mock.results[0].value).toBe(true);
+        expect(instance.adapter.hasSession("unreached")).toBe(false);
+      });
+
+      it("fails normally when the same refusal follows text and a tool result", async () => {
+        process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT = "1";
+        await refusePrompt();
+        releaseFailure();
+        const ack = await instance.adapter.sendTurn({ threadId: "unreached-after-output", text: "go", startupRecovery: true });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+          .toMatchObject({ ok: false, stopReason: "rpc_error" });
+        expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("ECONNREFUSED"))).toBe(true);
+      });
+
+      it("acknowledges at the prompt and fails normally without startup recovery", async () => {
+        await refusePrompt();
+        const ack = await instance.adapter.sendTurn({ threadId: "unreached-no-recovery", text: "go" });
+        expect(recorder.events.some((event) => event.type === "turn.completed")).toBe(false);
+        releaseFailure();
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+          .toMatchObject({ ok: false, stopReason: "rpc_error" });
+      });
+
+      it("fails normally when the same refusal follows a plan", async () => {
+        process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE = "1";
+        process.env.FAKE_ACP_UPDATES_FILE = join(scratch, "plan-updates.json");
+        writeFileSync(process.env.FAKE_ACP_UPDATES_FILE, JSON.stringify([{ update: { sessionUpdate: "plan", entries: [{ content: "Read the brief", status: "in_progress", priority: "medium" }] } }]));
+        await refusePrompt();
+        releaseFailure();
+        const ack = await instance.adapter.sendTurn({ threadId: "unreached-after-plan", text: "go", startupRecovery: true });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+          .toMatchObject({ ok: false, stopReason: "rpc_error" });
+      });
+
+      it("stops the prompt's quiet watch when it hands the turn to recovery", async () => {
+        process.env.OMB_ACP_QUIET_TICK_MS = "4321";
+        const started = vi.spyOn(globalThis, "setInterval");
+        const cleared = vi.spyOn(globalThis, "clearInterval");
+        await refusePrompt();
+        const pending = instance.adapter.sendTurn({ threadId: "unreached-quiet", text: "go", startupRecovery: true });
+        await vi.waitFor(() => expect(started.mock.calls.some(([, ms]) => ms === 4321)).toBe(true));
+        releaseFailure();
+        expect(await pending.catch((error) => error)).toBeInstanceOf(TurnNotStartedError);
+        const timer = started.mock.results[started.mock.calls.findIndex(([, ms]) => ms === 4321)].value;
+        expect(cleared.mock.calls.some(([handle]) => handle === timer)).toBe(true);
+      });
+
+      it("fails normally for another prompt error before any activity", async () => {
+        await refusePrompt({ code: -32603, message: "Internal error: Invalid API key.", data: { service: "session", errorName: "APIError" } });
+        releaseFailure();
+        const ack = await instance.adapter.sendTurn({ threadId: "unreached-other", text: "go", startupRecovery: true });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId)).toMatchObject({ ok: false });
+      });
+
+      it("never offers a stalled prompt to recovery", async () => {
+        process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100";
+        await refusePrompt(refused, "hang");
+        const ack = await instance.adapter.sendTurn({ threadId: "unreached-stall", text: "go", startupRecovery: true });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+          .toMatchObject({ ok: false, stopReason: "rpc_error" });
+      });
     });
   });
 
