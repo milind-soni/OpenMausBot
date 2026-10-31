@@ -24,11 +24,13 @@ export function createBotNameClash(deps: BotNameClashDeps) {
     return [...deps.people(), ...(own && tags.length ? [{ name: own, tags }] : [])];
   }
 
-  /** The warning a bot named `name` gets, in `language` (English for create_bot's result), or null when no person here
+  const line = (person: string, name: string, language?: string) => serverLine(language, "server.bots.nameClash", { person, name });
+
+  /** The warning a bot named `name` gets in create_bot's result (English, for the model), or null when no person here
    * goes by it. */
-  function warning(name: string, language?: string): string | null {
+  function warning(name: string): string | null {
     const person = personNameClash(name, people());
-    return person ? serverLine(language, "server.bots.nameClash", { person, name }) : null;
+    return person ? line(person, name) : null;
   }
 
   const unsubscribe = store.onChange((change: StoreChange) => {
@@ -37,8 +39,8 @@ export function createBotNameClash(deps: BotNameClashDeps) {
     const bot = store.bot(change.botId);
     if (!bot || seen.get(bot.id) === bot.name) return;
     seen.set(bot.id, bot.name);
-    const said = bot.hidden ? null : warning(bot.name, conversationLanguage(bot.threadId));
-    if (said) store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${said}`, ok: true } });
+    const person = bot.hidden ? null : personNameClash(bot.name, people());
+    if (person) store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${line(person, bot.name, conversationLanguage(bot.threadId))}`, ok: true } });
   });
 
   return { warning, stop: unsubscribe };
