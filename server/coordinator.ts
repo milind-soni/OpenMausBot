@@ -1,7 +1,7 @@
 import { RuntimeCoordinator } from "./runtime-coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
-import type { Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
+import type { Answerer, Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
 export type CoordinateBotsCall = {
@@ -17,6 +17,8 @@ export type CoordinateBotsCall = {
   doneWhen?: string;
   title?: string;
   projectId?: string;
+  /** The assignment whose question the message answers, instead of new work. */
+  answers?: string;
 };
 
 export type { LegacyThreadResolver };
@@ -52,6 +54,13 @@ export interface HandoffView {
   outcome?: Outcome;
   outcomeDetail?: string;
   question?: string;
+  /** Parked at Full access on a question its requester answers, not the person (`Assignment.decide`). */
+  decide?: { default?: string };
+  /** The answer its next turn carries, and who gave it when the person did not. */
+  answer?: string;
+  answeredBy?: Answerer;
+  /** While its turn runs: the teammates' questions that turn was resumed with. */
+  carrying?: string[];
   cards?: string[];
   continuation?: { note: string; handoffPath?: string; count: number };
   goalRunId?: string;
@@ -74,6 +83,8 @@ export interface HostTurnResult {
   evidence?: TurnEvidence;
   cap?: { note: string; handoffPath?: string };
   cards?: { question: string; ids: string[] };
+  /** The question it ends on stayed in one person's private chat: only that person can answer it. */
+  privateQuestion?: boolean;
   /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
    * outcome: it failed as `stalled`, not as a provider error. */
   stalled?: boolean;
@@ -156,8 +167,11 @@ export interface Coordinator {
   outstandingFor(threadId: string): HandoffView[];
   beginTurn(req: BeginTurnRequest): HandoffView;
   endTurn(id: string, result: HostTurnResult): void;
-  answerNode(id: string, text: string): boolean;
+  /** The parked node's next turn carries `text`, given by the person unless `by` says otherwise. */
+  answerNode(id: string, text: string, by?: Answerer): boolean;
   answerRoot(id: string, text: string): boolean;
+  /** Live nodes assigned to this bot that are parked on the person or on their requester. */
+  parkedFor(botId: string): HandoffView[];
   parkedDirect(threadId: string): HandoffView | undefined;
   prune(before: number): number;
   sharedRequest(node: HandoffView): { id: string; botIds: string[] };

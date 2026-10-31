@@ -424,15 +424,15 @@ export interface ResolvedSender {
   id?: string;
 }
 
-/** Who answered a card: a signed-in person (named as their messages are), the
- * owner on this machine, or a session-less local caller on a shared server
- * (`worker`: the Slack worker, or any other process on that machine). */
+/** Who answered a card: a signed-in person (named as their messages are), the owner on this machine, a session-less
+ * local caller on a shared server (`worker`: the Slack worker, or any other process on that machine), or at Full access
+ * the bot that decides a teammate's question (`bot`: no `answeredText` yet while it decides; "" when it picks itself). */
 export type CardAnswerer = (
   /** `person`: the answering session's opaque person key, so the owner checks
    * can tell whose answer it was. */
   | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
-  | { kind: "worker" }
+  | { kind: "worker" } | { kind: "bot"; name: string }
 ) & {
   /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
    * card. Absent: tapped. */
