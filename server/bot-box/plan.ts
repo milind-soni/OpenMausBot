@@ -1,5 +1,4 @@
-// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it. Pure, so
-// tests can check the list itself (and that removing a line opens exactly the hole it guards).
+// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it.
 //
 // What the box sees:
 //   - the image's code read-only: /usr (with /bin, /lib, /lib64 and /sbin as the links a merged-/usr Debian has), /etc,
@@ -16,6 +15,7 @@
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
 //     routes of this server). Nothing else on the server's loopback is reachable.
+import { statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type BoxNet = "isolated" | "shared";
@@ -115,6 +115,17 @@ export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HO
 /** Folders the box always has its own copy of, so no setting may put the host's back. */
 const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
 
+function assertReadOnlySource(source: string): void {
+  try {
+    const stat = statSync(source);
+    if (stat.isFile() && stat.nlink > 1) {
+      throw new Error(`The bot box refuses a multiply-linked read-only file: ${source}; grant a separate single-link copy instead.`);
+    }
+  } catch (error) {
+    if (!["ENOENT", "EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+  }
+}
+
 export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
   const dataDir = resolve(setup.dataDir), home = resolve(setup.home);
@@ -190,6 +201,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const readOnly = new Set<string>();
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
     const full = resolve(path);
+    if (request.ro?.includes(path)) assertReadOnlySource(full);
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if (covered(full) || readOnly.has(full)) continue;
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
@@ -214,7 +226,7 @@ export function bwrapArgs(plan: BoxPlan): string[] {
   const args: string[] = [];
   for (const mount of plan.mounts) {
     switch (mount.kind) {
-      case "ro": args.push(mount.optional ? "--ro-bind-try" : "--ro-bind", mount.source, mount.target); break;
+      case "ro": assertReadOnlySource(mount.source); args.push(mount.optional ? "--ro-bind-try" : "--ro-bind", mount.source, mount.target); break;
       case "bind": args.push(mount.optional ? "--bind-try" : "--bind", mount.source, mount.target); break;
       case "tmpfs": args.push("--tmpfs", mount.target); break;
       case "proc": args.push("--proc", mount.target); break;
