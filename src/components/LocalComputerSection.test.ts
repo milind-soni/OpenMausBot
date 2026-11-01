@@ -297,7 +297,6 @@ describe("cloud computer inventory UI", () => {
     const disconnected = renderCard({ configured: false });
     expect(disconnected).toContain("Boat is not connected");
     expect(disconnected).not.toContain("No cloud desktops found");
-    // The setup hint and its link say it once; the status stays for screen readers only.
     expect(disconnected.match(/Boat is not connected/g)).toHaveLength(1);
     expect(disconnected).toContain("Connect your Boat account");
     expect(disconnected).not.toContain("aria-busy");
@@ -513,7 +512,6 @@ describe("VPS computer inventory UI", () => {
   it("keeps disconnected, unavailable, and empty states distinct", () => {
     const disconnected = renderCard({ configured: false, aliases: [] });
     expect(disconnected).toContain("To use your own VPS, add its SSH alias");
-    // The setup hint and its link say it once; the status stays for screen readers only.
     expect(disconnected.match(/No VPS is set up yet/g)).toHaveLength(1);
     expect(disconnected).not.toContain("aria-busy");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
