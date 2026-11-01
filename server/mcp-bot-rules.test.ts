@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botListing, botMayChange, mcpOwner, mergeBotUpdate } from "./mcp-bot-rules.ts";
+import { botChangeLines, botListing, botMayChange, mcpOwner, mergeBotUpdate } from "./mcp-bot-rules.ts";
 import { parseMcpServerMutation, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 
 const REF = `secret-ref:${"a".repeat(32)}`;
@@ -41,6 +41,17 @@ describe("mcpOwner and botMayChange", () => {
     const server = stdio({ runsOn: { environmentId: "e1", label: "Studio Mac" } });
     expect(owner(server)).toBe("elsewhere");
     expect(botMayChange("elsewhere", server)).toEqual({ ok: false, error: "This server runs on Studio Mac, so it can't be changed here." });
+  });
+});
+
+describe("botChangeLines", () => {
+  it("names a literal under a secret's name as a new key and shows other literals", () => {
+    const env = { API_TOKEN: "plainopaque123xyz", LOG_LEVEL: "debug" };
+    expect(botChangeLines(stdio(), stdio({ env: { ...stdio().env, ...env } }), { env })).toEqual({ lines: ["env.LOG_LEVEL → debug"], keys: ["API_TOKEN"], clientSecret: false });
+    const headers = { "X-Api-Key": "opaque-value-123", Authorization: "Bearer abc123", "X-Team": "acme" };
+    const changed = botChangeLines(remote(), remote({ headers }), { headers });
+    expect(changed).toEqual({ lines: ["headers.X-Team → acme"], keys: ["X-Api-Key", "Authorization"], clientSecret: false });
+    expect(JSON.stringify(changed)).not.toMatch(/plainopaque123xyz|opaque-value-123|abc123/);
   });
 });
 

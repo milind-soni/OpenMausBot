@@ -152,4 +152,14 @@ describe("MCP approval cards", () => {
     expect(local.answers[0]).toContain("The person approved it, but it wasn't applied: disk full");
     expect(local.decisions.map((row) => row.decision)).toEqual(["card-shown", "user-approved"]);
   });
+
+  it("a new card about the same server frees the held change of every earlier one, a Stop-closed card's included", () => {
+    const { store, cards, propose } = service();
+    const stopped = propose();
+    store.patchMessage(THREAD, stopped.messageId, { card: closedByStop(store.rows[0]!.card)! });
+    const held = (cards as unknown as { held: Map<string, unknown> }).held;
+    expect(held.has(stopped.requestId)).toBe(true);
+    const newer = propose();
+    expect([...held.keys()]).toEqual([newer.requestId]);
+  });
 });

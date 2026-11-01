@@ -1,4 +1,5 @@
 import { redactSecretsInText } from "../shared/redact.ts";
+import { isSecretName } from "./redact.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 
@@ -131,8 +132,8 @@ export function botServerTarget(server: StoredMcpServer): string {
 }
 
 /** What an update changes, as `field: old → new` lines, the secrets it sends anew by key, and whether it sets a new OAuth
- * client secret. `next` is the merged server; env and header values show only where `sent` (the bot's own fields) gives
- * them as literals, and never an old value, so no saved secret shows. */
+ * client secret. `next` is the merged server. Security: an env or header value shows only where `sent` (the bot's own
+ * fields) gives it as a literal under a name that isn't a secret's, and never an old value. */
 export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer, sent: Record<string, unknown>): { lines: string[]; keys: string[]; clientSecret: boolean } {
   const lines: string[] = [];
   const change = (field: string, before: string, after: string, shown: readonly [string, string] = [before, after]) => {
@@ -152,7 +153,7 @@ export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer,
   const keys: string[] = [];
   for (const [label, values] of [["env", sent.env], ["headers", sent.headers]] as const) {
     for (const [key, value] of Object.entries(record(values))) {
-      if (isSecretRef(value)) keys.push(key);
+      if (isSecretRef(value) || (typeof value === "string" && isSecretName(key))) keys.push(key);
       else if (typeof value === "string") lines.push(`${label}.${key} → ${redactSecretsInText(value)}`);
     }
   }

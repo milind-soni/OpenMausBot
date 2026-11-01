@@ -630,6 +630,19 @@ describe("internal mcp_server route, below Full access", () => {
     expect(Object.keys(chat[0]!.card.mcpRequest!).sort()).toEqual(["action", "botId", "name", "requestId", "threadId"]);
   });
 
+  it("a literal under a secret's name shows as a new key, never its value, while other literals still show", async () => {
+    const commands = fixture({ full: false, servers: { notes } });
+    await commands.post({ action: "update", name: "notes", env: { API_TOKEN: "plainopaque123xyz", LOG_LEVEL: "debug" } });
+    expect(commands.card()?.subtitle).toContain("env.LOG_LEVEL → debug");
+    expect(commands.card()?.subtitle).toContain("new key for API_TOKEN");
+    expect(JSON.stringify(commands.chat)).not.toContain("plainopaque123xyz");
+
+    const remote = fixture({ full: false, servers: { linear } });
+    await remote.post({ action: "update", name: "linear", headers: { "X-Api-Key": "opaque-value-123", Authorization: "Bearer abc123" } });
+    expect(remote.card()?.subtitle).toBe("new key for X-Api-Key\nnew key for Authorization");
+    expect(JSON.stringify(remote.chat)).not.toMatch(/opaque-value-123|abc123/);
+  });
+
   it("a new literal OAuth client secret shows as its own change line without its value", async () => {
     probeWith({ ok: true, tools: [] });
     const signedApp = { ...linear, enabled: false, oauth: { clientId: "omb-app", clientSecret: "old-client-secret" } };

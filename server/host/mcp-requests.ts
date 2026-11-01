@@ -1,5 +1,5 @@
 import type { McpChangeRequest, OptionCardData } from "../../shared/wire.ts";
-import { redactSecretsInText, scrubHeldSecrets } from "../../shared/redact.ts";
+import { redactSecretsInText } from "../../shared/redact.ts";
 import { newId } from "../contracts.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
 
@@ -62,19 +62,19 @@ export class McpRequestService {
   private readonly options: McpRequestOptions;
   constructor(options: McpRequestOptions) { this.options = options; }
 
-  /** An older open card about the same server is superseded, so only the newest proposal can be answered. */
+  /** An older open card about the same server is superseded, so only the newest proposal can be answered, and every
+   * earlier card's held change is freed, a Stop-closed one's included. */
   propose(request: Omit<McpChangeRequest, "requestId" | "result" | "resumed">, subtitle: string, change: McpHeldChange, from?: RequestFrom): { requestId: string; messageId: string; text: string } {
     const { store } = this.options;
     for (const line of store.messagesFor(request.threadId)) {
-      const card = line.card, open = card?.mcpRequest;
-      if (card && open && open.botId === request.botId && open.name === request.name && !card.answered && !card.dismissed && !card.expired) {
-        this.held.delete(open.requestId);
-        store.patchMessage(request.threadId, line.id, { card: { ...card, expired: true, options: [] } });
-      }
+      const card = line.card, earlier = card?.mcpRequest;
+      if (!card || !earlier || earlier.botId !== request.botId || earlier.name !== request.name) continue;
+      this.held.delete(earlier.requestId);
+      if (!card.answered && !card.dismissed && !card.expired) store.patchMessage(request.threadId, line.id, { card: { ...card, expired: true, options: [] } });
     }
     const requestId = newId();
     const kind = CARDS[request.action];
-    const shown = scrubHeldSecrets(redactSecretsInText(subtitle));
+    const shown = redactSecretsInText(subtitle);
     const card: OptionCardData = {
       title: serverLine(this.language(request.threadId), kind.title, { name: request.name }), subtitle: shown,
       options: [kind.option, "Cancel"], requestId, tool: "mcp_server", fixedOptions: true, mcpRequest: { ...request, requestId },
