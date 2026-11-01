@@ -3234,6 +3234,7 @@
   "browser.panel.enableBot": "Enable the browser in this bot's profile to use it.",
   "browser.panel.installIncomplete": "Browser installation incomplete",
   "browser.panel.engineNotInstalled": "The browser isn't installed",
+  "browser.panel.engineNotInstalledHelp": "Install it so {name} can open web pages. It's a one-time download of about 160 MB.",
   "browser.panel.installIncompleteHelp": "agent-browser is installed, but Chrome setup has not finished. Retry the browser installation.",
   "browser.panel.installing": "Installing… (a one-time download of about 160 MB)",
   "browser.panel.retryInstall": "Retry browser installation",
