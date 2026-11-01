@@ -96,6 +96,7 @@ Use only mapped, tested commands:
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
+- [Who can see, chat with and change each team bot](team-bot-access.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
@@ -237,9 +238,9 @@ default focus, keyboard wrapping and focus return against two disposable bots;
 its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
-Active Threads popover's width and inset at each expanded sidebar density in a
-headless Electron window, including the compact-density case where the menu
-used to cross the window's left edge and lose its title.
+Active Threads popover's width and inset in the open sidebar and its column of
+avatars in a headless Electron window, so the menu never crosses the window's
+left edge and loses its title.
 
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.

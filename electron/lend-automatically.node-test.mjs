@@ -209,7 +209,7 @@ test("Pause stops every Cloud at once and lasts across restarts; Resume lends ag
   await until(() => homes[HOME].connects.length === 1 && homes[OTHER].connects.length === 1, "both Clouds to be lent");
   mac.sharing.pause();
   await until(() => homes[HOME].disconnects.length === 1 && homes[OTHER].disconnects.length === 1, "both Clouds to be told");
-  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, terminal: false, busy: null });
+  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, terminal: false, busy: null, screen: null });
   assert.equal(mac.sharing.lentToCloud(myCloud).paused, true, "Files keeps My Cloud's copies, and holds bots' changes there");
   const plans = path.join(mac.dir, "Plans");
   await mkdir(plans);
@@ -260,7 +260,7 @@ test("someone who had switched lending off, or unticked the internet connection,
   }
 });
 
-test("a grant kept from before keeps its folders, which Files keeps copies of; the terminal it had is not lent any more", async t => {
+test("a grant kept from before keeps its folders, which Files keeps copies of, and the terminal its account lent, as the menu's switch", async t => {
   const homes = { [HOME]: cloudHome() };
   const mac = await computer(t, { homes, places: [myCloud] });
   const plans = path.join(mac.dir, "Plans");
@@ -273,12 +273,45 @@ test("a grant kept from before keeps its folders, which Files keeps copies of; t
   sharing.start();
   await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
   await delay(100);
-  assert.equal(homes[HOME].connects.length, 1, "the grant with the terminal never connected, not even for a moment");
+  assert.equal(homes[HOME].connects.length, 1, "the grant from before never connected, not even for a moment");
   assert.deepEqual(homes[HOME].connects[0].folders.map(folder => [folder.id, folder.name, folder.write]), [[id, "Plans", false]], "the same folder, by the same id");
-  assert.equal(homes[HOME].connects[0].terminal, false);
-  homes[HOME].push({ action: "run_command", command: "id" });
+  assert.equal(homes[HOME].connects[0].terminal, true);
+  assert.equal(mac.summaries.at(-1).terminal, true, "the menu shows it on");
+  homes[HOME].push({ action: "run_command", command: "echo kept" });
   await until(() => homes[HOME].results.length === 1, "the command's answer");
-  assert.equal(homes[HOME].results[0].isError, true, "no command runs here");
+  assert.notEqual(homes[HOME].results[0].isError, true, "the command ran here");
+  const again = mac.restart();
+  again.start();
+  await until(() => homes[HOME].connects.length === 2, "the kept grant to reach My Cloud after another restart");
+  assert.equal(homes[HOME].connects[1].terminal, true, "still lent once saved the new way");
+  mac.signedIn.signInAs("acct_2");
+  await again.screenChanged();
+  await until(() => homes[HOME].connects.length === 3, "the other account's grant to reach My Cloud");
+  assert.equal(homes[HOME].connects[2].terminal, false, "only the account that lent it");
+});
+
+test("grants from before give no terminal when one didn't lend it, the person said no to lending, or two accounts lent it, after Resume too", async t => {
+  const grant = (origin, extra) => ({ sessionId: null, environmentId: null, id: randomUUID(), secret: "a".repeat(64), enabled: true, folders: [], terminal: true,
+    computer: false, internet: true, cloud: { accountId: "acct_1", origin }, ...extra });
+  const cases = {
+    "it didn't lend the terminal": { [myCloud.id]: grant(HOME, { terminal: false }) },
+    "it is off": { [myCloud.id]: grant(HOME, { enabled: false }) },
+    "the internet connection was unticked": { [myCloud.id]: grant(HOME, { internet: false }) },
+    "another Cloud of the account didn't lend it": { [myCloud.id]: grant(HOME), [clientA.id]: grant(OTHER, { terminal: false }) },
+    "two accounts lent it": { [myCloud.id]: grant(HOME), [clientA.id]: grant(OTHER, { cloud: { accountId: "acct_2", origin: OTHER } }) },
+  };
+  for (const [why, records] of Object.entries(cases)) {
+    const homes = { [HOME]: cloudHome(), [OTHER]: cloudHome() };
+    const mac = await computer(t, { homes, places: [myCloud, clientA] });
+    await mkdir(path.dirname(mac.file), { recursive: true });
+    await writeFile(mac.file, JSON.stringify({ version: 1, records }));
+    const sharing = mac.restart();
+    sharing.start();
+    if (sharing.paused()) await sharing.resume();
+    await until(() => homes[HOME].connects.length === 1, `the automatic grant to reach My Cloud when ${why}`);
+    assert.equal(homes[HOME].connects[0].terminal, false, why);
+    assert.equal(mac.summaries.at(-1).terminal, false, why);
+  }
 });
 
 test("the terminal is lent only once the person turns it on: every own Cloud gets it, it lasts across restarts, and turning it off takes it back", async t => {
@@ -473,7 +506,7 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   indicator.update({ clouds: [], using: [], paused: true });
   assert.equal(trays[0].destroyed, true, "gone once there is no Cloud to resume");
   assert.deepEqual(indicatorText({ clouds: ["A", "B", "C"], using: ["A", "B", "C"], paused: false }, "PC"),
-    { line: "A, B and C are using this PC", title: "3 Clouds are using this PC" });
+    { line: "A, B and C are using this PC", title: "3 Clouds are using this PC", screen: null });
 });
 
 test("See activity shows this computer's own record in the app's language: every value escaped, no script, nothing loaded", async () => {

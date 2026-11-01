@@ -8,6 +8,7 @@ import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
+import { accessFromVisibility } from "../../shared/bot-access.ts";
 import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
@@ -24,7 +25,7 @@ import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
 import { profileSnapshot } from "../profile-revision.ts";
 import { recordProfileChange } from "../profile-versions.ts";
-import { clientBotPatchViolation, requestSource } from "../request-auth.ts"; import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.ts";
+import { memberBotPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts"; import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
@@ -71,6 +72,10 @@ export interface BotPatchRouteDeps {
   closeOpenApprovals(threadId: string): void;
   assertTeamComputerChangeIdle(before: BotRecord, after: BotRecord): void;
   forgetTemporaryBrowser(botId: string): Promise<void>;
+  /** What this session may do with the bot: off a Team Cloud a member chats with every bot they see. */
+  levelOf(auth: RequestAuth, botId: string): "none" | "view" | "chat" | "edit";
+  /** A Team Cloud, where a bot's sharing follows its visibility. */
+  team: boolean;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -95,12 +100,15 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       const pairedDevice = req.headers["x-openmausbot-companion"] === "1";
       if ((auth.kind === "session" && !auth.scopes.includes("admin")) || pairedDevice) {
         const session = auth.kind === "session" ? auth.session : undefined;
-        const field = clientBotPatchViolation(body, ownsDefaultBot(store.bot(m[1]), session?.email), session?.membershipAuthority === "team");
+        const level = pairedDevice ? "chat" : deps.levelOf(auth, m[1]);
+        const field = memberBotPatchViolation(body, level === "none" ? "chat" : level, ownsDefaultBot(store.bot(m[1]), session?.email), session?.membershipAuthority === "team");
         if (field) {
           return json(res, 403, {
             error: pairedDevice
               ? `forbidden: a paired device may change how a bot looks, not "${field}"; change it on the host computer`
-              : `forbidden: this session may change how a bot looks, not "${field}" (needs the admin scope)`,
+              : level === "edit" ? `forbidden: "${field}" is an admin's to change`
+                : level === "view" ? `forbidden: you can view this bot, not change "${field}"`
+                  : `forbidden: this session may change how a bot looks, not "${field}" (needs the admin scope)`,
           });
         }
       }
@@ -565,6 +573,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         const parsed = parseVisibility(body.visibility);
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
         patch.visibility = parsed.visibility;
+        if (deps.team) patch.access = accessFromVisibility(parsed.visibility);
       }
       if (body.alwaysAllow !== undefined) {
         if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t: unknown) => typeof t !== "string")) {

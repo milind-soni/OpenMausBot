@@ -41,13 +41,35 @@ export interface CloudLendingState {
   /** Commands may be run on this computer as the person. */
   terminal?: boolean;
 }
+/** Computer control's state as lending reads it. */
+export interface ScreenStatus {
+  ready: boolean;
+  lent: boolean;
+  reason: "starting" | "permissions" | "blocked" | "off" | "not-running" | "unsupported" | null;
+  fix: "start" | "allow" | null;
+  message?: string;
+}
+/** A bot on one of the person's own Clouds needs this computer and can't use it now. */
+export interface ComputerAsk {
+  id: string;
+  need: "screen" | "folders" | "terminal";
+  reason: string;
+  bot: string;
+  why?: string;
+  state: "asking" | "turning-on" | "failed";
+  /** Taps on the card's Turn on so far. */
+  turnOn: number;
+}
 /** What lending tells the menu-bar item: the Clouds lent to (while paused, the ones it would lend to) and using it now. */
 export interface LendingSummary {
   lending: string[];
   clouds: string[];
   using: string[];
   paused: boolean;
+  terminal?: boolean;
   busy: { env: string; action: string } | null;
+  /** Computer control's latest state, null until it is first read. */
+  screen: ScreenStatus | null;
 }
 export interface AutomaticGrant { folders: SharedFolder[]; screen: boolean; internet: true; chrome: true; terminal: false }
 export type CloudLendingVerdict = { allow: true } | { pause: string } | { stop: "signed-out" | "account-changed" | "machine-changed" };
@@ -98,10 +120,18 @@ export function createComputerSharing(options: {
   myCloud?: () => Workspace | null;
   /** The saved servers that are the verified session's own Clouds, never a Team Cloud: each is lent this computer by itself. */
   ownClouds?: () => Workspace[];
-  /** Apps and screen can be lent here: computer control works, or only macOS's permissions are missing. */
-  screen?: () => boolean | Promise<boolean>;
+  /** Computer control's state; its `lent` says whether apps and screen are lent: computer control works, or only macOS's
+   * permissions are missing. */
+  screen?: () => boolean | ScreenStatus | Promise<boolean | ScreenStatus>;
   /** A Cloud's bot needs apps and screen while computer control isn't running: asks macOS for what it lacks. */
   askForScreen?: (connection: unknown) => void;
+  /** This app's own prompt for an ask: "turn-on", "not-now", or null when it didn't show or `signal` closed it. */
+  prompt?: (env: Workspace, ask: ComputerAsk, signal: AbortSignal) => Promise<"turn-on" | "not-now" | null>;
+  /** Starts computer control again; its state after. */
+  startScreen?: () => Promise<ScreenStatus | null>;
+  /** Turns on running commands once the person confirms it on this computer; true when they did. */
+  confirmTerminal?: () => Promise<boolean>;
+  log?: (line: string) => void;
 }): {
   state(id: string): SharingState;
   activity(id?: string, limit?: number): LendingActivityEntry[];

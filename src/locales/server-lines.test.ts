@@ -338,15 +338,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/app-trigger-requests.ts", "When “ … ” happens in  …  …"],
     ["server/app-trigger-requests.ts", "(it checks every 15 minutes)"],
     ["server/app-trigger-requests.ts", "reviews the event"],
-    ["server/automation-reports.ts", "Recovered:  …  finished OK at  …"],
-    ["server/automation-reports.ts", "This run didn't finish:  …"],
-    ["server/automation-reports.ts", "This run didn't finish."],
-    ["server/incidents.ts", "in the room \" … \""],
-    ["server/incidents.ts", "in its thread # …"],
-    ["server/incidents.ts", "in its main conversation"],
-    ["server/incidents.ts", "… 's run  …  stopped after showing no activity …"],
-    ["server/incidents.ts", "… 's run  …  could not start …"],
-    ["server/incidents.ts", "… 's scheduled routine  …  failed …"],
     ["server/routine-requests.ts", "Each time  … 's usage limit resets"],
     ["server/routine-requests.ts", "When  … 's usage limit resets"],
     ["server/routine-requests.ts", "Every  …  minutes, cadence starting at confirmation; first run is the"],
@@ -384,32 +375,9 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/routine-requests.ts", "On startup:  …"],
     ["server/routine-requests.ts", "Also runs once each time OpenMausBot starts"],
     ["server/routine-requests.ts", "Runs only on its schedule"],
-    ["server/routine-run-card.ts", "needs your input"],
-    ["server/routine-run-card.ts", "was blocked"],
-    ["server/routine-run-card.ts", "reached its limit"],
-    ["server/routine-run-card.ts", "was stopped"],
-    ["server/routine-run-card.ts", "needs your attention"],
-    ["server/routine-run-card.ts", "was cancelled"],
-    ["server/routine-run-card.ts", "was missed"],
-    ["server/routine-run-card.ts", "deferred: target busy"],
     ["server/webhook-requests.ts", "When another app sends something … ,  …   …"],
     ["server/webhook-requests.ts", "does what it is asked"],
     ["shared/plain-time-zone.ts", "every day"],
-  ],
-  "connect prompts and sign-ins": [
-    ["server/automation-reports.ts", "I need you to sign in to  …  …"],
-    ["server/automation-reports.ts", "I need you to connect  … ."],
-    ["server/automation-reports.ts", "I need your  … ."],
-    ["server/connector-card-text.ts", "this app"],
-    ["server/connector-card-text.ts", "Connect  …  as “ … ” to continue."],
-    ["server/connector-card-text.ts", "Connect  …  to continue."],
-    ["server/host/secret-cards.ts", "… 's commands can read it from a private file for 24 hours; it is neve"],
-    ["server/host/secret-cards.ts", "…  gets a one-use reference for OpenMausBot's own tools and never sees"],
-    ["server/host/secret-cards.ts", "Securely provide the  …  from OpenMausBot on your phone or computer. I"],
-    ["server/host/secret-cards.ts", "…   …  can use it but never read it back."],
-    ["server/index.ts", "Connect  …  as “ … ” so the bot can continue"],
-    ["server/index.ts", "Connect  …  so the bot can continue"],
-    ["shared/sign-in-request.ts", "…  needs you to sign in to  … . Open this conversation in OpenMausBot"],
   ],
   "rooms and teammates": [
     ["server/escalations.ts", "in the room \" … \""],
@@ -417,58 +385,9 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/escalations.ts", "in its main conversation"],
     ["server/escalations.ts", "… 's work  …  is parked at a gate:  … ."],
     ["server/host/delegated-level.ts", "…  — delegated by  … ,  … a Chief of Staff on  …"],
-    ["server/host/goal-cards.ts", "…  is coordinating this goal."],
-    ["server/host/goal-cards.ts", "Goal in progress:  …"],
-    ["server/host/goal-cards.ts", "needs your input"],
-    ["server/host/goal-cards.ts", "reached its limit"],
-    ["server/host/handoff-sent.ts", "this room"],
-    ["server/host/handoff-sent.ts", "Sent to  …  directly: it isn't in  … ."],
-    ["server/host/handoff-sent.ts", "Sent to  …  …"],
-    ["server/host/person-inbox.ts", "… 's assistant answered"],
-    ["server/host/team-messages.ts", "Not passed to  …"],
-    ["server/index.ts", "Send failed —  …"],
-    ["server/index.ts", "Result withheld:  …"],
-    ["server/index.ts", "delegated work"],
-    ["server/index.ts", "Resumed with a question from  …"],
-    ["server/index.ts", "Resumed with  …  results"],
-    ["server/index.ts", "…  is finishing another conversation — will reply here when free"],
-    ["server/index.ts", "…  is no longer available — skipped this round"],
-    ["server/index.ts", "…  stayed busy in another conversation for  …  minute …  — skipped thi"],
-    ["server/index.ts", "Answer passed to the waiting work"],
-    ["server/index.ts", "…  is busy in another conversation — skipped this round"],
-    ["server/index.ts", "… 's settings changed while starting — skipped this round"],
-    ["server/index.ts", "… 's computer provider is being updated — skipped this round"],
-    ["server/index.ts", "… 's cloud computer is being changed — skipped this round"],
-    ["server/index.ts", "…  became busy in another conversation — skipped this round"],
-    ["server/index.ts", "…  isn't in this room, so that mention didn't reach them — add them to"],
-    ["server/index.ts", "…  is archived and can't respond — restore it or mention an active roo"],
-    ["server/index.ts", "…  is still stopping — this message was not dispatched"],
-    ["server/index.ts", "A room member"],
-    ["server/index.ts", "Posted in  …"],
-    ["server/index.ts", "Opened thread # …"],
     ["server/peer-approval.ts", "@ …  wants to  …   …"],
-    ["server/recall-disclosure.ts", "…  recalled  …  message …  from its private chat with you"],
-    ["server/recall-disclosure.ts", "… 's recent-work brief covers  …  private chat …  with you"],
-    ["server/room-context.ts", "compacted  … 's context ( … % full): fresh session with the room's rec"],
-    ["server/room-context.ts", "… 's context was  … % full: compacted to a fresh session with the room"],
-    ["server/room-holds.ts", "…  is held (stopped by you) — @mention it or say resume"],
-    ["server/room-reply.ts", "…  finished without a summary — asking for a short result"],
-    ["server/room-reply.ts", "…  finished without a summary"],
-    ["server/room-turn-timeout.ts", "… 's room turn made no progress for  …   …  and was stopped"],
-    ["server/routes/internal-threads.ts", "Closed by @ …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
-    ["server/waiting-on-person.ts", "Queued for @ …  behind your  …  in “ … ”"],
-  ],
-  "notifications": [
-    ["server/host/person-inbox.ts", "…  · your assistant answered"],
-    ["server/notify.ts", "…  needs approval"],
-    ["server/notify.ts", "…  needs you to sign in to  …"],
-    ["server/notify.ts", "… 's routine failed"],
-    ["server/notify.ts", "… 's routine is waiting"],
-    ["server/notify.ts", "…  resumed with results"],
-    ["server/notify.ts", "…  mentioned you"],
-    ["server/notify.ts", "… 's wait is over"],
   ],
   "AI engines and limits": [
     ["server/cloud-credit-moves.ts", "notice:  …  is connected, so this conversation uses it now instead of"],
@@ -589,15 +508,13 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
   ],
   "moves to the Cloud": [
-    ["server/cloud-send-arrived.ts", "Now that I live on My Cloud, my webhook \" … \" has a new address. Open"],
+    ["server/cloud-send-arrived.ts", "Now that I live on  … , my webhook \" … \" has a new address. Open Autom"],
     ["server/cloud-send-arrived.ts", "I'm back on this computer, so my webhook \" … \" has an address here aga"],
   ],
   "calls": [
     ["shared/live-call.ts", "Call with  …  ·  …"],
   ],
 };
-
-
 
 const listed = (finding: Finding, file: string, snippet: string) => finding.file === file && finding.text.includes(snippet);
 
@@ -637,14 +554,18 @@ describe("lines the server writes for a person", () => {
       .map((path) => relative(ROOT, path).split("\\").join("/"));
     expect(readers.sort()).toEqual(["server/server-line-packs.ts", "server/server-lines.ts"]);
     // The server loads the other languages when it starts; without them every line reads in English.
-    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/^import [^\n]*\bimport "\.\/server-line-packs\.ts";$|^import "\.\/server-line-packs\.ts";$/m);
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/(?:^|;\s*)import "\.\/server-line-packs\.ts";/m);
+  });
+
+  it("tells every module the language of a conversation's person (server/server-lines.ts)", () => {
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toContain("setConversationLanguage(threadLanguage);");
   });
 });
 
 describe("the guard", () => {
   const ROOT_HERE = "/repo";
   const scan = (files: Record<string, string>) =>
-    findServerLines(Object.keys(files).map((file) => `${ROOT_HERE}/${file}`), (path) => files[relative(ROOT_HERE, path)] ?? null, ROOT_HERE)
+    findServerLines(Object.keys(files).map((file) => `${ROOT_HERE}/${file}`), (path) => files[relative(ROOT_HERE, path).split("\\").join("/")] ?? null, ROOT_HERE)
       .map((finding) => `${finding.file} ${finding.sink.replace(/ at \S+$/, "")}: ${finding.text}`);
 
   it("finds a new English line in each place a line is made", () => {

@@ -18,8 +18,7 @@ const OUTPUT_LIMIT = 256 * 1024;
 // and on Windows a grandchild whose parent has exited is outside the tree taskkill /T ends. A command's result is
 // therefore what it wrote by shortly after it exited, and a stopped command ends shortly after the stop.
 const COMMAND_SECONDS = 120;
-/** Below the 300-second wait for response headers in Node's fetch (undici), which carries the result back to the bot. */
-const MAX_COMMAND_SECONDS = 240;
+const MAX_COMMAND_SECONDS = 900;
 const PIPE_GRACE_MS = 1000;
 const STOP_GRACE_MS = 5000;
 /** The server reads a result body of at most 4,000,000 bytes. */
@@ -172,6 +171,9 @@ function killTree(child) {
 /** No inherited API keys or provider credentials. On Windows a child without SystemRoot cannot start Winsock, one
  * without USERPROFILE has no home, and one without TEMP or TMP puts temporary files in the Windows folder. */
 const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
+/** cua-driver 0.28.2 keeps its settings, history and cursor themes under Windows' own folders, which hold no secret. */
+const driverEnvironment = () => ({ ...hostEnvironment(), ...Object.fromEntries(["LOCALAPPDATA", "APPDATA", "ProgramData", "SystemDrive", "windir"]
+  .filter(key => process.env[key]).map(key => [key, process.env[key]])) });
 
 export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
 
@@ -193,7 +195,7 @@ export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECO
       // Without PATHEXT, PowerShell treats even .exe files as documents.
       env: { ...hostEnvironment(), ...(PATH ? { PATH } : {}) },
     });
-    const chunks = []; let bytes = 0; let reason; let settled = false;
+    const chunks = []; let bytes = 0; let reason; let keepOutput = false; let settled = false;
     const graces = [];
     const settle = (code, error) => {
       if (settled) return;
@@ -201,22 +203,24 @@ export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECO
       clearTimeout(timer); for (const grace of graces) clearTimeout(grace);
       signal.removeEventListener("abort", abort);
       child.stdout.destroy(); child.stderr.destroy();
+      const output = Buffer.concat(chunks).toString("utf8");
       if (error) reject(error);
+      else if (keepOutput) resolve({ ...text({ exitCode: null, stopped: reason, output }), isError: true });
       else if (reason) reject(new Error(reason));
-      else resolve(text({ exitCode: code, output: Buffer.concat(chunks).toString("utf8") }));
+      else resolve(text({ exitCode: code, output }));
     };
-    const stop = message => {
+    const stop = (message, withOutput = false) => {
       if (settled || reason) return;
-      reason = message;
+      reason = message; keepOutput = withOutput;
       killTree(child);
       graces.push(setTimeout(() => settle(null), STOP_GRACE_MS));
     };
     const abort = () => stop("Computer access was revoked or the requesting turn ended. Inspect the result before retrying.");
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => stop(`Command timed out after ${seconds} second${seconds === 1 ? "" : "s"}; inspect before retrying, or give a longer timeout_seconds.`), seconds * 1000);
+    const timer = setTimeout(() => stop(`Stopped at its ${seconds}-second limit; output is what it printed until then. Inspect before retrying, or give a longer timeout_seconds.`, true), seconds * 1000);
     for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => {
       bytes += chunk.length;
-      if (bytes <= OUTPUT_LIMIT) chunks.push(chunk); else stop("Command output exceeded the limit");
+      if (bytes <= OUTPUT_LIMIT) chunks.push(chunk); else stop(`Stopped after ${OUTPUT_LIMIT / 1024} KB of output; output is its first ${OUTPUT_LIMIT / 1024} KB. Send long output to a file and read it.`, true);
     });
     child.once("error", error => settle(null, error));
     child.once("close", code => settle(code));
@@ -228,7 +232,7 @@ export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECO
 export function createSharedCua(connection, { platform = process.platform } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
-    env: { ...hostEnvironment(), ...connection.mcpEnv },
+    env: { ...driverEnvironment(), ...connection.mcpEnv },
   });
   let sequence = 0; let closed = false; let bytes = 0;
   const pending = new Map();

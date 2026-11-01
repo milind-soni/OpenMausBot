@@ -174,6 +174,10 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
       return { own: false, environmentId: null, at: now() };
     }
   }
+  const owns = (place) => {
+    const known = handSaved(place) ? owners.get(place.id) : null;
+    return Boolean(known?.own) && now() - known.at < OWNER_KNOWN_MS;
+  };
   const moving = () => { const kept = parseJournal(journal.read()); return Boolean(kept) && kept.phase !== "back"; };
   const cloudMoving = () => { const kept = parseJournal(cloudJournal()); return Boolean(kept) && kept.phase !== "back"; };
   let retry = null;
@@ -211,12 +215,12 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
       const picked = chosen(), place = placeOf(picked);
       return picked && place && home.away() ? { id: place.id, origin: picked.origin, environmentId: picked.environmentId, name: place.name } : null;
     },
-    /** A server whose circle may offer "Make … my home": connected by hand, its own word that it is this person's alone (read
-     * again now and then, `refresh`), and no move under way or done, to it or to My Cloud. */
+    /** A server connected by hand whose own word, fresh, is that it is this person's alone (read again now and then,
+     * `refresh`). */
+    owns,
+    /** A server whose circle may offer "Make … my home": theirs alone, and no move under way or done, to it or to My Cloud. */
     offers(place) {
-      if (!handSaved(place) || moving() || chosen() || cloudMoving()) return false;
-      const known = owners.get(place.id);
-      return Boolean(known?.own) && now() - known.at < OWNER_KNOWN_MS;
+      return !moving() && !chosen() && !cloudMoving() && owns(place);
     },
     /** Asks each server connected by hand who owns it, unless it said so lately. */
     refresh() {
