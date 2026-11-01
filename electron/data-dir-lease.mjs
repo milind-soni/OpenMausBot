@@ -111,9 +111,21 @@ function isStartTicks(value) {
   return value === null || (Number.isSafeInteger(value) && value >= 0);
 }
 
+/** A program's file name as tasklist shows it, lower-cased: no folder, nothing a file name cannot hold. */
+function isImageName(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 260 && !/[\\/:*?"<>|\r\n\0]/.test(value);
+}
+
+/** Windows: the program this process runs, the one identity a reused pid can be checked against without wmic. */
+function processImage() {
+  if (process.platform !== "win32") return {};
+  const image = process.execPath.split(/[\\/]/).at(-1)?.toLowerCase();
+  return isImageName(image) ? { image } : {};
+}
+
 /** Who this process is beyond its pid: its pid namespace and when it started, so a reused pid is never taken for it. */
 function processIdentity() {
-  return { ns: pidNamespace(), start: processStartTicks(process.pid) };
+  return { ns: pidNamespace(), start: processStartTicks(process.pid), ...processImage() };
 }
 
 /** Unless the record provably predates this boot, one made in another pid namespace belongs to another container. */
@@ -166,7 +178,8 @@ function isLeaseOwner(value) {
     && (value.boot === undefined || isBootIdentity(value.boot))
     && (value.uptime === undefined || (Number.isInteger(value.uptime) && value.uptime >= 0))
     && (value.ns === undefined || isPidNamespace(value.ns))
-    && (value.start === undefined || isStartTicks(value.start));
+    && (value.start === undefined || isStartTicks(value.start))
+    && (value.image === undefined || isImageName(value.image));
 }
 
 function isReaperOwner(value, targetToken) {
@@ -238,54 +251,37 @@ function parseWmiDateTime(value) {
   return ms - offsetMinutes * 60 * 1000;
 }
 
-/** Windows: when a process started, in ms since the epoch; null when it has exited or neither probe can read it. */
-function processCreationTimeMs(pid) {
-  if (process.platform !== "win32") return null;
-  return wmicCreationTimeMs(pid) ?? cimCreationTimeMs(pid);
+/** A Windows probe's output, or null when the program is missing, fails or times out. */
+function windowsProbeOutput(command, args) {
+  try {
+    return execFileSync(command, args, { encoding: "utf8", timeout: 5_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return null;
+  }
 }
 
-function wmicCreationTimeMs(pid) {
-  try {
-    const output = execFileSync(
-      "wmic",
-      ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"],
-      { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
-    );
-    for (const line of output.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const lower = trimmed.toLowerCase();
-      if (lower === "node,creationdate" || lower.startsWith("node,")) continue;
-      const parts = trimmed.split(",");
-      const raw = parts[parts.length - 1].trim();
-      const parsed = parseWmiDateTime(raw);
-      if (parsed !== null) return parsed;
-    }
-  } catch {
+function processCreationTimeMs(pid) {
+  if (process.platform !== "win32") return null;
+  const output = windowsProbeOutput("wmic", ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"]);
+  for (const line of output?.split(/\r?\n/) ?? []) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const lower = trimmed.toLowerCase();
+    if (lower === "node,creationdate" || lower.startsWith("node,")) continue;
+    const parts = trimmed.split(",");
+    const raw = parts[parts.length - 1].trim();
+    const parsed = parseWmiDateTime(raw);
+    if (parsed !== null) return parsed;
   }
   return null;
 }
 
-/**
- * Windows 11 no longer installs wmic, and without a creation time every reused pid reads as the lease's owner, so
- * the lease can never be recovered. Windows PowerShell ships with every Windows; named by full path, never via PATH.
- */
-function cimCreationTimeMs(pid) {
-  const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  try {
-    const output = execFileSync(
-      powershell,
-      [
-        "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-        `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }`,
-      ],
-      { encoding: "utf8", timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
-    );
-    const ms = Number(output.trim());
-    return output.trim() && Number.isSafeInteger(ms) && ms > 0 ? ms : null;
-  } catch {
-    return null;
-  }
+/** Windows: the program a pid now runs, lower-cased ("openmausbot.exe"); null when unreadable. tasklist ships with Windows. */
+function processImageName(pid) {
+  const tasklist = join(process.env.SystemRoot || "C:\\Windows", "System32", "tasklist.exe");
+  const output = windowsProbeOutput(tasklist, ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+  const name = output ? /^"([^"]+)"/m.exec(output)?.[1] : undefined;
+  return name ? name.toLowerCase() : null;
 }
 
 /** Pids are reused within a boot: a process that started at another moment, or after the lease, is not its owner. */
@@ -297,8 +293,12 @@ function ownerIdentityMatches(owner) {
   }
   if (process.platform !== "win32") return true;
   const created = processCreationTimeMs(owner.pid);
-  if (created === null) return true;
-  return created < owner.createdAt;
+  if (created !== null) return created < owner.createdAt;
+  // Windows 11 no longer installs wmic. Without a creation time, a pid now running another program is still not the
+  // owner: the common reuse after a crash or an update. Another copy of the same program still reads as the owner.
+  if (typeof owner.image !== "string") return true;
+  const image = processImageName(owner.pid);
+  return image === null || image === owner.image;
 }
 
 function unlinkExact(path, message) {
