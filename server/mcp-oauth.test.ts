@@ -603,6 +603,21 @@ describe("McpOAuthManager onSettled", () => {
   });
 });
 
+describe("McpOAuthManager with a failing onSettled", () => {
+  it("a throwing onSettled neither breaks a callback nor escapes the expiry timer", async () => {
+    await setup({}, 150);
+    const heard: McpSignInPhase[] = [];
+    manager = new McpOAuthManager({ file: join(dir, "mcp-oauth.json"), lifetimeMs: 150, onSettled: (_name, phase) => { heard.push(phase); throw new Error("listener broke"); } });
+    const started = await manager.start("docs", mcp.url);
+    const page = await approve(started);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe("Signed in. You can close this tab and return to OpenMausBot.");
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+    await manager.start("docs", mcp.url);
+    await expect.poll(() => heard).toEqual(["succeeded", "expired"]);
+  });
+});
+
 describe("McpOAuthManager sign-in from a browser on another computer", () => {
   const elsewhere = { remote: true, origin: "https://cloud.example" };
 

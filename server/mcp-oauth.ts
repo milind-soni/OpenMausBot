@@ -268,6 +268,12 @@ export class McpOAuthManager {
     return starting.promise;
   }
 
+  /** The sign-in this owner is waiting on for a server, and whether it comes back to this computer's loopback listener. */
+  waiting(name: string, owner: string): { loopback: boolean } | null {
+    const flow = this.flows.get(name);
+    return flow?.owner === owner && flow.status.phase === "waiting" ? { loopback: flow.server !== null } : null;
+  }
+
   status(name: string, flowId: string, owner = "loopback"): McpSignInStatus | undefined {
     const flow = this.flows.get(name);
     return flow && flow.owner === owner && flow.status.flowId === flowId ? { ...flow.status } : undefined;
@@ -614,7 +620,13 @@ export class McpOAuthManager {
     flow.server?.close();
     flow.server?.closeIdleConnections();
     flow.status = { ...flow.status, phase, authorizationUrl: null, ...(message ? { message } : {}) };
-    if (!this.disposed) this.onSettled(flow.name, phase, flow.owner);
+    if (this.disposed) return;
+    // A listener's fault must neither escape the expiry timer nor turn a sign-in already stored into a failed callback.
+    try {
+      this.onSettled(flow.name, phase, flow.owner);
+    } catch (error) {
+      console.error("mcp sign-in: onSettled failed", error);
+    }
   }
 }
 

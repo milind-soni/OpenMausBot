@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { McpChangeRequest, OptionCardData } from "../../shared/wire.ts";
+import type { ConnectorCardData, McpChangeRequest, OptionCardData } from "../../shared/wire.ts";
 import type { Store } from "../store.ts";
 import { resumableCards } from "./resumable-cards.ts";
 
@@ -19,5 +19,17 @@ describe("resumableCards", () => {
     expect(waitsOn(card({ answered: "allow" }, { result: { state: "applied", text: "Turned on." }, resumed: true }))).toEqual([]);
     expect(waitsOn(card({ answered: "unavailable", dismissed: true })), "closed by Stop").toEqual([]);
     expect(waitsOn(card({ expired: true, options: [] })), "superseded").toEqual([]);
+  });
+
+  it("waits on an MCP Sign in card the person set aside until the bot hears it, never on one a newer card replaced", () => {
+    const signIn = (extra: Partial<ConnectorCardData>) => resumableCards({ activePath: () => [{ id: "m2", at: 10, role: "bot", kind: "connector",
+      connector: { source: "mcp", slug: "linear", label: "Linear", description: "", status: "required", resumeKey: "mcp-1", ...extra } }] } as unknown as Pick<Store, "activePath">, "t1", 0);
+    expect(signIn({})).toEqual([{ id: "m2", waits: "connect Linear" }]);
+    expect(signIn({ dismissed: true }), "Not now before the turn parked").toEqual([{ id: "m2", waits: "connect Linear" }]);
+    expect(signIn({ dismissed: true, resumed: true })).toEqual([]);
+    expect(signIn({ dismissed: true, superseded: true }), "a newer card for the same server").toEqual([]);
+    const app = resumableCards({ activePath: () => [{ id: "m3", at: 10, role: "bot", kind: "connector",
+      connector: { slug: "gmail", label: "Gmail", description: "", status: "required", resumeKey: "k-1", dismissed: true } }] } as unknown as Pick<Store, "activePath">, "t1", 0);
+    expect(app, "an app's card set aside waits on nothing, as before").toEqual([]);
   });
 });

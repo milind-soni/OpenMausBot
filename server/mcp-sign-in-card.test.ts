@@ -12,6 +12,7 @@ import type { WireMessage as Message } from "../shared/wire.ts";
 import type { AppConfig } from "./config.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { createMcpSignInCards, isCardOwnerLive } from "./host/mcp-sign-in-cards.ts";
+import { resumableCards } from "./host/resumable-cards.ts";
 import { createTeamConnectionsHost } from "./host/team-connections-host.ts";
 import { McpOAuthManager, type McpSignInPhase } from "./mcp-oauth.ts";
 import { personKey } from "./person-key.ts";
@@ -263,13 +264,71 @@ describe("the Sign in card", () => {
   it("a flow that would need paste-back is refused with \"Finish this sign-in in Settings → MCP servers.\"", async () => {
     const f = await setup();
     const { card } = await f.signIn();
+    const olive = session("olive@acme.test", ["admin", "client"]);
     const noVouchedOrigin = { host: "omb.example.com", "x-forwarded-proto": "https" };
-    expect(await f.authorize(card, session("olive@acme.test", ["admin", "client"]), noVouchedOrigin))
-      .toEqual({ status: 409, body: { error: "Finish this sign-in in Settings → MCP servers." } });
+    expect(await f.authorize(card, olive, noVouchedOrigin)).toEqual({ status: 409, body: { error: "Finish this sign-in in Settings → MCP servers." } });
+    expect(f.provider.counts.register, "decided before any client is registered").toBe(0);
     expect(f.current(card).connector).toMatchObject({ status: "required" });
     const onTheMac = await f.authorize(card);
     expect(onTheMac.status).toBe(200);
     expect(await f.approve(onTheMac.body.url as string)).toBe(200);
+
+    const preRegistered = await setup({ origins: ["https://omb.example.com"] });
+    (preRegistered.cfg.mcpServers!.linear as { oauth?: unknown }).oauth = { clientId: "omb-app" };
+    const other = (await preRegistered.signIn()).card;
+    const away = { host: "omb.example.com", origin: "https://omb.example.com", "x-forwarded-proto": "https" };
+    expect(await preRegistered.authorize(other, olive, away)).toEqual({ status: 409, body: { error: "Finish this sign-in in Settings → MCP servers." } });
+    expect(preRegistered.mcpOAuth.authState("linear", preRegistered.url)).toBe("none");
+    expect(preRegistered.current(other).connector).toMatchObject({ status: "required" });
+  });
+
+  it("a second tap from a browser elsewhere replaces a sign-in that would come back to this computer", async () => {
+    const f = await setup({ origins: ["https://omb.example.com"] });
+    const { card } = await f.signIn();
+    const onTheMac = new URL((await f.authorize(card)).body.url as string);
+    expect(onTheMac.searchParams.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
+    const away = { host: "omb.example.com", origin: "https://omb.example.com", "x-forwarded-proto": "https" };
+    const fromThePhone = new URL((await f.authorize(card, session("olive@acme.test", ["admin", "client"]), away)).body.url as string);
+    expect(fromThePhone.searchParams.get("redirect_uri")).toBe("https://omb.example.com/mcp-oauth/callback");
+    expect(f.current(card).connector).toMatchObject({ status: "authorizing" });
+    expect(await f.approve(onTheMac.href).catch(() => "listener closed")).toBe("listener closed");
+    expect(await f.approve(fromThePhone.href)).toBe(200);
+    expect(f.current(card).connector).toMatchObject({ status: "connected", resumed: true });
+  });
+
+  it("a card left waiting when the server restarted goes back to Sign in when polled", async () => {
+    const f = await setup();
+    const { card } = await f.signIn();
+    expect((await f.authorize(card)).status).toBe(200);
+    f.mcpOAuth.dispose();
+    expect(f.current(card).connector).toMatchObject({ status: "authorizing" });
+    expect(await f.route("status", card)).toEqual({ status: 200, body: { connected: false, pending: false, status: "required" } });
+    expect(f.current(card).connector).toMatchObject({ status: "required", error: "The sign-in window closed. Try again." });
+  });
+
+  it("a viewer who may not sign in can't settle a removed server's card", async () => {
+    const f = await setup();
+    const { card } = await f.signIn();
+    delete f.cfg.mcpServers!.linear;
+    expect(await f.authorize(card, session("ada@acme.test"))).toEqual({ status: 403, body: { error: "Only an admin of this installation can sign in to Linear." } });
+    expect(f.current(card).connector).toMatchObject({ status: "required" });
+    expect(f.current(card).connector!.resumed).toBeFalsy();
+    expect(f.answers).toEqual([]);
+  });
+
+  it("Not now before the turn parks still reaches the bot once it parks, and a replaced card waits on nothing", async () => {
+    const f = await setup();
+    const first = (await f.signIn()).card;
+    const { card } = await f.signIn();
+    expect(f.current(first).connector).toMatchObject({ dismissed: true, superseded: true });
+    f.turn.parked = false;
+    expect(await f.route("dismiss", card)).toEqual({ status: 200, body: { dismissed: true } });
+    expect(f.answers).toEqual([]);
+    expect(f.current(card).connector!.resumed).toBeFalsy();
+    const waited = resumableCards({ activePath: (threadId: string) => f.store.messagesFor(threadId) } as never, "main-chat", 0);
+    expect(waited.map((entry) => entry.id)).toEqual([card.id]);
+    expect(f.cards.parkedAnswer(f.current(card).connector!)).toContain(NOT_SIGNED_IN);
+    expect(f.cards.parkedAnswer(f.current(first).connector!)).toBeNull();
   });
 
   it("a sign-in window that closes sends the card back to Sign in with the reason, and the next tap starts a fresh sign-in", async () => {

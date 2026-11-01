@@ -1996,11 +1996,17 @@ function reconcileParkedNode(node: HandoffView): boolean {
       return true;
     }
     if (message.card?.mcpRequest && mcpRequests.decided(node.threadId, message.id)) return mcpRequests.resume(node.threadId, message.id, (text) => coordinator.answerNode(node.id, text));
+    if (isMcpSignInCard(message)) {
+      const heard = mcpSignInCards.parkedAnswer(message.connector);
+      if (!heard) continue;
+      if (!coordinator.answerNode(node.id, heard)) return false;
+      store.patchMessage(node.threadId, message.id, { connector: { ...message.connector, resumed: true } });
+      return true;
+    }
     if (message.connector) {
       const cards = connectorCards(node.threadId, message.connector.resumeKey);
       if (cards.some((item) => item.connector?.dismissed || item.connector?.status !== "connected")) continue;
-      const resumeText = isMcpSignInCard(message) ? mcpSignInCards.resumeText(message.connector) : connectionUpdateText(cards.map((item) => item.connector!.label));
-      if (!coordinator.answerNode(node.id, resumeText)) return false;
+      if (!coordinator.answerNode(node.id, connectionUpdateText(cards.map((item) => item.connector!.label)))) return false;
       for (const item of cards) store.patchMessage(node.threadId, item.id, { connector: { ...item.connector!, resumed: true, error: undefined } });
       return true;
     }

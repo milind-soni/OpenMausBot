@@ -142,22 +142,27 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     const { slug: name, label } = card.connector;
     const language = deps.language(threadId);
     if (card.connector.dismissed) return { status: 409, body: { error: "This sign-in request was set aside. Ask the bot again." } };
-    const server = current(name);
-    if ("reason" in server) return unreachable(threadId, card, server);
     const denied = mayAuthorize(auth, name, label, threadId, language);
     if (denied) return { status: denied.status, body: { error: denied.error } };
+    const server = current(name);
+    if ("reason" in server) return unreachable(threadId, card, server);
     const browser = browserFor(auth, req, label, language);
     if ("error" in browser) return { status: browser.status, body: { error: browser.error } };
+    // Paste-back needs the address bar of the browser that signed in, which only Settings asks for. A browser elsewhere
+    // needs this home's https address, and a pre-registered app always comes back to a fixed loopback port.
+    if (browser.remote && (!browser.origin || server.oauth)) return { status: 409, body: { error: serverLine(language, "server.mcp.signIn.inSettings") } };
     const manager = signer(name, threadId)!;
+    const owner = cardOwner(threadId, card.id);
+    if (browser.remote && manager.waiting(name, owner)?.loopback) cancel(name, threadId, card.id);
     let started;
     try {
-      started = await manager.start(name, server.url, undefined, cardOwner(threadId, card.id), browser);
+      started = await manager.start(name, server.url, undefined, owner, browser);
     } catch (error) {
       if (error instanceof McpSignInError) return { status: error.status, body: { error: error.message } };
       if (error instanceof McpOAuthError) return { status: 400, body: { error: error.message, code: error.code } };
       return { status: 502, body: { error: error instanceof Error ? error.message : "Sign-in could not start." } };
     }
-    // Paste-back needs the address bar of the browser that signed in, which only Settings asks for.
+    // The provider refused to register this home's https address.
     if (started.pasteBack) {
       cancel(name, threadId, card.id);
       return { status: 409, body: { error: serverLine(language, "server.mcp.signIn.inSettings") } };
@@ -200,6 +205,10 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     const server = current(name);
     const connected = !("reason" in server) && signer(name, threadId)?.authState(name, server.url) === "signed-in";
     if (connected) signedIn(threadId, card.id);
+    // A card can say "authorizing" with no sign-in behind it: the server restarted while it waited.
+    if (!connected && card.connector.status === "authorizing" && !signer(name, threadId)?.waiting(name, cardOwner(threadId, card.id))) {
+      patch(threadId, card.id, { status: "required", error: serverLine(deps.language(threadId), "server.mcp.signIn.expired") });
+    }
     const pending = !connected && find(threadId, card.id)?.connector.status === "authorizing";
     return { status: 200, body: { connected, pending, status: connected ? "connected" : pending ? "authorizing" : "required" } };
   }
@@ -222,7 +231,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
       for (const old of store.messagesFor(at.threadId)) {
         if (!isMcpSignInCard(old) || old.connector.slug !== name || old.from?.botId !== at.from?.botId) continue;
         if (old.connector.dismissed || old.connector.stopped || old.connector.status === "connected") continue;
-        patch(at.threadId, old.id, { dismissed: true });
+        patch(at.threadId, old.id, { dismissed: true, superseded: true });
         cancel(name, at.threadId, old.id);
       }
       const language = deps.language(at.threadId), label = appLabel(name);
@@ -260,8 +269,12 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
       patch(at.threadId, at.card.id, { status: "required", error: reason ? serverLine(deps.language(at.threadId), reason) : undefined });
     },
 
-    /** What a turn that parked after the person had already signed in hears when it resumes. */
-    resumeText: (card: ConnectorCardData) => mcpSignedInText(card.slug),
+    /** What a turn that parked after the person already answered the card hears; null while there is nothing to hear. */
+    parkedAnswer(card: ConnectorCardData): string | null {
+      if (card.superseded || card.resumed) return null;
+      if (card.status === "connected") return mcpSignedInText(card.slug);
+      return card.dismissed ? notSignedInText(card.slug) : null;
+    },
   };
 }
 

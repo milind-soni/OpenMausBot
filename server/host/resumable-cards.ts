@@ -27,7 +27,8 @@ export function resumableCards(store: Pick<Store, "activePath">, threadId: strin
       continue;
     }
     const connector = message.connector;
-    if (connector && !connector.dismissed && !connector.resumed) {
+    // An MCP Sign in card set aside before the turn parked is still answered ("didn't sign in"); an app's card is not.
+    if (connector && !connector.resumed && !connector.superseded && (!connector.dismissed || connector.source === "mcp")) {
       open.push({ id: message.id, waits: `connect ${connector.label}` });
       continue;
     }

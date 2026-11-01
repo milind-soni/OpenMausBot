@@ -750,6 +750,8 @@ export interface ConnectorCardData {
   alias?: string;
   error?: string;
   dismissed?: boolean;
+  /** A newer card for the same request replaced this one: it is hidden as `dismissed` is, and nothing waits on it. */
+  superseded?: boolean;
   resumed?: boolean;
   /** Stop ended the turn this card paused: it offers no action, and a
    * connection made afterwards is kept but continues nothing. */
