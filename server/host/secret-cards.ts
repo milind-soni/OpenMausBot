@@ -36,6 +36,7 @@ import {
 } from "../phone-secret.ts";
 import type { BotLogins } from "../bot-logins.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
+import { serverLine } from "../server-lines.ts";
 
 export const phoneSecretEnvelopeSchema = z.object({
   version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
@@ -63,6 +64,8 @@ export interface SecretCardsDeps {
   layerFolder(botId: string, threadId: string): string;
   /** The Local VM (its target key) this conversation's turn holds right now, if any. */
   turnVm(threadId: string): string | undefined;
+  /** The language a line in this conversation is written in for its person (server/server-lines.ts). */
+  threadLanguage?(threadId: string): string | undefined;
 }
 
 export type SecretCards = ReturnType<typeof createSecretCards>;
@@ -82,10 +85,8 @@ export function savedSecretText(label: string, saved: SavedSecret | null): strin
   return `The person saved ${label} to the file ${saved.file}. Read it only inside a command, such as TOKEN="$(cat '${saved.file}')"; never print, echo, log or copy it anywhere else. It is deleted after 24 hours.`;
 }
 
-function deliveryNote(botName: string, delivery: SecretDelivery): string {
-  return delivery === "file"
-    ? `${botName}'s commands can read it from a private file for 24 hours; it is never added to chat.`
-    : `${botName} gets a one-use reference for OpenMausBot's own tools and never sees it.`;
+function deliveryNote(botName: string, delivery: SecretDelivery, language: string | undefined): string {
+  return serverLine(language, delivery === "file" ? "server.connect.secretFile" : "server.connect.secretRef", { bot: botName });
 }
 
 /** Where a file secret goes: the Local VM workspace its card names, else the bot's own folder. */
@@ -205,8 +206,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return `${threadId}:${messageId}:${requestKey}`;
   }
 
-  function credentialDesktopHandoff(label: string): string {
-    return `Securely provide the ${label} from OpenMausBot on your phone or computer. It is never added to chat.`;
+  function credentialDesktopHandoff(label: string, language: string | undefined): string {
+    return serverLine(language, "server.connect.secretHandoff", { label });
   }
 
   function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
@@ -357,15 +358,16 @@ export function createSecretCards(deps: SecretCardsDeps) {
     if (deps.providerKeysRefused && isProviderCredentialTarget(credentialId)) return { status: 403, body: { error: HOSTED_PROVIDER_SETTINGS_ERROR } };
     // A later request supersedes pending cards; the fresh card is appended FIRST, so a failed save leaves the prior cards actionable.
     const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 240) : "";
+    const language = deps.threadLanguage?.(fromThreadId);
     const message = store.appendMessage(fromThreadId, {
       role: "bot",
       kind: "secret",
-      text: credentialDesktopHandoff(target.label),
+      text: credentialDesktopHandoff(target.label, language),
       ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
       secret: {
         target: credentialId,
         label: target.label,
-        description: `${reason ? `${target.description} ${reason}` : target.description} ${from.name} can use it but never read it back.`,
+        description: `${reason ? `${target.description} ${reason}` : target.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
         placeholder: target.placeholder,
         helpUrl: target.helpUrl,
         requestKey: randomUUID(),
@@ -392,15 +394,16 @@ export function createSecretCards(deps: SecretCardsDeps) {
     if (earlier && kept && earlier.secret!.delivery === asked.delivery) return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, kept) } };
     const mismatch = earlier && kept ? earlier.secret!.delivery : undefined;
     const vm = asked.delivery === "file" ? deps.turnVm(threadId) : undefined;
+    const language = deps.threadLanguage?.(threadId);
     const message = store.appendMessage(threadId, {
       role: "bot",
       kind: "secret",
-      text: credentialDesktopHandoff(asked.label),
+      text: credentialDesktopHandoff(asked.label, language),
       ...(room ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
       secret: {
         target: CUSTOM_SECRET_TARGET,
         label: asked.label,
-        description: `${asked.reason} ${deliveryNote(from.name, asked.delivery)}`,
+        description: `${asked.reason} ${deliveryNote(from.name, asked.delivery, language)}`,
         reason: asked.reason,
         placeholder: asked.placeholder,
         helpUrl: "",

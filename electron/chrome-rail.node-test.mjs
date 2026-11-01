@@ -5,6 +5,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { CHROME_RAIL_PATH, CHROME_RAIL_WIDTH, RAIL_OFFER_GRACE_MS, createChromeRail } from "./chrome-rail.mjs";
+import { TRAFFIC_LIGHTS } from "./window-chrome.mjs";
 
 const RAIL = "http://127.0.0.1:8799/rail";
 
@@ -13,8 +14,8 @@ function appWindow() {
   const page = Object.assign(new EventEmitter(), { mainFrame: { id: "page-frame" }, told: [], states: [], destroyed: false,
     send(channel, value) { if (channel === "rail:beside") this.told.push(value); if (channel === "rail:state") this.states.push(value); }, isDestroyed() { return this.destroyed; } });
   const children = [];
-  const win = Object.assign(new EventEmitter(), { webContents: page, size: [1440, 900], destroyed: false,
-    getContentSize() { return this.size; }, isDestroyed() { return this.destroyed; },
+  const win = Object.assign(new EventEmitter(), { webContents: page, size: [1440, 900], destroyed: false, lights: [],
+    getContentSize() { return this.size; }, isDestroyed() { return this.destroyed; }, setWindowButtonPosition(point) { this.lights.push(point); },
     contentView: { addChildView: (view) => children.push(view), removeChildView: (view) => children.splice(children.indexOf(view), 1) } });
   return { win, page, children };
 }
@@ -32,11 +33,11 @@ function viewMaker() {
   return { made, createView };
 }
 
-function world({ wanted = true, hidden = false } = {}) {
+function world({ wanted = true, hidden = false, frame = true } = {}) {
   const { win, page, children } = appWindow();
   const { made, createView } = viewMaker();
   const state = { wanted, hidden, changes: 0 };
-  const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; } };
+  const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; }, windowFrame: () => frame };
   const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
     wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; } });
   const handlers = new Map();
@@ -174,6 +175,47 @@ test("after the page moves on, a hidden rail waits a few seconds for the new pag
   assert.deepEqual([w.rail.shown(), w.page.told.at(-1)], [false, 0], "until that one offers its button");
 });
 
+test("the traffic lights sit in the frame's top bar beside a page that draws it, and go back where an older release left room for them", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const w = world();
+  w.rail.attach(w.win);
+  const framed = () => w.made[0].webContents.sent.filter(([channel]) => channel === "rail:framed").map(([, value]) => value);
+  t.mock.timers.tick(RAIL_OFFER_GRACE_MS - 1);
+  w.ask("rail:draws-frame");
+  t.mock.timers.tick(RAIL_OFFER_GRACE_MS);
+  assert.deepEqual([w.rail.framed(), w.win.lights, framed()], [true, [], []], "this app's page draws the frame in time: the window stays as it opened");
+  w.page.emit("did-navigate");
+  t.mock.timers.tick(RAIL_OFFER_GRACE_MS - 1);
+  assert.equal(w.rail.framed(), true, "still time for the next page");
+  t.mock.timers.tick(1);
+  assert.deepEqual([w.rail.framed(), w.win.lights, framed()], [false, [TRAFFIC_LIGHTS.unframed], [false]],
+    "an older Cloud's page, which never says so: the lights go back to its row, and the rail's places under them");
+  w.made[0].webContents.emit("did-finish-load");
+  assert.deepEqual(framed(), [false, false], "the rail's page, loaded again, hears it too");
+  w.page.emit("did-navigate");
+  w.ask("rail:draws-frame");
+  assert.deepEqual([w.rail.framed(), w.win.lights.at(-1), framed().at(-1)], [true, TRAFFIC_LIGHTS.framed, true], "the next page draws it: back in the bar at once");
+  const [view] = w.made;
+  for (const event of [{ sender: view.webContents, senderFrame: view.webContents.mainFrame }, { sender: w.page, senderFrame: { id: "an-iframe" } }, {}]) {
+    assert.throws(() => w.handlers.get("rail:draws-frame")(event), /only available to the page beside the window's rail/);
+  }
+});
+
+test("a page with the frame turned off says it draws none: the traffic lights go back at once, and the window opens that way next time", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const w = world();
+  w.rail.attach(w.win);
+  w.ask("rail:draws-frame", true);
+  w.ask("rail:draws-frame", false);
+  assert.deepEqual([w.rail.framed(), w.win.lights], [false, [TRAFFIC_LIGHTS.unframed]], "no grace to wait out: the page said so");
+  w.ask("rail:draws-frame", true);
+  assert.deepEqual([w.rail.framed(), w.win.lights.at(-1)], [true, TRAFFIC_LIGHTS.framed], "and back in the bar when it is turned on again");
+  const off = world({ frame: false });
+  off.rail.attach(off.win);
+  t.mock.timers.tick(RAIL_OFFER_GRACE_MS);
+  assert.deepEqual([off.rail.framed(), off.win.lights], [false, []], "a window made with the frame off opened its lights where they stay (windowChromeOptions)");
+});
+
 test("a page that stops responding, crashes or gives way to an error page gets the rail back", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const w = world({ hidden: true });
@@ -240,10 +282,10 @@ test("every page beside the rail, from any server, moves over by the rail's widt
   const page = pageWithPreload();
   page.tell(CHROME_RAIL_WIDTH);
   assert.equal(page.head.children.length, 1);
-  assert.match(page.head.children[0].textContent, /padding-left: 64px !important; --rail-beside: 64px;/, "and the page can read how far it moved");
+  assert.match(page.head.children[0].textContent, /padding-left: 36px !important; --rail-beside: 36px;/, "and the page can read how far it moved");
   page.frame.zoom = 1.25;
   page.resize();
-  assert.match(page.head.children[0].textContent, /padding-left: 51\.2px !important; --rail-beside: 51\.2px;/, "zoomed in, the same 64 points on screen");
+  assert.match(page.head.children[0].textContent, /padding-left: 28\.8px !important; --rail-beside: 28\.8px;/, "zoomed in, the same 36 points on screen");
   page.tell("9999");
   assert.match(page.head.children[0].textContent, /padding-left: 160px/, "never more than 200 points, whatever is sent");
   page.tell(0);
@@ -266,16 +308,18 @@ test("the rail's own page keeps its size at any zoom of this app's page (Chromiu
   }
 });
 
-test("every page beside the rail, from any server, gets the button's bridge and learns only whether there is a rail to hide; the rail's own channels stay this app's", async () => {
+test("every page beside the rail, from any server, gets the button's bridge, learns only whether there is a rail to hide, and says when it draws the frame; the rail's own channels stay this app's", async () => {
   const remote = pageWithPreload("https://bots.example.test", "/", (channel) => (channel === "rail:offer" ? { available: "yes", hidden: 1, places: [{ id: "home" }] } : { available: true, hidden: true }));
-  assert.deepEqual(Object.keys(remote.bridge.rail), ["state", "setHidden", "onState"]);
+  assert.deepEqual(Object.keys(remote.bridge.rail), ["state", "drawsFrame", "setHidden", "onState"]);
   /** A value made in the page's own context, as this one sees it. */
   const plain = (value) => JSON.parse(JSON.stringify(value));
   assert.deepEqual(plain(await remote.bridge.rail.state()), { available: false, hidden: false }, "two plain answers, nothing else main might send");
   await assert.rejects(remote.bridge.rail.setHidden(true), /Choose to hide or show/, "a server's page hides it only from the person's click");
   remote.navigator.userActivation.isActive = true;
   assert.deepEqual(plain(await remote.bridge.rail.setHidden(true)), { available: true, hidden: true });
-  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true]]);
+  await remote.bridge.rail.drawsFrame();
+  await remote.bridge.rail.drawsFrame(false);
+  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame", true], ["rail:draws-frame", false]]);
   const heard = [];
   const stop = remote.bridge.rail.onState((state) => heard.push(state));
   remote.hear("rail:state", { available: true, hidden: false, places: ["home"] });
@@ -283,7 +327,14 @@ test("every page beside the rail, from any server, gets the button's bridge and 
   remote.hear("rail:state", { available: true, hidden: true });
   assert.deepEqual(plain(heard), [{ available: true, hidden: false }]);
   const local = pageWithPreload("http://127.0.0.1:8799", "/");
-  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "setHidden", "onState", "expand", "onSkin"]);
+  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "expand", "onSkin", "onFramed"]);
+  const framed = [];
+  const unheard = local.bridge.rail.onFramed((value) => framed.push(value));
+  local.hear("rail:framed", false);
+  local.hear("rail:framed", "yes");
+  unheard();
+  local.hear("rail:framed", true);
+  assert.deepEqual(framed, [false, false], "only true is framed");
   await local.bridge.rail.setHidden(false);
   assert.deepEqual(plain(local.invoked), [["rail:hide", false]], "this app's own page, as for its other choices");
 });

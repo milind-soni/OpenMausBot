@@ -25,6 +25,7 @@ import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
 import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
+import { WindowFrameRow } from "./WindowFrameRow";
 import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
@@ -39,7 +40,7 @@ export type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; ope
 
 export const SIMPLE_ADVANCED_ONLY: readonly LocaleKey[] = [
   "settings.newBotEffort.title", "newBot.defaults", "settings.roomTurns.title", "settings.mcpCalls.title", "settings.threads.title",
-  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title", "sidebar.density.title",
+  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title",
   "settings.pinnedCircles.title", "settings.universalPins.title", "settings.toolCalls.title", "settings.runCard.title", "settings.keepWarm.title",
 ];
 
@@ -63,6 +64,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ThemeRow simple />
             <PlaceLookRows />
             <ChromeRailRow />
+            <WindowFrameRow />
             <ColorUserBubblesRow simple />
             <LanguageRow simple />
             <SendKeyRow simple />

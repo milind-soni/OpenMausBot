@@ -445,7 +445,8 @@ the six-digit code from another desktop app, not a self-hosted server's
 Server menu to switch back until the server is updated.
 
 After pairing, **Share this computer?** offers **Choose access** or **Not now**.
-Nothing is shared automatically. In **Settings → Servers → Computer
+Nothing is shared automatically, unless you make the server your bots' home
+(below). In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
 dialog. They can access information outside the selected folders. Share only
@@ -454,12 +455,36 @@ A folder read takes a file of up to 2 MiB and a write at most 256 KiB;
 transfers do not follow links or delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
-**Bring this computer's bots and chats.** Export a backup from this computer in
-**Settings → Backups → Export backup**, then import it on the server in
-**Settings → Backups → Import backup**. API keys, engine sign-ins and paired
-devices stay where they are on both sides; routines arrive paused. An older
-desktop app's **Copy this computer here** is answered with "Update OpenMausBot
-to bring your bots here by itself."
+**Make the server your bots' home.** Bots work together only within one
+place: bots on this computer can't reach bots on the server. To bring them
+together, right-click the server's circle at the window's left edge and choose
+**Make <server> my home**. The app moves this computer's bots, chats, memory,
+skills, logins, apps and keys, and routines there the way it moves them to My
+Cloud: everything is copied while you keep working, then at a quiet moment this
+computer stops for good, the rest goes, both sides are checked, and the server
+switches on what was on here, so no routine ever runs twice. The account area
+says how it goes, and after a day of failing it says the move needs you, with
+Try again. Afterwards the server is what the window opens, and this computer
+works for it by itself as it does for My Cloud: no access dialog, only the
+menu bar's item with Pause.
+
+Until then, a bot that asks for a teammate living in your other place says where
+that teammate lives and how to bring them together, instead of only that it
+can't reach it: the app tells each place of yours the names of the bots your
+other places have, and nothing more.
+
+This is offered only for a server that is yours alone: you paired with it as an
+admin, and its sign-in list names no members and no other admin (Settings →
+People). A server other people sign in to keeps the explicit **Share this
+computer?** flow above, and its bots stay where they are. Both sides need this
+release: an older server says to update it first.
+
+To move by hand instead, export a backup from this computer in **Settings →
+Backups → Export backup**, then import it on the server in **Settings → Backups
+→ Import backup**. API keys, engine sign-ins and paired devices stay where they
+are on both sides; routines arrive paused. An older desktop app's **Copy this
+computer here** is answered with "Update OpenMausBot to bring your bots here by
+itself."
 
 Only conversations you start yourself on that server can use what you share;
 other people's bots, routines and webhooks there cannot. Keys and sign-in
@@ -1201,7 +1226,7 @@ The note needs an engine that accepts a message in the middle of a turn
 only the stop, and only if you set it. The note and the stop do not cover bots
 on API models or turns in a room yet.
 
-Bots on API models (xAI, Mistral, Groq, Cerebras, Meta, MiniMax or an
+Bots on API models (xAI, Mistral, Groq, Greenference, Cerebras, Meta, MiniMax or an
 OpenAI-compatible endpoint) end a turn as failed when a tool call failed and
 the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to
@@ -1224,9 +1249,11 @@ is not a positive finite number (empty, `65m`, `0`, a negative number,
 `Infinity`, `1e309`) leaves the default. Set them in the server's environment
 and restart it; the restart stops every running turn.
 
-A turn in a room also has a work ceiling of its own, `rooms.turnTimeoutMinutes`
-in `config.json` (default 5 minutes, 1-1440, which one conversation can
-replace). It stops a member's turn even while its tool runs, and these two
+A turn in a room also has a limit of its own, `rooms.turnTimeoutMinutes` in
+`config.json` (default 5 minutes, 1-1440, which one conversation can replace).
+It stops a member's turn that shows no progress for that long. While one of the
+turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
+an MCP call can be set to take) or the room's limit if that is longer. These two
 settings do not change it.
 
 ## Updating

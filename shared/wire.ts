@@ -11,9 +11,9 @@ import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
-import type { SetupCardFields } from "./setup-card.ts";
+import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { BotAccessFields } from "./bot-access.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
-import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts"; import type { ComputerAskField } from "./computer-ask.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
@@ -191,7 +191,7 @@ export interface WireTask extends InboxTask {
   /** Prompt-cache keep-warm status for this thread, derived at projection;
    * absent when no window is open. */
   cacheKeepWarm?: CacheKeepWarmStatus;
-  /** the folder this task's turns run in, pinned on its first turn. */
+  /** the folder this task's turns run in, pinned on its first turn; one in its own folder moves to its bot's working folder. */
   cwd?: string | null;
   /** Set me up was pressed here (server/setup-request.ts): the person's next line in this conversation runs as a
    * setup request. Server-owned; a client only shows it. `by`: who pressed, where several people share the place (their
@@ -266,7 +266,7 @@ export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => b
 
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
-export interface WireBot extends DefaultBotFields {
+export interface WireBot extends DefaultBotFields, BotAccessFields {
   waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
@@ -317,7 +317,7 @@ export interface WireBot extends DefaultBotFields {
   /** This bot's own SSH config alias for its managed VPS computer; absent
    * means the default server from Settings → API keys. */
   vpsAlias?: string;
-  /** where NEW tasks run their shell tools; absent = home folder. */
+  /** where its tasks run their tools; absent = each task's own folder. Its .claude/settings.json (else the bot folder's) applies in all. */
   cwd?: string;
   /** Auto mode: the bot approves its own tool permissions. */
   autoApprove?: boolean;
@@ -424,15 +424,15 @@ export interface ResolvedSender {
   id?: string;
 }
 
-/** Who answered a card: a signed-in person (named as their messages are), the
- * owner on this machine, or a session-less local caller on a shared server
- * (`worker`: the Slack worker, or any other process on that machine). */
+/** Who answered a card: a signed-in person (named as their messages are), the owner on this machine, a session-less
+ * local caller on a shared server (`worker`: the Slack worker, or any other process on that machine), or at Full access
+ * the bot that decides a teammate's question (`bot`: no `answeredText` yet while it decides; "" when it picks itself). */
 export type CardAnswerer = (
   /** `person`: the answering session's opaque person key, so the owner checks
    * can tell whose answer it was. */
   | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
-  | { kind: "worker" }
+  | { kind: "worker" } | { kind: "bot"; name: string }
 ) & {
   /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
    * card. Absent: tapped. */
@@ -443,7 +443,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField {
+export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -645,7 +645,7 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
 }
 
-export interface OptionCardData extends WaitCardField {
+export interface OptionCardData extends WaitCardField, ComputerAskField {
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
@@ -827,8 +827,8 @@ export interface GroupTask {
   pinnedMessageId?: string;
   /** The person pinned this channel thread above the update-ordered list. */
   pinned?: boolean;
-  /** This conversation's own turn ceiling, in whole minutes. Absent uses
-   * the global group turn limit. Direct chats do not use this ceiling. */
+  /** This conversation's own turn limit: whole minutes a turn may go without progress. Absent uses
+   * the global group turn limit. Direct chats do not use this limit. */
   turnTimeoutMinutes?: number;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
@@ -890,7 +890,7 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
-  /** A direct-message channel's turn ceiling. Null on the wire means the
+  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the
    * global group limit. Channel conversations store theirs on each task. */
   turnTimeoutMinutes?: number | null;
   /** Members the person stopped in this room ("stop @Bot"), by bot id. A

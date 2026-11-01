@@ -51,3 +51,21 @@ test("this computer is lent to the person's own Clouds only, My Cloud first: nev
   state = { status: "signed-out", account: null, machine: null, clouds: [] };
   assert.deepEqual(target.places(), [], "signed out: no Cloud of anyone's");
 });
+
+test("a server of the person's own is lent only while it is their bots' home, bound to that server's identity, after their Clouds", () => {
+  const home = { id: "home", name: "My Cloud", origin: "https://omb-u-1.fly.dev", home: true };
+  const garage = { id: "g", kind: "remote", name: "Garage server", origin: "https://garage.example.test" };
+  const family = { id: "f", kind: "remote", name: "Family server", origin: "https://family.example.test" };
+  const state = { status: "connected", account: { id: "acct-1" }, machine: { status: "ready", origin: home.origin } };
+  let own = null;
+  const target = createLendingTarget({ account: () => ({ state: () => state, isOwnCloud: (origin) => origin === home.origin }), environments: () => [garage, family, home], ownHome: () => own });
+  assert.deepEqual(target.places().map((place) => place.name), ["My Cloud"], "connected by hand, never lent by itself");
+  assert.equal(target.cloud(garage).origin, home.origin, "checked against My Cloud, so no lending of its own ever passes");
+  own = { origin: garage.origin, environmentId: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f" };
+  assert.deepEqual(target.places().map((place) => place.name), ["My Cloud", "Garage server"]);
+  assert.deepEqual(target.cloud(garage), { status: "connected", accountId: "own:7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", origin: garage.origin });
+  assert.equal(target.cloud(family).origin, home.origin);
+  own = null;
+  assert.deepEqual(target.places().map((place) => place.name), ["My Cloud"]);
+  assert.notEqual(target.cloud(garage).accountId?.startsWith("own:"), true, "once it isn't home, the lending bound to it ends");
+});
