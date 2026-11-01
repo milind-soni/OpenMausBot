@@ -1036,7 +1036,7 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
 
   const save = () => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
-    const tmp = environmentsFilePath + ".tmp";
+    const tmp = join(options.dataDir, `environments.${process.pid}.${Date.now()}.tmp`);
     writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
     try {
       renameSync(tmp, environmentsFilePath);
@@ -1067,6 +1067,13 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
       dataDir = resolve(options.workspaceDataDir);
       const existing = state.environments.find((e) => e.kind === "local" && e.dataDir === dataDir);
       if (existing) { io.error(`A local workspace already uses ${dataDir}`); return 1; }
+      const targetDir = dataDir!;
+      const overlap = state.environments.find((e) => {
+        if (e.kind !== "local" || !e.dataDir) return false;
+        const a = resolve(e.dataDir);
+        return a.startsWith(targetDir + sep) || targetDir.startsWith(a + sep) || a === targetDir;
+      });
+      if (overlap) { io.error(`The data folder overlaps an existing workspace (${overlap.dataDir})`); return 1; }
     }
     state.environments.push({ id, kind: "local", name, dataDir });
     state.activeId = id;

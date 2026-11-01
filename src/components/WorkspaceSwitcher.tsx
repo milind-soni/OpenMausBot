@@ -26,6 +26,8 @@ type WebEnvironment = {
   capabilities?: Record<string, unknown>;
 };
 
+const basename = (p: string) => p.split(/[\\/]/).pop() ?? "";
+
 const SWITCHER_BUTTON =
   "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus";
 
@@ -161,7 +163,7 @@ export function WorkspaceSwitcher() {
         </span>
       </button>
       {open && (
-        <div ref={menuRef} role="menu" className={cn("absolute z-50 mt-2 w-80 rounded-lg border border-hairline bg-card shadow-lg", open ? "" : "hidden")}
+        <div ref={menuRef} className={cn("absolute z-50 mt-2 w-80 rounded-lg border border-hairline bg-card shadow-lg", open ? "" : "hidden")}
           onMouseDown={(event) => event.stopPropagation()}>
           <div className="px-3 py-2 border-b border-hairline/40">
             <div className="text-[11px] font-semibold text-ink-secondary uppercase tracking-wider">{t("workspaceSwitcher.title")}</div>
@@ -171,10 +173,10 @@ export function WorkspaceSwitcher() {
             {locals.map((entry) => {
               const isActive = entry.id === envs?.activeId;
               const isDefault = entry.id === "local";
+              const isPurgeable = Boolean(entry.dataDir && basename(entry.dataDir).startsWith(".openmausbot"));
               return (
                 <div key={entry.id} className="flex w-full items-center justify-between gap-3 px-3 py-2">
                   <button
-                    role="menuitem"
                     type="button"
                     onClick={() => switchTo(entry.id)}
                     disabled={busy || isActive}
@@ -192,7 +194,8 @@ export function WorkspaceSwitcher() {
                   {!isDefault && !isActive && !busy && (
                     <button
                       type="button"
-                      onClick={() => { setForgetId(entry.id); setPurge(false); }}
+                      aria-label={t("workspaceSwitcher.forgetEntry", { name: entry.name })}
+                      onClick={() => { setForgetId(entry.id); setPurge(isPurgeable); }}
                       className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger"
                     >
                       <Trash2 size={14} />
@@ -303,10 +306,16 @@ export function WorkspaceSwitcher() {
               <p className="text-[12px] text-ink-secondary leading-relaxed">
                 {t("workspaceSwitcher.forgetConfirm", { name: locals.find((e) => e.id === forgetId)?.name ?? "" })}
               </p>
-              <label className="flex items-start gap-2 mt-2 text-[12px] text-ink-secondary">
-                <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.target.checked)} className="mt-0.5" />
-                {t("workspaceSwitcher.forgetPurge", { path: locals.find((e) => e.id === forgetId)?.dataDir ?? "" })}
-              </label>
+              {(() => {
+                const target = locals.find((e) => e.id === forgetId);
+                const purgeable = Boolean(target?.dataDir && basename(target.dataDir).startsWith(".openmausbot"));
+                return (
+                  <label className="flex items-start gap-2 mt-2 text-[12px] text-ink-secondary">
+                    <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.target.checked)} className="mt-0.5" disabled={!purgeable} />
+                    {t("workspaceSwitcher.forgetPurge", { path: target?.dataDir ?? "" })}
+                  </label>
+                );
+              })()}
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
