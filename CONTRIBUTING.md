@@ -33,12 +33,15 @@ pnpm dev:desktop   # Electron shell (macOS/Ubuntu; keep server + Vite running)
 pnpm typecheck     # app + server
 pnpm test          # vitest suite (server unit + driver contract + API smoke)
 pnpm test:watch    # same, in watch mode
-pnpm exec vitest run --shard=1/4   # one CI shard, exactly the files CI ran in it
 pnpm check:electron # syntax-check the plain JS Electron entrypoints
 
 pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
 pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
 ```
+
+To reproduce a failing CI test job, follow [Vitest shards](docs/ci.md#vitest-shards).
+Use the job's checkout revision, OS, file filters, shard fraction, and
+`OMB_VITEST_E2E` value; the same shard number alone does not select the same files.
 
 `pnpm dev:desktop` downloads and verifies the pinned Cloudflare Tunnel connector for the current
 platform and architecture before Electron starts. Later launches re-verify and reuse the staged
@@ -259,19 +262,21 @@ out of its commits and screenshots.
 
 ## CI, in one glance
 
-Every PR runs the same checks, each as its own job so a failure names itself.
-The quick static job runs first; only after it passes do the expensive test and
-build jobs enter the runner queue. This saves capacity on submissions with type,
-lint or build errors, without skipping any checks on mergeable PRs. The required
-gates still fail if preflight fails or a required test job is skipped. It adds
-the preflight duration to an otherwise idle runner pool; it does not cure a
-GitHub-wide scheduling backlog.
+Every PR runs locale validation (`pnpm i18n:check`), lint, CI-selection tests,
+verification-documentation checks, and the required `CI` gate. The changed files
+select the remaining checks; see [CI job selection](docs/ci.md). Documentation-only
+PRs run the docs tests, while translation-only PRs run the locale subset. Runtime
+changes select broader tests and smokes.
 
-- **typecheck + lint** — typecheck, lint, locale catalogs (`pnpm i18n:check`), Electron syntax check, production UI build. Once, on Ubuntu; none of it is platform-specific.
-- **vitest (os, shard n/4)** — the suite split into four shards per platform: Ubuntu and Windows on a PR; macOS as well on main, in the merge queue and on manual runs (macOS runners are scarce and only a couple of tests are macOS-only). The suite runs its files serially on purpose (fake CLIs and a real harness server), so the whole suite takes about 70 minutes of Windows runner time and 50 of Ubuntu. The shards split it by each file's recorded CI time rather than by file count ([docs/ci.md](docs/ci.md#vitest-shards)). To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
-- **packaged server smoke (os)** — the server bundle copied out of the repo and started with no `node_modules` in reach.
-- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — real Electron utility processes against disposable homes; never the live app.
-- **CI** — the one check the branch rules require. It only aggregates the jobs above; if it is red, the failing job is named in its log.
+- **typecheck + lint** — the static job always runs the checks above, and adds typecheck, Electron syntax checks, and a production UI build when selected. It runs before the dependent jobs.
+- **vitest (os, part)** — full platform suites use eight Linux or Windows shards and four macOS shards; subset jobs have their own file lists and shard counts. Windows jobs run on PRs whose changes can affect Windows or carry the `windows` label. macOS Vitest shards run in the nightly/manual full lane. Files run serially within each shard, balanced by recorded platform time. Use the [reproduction steps](docs/ci.md#vitest-shards) for the failing job.
+- **packaged server smoke (os)** — when selected, the server bundle is copied out of the repo and started with no `node_modules` in reach.
+- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — when selected, real Electron utility processes run against disposable homes; never the live app.
+- **CI** — the required aggregate gate checks that selected jobs passed and unselected jobs were skipped. Its log names any failing dependency.
+
+For eligible owner runs on Boat, the static job also runs the selected Linux
+test lanes; their logs appear in groups named for each lane. Fork PRs use
+GitHub-hosted jobs. See [Linux on Boat](docs/ci.md#linux-on-boat).
 
 A `pre-push` hook installed by `pnpm install` runs lint, typecheck and the locale check before a push (about a minute). `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
 
