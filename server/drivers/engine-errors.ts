@@ -5,6 +5,7 @@ import { redactSecretsInText } from "../redact.ts";
 import { hostTimeZone } from "../turn-clock.ts";
 import { toolCountLimitFromError } from "../tool-count-limit.ts";
 import { USAGE_LIMIT } from "./retry.ts";
+import { usageLimitWait } from "./acp/quiet-status.ts";
 
 export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "tool_schema" | "tool_count" | "refused";
 
@@ -138,23 +139,27 @@ function isErrorBody(body: string): boolean {
 
 export interface ErrorReplyFailure {
   message: string;
-  stopReason: "quota" | "rpc_error";
+  stopReason: "quota" | "auth_required" | "rpc_error";
+  setup?: true;
   limit?: "engine";
   limitResetsAt?: number;
 }
 
-/** A reply that is only a provider's error body, as the failed turn it is; null for any other text. A 429 that names
- * its wait is a usage limit until then. */
+/** A reply that is only a provider's error body, as the failed turn it is; null for any other text. It reads by its
+ * words, as the same failure thrown would, and an account out of credits needs the person's setup. A 429 whose wait is
+ * longer than an engine retries on its own is a usage limit too, and the wait names its reset. */
 export function errorReplyFailure(provider: string, text: string, now = Date.now(), timeZone?: string): ErrorReplyFailure | null {
   const match = ERROR_REPLY.exec(text.trim());
-  if (!match || !isErrorBody(match[2]!)) return null;
+  const body = match?.[2];
+  if (!match || !body || !isErrorBody(body)) return null;
   const status = Number(match[1]);
-  const body = match[2]!;
-  const retryAfterMs = Number(match[3] ?? 0);
-  const resetsAt = status === 429 && retryAfterMs > 0 ? now + retryAfterMs : undefined;
-  const kind = resetsAt ? "usage_limit" : engineFailureKind(body, status);
+  const waitMs = Number(match[3] ?? 0);
+  const said = engineFailureKind(body, status);
+  const kind = said !== "credits" && usageLimitWait(status, waitMs) ? "usage_limit" : said;
+  const resetsAt = kind === "usage_limit" && waitMs > 0 ? now + waitMs : undefined;
   const message = engineFailureMessage(provider, body, { kind, status, resetsAt, timeZone })!;
-  if (kind !== "usage_limit") return { message, stopReason: kind === "credits" ? "quota" : "rpc_error" };
+  if (kind === "credits") return { message, stopReason: "auth_required", setup: true };
+  if (kind !== "usage_limit") return { message, stopReason: "rpc_error" };
   return { message, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
 }
 

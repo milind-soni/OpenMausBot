@@ -905,12 +905,6 @@ and the person hears it once for that stretch of the limit, as a notification:
 "Codex reached its limit until 14:00, so Kai is using Claude meanwhile." With
 no AI to carry on, it says the bot waits instead. Nobody is asked.
 
-An engine that posts the provider's raw error as its whole reply instead of
-failing the turn (omp's ACP mode sends `429 {"type":"error",…} retry-after-ms=…`
-that way) has that turn count as failed, not as a reply: the person reads it
-in plain words, and a 429 that names its wait is a usage limit held until
-then. A reply that only quotes such an error among other words stays a reply.
-
 - **Which AI.** For one model's own limit, the same AI's default model first;
   then the backups chosen for the bot or in Automatic recovery; then the AI a
   new bot would get. Only an AI that can run a turn now (installed, signed in,
@@ -932,6 +926,14 @@ then. A reply that only quotes such an error among other words stays a reply.
   (`limit-holds.json`, `limit-takeover-holds.json`), so a restart, an update or
   a sleep the Cloud was stopped for keeps them. A conversation that moved goes
   back once its AI's limit has reset, with one line saying so.
+
+An engine that posts the provider's raw error as its whole reply instead of
+failing the turn (omp's ACP mode sends `429 {"type":"error",…} retry-after-ms=…`
+that way) has that turn count as failed, not as a reply, and the person reads
+it in plain words. It is a usage limit when its words say so, or when it is a
+429 whose wait runs past two minutes, and is then held until that wait ends;
+a shorter wait is a rate limit to try again after. A reply that only quotes
+such an error among other words stays a reply.
 
 This is on by default. Start the server with `OMB_QUOTA_SWITCH=0` to switch it
 off: then only the backups Automatic recovery names take over, and the

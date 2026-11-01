@@ -84,8 +84,7 @@ export interface AcpTurnEnd {
 export function endTurn(current: AcpTurn, ok: boolean, stopReason: string | null, ai: string): AcpTurnEnd {
   const ended = ok && stopReason === null;
   const errorReply = ended && !current.state.stopped && !current.state.repliedText ? errorReplyFailure(ai, current.state.text) : null;
-  if (errorReply) current.state.text = "";
-  current.flushAssistantText();
+  if (!errorReply) current.flushAssistantText();
   if (ended && current.state.stopped) return { ok, stopReason: "cancelled" };
   if (errorReply) {
     const { stopReason: failed, ...error } = errorReply;

@@ -130,6 +130,30 @@ describe("errorReplyFailure", () => {
       .toEqual({ message: "omp is overloaded right now (HTTP 529). This is usually temporary, so try again in a few minutes.", stopReason: "rpc_error" });
   });
 
+  it("keeps a 429 whose wait an engine retries on its own a rate limit, and reads a longer one as a usage limit", () => {
+    const perMinute = anthropic(429, "rate_limit_error", "This request would exceed your organization's rate limit of 30,000 input tokens per minute.");
+    const rateLimit = { message: `omp hit a rate limit (HTTP 429; omp says: "This request would exceed your organization's rate limit of 30,000 input tokens per minute"). Wait a minute, then run it again.`, stopReason: "rpc_error" };
+    expect(errorReplyFailure("omp", `${perMinute} retry-after-ms=20000`, NOW)).toEqual(rateLimit);
+    expect(errorReplyFailure("omp", `${perMinute} retry-after-ms=120000`, NOW)).toEqual(rateLimit);
+    expect(errorReplyFailure("omp", `${perMinute} retry-after-ms=120001`, NOW)).toMatchObject({ stopReason: "quota", limit: "engine", limitResetsAt: NOW + 120_001 });
+  });
+
+  it("never reads another status's wait as a usage limit", () => {
+    expect(errorReplyFailure("omp", `${anthropic(529, "overloaded_error", "Overloaded")} retry-after-ms=300000`, NOW))
+      .toEqual({ message: "omp is overloaded right now (HTTP 529). This is usually temporary, so try again in a few minutes.", stopReason: "rpc_error" });
+  });
+
+  it("asks for the person's setup on an account out of credits, as the same failure thrown does, whatever its wait", () => {
+    const outOfCredits = {
+      message: 'Your omp account is out of credits (omp says: "Your credit balance is too low to access the Anthropic API"). Add credits with omp, then run it again.',
+      stopReason: "auth_required",
+      setup: true,
+    };
+    expect(errorReplyFailure("omp", anthropic(402, "billing_error", "Your credit balance is too low to access the Anthropic API."), NOW)).toEqual(outOfCredits);
+    expect(errorReplyFailure("omp", `${anthropic(429, "billing_error", "Your credit balance is too low to access the Anthropic API.")} retry-after-ms=300000`, NOW))
+      .toEqual(outOfCredits);
+  });
+
   it("leaves any other text a reply: an error quoted in words, a success status, a body that is no error", () => {
     for (const text of [
       `Here is what came back: ${anthropic(403, "permission_error", "OAuth authentication is currently not allowed for this organization.")}`,
