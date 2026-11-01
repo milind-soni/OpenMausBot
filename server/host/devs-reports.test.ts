@@ -222,6 +222,35 @@ describe("a message that tags @devs", () => {
     fx.stop();
   });
 
+  it("does not send for a @devs that is only inside a quote; the person's own @devs beside the same quote sends one", async () => {
+    const fx = fixture();
+    const said = fx.bot("scout-main", "I only send a report when your message tags @devs.");
+    const quote = (comment: string) => citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, said.text!.length)!, comment);
+    fx.person("scout-main", composeMessage("what does this mean?", [quote("really?")]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(0);
+    fx.person("scout-main", composeMessage("@devs this is wrong", [quote("")]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    expect(fx.sent[0]!.description.split("\n")[0]).toBe("this is wrong");
+    fx.stop();
+  });
+
+  it("reads each part on its own: a code span the quote cuts in half does not hide the person's own @devs", async () => {
+    const fx = fixture();
+    const said = fx.bot("scout-main", "Try: run `npm i` first.");
+    const quote = citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, 12)!, "@devs it fails at `install`");
+    fx.person("scout-main", composeMessage("", [quote]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
   it("drops a marker it cannot read too, so nothing encoded slips past redaction", async () => {
     const fx = fixture();
     const token = `ghp_${"t".repeat(36)}`;

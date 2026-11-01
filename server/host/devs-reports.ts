@@ -20,7 +20,7 @@ import { tagsDevs, withoutDevsTags } from "../../shared/devs-mention.ts";
 import { versionAtLeast, type BugReportStatus } from "../../shared/devs-report-status.ts";
 import { failedTurnCause } from "../../shared/failed-turn.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
-import { splitTranscriptCitations, withoutCitationMarkers } from "../../src/lib/citations.ts";
+import { splitTranscriptCitations } from "../../src/lib/citations.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { ProviderSnapshot } from "../contracts.ts";
 import { buildDevsReport, contactAddress, environmentSecrets, redactReportText, type BotSummary, type DevsReportPayload, type ReportedBot } from "../devs-report.ts";
@@ -152,12 +152,11 @@ const droppedLine = (language: string | undefined) => serverLine(language, "serv
 /** A failure line names MausBot in every language: a bot reply that does has passed it on. */
 const FAILED_MARKER = "MausBot";
 
-/** A quote's encoded copy never goes: redaction cannot read inside it. */
-function asWritten(message: string, botNames: readonly string[]): { text: string; words: string } {
+/** The person's own words: the text outside quotes and each quote's comment. Only a @devs there tags the message,
+ * never one inside a message they quoted. */
+function ownWords(message: string): string[] {
   const { display, citations } = splitTranscriptCitations(message);
-  const own = [display, ...citations.map((citation) => citation.comment ?? "")];
-  const words = own.map((part) => withoutDevsTags(withoutCitationMarkers(part), botNames)).filter(Boolean).join("\n\n");
-  return { text: withoutCitationMarkers(message), words };
+  return [display, ...citations.map((citation) => citation.comment ?? "")];
 }
 
 /** Rides on the turn that answers a @devs message. */
@@ -455,13 +454,14 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function personWrote(threadId: string, line: Message): void {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
-    if (!tagsDevs(line.text, botNames())) return;
+    const names = botNames();
+    const own = ownWords(line.text);
+    if (!own.some((part) => tagsDevs(part, names))) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
     if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(languageFor(line.sender?.id)), marker: "" });
     const redact = (text: string) => clip(redactReportText(text, secrets()), 3_000);
-    const { text, words } = asWritten(line.text, botNames());
-    waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(text), words: redact(words),
+    waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(own.map((part) => withoutDevsTags(part, names)).filter(Boolean).join("\n\n")),
       ...(line.sender ? { sender: { name: line.sender.name, ...(line.sender.id ? { id: line.sender.id } : {}) } } : {}) });
     save();
   }
