@@ -106,10 +106,10 @@ describe("bot-first sidebar", () => {
   });
 
   for (const enabled of [true, false]) {
-    it.each(densities)(`opens the last selected conversation on mouse or keyboard, %s density, threads ${enabled ? "on" : "off"}`, (density) => {
+    it.each(densities)(`opens the last selected conversation when nothing waits, on mouse or keyboard, %s density, threads ${enabled ? "on" : "off"}`, (density) => {
       fixture.showThreads = enabled;
       let tree: ReactNode;
-      function Capture() { tree = botRow(rowProps(density)); return tree; }
+      function Capture() { tree = botRow(rowProps(density, { ...bot, tasks: bot.tasks!.filter((task) => task.activity !== "waiting-on-you") })); return tree; }
       renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       row.props.onClick!({ type: "click", target: {} } as MouseEvent);
@@ -321,8 +321,8 @@ describe("bot-first sidebar", () => {
     expect(markup).not.toContain("waiting-dot");
   });
 
-  it.each(densities)("opens the thread the person last wrote in when threads are hidden, %s density", (density) => {
-    const used = { ...bot, mainThreadId: "idle-history" };
+  it.each(densities)("opens the thread the person last wrote in when nothing waits and threads are hidden, %s density", (density) => {
+    const used = { ...bot, mainThreadId: "idle-history", tasks: bot.tasks!.filter((task) => task.activity !== "waiting-on-you") };
     for (const enabled of [false, true]) {
       fixture.showThreads = enabled;
       const opened = enabled ? { type: "select", id: bot.id } : { type: "switchTask", botId: bot.id, threadId: "idle-history" };

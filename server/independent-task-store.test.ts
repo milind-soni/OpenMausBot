@@ -312,7 +312,10 @@ describe("independent bot task state", () => {
     expect(seen).toEqual(["bot", "bot"]);
     expect(bot).toMatchObject({ activity: "waiting-on-you", busy: true });
     store.setActivity(bot.id, "working");
+    expect(store.nonTaskActivity(bot.id)).toBe("working");
+    expect(bot.activity).toBe("waiting-on-you");
     store.setActivity(bot.id, "idle");
+    expect(store.nonTaskActivity(bot.id)).toBe("idle");
     expect(bot).toMatchObject({ activity: "waiting-on-you", busy: true });
     store.setTaskActivity(bot.id, first, "idle");
     expect(store.tasks(bot.id).find((task) => task.threadId === first)?.turnStartedAt).toBeUndefined();

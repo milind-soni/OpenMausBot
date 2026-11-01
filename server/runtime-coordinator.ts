@@ -455,9 +455,21 @@ export class RuntimeCoordinator implements Coordinator {
 
   answer(threadId: string, text: string): boolean {
     this.ready();
-    const parked = this.live().find(n => n.parentId !== undefined && n.status === "needs_input" && !(n.cards && n.cards.length > 0) &&
-      n.assignee.destination.threadId === threadId);
+    const parked = this.typedQuestionIn(threadId);
     return parked ? this.runtime.answer(parked.id, text) : false;
+  }
+
+  awaitingTypedAnswerThreads(): ReadonlySet<string> {
+    this.ready();
+    return new Set(this.typedQuestions().map(n => n.assignee.destination.threadId));
+  }
+
+  private typedQuestions(): Assignment[] {
+    return this.live().filter(n => n.parentId !== undefined && n.status === "needs_input" && !n.cards?.length);
+  }
+
+  private typedQuestionIn(threadId: string): Assignment | undefined {
+    return this.typedQuestions().find(n => n.assignee.destination.threadId === threadId);
   }
 
   awaitingAnswer(threadId: string): boolean {

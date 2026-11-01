@@ -1,5 +1,6 @@
 import { BellDot, CircleAlert, Clock3, Loader2, Pin, PinOff, type LucideIcon } from "lucide-react";
 import type { Dispatch } from "react";
+import { openBot, openBotThread } from "@/state/thread-navigation";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
@@ -18,6 +19,13 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
     .filter((task) => !task.routineRunId)
     .filter((task) => !isArchived(task) || (archivedApprovals && task.activity === "waiting-on-you"))
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.waitingForTeammates === true || task.queued || task.unread);
+}
+
+export function openSidebarBot(dispatch: Dispatch<Action>, bot: Bot, threadsShown: boolean) {
+  const waiting = threadsShown ? [] : (bot.tasks ?? []).filter((task) => task.activity === "waiting-on-you" && !isArchived(task));
+  const target = waiting.find((task) => task.threadId === bot.threadId) ?? waiting[0];
+  if (target) openBotThread(dispatch, bot, target.threadId, threadsShown);
+  else openBot(dispatch, bot, threadsShown);
 }
 
 export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>) {
