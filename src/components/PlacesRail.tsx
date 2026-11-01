@@ -63,7 +63,8 @@ export function matchingPlaces(places: RailPlace[], query: string): RailPlace[] 
   });
 }
 
-/** The tile's progress, drawn round its edge. The line starts at the top edge's middle and runs clockwise. */
+/** The tile's progress, drawn round its edge: a 2px line 1px off the tile, its corners in step with the tile's, on whole
+ * pixels at any scale. The line starts at the top edge's middle and runs clockwise. */
 function ProgressRing({ value = 0, waiting = false }: { value?: number; waiting?: boolean }) {
   const box = TILE + 6, inset = 1, side = box - 2 * inset, corner = tileRadius(TILE) + 2;
   const around = 4 * (side - 2 * corner) + 2 * Math.PI * corner;
@@ -73,13 +74,16 @@ function ProgressRing({ value = 0, waiting = false }: { value?: number; waiting?
     + ` V ${inset + corner} A ${corner} ${corner} 0 0 1 ${inset + corner} ${inset} Z`;
   return <svg aria-hidden="true" data-rail-ring={waiting ? "waiting" : Math.round(value * 100)} width={box} height={box} viewBox={`0 0 ${box} ${box}`}
     className={cn("pointer-events-none absolute -left-[3px] -top-[3px]", waiting && "animate-pulse motion-reduce:animate-none")}>
-    <path d={edge} fill="none" stroke="var(--color-hairline)" strokeWidth={1.5} />
-    <path d={edge} fill="none" stroke="var(--color-accent)" strokeWidth={1.5} strokeLinecap="round" strokeDasharray={`${shown * around} ${around}`}
+    <path d={edge} fill="none" stroke="var(--color-hairline)" strokeWidth={2} />
+    <path d={edge} fill="none" stroke="var(--color-accent)" strokeWidth={2} strokeLinecap="round" strokeDasharray={`${shown * around} ${around}`}
       className="transition-[stroke-dasharray] duration-500 motion-reduce:transition-none" />
   </svg>;
 }
 
-export function PlaceMark({ place, size = TILE }: { place: RailPlace; size?: number }) {
+/** What a place's mark draws: its kind, its name's letters and its colour, faded while it is offline or has ended. */
+type MarkedPlace = Pick<RailPlace, "kind" | "name" | "offline" | "ended"> & { color: unknown };
+
+export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: number }) {
   const color = cloudColor(place.color);
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
     className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
@@ -106,18 +110,22 @@ export function topWithin(element: HTMLElement, rail: HTMLElement): number {
   return top;
 }
 
-function PlaceTile({ place, calm, canPair, onOpen, onMenu }: { place: RailPlace; calm: boolean; canPair: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
+/** A place's tile: its mark, with a pill on the rail's edge for the place on screen (a short one on hover), and its dots,
+ * badge and progress round it, all inside the rail. */
+function PlaceTile({ place, canPair, onOpen, onMenu }: { place: RailPlace; canPair: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
   const label = placeLabel(place), acts = placeActs(place, canPair);
   return <button type="button" aria-label={label} title={label} aria-current={place.active ? "page" : undefined} aria-disabled={acts ? undefined : true}
     data-rail-place={place.id} data-rail-kind={place.kind} onClick={() => { if (acts && !place.active) onOpen(place); }} onContextMenu={menuOpener(place, onMenu)}
-    className={cn("relative shrink-0 rounded-[7px] transition-[box-shadow,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-offset-[3px] focus-visible:outline-focus",
-      place.active ? cn("ring-[1.5px] ring-offset-[1.5px] ring-offset-frame", calm ? "ring-ink/45" : "ring-ink/75")
-        : acts ? "hover:ring-[1.5px] hover:ring-ink/15 hover:ring-offset-[1.5px] hover:ring-offset-frame" : cn("cursor-default", !place.offline && "opacity-75"))}>
+    className={cn("group/tile relative shrink-0 rounded-[7px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+      !acts && cn("cursor-default", !place.offline && "opacity-75"))}>
+    <span aria-hidden="true" data-rail-pill={place.active ? "page" : acts ? "hover" : undefined}
+      className={cn("pointer-events-none absolute -left-1.5 top-1/2 w-[3px] -translate-y-1/2 rounded-r-full bg-ink transition-[height,opacity] duration-150 motion-reduce:transition-none",
+        place.active ? "h-4" : acts ? "h-2 opacity-0 group-hover/tile:opacity-100" : "hidden")} />
     <PlaceMark place={place} />
     {place.progress !== undefined && <ProgressRing value={place.progress} waiting={place.waiting === true} />}
-    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-frame bg-danger" />}
-    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-frame bg-accent" />}
-    {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-1 -right-1 grid size-3 place-items-center rounded-full border border-hairline bg-frame text-ink-secondary">
+    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-danger" />}
+    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-accent" />}
+    {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-1 -right-1 grid size-3 place-items-center rounded-full border border-hairline bg-(--rail-surface) text-ink-secondary">
       <Server size={7} strokeWidth={2.25} />
     </span>}
   </button>;
@@ -269,11 +277,12 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     track("rail_place_opened", { kind: place.kind });
     void bridge?.open?.(place.id).catch(() => {});
   };
-  const framed = windowFramed(capabilities.windowChrome), draggable = framed;
+  const framed = windowFramed(capabilities), draggable = capabilities.windowChrome !== "native";
   // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
-  // top bar (the traffic lights' place), so its places start under that bar. Beside a page that doesn't draw the frame
-  // (an older release), they start where that release left them: under the traffic lights' old place on macOS.
-  const above = !framed ? "h-3" : !chrome ? "h-[9px]" : besideFramed ? "h-[37px]" : capabilities.windowChrome === "mac-inset" ? "h-[52px]" : "h-3";
+  // top bar (the traffic lights' place), so its places start under that bar. With the frame turned off, or beside a page
+  // that doesn't draw it (an older release), they start under the traffic lights on macOS.
+  const lights = capabilities.windowChrome === "mac-inset" ? "h-[52px]" : "h-3";
+  const above = !framed ? lights : !chrome ? "h-[9px]" : besideFramed ? "h-[37px]" : lights;
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline style.
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
@@ -285,11 +294,13 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     setMenu({ place, top: nav ? Math.max(8, Math.min(topWithin(from, nav) - 6, nav.clientHeight - 200)) : 8 });
   };
   return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
-    className={cn("relative w-9 shrink-0 flex-col items-center bg-frame", chrome ? "flex h-full" : "hidden md:flex", !framed && (calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50"))}>
+    className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
+      framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-ink/[0.04]" : "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />
-    <ul className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto py-[3px]" style={noDrag}>
+    {/* As wide as the rail, so nothing round a tile is cut off at the sides: a list that scrolls clips its overflow. */}
+    <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>
       {shown.map((place) => <li key={place.id} className="flex">
-        <PlaceTile place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={openMenu} />
+        <PlaceTile place={place} canPair={canPair} onOpen={open} onMenu={openMenu} />
       </li>)}
     </ul>
     <div className="relative mt-2 flex flex-col items-center gap-2 pb-3" style={noDrag} ref={moreRef}>
