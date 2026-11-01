@@ -85,6 +85,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
+import { useUnreadNotice } from "./unread-notice";
 import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
@@ -728,6 +729,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
   const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
   const unread = botShowsUnread(bot);
+  const noticing = useUnreadNotice(unread);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
     <>
@@ -738,7 +740,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           size={simpleRow ? avatarSize + 6 : avatarSize}
           motion={mascotMotion?.kind ?? "none"}
           motionKey={mascotMotion?.nonce ?? 0}
-          animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
         {(iconOnly || !simpleList) && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />}

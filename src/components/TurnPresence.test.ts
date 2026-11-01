@@ -192,11 +192,30 @@ describe("the Now card", () => {
 });
 
 describe("thinking shimmer box", () => {
-  it("pads the sheen past ascenders, descenders and arabic marks without moving the layout", () => {
-    const css = readFileSync("src/styles.css", "utf8");
+  const css = readFileSync("src/styles.css", "utf8");
+
+  it("pads the phrase and its sheen past ascenders, descenders and arabic marks without moving the layout", () => {
     const rule = css.match(/\.thinking-shimmer \{[^}]*\}/)?.[0] ?? "";
-    expect(rule).toContain("background-clip: text");
     expect(rule).toMatch(/padding: 0\.35em 0\.12em/);
     expect(rule).toMatch(/margin: -0\.35em -0\.12em/);
+    const copy = css.match(/\.thinking-sheen > span::before \{[^}]*\}/)?.[0] ?? "";
+    expect(copy).toMatch(/padding: 0\.35em 0\.12em/);
+    expect(copy).toContain("content: attr(data-text) / \"\"");
+  });
+
+  it("moves the sheen by transform alone, so the compositor draws it without repainting the line", () => {
+    for (const name of ["sheen-band", "sheen-letters"]) {
+      const frames = css.match(new RegExp(`@keyframes ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
+      const properties = [...frames.matchAll(/([a-z-]+):/g)].map((match) => match[1]);
+      expect(properties.length).toBeGreaterThan(0);
+      expect(new Set(properties)).toEqual(new Set(["transform"]));
+    }
+  });
+
+  it("keeps the phrase's text to one copy for screen readers, selection and tests", () => {
+    render({ label: "Running a command", since: null });
+    const phrase = host.querySelector(".thinking-shimmer")!;
+    expect(phrase.textContent).toBe("Running a command");
+    expect(phrase.querySelector(".thinking-sheen")?.getAttribute("aria-hidden")).toBe("true");
   });
 });

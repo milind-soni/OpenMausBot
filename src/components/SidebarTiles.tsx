@@ -18,6 +18,7 @@ import { RenameTitle } from "./RenameTitle";
 import { openBotContextMenu, useVisibleMessages, type BotRowProps } from "./Sidebar";
 import { sidebarBotStatus } from "./SidebarBotActivity";
 import { SIMPLE_ROW_FOCUS } from "./SidebarSimpleTop";
+import { useUnreadNotice } from "./unread-notice";
 
 const RING = "ring-2 ring-[var(--tile)]";
 
@@ -32,6 +33,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const visible = useVisibleMessages(bot);
   const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
   const unread = botShowsUnread(bot);
+  const noticing = useUnreadNotice(unread);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const tooltip = botTooltip(bot, instances);
   const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
@@ -87,7 +89,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           size={56}
           motion={mascotMotion?.kind ?? "none"}
           motionKey={mascotMotion?.nonce ?? 0}
-          animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
         />
         {primary && bot.chiefOfStaff && (
           <span data-testid="chief-badge" className={cn("absolute -bottom-px -right-px flex size-4 items-center justify-center rounded-full bg-[#E8993A] text-white", RING)}>
