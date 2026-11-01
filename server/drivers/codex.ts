@@ -1670,18 +1670,21 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     let authBridge: Awaited<ReturnType<typeof startChatGptTokenBridge>> | null = null;
     if (planAuth) {
       if (planSigningOut) throw new Error("This ChatGPT account is being disconnected.");
-      if (!models.options.length) await refreshModels();
       const generation = planGeneration;
+      if (!models.options.length) await refreshModels();
       const token = await planAuth.accessToken();
-      if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
+      if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
-      if (await dynamicPlanSupport()) {
+      const dynamic = await dynamicPlanSupport();
+      if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
+      if (dynamic) {
         authBridge = await startChatGptTokenBridge(async () => {
           if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
           const value = await planAuth.accessToken();
           if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
           return value;
         });
+        if (planSigningOut || disposed || generation !== planGeneration) { authBridge.close(); throw new Error("This ChatGPT account changed."); }
         Object.assign(env, authBridge.env, { ELECTRON_RUN_AS_NODE: "1" });
       } else env.OPENMAUSBOT_CHATGPT_TOKEN = token;
       providerArgs = chatgptPlanCodexArgs(!!authBridge);
