@@ -291,10 +291,20 @@ jobs:
 
       - name: Staple, re-zip, regenerate blockmaps and the feed
         run: |
-          xcrun stapler staple release/OpenMausBot-*-arm64.dmg
-          xcrun stapler staple release/OpenMausBot-*-x64.dmg
-          xcrun stapler staple release/mac-arm64/OpenMausBot.app
-          xcrun stapler staple release/mac/OpenMausBot.app
+          # stapler fetches the ticket from Apple's CloudKit: the connection drops now and then (error 68), and a
+          # ticket can lag notarytool's Accepted verdict by a minute (error 65).
+          staple() {
+            for attempt in 1 2 3 4 5 6; do
+              xcrun stapler staple "$1" && return 0
+              echo "stapling $1 failed (attempt $attempt of 6); trying again in 30 s"
+              sleep 30
+            done
+            echo "::error::could not staple $1 after 6 attempts"
+            return 1
+          }
+          for f in release/OpenMausBot-*-arm64.dmg release/OpenMausBot-*-x64.dmg release/mac-arm64/OpenMausBot.app release/mac/OpenMausBot.app; do
+            staple "$f"
+          done
           v=$(node -p "require('./package.json').version")
           rm -f "release/OpenMausBot-$v-arm64.zip" "release/OpenMausBot-$v-x64.zip"
           ditto -c -k --sequesterRsrc --keepParent release/mac-arm64/OpenMausBot.app "release/OpenMausBot-$v-arm64.zip"
