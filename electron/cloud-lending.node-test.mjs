@@ -140,8 +140,8 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   await connected(sharing, 2, home);
   assert.equal(home.connects.at(-1).terminal, true);
   home.push({ action: "run_command", command: "echo fixture-terminal" });
-  // On Windows a command starts two PowerShells, which on a fresh CI runner can take longer than the default wait.
-  await until(() => home.results.length === 1, "the command result", 30_000);
+  // On Windows a command starts two PowerShells, whose first start on a fresh CI runner has taken over 30 seconds.
+  await until(() => home.results.length === 1, "the command result", 120_000);
   assert.notEqual(home.results[0].isError, true);
   assert.match(home.results[0].content[0].text, /fixture-terminal/);
   assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", true]]);
