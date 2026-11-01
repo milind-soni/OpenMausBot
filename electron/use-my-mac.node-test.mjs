@@ -384,7 +384,7 @@ test("a grant kept from before lending was automatic becomes the automatic one, 
     await until(() => state.home.connects.at(-1)?.internet === true && sharing.cloudState(env).link === "on", "the automatic grant to connect");
     const last = state.home.connects.at(-1);
     assert.deepEqual(last.folders.map((entry) => entry.name), ["Plans"], "its folders as they were");
-    assert.equal(last.terminal, false, "the terminal is no part of it");
+    assert.equal(last.terminal, true, "the terminal it lent, kept as the menu's switch");
     sharing.cloudChanged();
     await delay(100);
     assert.equal(state.home.connects.at(-1), last, "nothing else is lent on top");

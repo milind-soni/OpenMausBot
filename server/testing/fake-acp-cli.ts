@@ -39,6 +39,7 @@
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
 //   FAKE_ACP_MODELS_LIST=v2  OpenCode 2: `models` answers empty with exit 0, `models --verbose` exits 1
+//   FAKE_ACP_MODELS_LIST=auto-only  Cursor CLI 2026.10.22: `models` lists only `auto`
 //   FAKE_ACP_VERBOSE_FAIL_ONCE  marker path: the first `models --verbose` fails, like a new OpenCode home's first run
 //   FAKE_ACP_MODEL_STICKS  set_config_option succeeds but keeps the old model
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
@@ -292,6 +293,10 @@ if (argv[0] === "models" || argv.includes("--list-models")) {
       console.error("Unrecognized flag: --verbose");
       process.exit(1);
     }
+    process.exit(0);
+  }
+  if (process.env.FAKE_ACP_MODELS_LIST === "auto-only") {
+    console.log(["Available models", "", "auto - Auto (default)"].join("\n"));
     process.exit(0);
   }
   if (models.length) {

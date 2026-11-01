@@ -10,6 +10,7 @@ import type { LocaleKey } from "@/locales";
 import { mcpServersForBot, mcpServersOfBot, useMcpServers } from "@/lib/mcp-servers";
 import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
+import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
 import { Switch } from "../SettingsPrimitives";
@@ -68,7 +69,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
   const { draft, setDraft, error, saving, canPick, save, pick } = useWorkingFolder(bot);
   const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
   const pinned = task?.cwd;
-  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd;
+  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd && !isOwnThreadFolder(pinned, bot.id, bot.threadId);
 
   return (
     <div className="rounded-xl bg-card p-4">

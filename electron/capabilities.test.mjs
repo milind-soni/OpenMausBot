@@ -80,6 +80,13 @@ describe("desktop capabilities", () => {
     });
 
     expect(capabilities.windowChrome).toBe("win-caption");
+    expect(capabilities.windowFrame).toBe(true);
+  });
+
+  it("reports the frame as the window draws it: macOS keeps its inset title bar, Windows its own title bar once made without the frame", () => {
+    expect(desktopCapabilities({ platform: "darwin", frame: false })).toMatchObject({ windowChrome: "mac-inset", windowFrame: false });
+    expect(desktopCapabilities({ platform: "win32", frame: false })).toMatchObject({ windowChrome: "native", windowFrame: false });
+    expect(desktopCapabilities({ platform: "linux", frame: false })).toMatchObject({ windowChrome: "native", windowFrame: false });
   });
 
   it("offers Windows local control once the driver is connected", () => {
@@ -108,6 +115,15 @@ describe("desktop capabilities", () => {
       enabled: false,
       status: "unavailable",
     });
+  });
+
+  it("tells a PC whose screen control was blocked from one that only stopped, never that Windows is unsupported", () => {
+    const reasonOf = (reason) => desktopCapabilities({ platform: "win32", packaged: true, localConnection: { mode: "unavailable", reason } }).localComputer.reasonCode;
+    expect(reasonOf("embedded host failed: Spawn: reason Access is denied. (os error 5)")).toBe("cua-driver-blocked");
+    expect(reasonOf("embedded host failed: Spawn: reason Operation did not complete successfully because the file contains a virus or potentially unwanted software. (os error 225)")).toBe("cua-driver-blocked");
+    expect(reasonOf("cua-driver binary not found")).toBe("cua-driver-blocked");
+    expect(reasonOf("embedded host failed: StartupTimeout: timeoutMs 10000")).toBe("cua-driver-unavailable");
+    expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
   it.each(["freebsd"])("fails closed on %s", (platform) => {

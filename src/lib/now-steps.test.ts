@@ -13,16 +13,16 @@ describe("the Now card's steps", () => {
     const messages = [
       ask("Old question"),
       call("Bash", { ok: true, step: { activity: "command", target: "ls" } }),
-      ask("Find construction leads for Biber"),
-      call("WebSearch", { ok: true, step: { activity: "web", target: "Biber Dammbau" } }),
-      call("WebFetch", { ok: true, step: { activity: "fetch", target: "linkedin.com", detail: "linkedin.com/company/biber" } }),
+      ask("Find construction leads for Acme"),
+      call("WebSearch", { ok: true, step: { activity: "web", target: "Acme construction leads" } }),
+      call("WebFetch", { ok: true, step: { activity: "fetch", target: "linkedin.com", detail: "linkedin.com/company/acme" } }),
       call("Bash", { ok: false }),
       ask("and hurry", { steered: true }),
       call("Bash", { step: { activity: "command", target: "scrape.py", detail: "python3 scrape.py --pages 40" } }),
     ];
     expect(nowSteps(messages, null).map(({ label, state, hover }) => ({ label, state, hover }))).toEqual([
-      { label: "Searched the web for “Biber Dammbau”", state: "done", hover: undefined },
-      { label: "Read linkedin.com", state: "done", hover: "linkedin.com/company/biber" },
+      { label: "Searched the web for “Acme construction leads”", state: "done", hover: undefined },
+      { label: "Read linkedin.com", state: "done", hover: "linkedin.com/company/acme" },
       { label: "Ran a command", state: "failed", hover: undefined },
       { label: "Running scrape.py", state: "now", hover: "python3 scrape.py --pages 40" },
     ]);
@@ -44,6 +44,13 @@ describe("the Now card's steps", () => {
     expect(stepLabel({ name: "Bash", ok: true }, "done")).toBe("Ran a command");
     expect(stepLabel({ name: "Grep", ok: true }, "done")).toBe("Searched files");
     expect(stepLabel({ name: "mcp__agents__ask_bot", ok: true }, "done")).toBe("Asking a teammate");
+  });
+
+  it("says whose own app a step used, running or done", () => {
+    const whose = { person: "Ada", app: "Notion" };
+    expect(stepLabel({ name: "mcp__own_apps__NOTION_SEARCH", ok: true, whose }, "done")).toMatch(/ · using Ada's Notion$/);
+    expect(stepLabel({ name: "mcp__own_apps__NOTION_SEARCH", whose }, "now")).toMatch(/ · using Ada's Notion$/);
+    expect(stepLabel({ name: "mcp__own_apps__NOTION_SEARCH", ok: true }, "done")).not.toContain("using");
   });
 });
 

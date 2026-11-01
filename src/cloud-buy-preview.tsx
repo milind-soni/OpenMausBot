@@ -1,6 +1,6 @@
-// Dev-only gallery of the Cloud buying sheet and the Cloud Pro popup, served at /cloud-buy-preview.html; not in the packaged app.
+// Dev-only gallery of the Cloud buying sheet and the What's new popup, served at /cloud-buy-preview.html; not in the packaged app.
 // ?state=choose|choose-plain|sign-in-email|sign-in-code|sign-in-wrong|sign-in-sso|sign-in-done|sign-in-browser|pay|pay-late|setup|setup-slow|ready|has-cloud
-//   |team-setup|team-ready|unreachable|pro-popup|pro-popup-plain|pro-popup-plan|pro-popup-reauth
+//   |team-setup|team-ready|unreachable|whats-new|whats-new-plan
 // &skin=midnight&staging=1&reduced=1&plan=starter&lang=de
 // &current=pro (a subscriber's own plan says Your plan; current=personal shows a Personal subscriber's own card)
 import { StrictMode } from "react";
@@ -9,11 +9,12 @@ import { Cloud, FolderOpen, MessageSquare, Repeat } from "lucide-react";
 import type { CloudAccountState } from "../electron/cloud-account.mjs";
 import type { CloudOffer } from "../electron/cloud-home.mjs";
 import { CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } from "@/components/CloudAddDialog";
-import { CloudProPopup, cloudProPopupView } from "@/components/CloudProPopup";
+import { WhatsNewPopup } from "@/components/whats-new/WhatsNewPopup";
 import { ChooseScreen } from "@/components/cloud-buy/ChooseScreen";
 import type { CloudAddView } from "@/lib/cloud-plan";
 import { setLocale } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
+import { whatsNewView } from "@/lib/whats-new";
 import "./styles.css";
 
 const NOW = Date.now(), DAY = 86_400_000;
@@ -48,11 +49,10 @@ const VIEWS: Record<string, CloudAddView> = {
   unreachable: { kind: "unreachable" },
 };
 const FREE: CloudAccountState = { status: "connected", account: { id: "a", email: "maya@studio.co" }, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } };
+const TEAM = { tier: "team", label: "Team", amount: 16900, trialDays: 3, allowances: allowances(4, 4, 100, 4, 300, 180_000, 14) };
 const POPUPS: Record<string, { account: CloudAccountState; offer: CloudOffer }> = {
-  "pro-popup": { account: { status: "signed-out" }, offer: OFFER },
-  "pro-popup-plain": { account: FREE, offer: PLAIN },
-  "pro-popup-plan": { account: { ...FREE, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 30 * DAY, version: 2 } }, offer: OFFER },
-  "pro-popup-reauth": { account: { status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }, offer: OFFER },
+  "whats-new": { account: FREE, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
+  "whats-new-plan": { account: { ...FREE, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 30 * DAY, version: 2 } }, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
 };
 const noop = () => {};
 const actions = new Proxy({}, { get: () => noop }) as CloudAddActions;
@@ -80,11 +80,11 @@ function Preview() {
   if (params.get("reduced") === "1") document.documentElement.dataset.reducedMotion = "true";
   setLocale(params.get("lang") ?? "en");
   const state = params.get("state") ?? "choose";
-  const asked = POPUPS[state], popup = asked ? cloudProPopupView(asked.account, asked.offer) : null;
+  const asked = POPUPS[state], popup = asked ? whatsNewView(asked.account, asked.offer) : null;
   if (popup && typeof popup === "object") {
     return <div className="relative h-screen overflow-hidden">
       <MockApp />
-      <CloudProPopup view={popup} onPrimary={noop} onSeePlans={noop} onNotNow={noop} onClose={noop} />
+      <WhatsNewPopup view={popup} report={noop} onBuy={noop} onDone={noop} />
     </div>;
   }
   const view = VIEWS[state] ?? VIEWS.choose!;

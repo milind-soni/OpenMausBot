@@ -26,8 +26,9 @@ export function movedFrom(dataDir: string): MovedFrom | null {
   } catch { return null; }
 }
 
-export const webhookMovedLine = (name: string) =>
-  `Now that I live on My Cloud, my webhook "${name}" has a new address. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
+/** `place`: the server of the person's own the bot moved to, by the name they know it by; My Cloud without one. */
+export const webhookMovedLine = (name: string, place = "My Cloud") =>
+  `Now that I live on ${place}, my webhook "${name}" has a new address. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
 
 export const webhookHomeLine = (name: string) =>
   `I'm back on this computer, so my webhook "${name}" has an address here again. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
@@ -39,7 +40,8 @@ export interface ArrivedDeps {
   owner(auth: RequestAuth): CloudOwner | null;
 }
 
-const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500) });
+const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500),
+  place: z.string().trim().min(1).max(120).optional() });
 
 /** False when the path is not this route. */
 export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, auth, json, readBody }: RouteContext): Promise<boolean> {
@@ -60,7 +62,7 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   for (const { id } of telling) told.add(id);
   // Recorded before the lines go: a move cut short here never has a bot say it twice.
   writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told] }), { mode: 0o600 });
-  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name) });
+  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name, body.data.place) });
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }

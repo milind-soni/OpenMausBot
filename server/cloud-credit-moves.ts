@@ -1,8 +1,10 @@
-// Which engine each bot runs on, on a Cloud home with the trial's Claude credit. While nothing of the person's own is
-// signed in there, a bot on an engine that can't run (a copied bot's desktop engine, signed out here) runs on the credit,
-// and where it came from is remembered under providers/, which never travels in a backup or a move. Once an engine of
-// the person's own is signed in, every bot on the credit moves to it: back to the engine and model it came from when that
-// one can run, otherwise to the new-bot default among the person's own engines.
+// Which engine each bot runs on, on a Cloud home with the trial's Claude credit. While nothing of the person's own has
+// ever been signed in there, a bot on an engine that can't run (a copied bot's desktop engine, signed out here) runs on
+// the credit, and where it came from is remembered under providers/, which never travels in a backup or a move. Once an
+// engine of the person's own is signed in, every bot on the credit moves to it: back to the engine and model it came from
+// when that one can run, otherwise to the new-bot default among the person's own engines. From then on the credit takes
+// no bot by itself: when the person signs out of their last engine (or its sign-in lapses) the bots stay where they are,
+// a message to one says to sign in again, and routines wait (host/routine-holds-host.ts) instead of spending the credit.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
@@ -38,6 +40,24 @@ export function createCreditMoves(options: CreditMovesOptions) {
   const { credit, store, context } = options;
   const file = () => join(credit.storage(), "moved.json");
   const onCredit = (chosen?: ModelSelection) => Boolean(chosen && credit.owns(chosen.instanceId));
+  let hadOwn: boolean | undefined;
+
+  /** Whether an engine of the person's own was ever signed in here: kept beside moved.json once it was. */
+  function everOwn(): boolean {
+    if (hadOwn === undefined) {
+      try { readFileSync(join(credit.storage(), "own.json")); hadOwn = true; } catch { hadOwn = false; }
+    }
+    return hadOwn;
+  }
+  function sawOwn(): void {
+    if (everOwn()) return;
+    hadOwn = true;
+    try {
+      writeFileAtomic(join(credit.storage(), "own.json"), JSON.stringify({ at: Date.now() }), { mode: 0o600 });
+    } catch (error) {
+      options.log?.(`[trial credit] could not remember that the person's own AI was signed in (${error instanceof Error ? error.name : "error"})`);
+    }
+  }
 
   function origins(): Map<string, ModelSelection> {
     try {
@@ -60,11 +80,15 @@ export function createCreditMoves(options: CreditMovesOptions) {
   const signedIn = (instances: readonly SelectableInstance[]) => instances.filter(instance =>
     !context.company?.(instance.instanceId) && readyToRun(instance, context) && instance.snapshot.authenticated === true);
 
-  function plan(instances: readonly SelectableInstance[]): Plan {
+  /** `settling`: what this reads is acted on, so a sign-in it finds is remembered. */
+  function plan(instances: readonly SelectableInstance[], settling = false): Plan {
     const own = signedIn(instances);
-    if (own.length) return { kind: "off", own };
+    if (own.length) {
+      if (settling) sawOwn();
+      return { kind: "off", own };
+    }
     const engine = instances.find(instance => credit.owns(instance.instanceId));
-    if (!engine || credit.status() !== "active" || !readyToRun(engine, context) || !engine.models.default) return null;
+    if (everOwn() || !engine || credit.status() !== "active" || !readyToRun(engine, context) || !engine.models.default) return null;
     return { kind: "onto", target: { instanceId: engine.instanceId, model: engine.models.default } };
   }
 
@@ -122,7 +146,7 @@ export function createCreditMoves(options: CreditMovesOptions) {
   return {
     /** Moves the bots onto the credit, or off it, as the engines read now say. */
     settle(instances: readonly SelectableInstance[]): void {
-      const next = plan(instances);
+      const next = plan(instances, true);
       if (next?.kind === "onto") onto(next.target, instances);
       else if (next?.kind === "off") off(next.own);
     },
@@ -132,6 +156,11 @@ export function createCreditMoves(options: CreditMovesOptions) {
       const chosen = store.tasks(bot.id).find(task => task.threadId === threadId)?.modelSelection ?? bot.modelSelection;
       if (next?.kind === "onto") return stranded(bot.modelSelection, instances) || stranded(chosen, instances);
       return next?.kind === "off" && onCredit(chosen);
+    },
+    /** The person had an AI of their own here and none of theirs can run now, for sure (one whose sign-in can't be read
+     * yet might): the credit takes none of their bots, so their routines wait. */
+    away(instances: readonly SelectableInstance[]): boolean {
+      return everOwn() && !instances.some(instance => !context.company?.(instance.instanceId) && readyToRun(instance, context));
     },
     /** The credit's default model changed (the Admin's list): bots and defaults on the old default follow it. */
     followDefault(from: string, to: string): void {

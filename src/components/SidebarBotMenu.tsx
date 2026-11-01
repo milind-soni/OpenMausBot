@@ -20,7 +20,7 @@ import { submenuIntent, type SubmenuIntent } from "@/lib/submenu-intent";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useMoveToTeam } from "./MoveToTeam";
 import type { MenuState } from "./Sidebar";
-import { departmentNames, moveBotsToSection } from "./bot-sections";
+import { departmentNames, moveBotsToSection, useMayMoveBots } from "./bot-sections";
 
 type Flyout = "more" | "move";
 
@@ -68,6 +68,7 @@ export function BotContextMenu({
   const showThreads = useShowThreads();
   const admin = useOwnerOrAdmin();
   const member = admin === false;
+  const mayMove = useMayMoveBots();
   const clearThreads = useDeleteAllThreads(simpleMenu), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
@@ -236,7 +237,7 @@ export function BotContextMenu({
         <ChevronRight size={15} aria-hidden="true" className="text-ink-secondary rtl:-scale-x-100" />
       </button>
     );
-    const moveToSection = member ? null : flyoutButton("move", moveRef, <FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"));
+    const moveToSection = mayMove ? flyoutButton("move", moveRef, <FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection")) : null;
     const rename = onRename && item(<SquarePen size={16} className="text-ink-secondary" />, t("sidebar.bot.rename"), () => onRename(bot.id));
     const editProfile = item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.editProfile"), () => {
       openForSettings();
@@ -361,7 +362,7 @@ export function BotContextMenu({
       {divider("threads")}
       {team && mayChangeOwner(bot, team) && item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf([bot], team, shown))}
       {remoteClient ? [
-        !member && item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
+        mayMove && item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
           onClose();
           onMoveToSection(bot.id);
         }),
@@ -379,7 +380,7 @@ export function BotContextMenu({
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
         ),
         chiefItem(),
-        !member && item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
+        mayMove && item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
           onClose();
           onMoveToSection(bot.id);
         }),

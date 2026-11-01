@@ -74,6 +74,10 @@ describe("sentinel detectors", () => {
     // different limits are one timeout
     const [x] = turnStop.detect([tool("m2", HARNESS_NOTICE, "<bot>'s room turn exceeded 5 minutes and was stopped")], config);
     expect(x!.signature).toBe(observations[4]!.signature);
+    // a turn stopped for making no progress is a timeout too
+    const [idle] = turnStop.detect([tool("m3", HARNESS_NOTICE, "<bot>'s room turn made no progress for 5 minutes and was stopped")], config);
+    expect(idle!.kind).toBe("turn_timeout");
+    expect(toolError.detect([tool("m3", HARNESS_NOTICE, "<bot>'s room turn made no progress for 5 minutes and was stopped")], config)).toEqual([]);
   });
 
   it("queue_wait flags waits over the threshold, finished or still waiting, one issue per bot", () => {
