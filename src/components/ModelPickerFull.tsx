@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { hasSavedApiKey, needsCli, needsSignIn } from "./EngineSetup";
-import { MENU_META, MENU_ROW, MENU_STROKE } from "./menu-recipe";
+import { MENU_ROW, MENU_STROKE } from "./menu-recipe";
 import { Select } from "./Select";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
@@ -34,13 +34,15 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
       data-menu-row
       data-current-model={current || undefined}
       aria-pressed={current}
-      title={option.provider ? t("model.provider", { name: option.provider }) : undefined}
+      title={[option.label, option.provider].filter(Boolean).join(" · ")}
       onClick={onPick}
       className={MENU_ROW}
     >
-      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{option.label}</span>
+        {meta && <span className="truncate text-[12px] leading-4 text-ink-tertiary">{meta}</span>}
+      </span>
       {botModel && <span data-bot-model className="shrink-0 text-[12px] leading-4 text-ink-tertiary">{t("model.botModelTag")}</span>}
-      {meta && <span className={MENU_META}>{meta}</span>}
       {option.loaded && (
         <span className="flex shrink-0 items-center gap-1 text-[12px] leading-4 text-ink-tertiary">
           <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
@@ -73,7 +75,7 @@ export function FollowBotModelRow({ name, model, follows, onPick }: { name: stri
 
 export function ModelSearch({ value, onChange, local }: { value: string; onChange: (value: string) => void; local: boolean }) {
   return (
-    <div className="group/search flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 px-3.5">
+    <div className="group/search sticky top-0 z-[1] flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 bg-menu px-3.5">
       <Search size={16} strokeWidth={MENU_STROKE} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
       <input
         data-menu-search
@@ -119,8 +121,6 @@ export function railProviders(instances: InstanceInfo[], selectedInstance: Insta
   return { subscription: subscription.map(entry), api: api.map(entry), custom: custom.map(entry) };
 }
 
-const RAIL_LABEL = "pb-0.5 text-center text-[11px] leading-[14px] text-ink-tertiary";
-
 export function ModelEngineRail({ instances, selectedInstance, claudeInstance, openaiInstance, onSelect, onAddApiKeys }: {
   instances: InstanceInfo[];
   selectedInstance?: InstanceInfo;
@@ -131,18 +131,21 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
 }) {
   const { subscription, api, custom: local } = railProviders(instances, selectedInstance, claudeInstance, openaiInstance);
   const railButton = ({ instance, target, selected, label }: RailProvider) => {
+    const routeLabel = target.access === "api" ? `${label} · ${t("model.simple.apiKey")}` : label;
     const attention = needsCli(target) || needsSignIn(target) || Boolean(target.snapshot.update);
     const managedBy = target.policy ? t("policy.managedBy", { organization: target.policy.organizationName }) : undefined;
     return (
       <button
         type="button"
         key={instance.instanceId}
+        data-provider-tab
+        tabIndex={selected ? 0 : -1}
         onClick={() => onSelect(target)}
-        aria-label={managedBy ? `${label} · ${managedBy}` : label}
+        aria-label={managedBy ? `${routeLabel} · ${managedBy}` : routeLabel}
         aria-pressed={selected}
-        title={`${label} · ${managedBy ?? engineStatus(target)}`}
+        title={`${routeLabel} · ${managedBy ?? engineStatus(target)}${target.snapshot.update ? ` · ${target.snapshot.update.title}` : ""}`}
         className={cn(
-          "group relative flex size-9 shrink-0 items-center justify-center rounded-[8px]",
+          "group relative flex size-9 shrink-0 items-center justify-center rounded-[8px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
           selected ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
           managedBy && "opacity-40",
         )}
@@ -158,10 +161,34 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
     );
   };
   return (
-    <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r-[0.5px] border-ink/10 p-2">
-      {subscription.length > 0 && <div className={cn(RAIL_LABEL, "pt-0.5")}>{t("model.rail.cloud")}</div>}
+    <div data-model-providers role="group" aria-label={t("settings.engines.title")}
+      className="flex shrink-0 items-center gap-1 overflow-x-auto overscroll-contain border-b-[0.5px] border-ink/10 p-1.5"
+      onKeyDown={(event) => {
+        const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-provider-tab]")];
+        const index = tabs.indexOf(event.target as HTMLButtonElement);
+        if (index < 0) return;
+        const rtl = getComputedStyle(event.currentTarget).direction === "rtl";
+        const step = event.key === "ArrowRight" ? (rtl ? -1 : 1) : event.key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
+        const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : step ? (index + step + tabs.length) % tabs.length : null;
+        if (next !== null) {
+          event.preventDefault();
+          event.stopPropagation();
+          const tab = tabs[next];
+          tab?.focus({ preventScroll: true });
+          tab?.click();
+          if (tab) {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            const item = tab.getBoundingClientRect();
+            event.currentTarget.scrollLeft += item.left < bounds.left ? item.left - bounds.left : item.right > bounds.right ? item.right - bounds.right : 0;
+          }
+        } else if (event.key === "ArrowDown") {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.closest('[role="dialog"]')?.querySelector<HTMLInputElement>("[data-menu-search]")?.focus();
+        }
+      }}>
       {subscription.map(railButton)}
-      {(api.length > 0 || onAddApiKeys) && <div className={cn(RAIL_LABEL, subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</div>}
+      {subscription.length > 0 && api.length > 0 && <span role="separator" aria-orientation="vertical" className="mx-0.5 h-5 shrink-0 border-l border-ink/10" />}
       {api.map(railButton)}
       {onAddApiKeys && (
         <button
@@ -175,7 +202,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
           <Plus size={16} strokeWidth={MENU_STROKE} aria-hidden="true" />
         </button>
       )}
-      {local.length > 0 && <div className={cn(RAIL_LABEL, "pt-2")}>{t("model.rail.local")}</div>}
+      {local.length > 0 && (subscription.length > 0 || api.length > 0) && <span role="separator" aria-orientation="vertical" className="mx-0.5 h-5 shrink-0 border-l border-ink/10" />}
       {local.map(railButton)}
     </div>
   );

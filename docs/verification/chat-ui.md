@@ -284,6 +284,10 @@ The advisory renderer job runs both recipes. Runtime mounting, direct/channel
 turns, busy-state rejection and revoked-session imports are separately exercised
 by `server/mcp-selection.e2e.test.ts` against disposable fake-engine servers.
 
+## Model picker
+
+The [model picker recipe](model-selector.md) covers provider browsing, persistent search, reasoning controls, and the browser regression for short desktop and phone windows.
+
 ## Cleanup
 
 Interrupt `ui launch` with Ctrl-C. It closes the browser session (waiting

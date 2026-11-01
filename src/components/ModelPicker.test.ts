@@ -340,7 +340,8 @@ describe("OpenAI sign-ins in the rail", () => {
     const markup = renderToStaticMarkup(createElement(ModelEngineRail, {
       instances: [codex, plan, apiKey], selectedInstance: plan, onSelect: () => {},
     }));
-    expect(markup.match(/aria-label="OpenAI"/g)).toHaveLength(2);
+    expect(markup.match(/aria-label="OpenAI"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="OpenAI · API key"');
     expect(markup).toContain('aria-label="OpenAI" aria-pressed="true"');
     expect(markup).not.toContain('aria-label="Codex"');
     expect(markup).not.toContain('aria-label="ChatGPT plan"');
@@ -370,7 +371,7 @@ describe("Claude provider and account selection", () => {
       expect(markup).toContain('aria-label="OpenAI" aria-pressed="false"');
       expect(markup).not.toContain('aria-label="Personal"');
       expect(markup).not.toContain('aria-label="Work"');
-      expect(markup).toContain("w-14");
+      expect(markup).toContain("overflow-x-auto");
     }
   });
 

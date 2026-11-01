@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { agentBrowser, sessionEnv, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 import { fixtureApi } from "./preview-fixture.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -238,6 +238,57 @@ describe("control-omb ui drives the real renderer", () => {
     expect(launched.child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
   }, LAUNCH_TIMEOUT_MS + 180_000);
+
+  run("keeps advanced model choices and the footer reachable in short desktop and phone windows", async () => {
+    launched = await launch(["--engine", "codex"]);
+    const { info } = launched;
+    const handle = JSON.parse(readFileSync(info.ui, "utf8"));
+    const evaluate = async (js: string) => (await ui("eval", info.ui, "--js", js)).result;
+    const viewport = (width: number) => agentBrowser(handle.binary, sessionEnv(handle), ["set", "viewport", String(width), "440"]);
+    const bounds = () => evaluate(`(() => {
+      const menu = document.querySelector('[data-model-picker-content]');
+      const catalog = menu?.querySelector('[data-model-catalog-scroll]');
+      const list = menu?.querySelector('[data-model-list]');
+      const footer = menu?.querySelector('[data-model-add-api-keys]');
+      if (!menu || !catalog || !list || !footer) return null;
+      const box = menu.getBoundingClientRect();
+      return { listHeight: list.clientHeight, scrollable: catalog.scrollHeight > catalog.clientHeight,
+        left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+        footerBottom: footer.getBoundingClientRect().bottom, footerGap: box.bottom - footer.getBoundingClientRect().bottom };
+    })()`);
+    for (const width of [1280, 390]) {
+      await viewport(width);
+      await evaluate("localStorage.setItem('omb-advanced-mode','1'); location.reload(); true");
+      await expect.poll(() => evaluate("Boolean(document.querySelector('[data-tour=model],button[aria-label=More]'))"), { timeout: 15_000 }).toBe(true);
+      await evaluate("document.documentElement.dataset.reducedMotion='true'; true");
+      if (width === 390) {
+        await ui("click", info.ui, "--name", "More");
+        await evaluate("[...document.querySelectorAll('[role=menu] button')].find(button => button.textContent.trim().startsWith('Model')).click(); true");
+      }
+      await expect.poll(() => evaluate("Boolean(document.querySelector('[data-tour=model]'))"), { timeout: 10_000 }).toBe(true);
+      await evaluate("document.querySelector('[data-tour=model]').click(); true");
+      await ui("click", info.ui, "--name", "OpenAI");
+      await expect.poll(async () => (await bounds())?.listHeight ?? 0, { timeout: 10_000 }).toBeGreaterThan(0);
+      const before = await bounds();
+      expect(before.scrollable).toBe(true);
+      expect(before.left).toBeGreaterThanOrEqual(0);
+      expect(before.right).toBeLessThanOrEqual(width);
+      expect(before.top).toBeGreaterThanOrEqual(0);
+      expect(before.bottom).toBeLessThanOrEqual(440);
+      expect(before.footerBottom).toBeLessThanOrEqual(440);
+      await evaluate("const catalog=document.querySelector('[data-model-catalog-scroll]'); catalog.scrollTop=catalog.scrollHeight; true");
+      await expect.poll(() => evaluate(`(() => {
+        const catalog=document.querySelector('[data-model-catalog-scroll]').getBoundingClientRect();
+        const row=[...document.querySelectorAll('[data-model-list] [data-menu-row]')].at(-1)?.getBoundingClientRect();
+        return Boolean(row && row.top >= catalog.top && row.bottom <= catalog.bottom);
+      })()`)).toBe(true);
+      expect((await bounds()).footerGap).toBeCloseTo(before.footerGap, 1);
+      await ui("press", info.ui, "--keys", "Escape");
+      if (width === 390) await ui("press", info.ui, "--keys", "Escape");
+    }
+    await waitForExit(launched.child, { signal: "SIGINT", graceMs: 30_000 });
+    expect(launched.child.exitCode).toBe(0);
+  }, LAUNCH_TIMEOUT_MS + 120_000);
 
   run("sends a turn from the composer and shows the reply and the scripted tool chip", async () => {
     launched = await launch(["--tool-calls", TOOL_CALLS]);

@@ -41,7 +41,6 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
   const { state, dispatch, refreshInstances, refreshModels } = useStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [placement, setPlacement] = useState<PickerPlacement | null>(null);
@@ -89,7 +88,6 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
   };
   const openMenu = () => {
     setQuery("");
-    setExpanded(new Set());
     setPlacement(null);
     focusOnPlace.current = true;
     setOpen(true);
@@ -110,7 +108,7 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
     const listed = configuredModelInstances(state.instances, current?.instanceId).filter((instance) => !exclude.has(instance.instanceId));
     const built = simpleModelMenu({
       instances: state.instances, listed, selection: current ?? NO_SELECTION,
-      bot: { name: bot.name, selection: bot.modelSelection }, query, expanded, probing: NOTHING_PROBED, loading, refreshing,
+      bot: { name: bot.name, selection: bot.modelSelection }, query, probing: NOTHING_PROBED, loading, refreshing,
     });
     return current ? built : { ...built, current: null };
   };
@@ -188,11 +186,6 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
             }}
             onPickCurrent={() => close(true)}
             onFollowBot={() => close(true)}
-            onToggle={(instance) => setExpanded((shown) => {
-              const next = new Set(shown);
-              if (!next.delete(instance.instanceId)) next.add(instance.instanceId);
-              return next;
-            })}
             onSetUp={manage}
             onCheckAgain={checkAgain}
             onManage={manage}

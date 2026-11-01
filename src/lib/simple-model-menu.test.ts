@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { InstanceInfo, ModelSelection } from "@/state/store";
-import { modelName, simpleModelMenu, SIMPLE_SEARCH_AFTER } from "./simple-model-menu";
+import { modelName, simpleModelMenu } from "./simple-model-menu";
 
 vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -41,7 +41,7 @@ function menu(listed: InstanceInfo[], options: Partial<Parameters<typeof simpleM
   return simpleModelMenu({
     instances: listed, listed, selection: sonnet,
     bot: { name: "Pepper", selection: sonnet },
-    query: "", expanded: new Set(), probing: new Set(), loading: false,
+    query: "", probing: new Set(), loading: false,
     ...options,
   });
 }
@@ -57,21 +57,21 @@ describe("the Simple model menu", () => {
     expect(built.current).toMatchObject({ label: "Claude Sonnet 5", title: "Claude · Claude Sonnet 5", warning: false, pending: false });
     expect(built.current!.meta).toBeUndefined();
     expect(built.groups.map((group) => group.label)).toEqual(["Claude"]);
-    expect(rows(built)).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
-    expect(body(built)).toMatchObject({ kind: "models", total: 8, toggle: "more" });
-    expect(built.search).toBe(false);
+    expect(rows(built)).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5", "Haiku 5.5", "Haiku 5", "Sonnet 4.5"]);
+    expect(body(built)).toMatchObject({ kind: "models", total: 8 });
+    expect(built.search).toBe(true);
   });
 
-  it("opens a group's whole list in place, keeping its suggestions first, and folds it back", () => {
-    const opened = menu([claude()], { expanded: new Set(["claude"]) });
+  it("keeps the whole catalog available without a second expansion state", () => {
+    const opened = menu([claude()], {});
     expect(rows(opened)).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5", "Haiku 5.5", "Haiku 5", "Sonnet 4.5"]);
-    expect(body(opened)).toMatchObject({ toggle: "less" });
+    expect(body(opened)).toMatchObject({ kind: "models" });
   });
 
   it("shows the one model a toggle would hide instead of the toggle", () => {
     const built = menu([claude({}, claudeModels.slice(0, 6))]);
     expect(rows(built)).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5", "Haiku 5.5"]);
-    expect(body(built)).toMatchObject({ toggle: null });
+    expect(body(built)).toMatchObject({ kind: "models" });
   });
 
   it("lists every ready provider at once: the current one first, then sign-ins, API keys and local engines", () => {
@@ -81,10 +81,10 @@ describe("the Simple model menu", () => {
     expect(rows(built, 3)).toEqual(["Sonnet 5", "Fable 5.1"]);
   });
 
-  it("offers three suggestions in a provider that does not hold the current model", () => {
+  it("lists the full catalog of a provider that does not hold the current model", () => {
     const built = menu([claude(), engine("other", "codex", "Codex", "subscription", claudeModels.slice(0, 5))]);
-    expect(rows(built, 1)).toHaveLength(3);
-    expect(body(built, 1)).toMatchObject({ toggle: "more", total: 5 });
+    expect(rows(built, 1)).toHaveLength(5);
+    expect(body(built, 1)).toMatchObject({ total: 5 });
   });
 
   it("leaves out a provider whose only model is the current one", () => {
@@ -203,16 +203,16 @@ describe("the Simple model menu", () => {
     expect(menu([]).empty).toBe("none");
   });
 
-  it("counts only models a person can pick toward the search box", () => {
+  it("keeps search available when some providers are unavailable or managed", () => {
     const missing = engine("cursor", "cursorAgent", "Cursor", "subscription", claudeModels.slice(0, 6), { snapshot: { state: "unavailable", reason: "not found" } });
     const managed = { ...engine("router", "openai-compat", "Router", "api", claudeModels), policy: { organizationName: "Acme", reason: "No." } };
-    expect(menu([claude(), missing, managed]).search).toBe(false);
+    expect(menu([claude(), missing, managed]).search).toBe(true);
   });
 
-  it("searches only past twelve models, across every provider, with the current model checked in place", () => {
-    expect(menu([claude(), codex]).search).toBe(false);
+  it("searches catalogs of every size, with the current model checked in place", () => {
+    expect(menu([claude(), codex]).search).toBe(true);
     const many = engine("router", "openai-compat", "OpenRouter", "api",
-      Array.from({ length: SIMPLE_SEARCH_AFTER }, (_, index) => ({ id: `model-${index}`, label: `Router ${index}` })));
+      Array.from({ length: 12 }, (_, index) => ({ id: `model-${index}`, label: `Router ${index}` })));
     expect(menu([claude(), many], { query: "sonnet" }).search).toBe(true);
     const found = menu([claude(), codex, many], { query: "sonnet 5" });
     expect(found.current).toBeNull();
