@@ -17,7 +17,8 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { startChatGptTokenBridge } from "./chatgpt-plan-token-bridge.ts";
-import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { chatgptPlanCodexArgs, managedCodexArgs, decodeManagedCodex, createDynamicPlanSupport } from "./codex-provider-config.ts";
+export { chatgptPlanCodexArgs, managedCodexArgs } from "./codex-provider-config.ts";
 import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tomlInlineTable, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
@@ -85,56 +86,6 @@ function decodeConfig(raw: unknown): CodexConfig {
     ...(o.authMode === "chatgpt-plan" ? { authMode: "chatgpt-plan" as const } : {}),
     ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
   };
-}
-
-/** The token-sharing Responses bridge carries no hosted tool_search (Codex 0.159.0 sends none), so
- * a plan turn's MCP tools load up front. */
-export function chatgptPlanCodexArgs(dynamic = false): string[] {
-  return [
-    "-c", 'model_provider="openai_chatgpt_plan"',
-    "-c", 'model_providers.openai_chatgpt_plan.name="ChatGPT plan"',
-    "-c", 'model_providers.openai_chatgpt_plan.base_url="https://api.openai.com/v1"',
-    ...(dynamic ? [
-      "-c", `model_providers.openai_chatgpt_plan.auth.command=${JSON.stringify(process.execPath)}`,
-      "-c", `model_providers.openai_chatgpt_plan.auth.args=[${JSON.stringify(SPAWNED_PROXIES.chatgptPlanToken)}]`,
-      "-c", "model_providers.openai_chatgpt_plan.auth.refresh_interval_ms=30000",
-      "-c", "model_providers.openai_chatgpt_plan.auth.timeout_ms=60000",
-    ] : ["-c", 'model_providers.openai_chatgpt_plan.env_key="OPENMAUSBOT_CHATGPT_TOKEN"']),
-    "-c", 'model_providers.openai_chatgpt_plan.wire_api="responses"',
-    "-c", "model_providers.openai_chatgpt_plan.requires_openai_auth=false",
-    "-c", "model_providers.openai_chatgpt_plan.supports_websockets=false",
-    "-c", 'cli_auth_credentials_store="ephemeral"',
-    "-c", "features.tool_search=false",
-    "-c", "shell_environment_policy.ignore_default_excludes=false",
-    // OPENMAUSBOT_CHATGPT_TOKEN is excluded via extendShellExclusions: a `-c exclude` here would replace the lower layers' list.
-  ];
-}
-
-function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
-  const value = raw as { url?: unknown; models?: unknown };
-  if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
-    throw new Error("Invalid Company Codex configuration.");
-  }
-  const url = new URL(value.url);
-  // Plain HTTP leaks the Company API key; allow it only on loopback.
-  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
-  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) throw new Error("Invalid Company Codex endpoint.");
-  return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
-}
-
-export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): string[] {
-  // Credential stays in the instance environment, never argv or config.toml.
-  // https://learn.chatgpt.com/docs/config-file/config-reference
-  return [
-    "-c", 'model_provider="openmaus_company"',
-    "-c", 'model_providers.openmaus_company.name="Company"',
-    "-c", `model_providers.openmaus_company.base_url=${JSON.stringify(config.url)}`,
-    "-c", 'model_providers.openmaus_company.env_key="OPENMAUSBOT_COMPANY_API_KEY"',
-    "-c", 'model_providers.openmaus_company.wire_api="responses"',
-    "-c", "model_providers.openmaus_company.requires_openai_auth=false",
-    "-c", 'cli_auth_credentials_store="ephemeral"',
-    "-c", "shell_environment_policy.ignore_default_excludes=false",
-  ];
 }
 
 const PRIVATE_ENV_FAMILIES = ["OMB_GATE_CONFIG_", "OMB_REMOTE_MCP_CONFIG_"];
@@ -503,13 +454,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     };
     const catalogEnv = childEnv();
     const planAuth = plan ? new ChatGptPlanAuthController({ directory: planDirectory }) : null;
-    // 0.165.0 is the earliest version verified with command authentication here.
-    const dynamicPlanSupport = plan && !planUnavailable ? new Promise<boolean>((resolve) => {
-      execCli(config.cli, ["--version"], { timeout: 8000, env: catalogEnv }, (error, stdout) => {
-        const match = error ? null : stdout.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
-        resolve(!!match && (Number(match[1]) > 0 || Number(match[2]) >= 165));
-      });
-    }) : Promise.resolve(false);
+    const dynamicPlanSupport = plan && !planUnavailable ? createDynamicPlanSupport(config.cli, catalogEnv, execCli) : async () => false;
     let planGeneration = 0;
     let planSigningOut = false;
     let disposed = false;
@@ -664,7 +609,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
         return { turnId };
       }
-      const dynamicPlan = !!planAuth && await dynamicPlanSupport;
+      const dynamicPlan = !!planAuth && await dynamicPlanSupport();
       assertPlanCurrent();
       const authBridge = dynamicPlan && planAuth ? await startChatGptTokenBridge(async () => {
         assertPlanCurrent();
@@ -1690,7 +1635,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     if (!("version" in probe)) return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
     const { version } = probe;
     if (planAuth) {
-      const warning = planWarning ?? (!(await dynamicPlanSupport) ? "Update Codex to 0.165.0 or newer to renew ChatGPT credentials during a running task." : undefined);
+      const warning = planWarning ?? (!(await dynamicPlanSupport()) ? "Update Codex to 0.165.0 or newer to renew ChatGPT credentials during a running task." : undefined);
       return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
         ...(warning ? { warning: { title: "Check ChatGPT connection", message: warning } } : {}) };
     }
@@ -1730,7 +1675,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const token = await planAuth.accessToken();
       if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
-      if (await dynamicPlanSupport) {
+      if (await dynamicPlanSupport()) {
         authBridge = await startChatGptTokenBridge(async () => {
           if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
           const value = await planAuth.accessToken();
