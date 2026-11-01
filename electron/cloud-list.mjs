@@ -186,3 +186,29 @@ export function listedColors(clouds) {
 export function ownCloudPlaces(clouds) {
   return otherOwnClouds(clouds).filter(cloud => cloud.origin).map(cloud => ({ id: cloud.id, role: cloud.role, name: cloud.name, color: swatchColor(cloud.color), origin: cloud.origin }));
 }
+
+/** The saved places once the session says where the account's own machine is: the place listed as home at another
+ * address was My Cloud before this one. It leaves the list when the session's list has it as ended, or not at all;
+ * otherwise (still one of the person's Clouds, or an Admin without the list) it stays, as a place of its own. */
+export function withoutOldCloudHome(saved, state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  if (!machine?.origin || machine.status === "provisioning") return saved;
+  const clouds = state.clouds;
+  let next = saved;
+  for (const entry of saved.environments) {
+    if (entry.home !== true || entry.origin === machine.origin) continue;
+    const listed = Array.isArray(clouds) ? clouds.find(cloud => cloud.origin === entry.origin) ?? null : null;
+    if (Array.isArray(clouds) && (!listed || cloudState(listed) === "ended")) { next = environments.withoutEnvironment(next, entry.id); continue; }
+    const { home: _home, ...rest } = entry;
+    next = { ...next, environments: next.environments.map(candidate => (candidate.id === entry.id ? rest : candidate)) };
+  }
+  return next;
+}
+
+/** The name and colour the Admin lists the account's own machine's Cloud under, for its saved place; null when the
+ * session lists none. */
+export function homeLook(state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  const listed = machine?.origin && Array.isArray(state.clouds) ? state.clouds.find(cloud => ownCloud(cloud) && cloud.origin === machine.origin) : null;
+  return listed?.name ? { name: listed.name, color: swatchColor(listed.color) } : null;
+}
