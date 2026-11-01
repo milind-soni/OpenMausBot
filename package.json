@@ -46,6 +46,7 @@
     "bench:persistence": "node --experimental-strip-types scripts/bench-persistence.ts",
     "bench:today": "node --experimental-strip-types scripts/bench-today.ts",
     "bench:browser-stream": "node --experimental-strip-types scripts/bench-browser-stream.ts",
+    "bench:desktop": "node --experimental-strip-types scripts/bench-desktop.ts",
     "test:watch": "vitest",
     "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
