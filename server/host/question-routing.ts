@@ -3,6 +3,7 @@
 // Otherwise a question waits for the person, and an answer counts wherever it is given, also when their Chief or another
 // bot passes it on to the bot that asks, naming the question it answers. What the bot that handed work on sends to the
 // thread that work runs in goes into that work: it answers the question the work waits on, or reaches its running turn.
+// A Chief may also answer, for the person, a question a teammate it manages puts to them in a thread the Chief did not open.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.ts";
@@ -22,6 +23,8 @@ export interface QuestionRoutingDeps {
   answerNode(id: string, text: string, by: Answerer): boolean;
   /** The bot's turn in `threadId` waits on this card's live request. */
   live(threadId: string, requestId: string): boolean;
+  /** The bot's work in `threadId` was started by an outside event or runs with no person behind it. */
+  unattended(botId: string, threadId: string): boolean;
   /** Answers the live question request a turn waits on; true when the turn took the answer. */
   answerLive(threadId: string, requestId: string, text: string): Promise<boolean>;
   /** The open sign-in cards this work waits on were answered elsewhere: they settle, and the place goes back to its bot. */
@@ -131,5 +134,50 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
       detail: "handed to the turn it is running on the work you gave it, which reads it at its next step; that work's one result still returns to you" });
   }
 
-  return { notAsked, relay };
+  /** The question card `botId`'s turn in `threadId` waits on that a Chief may answer for the person: answerable in words, not
+   * one only the person can answer, and not in work an outside event started, whose questions stay theirs. */
+  function forPerson(botId: string, threadId: string): { row: Message; question: string } | undefined {
+    if (deps.unattended(botId, threadId)) return undefined;
+    const row = store.messagesFor(threadId).findLast((one) => !one.inbox && answerableInWords(one.card) && deps.live(threadId, one.card!.requestId!));
+    const question = row?.card ? row.card.subtitle || row.card.title : "";
+    return row && !personOnly(question) ? { row, question } : undefined;
+  }
+
+  /** What the Chief's turns list: the questions `teammates` (those it manages) wait on the person for, in threads the Chief
+   * did not open on them and it may read (`readable`); at most ten. */
+  function waitingForPerson(chief: BotRecord, teammates: readonly BotRecord[], readable: (threadId: string) => boolean = () => true): Array<{ bot: string; threadId: string; thread: string; question: string }> {
+    return teammates.flatMap((teammate) => store.tasks(teammate.id)
+      .filter((task) => task.activity === "waiting-on-you" && task.archivedAt === undefined && task.openedBy?.botId !== chief.id && readable(task.threadId))
+      .flatMap((task) => {
+        const asked = forPerson(teammate.id, task.threadId);
+        return asked ? [{ bot: teammate.name, threadId: task.threadId, thread: task.title, question: asked.question }] : [];
+      })).slice(0, 10);
+  }
+
+  /** A Chief answers, for the person, the question card `target` waits on in `threadId`: a thread the Chief did not open on
+   * it, such as the person's own chat with it. The caller checks that the Chief manages `target` and may read that thread.
+   * Undefined when the thread waits on no question the Chief may answer, so the usual thread rules apply: a sign-in, an
+   * approval or a question only the person can answer stays theirs. The card shows the Chief's answer, and the person's own
+   * answer still replaces it. */
+  async function answerForPerson(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; threadId: string; message: string }): Promise<PeerDeliveryReceipt | undefined> {
+    const { sender, target, threadId, message } = input;
+    const task = store.taskByThread(target.id, threadId);
+    if (!task || task.archivedAt !== undefined || task.openedBy?.botId === sender.id) return undefined;
+    const asked = forPerson(target.id, threadId);
+    if (!asked) return undefined;
+    const { row, question } = asked, card = row.card!;
+    if (!(await deps.answerLive(threadId, card.requestId!, `@${sender.name} answered for the person: ${message}`))) {
+      return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed", threadId,
+        detail: `${target.name}'s question "${question}" was answered or closed meanwhile; nothing was sent` });
+    }
+    const settled = store.messagesFor(threadId).find((one) => one.id === row.id)?.card;
+    if (settled) store.patchMessage(threadId, row.id, { card: { ...settled, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
+    store.appendMessage(input.senderThreadId, { role: "bot", kind: "activity", from: { botId: sender.id, name: sender.name, color: sender.color },
+      tool: { name: `Answered ${target.name}'s question for the person`, ok: true, output: question.slice(0, 400) },
+      threadRef: { botId: target.id, threadId, title: task.title } });
+    return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "injected", threadId,
+      detail: `answered its question "${question}" for the person; it carries on with your answer, and the person can still give their own in that thread` });
+  }
+
+  return { notAsked, relay, answerForPerson, waitingForPerson };
 }

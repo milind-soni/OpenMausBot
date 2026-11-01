@@ -1205,7 +1205,7 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
   if (bot.memoryEnabled === false || !autoRecallEnabled(cfg)) return "";
   const roomByThread = opts.conversations ? recallRooms(store.groups, bot, roomFeedsBot) : new Map<string, GroupRecord>();
   const threadIds = opts.conversations
-    ? recallThreadIds(bot, roomByThread).filter((id) => id !== threadId && !proactive.fence.confines(id) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(id) : !CLOUD_HOME || cloudOwnerOnlyThread(id)))
+    ? recallThreadIds(bot, roomByThread).filter((id) => id !== threadId && threadReadableFrom(threadId)(id))
     : [];
   try {
     const recalled = buildRecall({
@@ -3815,6 +3815,29 @@ function outstandingAssignmentsPrompt(threadId: string): string {
   return ` Assignments you already sent are still outstanding, and nothing in this conversation cancelled them: ${JSON.stringify(listed)}. Do not resend them, do not poll or wait for them, and do not tell the user they were lost. Each result returns to this conversation on its own and resumes you then. To change or add to one, send the change to the same teammate with coordinate_bots, with its threadId as thread: it goes into that work, answering the question it waits on or reaching the turn running it. Answer the message above with that work still in flight.`;
 }
 
+function threadReadableFrom(threadId: string): (other: string) => boolean {
+  return (other) => !proactive.fence.confines(other) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(other) : !CLOUD_HOME || cloudOwnerOnlyThread(other));
+}
+
+const unattendedWork = (botId: string, threadId: string): boolean => isUnattended(botId, threadId)
+  || directRequestOwners.get(threadId)?.origin?.kind === "outside"
+  || coordinator.active().some((node) => node.threadId === threadId && node.origin?.kind === "outside");
+
+/** Security invariant: only a turn the person is behind speaks for them. A webhook, routine or guest turn must not answer their questions. */
+const chiefActsForPerson = (bot: BotRecord, threadId: string): boolean =>
+  chiefLevel(bot) && !unattendedWork(bot.id, threadId) && !cloudGuestDriven(threadId) && !proactive.fence.confines(threadId);
+
+/** A Chief's turns list the questions teammates it manages wait on the person for, so it can answer one for them or send the
+ * person to the thread that asks. */
+function teammateQuestionsPrompt(bot: BotRecord, threadId: string): string {
+  if (!chiefActsForPerson(bot, threadId)) return "";
+  const teammates = store.bots.filter((teammate) => teammate.id !== bot.id && !teammate.hidden && canManage(bot, teammate));
+  const waiting = questionRouting.waitingForPerson(bot, teammates, threadReadableFrom(threadId))
+    .map((one) => ({ ...one, thread: escapeNotes(one.thread).slice(0, 120), question: escapeNotes(one.question).slice(0, 400) }));
+  if (!waiting.length) return "";
+  return ` Teammates you manage wait on the person's answer to these questions: ${JSON.stringify(waiting)}. When the person gives you an answer or asks you to answer one, or you know the answer for certain, send it to that teammate with coordinate_bots with its threadId as thread: it answers the question there for the person, who can still change it. Otherwise tell the person which thread asks; never guess an answer.`;
+}
+
 function queuedBehindPerson(node: HandoffView): { threadId: string; kind: "approval" | "question" | "review"; title: string } | undefined {
   if (node.groupId || node.status !== "queued" || threadBusy(node.botId, node.threadId) || !botAtThreadCapacity(node.botId)) return undefined;
   for (const task of store.tasks(node.botId)) {
@@ -3943,6 +3966,7 @@ const askCards = createAskCards({ store, node: (id) => coordinator.node(id), del
   answeredIn: (threadId, requestId) => automationReports.answeredIn(teamMessages.inbox.answeredIn(threadId, requestId), requestId), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
   copiedInto: (inboxThreadId, botId, threadId) => Boolean(CLOUD_TEAM) && teamMessages.inbox.isHomeOf(inboxThreadId, teamOwners.routing.askedPerson(botId, threadId)) });
 const questionRouting = createQuestionRouting({ store, active: () => coordinator.active(), node: (id) => coordinator.node(id), parkedFor: (botId) => coordinator.parkedFor(botId), answerNode: (id, text, by) => coordinator.answerNode(id, text, by), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
+  unattended: (botId, threadId) => unattendedWork(botId, threadId),
   answerLive: async (threadId, requestId, text) => await answerRequest(threadId, botForThread(store.botByThread(threadId)?.id ?? "", threadId)?.modelSelection.instanceId ?? "", requestId, "answer", text) === "answered", settleSignIns: (node) => signInSettle.answeredElsewhere(node),
   keptPrivate: (node, requester) => keptPrivate({ child: teamHost.privateTo(node.threadId), parent: teamHost.privateTo(requester.threadId) }),
   steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused" });
@@ -8506,6 +8530,7 @@ async function startTurn(
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
         { id: "assignment", label: "Teammate task", text: coordinationNode?.parentId ? `\n${coordinationSystemInstructions()}` : "" },
         { id: "outstanding", label: "Outstanding teammate work", text: outstandingAssignmentsPrompt(threadId) },
+        { id: "teammate-questions", label: "Teammates' questions to the person", text: teammateQuestionsPrompt(liveBot ?? bot, threadId) },
         { id: "credential", label: "Credentials", text: credentialPrompt }, { id: "just-do-it", label: "Just do it", text: approvalModeForTurn(bot, commsDepth > 0, threadId) === "full" && !isUnattended(bot.id, threadId) && coordinationNode?.origin?.kind !== "outside" ? JUST_DO_IT_PROMPT : "" },
         { id: "recall", label: "Recall", text: recallPrompt },
         { id: "routine", label: "Routines", text: routinePrompt },
@@ -13940,6 +13965,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!recipient) throw new Error("The recipient no longer exists");
             // Work a person's request hands on opens in the receiving bot's chat with them when it may use their own apps.
             const opener = (room ? null : handOnFor) ?? openerFrom(address.threadId);
+            // A Chief answers, for the person, the question a teammate it manages waits on in a thread the Chief did not open.
+            const forPerson = EXTERNAL || room || fresh || call.answers || mode !== "work" || call.thread === "standing" || !chiefActsForPerson(internalSender, internalCapability.threadId) || !canManage(internalSender, recipient)
+              || !threadReadableFrom(internalCapability.threadId)(call.thread) ? undefined
+              : await questionRouting.answerForPerson({ sender: internalSender, senderThreadId: address.threadId, target: recipient, threadId: call.thread, message: call.message });
+            if (forPerson) { if (forPerson.outcome === "failed") refused.push(forPerson.detail); receipts.push(forPerson); continue; }
             const continued = room || fresh ? undefined : workThreadFor(store, { botId: target.botId, botName: recipient.name, fromBotId: internalSender.id, fromThreadId: address.threadId, thread: call.thread, notice: mode === "notify",
               answering: coordinator.answersTo(internalCapability.roomHandoffId ?? generation),
               also: (task) => !CLOUD_TEAM || threadStarters.get(task.threadId) === opener });
