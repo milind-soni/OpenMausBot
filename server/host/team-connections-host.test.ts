@@ -109,6 +109,16 @@ describe("whose connection a turn may use", () => {
     expect(setup({ team: false }).host.turnPerson("ada-chat"), "off a team nothing is anyone's").toBeNull();
   });
 
+  it("tests a personal server with the member's own sign-in, and their key only at the address it was saved for", () => {
+    const { host } = setup();
+    host.people.putKey(ADA, "ada@acme.test", "mail", { url: "https://mail.example/mcp", header: "Authorization", value: "Bearer ada-own-mail-key" });
+    const own = host.people.connection(ADA, "mail", "https://mail.example/mcp");
+    expect(own.oauth).toBe(host.people.oauth(ADA));
+    expect(own.key).toMatchObject({ header: "Authorization", value: "Bearer ada-own-mail-key" });
+    expect(host.people.connection(ADA, "mail", "https://elsewhere.example/mcp").key).toBeUndefined();
+    expect(host.people.connection(CLEO, "mail", "https://mail.example/mcp")).toEqual({ oauth: host.people.oauth(CLEO) });
+  });
+
   it("lets a turn change the team's MCP servers only when the person it acts for is an owner or admin", () => {
     const team = setup({ roster: ROSTER, requester: { "main-chat": OLIVE, "work-chat": BEN, "ada-chat": ADA, "room-chat": "" } }).host;
     expect(team.actsForAdmin("main-chat"), "the owner").toBe(true);

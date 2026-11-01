@@ -205,6 +205,11 @@ export class PeopleConnections {
     }
     return manager;
   }
+  /** The member's own sign-in and key for a personal server, to test it as them. */
+  connection(person: string, name: string, url: string): { oauth: McpOAuthManager; key?: PersonKey } {
+    const key = this.key(person, name, url);
+    return { oauth: this.oauth(person), ...(key ? { key } : {}) };
+  }
   /** Managers with a flow that may be waiting for its callback (made in this process). */
   liveManagers(): McpOAuthManager[] {
     return [...this.managers.values()];

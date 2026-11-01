@@ -500,6 +500,8 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
     name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
     /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
     step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
+    /** Words the harness wrote for what the call did, shown in place of `name`; `name` stays the tool's own. */
+    label?: string;
     /** error rows: the installed Claude Code is too old for the model, and
      * the UI can offer to update it in place. notice rows: `rescue`, a turn that heard nothing from its AI for a while. */
     claudeUpdate?: boolean; rescue?: import("./first-reply-rescue.ts").FirstReplyRescue;

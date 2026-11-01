@@ -590,7 +590,7 @@ import { createDeciderRoutes } from "./routes/decider.ts"; import { createCloudS
 import { createUpdateCheckRoutes, serverUpdateChecker } from "./routes/update-check.ts"; import { createTimeZoneRoutes } from "./routes/time-zone.ts";
 import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createInternalSignInRoutes } from "./routes/sign-in.ts";
-import { createInternalMcpRoutes } from "./routes/internal-mcp.ts";
+import { createInternalMcpRoutes, showMcpActivity } from "./routes/internal-mcp.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
@@ -11980,12 +11980,19 @@ function mcpServerResponse() {
     const auth = mcpOAuth.authState(server.name, server.url);
     const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: mcpOAuthRedirectUri(server.url) } } : server;
     return auth === "none" ? listed : { ...listed, auth };
-  }).map(mcpServersHost.listing).map(server =>
-    managedPolicy.mcpAllowed(server.name, "url" in server ? server.url : undefined) ? server : { ...server, managedBy: policy!.organizationName });
+  }).map(mcpServersHost.listing).map((server) => {
+    const managedBy = mcpManagedBy(server.name, server);
+    return managedBy ? { ...server, managedBy } : server;
+  });
   return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
 }
+const mcpServerUrl = (server: object) => ("url" in server && typeof server.url === "string" ? server.url : undefined);
 function mcpPolicyRefusal(name: string, server: object): string | undefined {
-  return managedPolicy.mcpRefusal(name, "url" in server && typeof server.url === "string" ? server.url : undefined);
+  return managedPolicy.mcpRefusal(name, mcpServerUrl(server));
+}
+/** The organisation whose policy leaves this server out, if one does. */
+function mcpManagedBy(name: string, server: object): string | undefined {
+  return managedPolicy.mcpAllowed(name, mcpServerUrl(server)) ? undefined : managedPolicy.current()?.organizationName;
 }
 
 function engineMcpServers(bot: BotRecord) { return teamConnections.engineMcp(bot); }
@@ -14538,21 +14545,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         canUse: (name) => canUseMcpServer(internalSender.toolScope, name),
         config: mcpConfig, cfg: () => cfg, personal: () => teamConnections.personMcp(),
         authState: (name, url) => mcpOAuth.authState(name, url),
-        managedBy: (name, server) => (managedPolicy.mcpAllowed(name, isRemoteMcpServer(server) ? server.url : undefined) ? undefined : managedPolicy.current()?.organizationName),
+        managedBy: mcpManagedBy, policyRefusal: mcpPolicyRefusal,
         signOut: async (name, url) => { await mcpOAuth.signOut(name, url); broadcast({ kind: "mcp.changed" }); },
         testAs: (name, url) => {
           const person = teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation);
-          const key = person ? teamConnections.people.key(person, name, url) : null;
-          return person ? { oauth: teamConnections.people.oauth(person), ...(key ? { key } : {}) } : null;
+          return person ? teamConnections.people.connection(person, name, url) : null;
         },
         redeem: (body) => secretCards.redeemMcpServer(body, internalSender.id, internalCapability.threadId),
         addToBotList: (name) => { const bot = store.bot(internalSender.id); if (bot?.mcpServers) store.patchBot(bot.id, { mcpServers: [...new Set([...bot.mcpServers, name])] }); },
         botAdd: (current, body) => mcpServersHost.botAdd(current, body, internalSender.id),
+        botKeep: (server) => mcpServersHost.botKeep(server, internalSender.id),
         ownCwd: () => (existsSync(workspaceDir(internalSender.id)) ? workspaceDir(internalSender.id) : DATA_DIR),
-        decide: (summary) => appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: internalSender.id, botName: internalSender.name, tool: "mcp_server", summary,
-          decision: "auto-approved", source: fullAccessForSource(internalSender.id, internalCapability.threadId) ? "full-access" : "level" }),
-        activity: (label) => store.appendMessage(internalCapability.threadId, { role: "bot", kind: "activity", tool: { name: label, ok: true },
-          ...(store.groupByThread(internalCapability.threadId) ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }),
+        decide: (summary, applied) => appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: internalSender.id, botName: internalSender.name, tool: "mcp_server", summary, decision: "auto-approved", source: applied }),
+        activity: (label) => showMcpActivity(store, { threadId: internalCapability.threadId, ...(store.groupByThread(internalCapability.threadId)
+          ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : { turnId: liveTurnByThread.get(internalCapability.threadId) }) }, label),
         language: () => threadLanguage(internalCapability.threadId),
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;
