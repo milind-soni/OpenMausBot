@@ -338,6 +338,22 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     await w.host.release(node.id, { ok: true, text: "done" });
   });
 
+  it("lets work handed on with reply none answer its requester's conversation with a one-way notice, and nothing more", async () => {
+    const w = world(hold);
+    begun(w, chief, "gen-1");
+    const { node } = w.coordinator.enqueue(chief, "gen-1", undefined, builder, "Ask the person, then tell me", { mode: "notify", reply: "none" });
+    w.coordinator.tick();
+    expect(() => send(w, builder, "gen-1", node.id, chief, "They said yes")).toThrow(/back to an ancestor/);
+    expect(() => w.coordinator.enqueue(builder, "gen-1", node.id, { ...chief, threadId: "chief-other" }, "They said yes", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    const answer = w.coordinator.enqueue(builder, "gen-1", node.id, chief, "They said yes", { mode: "notify", reply: "none" });
+    expect(answer).toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-chat", status: "queued" } });
+    await w.host.release(node.id, { ok: true, text: "done" });
+    const awaited = send(w, chief, "gen-2", undefined, builder, "Build it");
+    w.coordinator.tick();
+    expect(() => w.coordinator.enqueue(builder, "gen-2", awaited.node.id, chief, "Done", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    await w.host.release(awaited.node.id, { ok: true, text: "done" });
+  });
+
   it("refuses a second assignment to a teammate that completed one, unless it is rework", async () => {
     const w = world();
     const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");

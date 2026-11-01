@@ -84,7 +84,10 @@ function replyLine(a: Assignment, requester: string): string {
     return `${requester} is resumed with your reply when your turn ends${close}.${ask}`;
   }
   if (a.reply === "poll") return `${requester} reads your reply from its inbox when it asks${close}.`;
-  return `Ownership is yours: results, failures and questions stay in this thread; ${requester} is not waiting and will not be resumed.`;
+  const { botId, threadId } = a.requester;
+  const answerBack = a.requester.kind === "bot_turn" && botId && threadId && a.assignee.destination.groupId === undefined
+    ? ` If it asked to hear back, send ${requester} one coordinate_bots notice with reply "none" and thread "${threadId}".` : "";
+  return `Ownership is yours: results, failures and questions stay in this thread; ${requester} is not waiting and will not be resumed.${answerBack}`;
 }
 
 /** Harness-quoted, so the person's "yes" never travels as pasted text, and a bot's answer never passes for theirs. */

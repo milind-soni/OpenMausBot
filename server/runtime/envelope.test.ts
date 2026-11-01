@@ -70,6 +70,14 @@ describe("composeEnvelope: assignment with person lineage", () => {
       .toContain("Ownership is yours: results, failures and questions stay in this thread; @Chief is not waiting and will not be resumed.");
   });
 
+  it("tells work handed on with reply none how to answer back into its requester's thread, outside a room only", () => {
+    const answerBack = 'If it asked to hear back, send @Chief one coordinate_bots notice with reply "none" and thread "th_1".';
+    expect(composeEnvelope(assignment({ reply: "none", mode: "notify" }), names)).toContain(answerBack);
+    expect(envelope).not.toContain("If it asked to hear back");
+    const inRoom = assignment({ reply: "none", mode: "notify", assignee: { botId: "scout", destination: { kind: "room_thread", threadId: "th_2", groupId: "g_1" } } });
+    expect(composeEnvelope(inRoom, names)).not.toContain("If it asked to hear back");
+  });
+
   it("tells a bot's assignee to ask its requester by ending the turn, never with coordinate_bots", () => {
     expect(envelope).toContain("Ask @Chief or anyone above it by ending your turn with the question, never coordinate_bots.");
     expect(composeEnvelope(assignment({ requester: { kind: "person" } }), names)).not.toContain("never coordinate_bots");
