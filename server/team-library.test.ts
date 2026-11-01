@@ -68,6 +68,19 @@ describe("team library", () => {
     expect(() => parseTeamCatalog(unsafe)).toThrow("safe catalog path");
   });
 
+  it("keeps only valid community stats, and loads a catalog without them or with bad ones", () => {
+    expect(parseTeamCatalog(catalog).templateStats).toBeUndefined();
+    const parsed = parseTeamCatalog({ ...catalog, templateStats: {
+      assistant: { stars: 128, installs: 2400 },
+      inbox: { installs: 31 },
+      "Bad Id": { stars: 5 },
+      scout: { stars: -1, installs: 1.5 },
+      watch: "lots",
+    } });
+    expect(parsed.templateStats).toEqual({ assistant: { stars: 128, installs: 2400 }, inbox: { installs: 31 } });
+    expect(parseTeamCatalog({ ...catalog, templateStats: [1, 2] }).templateStats).toBeUndefined();
+  });
+
   it("loads only the manifest selected by the trusted catalog", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) => {
       const target = String(url);

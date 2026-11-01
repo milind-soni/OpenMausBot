@@ -19,9 +19,16 @@ export interface TeamCatalogEntry {
   requires: { apps: string[] };
 }
 
+/** Community signals per template id, when the catalog publishes them. */
+export interface TemplateStats {
+  stars?: number;
+  installs?: number;
+}
+
 export interface TeamCatalog {
   repositoryUrl: string;
   teams: TeamCatalogEntry[];
+  templateStats?: Record<string, TemplateStats>;
 }
 
 const CATALOG_COPY: Record<string, string> = {

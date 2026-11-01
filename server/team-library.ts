@@ -27,11 +27,35 @@ export interface TeamCatalogEntry {
   requires: { apps: string[] };
 }
 
+/** Community signals per template id (a ready-made bot's id or a team's slug), published with the catalog. */
+export interface TemplateStats {
+  stars?: number;
+  installs?: number;
+}
+
 export interface TeamCatalog {
   format: "openmaus.catalog";
   version: 1;
   repositoryUrl: typeof TEAM_LIBRARY_REPOSITORY;
   teams: TeamCatalogEntry[];
+  templateStats?: Record<string, TemplateStats>;
+}
+
+const MAX_TEMPLATE_STATS = 300;
+const count = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000 ? value : undefined;
+
+/** Optional, so a catalog without it (or with a bad entry) still loads: a bad entry is left out, never shown. */
+function parseTemplateStats(value: unknown): Record<string, TemplateStats> | undefined {
+  if (!isRecord(value)) return undefined;
+  const stats: Record<string, TemplateStats> = {};
+  for (const [id, raw] of Object.entries(value).slice(0, MAX_TEMPLATE_STATS)) {
+    if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id) || !isRecord(raw)) continue;
+    const stars = count(raw.stars), installs = count(raw.installs);
+    if (stars === undefined && installs === undefined) continue;
+    stats[id] = { ...(stars !== undefined ? { stars } : {}), ...(installs !== undefined ? { installs } : {}) };
+  }
+  return Object.keys(stats).length ? stats : undefined;
 }
 
 type Fetcher = typeof fetch;
@@ -111,11 +135,13 @@ export function parseTeamCatalog(value: unknown): TeamCatalog {
       requires: { apps: stringList(requires.apps ?? [], `${field}.requires.apps`, 30) },
     };
   });
+  const templateStats = parseTemplateStats(value.templateStats);
   return {
     format: "openmaus.catalog",
     version: 1,
     repositoryUrl: TEAM_LIBRARY_REPOSITORY,
     teams,
+    ...(templateStats ? { templateStats } : {}),
   };
 }
 
