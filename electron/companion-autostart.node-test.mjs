@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { COMPANION_AUTOSTART_RETRY_DELAYS_MS, startCompanionWithRetries } from "./companion-autostart.mjs";
+import { autoStartCompanion, COMPANION_AUTOSTART_RETRY_DELAYS_MS, startCompanionWithRetries } from "./companion-autostart.mjs";
 
 const up = { enabled: true };
 const timedOut = { enabled: false, error: "the companion did not come up in time" };
@@ -72,4 +72,49 @@ test("the delays grow and stay within a minute", () => {
   assert.deepEqual(delays, [...delays].sort((a, b) => a - b));
   assert.ok(delays.every((ms) => ms > 0 && ms <= 60_000));
   assert.throws(() => COMPANION_AUTOSTART_RETRY_DELAYS_MS.push(1));
+});
+
+test("the launch start waits for the organisation policy before the first start", async () => {
+  const order = [];
+  let restore;
+  const restored = new Promise((resolve) => { restore = resolve; });
+  const done = autoStartCompanion({
+    restored,
+    start: async () => { order.push("start"); return up; },
+    wanted: () => true,
+    sleep: async () => {},
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(order, []);
+  order.push("restored");
+  restore();
+  assert.deepEqual(await done, up);
+  assert.deepEqual(order, ["restored", "start"]);
+});
+
+test("the launch start retries a failed start, as startCompanionWithRetries does", async () => {
+  const states = [timedOut, up];
+  const lines = [];
+  const state = await autoStartCompanion({
+    start: async () => states.shift(),
+    wanted: () => true,
+    log: (line) => lines.push(line),
+    sleep: async () => {},
+  });
+  assert.deepEqual(state, up);
+  assert.deepEqual(lines, ["companion start failed: the companion did not come up in time; trying again in 5s (1 of 3)"]);
+});
+
+test("a refusal or a policy that could not be restored is logged as a skipped auto-start and never rejects", async () => {
+  for (const [restored, start] of [
+    [undefined, async () => { throw new Error("remote access is turned off by your organisation"); }],
+    [Promise.reject(new Error("policy unreadable")), async () => up],
+  ]) {
+    const lines = [];
+    let starts = 0;
+    const state = await autoStartCompanion({ restored, start: async () => { starts++; return start(); }, wanted: () => true, log: (line) => lines.push(line) });
+    assert.equal(state, null);
+    assert.match(lines.at(-1), /^companion auto-start skipped: (remote access is turned off by your organisation|policy unreadable)$/);
+    assert.equal(starts, restored ? 0 : 1);
+  }
 });

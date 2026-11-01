@@ -28,3 +28,16 @@ export async function startCompanionWithRetries({
   if (state?.error) log(`companion start failed: ${state.error}; giving up until the app restarts`);
   return state;
 }
+
+/**
+ * The start at launch: waits for `restored` (a saved organisation policy may turn remote access off), then starts with
+ * retries. Never rejects: a refusal, or a policy that could not be restored, is logged as a skipped auto-start.
+ */
+export function autoStartCompanion({ restored, log = () => {}, ...retry }) {
+  return Promise.resolve(restored)
+    .then(() => startCompanionWithRetries({ log, ...retry }))
+    .catch((error) => {
+      log(`companion auto-start skipped: ${error?.message ?? error}`);
+      return null;
+    });
+}
