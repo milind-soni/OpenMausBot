@@ -174,6 +174,19 @@ like every other header value. `you-research` (multi-step cited reports) is
 served by its own dedicated server, `https://api.you.com/mcp/research` — add
 it the same way, with the same header.
 
+Keenable's search server also needs no token. Add a URL server with the
+address
+
+```
+https://api.keenable.ai/mcp-public
+```
+
+and leave the headers empty. It advertises `search_web_pages` (web search) and
+`fetch_page_content` (one page as Markdown); both are read-only and both work
+without a key. Keyless requests from one IP address share a limit of 1,000 an
+hour. A key from the [Keenable console](https://app.keenable.ai/console)
+removes that cap: add one header, `X-API-Key`, with your key as the value.
+
 ### Import and choose tools per bot
 
 The paste box also takes an `mcpServers` JSON block, a VS Code `servers`
