@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 import { createHash } from "node:crypto";
 import { botOwner, chiefScope } from "../shared/bot-owner.ts";
 import { z } from "zod";
@@ -14,7 +15,7 @@ import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupRe
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
-const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
+const FIELD_LABELS: Record<string, ServerLineKey> = { name: "server.localeCoverage.fieldName", title: "server.localeCoverage.fieldTitle", description: "server.localeCoverage.fieldDescription", section: "server.localeCoverage.fieldDepartment", cwd: "server.localeCoverage.fieldWorkingFolder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
 const fieldsSchema = z.object({
@@ -242,54 +243,55 @@ export class TeamSetupRequestService {
     return { ...this.proposeDeletion(args), applied: false, state: "pending" as const };
   }
 
-  private cardData(request: TeamSetupRequest, immediate = false): OptionCardData {
+  private cardData(request: TeamSetupRequest, immediate = false, language?: string): OptionCardData {
     const permission = this.options.canPersist(request.botId, request.threadId);
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
-    const lines = [`Why: ${request.reason}`];
-    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared department computers remain. Active work or an unavailable provider can block deletion safely.");
+    const lines = [serverLine(language, "server.localeCoverage.why", { reason: request.reason })];
+    if (request.deletion) lines.push(serverLine(language, "server.localeCoverage.teamDeleteLine", { name: request.deletion.name, id: request.deletion.botId }), serverLine(language, "server.localeCoverage.teamDeleteConsequences"));
     if (request.newTeams.length) {
-      lines.push(`Create departments: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
+      lines.push(serverLine(language, "server.localeCoverage.teamCreateDepartments", { names: request.newTeams.map((name) => JSON.stringify(name)).join(", ") }));
       if (!request.operations.some(op => op.botId === chief.id && op.fields.chiefOfStaff === false)) {
-        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new departments.`);
+        lines.push(serverLine(language, "server.localeCoverage.teamAuthorizeChief", { name: chief.name }));
       }
     }
     for (const operation of request.operations) {
       const current = this.options.store.bot(operation.botId);
-      lines.push(`\n${operation.action === "create" ? "Create" : "Update"} @${operation.fields.name ?? current?.name} (${operation.action === "create" ? "new bot" : operation.botId})`);
+      lines.push(serverLine(language, operation.action === "create" ? "server.localeCoverage.teamCreateBotLine" : "server.localeCoverage.teamUpdateBotLine", { name: operation.fields.name ?? current?.name ?? "", id: operation.botId }));
       for (const [key, value] of Object.entries(operation.fields)) {
         if (key === "chiefOfStaff") {
-          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this department." : " Access to additional departments is removed."}`);
+          lines.push(serverLine(language, "server.localeCoverage.teamChiefChange", { before: serverLine(language, current?.chiefOfStaff ? "server.localeCoverage.yes" : "server.localeCoverage.no"), after: serverLine(language, value ? "server.localeCoverage.yes" : "server.localeCoverage.no"), note: serverLine(language, value ? "server.localeCoverage.teamChiefGranted" : "server.localeCoverage.teamChiefRevoked") }));
           continue;
         }
         if (key === "soul") {
-          lines.push(...soulDiffLines(current?.soul ?? "", value as string));
+          lines.push(...soulDiffLines(current?.soul ?? "", value as string, language ? { heading: (before, after) => serverLine(language, "server.localeCoverage.soulDiffHeading", { before, after }), largeChange: serverLine(language, "server.localeCoverage.soulDiffLarge"), empty: serverLine(language, "server.localeCoverage.soulDiffEmpty") } : undefined));
         } else if (key === "modelSelection") {
-          lines.push(`Default AI and model: ${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}`);
+          lines.push(serverLine(language, "server.localeCoverage.defaultModelSet", { value: `${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}` }));
           if (current && typeof value === "object" && value !== null &&
               (value as ModelSelection).instanceId !== current.modelSelection.instanceId && this.options.driverCapabilities) {
             lines.push(...harnessCapabilityLines(
               this.options.driverCapabilities(current.modelSelection.instanceId),
               this.options.driverCapabilities((value as ModelSelection).instanceId),
+              language,
             ));
           }
         } else {
           const before = current ? (key === "section" ? current.section || "General" : String(current[key as keyof BotRecord] ?? "")) : undefined;
           const after = key === "section" ? (value as string) || "General" : String(value);
-          lines.push(`${FIELD_LABELS[key] ?? key}: ${current ? `"${before}" → ` : ""}"${after}"`);
+          lines.push(`${FIELD_LABELS[key] ? serverLine(language, FIELD_LABELS[key]!) : key}: ${current ? `"${before}" → ` : ""}"${after}"`);
         }
       }
     }
     if (!request.deletion) {
-      lines.push("\nDefault models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
+      lines.push("\n" + serverLine(language, "server.localeCoverage.defaultModelScope"));
       if (request.operations.some((operation) => operation.action === "create")) {
-        lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default, avatar untouched.`);
+        lines.push(serverLine(language, "server.localeCoverage.newBotsAccess", { name: chief.name }));
       }
-      lines.push("Existing execution permissions are unchanged.");
+      lines.push(serverLine(language, "server.localeCoverage.existingPermissionsUnchanged"));
     }
-    if (!immediate) lines.push("After this decision the Chief continues once with the result.");
-    const title = request.deletion ? `Delete @${request.deletion.name}?`
-      : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
+    if (!immediate) lines.push(serverLine(language, "server.localeCoverage.chiefContinuesAfterDecision"));
+    const title = request.deletion ? serverLine(language, "server.localeCoverage.teamDeleteTitle", { name: request.deletion.name })
+      : serverLine(language, request.operations.length === 1 ? "server.localeCoverage.teamApplyOne" : "server.localeCoverage.teamApplyMany", { count: request.operations.length });
     const detail = lines.join("\n");
     return {
       title, subtitle: detail, options: request.deletion ? ["Delete bot", "Cancel"] : ["Apply setup", "Cancel"], requestId: request.requestId,
@@ -299,7 +301,8 @@ export class TeamSetupRequestService {
 
   private card(request: TeamSetupRequest, from?: RequestFrom) {
     const card = this.cardData(request);
-    const message = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card });
+    const shown = this.cardData(request, false, conversationLanguage(request.threadId));
+    const message = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: shown });
     const { title, subtitle: detail } = card;
     return { requestId: request.requestId, messageId: message.id, title, summary: title, detail };
   }
@@ -328,6 +331,7 @@ export class TeamSetupRequestService {
 
   private async applyImmediately(request: TeamSetupRequest, from?: RequestFrom, canCommit?: () => boolean) {
     const card = this.cardData(request, true);
+    const shown = this.cardData(request, true, conversationLanguage(request.threadId));
     const before = request.deletion ? undefined : this.undoBefore(request);
     let result = await this.apply(request, true, canCommit);
     const undo = before && result.state === "applied" && !result.error ? this.undoRecord(result, before) : undefined;
@@ -335,7 +339,7 @@ export class TeamSetupRequestService {
     let messageId: string | undefined;
     try {
       messageId = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: {
-        ...card, title, options: [], ...(result.state === "applied" ? { answered: "allow" as const, autoApplied: true } : { expired: true }), held: result.error,
+        ...shown, title: result.state === "applied" && request.deletion ? serverLine(conversationLanguage(request.threadId), "server.localeCoverage.teamDeletedTitle", { name: request.deletion.name }) : serverLine(conversationLanguage(request.threadId), result.state === "applied" ? "server.localeCoverage.teamSetupApplied" : "server.localeCoverage.teamSetupNotApplied"), options: [], ...(result.state === "applied" ? { answered: "allow" as const, autoApplied: true } : { expired: true }), held: result.error,
         teamSetupRequest: { ...request, result, resumed: true, ...(undo ? { undo } : {}) },
       } }).id;
     } catch (error) {

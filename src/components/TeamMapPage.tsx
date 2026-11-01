@@ -236,7 +236,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                   {t("team.instructionsFactHint")} {updatedAt ? ` ${t("team.instructionsLastSaved", { time: new Date(updatedAt).toLocaleString() })}` : ""}
                 </span>
                 <span className={cn("shrink-0 tabular-nums", bytes > maxBytes && "text-danger")}>
-                  {bytes.toLocaleString()} / {maxBytes.toLocaleString()} bytes
+                  {bytes.toLocaleString()} / {maxBytes.toLocaleString()} {t("ui.soulField.bytes")}
                 </span>
               </div>
             </>
@@ -290,11 +290,12 @@ export function TeamMapPage() {
   pendingMoveRef.current = pendingMove;
   useEffect(() => () => pendingMoveRef.current?.resolve(false), []);
   const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
+  const generalName = t("ui.final.team.general");
   const sections = useMemo(() => {
     const names = [...new Set([...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : [])])];
     const order = (key: string) => key === "" ? -1 : names.includes(key) ? names.indexOf(key) : names.length;
-    return buildTeamMapSections(bots, names).sort((a, b) => order(a.key) - order(b.key));
-  }, [bots, state.sections, state.groups]);
+    return buildTeamMapSections(bots, names, generalName).sort((a, b) => order(a.key) - order(b.key));
+  }, [bots, state.sections, state.groups, generalName]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);

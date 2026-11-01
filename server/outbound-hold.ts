@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 import type { ConnectorCall } from "../shared/outbound.ts";
 import { DEFAULT_OUTBOUND_POLICY } from "../shared/outbound.ts";
 import type { Notification } from "../shared/notification.ts";
@@ -66,7 +67,7 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
           kind: "options",
           ...(owner?.group ? { from: { botId: currentSender.id, name: currentSender.name, color: currentSender.color } } : {}),
           card: {
-            title: "Send on your behalf?",
+            title: serverLine(conversationLanguage(threadId), "server.localeCoverage.sendOnBehalf"),
             subtitle: summary,
             options: ["Allow", "Deny"],
             requestId: held.requestId,

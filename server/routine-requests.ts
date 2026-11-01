@@ -1,3 +1,5 @@
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
+import { intlLocale } from "./language.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -50,13 +52,13 @@ const WEEKDAY_NUMBER = {
 const RFC3339_WITH_OFFSET =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/i;
 const ACTION_COPY = {
-  create: { title: "Schedule", detail: "Create routine" },
-  update: { title: "Update", detail: "Update routine" },
-  pause: { title: "Pause", detail: "Pause routine" },
-  resume: { title: "Resume", detail: "Resume routine" },
-  run_now: { title: "Run now", detail: "Run routine now" },
-  delete: { title: "Delete", detail: "Delete routine" },
-} as const satisfies Record<RoutineRequestOperation["action"], { title: string; detail: string }>;
+  create: { title: "server.localeCoverage.routineSchedule", detail: "server.localeCoverage.routineCreateDetail" },
+  update: { title: "server.localeCoverage.routineUpdate", detail: "server.localeCoverage.routineUpdateDetail" },
+  pause: { title: "server.localeCoverage.routinePause", detail: "server.localeCoverage.routinePauseDetail" },
+  resume: { title: "server.localeCoverage.routineResume", detail: "server.localeCoverage.routineResumeDetail" },
+  run_now: { title: "server.localeCoverage.routineRunNow", detail: "server.localeCoverage.routineRunDetail" },
+  delete: { title: "server.localeCoverage.routineDelete", detail: "server.localeCoverage.routineDeleteDetail" },
+} as const satisfies Record<RoutineRequestOperation["action"], { title: ServerLineKey; detail: ServerLineKey }>;
 const ROUTINE_REQUEST_FINGERPRINT_VERSION = 1 as const;
 
 export type { RoutineProposalInput, RoutineToolChangesInput, RoutineToolDefinitionInput, RoutineToolScheduleInput } from "./routine-request-schemas.ts";
@@ -552,9 +554,9 @@ function nextForOperation(operation: RoutineRequestOperation, manager: RoutineMa
   return nextOccurrence(schedule, now);
 }
 
-function formatInstant(at: number, timeZone: string): string {
+function formatInstant(at: number, timeZone: string, language?: string): string {
   try {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat(intlLocale(language), {
       timeZone,
       dateStyle: "medium",
       timeStyle: "short",
@@ -564,53 +566,56 @@ function formatInstant(at: number, timeZone: string): string {
   }
 }
 
-export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string, engines?: LimitResetEngines): string {
-  if (schedule.type === "cron") return `${cronScheduleLabel(schedule)} · Cron: ${schedule.expression}`;
+export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string, engines?: LimitResetEngines, language?: string): string {
+  if (schedule.type === "cron") return `${language ? cronScheduleLabel(schedule, { locale: language, format: (key, params) => serverLine(language, key, params) }) : cronScheduleLabel(schedule)} · Cron: ${schedule.expression}`;
+  const daysText = (days: readonly number[]) => language ? plainWeekdays(days, language, {
+    everyDay: serverLine(language, "server.localeCoverage.cadenceEveryDay"), weekdays: serverLine(language, "server.localeCoverage.cadenceWeekdays"),
+  }) : plainWeekdays(days);
   if (schedule.type === "limit_reset") {
     const name = engines?.name(schedule.engine) ?? schedule.engine;
-    return schedule.repeat === "every_reset" ? `Each time ${name}'s usage limit resets` : `When ${name}'s usage limit resets`;
+    return serverLine(language, schedule.repeat === "every_reset" ? "server.localeCoverage.scheduleEachReset" : "server.localeCoverage.scheduleWhenReset", { name });
   }
-  const zone = plainTimeZone(timeZone);
-  if (schedule.type === "once") return `${formatInstant(schedule.at, timeZone)} ${zone}`;
+  const zone = plainTimeZone(timeZone, language);
+  if (schedule.type === "once") return `${formatInstant(schedule.at, timeZone, language)} ${zone}`;
   if (schedule.type === "interval") {
     const restricted = intervalHasRestrictions(schedule);
     const cadence = schedule.anchorAt === undefined
       ? restricted
-        ? `Every ${schedule.everyMinutes} minutes, cadence starting at confirmation; first run is the next allowed time`
-        : `Every ${schedule.everyMinutes} minutes, starting one interval after confirmation`
-      : `Every ${schedule.everyMinutes} minutes, anchored at ${formatInstant(schedule.anchorAt, timeZone)} ${zone}`;
+        ? serverLine(language, "server.localeCoverage.scheduleIntervalRestricted", { minutes: schedule.everyMinutes })
+        : serverLine(language, "server.localeCoverage.scheduleInterval", { minutes: schedule.everyMinutes })
+      : serverLine(language, "server.localeCoverage.scheduleAnchored", { minutes: schedule.everyMinutes, time: formatInstant(schedule.anchorAt, timeZone, language), zone });
     const restrictions = [
       schedule.weekdays?.length
-        ? `on ${plainWeekdays(schedule.weekdays)} (${zone})`
+        ? serverLine(language, "server.localeCoverage.scheduleOnDays", { days: daysText(schedule.weekdays), zone })
         : null,
-      schedule.window ? `during ${plainClock(schedule.window.start)}–${plainClock(schedule.window.end)} ${zone}` : null,
-      schedule.endsAt !== undefined ? `until ${formatInstant(schedule.endsAt, timeZone)} ${zone}` : null,
+      schedule.window ? serverLine(language, "server.localeCoverage.scheduleWindow", { start: plainClock(schedule.window.start), end: plainClock(schedule.window.end), zone }) : null,
+      schedule.endsAt !== undefined ? serverLine(language, "server.localeCoverage.scheduleUntil", { time: formatInstant(schedule.endsAt, timeZone, language), zone }) : null,
     ].filter((part): part is string => part !== null);
     return restrictions.length ? `${cadence} · ${restrictions.join(" · ")}` : cadence;
   }
-  return `${plainWeekdays(schedule.weekdays)} at ${plainClock(schedule.time)} ${zone}`;
+  return serverLine(language, "server.localeCoverage.scheduleWeekly", { days: daysText(schedule.weekdays), time: plainClock(schedule.time), zone });
 }
 
-export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false): string {
-  const session = continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
-  if (schedule.type === "cron") return `Will run at matching calendar times, ${plainTimeZone(schedule.timeZone)}; ${session}.`;
-  if (schedule.type === "once") return "Will run once; that run starts a fresh session.";
+export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false, language?: string): string {
+  const session = serverLine(language, continuity ? "server.localeCoverage.sessionWithReport" : "server.localeCoverage.sessionFresh");
+  if (schedule.type === "cron") return serverLine(language, "server.localeCoverage.consequenceCron", { zone: plainTimeZone(schedule.timeZone, language), session });
+  if (schedule.type === "once") return serverLine(language, "server.localeCoverage.consequenceOnce");
   if (schedule.type === "limit_reset") {
     return schedule.repeat === "every_reset"
-      ? "Will run a minute after each time that usage limit resets, in this conversation."
-      : "Will run once, a minute after that usage limit resets, and continue in this conversation.";
+      ? serverLine(language, "server.localeCoverage.consequenceEachReset")
+      : serverLine(language, "server.localeCoverage.consequenceResetOnce");
   }
   if (schedule.type === "interval") {
     if (intervalHasRestrictions(schedule)) {
-      return `Will run every ${schedule.everyMinutes} minutes when its day, time, and end restrictions allow; ${session}.`;
+      return serverLine(language, "server.localeCoverage.consequenceRestricted", { minutes: schedule.everyMinutes, session });
     }
     const runsPerDay = Math.round(1440 / schedule.everyMinutes);
-    const cadence = runsPerDay <= 1 ? "about once a day" : `about ${runsPerDay} times a day`;
-    return `Will run ${cadence}; ${session}.`;
+    const cadence = serverLine(language, runsPerDay <= 1 ? "server.localeCoverage.cadenceOnceDaily" : "server.localeCoverage.cadenceTimesDaily", { count: runsPerDay });
+    return serverLine(language, "server.localeCoverage.consequenceCadence", { cadence, session });
   }
   const days = schedule.weekdays.length;
-  const cadence = days === 7 ? "every day" : days === 1 ? "one day a week" : `${days} days a week`;
-  return `Will run ${cadence}; ${session}.`;
+  const cadence = serverLine(language, days === 7 ? "server.localeCoverage.cadenceEveryDay" : days === 1 ? "server.localeCoverage.cadenceOneDayWeekly" : "server.localeCoverage.cadenceDaysWeekly", { count: days });
+  return serverLine(language, "server.localeCoverage.consequenceCadence", { cadence, session });
 }
 
 function effectiveDefinition(operation: RoutineRequestOperation, manager: RoutineManager): RoutineRequestDefinition | null {
@@ -647,27 +652,28 @@ function cardCopy(
   timeZone: string,
   now: number,
   engines?: LimitResetEngines,
+  language?: string,
 ): RoutineCardCopy {
   const definition = effectiveDefinition(operation, manager);
   const actionCopy = ACTION_COPY[operation.action];
-  const actionLabel = actionCopy.title;
-  const name = redactSecretsInText(definition?.name ?? "routine");
+  const actionLabel = serverLine(language, actionCopy.title);
+  const name = redactSecretsInText(definition?.name ?? serverLine(language, "server.localeCoverage.routineFallbackName"));
   const forBot = operation.forBot;
-  const forSuffix = forBot ? ` for @${redactSecretsInText(forBot.name)}` : "";
-  const title = `${actionLabel} “${name}”${forSuffix}?`;
+  const forSuffix = forBot ? serverLine(language, "server.localeCoverage.routineForSuffix", { name: redactSecretsInText(forBot.name) }) : "";
+  const title = serverLine(language, "server.localeCoverage.routineTitle", { action: actionLabel, name, forBot: forSuffix });
   if (!definition) {
     return {
       title,
       summary: title,
-      detail: `Action: ${actionCopy.detail}\nName: ${name}`,
+      detail: `${serverLine(language, "server.localeCoverage.labelAction")}: ${serverLine(language, actionCopy.detail)}\n${serverLine(language, "server.localeCoverage.fieldName")}: ${name}`,
       nextRunAt: null,
       tool: "manage_routine",
     };
   }
   const nextRunAt = nextForOperation(operation, manager, now, engines);
   const scheduleTimeZone = definition.schedule.type === "cron" ? definition.schedule.timeZone : timeZone;
-  const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone, engines);
-  const destination = definition.runOn === "cloud" ? "Bot’s current model on its cloud desktop" : "Bot’s current model, where it usually works";
+  const when = operation.action === "run_now" ? serverLine(language, "server.localeCoverage.routineNow") : scheduleText(definition.schedule, timeZone, engines, language);
+  const destination = serverLine(language, definition.runOn === "cloud" ? "server.localeCoverage.routineCloudDestination" : "server.localeCoverage.routineUsualDestination");
   const current = operation.action === "create"
     ? null
     : manager.listRoutines().find((routine) => routine.id === operation.routineId) ?? null;
@@ -677,48 +683,48 @@ function cardCopy(
     definition.schedule.type === "interval" &&
     intervalHasRestrictions(definition.schedule);
   const nextDescription = remainsPaused
-    ? "None — this routine remains paused"
+    ? serverLine(language, "server.localeCoverage.routineRemainsPaused")
     : deferredInterval
       ? deferredRestrictedInterval
-        ? `Next allowed time after confirmation (${plainTimeZone(timeZone)})`
-        : "One interval after confirmation"
+        ? serverLine(language, "server.localeCoverage.nextAllowedTime", { zone: plainTimeZone(timeZone, language) })
+        : serverLine(language, "server.localeCoverage.nextInterval")
       : nextRunAt !== null
-        ? formatInstant(nextRunAt, scheduleTimeZone)
+        ? formatInstant(nextRunAt, scheduleTimeZone, language)
         : operation.action === "pause"
-          ? "None — this routine will be paused"
+          ? serverLine(language, "server.localeCoverage.routineWillPause")
           : operation.action === "delete"
-            ? "None — this routine will be deleted"
-            : definition.schedule.type === "limit_reset" ? "When that limit resets (the time is not known yet)" : "None";
-  const status = remainsPaused ? " · Remains paused" : "";
+            ? serverLine(language, "server.localeCoverage.routineWillDelete")
+            : definition.schedule.type === "limit_reset" ? serverLine(language, "server.localeCoverage.nextResetUnknown") : serverLine(language, "server.localeCoverage.routineNone");
+  const status = remainsPaused ? serverLine(language, "server.localeCoverage.routinePausedSuffix") : "";
   // Credential-shaped values never travel back through the bot's MCP response or into the transcript.
   const visibleInstructions = redactSecretsInText(definition.instructions);
   const runLimit = definition.timeoutMinutes === undefined
-    ? "no run limit"
-    : `${definition.timeoutMinutes} min limit`;
+    ? serverLine(language, "server.localeCoverage.routineNoRunLimit")
+    : serverLine(language, "server.localeCoverage.routineMinuteLimit", { minutes: definition.timeoutMinutes });
   return {
     title,
     summary: `${actionLabel} “${name}”${forSuffix} · ${when} · ${destination} · ${runLimit}${status}`,
     detail: [
-      `Action: ${actionCopy.detail}`,
-      `Name: ${name}`,
-      ...(forBot ? [`For: @${redactSecretsInText(forBot.name)} — each run uses that bot's AI and permissions`] : []),
-      `Schedule: ${when}`,
-      `Next run: ${nextDescription}`,
+      `${serverLine(language, "server.localeCoverage.labelAction")}: ${serverLine(language, actionCopy.detail)}`,
+      `${serverLine(language, "server.localeCoverage.fieldName")}: ${name}`,
+      ...(forBot ? [serverLine(language, "server.localeCoverage.routineForDetail", { name: redactSecretsInText(forBot.name) })] : []),
+      `${serverLine(language, "server.localeCoverage.labelSchedule")}: ${when}`,
+      `${serverLine(language, "server.localeCoverage.labelNextRun")}: ${nextDescription}`,
       ...(definition.schedule.type === "cron" && nextRunAt !== null && operation.action !== "run_now"
-        ? [`Next 3 runs (${plainTimeZone(scheduleTimeZone)}): ${nextCronRuns(definition.schedule, now, 3).map((at) => formatInstant(at, scheduleTimeZone)).join(" · ")}`]
+        ? [serverLine(language, "server.localeCoverage.nextThreeRuns", { zone: plainTimeZone(scheduleTimeZone, language), times: nextCronRuns(definition.schedule, now, 3).map((at) => formatInstant(at, scheduleTimeZone, language)).join(" · ") })]
         : []),
-      `Runs on: ${destination}`,
-      `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
-      `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
-      `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
+      `${serverLine(language, "server.localeCoverage.labelRunsOn")}: ${destination}`,
+      `${serverLine(language, "server.localeCoverage.labelRunLimit")}: ${definition.timeoutMinutes === undefined ? serverLine(language, "server.localeCoverage.routineNoLimit") : serverLine(language, "server.localeCoverage.waitMinuteMany", { count: definition.timeoutMinutes })}`,
+      `${serverLine(language, "server.localeCoverage.labelContinuity")}: ${definition.continuity ? serverLine(language, "server.localeCoverage.routineContinuity") : serverLine(language, "server.localeCoverage.routineFresh")}`,
+      `${serverLine(language, "server.localeCoverage.labelWhileBusy")}: ${definition.overlap === "queue" ? serverLine(language, "server.localeCoverage.routineQueueOverlap") : serverLine(language, "server.localeCoverage.routineSkipOverlap")}`,
       ...(definition.runOnStartup || (operation.action === "update" && operation.changes.runOnStartup !== undefined)
-        ? [`On startup: ${definition.runOnStartup ? "Also runs once each time OpenMausBot starts" : "Runs only on its schedule"}`]
+        ? [`${serverLine(language, "server.localeCoverage.labelStartup")}: ${definition.runOnStartup ? serverLine(language, "server.localeCoverage.routineRunAtStartup") : serverLine(language, "server.localeCoverage.routineScheduleOnly")}`]
         : []),
       ...(operation.action === "create" || operation.action === "update"
-        ? [consequenceLine(definition.schedule, Boolean(definition.continuity))]
+        ? [consequenceLine(definition.schedule, Boolean(definition.continuity), language)]
         : []),
       "",
-      "Instructions:",
+      serverLine(language, "server.localeCoverage.labelInstructions"),
       visibleInstructions,
     ].join("\n"),
     nextRunAt,
@@ -1007,12 +1013,13 @@ export class RoutineRequestService {
     const definition = effectiveDefinition(operation, this.routines);
     const timeZone = definition?.schedule.type === "cron" ? definition.schedule.timeZone : this.timeZone();
     const copy = cardCopy(operation, this.routines, timeZone, cardAt, this.engines);
+    const shown = cardCopy(operation, this.routines, timeZone, cardAt, this.engines, conversationLanguage(threadId));
     const messageInput: Parameters<RoutineRequestStore["appendMessage"]>[1] = {
       role: "bot",
       kind: "options",
       card: {
-        title: copy.title,
-        subtitle: copy.detail,
+        title: shown.title,
+        subtitle: shown.detail,
         options: ["Confirm", "Cancel"],
         requestId,
         tool: copy.tool,

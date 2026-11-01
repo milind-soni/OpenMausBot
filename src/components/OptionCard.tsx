@@ -47,6 +47,9 @@ export function OptionCard({
   if (!card || shouldHideOnboardingCard(message, transcript) || (card.requestId && card.dismissed && card.answered)) return null;
 
   const options = parseChoices(card.options, MAX_CHOICES) ?? [];
+  const displayOption = (value: string) => card.quotaSwitch && value === "Not now"
+    && !card.quotaSwitch.engines.some((engine) => engine.name.trim() === value)
+    ? t("notice.notNow") : value;
   const index = transcript.findIndex((entry) => entry.id === message.id);
   const quiet = !card.answered && index >= 0 && transcript.slice(index + 1).some((later) => later.role === "user" && later.kind === "text");
 
@@ -73,7 +76,7 @@ export function OptionCard({
           </button>
         )}
       >
-        {closed ? t("question.status.closed") : picked ? settledAnswer(picked, options) : <span>{card.title} · {t("question.status.answered")}</span>}
+        {closed ? t("question.status.closed") : picked ? settledAnswer(displayOption(picked), options.map(displayOption)) : <span>{card.title} · {t("question.status.answered")}</span>}
       </AskSettledLine>
     );
   }
@@ -88,7 +91,7 @@ export function OptionCard({
     >
       {options.length > 0 && (
         <AskChoices
-          choices={options.map((label) => ({ label }))}
+          choices={options.map((value) => ({ label: displayOption(value), value }))}
           label={card.title}
           picked={card.answeredText ?? card.answered ? [card.answeredText ?? card.answered!] : []}
           disabled={Boolean(card.answered)}

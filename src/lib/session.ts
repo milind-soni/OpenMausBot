@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface EnvironmentDescriptor {
   environmentId: string;
   label: string;
@@ -105,9 +107,9 @@ export function takeInvitedEmailFromLocation(): string | null {
 }
 
 export function defaultDeviceLabel(userAgent: string = navigator.userAgent): string {
-  const browser = /Edg\//.test(userAgent) ? "Edge" : /OPR\//.test(userAgent) ? "Opera" : /Chrome\//.test(userAgent) ? "Chrome" : /Firefox\//.test(userAgent) ? "Firefox" : /Safari\//.test(userAgent) ? "Safari" : "Browser";
+  const browser = /Edg\//.test(userAgent) ? "Edge" : /OPR\//.test(userAgent) ? "Opera" : /Chrome\//.test(userAgent) ? "Chrome" : /Firefox\//.test(userAgent) ? "Firefox" : /Safari\//.test(userAgent) ? "Safari" : t("ui.session.genericBrowser");
   const os = /iPhone/.test(userAgent) ? "iPhone" : /iPad/.test(userAgent) ? "iPad" : /Android/.test(userAgent) ? "Android" : /Mac OS X/.test(userAgent) ? "Mac" : /Windows/.test(userAgent) ? "Windows" : /Linux/.test(userAgent) ? "Linux" : "";
-  return os ? `${browser} on ${os}` : browser;
+  return os ? t("ui.session.browserOnDevice", { browser, os }) : browser;
 }
 
 /** A retry with the same id returns the same session, and nobody who merely shares this address can guess it. */
@@ -128,7 +130,7 @@ export async function pairWithCode(
       body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId(), ...(input.browser ? { browser: true } : {}) }),
     });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("ui.session.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
   }
   const body: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
@@ -165,7 +167,7 @@ async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: 
   try {
     res = await fetchImpl(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("ui.session.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
   }
   const parsed: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
@@ -184,5 +186,7 @@ export function verifyEmailSignIn(input: { email: string; code: string; label: s
 export function reasonWorthShowing(reason: string | undefined): string | null {
   if (!reason) return null;
   if (/through a proxy|loopback host required|cross-origin request|^40[13]$/i.test(reason)) return null;
+  if (reason === SERVICE_TRUST_REASON) return t("ui.session.serviceTrust");
+  if (reason === BROWSER_SIGN_IN_FAILED) return t("ui.session.browserSignInFailed");
   return reason;
 }

@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 // Harness-native approval cards for peer comms (approvePeerComms), resolved before an answer reaches the provider adapter.
 
 import { newId } from "./contracts.ts";
@@ -72,10 +73,10 @@ export interface PeerApprovalTarget {
   name: string;
 }
 
-const ACTION_VERB: Record<PeerAction, string> = {
-  ask_bot: "contact",
-  delegate_bot: "delegate to",
-  post_to_room: "post in",
+const ACTION_TITLE: Record<PeerAction, ServerLineKey> = {
+  ask_bot: "server.localeCoverage.peerContactTitle",
+  delegate_bot: "server.localeCoverage.peerDelegateTitle",
+  post_to_room: "server.localeCoverage.peerPostTitle",
 };
 
 function pushApprovalCard(
@@ -92,7 +93,7 @@ function pushApprovalCard(
     role: "bot",
     kind: "options",
     card: {
-      title: `@${from.name} wants to ${ACTION_VERB[action]} ${action === "post_to_room" ? `“${target.name}”` : `@${target.name}`}`,
+      title: serverLine(conversationLanguage(sourceThreadId), ACTION_TITLE[action], { from: from.name, target: target.name }),
       subtitle,
       options: ["Allow", "Deny", "Always allow"],
       requestId,
@@ -199,7 +200,7 @@ function peerCardThreads(bus: ApprovalBus): Set<string> {
 export function dismissStalePeerCards(bus: ApprovalBus): number {
   let dismissed = 0;
   const threads = peerCardThreads(bus);
-  for (const { threadId, messageId } of optionCardsForTools(Object.keys(ACTION_VERB))) {
+  for (const { threadId, messageId } of optionCardsForTools(Object.keys(ACTION_TITLE))) {
     if (!threads.has(threadId)) continue;
     const card = bus.store.messagesFor(threadId).find((message) => message.id === messageId)?.card;
     if (!card?.requestId || card.answered || card.dismissed) continue;

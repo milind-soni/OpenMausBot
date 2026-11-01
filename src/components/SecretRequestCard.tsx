@@ -147,7 +147,7 @@ export function SecretRequestCard({
     return (
       <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
         <span className="text-ink-secondary" title={description}>{secret.label}</span>
-        <span> · Superseded by a newer request</span>
+        <span> {t("ui.secretRequestCard.supersededByANewerRequest")}</span>
       </AskSettledLine>
     );
   }
@@ -156,7 +156,7 @@ export function SecretRequestCard({
     return (
       <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
         <span className="text-ink-secondary" title={secret.description}>{secret.label}</span>
-        <span> · Stopped</span>
+        <span> {t("ui.secretRequestCard.stopped")}</span>
       </AskSettledLine>
     );
   }
@@ -165,7 +165,7 @@ export function SecretRequestCard({
     const retry = !secret.resumed && !stopped && error ? (
       <button type="button" onClick={() => void retryResume()} disabled={saving} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
         {saving ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-        Try again
+        {t("cloudAdd.tryAgain")}
       </button>
     ) : undefined;
     return (
@@ -181,7 +181,7 @@ export function SecretRequestCard({
         action={retry}
         detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{error}</p>}
       >
-        <span className="text-ink-secondary" title={description}>{provided ? `${secret.label} saved securely` : secret.label}</span>
+        <span className="text-ink-secondary" title={description}>{provided ? t("ui.secretRequestCard.labelSavedSecurely", { label: secret.label }) : secret.label}</span>
         <span className={declined ? "text-danger" : undefined}> · {footerLabel}</span>
       </AskSettledLine>
     );
@@ -198,7 +198,7 @@ export function SecretRequestCard({
     >
       {remoteClient ? (
         <div className="text-[13px] leading-relaxed text-ink-secondary">
-          This key must be saved on the host computer. Open this conversation on the host to continue securely.
+          {t("ui.secretRequestCard.thisKeyMustBeSavedOnTheHostComputerOpen")}
         </div>
       ) : (
         <form onSubmit={(event) => void save(event)}>
@@ -217,13 +217,13 @@ export function SecretRequestCard({
             />
             <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>
               {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
-              {savedLocally ? "Continue task" : "Save securely"}
+              {savedLocally ? t("ui.secretRequestCard.continueTask") : t("ui.secretRequestCard.saveSecurely")}
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
               <LockKeyhole size={11} />{" "}
-              {!custom ? `Stored securely by ${productName()} and never added to chat.` : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
+              {!custom ? t("ui.secretRequestCard.storedSecurelyByAppAndNeverAddedToChat") : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
             {secret.helpUrl && (
               <a
@@ -232,7 +232,7 @@ export function SecretRequestCard({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-accent-text hover:underline"
               >
-                Where to get this key <ExternalLink size={11} />
+                {t("ui.secretRequestCard.whereToGetThisKey")} <ExternalLink size={11} />
               </a>
             )}
           </div>

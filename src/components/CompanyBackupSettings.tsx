@@ -208,7 +208,7 @@ export function ConnectedCompanyBackupSettings({ connection, bridge }: { connect
       // Boot recovery reads this stage ID even if the response is lost; without storage, never start a replacement we
       // cannot recover.
       const existingRestore = localStorage.getItem(WORKSPACE_RESTORE_MARKER);
-      if (existingRestore && existingRestore !== preview.id) throw new Error("An earlier restore needs recovery first.");
+      if (existingRestore && existingRestore !== preview.id) throw new Error(t("ui.companyBackupSettings.anEarlierRestoreNeedsRecoveryFirst"));
       localStorage.setItem(WORKSPACE_RESTORE_MARKER, preview.id);
       await bridge.restore({ id: preview.id, confirmation: "REPLACE" });
       if (isCurrent()) { setRestartRequired(true); closeDialog(); }

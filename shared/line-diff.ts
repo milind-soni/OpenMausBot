@@ -45,17 +45,18 @@ export const MAX_DIFF_LINES = 400;
  * replacement when the diff would outrun the card. The full replacement is
  * already byte-bounded by profile validation and is readable in the same
  * generic card on desktop and phones. */
-export function soulDiffLines(before: string, after: string): string[] {
+export function soulDiffLines(before: string, after: string, words?: { heading: (beforeBytes: number, afterBytes: number) => string; largeChange: string; empty: string }): string[] {
   const encoder = new TextEncoder();
   const bytesBefore = encoder.encode(before).length;
   const bytesAfter = encoder.encode(after).length;
   const diff = lineDiff(before, after);
+  const heading = words?.heading(bytesBefore, bytesAfter) ?? `SOUL.md (${bytesBefore} → ${bytesAfter} bytes):`;
   if (diff.length > MAX_DIFF_LINES) {
     return [
-      `SOUL.md (${bytesBefore} → ${bytesAfter} bytes):`,
-      "Large change — complete proposed instructions (replaces the current SOUL.md):",
-      after || "(empty)",
+      heading,
+      words?.largeChange ?? "Large change — complete proposed instructions (replaces the current SOUL.md):",
+      after || (words?.empty ?? "(empty)"),
     ];
   }
-  return [`SOUL.md (${bytesBefore} → ${bytesAfter} bytes):`, ...diff];
+  return [heading, ...diff];
 }

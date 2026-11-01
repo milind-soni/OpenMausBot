@@ -1,30 +1,31 @@
 import { screenFixLabel, screenLine } from "./screen-words.mjs";
+import { desktopText } from "./i18n.mjs";
 
 /** The device word the person knows this computer by. */
-export const deviceWord = (platform = process.platform) => platform === "darwin" ? "Mac" : platform === "win32" ? "PC" : "computer";
+export const deviceWord = (platform = process.platform) => platform === "darwin" ? "Mac" : platform === "win32" ? "PC" : desktopText("desktop.extra.indicator.computer");
 
-const listed = names => names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+const listed = names => names.length < 3 ? names.join(desktopText("desktop.extra.indicator.listAnd")) : `${names.slice(0, -1).join(desktopText("desktop.extra.indicator.listComma"))}${desktopText("desktop.extra.indicator.listAnd")}${names.at(-1)}`;
 /** Beside the icon there is room for two names at most. */
-const short = names => names.length < 3 ? listed(names) : `${names.length} Clouds`;
+const short = names => names.length < 3 ? listed(names) : desktopText("desktop.extra.indicator.cloudCount", { count: names.length });
 
 /** `screen`: computer control's state; while it isn't ready the line says what the Clouds
  * can't use, and `screen` why. */
 export function indicatorText({ clouds, using, paused, screen = null }, device) {
-  const it = `this ${device}`;
-  if (paused) return { line: `Paused: ${listed(clouds)} can't use ${it}`, title: "Paused", screen: null };
+  if (paused) return { line: desktopText("desktop.extra.indicator.paused", { names: listed(clouds), device }), title: desktopText("automations.status.paused"), screen: null };
   const why = screenLine(screen, device);
-  if (using.length) return { line: `${listed(using)} ${using.length > 1 ? "are" : "is"} using ${it}`, title: `${short(using)} ${using.length > 1 ? "are" : "is"} using ${it}`, screen: why };
-  return { line: why ? `${listed(clouds)} can use ${it}, but not its apps and screen` : `${listed(clouds)} can use ${it}`, title: "", screen: why };
+  if (using.length) return { line: desktopText(using.length > 1 ? "desktop.extra.indicator.usingMany" : "desktop.extra.indicator.usingOne", { names: listed(using), device }), title: desktopText(using.length > 1 ? "desktop.extra.indicator.usingMany" : "desktop.extra.indicator.usingOne", { names: short(using), device }), screen: why };
+  return { line: desktopText(why ? "desktop.extra.indicator.limited" : "desktop.extra.indicator.available", { names: listed(clouds), device }), title: "", screen: why };
 }
 
-export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device = deviceWord() }) {
+export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device }) {
   let tray = null;
   let shown = null;
   const draw = view => {
     if (!tray || tray.isDestroyed()) return;
-    const { line, title, screen } = indicatorText(view, device);
+    const currentDevice = device ?? deviceWord();
+    const { line, title, screen } = indicatorText(view, currentDevice);
     const fix = screen ? screenFixLabel(view.screen) : null;
-    tray.setToolTip(`OpenMausBot: ${line}${screen ? `. ${screen}` : ""}`);
+    tray.setToolTip(`OpenMausBot: ${screen ? desktopText("desktop.extra.indicator.tooltipScreen", { line, screen }) : line}`);
     // Electron shows a tray title beside the icon on macOS only.
     tray.setTitle?.(title);
     tray.setContextMenu(Menu.buildFromTemplate([
@@ -32,11 +33,11 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       ...screen ? [{ label: screen, enabled: false }] : [],
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
-      view.paused ? { label: "Resume", click: () => onResume() } : { label: "Pause", click: () => onPause() },
-      ...view.paused ? [] : [{ label: `Let Clouds run commands on this ${device}`, type: "checkbox", checked: view.terminal,
+      view.paused ? { label: desktopText("automations.resume"), click: () => onResume() } : { label: desktopText("automations.pause"), click: () => onPause() },
+      ...view.paused ? [] : [{ label: desktopText("desktop.extra.indicator.allowTerminal", { device: currentDevice }), type: "checkbox", checked: view.terminal,
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
         click: () => { draw(view); onTerminal(!view.terminal); } }],
-      { label: "See activity", click: () => onActivity() },
+      { label: desktopText("desktop.extra.indicator.activity"), click: () => onActivity() },
     ]));
   };
   return {
@@ -52,6 +53,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       }
       draw(next);
     },
+    refresh() { if (shown) draw(shown); },
     destroy() { if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; shown = null; },
   };
 }

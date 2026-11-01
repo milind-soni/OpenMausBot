@@ -9,7 +9,7 @@ import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.
 import { composeAddition } from "../runtime/envelope.ts";
 import { personOnly, withDefault } from "../runtime/questions.ts";
 import type { Answerer } from "../runtime/types.ts";
-import { conversationLanguage } from "../server-lines.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { answerableInWords } from "./ask-cards.ts";
 import { sentRow } from "./handoff-sent.ts";
@@ -112,7 +112,7 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
       if (asked?.card) store.patchMessage(node.threadId, asked.id, { card: { ...asked.card, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
     }
     store.appendMessage(input.senderThreadId, { role: "bot", kind: "activity", from: { botId: sender.id, name: sender.name, color: sender.color },
-      tool: { name: `Answered ${target.name}'s question`, ok: true, output: pick.question.slice(0, 400) },
+      tool: { name: serverLine(conversationLanguage(input.senderThreadId), "server.localeCoverage.answeredTeammateQuestion", { name: target.name }), ok: true, output: pick.question.slice(0, 400) },
       threadRef: { botId: target.id, threadId: pick.threadId, title: store.taskByThread(target.id, pick.threadId)?.title ?? target.name } });
     return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "injected", threadId: pick.threadId, ...(pick.node ? { requestId: pick.node.id } : {}),
       detail: `answered its question "${pick.question}"; it carries on with your answer, and its result returns to whoever handed it that work` });

@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import "../server-line-packs.ts";
+import { setConversationLanguage } from "../server-lines.ts";
 
 import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
@@ -79,6 +81,21 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
 }
 
 describe("a teammate's NEEDS INPUT question", () => {
+  afterEach(() => setConversationLanguage(() => undefined));
+
+  it("keeps one restored chip after changing Chinese variant, but shows a new question", () => {
+    const w = world();
+    const node = w.node({ cards: ["m9"] });
+    setConversationLanguage(() => "zh");
+    w.cards.park(node, QUESTION);
+    expect(w.rows("inbox")[0]?.tool?.name).toContain("需要你回答");
+    setConversationLanguage(() => "zh-tw");
+    w.cards.park(node, QUESTION, true);
+    expect(w.rows("inbox")).toHaveLength(1);
+    w.cards.park(node, "A different question?", true);
+    expect(w.rows("inbox")).toHaveLength(2);
+  });
+
   it("becomes a question card in its conversation, its line keeps the words before it, and the requester's chat gets one chip", () => {
     const w = world();
     w.say("work", `The footer text still uses the old template.\nNEEDS INPUT: ${QUESTION}`);

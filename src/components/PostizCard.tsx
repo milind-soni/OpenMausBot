@@ -65,7 +65,7 @@ export function PostizCard({ refreshKey = 0, onConnection }: {
     try {
       const response = await api(check ? `${POSTIZ_API}/check` : POSTIZ_API, check ? { method: "POST" } : undefined);
       if (!mounted.current) return null;
-      if (!isPostizStatus(response)) throw new Error("unexpected Postiz status");
+      if (!isPostizStatus(response)) throw new Error(t("ui.postizCard.unexpectedPostizStatus"));
       setStatus(response);
       setLoadFailed(false);
       if (response.team && response.scope === "person") setOwn(await ownConnection());

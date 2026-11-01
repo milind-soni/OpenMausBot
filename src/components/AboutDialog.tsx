@@ -66,13 +66,13 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
         <p className="mt-1 text-[13px] text-ink-secondary">{version}</p>
         {connected && <p className="mt-0.5 text-[13px] text-ink-secondary">{connected}</p>}
         <p className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
-          A desktop home for your agents, built on {APP_NAME}: open source, Apache 2.0 licensed.
+          {t("ui.aboutDialog.aDesktopHomeForYourAgentsBuiltOnAppOpen", { app: APP_NAME })}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-[13px]">
           <AboutLink href={APP_REPOSITORY} label="GitHub" />
-          <AboutLink href={DOCS_URL} label="Docs" />
-          <AboutLink href={RELEASES_URL} label="Releases" />
-          <AboutLink href={LICENSE_URL} label="License" />
+          <AboutLink href={DOCS_URL} label={t("ui.aboutDialog.docs")} />
+          <AboutLink href={RELEASES_URL} label={t("ui.aboutDialog.releases")} />
+          <AboutLink href={LICENSE_URL} label={t("ui.aboutDialog.license")} />
         </div>
         <button
           ref={closeRef}
@@ -80,7 +80,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
           onClick={onClose}
           className="mt-5 w-full rounded-xl bg-raised px-4 py-2 text-[13px] font-medium text-ink hover:brightness-110"
         >
-          Close
+          {t("cloudAdd.close")}
         </button>
       </div>
     </div>

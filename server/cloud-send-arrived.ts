@@ -9,7 +9,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import { switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
-import { serverLine, type LineLanguage } from "./server-lines.ts";
+import { conversationLanguage, serverLine, type LineLanguage } from "./server-lines.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { Store } from "./store.ts";
@@ -31,8 +31,8 @@ export function movedFrom(dataDir: string): MovedFrom | null {
 export const webhookMovedLine = (name: string, place = "My Cloud", language?: string) =>
   serverLine(language, "server.moves.webhookMoved", { name, place });
 
-export const webhookHomeLine = (name: string) =>
-  `I'm back on this computer, so my webhook "${name}" has an address here again. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
+export const webhookHomeLine = (name: string, language?: string) =>
+  serverLine(language, "server.localeCoverage.webhookHomeAgain", { name });
 
 export interface ArrivedDeps {
   dataDir: string;
@@ -92,7 +92,7 @@ export async function homeRoute(deps: Omit<ArrivedDeps, "owner">, { req, res, pa
   });
   // Gone before the lines go: coming home again after a crash here never has a bot say it twice.
   rmSync(join(deps.dataDir, FILE), { force: true });
-  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookHomeLine(line.name) });
+  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookHomeLine(line.name, conversationLanguage(line.threadId)) });
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }

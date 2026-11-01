@@ -121,7 +121,7 @@ export function useManagedSkills(bot: Bot) {
         // Security: a disabled import has not necessarily been reviewed; its integrity-checked bytes need one explicit
         // review before they reach the prompt.
         const result = (await api(skill.origin === "library" ? `/api/skills-library/${encodeURIComponent(skill.name)}` : `/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string };
-        if (!result.text) throw new Error("The skill contents are unavailable; remove and import or learn it again.");
+        if (!result.text) throw new Error(t("ui.skillsSection.theSkillContentsAreUnavailableRemoveAndImportOrLearn"));
         setReviewing({ skill, text: result.text });
         return;
       }
@@ -223,10 +223,10 @@ export function SkillReviewDialog({
     >
       <div className="flex max-h-[min(760px,90vh)] w-full max-w-2xl flex-col rounded-2xl bg-card p-5 shadow-2xl">
         <div id="skill-review-title" className="text-[16px] font-semibold text-ink">
-          Review {skill.name} before enabling
+          {t("ui.skillsSection.reviewNameBeforeEnabling", { name: skill.name })}
         </div>
         <div className="mt-1 break-all text-[12px] text-ink-secondary">
-          Source: {skill.source}
+          {t("ui.skillRequestPreview.source")} {skill.source}
         </div>
         {skill.warnings.length > 0 && (
           <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning">
@@ -235,7 +235,7 @@ export function SkillReviewDialog({
         )}
         <pre
           tabIndex={0}
-          aria-label={`Full SKILL.md for ${skill.name}`}
+          aria-label={t("ui.skillRequestPreview.fullSKILLMdForName", { name: skill.name })}
           className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink"
         >
           {text}
@@ -248,7 +248,7 @@ export function SkillReviewDialog({
             onClick={onCancel}
             className="rounded-lg px-4 py-2 text-[13px] font-medium text-ink-secondary hover:bg-raised disabled:opacity-40"
           >
-            Cancel
+            {t("connectedWorkspaces.cancel")}
           </button>
           <button
             type="button"
@@ -256,7 +256,7 @@ export function SkillReviewDialog({
             onClick={onEnable}
             className="rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
           >
-            Enable reviewed skill
+            {t("ui.skillsSection.enableReviewedSkill")}
           </button>
         </div>
       </div>
@@ -468,24 +468,24 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                         className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
                         title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : undefined}
                       >
-                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? "library" : "private"}
+                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? t("ui.skillsSection.library") : t("ui.skillsSection.private")}
                       </span>
                     )}
                     <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
-                    <div className="mt-0.5 text-[11px] text-ink-secondary">Used when the bot decides it's relevant</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t("ui.skillsSection.usedWhenTheBotDecidesItSRelevant")}</div>
                   </button>
                   {skill.origin !== "native" && (
                     <Switch
                       checked={skill.enabled}
-                      aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
+                      aria-label={t(skill.enabled ? "ui.skillsSection.disableName" : "ui.skillsSection.enableName", { name: skill.name })}
                       disabled={Boolean(working)}
                       onClick={() => void toggle(skill)}
                     />
                   )}
                   {skill.origin !== "imported" && skill.origin !== "native" && (
                     <button
-                      aria-label={`Remove ${skill.name}`}
-                      title="Remove skill"
+                      aria-label={t("keys.opencode.otherProviders.removeAria", { name: skill.name })}
+                      title={t("ui.skillsSection.removeSkill")}
                       disabled={Boolean(working)}
                       onClick={() => void remove(skill)}
                       className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
@@ -494,7 +494,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     </button>
                   )}
                 </div>
-                <div className="mt-1 truncate text-[11px] text-ink-secondary" title={skill.source}>Source: {skill.source}</div>
+                <div className="mt-1 truncate text-[11px] text-ink-secondary" title={skill.source}>{t("ui.skillRequestPreview.source")} {skill.source}</div>
                 {skill.warnings.length > 0 && (
                   <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                 )}
@@ -504,7 +504,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
         )}
         {staged.length > 0 && (
           <div className="mt-2 text-[12px] text-warning">
-            {staged.length} proposal{staged.length === 1 ? " is" : "s are"} waiting for a decision in chat.
+            {t(staged.length === 1 ? "ui.skillsSection.countProposalIsWaitingForADecisionInChat" : "ui.skillsSection.countProposalsAreWaitingForADecisionInChat", { count: staged.length })}
           </div>
         )}
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
@@ -542,12 +542,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                 onClick={() => setViewing(null)}
                 className="rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
               >
-                Close
+                {t("cloudAdd.close")}
               </button>
             </div>
             <pre
               tabIndex={0}
-              aria-label={`Full SKILL.md for ${viewing.name}`}
+              aria-label={t("ui.skillRequestPreview.fullSKILLMdForName", { name: viewing.name })}
               className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink"
             >
               {viewing.text}
