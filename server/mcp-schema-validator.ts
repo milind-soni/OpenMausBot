@@ -10,6 +10,27 @@ const validatorOptions = {
   strictRequired: false, strictTypes: false, strictTuples: false,
 };
 
+const SAFE_MIN = Number.MIN_SAFE_INTEGER;
+const SAFE_MAX = Number.MAX_SAFE_INTEGER;
+// schemars 1.x writes one of these formats for each Rust integer type (isize/usize are `int`/`uint`); its `float` and
+// `double` come from ajv-formats, which takes any number, and JSON.parse never yields NaN or Infinity. These replace
+// ajv-formats' int32/int64: its int64 takes any integer, but past the safe integer JSON.parse may already have rounded
+// the value and cannot tell, so it is refused rather than sent on.
+const INTEGER_FORMATS: ReadonlyArray<readonly [string, number, number]> = [
+  ["int8", -128, 127],
+  ["int16", -32768, 32767],
+  ["int32", -2147483648, 2147483647],
+  ["int64", SAFE_MIN, SAFE_MAX],
+  ["int128", SAFE_MIN, SAFE_MAX],
+  ["int", SAFE_MIN, SAFE_MAX],
+  ["uint8", 0, 255],
+  ["uint16", 0, 65535],
+  ["uint32", 0, 4294967295],
+  ["uint64", 0, SAFE_MAX],
+  ["uint128", 0, SAFE_MAX],
+  ["uint", 0, SAFE_MAX],
+];
+
 export function compileToolSchema(schema: Record<string, unknown>, options: { allErrors?: boolean; strict?: boolean } = {}): ValidateFunction {
   const dialect = schema.$schema;
   if (dialect !== undefined && dialect !== "http://json-schema.org/draft-07/schema#" && dialect !== "https://json-schema.org/draft/2020-12/schema") {
@@ -24,8 +45,7 @@ export function compileToolSchema(schema: Record<string, unknown>, options: { al
   compiler.addKeyword({ keyword: "x-mcp-header", schemaType: "string" });
   // Google's remote MCP servers (Maps, Gmail, Drive) annotate enums with per-value descriptions; it adds no constraint to check.
   compiler.addKeyword({ keyword: "x-google-enum-descriptions", schemaType: "array" });
-  compiler.addFormat("uint32", { type: "number", validate: value => Number.isInteger(value) && value >= 0 && value <= 4294967295 });
-  compiler.addFormat("uint64", { type: "number", validate: value => Number.isSafeInteger(value) && value >= 0 });
+  for (const [format, min, max] of INTEGER_FORMATS) compiler.addFormat(format, { type: "number", validate: value => Number.isInteger(value) && value >= min && value <= max });
   try { return compiler.compile(schema); }
   catch { throw new Error("MCP tool schema could not be validated; check its constraints, formats, and references"); }
 }
