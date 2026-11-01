@@ -186,6 +186,12 @@ input[type="checkbox"][role="switch"]:disabled { cursor: not-allowed; opacity: 0
 .dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 .dialog-actions > :first-child:not(:only-child) { margin-right: auto; }
 
+/* A view or dialog whose code could not load (components/lazy-component.tsx). */
+.load-failed { display: flex; align-items: center; justify-content: center; gap: var(--space-3); min-height: min(100%, 320px); padding: var(--space-12) var(--space-4); color: var(--text-2); font-size: var(--text-base); }
+.workspace > .load-failed { min-height: 100%; padding-bottom: 12vh; }
+@media (min-width: 761px) { .origin-dialog.load-failed-dialog { width: 360px; } }
+.load-failed-dialog .dialog-actions { margin-top: 0; }
+
 @media (max-width: 760px) {
   .origin-dialog { width: 100vw; max-width: 100vw; max-height: 92dvh; margin: auto 0 0; border-width: 1px 0 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding-bottom: env(safe-area-inset-bottom); }
   @starting-style { .origin-dialog[open] { opacity: 0; transform: translateY(24px); } }

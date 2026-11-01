@@ -14,6 +14,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { MemberProfileContext, useMemberProfile, useWorkspace, type Workspace } from "./workspace-context";
 import { useModalKeyboard } from "./use-modal-keyboard";
+import { useAnchoredPopover } from "./use-anchored-popover";
 import { WorkspaceGitHubSetup } from "./repository-settings";
 import { useNotifications } from "./use-notifications";
 import { ProjectIcon } from "./project-icon";
@@ -46,7 +47,10 @@ export type AuthUser = {
   role: "owner" | "user";
   status: "active" | "disabled";
 };
-type MainView = "project" | "inbox" | "chat" | "voice" | "draw";
+type ToolView = "inbox" | "chat" | "voice" | "draw";
+type MainView = "project" | ToolView;
+const toolViews: readonly string[] = ["inbox", "chat", "voice", "draw"] satisfies ToolView[];
+const toolView = (value: string | null) => value && toolViews.includes(value) ? value as ToolView : null;
 type ProjectWithUi = Doc<"projects"> & { memberRole: string; iconUrl?: string | null; openIssueCount?: number };
 type LocalChatMessage = {
   id: string;
@@ -154,8 +158,8 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     const params = new URLSearchParams(window.location.search);
     const githubStatus = params.get("github");
     if (githubStatus) setShellNotice(githubStatus === "connected" ? "GitHub connected to this workspace." : githubStatus === "app-ready" ? "GitHub App ready. Open Settings > Integrations to connect your workspace." : "GitHub connection was not completed. Try again from Settings > Integrations.");
-    const view = params.get("view");
-    if (view && ["chat", "voice", "draw", "inbox"].includes(view)) setMainView(view as MainView);
+    const view = toolView(params.get("view"));
+    if (view) setMainView(view);
     const project = params.get("project");
     if (project) setActiveProjectId(project as Id<"projects">);
     const issue = params.get("issue");
@@ -191,18 +195,44 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     }
   }, [projects, activeProjectId]);
 
+  // Sidebar destinations each get a history entry, so Back (and the Android back gesture) returns to the previous
+  // view. A deep link keeps its entry; re-selecting the view that is already open adds nothing.
+  const shown = useRef({ mainView, activeProjectId });
+  useEffect(() => { shown.current = { mainView, activeProjectId }; }, [mainView, activeProjectId]);
+  useEffect(() => {
+    const onPop = () => {
+      if (window.location.pathname !== `/${workspace.slug}`) return;
+      const params = new URLSearchParams(window.location.search);
+      setMobileOpen(false);
+      const view = toolView(params.get("view"));
+      if (view) { setMainView(view); return; }
+      const project = params.get("project") as Id<"projects"> | null;
+      const issue = params.get("issue") as Id<"tasks"> | null;
+      // The open project's board follows its own issue and tab entries; a project coming back on screen reads them.
+      if (project && (project !== shown.current.activeProjectId || shown.current.mainView !== "project")) {
+        setActiveProjectId(project);
+        setInitialIssue(issue ? { projectId: project, taskId: issue } : null);
+      }
+      setMainView("project");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [workspace.slug]);
+
   const openProject = (projectId: Id<"projects">) => {
+    const already = mainView === "project" && activeProjectId === projectId;
     setActiveProjectId(projectId);
     setInitialIssue(null);
     setMainView("project");
     setMobileOpen(false);
-    window.history.replaceState(null, "", `/${workspace.slug}?project=${projectId}`);
+    if (!already) window.history.pushState(null, "", `/${workspace.slug}?project=${projectId}`);
   };
   const openIssue = (projectId: Id<"projects">, taskId: Id<"tasks">) => { setLinkedTask(null); openProject(projectId); setInitialIssue({ projectId, taskId }); };
   const openReference = (projectId: Id<"projects">, taskId?: Id<"tasks">) => { if (taskId) setLinkedTask({ projectId, taskId }); else { setLinkedTask(null); openProject(projectId); } };
-  const openView = (view: MainView) => {
+  const openView = (view: ToolView) => {
+    const already = mainView === view;
     setMainView(view); setMobileOpen(false);
-    window.history.replaceState(null, "", `/${workspace.slug}?view=${view}`);
+    if (!already) window.history.pushState(null, "", `/${workspace.slug}?view=${view}`);
   };
   const moveProject = async (target: Id<"projects">) => {
     if (!dragProject || dragProject === target || !sidebarProjects) return;
@@ -355,7 +385,6 @@ function ProfileMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState<false | "first" | "last">(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const workspace = useWorkspace();
@@ -363,17 +392,21 @@ function ProfileMenu({
   const router = useRouter();
   const items = () => [...(listRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') || [])];
   const closeMenu = (refocus = true) => { setMenu(false); if (refocus) focusQuietly(triggerRef.current); };
+  // Under the chip on desktop, a bottom sheet on phones like every other menu.
+  const noInitialFocus = useRef<HTMLElement>(null);
+  useAnchoredPopover(Boolean(menu), triggerRef, listRef, noInitialFocus, { width: 240, maxHeight: 520, onDismiss: restore => {
+    // A press outside only closes the menu; it does not also open what was under it.
+    if (!restore) swallowPressClick();
+    closeMenu(restore);
+  } });
   useEffect(() => {
     if (!menu) return;
     const list = items();
     focusQuietly(menu === "last" ? list.at(-1) : list[0]);
-    const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) { setMenu(false); swallowPressClick(); } };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
   }, [menu]);
   const choose = (action: () => void) => { closeMenu(); action(); };
   return (
-    <div className="profile-menu-wrap" ref={menuRef}>
+    <div className="profile-menu-wrap">
       {open ? <WorkspaceSettings sessionToken={sessionToken} sound={sound} onToggleSound={onToggleSound} profile={<ProfileSettings user={user} sessionToken={sessionToken} />} security={<PasswordChanger sessionToken={sessionToken} />} onClose={() => setOpen(false)} onLogout={onLogout} /> : null}
       <button ref={triggerRef} className="profile-chip bottom" type="button" aria-label={`${workspace.name}, account menu`} aria-expanded={Boolean(menu)} aria-haspopup="menu" aria-controls={menu ? "account-menu" : undefined} onClick={() => setMenu(menu ? false : "first")} onKeyDown={event => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setMenu(event.key === "ArrowUp" ? "last" : "first"); }
@@ -382,7 +415,7 @@ function ProfileMenu({
         <strong>{workspace.name}</strong>
         <ChevronDown className="profile-chevron" size={13} />
       </button>
-      {menu && <div ref={listRef} id="account-menu" className="origin-dropdown account-dropdown" role="menu" aria-label="Account and workspaces" onKeyDown={event => {
+      {menu && <div ref={listRef} id="account-menu" popover="manual" className="origin-dropdown account-dropdown" role="menu" aria-label="Account and workspaces" onKeyDown={event => {
         const list = items();
         const index = list.indexOf(document.activeElement as HTMLElement);
         const move = (next: number) => { event.preventDefault(); list[(next + list.length) % list.length]?.focus(); };

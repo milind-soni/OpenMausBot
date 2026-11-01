@@ -17,6 +17,13 @@
 .slug-input > span { color: var(--text-3); white-space: nowrap; font-size: var(--text-sm); }
 .slug-input input { min-width: 0; border: 0; background: transparent; padding-left: 2px; box-shadow: none; }
 .slug-input input:focus-visible { box-shadow: none; }
+/* Field messages (lib/auth-form.ts): under the field they are about, instead of the browser's validation bubble. */
+.form-field { display: grid; gap: 6px; }
+.auth-field-error { margin: 0; color: var(--red); font-size: var(--text-sm); line-height: var(--leading); }
+.form-field input[aria-invalid="true"], .slug-input[data-invalid] { border-color: rgba(242, 113, 107, 0.6); }
+.form-field input[aria-invalid="true"]:focus { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
+.slug-input[data-invalid]:focus-within { border-color: var(--red); }
+.slug-input input[aria-invalid="true"], .slug-input input[aria-invalid="true"]:focus { border: 0; box-shadow: none; }
 .auth-switch { margin: 0; text-align: center; color: var(--text-3); font-size: var(--text-sm); }
 .auth-switch button { border: 0; padding: var(--space-1); background: none; color: var(--text-1); font-weight: var(--weight-medium); }
 .auth-switch button:hover { color: var(--accent-text); }

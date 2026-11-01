@@ -78,3 +78,4 @@
 .excalidraw .Switch input[type]::after { content: none; }
 /* Help is the keyboard shortcuts: not on touch screens. */
 @media (pointer: coarse) { .drawing-canvas .excalidraw .dropdown-menu [data-testid="help-menu-item"] { display: none; } }
+.draw-view > .load-failed { min-height: 100%; padding-bottom: 12vh; }

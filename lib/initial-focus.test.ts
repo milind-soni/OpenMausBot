@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { focusInitialInput } from "./initial-focus";
+import { focusInitialInput, isNavigationKey } from "./initial-focus";
 
 function field({ hidden = false, unavailable = false, preferred = false } = {}) {
   return { matches: () => unavailable, getClientRects: () => hidden ? [] : [{}], hasAttribute: () => preferred, focus: vi.fn() };
@@ -24,5 +24,18 @@ describe("initial input focus", () => {
   });
   it("can retry when an async editor is not mounted yet", () => {
     expect(focusInitialInput(root())).toBe(false);
+  });
+});
+
+describe("input modality", () => {
+  const key = (key: string, mods: Partial<Record<"metaKey" | "ctrlKey" | "altKey", boolean>> = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, ...mods });
+  it("treats Tab and arrow keys as keyboard navigation", () => {
+    for (const name of ["Tab", "ArrowDown", "ArrowLeft", "Home", "End", "PageDown"]) expect(isNavigationKey(key(name))).toBe(true);
+    expect(isNavigationKey(key("Tab", { altKey: true }))).toBe(true);
+  });
+  it("keeps the pointer modality for typing, shortcuts and command chords", () => {
+    for (const name of ["r", "c", "f", "Enter", " ", "Escape", "Shift", "Meta"]) expect(isNavigationKey(key(name))).toBe(false);
+    expect(isNavigationKey(key("ArrowDown", { metaKey: true }))).toBe(false);
+    expect(isNavigationKey(key("Tab", { ctrlKey: true }))).toBe(false);
   });
 });

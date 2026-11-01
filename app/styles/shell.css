@@ -53,7 +53,7 @@
 .sidebar-topbar > .icon-button svg { width: 16px; height: 16px; }
 .sidebar-topbar > .sidebar-new-issue { border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-1); }
 .sidebar-topbar > .sidebar-new-issue:hover:not(:disabled) { background: var(--surface-4); }
-.account-dropdown { position: fixed; left: 12px; top: 48px; width: 240px; max-height: calc(100dvh - 64px); overflow-y: auto; transform-origin: top left; }
+.account-dropdown { position: fixed; inset: auto; margin: 0; width: 240px; overflow-y: auto; transform-origin: top left; }
 .workspace-initial { display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-xs); background: var(--surface-5); color: var(--text-1); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
 
 .sidebar-content { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; width: 100%; }
@@ -178,8 +178,6 @@
   .modal-backdrop { padding: var(--space-2); }
   .search-modal { max-height: 80dvh; }
   .menu-desktop-only { display: none !important; }
-  .account-dropdown { left: var(--space-3); right: auto; width: min(280px, calc(86vw - 24px)); }
-  .account-dropdown button { min-height: 40px; }
 }
 .project-viewer[data-self-viewer] { display: none; }
 .account-identity { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; padding: 0 var(--space-2); }

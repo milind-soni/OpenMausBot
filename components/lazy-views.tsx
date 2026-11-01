@@ -9,13 +9,13 @@ import { lazyComponent } from "./lazy-component";
  * in the background once the workspace has settled (see preloadViews), so opening one later renders at once; before
  * that, views show their usual loading skeleton and dialogs open when their code has arrived.
  */
-export const TaskModal = lazyComponent(() => import("./issue-detail").then(module => module.TaskModal));
-export const IssueComposer = lazyComponent(() => import("./issue-composer").then(module => module.IssueComposer));
+export const TaskModal = lazyComponent(() => import("./issue-detail").then(module => module.TaskModal), null, { dialog: true });
+export const IssueComposer = lazyComponent(() => import("./issue-composer").then(module => module.IssueComposer), null, { dialog: true });
 export const ChatView = lazyComponent(() => import("./chat-shell").then(module => module.ChatView), <ContentSkeleton kind="chat" label="Loading chat" />);
 export const InboxView = lazyComponent(() => import("./inbox-view").then(module => module.InboxView), <ContentSkeleton label="Loading inbox" />);
-export const WorkspaceSettings = lazyComponent(() => import("./workspace-settings").then(module => module.WorkspaceSettings));
-export const MemberProfile = lazyComponent(() => import("./member-profile").then(module => module.MemberProfile));
-export const CreateWorkspaceDialog = lazyComponent(() => import("./create-workspace-dialog").then(module => module.CreateWorkspaceDialog));
+export const WorkspaceSettings = lazyComponent(() => import("./workspace-settings").then(module => module.WorkspaceSettings), null, { dialog: true });
+export const MemberProfile = lazyComponent(() => import("./member-profile").then(module => module.MemberProfile), null, { dialog: true });
+export const CreateWorkspaceDialog = lazyComponent(() => import("./create-workspace-dialog").then(module => module.CreateWorkspaceDialog), null, { dialog: true });
 export const AssetsPanel = lazyComponent(() => import("./project-library").then(module => module.AssetsPanel), <DelayedSkeleton label="Loading assets" />);
 export const VaultPanel = lazyComponent(() => import("./project-library").then(module => module.VaultPanel), <DelayedSkeleton label="Loading vault" />);
 export const FeedbackView = lazyComponent(() => import("./feedback-view").then(module => module.FeedbackView), <DelayedSkeleton label="Loading feedback" />);

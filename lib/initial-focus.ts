@@ -8,13 +8,22 @@ export function focusInitialInput(root: HTMLElement) {
   return Boolean(input);
 }
 
-/* Input modality: rings show only for keyboard use, including focus that code moves (drawer, dialog close). */
+/*
+ * Input modality: rings show only for keyboard navigation, including focus that code moves (drawer, dialog close).
+ * Typing and single-key shortcuts (C, F, Draw's tool keys) keep the pointer modality, so a sidebar item that was
+ * clicked never lights up because a letter was pressed afterwards.
+ */
+const navigationKeys = new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+/** Whether a key press means the person is moving focus with the keyboard. */
+export function isNavigationKey(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">) {
+  return !event.metaKey && !event.ctrlKey && navigationKeys.has(event.key);
+}
 let keyboardInput = false;
 if (typeof window !== "undefined") {
   // Set on the first input only, so the server-rendered <html> still matches during hydration.
   const set = (keyboard: boolean) => { keyboardInput = keyboard; document.documentElement.dataset.input = keyboard ? "keyboard" : "pointer"; };
-  window.addEventListener("keydown", event => { if (!event.metaKey && !event.ctrlKey && event.key !== "Meta" && event.key !== "Control") set(true); }, true);
-  window.addEventListener("pointerdown", () => set(false), true);
+  window.addEventListener("keydown", event => { if (event.isTrusted && isNavigationKey(event)) set(true); }, true);
+  window.addEventListener("pointerdown", event => { if (event.isTrusted) set(false); }, true);
 }
 /** Moves focus without scrolling; the focus ring shows only when the person is using the keyboard. */
 export function focusQuietly(element: HTMLElement | null | undefined) {
