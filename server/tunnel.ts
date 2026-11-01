@@ -25,6 +25,7 @@ import {
   createManagedCompanionTunnel,
   managedCompanionTunnelAccess,
   resolveCloudflaredBinary,
+  stagedCloudflaredPath,
   type ManagedTunnelAccess,
   type ManagedTunnelState,
 } from "../electron/managed-companion-tunnel.mjs";
@@ -220,19 +221,25 @@ export async function ensureCloudflared(options: {
 }): Promise<string> {
   const env = options.env ?? process.env;
   const found = cloudflaredPath(options.dataDir, env);
-  if (found) return found;
-  options.log(`downloading cloudflared once (pinned version and digest, about 40 MB) into ${options.dataDir}`);
+  const staged = stagedCloudflaredPath({ appPath: options.dataDir });
+  const refreshStaged = !env.OMB_CLOUDFLARED_PATH?.trim() && found === staged;
+  if (found && !refreshStaged) return found;
+  options.log(
+    refreshStaged
+      ? `checking staged cloudflared (pinned version and digest) in ${options.dataDir}`
+      : `downloading cloudflared once (pinned version and digest, about 40 MB) into ${options.dataDir}`,
+  );
   await new Promise<void>((done, fail) => {
     const child = spawn(process.execPath, [prepareEntry(options.here), "--current", "--root", options.dataDir], {
       env,
       stdio: ["ignore", "inherit", "inherit"],
     });
-    child.on("error", fail);
-    child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared download failed (exit ${code ?? "signal"})`))));
+    child.on("error", (error) => fail(new Error(`could not prepare cloudflared: ${error.message}`)));
+    child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared ${refreshStaged ? "refresh" : "download"} failed (exit ${code ?? "signal"})`))));
   });
-  const staged = cloudflaredPath(options.dataDir, env);
-  if (!staged) throw new Error("cloudflared was downloaded but is not where it should be; remove the data dir's dist-native folder and try again");
-  return staged;
+  const prepared = refreshStaged ? (existsSync(staged) ? staged : null) : cloudflaredPath(options.dataDir, env);
+  if (!prepared) throw new Error("cloudflared was prepared but is not where it should be; remove the data dir's dist-native folder and try again");
+  return prepared;
 }
 
 export function createTunnelOrigin(): CompanionOriginEndpoint {

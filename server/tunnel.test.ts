@@ -1,9 +1,10 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stagedCloudflaredPath } from "../electron/managed-companion-tunnel.mjs";
 import { runLogin, runLogout, runStatus, type CliIo, type CliOptions } from "./cli.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startControlPlaneStub, type ControlPlaneStub } from "./testing/control-plane-stub.ts";
@@ -14,6 +15,7 @@ import {
   createTunnelOrigin,
   describeTunnelAccount,
   describeTunnelState,
+  ensureCloudflared,
   fleetAccess,
   fleetCredential,
   guardianEntry,
@@ -39,6 +41,91 @@ function fakeIo(answers: string[]) {
   const io: CliIo = { log: (line) => out.push(line), error: (line) => err.push(line), ask: async () => answers.shift() ?? "" };
   return { io, out, err };
 }
+
+describe("the headless cloudflared connector", () => {
+  let dir: string;
+  let here: string;
+  let dataDir: string;
+  let staged: string;
+  let marker: string;
+  let lines: string[];
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "omb-tunnel-connector-"));
+    here = join(dir, "bundle");
+    dataDir = join(dir, "data");
+    staged = join(dataDir, "dist-native", "cloudflared", `${process.platform}-${process.arch}`, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    marker = join(dir, "prepare-args.json");
+    lines = [];
+    mkdirSync(here, { recursive: true });
+    writeFileSync(join(here, "prepare-cloudflared.js"), `
+      const fs = require("node:fs");
+      const path = require("node:path");
+      fs.writeFileSync(process.env.MARKER, JSON.stringify(process.argv.slice(2)));
+      if (process.env.FAIL_PREPARE) process.exit(41);
+      const root = process.argv[process.argv.indexOf("--root") + 1];
+      const file = path.join(root, "dist-native", "cloudflared", \`${process.platform}-${process.arch}\`, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "fresh");
+    `);
+  });
+  afterEach(() => removeTempDir(dir));
+
+  it("refreshes a staged connector before returning it", async () => {
+    mkdirSync(dirname(staged), { recursive: true });
+    writeFileSync(staged, "stale");
+
+    const found = await ensureCloudflared({ dataDir, here, env: { PATH: "", MARKER: marker }, log: (line) => lines.push(line) });
+
+    expect(found).toBe(staged);
+    expect(existsSync(marker)).toBe(true);
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(["--current", "--root", dataDir]);
+    expect(readFileSync(staged, "utf8")).toBe("fresh");
+    expect(lines.join("\n")).not.toMatch(/downloading/i);
+  });
+
+  it("honours an explicit override even when it names the staged path", async () => {
+    mkdirSync(dirname(staged), { recursive: true });
+    writeFileSync(staged, "override");
+    expect(await ensureCloudflared({
+      dataDir, here, env: { PATH: "", MARKER: marker, OMB_CLOUDFLARED_PATH: staged }, log: (line) => lines.push(line),
+    })).toBe(staged);
+    expect(existsSync(marker)).toBe(false);
+    expect(readFileSync(staged, "utf8")).toBe("override");
+    expect(lines).toEqual([]);
+  });
+
+  it("uses a PATH connector without preparing it when none is staged", async () => {
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const executable = join(bin, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    writeFileSync(executable, "path");
+    expect(await ensureCloudflared({ dataDir, here, env: { PATH: bin, MARKER: marker }, log: (line) => lines.push(line) })).toBe(executable);
+    expect(existsSync(marker)).toBe(false);
+    expect(lines).toEqual([]);
+  });
+
+  it("rejects a failed refresh instead of returning the stale connector", async () => {
+    mkdirSync(dirname(staged), { recursive: true });
+    writeFileSync(staged, "stale");
+    await expect(ensureCloudflared({
+      dataDir, here, env: { PATH: "", MARKER: marker, FAIL_PREPARE: "1" }, log: (line) => lines.push(line),
+    })).rejects.toThrow("the cloudflared refresh failed (exit 41)");
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(["--current", "--root", dataDir]);
+    expect(readFileSync(staged, "utf8")).toBe("stale");
+  });
+
+  it("prepares a connector when none is found", async () => {
+    expect(await ensureCloudflared({ dataDir, here, env: { PATH: "", MARKER: marker }, log: (line) => lines.push(line) })).toBe(staged);
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(["--current", "--root", dataDir]);
+    expect(readFileSync(staged, "utf8")).toBe("fresh");
+    expect(lines.join("\n")).toMatch(/downloading/i);
+  });
+
+  it("uses the Windows executable name in the shared staged path", () => {
+    expect(stagedCloudflaredPath({ appPath: dataDir, platform: "win32", arch: "x64" }))
+      .toBe(join(dataDir, "dist-native", "cloudflared", "win32-x64", "cloudflared.exe"));
+  });
+});
 
 describe("tunnel credentials: a private file, and unreadable is not empty", () => {
   let dir: string;
