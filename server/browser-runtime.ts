@@ -1,5 +1,3 @@
-import { realpathSync } from "node:fs";
-import { posix, win32 } from "node:path";
 import { killCliTree, spawnCli } from "./procs.ts";
 import { scrubHeldSecrets } from "../shared/redact.ts";
 import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
@@ -8,6 +6,7 @@ import { PageSizes, type PageSize } from "./browser-page-size.ts";
 import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-hold.ts";
 import type { BrowserSteps, StepCall, StepContext } from "./browser-steps.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
+import { launchSettingsKey } from "./browser-launch-key.ts";
 
 export interface BrowserSpawnSpec {
   command: string;
@@ -56,42 +55,6 @@ const LANE_BUSY = "Your previous browser call is still running; wait for it to f
 export const BROWSER_CALL_DEFAULTS = { requestTimeoutMs: 120_000, laneWaitMs: 30_000, callBudgetMs: HARNESS_CALL_BUDGET_MS, followUpReserveMs: 15_000 } as const;
 const RESTART_COST = "a restart closes every tab and loses page state such as form input";
 const LATE = Symbol("late");
-
-/** fnm's shell hook (`fnm env`, which a person's profile runs) puts a per-shell `<pid>_<epoch-ms>` link to the active
- * Node version on PATH: the link's name says nothing, the installation it resolves to does. Unix puts the link's
- * `bin` on PATH, Windows the link itself. */
-const FNM_PER_SHELL = /(?:^|[\\/])fnm_multishells[\\/][^\\/]+(?:[\\/]bin)?[\\/]?$/u;
-const FNM_UNRESOLVED = "fnm-multishell";
-
-function fnmTarget(entry: string): string {
-  try { return realpathSync.native(entry); }
-  catch { return FNM_UNRESOLVED; }
-}
-
-function stablePath(path: string, platform: NodeJS.Platform): string {
-  const entries: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of path.split((platform === "win32" ? win32 : posix).delimiter)) {
-    if (!FNM_PER_SHELL.test(entry)) {
-      entries.push(entry);
-      continue;
-    }
-    const target = fnmTarget(entry);
-    if (seen.has(target)) continue;
-    seen.add(target);
-    entries.push(target);
-  }
-  return entries.join((platform === "win32" ? win32 : posix).delimiter);
-}
-
-/** A running browser answers only the launch settings it started with: agent-browser relaunches Chrome without a word
- * when a command carries others, so a call with different ones is refused instead. */
-export function launchSettingsKey(spec: BrowserSpawnSpec, platform: NodeJS.Platform = process.platform): string {
-  const env = Object.entries(spec.env)
-    .map(([name, value]) => [name, name === "PATH" && value !== undefined ? stablePath(value, platform) : value] as const)
-    .sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify([spec.command, spec.args, env]);
-}
 
 const PAGE_ACTIONS: ReadonlySet<string> = new Set([
   "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press",
