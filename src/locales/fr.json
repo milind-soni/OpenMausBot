@@ -1930,6 +1930,8 @@
   "connectors.card.openAgain": "Rouvrir",
   "connectors.card.tryAgain": "Réessayer",
   "connectors.card.connectSecurely": "Se connecter en sécurité",
+  "connectors.card.signInTo": "Se connecter à {label}",
+  "connectors.card.signIn": "Se connecter",
   "connectors.card.continueTask": "Reprendre la tâche",
   "connectors.card.continuing": "Reprise en cours",
   "connectors.disconnectConfirm": "Déconnecter {identity} de {service} ? Seul ce compte {service} sera révoqué. Vos autres comptes {service} resteront connectés.",

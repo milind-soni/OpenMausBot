@@ -3798,6 +3798,8 @@
   "connectors.card.openAgain": "Tekrar aç",
   "connectors.card.tryAgain": "Tekrar dene",
   "connectors.card.connectSecurely": "Güvenli bir şekilde bağlan",
+  "connectors.card.signInTo": "{label} hesabında oturum aç",
+  "connectors.card.signIn": "Oturum aç",
   "connectors.card.continueTask": "Göreve devam et",
   "connectors.card.continuing": "Devam ediliyor",
   "connectors.disconnectConfirm": "{identity} kimliğinin {service} bağlantısı kesilsin mi? Yalnızca bu {service} hesabı iptal edilecektir. Diğer {service} hesaplarınız bağlı kalacaktır.",

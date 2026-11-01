@@ -3798,6 +3798,8 @@
   "connectors.card.openAgain": "Mở lại",
   "connectors.card.tryAgain": "Thử lại",
   "connectors.card.connectSecurely": "Kết nối an toàn",
+  "connectors.card.signInTo": "Đăng nhập vào {label}",
+  "connectors.card.signIn": "Đăng nhập",
   "connectors.card.continueTask": "Tiếp tục nhiệm vụ",
   "connectors.card.continuing": "Đang tiếp tục",
   "connectors.disconnectConfirm": "Ngắt kết nối {identity} khỏi {service}? Chỉ quyền truy cập của tài khoản {service} này sẽ bị thu hồi. Các tài khoản {service} khác của bạn vẫn sẽ được duy trì kết nối.",

@@ -5126,6 +5126,8 @@
   "connectors.card.openAgain": "다시 열기",
   "connectors.card.tryAgain": "다시 시도",
   "connectors.card.connectSecurely": "안전하게 연결",
+  "connectors.card.signInTo": "{label}에 로그인",
+  "connectors.card.signIn": "로그인",
   "connectors.card.continueTask": "작업 계속",
   "connectors.card.continuing": "계속하는 중",
   "connectors.disconnectConfirm": "{service}에서 {identity} 연결을 해제할까요? 이 {service} 계정만 해제되고, 다른 {service} 계정은 연결된 채로 남아요.",

@@ -2584,6 +2584,8 @@
   "connectors.card.openAgain": "重新打开",
   "connectors.card.tryAgain": "重试",
   "connectors.card.connectSecurely": "安全连接",
+  "connectors.card.signInTo": "登录 {label}",
+  "connectors.card.signIn": "登录",
   "connectors.card.continueTask": "继续任务",
   "connectors.card.continuing": "继续中",
   "connectors.disconnectConfirm": "断开 {identity} 与 {service} 的连接？只会撤销这个 {service} 账号，你的其他 {service} 账号仍保持连接。",

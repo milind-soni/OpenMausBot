@@ -4610,6 +4610,8 @@
   "connectors.card.openAgain": "Apri di nuovo",
   "connectors.card.tryAgain": "Riprova",
   "connectors.card.connectSecurely": "Connetti in modo sicuro",
+  "connectors.card.signInTo": "Accedi a {label}",
+  "connectors.card.signIn": "Accedi",
   "connectors.card.continueTask": "Continua l'attività",
   "connectors.card.continuing": "In corso",
   "connectors.disconnectConfirm": "Vuoi disconnettere {identity} da {service}? Verrà revocato solo questo account {service}. Gli altri tuoi account {service} resteranno connessi.",

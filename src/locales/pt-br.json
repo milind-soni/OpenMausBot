@@ -4573,6 +4573,8 @@
   "connectors.card.openAgain": "Abrir de novo",
   "connectors.card.tryAgain": "Tentar de novo",
   "connectors.card.connectSecurely": "Conectar com segurança",
+  "connectors.card.signInTo": "Entrar em {label}",
+  "connectors.card.signIn": "Entrar",
   "connectors.card.continueTask": "Continuar a tarefa",
   "connectors.card.continuing": "Continuando",
   "connectors.disconnectConfirm": "Desconectar {identity} de {service}? Só esta conta {service} será revogada. Suas outras contas {service} continuam conectadas.",

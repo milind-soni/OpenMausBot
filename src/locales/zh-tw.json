@@ -3307,6 +3307,8 @@
   "connectors.card.openAgain": "再次開啟",
   "connectors.card.tryAgain": "再試一次",
   "connectors.card.connectSecurely": "安全連線",
+  "connectors.card.signInTo": "登入 {label}",
+  "connectors.card.signIn": "登入",
   "connectors.card.continueTask": "繼續任務",
   "connectors.card.continuing": "繼續中",
   "connectors.disconnectConfirm": "要中斷 {identity} 與 {service} 的連線嗎？系統只會撤銷這個 {service} 帳戶，你其他的 {service} 帳戶仍會保持連線。",

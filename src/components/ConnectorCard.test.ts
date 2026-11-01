@@ -60,6 +60,20 @@ describe("ConnectorCard ask card", () => {
     expect(other).not.toContain("<input");
   });
 
+  it("reads as a sign-in for an MCP server and as today for a Composio app", () => {
+    const mcp = view({ source: "mcp", slug: "linear", label: "Linear" });
+    expect(mcp).toContain("Sign in to Linear");
+    expect(mcp).toMatch(/<button[^>]*>(?:(?!<\/button>)[^])*Sign in<\/button>/);
+    expect(mcp).not.toContain(t("connectors.card.connectSecurely"));
+    const composio = view({ source: "composio" });
+    expect(composio).toContain(t("connectors.card.connectSecurely"));
+    expect(composio).not.toContain("Sign in to");
+  });
+
+  it("draws nothing once superseded", () => {
+    expect(view({ source: "mcp", superseded: true })).toBe("");
+  });
+
   it("draws nothing once dismissed", () => {
     expect(view({ dismissed: true })).toBe("");
   });

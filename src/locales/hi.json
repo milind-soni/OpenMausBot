@@ -1930,6 +1930,8 @@
   "connectors.card.openAgain": "फिर से खोलें",
   "connectors.card.tryAgain": "फिर कोशिश करें",
   "connectors.card.connectSecurely": "सुरक्षित रूप से जोड़ें",
+  "connectors.card.signInTo": "{label} में साइन इन करें",
+  "connectors.card.signIn": "साइन इन करें",
   "connectors.card.continueTask": "काम जारी रखें",
   "connectors.card.continuing": "जारी है",
   "connectors.disconnectConfirm": "{identity} को {service} से अलग करें? सिर्फ़ इस {service} खाते की कनेक्शन अनुमति रद्द होगी। आपके बाकी {service} खाते जुड़े रहेंगे।",

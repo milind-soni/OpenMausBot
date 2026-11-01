@@ -4796,6 +4796,8 @@
   "connectors.card.openAgain": "もう一度開く",
   "connectors.card.tryAgain": "もう一度試す",
   "connectors.card.connectSecurely": "安全に接続",
+  "connectors.card.signInTo": "{label}にサインイン",
+  "connectors.card.signIn": "サインイン",
   "connectors.card.continueTask": "作業を再開",
   "connectors.card.continuing": "続行中",
   "connectors.disconnectConfirm": "{identity} を {service} から切断しますか？取り消されるのはこの {service} アカウントだけです。他の {service} アカウントは接続されたままです。",

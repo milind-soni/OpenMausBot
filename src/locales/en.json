@@ -5264,6 +5264,8 @@
   "connectors.card.openAgain": "Open again",
   "connectors.card.tryAgain": "Try again",
   "connectors.card.connectSecurely": "Connect securely",
+  "connectors.card.signInTo": "Sign in to {label}",
+  "connectors.card.signIn": "Sign in",
   "connectors.card.continueTask": "Continue task",
   "connectors.card.continuing": "Continuing",
   "connectors.disconnectConfirm": "Disconnect {identity} from {service}? Only this {service} account will be revoked. Your other {service} accounts will stay connected.",

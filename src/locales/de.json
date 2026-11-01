@@ -1943,6 +1943,8 @@
   "connectors.card.openAgain": "Erneut öffnen",
   "connectors.card.tryAgain": "Nochmal versuchen",
   "connectors.card.connectSecurely": "Sicher verbinden",
+  "connectors.card.signInTo": "Bei {label} anmelden",
+  "connectors.card.signIn": "Anmelden",
   "connectors.card.continueTask": "Aufgabe fortsetzen",
   "connectors.card.continuing": "Wird fortgesetzt",
   "connectors.disconnectConfirm": "{identity} von {service} trennen? Nur dieses {service}-Konto wird widerrufen. Deine anderen {service}-Konten bleiben verbunden.",
