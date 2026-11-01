@@ -77,7 +77,7 @@ type Receipts = { calls: Array<{ method: string; path: string }>; shots: Record<
     await ui("screenshot", "--out", `${fixture.logPath}.team-map-computers.png`);
 
     // The switch hides them, and the choice survives a reload.
-    expect(await press("Show computers")).toBe(true);
+    expect(await press("Show screens")).toBe(true);
     await expect.poll(async () => (await screens()).length).toBe(0);
     await evaluate("location.reload(); true");
     await openMap();
@@ -87,7 +87,7 @@ type Receipts = { calls: Array<{ method: string; path: string }>; shots: Record<
     const quiet = await shots();
     await new Promise((resolve) => setTimeout(resolve, 15_000));
     expect(await shots()).toBe(quiet);
-    expect(await press("Show computers")).toBe(true);
+    expect(await press("Show screens")).toBe(true);
     await expect.poll(async () => (await screens()).length, { timeout: 20_000 }).toBe(14);
 
     // The map's composer: nothing goes out without a tag; each tagged bot gets one normal message in its own chat.
@@ -115,7 +115,7 @@ type Receipts = { calls: Array<{ method: string; path: string }>; shots: Record<
     await expect.poll(snapshot).toContain("Sent to");
 
     // Clicking a computer opens that bot's computer view beside the map.
-    expect(await press("Open Theo's computer (Working)")).toBe(true);
+    expect(await press("Open Theo's desktop (Working)")).toBe(true);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Theo's screen");
     expect(await snapshot()).toContain('region "Team canvas"');
     Object.assign(evidence, { receipts: await receipts(), screens: await screens() });

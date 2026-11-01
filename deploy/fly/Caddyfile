@@ -1,5 +1,6 @@
 # Edge for one OMB Cloud Pro home machine (docs/cloud-pro.md). Fly's proxy
-# terminates TLS for <app>.fly.dev and reaches this machine on :8080. The
+# terminates TLS for <app>.fly.dev and reaches this machine on :8080 (on an own
+# server, the Cloudflare tunnel does, in this home's network namespace). The
 # OpenMausBot server listens only on 127.0.0.1, and every request forwarded
 # to it carries X-Forwarded-*, so it is never the loopback owner
 # (server/request-auth.ts): a remote client needs a paired session.
@@ -15,12 +16,15 @@
 	auto_https off
 	persist_config off
 	servers {
-		# Fly's proxy connects from its private ranges and names the real
-		# client in Fly-Client-IP. Only those peers may name a client; the
-		# address feeds the pairing lockout, never authorization.
-		trusted_proxies static private_ranges
+		# Only these peers may name the real client, and only in this header:
+		# Fly's proxy from its private ranges in Fly-Client-IP, or an own
+		# server's tunnel from this home's loopback in Cf-Connecting-IP (the
+		# launcher sets both: server/cloud-home-start.ts). Any other peer's
+		# header is ignored, and unset, no peer may name one. The address feeds
+		# the pairing lockout, never authorization.
+		trusted_proxies static {$OMB_CLOUD_EDGE_TRUSTED_PROXIES}
 		trusted_proxies_strict
-		client_ip_headers Fly-Client-IP
+		client_ip_headers {$OMB_CLOUD_EDGE_CLIENT_IP_HEADER}
 	}
 }
 

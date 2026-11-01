@@ -94,7 +94,6 @@ export function createPhoneHost(deps: PhoneHostDeps): PhoneHost {
     withheld: (bot, owner) => (owner !== null && mounts(bot, owner) ? phoneWithheldPrompt(bot, phonesOf(owner).map(({ registration }) => registration)) : ""),
     toolListing: () => (registry.list(null, () => false).length === 0 ? null : { phone: PHONE_TOOLS.map(({ name, description }) => ({ name, description })) }),
     async handle(body, capability, assertActive) {
-      const active = () => deps.active(capability);
       return phoneRpc(body as { method?: unknown; params?: unknown }, {
         assertActive,
         // Re-read the live bot and the turn's owner on every call, so a permission change wins over a request
@@ -127,6 +126,13 @@ export function createPhoneHost(deps: PhoneHostDeps): PhoneHost {
           return allows(match, phoneToolCapability(name)) ? target(match) : notAllowed(match.registration.name, name);
         },
         run: async (phone, name, args) => {
+          const owner = deps.turnOwner(capability);
+          const active = () => {
+            if (!deps.active(capability) || owner === null || deps.turnOwner(capability) !== owner) return false;
+            const bot = deps.bot(capability.botId);
+            const current = registry.get(phone.key);
+            return Boolean(bot && current && current.owner === owner && phoneAccess(bot, current.registration.capabilities, name).ok);
+          };
           const outcome = await jobs.request(phone.key, name, args, {
             active, timeoutMs: isOutboundTool(name) ? PHONE_SEND_TIMEOUT_MS : PHONE_JOB_TIMEOUT_MS,
             offlineText: `${phone.name} is offline. Open the MausBot app on it.`, online: () => registry.online(phone.key),

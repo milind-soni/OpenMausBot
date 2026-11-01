@@ -23,9 +23,10 @@ export declare function lentReport(input: {
 export declare function lendingForFiles(parts: {
   environment: () => unknown;
   sharing: () => unknown;
-  validate: (folders: unknown[]) => Promise<Array<{ id: string; path: string; name: string; write: boolean }>>;
+  validate: (folders: unknown[], options?: { homeEdits?: boolean }) => Promise<Array<{ id: string; path: string; name: string; write: boolean }>>;
 }): {
-  now(): { lendingId: string; folders: LentFolder[]; protectedPaths: string[] } | { off: true } | null;
+  /** `paused`: lending is paused on this computer, so bots' changes made on My Cloud wait there. */
+  now(): { lendingId: string; folders: LentFolder[]; protectedPaths: string[]; paused?: true } | { off: true } | null;
   lend(pcPath: string): Promise<LentFolder | null>;
   unlend(folderId: string): Promise<void>;
 };

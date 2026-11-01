@@ -1,4 +1,4 @@
-import { FolderOpen, Puzzle, UsersRound, Zap } from "lucide-react";
+import { FolderOpen, Globe, Puzzle, UsersRound, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useWebPanels } from "@/lib/web-panel-preferences";
 import { isRoutineProblemRun } from "@/lib/routines";
 import { useSidebarToolsLayout, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
@@ -113,6 +114,7 @@ export function SidebarFooterNav({
 }) {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
+  const webPanels = useWebPanels();
   const iconsOnly = density === "icons";
   const toolsLayout = useSidebarToolsLayout();
   const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
@@ -167,6 +169,17 @@ export function SidebarFooterNav({
         />
       )}
       {filesRow}
+      {advanced && webPanels.map((panel) => (
+        <NavRow
+          key={panel.id}
+          id={`web-panel-${panel.id}`}
+          label={panel.name}
+          iconsOnly={iconsOnly || toolbar}
+          active={state.activeView === "web-panel" && state.webPanelId === panel.id}
+          icon={(active) => <Globe size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showWebPanel", id: panel.id })}
+        />
+      ))}
     </>
   );
 

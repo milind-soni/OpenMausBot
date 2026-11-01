@@ -1,4 +1,4 @@
-// The harness side of the bot trigger tools (list_triggers, create_trigger, manage_trigger): what a bot is shown about
+// The harness side of the bot trigger tools (trigger_info, trigger): what a bot is shown about
 // its schedules, webhooks and app events, and how a trigger request is read before it reaches its service.
 import { z } from "zod";
 
@@ -84,7 +84,7 @@ export function agentWebhook(webhook: WebhookTrigger, latestRun?: RoutineRun) {
     kind: "webhook" as const,
     name: redactSecretsInText(webhook.name),
     ...instructionsOf(webhook.prompt),
-    when: "When another app sends something to its address. For the address to paste into that app's setup, call list_triggers with this trigger_id and include_address; the person also has Copy address on the Automations page.",
+    when: "When another app sends something to its address. For the address to paste into that app's setup, call trigger_info with this trigger_id and include_address; the person also has Copy address on the Automations page.",
     enabled: webhook.enabled,
     runOn: webhook.runOn,
     eventTypes: webhook.eventTypes ?? [],
@@ -153,7 +153,7 @@ export function listTriggers(input: {
     const routine = routines.find((candidate) => candidate.id === input.triggerId);
     const webhook = webhooks.find((candidate) => candidate.id === input.triggerId);
     const app = apps.find((candidate) => candidate.id === input.triggerId);
-    if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this bot. Call list_triggers without trigger_id to see its ids." };
+    if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." };
     const fires = input.runs.filter((run) => run.routineId === input.triggerId).slice(0, FIRES_SHOWN).map(agentRun);
     const shown = routine ? agentRoutine(routine, latest.get(routine.id)) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app!, latest.get(app!.id));
     return { ...header, trigger: { ...shown, recentFires: fires } };

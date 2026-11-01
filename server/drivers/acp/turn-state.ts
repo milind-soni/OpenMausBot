@@ -62,3 +62,11 @@ export interface AcpSession {
   fallbackNotice?: string;
   launchModel?: string;
 }
+
+/** A `tool_call` without a status is pending (ACP's default); a `tool_call_update` without one leaves the call as it was. */
+export function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; status?: unknown }, defaultStatus?: "pending"): void {
+  if (typeof update.toolCallId !== "string" || !update.toolCallId) return;
+  const status = update.status ?? defaultStatus;
+  if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
+  else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
+}

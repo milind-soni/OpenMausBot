@@ -51,8 +51,8 @@ describe("shared sidebar density store", () => {
     const preference = await import("./sidebar-preferences");
     expect(preference.useSidebarDensity()).toBe("comfortable");
     expect(hook.serverSnapshot!()).toBe("comfortable");
-    preference.saveSidebarDensity("compact");
-    expect(preference.useSidebarDensity()).toBe("compact");
+    preference.saveSidebarDensity("icons");
+    expect(preference.useSidebarDensity()).toBe("icons");
   });
 
   it("persists a choice and notifies every mounted consumer", async () => {
@@ -64,29 +64,29 @@ describe("shared sidebar density store", () => {
     const unsubscribeSettings = hook.subscribe!(settings);
 
     preference.setSidebarDensity("icons");
-    expect(local.getItem(preference.SIDEBAR_DENSITY_KEY)).toBe("icons");
+    expect(local.getItem(preference.SIDEBAR_DENSITY_KEY)).toBe("avatars");
     expect(sidebar).toHaveBeenCalledOnce();
     expect(settings).toHaveBeenCalledOnce();
     expect(hook.snapshot!()).toBe("icons");
 
     unsubscribeSidebar();
-    preference.setSidebarDensity("compact");
+    preference.setSidebarDensity("comfortable");
     expect(sidebar).toHaveBeenCalledOnce();
     expect(settings).toHaveBeenCalledTimes(2);
     unsubscribeSettings();
 
     vi.resetModules();
     const reloaded = await import("./sidebar-preferences");
-    expect(reloaded.useSidebarDensity()).toBe("compact");
+    expect(reloaded.useSidebarDensity()).toBe("comfortable");
   });
 
   it("follows another window's change, ignoring unrelated storage", async () => {
     const preference = await import("./sidebar-preferences");
-    preference.setSidebarDensity("compact");
+    preference.setSidebarDensity("comfortable");
     const listener = vi.fn();
     const unsubscribe = hook.subscribe!(listener);
 
-    local.setItem(preference.SIDEBAR_DENSITY_KEY, "icons");
+    local.setItem(preference.SIDEBAR_DENSITY_KEY, "avatars");
     storageEvent(preference.SIDEBAR_DENSITY_KEY);
     expect(listener).toHaveBeenCalledOnce();
     expect(hook.snapshot!()).toBe("icons");

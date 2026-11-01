@@ -12,6 +12,7 @@ import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 
 const run = promisify(execFile);
 const PROFILE_IN_CONTAINER = "/home/cua/.mozilla";
+const APPS_IN_CONTAINER = "/home/cua/.local";
 // docker: "Could not find the file … in container"; podman: "… could not be found on container …: no such file or directory".
 const NOT_IN_CONTAINER = /could not (?:be )?f(?:ou|i)nd|no such file/iu;
 
@@ -62,4 +63,49 @@ export async function keepFirefoxProfileBeforeRemove(
   if (!status.runtime || status.container === "missing" || !status.managed || status.imageMatches) return "none";
   if (status.container === "running") await stop();
   return rescueFirefoxProfile(status.runtime, target);
+}
+
+/** User-installed desktop applications conventionally live in ~/.local. Rescue that directory before replacing a legacy
+ * Local VM, but never overwrite an application area the durable folder already owns. */
+export async function rescueInstalledApps(runtime: string, target: LocalVmTarget): Promise<"rescued" | "kept" | "none"> {
+  const apps = join(target.workspaceDir, ".desktop-apps");
+  const durable = join(apps, "local");
+  await mkdir(apps, { recursive: true, mode: 0o700 });
+  const existing = await lstat(durable).catch(() => null);
+  const staging = join(apps, `.local-rescue-${randomBytes(6).toString("hex")}`);
+  try {
+    const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${APPS_IN_CONTAINER}`, staging]);
+    try {
+      await run(command, args, { timeout: 5 * 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, PATH: augmentedPath() } });
+    } catch (error) {
+      const failure = error as { stderr?: string; message?: string };
+      if (NOT_IN_CONTAINER.test(`${failure.stderr ?? ""} ${failure.message ?? ""}`)) return "none";
+      throw new Error(`could not copy installed desktop apps: ${(failure.stderr || failure.message || String(error)).trim().slice(0, 300)}`);
+    }
+    const copied = await lstat(staging);
+    if (!copied.isDirectory()) return "none";
+    if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) {
+      try {
+        await run("/usr/bin/diff", ["-qr", staging, durable], { timeout: 5 * 60_000, maxBuffer: 1024 * 1024 });
+      } catch {
+        throw new Error("could not preserve installed desktop apps because the durable app area differs from the old desktop");
+      }
+      return "kept";
+    }
+    if (existing) await rmdir(durable);
+    await rename(staging, durable);
+    return "rescued";
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
+export async function keepInstalledAppsBeforeRemove(
+  target: LocalVmTarget,
+  status: Pick<ContainerComputerStatus, "runtime" | "container" | "managed" | "imageMatches">,
+  stop: () => Promise<unknown>,
+): Promise<"rescued" | "kept" | "none"> {
+  if (!status.runtime || status.container === "missing" || !status.managed || status.imageMatches) return "none";
+  if (status.container === "running") await stop();
+  return rescueInstalledApps(status.runtime, target);
 }

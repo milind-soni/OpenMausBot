@@ -14,6 +14,7 @@ export const ENGINE_KINDS: Record<string, { config: string; instance: string; ap
   "openai-compatible": { config: "openaiCompat", instance: "openaiCompat", baseUrl: "required" },
   xai: { config: "xai", instance: "xaiApi", baseUrl: "allowed" },
   groq: { config: "groq", instance: "groq", baseUrl: "allowed" },
+  greenference: { config: "greenference", instance: "greenference", baseUrl: "no" },
   mistral: { config: "mistral", instance: "mistral", baseUrl: "no" },
   cerebras: { config: "cerebras", instance: "cerebras", baseUrl: "no" },
 };
@@ -49,7 +50,9 @@ export interface EngineRequest {
   progress?(event: Rec): void;
 }
 
-export const INSTALL_TIMEOUT_MS = 15 * 60_000;
+// The server stops a standalone download after 20 minutes; the extra minute covers unpacking and its checks, so the
+// server's own plain message arrives before this client gives up.
+export const INSTALL_TIMEOUT_MS = 21 * 60_000;
 
 async function installEngine(client: HeadlessClient, instanceId: string): Promise<string | undefined> {
   const response = await client.raw(`/api/instances/${encodeURIComponent(instanceId)}/install`, {

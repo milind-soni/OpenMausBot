@@ -105,6 +105,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       key: bot.id, name: bot.name, title: bot.title, description: bot.description, soul: bot.soul,
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
+      mascotFaceColor: bot.mascotFaceColor ?? undefined,
       chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
       // Grants travel so the team's shape survives, but the import still lands every bot grant-less.
       ...(bot.connectorTools ? { connectorTools: structuredClone(bot.connectorTools) } : {}),
@@ -173,6 +174,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         name: takeImportName(source.name, takenNames), title: source.title, description: source.description, soul: source.soul,
         color: source.color, mascotExpression: source.mascotExpression,
         mascotBody: botBodyId(source.mascotBody),
+        mascotFaceColor: source.mascotFaceColor,
         modelSelection: selection, section: sectionFor(source.section),
         // who may see the imported team is the importing admin's choice
         ...(options.visibility ? { visibility: options.visibility } : {}),

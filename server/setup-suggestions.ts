@@ -1,20 +1,21 @@
-// Personal answers for a new bot's setup card, written by the bot's own engine (or the helper) as a side job. The card
-// waits for them, for at most 6 s, and is filled once: the answers never change under the person's eyes, so a letter
-// key always picks the job it shows. Without anything to go on, or when no one can write them, the fixed answers
-// (initial-greeting.ts) show at once.
+// Personal answers for a new bot's setup card, written by the bot's own engine (or the helper) as a side job. A new
+// card waits for them for at most 6 s, and renaming the bot while its card is unanswered writes them again for the new
+// name. While they are written the card takes no pick, and they change only in the change that ends that wait, so a
+// letter key always picks a job the person could read. Without anything to go on the fixed answers (initial-greeting.ts)
+// show; when no one can write them, the card keeps what it shows.
 import { redactSecretsInText } from "../shared/redact.ts";
 import { appLabel } from "./app-event-catalog.ts";
 import type { AppConfig } from "./config.ts";
 import type { ProviderAdapter } from "./contracts.ts";
-import { hasSetupChoices } from "./initial-greeting.ts";
+import { hasSetupChoices, setupChoices } from "./initial-greeting.ts";
 import { isPickedBotName } from "./names.ts";
 import { LEARNED_LINE } from "./profile-learned.ts";
 import { openSetupOffer, type SetupRequestStore } from "./setup-request.ts";
 import type { SideJobText } from "./side-jobs.ts";
-import type { BotRecord } from "./store.ts";
+import type { BotRecord, Message, Store } from "./store.ts";
 
 export interface SuggestionFacts {
-  /** As typed; absent when the server picked the name (isPickedBotName). */
+  /** As typed; absent when it is blank or the server picked it (isPickedBotName). */
   name?: string;
   title?: string;
   department?: string;
@@ -105,7 +106,7 @@ const HEALTH = /diabet|insulin|glucos|glicos|blood sugar|medicat|medicament|pres
 /** Links, email addresses, and digits (dates, amounts, phone numbers). */
 const UNSAFE = /https?:\/\/|www\.|@|\d/i;
 const SCRIPT: Record<string, RegExp> = {
-  ja: /[぀-ヿ一-鿿]/, zh: /[一-鿿]/, ru: /[Ѐ-ӿ]/, uk: /[Ѐ-ӿ]/, hi: /[ऀ-ॿ]/,
+  ja: /[぀-ヿ一-鿿]/, zh: /[一-鿿]/, ko: /[가-힣]/, ru: /[Ѐ-ӿ]/, uk: /[Ѐ-ӿ]/, hi: /[ऀ-ॿ]/,
 };
 
 /** The last JSON array of strings in the reply, fences and prose around it ignored: some engines hand back their
@@ -170,10 +171,12 @@ export function worthAsking(facts: SuggestionBasis, apps: SuggestionApps): boole
 }
 
 export const SETUP_SUGGESTIONS_DEADLINE_MS = 6_000;
+/** Renames closer together than this are written for once, with the latest name. */
+export const RENAME_SETTLE_MS = 600;
 const APPS_WAIT_MS = 700;
 
 export interface SetupSuggestionsDeps {
-  store: SetupRequestStore;
+  store: SetupRequestStore & Pick<Store, "onChange">;
   /** config.json features.smartSetupChoices, on unless false. */
   enabled(): boolean;
   /** The bot's engine can set a bot up, as a pick needs. */
@@ -188,44 +191,151 @@ export interface SetupSuggestionsDeps {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms).unref?.(); });
 
+const typedName = (name: string): string | undefined => (name.trim() && !isPickedBotName(name) ? name : undefined);
+
+/** What the prompt reads first: the typed name, the title and the department. */
+const calledKey = (bot: Pick<BotRecord, "name" | "title" | "section">): string =>
+  JSON.stringify([factLine(typedName(bot.name), 80), factLine(bot.title, 120), factLine(bot.section, 60)]);
+
+/** One writing of a bot's card; a newer one for the same bot supersedes it. */
+interface CardJob {
+  threadId: string;
+  greetingId: string;
+  stop: AbortController;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+type Outcome = "shown" | "nothing to go on" | "unusable reply" | "failed" | "late" | "stopped";
+
 export function createSetupSuggestions(deps: SetupSuggestionsDeps) {
-  async function write(bot: BotRecord, greetingId: string, writer: SideJobText, basis: SuggestionBasis, apps: SuggestionApps): Promise<void> {
+  const jobs = new Map<string, CardJob>();
+  const called = new Map(deps.store.bots.map((bot) => [bot.id, calledKey(bot)]));
+
+  const unanswered = (bot: BotRecord): Message | null => {
+    const greeting = openSetupOffer(deps.store, bot.id, bot.threadId);
+    return greeting && !deps.store.taskByThread(bot.id, bot.threadId)?.setupRequest ? greeting : null;
+  };
+
+  function drop(botId: string): void {
+    const job = jobs.get(botId);
+    if (!job) return;
+    jobs.delete(botId);
+    clearTimeout(job.timer);
+    job.stop.abort();
+  }
+
+  function begin(bot: BotRecord, greetingId: string): CardJob {
+    drop(bot.id);
+    const job: CardJob = { threadId: bot.threadId, greetingId, stop: new AbortController() };
+    jobs.set(bot.id, job);
+    return job;
+  }
+
+  /** Ends the job, so the card takes picks again: with `choices` while it is unanswered, else with what it shows. Null
+   * when a newer job owns the card. */
+  function settle(botId: string, job: CardJob, choices: readonly string[] | null): boolean | null {
+    if (jobs.get(botId) !== job) return null;
+    drop(botId);
+    const greeting = deps.store.messagesFor(job.threadId).find((message) => message.id === job.greetingId);
+    if (!greeting?.setupChoicesPending && greeting?.setupChoicesUpdating === undefined) return false;
+    const bot = deps.store.bot(botId);
+    const shown = choices !== null && bot !== null && unanswered(bot)?.id === job.greetingId;
+    deps.store.patchMessage(job.threadId, job.greetingId, { setupChoicesPending: undefined, setupChoicesUpdating: undefined, ...(shown ? { setupChoices: [...choices] } : {}) });
+    return shown;
+  }
+
+  async function ask(writer: SideJobText, basis: SuggestionBasis, apps: SuggestionApps, stop: AbortSignal): Promise<{ choices: string[] | null; outcome: Outcome }> {
     const started = Date.now();
     const expiry = new AbortController();
     const timer = setTimeout(() => expiry.abort(), SETUP_SUGGESTIONS_DEADLINE_MS);
     timer.unref?.();
-    const expired = new Promise<never>((_, reject) => expiry.signal.addEventListener("abort", () => reject(new Error("late")), { once: true }));
-    expired.catch(() => undefined);
-    let choices: string[] | null = null;
-    let outcome = "failed";
+    const signal = AbortSignal.any([expiry.signal, stop]);
+    const ended = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("ended")), { once: true }));
+    ended.catch(() => undefined);
     try {
-      const named = apps && "later" in apps ? await Promise.race([apps.later, sleep(APPS_WAIT_MS).then(() => [])]) : apps?.known ?? [];
-      if (!worthAsking(basis, { known: named })) {
-        outcome = "nothing to go on";
-        return;
-      }
+      const named = apps && "later" in apps ? await Promise.race([apps.later, sleep(APPS_WAIT_MS).then(() => []), ended]) : apps?.known ?? [];
+      if (!worthAsking(basis, { known: named })) return { choices: null, outcome: "nothing to go on" };
       const prompt = setupSuggestionPrompt({ ...basis, apps: named });
       const remaining = Math.max(1, SETUP_SUGGESTIONS_DEADLINE_MS - (Date.now() - started));
-      const reply = await Promise.race([writer.generateText(prompt, { signal: expiry.signal, timeoutMs: remaining }), expired]);
-      choices = parseSetupSuggestions(reply, basis.languageCode);
-      outcome = choices ? "shown" : "unusable reply";
+      const reply = await Promise.race([writer.generateText(prompt, { signal, timeoutMs: remaining }), ended]);
+      const choices = parseSetupSuggestions(reply, basis.languageCode);
+      return { choices, outcome: choices ? "shown" : "unusable reply" };
     } catch {
-      outcome = expiry.signal.aborted ? "late" : "failed";
+      return { choices: null, outcome: stop.aborted ? "stopped" : expiry.signal.aborted ? "late" : "failed" };
     } finally {
       clearTimeout(timer);
-      try {
-        const greeting = deps.store.messagesFor(bot.threadId).find((message) => message.id === greetingId);
-        if (greeting?.setupChoicesPending) {
-          const open = openSetupOffer(deps.store, bot.id, bot.threadId)?.id === greetingId && !deps.store.taskByThread(bot.id, bot.threadId)?.setupRequest;
-          const shown = choices !== null && open && !expiry.signal.aborted;
-          deps.store.patchMessage(bot.threadId, greetingId, { setupChoicesPending: undefined, ...(shown ? { setupChoices: choices! } : {}) });
-          deps.log?.(`setup card answers for ${bot.id}: ${shown ? "shown" : outcome === "shown" ? "late" : outcome} after ${Date.now() - started} ms (${bot.modelSelection.instanceId}, ${writer.via})`);
-        }
-      } catch {
-        deps.log?.(`setup card answers for ${bot.id}: could not be saved`);
-      }
     }
   }
+
+  /** `renamed`: the card already shows answers, and nothing to go on means the fixed ones. */
+  async function write(bot: BotRecord, job: CardJob, writer: SideJobText, basis: SuggestionBasis, apps: SuggestionApps, renamed: boolean): Promise<void> {
+    const started = Date.now();
+    const { choices, outcome } = await ask(writer, basis, apps, job.stop.signal);
+    try {
+      const shown = settle(bot.id, job, choices ?? (renamed && outcome === "nothing to go on" ? setupChoices(basis.languageCode) : null));
+      if (shown === null) return;
+      deps.log?.(`setup card answers for ${bot.id}${renamed ? " after a rename" : ""}: ${!shown && outcome === "shown" ? "late" : outcome} after ${Date.now() - started} ms (${bot.modelSelection.instanceId}, ${writer.via})`);
+    } catch {
+      deps.log?.(`setup card answers for ${bot.id}: could not be saved`);
+    }
+  }
+
+  /** Ends a rename's job without asking anyone. */
+  function end(botId: string, job: CardJob, why: string, choices: readonly string[] | null = null): void {
+    try {
+      if (settle(botId, job, choices) !== null) deps.log?.(`setup card answers for ${botId} after a rename: ${why}`);
+    } catch {
+      deps.log?.(`setup card answers for ${botId}: could not be saved`);
+    }
+  }
+
+  function rewrite(botId: string, job: CardJob): void {
+    const bot = deps.store.bot(botId);
+    if (!bot || jobs.get(botId) !== job) return;
+    try {
+      if (!unanswered(bot)) return end(botId, job, "answered first");
+      const basis = deps.facts(bot);
+      const apps = deps.apps(bot);
+      if (!worthAsking(basis, apps)) return end(botId, job, "nothing to go on", setupChoices(basis.languageCode));
+      const writer = deps.withinBudget() ? deps.writer(bot.id) : null;
+      if (!writer) return end(botId, job, "no one can write them");
+      void write(bot, job, writer, basis, apps, true);
+    } catch {
+      end(botId, job, "not asked");
+    }
+  }
+
+  /** The card takes no pick from now on, so a letter key never picks an answer written for the old name. */
+  function renamed(bot: BotRecord): void {
+    const greeting = deps.enabled() && deps.canSetUp(bot) ? unanswered(bot) : null;
+    const current = jobs.get(bot.id);
+    if (!greeting) {
+      if (current) settle(bot.id, current, null);
+      return;
+    }
+    const job = begin(bot, greeting.id);
+    deps.store.patchMessage(bot.threadId, greeting.id, { setupChoicesPending: undefined, setupChoicesUpdating: Date.now() });
+    job.timer = setTimeout(() => rewrite(bot.id, job), RENAME_SETTLE_MS);
+    job.timer.unref?.();
+  }
+
+  deps.store.onChange((change) => {
+    if (change.type === "bot.deleted") {
+      called.delete(change.botId);
+      drop(change.botId);
+    } else if (change.type === "message" && change.message.role === "user") {
+      for (const [botId, job] of jobs) if (job.threadId === change.threadId) settle(botId, job, null);
+    } else if (change.type === "bot") {
+      const bot = deps.store.bot(change.botId);
+      if (!bot) return;
+      const key = calledKey(bot);
+      const before = called.get(bot.id);
+      called.set(bot.id, key);
+      const current = jobs.get(bot.id);
+      if (before !== undefined && before !== key) renamed(bot);
+      else if (current && !unanswered(bot)) settle(bot.id, current, null);
+    }
+  });
 
   return {
     /** Marks the card as waiting before it returns, so the new bot's first transcript carries the mark. */
@@ -233,14 +343,14 @@ export function createSetupSuggestions(deps: SetupSuggestionsDeps) {
       try {
         const bot = deps.store.bot(botId);
         const greeting = bot && deps.enabled() ? openSetupOffer(deps.store, bot.id, bot.threadId) : null;
-        if (!bot || !greeting || greeting.setupChoicesPending || !deps.canSetUp(bot) || !deps.withinBudget()) return;
+        if (!bot || !greeting || jobs.has(bot.id) || greeting.setupChoicesPending || !deps.canSetUp(bot) || !deps.withinBudget()) return;
         const writer = deps.writer(bot.id);
         if (!writer) return;
         const basis = deps.facts(bot);
         const apps = deps.apps(bot);
         if (!worthAsking(basis, apps)) return;
         deps.store.patchMessage(bot.threadId, greeting.id, { setupChoicesPending: true });
-        void write(bot, greeting.id, writer, basis, apps);
+        void write(bot, begin(bot, greeting.id), writer, basis, apps, false);
       } catch {
         deps.log?.(`setup card answers for ${botId}: not asked`);
       }
@@ -256,7 +366,7 @@ export function suggestionBasis(bot: BotRecord, place: { bots: readonly BotRecor
   try { language = new Intl.DisplayNames(["en"], { type: "language" }).of(place.languageCode) ?? "English"; } catch { language = "English"; }
   const aboutMe = place.shared ? undefined : aboutMeExcerpt(place.aboutMe, redactSecretsInText);
   return {
-    ...(isPickedBotName(bot.name) ? {} : { name: bot.name }),
+    ...(typedName(bot.name) ? { name: bot.name } : {}),
     ...(bot.title ? { title: bot.title } : {}),
     ...(bot.section ? { department: bot.section } : {}),
     ...(aboutMe ? { aboutMe } : {}),
@@ -271,7 +381,7 @@ type EngineCapabilities = Partial<Pick<ProviderAdapter["capabilities"], "agentsM
 
 /** The server's side of the card's writer, read as each bot is made. */
 export interface SetupSuggestionsHost extends Pick<SetupSuggestionsDeps, "withinBudget" | "writer" | "log"> {
-  store: SetupRequestStore & { readonly bots: readonly BotRecord[] };
+  store: SetupSuggestionsDeps["store"] & { readonly bots: readonly BotRecord[] };
   config(): Pick<AppConfig, "features" | "profile">;
   /** Several people share this place. */
   shared(): boolean;

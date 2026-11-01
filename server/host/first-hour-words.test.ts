@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FIRST_HOUR_LANGUAGES, firstHourWords, roundedTime } from "./first-hour-words.ts";
 
-const LOCALES = ["de", "es", "fr", "hi", "it", "ja", "pl", "pt-br", "ru", "tr", "uk", "vi", "zh", "zh-tw"];
+const LOCALES = ["de", "es", "fr", "hi", "it", "ja", "ko", "pl", "pt-br", "ru", "tr", "uk", "vi", "zh", "zh-tw"];
 
 describe("the first hour's words", () => {
   it("come in English and every language the app ships", () => {

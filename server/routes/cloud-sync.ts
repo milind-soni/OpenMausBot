@@ -90,7 +90,7 @@ export function createCloudSyncRoutes(options: {
         return;
       }
       if (method === "DELETE" && (m = match(`/api/sync/folders/${FOLDER}`))) {
-        s.unregister(m[1]!, url.searchParams.get("keepCloudCopy") !== "0");
+        await s.unregister(m[1]!, url.searchParams.get("keepCloudCopy") !== "0");
         res.writeHead(204).end();
         return;
       }

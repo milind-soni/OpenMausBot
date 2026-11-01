@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { callTool, type ToolCallContext } from "./agents-call.ts";
-import { availableTools, type CatalogProfile } from "./agents-catalog.ts";
+import { availableTools, fullInputSchema, type CatalogProfile } from "./agents-catalog.ts";
 
 function profile(overrides: Partial<CatalogProfile> = {}): CatalogProfile {
   return {
@@ -43,11 +43,13 @@ describe("Watcher options-card tool", () => {
     expect(availableTools(profile({ botId: "another-bot" })).map((tool) => tool.name)).not.toContain("create_options_card");
   });
 
-  it("advertises the bounded two-through-six choice schema", () => {
+  it("holds calls to the bounded two-through-six choice schema it describes in words", () => {
     const tool = availableTools(profile()).find((candidate) => candidate.name === "create_options_card")!;
     const options = (tool.inputSchema.properties as any).options;
-    expect(options).toMatchObject({ type: "array", minItems: 2, maxItems: 6, uniqueItems: true });
-    expect(tool.inputSchema.required).toEqual(["title", "subtitle", "options"]);
+    expect(tool.description).toContain("2-6 choices");
+    expect(options).toMatchObject({ type: "array", items: { type: "string" } });
+    expect(fullInputSchema("create_options_card")).toMatchObject({ properties: { options: { type: "array", minItems: 2, maxItems: 6, uniqueItems: true } } });
+    expect((tool.inputSchema as { required?: string[] }).required).toEqual(["title", "subtitle", "options"]);
   });
 
   it("refuses direct calls from another bot before a server round trip", async () => {
@@ -64,7 +66,7 @@ describe("Watcher options-card tool", () => {
     const result = await callTool("create_options_card", {
       title: "Title", subtitle: "Subtitle", options: ["Only one"],
     }, context({ client: { api, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } }));
-    expect(result).toEqual({ text: "options must contain 2-6 items.", isError: true });
+    expect(result).toEqual({ text: "create_options_card was not run: options needs at least 2 items (it has 1). Fix these and call it again.", isError: true });
     expect(api).not.toHaveBeenCalled();
   });
 

@@ -7,14 +7,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_WAITED, controlRefusal, createControlClient } from "./control-client.ts";
 import { computerPersonAwayText } from "./computer-wait.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { answerYourComputer, openYourComputerCard, withAnswer } from "./testing/your-computer.ts";
 import { YOUR_COMPUTER_WAITING } from "./your-computer-consent.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const CALL_WAIT_MS = 5_000;
-const ACT_WITHIN_MS = 1_000;
+// A first screen call must clear within ACT_WITHIN_MS, the person's answer to its card and the seat's claim included.
+const CALL_WAIT_MS = hostTimeout(5_000);
+const ACT_WITHIN_MS = hostTimeout(1_000);
 
 describe("lazy host claim and pin on use (issue #1650)", () => {
   let home = "";

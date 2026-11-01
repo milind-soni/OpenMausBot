@@ -79,7 +79,7 @@ describe("individual Markdown block actions", () => {
     await act(async () => first!.click());
     expect(first!.getAttribute("aria-label")).toBe("Code copied to clipboard");
     expect(first!.querySelector('[role="status"]')).toBe(status);
-    expect(status?.textContent).toBe("Copied!");
+    expect(status?.textContent).toBe("Copied");
     expect(writeText).toHaveBeenLastCalledWith(plain);
   });
 });

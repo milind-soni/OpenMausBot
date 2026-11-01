@@ -60,9 +60,10 @@ describe("OpenMausBot data-directory lease", () => {
     const stored = JSON.parse(readFileSync(join(dir, "openmausbot-server.lease"), "utf8"));
 
     // boot/uptime identify which boot wrote the record, so a pid recycled
-    // across a restart cannot be mistaken for a live owner. boot is null on
-    // platforms that expose no boot id, so it is checked separately.
-    const { boot, ...rest } = stored;
+    // across a restart cannot be mistaken for a live owner, and ns/start which
+    // pid namespace and process, so a container's reused pid cannot either.
+    // Each is null where the platform does not expose it.
+    const { boot, ns, start, ...rest } = stored;
     expect(rest).toEqual({
       version: 1,
       pid: process.pid,
@@ -72,8 +73,9 @@ describe("OpenMausBot data-directory lease", () => {
       uptime: expect.any(Number),
     });
     expect(boot === null || (typeof boot === "string" && boot.length > 0)).toBe(true);
+    expect(process.platform === "linux" ? /^[1-9]\d*$/.test(ns) && Number.isSafeInteger(start) : ns === null && start === null).toBe(true);
     expect(Object.keys(stored).sort()).toEqual(
-      ["boot", "createdAt", "host", "pid", "token", "uptime", "version"],
+      ["boot", "createdAt", "host", "ns", "pid", "start", "token", "uptime", "version"],
     );
     expect(() => acquireDataDirLease(dir)).toThrow(/already using this data directory/i);
 

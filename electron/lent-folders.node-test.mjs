@@ -58,7 +58,7 @@ test("lending for Files lends a folder read only on top of what is lent, and sto
   const env = { id: "cloud", origin: "https://omb-u-aaaaaaaaaaaa.fly.dev" };
   let state = { enabled: true, folders: [folder("Documents")], screen: true, internet: true, chrome: false, terminal: false };
   const saved = [], revoked = [];
-  const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input, enabled: true }; }, revoke: () => { revoked.push(true); state = { ...state, enabled: false }; }, lentToCloud: () => ({ off: true }) };
+  const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input, enabled: true }; return state; }, revoke: () => { revoked.push(true); state = { ...state, enabled: false }; }, lentToCloud: () => ({ off: true }) };
   const lending = lendingForFiles({ environment: () => env, sharing: () => sharing, validate: async ([entry]) => [{ ...entry, name: entry.path.split("/").at(-1) }] });
   const lent = await lending.lend("/Users/ash/Clients");
   assert.equal(lent.write, false);
@@ -169,6 +169,23 @@ test("a bot's change from while this computer was away lands, and one that met t
   assert.ok(existsSync(join(s.notes, "drafts")));
 });
 
+test("while lending is paused, a bot's change made on My Cloud waits there; Resume lands it, and the copy is kept all along", async (t) => {
+  const s = setup(t);
+  await s.service.pass();
+  const [entry] = s.service.state().shared;
+  s.lent.now = { ...s.lent.now, paused: true };
+  s.cloud.stage(entry.id, "plan.md", "the bot's plan", sha("the plan"));
+  await s.service.pass();
+  assert.equal(readFileSync(join(s.notes, "plan.md"), "utf8"), "the plan", "nothing lands here while paused");
+  assert.equal(s.cloud.lent.staged.length, 1, "it waits on My Cloud");
+  assert.equal(s.service.state().shared[0]?.id, entry.id, "the copy stays");
+  const { paused: _paused, ...resumed } = s.lent.now;
+  s.lent.now = resumed;
+  await s.service.pass();
+  assert.equal(readFileSync(join(s.notes, "plan.md"), "utf8"), "the bot's plan");
+  assert.equal(s.cloud.lent.staged.length, 0);
+});
+
 test("a Cloud from before lent copies gets none: lending stays live only there, and nothing lands where every bot reads", async (t) => {
   const s = setup(t);
   s.cloud.state.lentCopies = false;
@@ -182,7 +199,7 @@ test("a lent folder deleted from disk never stops lending or unlending the rest"
   const gone = folder("Gone"), kept = folder("Kept");
   let state = { enabled: true, folders: [gone, kept], screen: false, internet: true, chrome: false, terminal: false };
   const saved = [];
-  const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input }; }, revoke: () => {}, lentToCloud: () => ({ off: true }) };
+  const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input }; return state; }, revoke: () => {}, lentToCloud: () => ({ off: true }) };
   // As validateSharedFolders does: a folder no longer on disk rejects with ENOENT.
   const validate = async ([entry]) => { if (entry.path === gone.path) throw Object.assign(new Error("gone"), { code: "ENOENT" }); return [{ ...entry, name: entry.path.split("/").at(-1) }]; };
   const lending = lendingForFiles({ environment: () => env, sharing: () => sharing, validate });

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { appPermissionAllowed, appPermissionHandlers, externalWebUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
+import { appPermissionAllowed, appPermissionHandlers, emailDraftUrl, externalLinkUrl, externalWebUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
+import { boatClaimMailto } from "../src/lib/boat-offer.ts";
 import { cloudPlanSnapshot, createCloudAccountClient } from "./cloud-account.mjs";
 import { myCloudOrigin, rememberedCloudHome } from "./cloud-home.mjs";
 
@@ -76,11 +77,35 @@ test("web links reject embedded credentials and non-web schemes", () => {
     assert.throws(() => externalWebUrl(url), /web address/);
 });
 
+test("an email link opens only as a draft to one address with a subject and a body", () => {
+  const draft = "mailto:support@example.com?subject=Hello%20there&body=Line%20one%0D%0ALine%20two";
+  assert.equal(emailDraftUrl(draft), draft);
+  assert.equal(externalLinkUrl(draft), draft);
+  assert.equal(externalLinkUrl("MAILTO:support@example.com?Subject=Hi"), "mailto:support@example.com?Subject=Hi");
+  assert.equal(externalLinkUrl("https://example.com/help"), "https://example.com/help");
+  for (const url of ["mailto:a@example.com,b@example.com", "mailto:a%2Cb@example.com", "mailto:?to=a@example.com", "mailto:", "mailto:nobody"])
+    assert.throws(() => externalLinkUrl(url), /one address/, url);
+  for (const url of ["mailto:a@example.com?attach=/etc/passwd", "mailto:a@example.com?subject=Hi&cc=b@example.com", "mailto:a@example.com?bcc=b@example.com",
+    "mailto:a@example.com?to=b@example.com", "mailto:a@example.com?Attachment=~/.ssh/id_rsa"])
+    assert.throws(() => externalLinkUrl(url), /only a subject and a body/, url);
+  assert.throws(() => emailDraftUrl("mailto:a%E0%A4%A@example.com"), /invalid/);
+  assert.throws(() => emailDraftUrl("https://example.com"), /Only email links/);
+  for (const url of ["file:///tmp/test", "javascript:alert(1)", "data:text/html,test", "tel:+15555550100", "sms:+15555550100"])
+    assert.throws(() => externalLinkUrl(url), /Only web/, url);
+  for (const url of [null, 123, "not a url"])
+    assert.throws(() => externalLinkUrl(url), /web address/);
+});
+
+test("the app's claim to Boat opens exactly as the app drafts it", () => {
+  assert.equal(externalLinkUrl(boatClaimMailto()), boatClaimMailto());
+});
+
 test("both external-link entry points use the policy and IPC retains the local-origin gate", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   assert.match(main, /ipcMain\.handle\("desktop:open-external", localOnly\("desktop:open-external"/);
-  assert.match(main, /shell\.openExternal\(externalWebUrl\(rawUrl\)\)/);
-  assert.match(main, /shell\.openExternal\(externalWebUrl\(url\)\)/);
+  assert.match(main, /shell\.openExternal\(externalLinkUrl\(rawUrl\)\)/);
+  assert.match(main, /shell\.openExternal\(externalLinkUrl\(url\)\)/);
+  assert.doesNotMatch(main, /shell\.openExternal\(externalWebUrl\(/);
 });
 
 test("fails closed on unparsable or opaque origins", () => {

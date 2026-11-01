@@ -8,15 +8,16 @@ import { bootstrapBrand } from "./lib/brand";
 import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
-import { applyInterfaceMode, settleAdvancedModeDefault } from "./lib/interface-mode";
+import { settleAdvancedModeDefault } from "./lib/interface-mode";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
 import { HomeScreen, SignedOutAtHome } from "./components/HomeScreen";
+import { PageBoundary } from "./components/PageBoundary";
+import { endedBeforeReload, forgetEndedSession, SESSION_ENDED_REASON } from "./lib/session-ended";
 import "./styles.css";
 
 // Before first paint; settleAdvancedModeDefault must run before applySkin writes omb-skin.
 settleAdvancedModeDefault();
-applyInterfaceMode();
 applySkinChoice(readSkinChoice());
 applyFont(readFont());
 applyChatWidth(readChatWidth());
@@ -24,6 +25,12 @@ applyChatWidth(readChatWidth());
 async function chooseRoot(): Promise<React.ReactNode> {
   const home = window.ogb?.home;
   if (location.pathname === "/home" && home) return <HomeScreen bridge={home} manage={window.ogb?.cloudPlan?.manage} />;
+  // The window's own rail of places (electron/chrome-rail.mjs): see-through but for the rail and its open sheets.
+  if (location.pathname === "/rail" && window.ogb?.rail?.expand) {
+    document.documentElement.style.background = document.body.style.background = "transparent";
+    const { ChromeRail } = await import("./components/ChromeRail");
+    return <ChromeRail />;
+  }
   if (location.pathname === "/pair") {
     const signIn = takeBrowserSignInFromLocation();
     if (signIn) {
@@ -34,9 +41,10 @@ async function chooseRoot(): Promise<React.ReactNode> {
   }
   const session = await readSessionState();
   if (session.kind === "unauthenticated") {
-    const pair = <PairPage initialCode={null} reason={session.error} />;
+    const pair = <PairPage initialCode={null} reason={endedBeforeReload() ? SESSION_ENDED_REASON : session.error} />;
     return home ? <SignedOutAtHome bridge={home} fallback={pair} /> : pair;
   }
+  forgetEndedSession();
   if (session.kind === "loopback" && session.trust === "service") return <PairPage initialCode={null} reason={SERVICE_TRUST_REASON} />;
   if (location.pathname === "/desktop-viewer") {
     const { DesktopViewer } = await import("./components/DesktopViewer");
@@ -46,5 +54,5 @@ async function chooseRoot(): Promise<React.ReactNode> {
 }
 
 void Promise.all([bootstrapBrand(), chooseRoot()]).then(([, root]) => {
-  createRoot(document.getElementById("root")!).render(<StrictMode>{root}</StrictMode>);
+  createRoot(document.getElementById("root")!).render(<StrictMode><PageBoundary>{root}</PageBoundary></StrictMode>);
 });

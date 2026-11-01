@@ -11,7 +11,7 @@ export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel
 }) {
   return <aside aria-labelledby={titleId} data-notice={notice} onKeyDown={event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onDismiss(); }
-  }} className="fixed bottom-4 left-4 z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-xl border border-hairline/40 bg-panel p-3.5 text-ink shadow-2xl shadow-black/20">
+  }} className="fixed bottom-4 left-[calc(var(--rail-beside,0px)_+_1rem)] z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw_-_var(--rail-beside,0px)_-_32px)] overflow-y-auto rounded-xl border border-hairline/40 bg-panel p-3.5 text-ink shadow-2xl shadow-black/20">
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-start gap-2.5">
         <Icon size={16} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />
@@ -26,10 +26,10 @@ export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel
 
 export const PRIMARY_BUTTON = "ui-button ui-button-primary min-h-9 gap-1.5 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function LinkButton({ url, label, onOpened }: { url: string; label: string; onOpened?: () => void }) {
+export function LinkButton({ url, label, onOpened, className = PRIMARY_BUTTON }: { url: string; label: string; onOpened?: () => void; className?: string }) {
   const [failed, setFailed] = useState(false);
   return <div>
-    <button type="button" className={PRIMARY_BUTTON} onClick={() => {
+    <button type="button" className={className} onClick={() => {
       setFailed(false);
       void openExternalLink(url).then(onOpened).catch(() => setFailed(true));
     }}>
@@ -48,5 +48,5 @@ export function NoticeToast({ text, onDone }: { text: string; onDone: () => void
     const timer = setTimeout(onDone, 5_000);
     return () => clearTimeout(timer);
   }, [text]);
-  return <p role="status" data-notice-toast className="fixed bottom-4 left-4 z-[60] w-[300px] max-w-[calc(100vw-32px)] rounded-xl border border-hairline/40 bg-panel px-3.5 py-2.5 text-[13px] text-ink shadow-2xl shadow-black/20">{text}</p>;
+  return <p role="status" data-notice-toast className="fixed bottom-4 left-[calc(var(--rail-beside,0px)_+_1rem)] z-[60] w-[300px] max-w-[calc(100vw_-_var(--rail-beside,0px)_-_32px)] rounded-xl border border-hairline/40 bg-panel px-3.5 py-2.5 text-[13px] text-ink shadow-2xl shadow-black/20">{text}</p>;
 }

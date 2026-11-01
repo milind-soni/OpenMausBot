@@ -224,6 +224,7 @@ export interface FollowupPayload {
   trigger?: UsageTrigger;
   origin?: WorkOrigin;
   queuedAt?: number;
+  rowId?: string;
 }
 export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
 export interface ChatFollowup {
@@ -334,8 +335,8 @@ export function markNotificationLogRead(ids: readonly string[]): void {
 }
 
 /** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
-export function markThreadNotificationLogRead(threadId: string): string[] {
-  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 RETURNING id").all(threadId) as Array<{ id: string }>;
+export function markThreadNotificationLogRead(threadId: string, includeSpend = true): string[] {
+  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 AND (? OR kind != 'spend') RETURNING id").all(threadId, includeSpend ? 1 : 0) as Array<{ id: string }>;
   return rows.map((row) => row.id);
 }
 

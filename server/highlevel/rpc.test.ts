@@ -153,7 +153,7 @@ describe("highlevelRpc", () => {
     const read = await highlevelRpc(call("HIGHLEVEL_GET_CONTACT", { contactId: "contact_1" }), deps) as { isError?: boolean; structuredContent: Record<string, unknown> };
     expect(read.isError).toBeUndefined();
     expect(read.structuredContent).toMatchObject({ id: "contact_1", email: "ada@fixture.test" });
-    expect(checks()).toBe(2);
+    expect(checks()).toBeGreaterThanOrEqual(2);
     expect(writes).toEqual([]);
     const write = await highlevelRpc(call("HIGHLEVEL_UPDATE_CONTACT", { contactId: "contact_1", email: "new@fixture.test", tags: ["a"] }), deps) as { isError?: boolean };
     expect(write.isError).toBeUndefined();

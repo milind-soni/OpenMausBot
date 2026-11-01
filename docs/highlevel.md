@@ -168,6 +168,8 @@ Every successful write appends an activity row to the thread: `tool.name` `mcp__
   401 is answered at once.
 - A call that creates a contact, note, task or opportunity is never sent twice. HighLevel takes no idempotency key and
   may have saved the record before a 5xx or a lost answer. The bot gets an error that says so and checks first.
+- Each tool call checks its turn after retry or budget waits and before each HighLevel API request.
+  Stop prevents later requests. A request already sent can still complete.
 - Access tokens last a day; refresh tokens a year and rotate on every use. The rotated pair is stored before the retry.
   A refresh or a sign-out lands only on the token pair it started from. A call whose tokens were replaced meanwhile
   retries with the newer tokens of the same location, or stops when another location was connected.
@@ -188,7 +190,8 @@ locations at once (one connection per installation).
   is not a sign-out (token and OAuth) while a dead token still is; the token check's 401/403/404 sentences and redaction.
 - `server/highlevel/rpc.test.ts`: per-bot scoping (read-only refusal text, grants, tools/list filtering), the write
   record and the host's activity row.
+- `server/highlevel/cancellation.test.ts`: Stop during 429, 5xx and budget waits, before dispatch, and concurrent call isolation.
 - `server/highlevel/sign-in.test.ts`: the relay contract, the sign-in flow, a replaced flow's late claim, the token path
   and the owner routes.
 - `server/highlevel.e2e.test.ts`: a real server, fake relay and fake HighLevel, Connect → tools → refresh →
-  revocation → Disconnect → Private Integration token.
+  revocation → Disconnect → Private Integration token, and Stop during a 429 wait without a later write.

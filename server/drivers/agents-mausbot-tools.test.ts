@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
+import { availableTools, catalogProfileFromEnv, fullInputSchema } from "./agents-catalog.ts";
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 
 const listed = (env: Record<string, string>) => availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "maus", OMB_CHIEF_OF_STAFF: "1", ...env }));
@@ -20,7 +20,8 @@ describe("MausBot's two notification tools on the wire", () => {
       ["object", false, [], []],
       ["object", false, ["ids"], ["ids"]],
     ]);
-    expect(maus[1]!.inputSchema.properties.ids).toMatchObject({ type: "array", maxItems: 40, items: { type: "string" } });
+    expect(maus[1]!.inputSchema.properties.ids).toEqual({ type: "array", items: { type: "string" } });
+    expect(fullInputSchema("mark_notifications_read")).toMatchObject({ properties: { ids: { type: "array", maxItems: 40 } } });
     expect(JSON.stringify(MAUSBOT_TOOL_DEFINITIONS)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)"/);
   });
 });

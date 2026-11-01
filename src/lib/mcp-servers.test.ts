@@ -8,7 +8,7 @@ vi.mock("react", async (importOriginal) => ({
   useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
 }));
 
-import { mcpServersForBot } from "./mcp-servers";
+import { mcpServersForBot, mcpServersOfBot } from "./mcp-servers";
 
 describe("mcpServersForBot", () => {
   const all = [
@@ -18,13 +18,20 @@ describe("mcpServersForBot", () => {
   ];
 
   it("gives a bot without a list every enabled server", () => {
-    expect(mcpServersForBot(all, undefined).map((s) => s.name)).toEqual(["notes", "linear"]);
-    expect(mcpServersForBot(all, null).map((s) => s.name)).toEqual(["notes", "linear"]);
+    expect(mcpServersForBot(all, undefined, "b1").map((s) => s.name)).toEqual(["notes", "linear"]);
+    expect(mcpServersForBot(all, null, "b1").map((s) => s.name)).toEqual(["notes", "linear"]);
   });
 
   it("narrows to the bot's own names and never revives a disabled server", () => {
-    expect(mcpServersForBot(all, ["linear", "off", "gone"]).map((s) => s.name)).toEqual(["linear"]);
-    expect(mcpServersForBot(all, [])).toEqual([]);
+    expect(mcpServersForBot(all, ["linear", "off", "gone"], "b1").map((s) => s.name)).toEqual(["linear"]);
+    expect(mcpServersForBot(all, [], "b1")).toEqual([]);
+  });
+
+  it("never gives a bot another bot's own server", () => {
+    const owned = [...all, { name: "blender", enabled: true, bot: "ingo" }];
+    expect(mcpServersForBot(owned, undefined, "ingo").map((s) => s.name)).toEqual(["notes", "linear", "blender"]);
+    expect(mcpServersForBot(owned, ["blender"], "pepe")).toEqual([]);
+    expect(mcpServersOfBot(owned, "pepe").map((s) => s.name)).toEqual(["notes", "linear", "off"]);
   });
 });
 

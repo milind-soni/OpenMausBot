@@ -47,7 +47,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async () => { throw new Error('fixture denial'); } }); true`);
     await ui("click", "--name", "Copy as Markdown");
-    await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Copy failed — try download");
+    await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Couldn't copy. Use Download instead.");
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { window.copiedTranscript = text; } }); true`);
     await evaluate(`document.querySelector('[role=menu] button:has([role=status])').click(); true`);
     await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Copied");
@@ -65,16 +65,16 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
         return { viewport: innerWidth, scroll: document.documentElement.scrollWidth,
           menu: rect('[role=menu][aria-label=More]'), editor: rect('.mention-editor'),
           row: rect('[data-composer-row]'), controls: rect('[data-composer-actions]'),
-          threads: Boolean(document.querySelector('button[aria-label="All threads"]')) };
+          wraps: getComputedStyle(document.querySelector('[data-composer-row]')).flexWrap === 'wrap' };
       })()`);
       expect(await evaluate("document.querySelectorAll('[data-chathead-controls] > div').length")).toBeLessThan(6);
       expect(layout.scroll).toBeLessThanOrEqual(width);
       expect(layout.viewport).toBe(width);
       expect(layout.menu.left).toBeGreaterThanOrEqual(0);
       expect(layout.menu.right).toBeLessThanOrEqual(width);
-      expect(layout.threads).toBe(true);
       expect(layout.controls.width).toBeGreaterThan(0);
-      if (layout.row.width < 480) {
+      // Simple mode keeps the editor and its controls on one row at every width.
+      if (layout.wraps && layout.row.width < 480) {
         expect(layout.editor.width).toBeGreaterThanOrEqual(layout.row.width - 1);
         expect(layout.editor.bottom).toBeLessThanOrEqual(layout.controls.top);
       }

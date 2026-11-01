@@ -1,17 +1,21 @@
 // Runs one agents tool: check arguments, call the harness, render the model's text. Stateless;
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
+import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
 import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
-import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
+import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
+import { outOfBounds } from "./agents-schema.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
+import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
+import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
@@ -99,6 +103,14 @@ function handoffIds(r: Json): string[] {
 const MOVED_ENTRIES_SHOWN = 5;
 const FORGOTTEN_SHOWN = 8;
 
+/** A preference saved once in the person's About me, which every bot reads in their work. */
+function preferText(r: Json): string {
+  const whose = typeof r.person === "string" && r.person ? `${r.person}'s` : "the person's";
+  return r.preference === "saved"
+    ? `Saved in ${whose} About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too.`
+    : `Already in ${whose} About me, or they removed it before: nothing to save or pass on.`;
+}
+
 function forgetText(passage: string, r: Json): string {
   const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
   const notes = list(r.forgotten);
@@ -169,7 +181,11 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
 
-export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const { name, arguments: args } = resolveAgentsCall(called, input);
+  const refused = outOfBounds(name, fullInputSchema(name), args);
+  if (refused) return { text: refused, isError: true };
+  const member = agentsCallMember(name, args);
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
@@ -203,6 +219,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
+  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context);
+  if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };
@@ -243,13 +261,13 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
     const usable = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === "string")
       && typeof canonical.message === "string" && canonical.message.trim().length > 0
-      && (canonical.thread === undefined || canonical.thread === "standing" || canonical.thread === "new")
+      && (canonical.thread === undefined || (typeof canonical.thread === "string" && /^[\w-]{1,128}$/.test(canonical.thread)))
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string");
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string");
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
@@ -260,6 +278,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       thread: canonical.thread, reply: canonical.reply,
       title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
+      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }
@@ -457,7 +476,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.`,
     };
   }
-  if (name === "create_room") {
+  if (member === "create_room") {
     if (args.section !== undefined) return { text: "A room you create stays in your own department; ask the user to move it.", isError: true };
     const roomName = String(args.name ?? "").trim();
     const memberIds = Array.isArray(args.member_bot_ids)
@@ -465,10 +484,10 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       : [];
     const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
     if (!roomName) {
-      return { text: "create_room needs a room name.", isError: true };
+      return { text: "manage_room action=create needs a room name.", isError: true };
     }
     if (!memberIds.length) {
-      return { text: "create_room needs at least one bot ID in member_bot_ids.", isError: true };
+      return { text: "manage_room action=create needs at least one bot ID in member_bot_ids.", isError: true };
     }
     const r = await api(`/api/internal/create-room`, {
       method: "POST",
@@ -485,12 +504,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members.`,
     };
   }
-  if (name === "manage_room") {
+  if (member === "manage_room") {
     if (args.section !== undefined || args.action === "set_section") return { text: "Moving rooms between sections is user-only.", isError: true };
     const roomId = String(args.room_id ?? "").trim();
     const action = String(args.action ?? "").trim();
     if (!roomId || !action) {
-      return { text: "manage_room needs room_id and action.", isError: true };
+      return { text: "manage_room needs action and, for any action but create, the room_id from list_rooms.", isError: true };
     }
     const memberIds = Array.isArray(args.member_bot_ids)
       ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
@@ -515,6 +534,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   }
   if (name === "request_credential") {
     const credentialId = args.credential_id;
+    if (credentialId === undefined || credentialId === "") return requestCustomSecret(args, context);
     if (!isCredentialTargetId(credentialId)) {
       return { text: "request_credential needs a supported credential_id.", isError: true };
     }
@@ -631,12 +651,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     return confirmationResult(r, "the default model change", "model");
   }
-  if (name === "memory_update") {
+  if (member === "memory_update") {
     const passageOnly = args.action === "remove" || args.action === "forget";
-    if (!["append", "replace", "remove", "supersede", "forget"].includes(String(args.action))
+    if (!["append", "replace", "remove", "supersede", "forget", "prefer"].includes(String(args.action))
       || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
-      || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
-      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, or forget with old_text naming what to forget.", isError: true };
+      || (args.action !== "append" && args.action !== "prefer" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
+      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, forget with old_text naming what to forget, or prefer with text: one standing preference of the person.", isError: true };
     }
     const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
@@ -651,6 +671,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
+    if (args.action === "prefer") return { text: preferText(r) };
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
     const full = r.truncated
@@ -675,7 +696,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (r.error) return { text: `Couldn't retry that thread: ${String(r.error)}`, isError: true };
     return { text: typeof r.message === "string" ? r.message : "The thread is running again. Its result stays in that thread; you are not woken for it — check it later with session_search or list_threads if you need to." };
   }
-  if (name === "memory_log") {
+  if (member === "memory_log") {
     if (typeof args.text !== "string" || !args.text.trim()) {
       return { text: "memory_log needs text: one line about what happened.", isError: true };
     }
@@ -704,7 +725,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     return confirmationResult(r, `the team memory entry for ${entryName}`, "entry");
   }
-  if (name === "session_search") {
+  if (member === "session_search") {
     const q = String(args.query ?? "").trim();
     const since = typeof args.since === "string" ? args.since.trim() : "";
     const until = typeof args.until === "string" ? args.until.trim() : "";
@@ -745,17 +766,17 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return {
       text:
         `${memoryBlock}${hits.length} ${q ? "matching " : ""}message${hits.length === 1 ? "" : "s"} from your earlier conversations (${q ? "best match first" : "newest first"}):\n${lines.join("\n")}\n\n` +
-        "These are your own past notes. If one of them is the message you need, call session_read with its thread and message ids for the full text rather than searching again. Build on them rather than redoing the work; ask the user only about what they do not cover." +
+        "These are your own past notes. If one of them is the message you need, call session_search with its thread_id and message_id for the full text rather than searching again. Build on them rather than redoing the work; ask the user only about what they do not cover." +
         (crossed
           ? " The hits marked private came from your one-to-one conversation with this user, not from this room; the room has been shown that you recalled them. Use them, and say where something came from if anyone asks."
           : ""),
     };
   }
-  if (name === "session_read") {
+  if (member === "session_read") {
     const threadId = String(args.thread_id ?? "").trim();
     const messageId = String(args.message_id ?? "").trim();
     if (!threadId || !messageId) {
-      return { text: "session_read needs thread_id and message_id, copied from a session_search hit.", isError: true };
+      return { text: "Reading a message needs both thread_id and message_id, copied from a session_search hit.", isError: true };
     }
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, threadId, messageId });
     let r: Json;
@@ -860,9 +881,29 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       headerKeys ? `Header names on file: ${headerKeys}.` : "",
     ].filter(Boolean).join(" ");
     const local = transport === "command" ? " Enabling a local command runs that command on their computer." : "";
+    const keptIn = Array.isArray(saved.keptIn) ? saved.keptIn.filter((path): path is string => typeof path === "string") : [];
+    const own = (saved.own === true ? " It uses files in your own folder, so it works only for you, not for other bots." : "")
+      + (keptIn.length ? ` Its files were in this conversation's temporary folder, so they were copied to ${keptIn.join(", ")} in your own folder, and it runs from there: change them there.` : "");
     return {
-      text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${named ? ` ${named}` : ""}`,
+      text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${own}${named ? ` ${named}` : ""}`,
     };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
+}
+
+/** A secret OpenMausBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */
+async function requestCustomSecret(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const r = await context.client.apiResponse("/api/internal/request-credential", {
+    method: "POST",
+    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery }),
+  });
+  const label = typeof r.body.label === "string" ? r.body.label : "the secret";
+  if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
+  if (typeof r.body.text === "string") return { text: `${r.body.text} Continue the task.` };
+  const asked = r.body.savedAs === "ref"
+    ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.`
+    : r.body.savedAs === "file" ? ` ${label} was saved earlier as a file for your commands, not as a secretRef, so this card asks for it again.` : "";
+  return {
+    text: `A secure card for ${label} is ready in OpenMausBot, on the computer and on a freshly QR-paired phone.${asked} End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
+  };
 }

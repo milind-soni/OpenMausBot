@@ -36,7 +36,9 @@ function fixture() {
   fs.copyFileSync(browserPolicy, path.join(resources, "openmausbot-browser.apparmor"));
   const systemRoot = path.join(appRoot, "test-system");
   const apparmorDir = path.join(systemRoot, "apparmor.d");
-  fs.mkdirSync(apparmorDir, { recursive: true });
+  // Model the primary target host: Ubuntu 24.04 with the AppArmor 4 ABI.
+  fs.mkdirSync(path.join(apparmorDir, "abi"), { recursive: true });
+  fs.writeFileSync(path.join(apparmorDir, "abi", "4.0"), "fixture\n");
   fs.chmodSync(apparmorDir, 0o755);
   const parser = path.join(systemRoot, "apparmor_parser");
   fs.writeFileSync(parser, '#!/bin/sh\nprintf "profile operation: %s %s\\n" "$1" "$2"\n', { mode: 0o755 });
@@ -86,10 +88,23 @@ describe("Linux DEB sandbox policy", () => {
 describe.skipIf(process.platform !== "linux")("Linux DEB upgrade hook", () => {
   it("skips an unsupported optional policy on legacy hosts without userns restriction", () => {
     const { appRoot, systemRoot, parser, apparmorDir } = fixture();
+    fs.rmSync(path.join(apparmorDir, "abi"), { recursive: true });
     fs.unlinkSync(path.join(systemRoot, "apparmor_restrict_unprivileged_userns"));
     fs.writeFileSync(parser, "#!/bin/sh\nexit 42\n", { mode: 0o755 });
     const result = runHook(appRoot);
     expect(result.status).toBe(0);
+    expect(fs.existsSync(path.join(apparmorDir, "openmausbot-browser"))).toBe(false);
+  });
+  it("skips the optional policy on an unrestricted host without the AppArmor 4 ABI", () => {
+    const { appRoot, systemRoot, parser, apparmorDir } = fixture();
+    // Ubuntu 22.04 + HWE exposes the restriction sysctl set to 0, but its
+    // AppArmor 3.0 parser cannot load an abi/4.0 policy.
+    fs.rmSync(path.join(apparmorDir, "abi"), { recursive: true });
+    fs.writeFileSync(path.join(systemRoot, "apparmor_restrict_unprivileged_userns"), "0\n");
+    fs.writeFileSync(parser, "#!/bin/sh\nexit 42\n", { mode: 0o755 });
+    const result = runHook(appRoot);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).not.toContain("profile operation");
     expect(fs.existsSync(path.join(apparmorDir, "openmausbot-browser"))).toBe(false);
   });
   it("repairs legacy directory and executable modes idempotently", () => {

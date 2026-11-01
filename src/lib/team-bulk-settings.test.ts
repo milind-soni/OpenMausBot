@@ -114,7 +114,7 @@ describe("team-wide settings", () => {
     expect(toOpus.map((row) => row.status)).toEqual(["apply", "skip", "skip", "skip"]);
     expect(toOpus[0]).toMatchObject({ patch: { modelSelection: { instanceId: "claude", model: "opus", effort: "low" }, keepThreadModels: true } });
     expect(toOpus[1]).toMatchObject({ reason: "Codex does not offer opus" });
-    expect(toOpus[3]).toMatchObject({ reason: "its engine is not available" });
+    expect(toOpus[3]).toMatchObject({ reason: "its AI isn't available" });
 
     const high = planTeamChange(bots, instances, { kind: "model", effort: "high" });
     expect(high.map((row) => row.status)).toEqual(["apply", "apply", "skip", "skip"]);

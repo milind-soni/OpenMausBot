@@ -363,7 +363,7 @@ describe("the model picker in Simple mode", () => {
     expect(atDefault).toContain('title="The model decides how hard to think." class="text-[12px] leading-4 text-ink-tertiary">Default</span>');
   });
 
-  it("names the model on the Simple chip at every header width, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
+  it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
     const chip = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     const markup = renderToStaticMarkup(chip);
     expect(markup).not.toContain("data-model-effort");
@@ -374,12 +374,40 @@ describe("the model picker in Simple mode", () => {
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
-    expect(markup).toContain('<span class="max-w-[160px] truncate">Opus 5.5</span>');
+    expect(markup).toContain('<span class="min-w-0 max-w-[160px] truncate">Opus 5.5</span>');
     expect(markup).toContain("opacity-60");
     fixture.advanced = true;
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(renderToStaticMarkup(advanced)).toContain("· High");
     expect(String(advanced.props.title)).toContain("High effort");
+  });
+
+  it("puts the header chip on an opaque surface, so scrolled transcript text cannot read through it", () => {
+    const classes = () => String(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!.props.className);
+    expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
+    expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    fixture.advanced = true;
+    try {
+      expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "shadow-(--shadow-float)"]));
+      expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    } finally {
+      fixture.advanced = false;
+    }
+  });
+
+  it("leaves a contained picker on its settings row unchanged, with no floating surface", () => {
+    const chip = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(chip.props.className)).not.toContain("bg-composer");
+    expect(String(chip.props.className)).not.toContain("shadow-(--shadow-float)");
+  });
+
+  it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
+    const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
+    const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(loose.props.className)).toContain("shrink-0");
+    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
@@ -485,6 +513,24 @@ describe("the model picker in Simple mode", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: expect.objectContaining({ model: "claude-haiku-4-5-20251001" }),
+    }));
+  });
+
+  it("lets a contained Antigravity picker return a named variant to the session setting", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "high",
+    } };
+    const opened = open(forBot, { contained: true });
+    const simple = pane(opened)!;
+    expect(opened.html).toContain("Use session setting");
+    expect((simple.props as { onResetVariant?: () => void }).onResetVariant).toBeTypeOf("function");
+    (simple.props as { onResetVariant: () => void }).onResetVariant();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: { instanceId: "antigravity", model: "gemini-3.8-flash" },
     }));
   });
 
@@ -702,6 +748,23 @@ describe("the model picker in Simple mode", () => {
     expect(html).toMatch(/data-simple-route="true"[^>]*>anthropic</);
     expect(html).toMatch(/data-simple-route="true"[^>]*>amazon-bedrock</);
     expect(html).not.toMatch(/data-simple-route="true"[^>]*>openai</);
+  });
+
+  it("renders a model's route on its own line in a row that may grow", () => {
+    fixture.instances = [engine("pi", "piAgent", "pi", "custom", [
+      { id: "amazon-bedrock/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
+      { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },
+    ])];
+    const html = menu(open(bot(undefined, "pi", "amazon-bedrock/claude-sonnet-4-5")).html);
+    const row = html.split("<button").find((part) => part.includes("data-simple-route") && part.includes("anthropic"));
+    expect(row).toBeDefined();
+    const lines = row!.slice(row!.indexOf("data-simple-model-text"));
+    expect(lines).toMatch(/data-simple-model-text="true" class="[^"]*\bflex-col\b/);
+    expect(lines).toMatch(/<span class="truncate">Claude Sonnet 4\.5<\/span>/);
+    expect(lines).toMatch(/data-simple-route="true" class="[^"]*\btruncate\b[^"]*">anthropic</);
+    expect(row).toContain("min-h-[30px]");
+    expect(row).not.toMatch(/\sh-\[30px\]/);
+    expect(row).not.toContain("max-w-[45%]");
   });
 
   it("looks for local models only when asked, on Show all where a provider offers them, never just for opening", () => {

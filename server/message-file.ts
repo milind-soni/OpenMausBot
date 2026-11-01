@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
+import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 
 export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -376,6 +377,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       sawOutsideRoot = true;
       continue;
     }
+    if (inSecretFolder(canonicalBefore)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
 
     let handle: FileHandle | undefined;
     try {
@@ -390,6 +392,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
 
       const canonicalAfter = await realpath(candidate);
       if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
+      if (inSecretFolder(canonicalAfter)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
       const after = await stat(canonicalAfter);
       if (opened.dev !== after.dev || opened.ino !== after.ino) {
         throw statusError(409, "the linked file changed while it was being opened");
@@ -508,6 +511,7 @@ async function readMessageFolder(
       sawOutsideRoot = true;
       continue;
     }
+    if (inSecretFolder(folder)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
     if (!(await stat(folder)).isDirectory()) throw statusError(400, "the link does not point to a folder");
 
     const names = (await readdir(folder)).sort((a, b) => a.localeCompare(b));
@@ -519,7 +523,7 @@ async function readMessageFolder(
         const own = await lstat(child);
         if (!own.isFile() && !own.isSymbolicLink()) continue;
         const target = await realpath(child);
-        if (!containedBy(root, target)) continue;
+        if (!containedBy(root, target) || inSecretFolder(target)) continue;
         const info = await stat(target);
         if (!info.isFile()) continue;
         if (entries.length >= MESSAGE_FOLDER_MAX_ENTRIES) {

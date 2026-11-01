@@ -74,7 +74,7 @@ test("a folder added on the Files page is lent, read only, and Stop sharing take
   const saves = [];
   const sharing = {
     cloudState: () => state, lentToCloud: () => (state.enabled ? { lendingId: "8b6f1c1e-3d6a-4a8e-9f1e-0a1b2c3d4e5f", folders: state.folders, protectedPaths: [] } : { off: true }),
-    saveCloud: async (_env, input) => { saves.push(input); state = { ...state, ...input, enabled: true }; }, revoke: () => { saves.push("revoked"); state = { ...state, enabled: false }; },
+    saveCloud: async (_env, input) => { saves.push(input); state = { ...state, ...input, enabled: true }; return state; }, revoke: () => { saves.push("revoked"); state = { ...state, enabled: false }; },
   };
   const installed = installCloudFiles({
     app: { getPath: (name) => join(dir, name) }, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },

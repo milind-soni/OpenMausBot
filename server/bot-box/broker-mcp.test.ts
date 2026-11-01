@@ -9,7 +9,7 @@ import { RemoteMcpClient } from "../mcp-http.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
-import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName } from "./broker-mcp.ts";
+import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName, mcpReconnectLine, retryBrokeredMcp } from "./broker-mcp.ts";
 import { openCredentialBroker, type CredentialBroker } from "./broker.ts";
 
 const custom = {
@@ -53,6 +53,25 @@ describe("remote MCP servers through the broker", () => {
     credentials.revokeThread("t1");
     expect(url(brokerRemoteMcp(changed, { botId: "b1", threadId: "t1" }, b))).not.toBe(first);
     expect(credentials.stats().tokens).toBe(2);
+  });
+
+  withBroker("gives a conversation a new token after a URL server failed as its engine started, so the engine reconnects", async () => {
+    const b = await broker();
+    const url = (servers: Record<string, unknown>) => (servers.notion as { url: string }).url;
+    const first = url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b));
+    brokerRemoteMcp(custom, { botId: "b1", threadId: "t2" }, b);
+    expect(retryBrokeredMcp({ botId: "b1", threadId: "t1" }, ["files"]), "a command server is checked elsewhere").toEqual([]);
+    expect(retryBrokeredMcp({ botId: "b1", threadId: "t9" }, ["notion"]), "a conversation with nothing brokered").toEqual([]);
+    expect(url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b)), "nothing failed here: same token, same warm engine").toBe(first);
+    expect(retryBrokeredMcp({ botId: "b1", threadId: "t1" }, ["notion", "files"])).toEqual(["notion"]);
+    const next = url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b));
+    expect(next, "a new token, so the engine's server list changes and it starts again").not.toBe(first);
+    expect(url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b)), "then kept again").toBe(next);
+  });
+
+  it("says which servers didn't connect, and that they connect again on the next message", () => {
+    expect(mcpReconnectLine(["notion"])).toBe("The MCP server notion didn't connect, so its tools weren't available this time. It connects again on your next message.");
+    expect(mcpReconnectLine(["notion", "hq", "mail"])).toBe("The MCP servers notion, hq, and mail didn't connect, so their tools weren't available this time. They connect again on your next message.");
   });
 
   withBroker("takes a gateway's two service-token headers to it, while the engine's server list holds neither", async () => {

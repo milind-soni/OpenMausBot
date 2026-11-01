@@ -117,7 +117,7 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
     let whole: BridgeTool[] = [];
     await withServer(unbridged, async (ask) => {
       whole = (await ask("tools/list")).result!.tools!;
-      expect(whole.map((tool) => tool.name)).toEqual(expect.arrayContaining(["coordinate_bots", "create_trigger", "list_triggers", "session_search"]));
+      expect(whole.map((tool) => tool.name)).toEqual(expect.arrayContaining(["coordinate_bots", "trigger", "trigger_info", "session_search"]));
       expect(whole.map((tool) => tool.name)).not.toEqual(expect.arrayContaining(["find_tool"]));
       expect(whole.length).toBeGreaterThan(25);
       // the bridge's two names mean nothing to a turn that does not have it
@@ -135,7 +135,7 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
     expect(bridged.env.OMB_AGENTS_TOOL_BRIDGE).toBe("1");
     expect(after.systemPrompt).toContain(AGENTS_TOOL_BRIDGE_PROMPT);
     // the rest of the prompt still names its tools as it did; the one rule covers them
-    for (const prompt of [before.systemPrompt, after.systemPrompt]) expect(prompt).toContain("set it up with create_trigger in this turn");
+    for (const prompt of [before.systemPrompt, after.systemPrompt]) expect(prompt).toContain("set it up with trigger action=create in this turn");
     // said once
     expect(after.systemPrompt.split(AGENTS_TOOL_BRIDGE_PROMPT)).toHaveLength(2);
     // a fixture bot is not a Chief of Staff, so create_bot is not one of its tools
@@ -149,13 +149,13 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
       expect(JSON.stringify(list.result!.tools)).toBe(JSON.stringify(createToolBridge(whole).listed));
       expect(namesOf(list).slice(-2)).toEqual(["find_tool", "use_tool"]);
       expect(namesOf(list)).toEqual(expect.arrayContaining(["coordinate_bots", "post_to_room", "memory_update", "request_sign_in"]));
-      expect(namesOf(list)).not.toEqual(expect.arrayContaining(["create_trigger"]));
+      expect(namesOf(list)).not.toEqual(expect.arrayContaining(["trigger"]));
       expect(JSON.stringify(list.result!.tools).length).toBeLessThan(JSON.stringify(whole).length / 2);
 
       // found from how a person would ask, with the schema the whole catalog lists
       const found = (JSON.parse(textOf(await call(ask, "find_tool", { query: "what routines do I have" }))) as { matches: BridgeTool[] }).matches;
-      expect(found[0]!.name).toBe("list_triggers");
-      expect(found[0]!.inputSchema).toEqual(whole.find((tool) => tool.name === "list_triggers")!.inputSchema);
+      expect(found[0]!.name).toBe("trigger_info");
+      expect(found[0]!.inputSchema).toEqual(whole.find((tool) => tool.name === "trigger_info")!.inputSchema);
       // then run: the harness itself answered, with this turn's capability,
       // what it answers the same tool called by its own name
       const routines = await use(ask, "list_triggers");
@@ -204,6 +204,9 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
     await control(["send-channel", "--channel", channel.id, "--text", "Stay active in this room."]);
     const room = await launched();
     expect(room.mcpConfig.mcpServers.agents!.env.OMB_AGENTS_TOOL_BRIDGE).toBe("1");
+    // A room refuses widgets, pages and a computer pick, so its turn is not listed them.
+    expect(room.mcpConfig.mcpServers.agents!.env).toMatchObject({ OMB_ROOM: "1", OMB_COMPUTER_SELECTION: "0" });
+    expect(after.mcpConfig.mcpServers.agents!.env.OMB_ROOM).toBe("0");
     expect(room.systemPrompt).toContain(AGENTS_TOOL_BRIDGE_PROMPT);
     await control(["interrupt", "--channel", channel.id]);
     await control(["wait", "--channel", channel.id, "--timeout", "30"]);
@@ -230,7 +233,7 @@ it("leaves every gate and limit where it was: a tool selection, a Chief-only too
     await withServer(gate, async (ask) => {
       const list = await ask("tools/list");
       // the whole catalog but the one tool the selection leaves out, and no way round it
-      expect(namesOf(list)).toEqual(expect.arrayContaining(["coordinate_bots", "create_trigger", "list_rooms", "post_to_room"]));
+      expect(namesOf(list)).toEqual(expect.arrayContaining(["coordinate_bots", "trigger", "list_rooms", "post_to_room"]));
       for (const name of ["vm_exec", "find_tool", "use_tool"]) expect(namesOf(list), name).not.toContain(name);
       expect((await call(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." });
       expect((await use(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." });

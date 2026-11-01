@@ -172,10 +172,22 @@ describe("a usage-limit refusal", () => {
   it("rejects the turn with its reset once the process has stopped, publishing nothing", async () => {
     const f = fixture();
     await expect(f.send(() => refuse(f))).rejects.toMatchObject({
-      name: "TurnUsageLimitRefusedError", turnId: "turn", message: limitError.message, resetsAt: 1_760_888_400_000,
+      name: "TurnUsageLimitRefusedError", turnId: "turn", message: limitError.message, resetsAt: 1_760_888_400_000, scope: "engine", known: false,
     });
     expect(f.stopped).toHaveBeenCalledOnce();
     expect(f.events.map(event => event.type)).toEqual(["turn.started"]);
+  });
+
+  it("says which limit it was, so one model's own limit holds that model alone", async () => {
+    const f = fixture();
+    const modelLimit = { ...limitError, limit: "model", limitResetsAt: 1_761_000_000_000 } as RuntimeEvent;
+    await expect(f.send(() => {
+      f.recovery.frame("thread", { type: "rate_limit_event" });
+      f.recovery.frame("thread", limitFrame);
+      f.recovery.emit(modelLimit);
+      f.recovery.frame("thread", result);
+      f.recovery.emit(quota);
+    })).rejects.toMatchObject({ name: "TurnUsageLimitRefusedError", resetsAt: 1_761_000_000_000, scope: "model" });
   });
 
   it("publishes the limit as usual when recovery is off or the model already worked", async () => {

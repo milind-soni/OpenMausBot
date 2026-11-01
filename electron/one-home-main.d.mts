@@ -21,8 +21,6 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   journalFile(): string;
   tempRoot(): string;
   lend?(projects: string[]): Promise<unknown>;
-  /** Once this computer is lent: asks the person, at most once, to lend the rest of it too, without being waited for. */
-  offer?(): unknown;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;
   openLocal?(): void;
@@ -38,6 +36,8 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   teamJournal?: { read(): unknown; write(value: unknown): void };
   /** The waits of the move's report to the Admin (move-status.mjs), setTimeout's by default. */
   reportTimers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
+  /** The move to a server of the person's own: while it is chosen no move to My Cloud starts, and its line is this computer's page's. */
+  other?(): null | { view(): unknown; seen(): unknown; retry(): Promise<unknown>; active(): boolean };
 }): ReturnType<typeof installCloudSend> & {
   keep: { state(): KeepHereState; set(on: boolean): Promise<void> };
   kick(): Promise<void>;

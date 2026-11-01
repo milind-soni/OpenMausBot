@@ -7,6 +7,7 @@ describe("presence client", () => {
   it("sends the device's zone and the app's language with the desktop source", () => {
     expect(presenceBody("Asia/Kolkata", "pt-br")).toEqual({ source: "desktop", timeZone: "Asia/Kolkata", language: "pt-br" });
     expect(presenceBody("", "en")).toEqual({ source: "desktop", language: "en" });
+    expect(presenceBody("UTC", "en", "thread-1")).toEqual({ source: "desktop", timeZone: "UTC", language: "en", threadId: "thread-1" });
   });
 
   it("names the pack the app shows: the device's pick, else the server's language", () => {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
+  advanced: false,
   effects: [] as Array<() => void | (() => void)>,
   portal: null as { node: ReactElement<{ ref: RefObject<HTMLDivElement | null> }>; target: unknown } | null,
 }));
@@ -20,18 +21,21 @@ vi.mock("react-dom", async (importOriginal) => {
 });
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [bot, { ...bot, id: "other" }] }, dispatch: vi.fn() }) };
 });
 
 const { BotContextMenu } = await import("./Sidebar");
+const { t } = await import("@/lib/i18n");
 const bot: Bot = {
   id: "dumpling", threadId: "thread", name: "Dumpling", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "test", model: "test" },
 };
 const listeners = new Map<string, () => void>();
 beforeEach(() => {
+  fixture.advanced = false;
   fixture.effects = [];
   fixture.portal = null;
   listeners.clear();
@@ -104,5 +108,16 @@ describe("bot actions menu viewport placement", () => {
     const negative = measuredMenu(228, 468);
     layoutEffects();
     expect(negative.style).toEqual({ top: "8px", left: "8px" });
+  });
+
+  it("keeps Advanced's flat list of bot actions, drawn on the shared menu sheet", () => {
+    fixture.advanced = true;
+    const html = render();
+    for (const key of ["task.newShort", "folder.new", "task.deleteAll", "sidebar.bot.pin", "sidebar.bot.makeChief", "sidebar.bot.moveToSection", "sidebar.bot.markUnread", "sidebar.bot.editProfile", "sidebar.bot.duplicate", "sidebar.copyConversationId", "sidebar.bot.archive", "common.delete"] as const) {
+      expect(html, key).toContain(t(key));
+    }
+    expect(html).not.toContain(t("sidebar.bot.more"));
+    expect(html).toContain("rounded-[var(--radius-menu)]");
+    expect(html).not.toContain("shadow-2xl");
   });
 });

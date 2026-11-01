@@ -27,10 +27,15 @@ export interface PhoneRouteDeps {
   /** The owner this phone belongs to, or null when phones are not offered here (team Cloud, hosted workspace, guest session). */
   owner: (auth: RequestAuth) => string | null;
   isAdmin: (auth: RequestAuth) => boolean;
+  live: (auth: RequestAuth) => boolean;
 }
 
 export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
   const { registry, jobs } = deps;
+  const removePhone = (key: string, block = false) => {
+    try { return registry.remove(key, { block }); }
+    finally { jobs.drop(key, PHONE_ACCESS_CHANGED); }
+  };
   return async ({ req, res, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/phones" && !path.startsWith("/api/phones/")) return PASS;
     res.setHeader("Cache-Control", "no-store");
@@ -41,6 +46,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
     }
 
     if (path === "/api/phones/self" || path.startsWith("/api/phones/self/")) {
+      if (!deps.live(auth)) return json(res, 401, { error: "Session expired" });
       const key = phoneKey(auth);
       const owner = deps.owner(auth);
       if (!key || !owner) return json(res, 403, { error: SELF_ONLY });
@@ -49,6 +55,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
         if (method === "PUT") {
           if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
           const parsed = phoneRegistration.safeParse(await readBody(req, 16_384));
+          if (!deps.live(auth)) return json(res, 401, { error: "Session expired" });
           if (!parsed.success) return json(res, 400, { error: "Invalid phone registration" });
           registry.register(key, owner, parsed.data);
           const [phone] = registry.list(owner, (k) => jobs.busy(k)).filter((p) => p.key === key);
@@ -56,14 +63,15 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
         }
         if (method === "GET") return json(res, 200, { phone: registry.list(owner, (k) => jobs.busy(k)).find((p) => p.key === key) ?? null });
         if (method === "DELETE") {
-          const removed = registry.remove(key);
-          jobs.drop(key, PHONE_ACCESS_CHANGED);
+          const removed = removePhone(key);
           return json(res, 200, { removed });
         }
       }
       if (path === "/api/phones/self/jobs" && method === "GET") {
         if (!registry.get(key)) return json(res, 404, { error: "Register this phone first" });
-        return json(res, 200, { job: await jobs.poll(key, responseGone(res)) });
+        const job = await jobs.poll(key, responseGone(res));
+        if (!deps.live(auth)) return json(res, 401, { error: "Session expired" });
+        return json(res, 200, { job });
       }
       const act = /^\/api\/phones\/self\/jobs\/([\w-]+)\/(lease|result)$/.exec(path);
       if (act && method === "POST") {
@@ -83,8 +91,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
       if (!deps.isAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can remove phones." });
       // Removed on the computer: its waiting jobs fail and the key stays refused, so the phone must pair again.
       const key = decodeURIComponent(one[1]!);
-      const removed = registry.remove(key, { block: true });
-      jobs.drop(key, PHONE_ACCESS_CHANGED);
+      const removed = removePhone(key, true);
       return json(res, 200, { removed });
     }
     return json(res, 404, { error: "not found" });

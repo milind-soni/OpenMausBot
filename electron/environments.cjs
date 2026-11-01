@@ -10,8 +10,13 @@ const TEAM_ROLE_LABELS = Object.freeze({ owner: "Super admin", admin: "Admin", m
 const teamRoleLabel = (role) => TEAM_ROLE_LABELS[role] ?? TEAM_ROLE_LABELS.member;
 const cleanTeam = (value) => (value && typeof value === "object" && typeof value.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id) && TEAM_ROLES.includes(value.role)
   ? { id: value.id, role: value.role } : null);
-/** My Cloud first, then each team, then saved servers. */
-const placeRank = (entry, homeOrigin) => (entry.origin === homeOrigin ? 0 : entry.team ? 1 : 2);
+/** A Cloud of the person's own besides My Cloud is listed by the verified session too (`cloud`: its id and their role). */
+const cleanCloud = (value) => (value && typeof value === "object" && typeof value.id === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) && TEAM_ROLES.includes(value.role)
+  ? { id: value.id, role: value.role } : null);
+/** A place the Admin lists and removes: a team's Cloud, or another Cloud of the person's own. */
+const listedPlace = (entry) => Boolean(entry?.team || entry?.cloud);
+/** My Cloud first, then each Cloud and team, then saved servers. */
+const placeRank = (entry, homeOrigin) => (entry.origin === homeOrigin ? 0 : listedPlace(entry) ? 1 : 2);
 
 function normalizeOrigin(input) {
   if (typeof input !== "string") return null;
@@ -79,7 +84,7 @@ function workspaceSummary(state) {
 function workspaceWindowTitle(state, companion, homeOrigin = null) {
   if (companion) return `OpenMausBot — Connected to: ${companion.serverName} (${new URL(companion.endpoint).host})`;
   const active = activeEnvironment(state);
-  if (active?.team) return `OpenMausBot — ${active.name}`;
+  if (listedPlace(active)) return `OpenMausBot — ${active.name}`;
   if (active && active.kind !== "local" && active.origin !== homeOrigin) return `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})`;
   if (active && homeOrigin && active.origin === homeOrigin && otherPlaces(state, homeOrigin) > 0) return `OpenMausBot — ${active.name}`;
   return "OpenMausBot";
@@ -112,8 +117,8 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
   if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin });
   return [
     ...(places ? [{ id: "workspace-places", label: places, enabled: false }, { type: "separator" }] : []),
-    { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
-    ...[...state.environments].sort((a, b) => Boolean(b.team) - Boolean(a.team)).map((entry) => {
+    { id: "workspace-local", label: "This computer", type: "radio", checked: !active, ...(iconFor && cleanColor(state.localColor) ? { icon: iconFor(state.localColor) } : {}), click: () => onSwitch(LOCAL_ID) },
+    ...[...state.environments].sort((a, b) => listedPlace(b) - listedPlace(a)).map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
       const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role) : null;
       return {
@@ -126,13 +131,13 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
     ...(onAddCloud ? [{ id: "workspace-add-cloud", label: "Add a Cloud…", sublabel: "Keeps your bots running 24/7", click: onAddCloud }] : []),
     { type: "separator" },
     { id: "workspace-connect", label: "Connect to a server…", click: onConnect },
-    ...(active && !active.team ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
+    ...(active && !listedPlace(active) ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
   ];
 }
 
-/** Once My Cloud is the person's home: My Cloud, each team's Cloud (with this person's role), then the other saved
- * servers, each a whole place of its own; this computer is not one of them, and nothing here sends or copies. A team is
- * the Admin's to list and remove, so it has no Forget. */
+/** Once My Cloud is the person's home: My Cloud, each Cloud of theirs and each team's Cloud (with this person's role),
+ * then the other saved servers, each a whole place of its own; this computer is not one of them, and nothing here sends
+ * or copies. A Cloud or a team is the Admin's to list and remove, so it has no Forget. */
 function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin }) {
   const active = activeEnvironment(state);
   const places = state.environments.filter((entry) => entry.kind !== "local").sort((a, b) => placeRank(a, homeOrigin) - placeRank(b, homeOrigin));
@@ -145,7 +150,7 @@ function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldS
         ...(icon ? { icon } : {}), type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
       };
     }),
-    ...(active && active.origin !== homeOrigin && !active.team ? [{ type: "separator" }, { id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
+    ...(active && active.origin !== homeOrigin && !listedPlace(active) ? [{ type: "separator" }, { id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
   ];
 }
 
@@ -192,8 +197,43 @@ function reconcileTeams(state, teams, makeId, homeOrigin = null) {
   let next = kept.length === state.environments.length ? state : { ...state, environments: kept };
   for (const team of teams) next = withTeam(next, { id: team?.id, role: team?.role, name: team?.name, origin: team?.machine?.origin }, makeId);
   if (next === state) return { state, left };
-  const activeId = next.environments.some((entry) => entry.id === next.activeId) ? next.activeId : next.environments.find((entry) => entry.origin === homeOrigin)?.id ?? LOCAL_ID;
-  return { state: activeId === next.activeId ? next : { ...next, activeId }, left };
+  return { state: withActiveKept(next, homeOrigin), left };
+}
+
+/** The place on screen that is gone: My Cloud is active again (or this computer, without one). */
+function withActiveKept(state, homeOrigin) {
+  const activeId = state.environments.some((entry) => entry.id === state.activeId) ? state.activeId : state.environments.find((entry) => entry.origin === homeOrigin)?.id ?? LOCAL_ID;
+  return activeId === state.activeId ? state : { ...state, activeId };
+}
+
+/** Another Cloud of the person's own as a saved place: listed once at its address, under the name and colour the Admin
+ * keeps for it (`color` undefined keeps the saved one; null is none). A server saved by hand at that address becomes the
+ * Cloud's entry; My Cloud's entry and a team's never do. The same state when nothing changes. */
+function withOwnCloud(state, cloud, makeId) {
+  const origin = normalizeOrigin(cloud?.origin), owner = cleanCloud(cloud), name = cleanName(cloud?.name, "");
+  if (!origin || !owner || !name) return state;
+  const existing = state.environments.find((entry) => entry.origin === origin);
+  if (existing?.home || existing?.team) return state;
+  const color = cloud.color === undefined ? cleanColor(existing?.color) : cleanColor(cloud.color);
+  if (existing && existing.name === name && existing.cloud?.id === owner.id && existing.cloud?.role === owner.role && (cleanColor(existing.color) ?? null) === (color ?? null)) return state;
+  const { color: _old, ...rest } = existing ?? { id: makeId(), kind: "remote", origin };
+  const next = { ...rest, name, ...(color ? { color } : {}), cloud: owner };
+  return { ...state, environments: existing ? state.environments.map((entry) => (entry === existing ? next : entry)) : [...state.environments, next] };
+}
+
+/** The person's other own Clouds the verified session lists (cloud-list.mjs ownCloudPlaces), as saved places: one the
+ * session no longer lists is gone. Null (an Admin without the list, or no verified word) changes nothing. */
+function reconcileOwnClouds(state, clouds, makeId, homeOrigin = null) {
+  if (!Array.isArray(clouds)) return state;
+  const wanted = new Map();
+  for (const cloud of clouds) {
+    const owner = cleanCloud(cloud), origin = normalizeOrigin(cloud?.origin);
+    if (owner && origin && !wanted.has(origin)) wanted.set(origin, cloud);
+  }
+  const kept = state.environments.filter((entry) => !entry.cloud || wanted.get(entry.origin)?.id === entry.cloud.id);
+  let next = kept.length === state.environments.length ? state : { ...state, environments: kept };
+  for (const cloud of wanted.values()) next = withOwnCloud(next, cloud, makeId);
+  return next === state ? state : withActiveKept(next, homeOrigin);
 }
 
 function botList(names, shown = 2) {
@@ -301,7 +341,8 @@ function parseEnvironments(raw) {
       if (!dataDir || seen.has(dirKey)) continue;
       seen.add(id);
       seen.add(dirKey);
-      environments.push({ id, kind: "local", name: cleanName(entry.name, dirBasename(dataDir)), dataDir });
+      const color = cleanColor(entry?.color);
+      environments.push({ id, kind: "local", name: cleanName(entry.name, dirBasename(dataDir)), dataDir, ...(color ? { color } : {}) });
       continue;
     }
     const origin = normalizeOrigin(entry?.origin);
@@ -309,15 +350,19 @@ function parseEnvironments(raw) {
     seen.add(id);
     seen.add(origin);
     const color = cleanColor(entry?.color), team = entry?.home === true ? null : cleanTeam(entry?.team);
+    const cloud = entry?.home === true || team ? null : cleanCloud(entry?.cloud);
     environments.push({ id, kind: "remote", name: cleanName(entry?.name, nameFromOrigin(origin)), origin, ...(entry?.microphone === true ? { microphone: true } : {}),
-      ...(color ? { color } : {}), ...(entry?.home === true ? { home: true } : {}), ...(team ? { team } : {}) });
+      ...(color ? { color } : {}), ...(entry?.home === true ? { home: true } : {}), ...(team ? { team } : {}), ...(cloud ? { cloud } : {}) });
   }
   const activeId = typeof value?.activeId === "string" && environments.some((e) => e.id === value.activeId) ? value.activeId : LOCAL_ID;
-  return { environments, activeId };
+  const localColor = cleanColor(value?.localColor);
+  return { environments, activeId, ...(localColor ? { localColor } : {}) };
 }
 
+/** `localColor`: This computer's own colour, which has no entry in the list; absent for none. */
 function serializeEnvironments(state) {
-  return JSON.stringify({ version: 2, environments: state.environments, activeId: state.activeId }, null, 2) + "\n";
+  const localColor = cleanColor(state.localColor);
+  return JSON.stringify({ version: 2, environments: state.environments, activeId: state.activeId, ...(localColor ? { localColor } : {}) }, null, 2) + "\n";
 }
 
 function withEnvironment(state, input, makeId) {
@@ -332,6 +377,39 @@ function withEnvironment(state, input, makeId) {
   const id = makeId();
   const environments = [...state.environments, { id, kind: "remote", name: cleanName(input?.name, nameFromOrigin(origin)), origin }];
   return { ...state, environments };
+}
+
+/** One place's colour as the person chose it, or none (`color` null): a saved place's, or This computer's (LOCAL_ID).
+ * A colour this app doesn't draw changes nothing. The same state when it is that colour already. */
+function withPlaceColor(state, id, color) {
+  const existing = savedPlace(state, id);
+  if (!existing || (color !== null && !cleanColor(color)) || (cleanColor(existing.color) ?? null) === color) return state;
+  if (id === LOCAL_ID) {
+    const { localColor: _old, ...rest } = state;
+    return color ? { ...rest, localColor: color } : rest;
+  }
+  const { color: _old, ...rest } = existing;
+  const next = color ? { ...rest, color } : rest;
+  return { ...state, environments: state.environments.map((entry) => (entry === existing ? next : entry)) };
+}
+
+/** The place `id` names (the one on screen by default): a saved entry, or This computer as one, named and coloured. */
+function savedPlace(state, id = state.activeId) {
+  if (id === LOCAL_ID) return { id: LOCAL_ID, kind: "local", name: "This computer", ...(cleanColor(state.localColor) ? { color: state.localColor } : {}) };
+  return state.environments.find((entry) => entry.id === id) ?? null;
+}
+
+/** The colours the Admin keeps for My Cloud (`home`) and team Clouds (`teamId`), on their saved places: once a colour
+ * was chosen there it is the one everywhere (none for slate); before that, what this app saved stays. */
+function withListedColors(state, looks, homeOrigin = null) {
+  let next = state;
+  for (const look of Array.isArray(looks) ? looks : []) {
+    const entry = next.environments.find((candidate) => (look?.home === true
+      ? candidate.kind !== "local" && (candidate.home === true || (homeOrigin !== null && candidate.origin === homeOrigin))
+      : typeof look?.teamId === "string" && candidate.team?.id === look.teamId));
+    if (entry) next = withPlaceColor(next, entry.id, cleanColor(look.color));
+  }
+  return next;
 }
 
 /** A saved server's name and colour, as its owner chose them (the Cloud's own setup); an invalid colour is left as it was. */
@@ -380,7 +458,7 @@ function bootEnvironmentDir(state, defaultDir) {
 
 function withoutEnvironment(state, id) {
   const environments = state.environments.filter((e) => e.id !== id);
-  return { environments, activeId: state.activeId === id ? LOCAL_ID : state.activeId };
+  return { ...state, environments, activeId: state.activeId === id ? LOCAL_ID : state.activeId };
 }
 
 function withMicrophone(state, id) {
@@ -411,8 +489,11 @@ module.exports = {
   ENTRY_COLORS,
   TEAM_ROLES,
   teamRoleLabel,
+  listedPlace,
   reconcileTeams,
+  reconcileOwnClouds,
   withTeam,
+  withOwnCloud,
   LOCAL_ID,
   activeEnvironment,
   activeLocalDataDir,
@@ -424,11 +505,14 @@ module.exports = {
   parseEnvironments,
   parsePairingLink,
   parseHostedWorkspaceLink,
+  savedPlace,
   serializeEnvironments,
   startupEnvironmentDir,
   withActive,
   withEnvironment,
   withEnvironmentLook,
+  withListedColors,
+  withPlaceColor,
   withLocalEnvironment,
   withMicrophone,
   withoutEnvironment,

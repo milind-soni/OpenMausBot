@@ -288,8 +288,13 @@ export class Speaker {
       cancel: () => { if (live()) this.stop(); },
       fail: (error) => {
         if (finished) return;
+        const wasLive = live();
         controller.abort();
-        if (live()) this.set({ ...IDLE, error });
+        if (wasLive) {
+          if (this.settlePlayback) this.settlePlayback(false);
+          else this.teardownAudio();
+          this.set({ ...IDLE, error });
+        }
         if (this.request === controller) this.request = null;
         finish();
       },

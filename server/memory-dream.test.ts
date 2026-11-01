@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
+import { ownerOnlyConversation } from "./cloud-lending.ts";
+import { stampOwner } from "./cloud-owner-lines.ts";
 import {
   DREAM_CONVERSATION_BYTES, DREAM_MARKER, DREAM_TOTAL_BYTES, MAX_IDEAS, MAX_LEARNED,
   dreamConversations, dreamPrompt, parseDream, type DreamConversation, type DreamSource,
@@ -10,6 +12,7 @@ import {
 import { parseMemoryEntries } from "./memory-entries.ts";
 import { flushMemoryJournal, readMemoryJournal } from "./memory-journal.ts";
 import { closeMessageDb } from "./message-db.ts";
+import type { Message } from "./store.ts";
 import { createMemoryUpkeep, NO_DREAM_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
 import { ensureWorkspace, readMemoryTopic, workspaceDir, writeMemoryFile, WORKSPACES_DIR } from "./workspace.ts";
 
@@ -63,6 +66,103 @@ describe("the chats a dream reads", () => {
 
   it("skips a chat with nothing the person said", () => {
     expect(dreamConversations(source({ a: { askedAt: 10, path: [replied("Hello!")] } }), "bot", 0)).toEqual([]);
+  });
+
+  it("keeps both owner-only conversations after their move to My Cloud stamps the owner", () => {
+    const owner = { person: "p_owner", name: "Amit" };
+    const threads: Record<string, { askedAt: number; path: Message[] }> = {
+      a: { askedAt: 200, path: [{ id: "a1", at: 200, role: "user", kind: "text", text: "Shorter please" }] },
+      b: { askedAt: 300, path: [{ id: "b1", at: 300, role: "user", kind: "text", text: "Too long again" }] },
+    };
+    const expected = [
+      { threadId: "b", lines: [{ by: "person", text: "Too long again" }] },
+      { threadId: "a", lines: [{ by: "person", text: "Shorter please" }] },
+    ];
+    expect(dreamConversations(source(threads), "bot", 100)).toEqual(expected);
+    for (const thread of Object.values(threads)) thread.path = stampOwner(thread.path, owner);
+    const ownerPerson = (person: string | undefined) => person === owner.person;
+    const after = dreamConversations(source(threads), "bot", 100,
+      (id) => ownerOnlyConversation(threads[id]!.path, ownerPerson, () => undefined),
+      (sender) => ownerPerson(sender?.id));
+    expect(after).toEqual(expected);
+  });
+
+  it.each(["relay", "API"] as const)("omits replies to a filtered %s request in an owner-only Cloud conversation", (origin) => {
+    const owner = { name: "Amit", id: "p_owner" };
+    const path: Message[] = [
+      { id: "owner", at: 100, role: "user", kind: "text", text: "Shorter please", sender: owner },
+      { id: "owner-reply", at: 110, role: "bot", kind: "text", text: "A shorter draft.", requestMessageId: "owner" },
+      { id: "external", at: 120, role: "user", kind: "text", text: "Prepare a long report", sender: owner,
+        ...(origin === "relay" ? { relayed: true } : { via: "api" }) },
+      { id: "external-reply", at: 130, role: "bot", kind: "text", text: "A long external report.", requestMessageId: "external" },
+      { id: "next", at: 140, role: "user", kind: "text", text: "Keep it plain too", sender: owner },
+      { id: "next-reply", at: 150, role: "bot", kind: "text", text: "A plain draft.", requestMessageId: "next" },
+      { id: "continuation", at: 160, role: "bot", kind: "text", text: "More of the external report.", requestMessageId: "external" },
+    ];
+    const ownerPerson = (person: string | undefined) => person === owner.id;
+    const allowed = () => ownerOnlyConversation(path, ownerPerson, () => undefined);
+    expect(allowed()).toBe(true);
+    expect(dreamConversations(source({ a: { askedAt: 140, path } }), "bot", 0, allowed,
+      (sender) => ownerPerson(sender?.id))).toEqual([{
+      threadId: "a", lines: [
+        { by: "person", text: "Shorter please" },
+        { by: "bot", text: "A shorter draft." },
+        { by: "person", text: "Keep it plain too" },
+        { by: "bot", text: "A plain draft." },
+      ],
+    }]);
+  });
+
+  it.each<[string, Partial<Message>]>([
+    ["guest", { sender: { name: "Guest", id: "p_guest" } }],
+    ["peer", { peerAsk: { botId: "peer", name: "Teammate" } }],
+    ["aside", { aside: true }],
+    ["webhook", { webhookPost: true }],
+  ])("omits replies associated with an excluded %s request", (_kind, extra) => {
+    const path: Message[] = [
+      { id: "owner", at: 100, role: "user", kind: "text", text: "Shorter please" },
+      { id: "excluded", at: 110, role: "user", kind: "text", text: "Prepare a long report", ...extra },
+      { id: "excluded-reply", at: 120, role: "bot", kind: "text", text: "A long report.", requestMessageId: "excluded" },
+      { id: "owner-reply", at: 130, role: "bot", kind: "text", text: "A shorter draft.", requestMessageId: "owner" },
+    ];
+    expect(dreamConversations(source({ a: { askedAt: 100, path } }), "bot", 0)).toEqual([{
+      threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "A shorter draft." }],
+    }]);
+  });
+
+  it("omits automation reports from an owner conversation", () => {
+    const owner = { name: "Amit", id: "p_owner" };
+    const path: Message[] = [
+      { id: "owner", at: 100, role: "user", kind: "text", text: "Shorter please", sender: owner },
+      { id: "report", at: 110, role: "bot", kind: "text", text: "The routine prepared a long report.",
+        automation: { routineId: "r1", runId: "run1", name: "Daily report", executionThreadId: "execution", trigger: "schedule", scheduledFor: 110 } },
+      { id: "reply", at: 120, role: "bot", kind: "text", text: "A shorter draft.", requestMessageId: "owner" },
+    ];
+    expect(dreamConversations(source({ a: { askedAt: 100, path } }), "bot", 0, () => true,
+      (sender) => sender?.id === owner.id)).toEqual([{
+      threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "A shorter draft." }],
+    }]);
+  });
+
+  it("requires the owner's identity and still excludes peers, asides and automation", () => {
+    const owner = { name: "Amit", id: "p_owner" };
+    const read = dreamConversations(source({
+      a: { askedAt: 200, path: [
+        said("Shorter please", { sender: owner }),
+        said("A guest", { sender: { name: "Amit", id: "p_guest" } }),
+        said("An unidentified guest", { sender: { name: "Amit" } }),
+        said("Unproven words"),
+        said("A peer", { sender: owner, peerAsk: { botId: "peer" } }),
+        said("An aside", { sender: owner, aside: true }),
+        said("A webhook", { sender: owner, webhookPost: true }),
+        said("Relayed words", { sender: owner, relayed: true }),
+        said("An API request", { sender: owner, via: "api" }),
+        replied("Done."),
+      ] },
+      run: { askedAt: 300, routineRunId: "routine", path: [said("A routine", { sender: owner })] },
+      guest: { askedAt: 400, path: [said("Guest only", { sender: { name: "Guest", id: "p_guest" } }), replied("Hello")] },
+    }), "bot", 100, () => true, (sender) => sender?.id === owner.id);
+    expect(read).toEqual([{ threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "Done." }] }]);
   });
 });
 

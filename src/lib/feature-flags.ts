@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -87,4 +87,13 @@ export function shareLearnedSkillsMode(config: FeatureFlagConfig | null | undefi
 
 export function roomMemoryCaptureEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.roomMemoryCapture === true;
+}
+
+export function savedStepsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.savedSteps !== false;
+}
+
+/** The server can run saved steps (a Mac, not Windows or a Cloud home); unsaid counts as no. */
+export function savedStepsHere(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.savedStepsHere === true;
 }

@@ -2,6 +2,7 @@ import { AlertTriangle, Loader2, RefreshCw, Server, Trash2 } from "lucide-react"
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Card } from "./SettingsPrimitives";
+import { KeysLink } from "./keys/KeysLink";
 import {
   computerStateLabel,
   vpsComputerInventoryStateKind,
@@ -41,7 +42,7 @@ export function VpsComputersCard({
           {configured === true
             ? t("vm.vps.sshHost", { alias: aliases.join(", ") || t("vm.vps.configuredFallback") })
             : configured === false
-              ? t("vm.vps.needsAlias")
+              ? <>{t("vm.vps.needsAlias")} <KeysLink id="vps" /></>
               : t("vm.vps.refreshHint")}
         </div>
         <button
@@ -69,7 +70,7 @@ export function VpsComputersCard({
                 : t("vm.vps.foundMany", { count: instances.length })}
       </p>
 
-      <div
+      {!(configured === false && !loading && !unavailableReason) && <div
         aria-busy={loading || removingName !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
@@ -149,7 +150,7 @@ export function VpsComputersCard({
             </div>
           );
         })}
-      </div>
+      </div>}
     </Card>
   );
 }

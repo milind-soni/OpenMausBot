@@ -25,8 +25,12 @@ export interface LiveOpenOptions {
   botId: string;
   session: string;
   owner: string;
+  /** The person watching, whose hold this view shares on any device; the owner when unset. */
+  person?: string;
   isCurrent: () => boolean;
   res: ServerResponse;
+  /** The panel's size in CSS pixels, which the page fills from the start. */
+  size?: { width: number; height: number } | null;
 }
 
 interface V1Viewer {
@@ -34,6 +38,7 @@ interface V1Viewer {
   readonly botId: string;
   readonly session: string;
   readonly owner: string;
+  readonly person: string;
   readonly isCurrent: () => boolean;
   readonly res: ServerResponse;
   core: Viewer | null;
@@ -104,10 +109,11 @@ export class LiveV1 {
     }
   }
 
+  /** `owned` when the view's person holds the browser, from this view or another of theirs; `controlling` when their hold is used from this one. */
   #control(viewer: V1Viewer): void {
-    const session = viewer.session;
-    const held = this.#service.heldBy(session);
-    this.#send(viewer, { type: "control", held: held !== null, owned: held === viewer.id, controlling: this.#service.canControl(session, viewer.id) });
+    const state = viewer.core?.controlState();
+    if (!state) return;
+    this.#send(viewer, { type: "control", held: state.held, owned: state.owned, controlling: state.controlling });
   }
 
   #controlAll(session: string): void {
@@ -181,7 +187,7 @@ export class LiveV1 {
     }
     const target = this.#target(options.session);
     if (!target) throw new BrowserLiveError("The browser could not start on this server. Reconnect to retry with a fresh browser session.", 503);
-    const viewer: V1Viewer = { ...options, id: "", core: null, closed: false, blocked: false, ready: false, seq: 0, sent: null, pending: null, pendingActions: 0, restarting: false };
+    const viewer: V1Viewer = { ...options, person: options.person ?? options.owner, id: "", core: null, closed: false, blocked: false, ready: false, seq: 0, sent: null, pending: null, pendingActions: 0, restarting: false };
     if (!this.#current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     options.res.once("close", () => this.#close(viewer));
     options.res.once("error", () => this.#close(viewer));
@@ -192,10 +198,15 @@ export class LiveV1 {
     }, WAITING_AFTER_MS);
     waiting.unref?.();
     try {
-      const core = await this.#service.attachViewer(target, { owner: options.owner, canOperate: true, ...LO_TIER, pace: "lo", pointer: false }, (output) => this.#output(viewer, output));
+      const core = await this.#service.attachViewer(target, { owner: options.owner, person: viewer.person, canOperate: true, ...LO_TIER, pace: "lo", pointer: false, ...(options.size ? { size: options.size } : {}) }, (output) => this.#output(viewer, output));
       (viewer as { id: string }).id = core.id;
       viewer.core = core;
-      if (!this.#current(viewer)) { this.#close(viewer); return; }
+      if (!this.#current(viewer)) {
+        // It went while the browser started: what it opened goes too.
+        if (viewer.closed) void core.close({ dropped: this.#theirs(viewer) }).catch(() => undefined);
+        else this.#close(viewer);
+        return;
+      }
       this.#viewers.set(viewer.id, viewer);
       this.#startEvents(viewer);
       viewer.ready = true;
@@ -222,7 +233,13 @@ export class LiveV1 {
     }
   }
 
-  #close(viewer: V1Viewer, endResponse = true): void {
+  /** Still the view of a person allowed to see this browser: its stream went, not its sign-in. */
+  #theirs(viewer: V1Viewer): boolean {
+    try { return viewer.isCurrent(); } catch { return false; }
+  }
+
+  /** `purposeful`: the server closed it; otherwise a hold of its person waits the grace for their next view. */
+  #close(viewer: V1Viewer, endResponse = true, purposeful = false): void {
     if (viewer.closed) return;
     viewer.closed = true;
     if (viewer.id) this.#viewers.delete(viewer.id);
@@ -232,7 +249,7 @@ export class LiveV1 {
     viewer.sent?.ack();
     viewer.pending = null;
     viewer.sent = null;
-    void viewer.core?.close().catch(() => undefined).then(() => this.#controlAll(viewer.session));
+    void viewer.core?.close({ dropped: !purposeful && this.#theirs(viewer) }).catch(() => undefined).then(() => this.#controlAll(viewer.session));
     if (endResponse && !viewer.res.writableEnded && !viewer.res.destroyed) {
       if (viewer.blocked || viewer.res.writableLength > MAX_BUFFER) viewer.res.destroy();
       else viewer.res.end();
@@ -241,7 +258,7 @@ export class LiveV1 {
 
   #refusal(viewer: V1Viewer, otherwise: string): BrowserLiveError {
     const holder = this.#service.heldBy(viewer.session);
-    if (holder && holder !== viewer.id) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409);
+    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409);
     return new BrowserLiveError(this.#service.interrupted(viewer.session) ? RESTART_NEEDED : otherwise, 409);
   }
 
@@ -261,11 +278,15 @@ export class LiveV1 {
       }
       return { ok: true };
     }
+    if (action.type === "resize") {
+      if (action.size) await core.input({ type: "resize", ...action.size });
+      return { ok: true };
+    }
     if (action.type === "restart") {
       if (viewer.restarting) throw new BrowserLiveError("The browser is already restarting.", 409);
       viewer.restarting = true;
       try {
-        await this.#service.restart(viewer.session, viewer.id);
+        await this.#service.restart(viewer.session, viewer.person);
         this.closeForSession(viewer.session);
         return { ok: true };
       } catch {
@@ -281,21 +302,21 @@ export class LiveV1 {
     }
     if (action.type === "take") {
       const before = this.#service.heldBy(viewer.session);
-      if (before !== null && before !== viewer.id) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.");
+      if (before !== null && before !== viewer.person) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.");
       const busy = this.#service.profiles().find((profile) => profile.session === viewer.session)?.control.agents ?? 0;
       await core.input({ type: "takeControl" });
       this.#controlAll(viewer.session);
-      if (this.#service.heldBy(viewer.session) !== viewer.id) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.");
+      if (!core.controlState().controlling) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.");
       if (!this.#current(viewer)) { this.#close(viewer); throw new BrowserLiveError("This browser view closed.", 409); }
       return { ok: true, waited: busy > 0 };
     }
-    if (!this.#service.canControl(viewer.session, viewer.id)) throw this.#refusal(viewer, "Browser control changed. Try again.");
+    if (!core.controlState().controlling) throw this.#refusal(viewer, "Browser control changed. Try again.");
     if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
     viewer.pendingActions++;
     try {
       if (action.type === "command") await core.input(commandMessage(action.args));
       else if (action.type === "input") await core.input(inputMessage(action.message));
-      if (!this.#service.canControl(viewer.session, viewer.id)) throw this.#refusal(viewer, "Browser control changed. Try again.");
+      if (!core.controlState().controlling) throw this.#refusal(viewer, "Browser control changed. Try again.");
       core.pushTabs();
       return { ok: true };
     } finally {
@@ -312,10 +333,10 @@ export class LiveV1 {
     void this.#service.handBack(session).then(() => this.#controlAll(session), () => undefined);
   }
 
-  closeForSession(session: string): void { for (const viewer of this.#viewers.values()) if (viewer.session === session) this.#close(viewer); }
-  closeForOwner(owner: string): void { for (const viewer of this.#viewers.values()) if (viewer.owner === owner) this.#close(viewer); }
-  closeForBot(botId: string): void { for (const viewer of this.#viewers.values()) if (viewer.botId === botId) this.#close(viewer); }
-  closeAll(): void { for (const viewer of this.#viewers.values()) this.#close(viewer); }
+  closeForSession(session: string): void { for (const viewer of this.#viewers.values()) if (viewer.session === session) this.#close(viewer, true, true); }
+  closeForOwner(owner: string): void { for (const viewer of this.#viewers.values()) if (viewer.owner === owner) this.#close(viewer, true, true); }
+  closeForBot(botId: string): void { for (const viewer of this.#viewers.values()) if (viewer.botId === botId) this.#close(viewer, true, true); }
+  closeAll(): void { for (const viewer of this.#viewers.values()) this.#close(viewer, true, true); }
 }
 
 /** The fixed v1 verbs, as the viewer messages the new browser takes. */

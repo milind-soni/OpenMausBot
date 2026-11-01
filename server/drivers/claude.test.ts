@@ -591,6 +591,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(beat).toBeLessThan(types.lastIndexOf("item.completed"));
   });
 
+  it("names the CLI process while a long tool runs, and no process once the turn is over", async () => {
+    const release = join(scratch, "release");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "python3 scrape.py" }, hold: "idle" }]), FAKE_CLAUDE_RELEASE: release,
+    });
+    await instance.adapter.sendTurn({ threadId: "t-engine-pid", text: "scrape" });
+    await recorder.until((e) => e.type === "item.started" && e.itemType === "tool");
+    const pid = instance.adapter.enginePid?.("t-engine-pid");
+    expect(pid).toEqual(expect.any(Number));
+    expect(() => process.kill(pid!, 0), "the CLI running this turn").not.toThrow();
+    writeFileSync(release, "go");
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(instance.adapter.enginePid?.("t-engine-pid")).toBeUndefined();
+  });
+
   it("reports a long Write's input as it streams, after the bot's words and before its tool call", async () => {
     await create("slow-write", { FAKE_CLAUDE_WRITE_BYTES: "6144", FAKE_CLAUDE_WRITE_STEP_MS: "5" });
     await instance.adapter.sendTurn({ threadId: "t-slow-write", text: "build a dashboard" });
@@ -677,7 +692,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-weekly", text: "Hey talk to @Tango" });
     await recorder.until((event) => event.type === "turn.completed");
     const errors = recorder.events.filter((event) => event.type === "runtime.error");
-    expect(errors).toEqual([expect.objectContaining({ message: claudeLimitMessage({ window: "seven_day", resetsAt }), limitResetsAt: resetsAt * 1000 })]);
+    expect(errors).toEqual([expect.objectContaining({ message: claudeLimitMessage({ window: "seven_day", resetsAt }), limitResetsAt: resetsAt * 1000, limit: "engine" })]);
     expect((errors[0] as any).message).toMatch(/^This Claude account has reached its weekly limit, which resets .+\. Until then, /);
     expect(errors[0]).not.toHaveProperty("setup");
     expect(errors[0]).not.toHaveProperty("claudeUpdate");
@@ -693,9 +708,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-credits", text: "continue" });
     await recorder.until((event) => event.type === "turn.completed");
     const errors = recorder.events.filter((event) => event.type === "runtime.error");
-    expect(errors).toEqual([expect.objectContaining({ message: claudeLimitMessage({ window: null, resetsAt, credits: true }) })]);
+    expect(errors).toEqual([expect.objectContaining({ message: claudeLimitMessage({ window: null, resetsAt, credits: true }), limit: "credits" })]);
     expect((errors[0] as any).message).toContain("those credits are used up");
     expect(errors[0]).not.toHaveProperty("limitResetsAt");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
+  });
+
+  it("settles a turn its model's own weekly window refused as that model's limit, with that window's reset", async () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 2 * 86_400;
+    const opus = { status: "rejected", resetsAt, rateLimitType: "seven_day_opus", overageStatus: "rejected", isUsingOverage: false };
+    await create("usage-limit", { FAKE_CLAUDE_RATE_LIMIT: JSON.stringify(opus) });
+    await instance.adapter.sendTurn({ threadId: "t-opus-window", text: "continue" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const errors = recorder.events.filter((event) => event.type === "runtime.error");
+    expect(errors).toEqual([expect.objectContaining({ limit: "model", limitResetsAt: resetsAt * 1000 })]);
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
   });
 
@@ -1529,6 +1555,88 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
   });
 
+  describe("the bot's own settings file", () => {
+    const guard = { matcher: "Bash", hooks: [{ type: "command", command: "/opt/guards/no-force-push.sh" }] };
+    const botFolders = (name: string, settings: unknown) => {
+      const bot = join(scratch, `${name}-bot`), thread = join(scratch, `${name}-thread`);
+      mkdirSync(join(bot, ".claude"), { recursive: true });
+      mkdirSync(thread);
+      const file = join(bot, ".claude", "settings.json");
+      writeFileSync(file, JSON.stringify(settings));
+      return { bot, thread, file };
+    };
+
+    it("reaches a turn in a thread's own folder, beside OpenMausBot's own settings", async () => {
+      const dump = join(scratch, "bot-settings.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("reach", {
+        hooks: { PreToolUse: [guard], Stop: [{ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] }] },
+        enabledPlugins: { "guard@team": true },
+        permissions: { deny: ["Read(./.env)"], defaultMode: "bypassPermissions" },
+        env: { GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "false" },
+        model: 123,
+      });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings", botId: "b-settings", text: "hi", cwd: thread, botSettingsFile: file,
+        integrations: { hooks: { url: "http://127.0.0.1:1/hooks", token: "bearer" } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(realpathSync(seen.cwd)).toBe(realpathSync(thread));
+      expect(seen.settings.hooks.PreToolUse).toEqual([guard]);
+      expect(seen.settings.hooks.Stop).toHaveLength(2);
+      expect(seen.settings.hooks.Stop[0]).toEqual({ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] });
+      expect(Object.keys(seen.settings.hooks)).toEqual(expect.arrayContaining(Object.keys(claudeHookSettings("/helper.ts"))));
+      expect(seen.settings.enabledPlugins).toEqual({ "guard@team": true });
+      expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
+      expect(seen.settings.env).toMatchObject({ GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "true" });
+      expect(seen.settings).not.toHaveProperty("model");
+      expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+    });
+
+    it("is left to Claude Code when the turn runs in the folder that holds it", async () => {
+      const dump = join(scratch, "bot-settings-own-folder.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { bot, file } = botFolders("own-folder", { hooks: { PreToolUse: [guard] }, enabledPlugins: { "guard@team": true } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-own", text: "hi", cwd: bot, botSettingsFile: file });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.settings).not.toHaveProperty("enabledPlugins");
+      expect(seen.settings).not.toHaveProperty("hooks");
+    });
+
+    it("never reaches a guest's turn", async () => {
+      const dump = join(scratch, "bot-settings-guest.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create("echo", { FAKE_CLAUDE_VERSION: "2.1.284" });
+      const { thread, file } = botFolders("guest", { hooks: { PreToolUse: [guard] }, env: { GUARD_LEVEL: "strict" } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-guest", text: "hi", cwd: thread, botSettingsFile: file, approvalMode: "ask", guestConfined: true });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv).toContain("--restricted");
+      expect(seen.settings).not.toHaveProperty("hooks");
+      expect(seen.settings.env).not.toHaveProperty("GUARD_LEVEL");
+    });
+
+    it("starts a new process on the turn after it changes, and keeps the warm one while it does not", async () => {
+      const dump = join(scratch, "bot-settings-warm.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("warm", { enabledPlugins: { "guard@team": true } });
+      const turn = async (text: string) => {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-bot-settings-warm", text, cwd: thread, botSettingsFile: file });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        return JSON.parse(readFileSync(dump, "utf8"));
+      };
+      const first = await turn("one");
+      expect((await turn("two")).pid).toBe(first.pid);
+      writeFileSync(file, JSON.stringify({ enabledPlugins: { "guard@team": true, "review@team": true } }));
+      const changed = await turn("three");
+      expect(changed.pid).not.toBe(first.pid);
+      expect(changed.settings.enabledPlugins).toEqual({ "guard@team": true, "review@team": true });
+    });
+  });
+
   it("launches isolated from the machine's own Claude Code configuration", async () => {
     await create();
     const dump = join(scratch, "isolation.json");
@@ -1673,7 +1781,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-settings", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token" } });
+    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token", ENABLE_TOOL_SEARCH: "true" } });
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
     expect(JSON.stringify(seen.argv)).not.toContain("synthetic");
     const settingsPath = seen.argv[seen.argv.indexOf("--settings") + 1];
@@ -1703,6 +1811,71 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(after.settings.env.ANTHROPIC_API_KEY).toBe("synthetic-new");
   });
 
+  it("loads third-party MCP tools on demand and keeps OpenMausBot's own servers loaded", async () => {
+    await create();
+    const dump = join(scratch, "tool-search.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const stdio = (name: string) => ({ command: process.execPath, args: [`/fake/${name}.js`], env: {} });
+    const integrations = {
+      agents: stdio("agents"), browser: stdio("browser"), composio: stdio("composio"), composioOwn: stdio("own-apps"),
+      localComputer: stdio("computer"), phone: stdio("phone"), data: stdio("data"), highlevel: stdio("highlevel"),
+      device: stdio("device"), dweb: { url: "http://127.0.0.1:1" },
+      custom: {
+        shop: { command: "npx", args: ["shop"], env: {} }, docs: { type: "http" as const, url: "https://docs.example.test/mcp", headers: {} },
+        postiz: { type: "http" as const, url: "https://api.postiz.com/mcp-oauth-dynamic", headers: { Authorization: "Bearer pos_fixture" } },
+      },
+    };
+    const mounted = async (threadId: string, preloadBrowserTools: boolean) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hi", cwd: scratch, preloadBrowserTools, integrations });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const seen = JSON.parse(readFileSync(dump, "utf8")) as { settings: { env: Record<string, string> }; mcpConfig: { mcpServers: Record<string, { alwaysLoad?: boolean }> } };
+      const servers = Object.entries(seen.mcpConfig.mcpServers);
+      return {
+        toolSearch: seen.settings.env.ENABLE_TOOL_SEARCH,
+        alwaysLoaded: servers.filter(([, server]) => server.alwaysLoad === true).map(([name]) => name).sort(),
+        onDemand: servers.filter(([, server]) => server.alwaysLoad === undefined).map(([name]) => name).sort(),
+      };
+    };
+
+    const browsing = await mounted("t-tool-search", true);
+    expect(browsing.toolSearch).toBe("true");
+    expect(browsing.alwaysLoaded).toEqual(["agents", "browser", "ogb"]);
+    expect(browsing.onDemand).toEqual(["composio", "computer", "data", "device", "docs", "dweb", "highlevel", "own_apps", "phone", "postiz", "shop"]);
+    const other = await mounted("t-tool-search-no-browse", false);
+    expect(other.alwaysLoaded).toEqual(["agents", "ogb"]);
+    expect(other.onDemand).toContain("browser");
+  });
+
+  it("honours a person who turned Claude Code's tool search off, and restarts when they change it", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    const path = join(account, "settings.json");
+    writeFileSync(path, JSON.stringify({ env: { ENABLE_TOOL_SEARCH: "false" } }));
+    const dump = join(scratch, "tool-search-off.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { configDir: account });
+    const turn = async (text: string, cwd?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "t-tool-search-off", text, ...(cwd ? { cwd } : {}),
+        integrations: { composio: { command: process.execPath, args: ["/fake/composio.js"], env: {} } },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      return JSON.parse(readFileSync(dump, "utf8")) as { pid: number; settings: { env: Record<string, string> } };
+    };
+
+    // The turn leaves the account's settings out (--setting-sources project), so the choice travels in --settings.
+    const off = await turn("hi");
+    expect(off.settings.env.ENABLE_TOOL_SEARCH).toBe("false");
+    writeFileSync(path, JSON.stringify({ env: { ENABLE_TOOL_SEARCH: "auto" } }));
+    const on = await turn("again");
+    expect(on.settings.env.ENABLE_TOOL_SEARCH).toBe("true");
+    expect(on.pid).not.toBe(off.pid);
+    // The bot's project settings beat the account's.
+    const project = join(scratch, "project-off");
+    mkdirSync(join(project, ".claude"), { recursive: true });
+    writeFileSync(join(project, ".claude", "settings.json"), JSON.stringify({ env: { ENABLE_TOOL_SEARCH: "auto:100" } }));
+    expect((await turn("project", project)).settings.env.ENABLE_TOOL_SEARCH).toBe("auto:100");
+  });
+
   it("does not mix a personal helper/endpoint with an explicitly configured OMB connection", async () => {
     const account = join(scratch, "account");
     mkdirSync(account);
@@ -1712,7 +1885,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-explicit", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")] });
+    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], env: { ENABLE_TOOL_SEARCH: "true" } });
     expect(seen.env.ANTHROPIC_API_KEY).toBe("workspace-key");
     expect(seen.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(readClaudeAuthSettings({ HOME: scratch, CLAUDE_CONFIG_DIR: join(scratch, "other-account") })).toEqual({});
@@ -2858,6 +3031,14 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const second = await instance.adapter.sendTurn({ threadId: "t-team-tools", text: "two" });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(dumpedPid(dump)).not.toBe(failedLaunch);
+  });
+
+  it("reports which of the turn's own MCP servers did not connect, and none of OpenMausBot's", async () => {
+    await create(undefined, { FAKE_CLAUDE_MCP_FAILED: "agents,blender,stranger" });
+    const custom = { blender: { command: "/usr/bin/python3", args: ["/srv/blender.py"], env: {} }, notes: { command: "npx", args: ["notes-mcp"], env: {} } };
+    const turn = await instance.adapter.sendTurn({ threadId: "t-custom-failed", text: "one", integrations: { custom } });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId);
+    expect(recorder.events.filter((e) => e.type === "session.started").map((e) => (e as { mcpFailed?: string[] }).mcpFailed)).toEqual([["blender"]]);
   });
 
   it("books each turn of a retained process at its own cost, not the process's running total", async () => {

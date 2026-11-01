@@ -5,6 +5,7 @@ import {
   LIVE_COPY, liveCardKind, liveStepLabel, spokenApprovalPrompt, spokenConnectorPrompt, spokenQuestionPrompt, spokenReviewPrompt, spokenSecretPrompt, spokenSignInPrompt,
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
+import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
 import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -710,7 +711,7 @@ export class LiveCallController {
     const waiting = message.kind === "connector"
       ? Boolean(connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed)
       : message.kind === "signin"
-        ? Boolean(signIn && !signIn.done && !signIn.cancelled && !signIn.superseded)
+        ? Boolean(signIn && signInWaits(signIn))
         : Boolean(secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed);
     const key = `${message.kind}:${message.id}`;
     if (!waiting || call.announced.has(key)) return;

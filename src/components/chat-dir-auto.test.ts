@@ -14,8 +14,7 @@ function expectDirAuto(file: string, marker: string) {
 describe("chat text follows the writer's direction", () => {
   it("sets dir=auto on the chat inputs and previews that were still forced ltr", () => {
     expectDirAuto("BubbleEditor.tsx", "value={draft}");
-    expectDirAuto("OptionCard.tsx", "value={custom}");
-    expectDirAuto("QuestionCard.tsx", "value={draft.custom}");
+    expectDirAuto("AskCard.tsx", "value={value}");
     expectDirAuto("CitationUI.tsx", "value={comment}");
     expectDirAuto("ChatFindBar.tsx", "value={query}");
     expectDirAuto("RawMarkdownToggle.tsx", 'data-testid="raw-markdown-view"');

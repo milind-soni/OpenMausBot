@@ -20,7 +20,7 @@ import { MacLocalControl } from "./MacLocalControl";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/state/store";
-import { VpsComputersCard } from "./VpsComputersCard";
+import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -380,7 +380,7 @@ export function CloudComputersCard({
           {configured === true
             ? t("vm.cloud.includesOrphans")
             : configured === false
-              ? t("vm.cloud.needsKey")
+              ? <>{t("vm.cloud.needsKey")} <KeysLink id="box" /></>
               : t("vm.cloud.refreshHint")}
         </div>
         <button
@@ -408,7 +408,7 @@ export function CloudComputersCard({
                 : t("vm.cloud.foundMany", { count: instances.length })}
       </p>
 
-      <div
+      {!(configured === false && !loading && !unavailableReason) && <div
         aria-busy={loading || pending !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
@@ -492,7 +492,7 @@ export function CloudComputersCard({
             </div>
           );
         })}
-      </div>
+      </div>}
     </Card>
   );
 }

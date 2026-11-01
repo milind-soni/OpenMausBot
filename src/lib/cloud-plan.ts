@@ -140,7 +140,7 @@ export function cloudNoticeKind(view: CloudPlanView, account: CloudAccountState 
 }
 
 
-export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "update_popup", "app_onboarding"] as const;
+export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "app_whats_new_pro", "app_whats_new_team", "app_onboarding"] as const;
 export type CloudSource = (typeof CLOUD_SOURCES)[number];
 
 export function offerPlanLabel(plan: CloudOfferPlan): string {
@@ -211,6 +211,15 @@ export function planCards(offer: CloudOffer, { current = null, own = null }: { c
     plans.splice(at === -1 ? plans.length : at, 0, own);
   }
   return plans.map(plan => planCard(plan, offer.recommended, current));
+}
+
+const WEIGHED: ReadonlySet<CloudPlanCardRow["key"]> = new Set(["hours", "storage", "voice"]);
+/** What each card shows itself: the numbers a person weighs up, and whether it sleeps when the plans differ there. The
+ * rest of its rows are its details, for Compare plans. */
+export function cardRows(cards: readonly CloudPlanCard[]): Array<{ shown: CloudPlanCardRow[]; details: CloudPlanCardRow[] }> {
+  const power = new Set(cards.flatMap(card => card.rows.filter(row => row.key === "power").map(row => row.text)));
+  const shown = (row: CloudPlanCardRow) => WEIGHED.has(row.key) || (row.key === "power" && power.size > 1);
+  return cards.map(card => ({ shown: card.rows.filter(shown), details: card.rows.filter(row => !shown(row)) }));
 }
 
 const DAY_MS = 86_400_000;

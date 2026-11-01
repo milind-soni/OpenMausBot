@@ -72,10 +72,10 @@ interface SavedBot { id: string; name: string; toolScope?: { allow?: string[]; d
     expect(await scope()).toEqual(selected);
     await fill("Allow (one per line)", "");
     expect(await snapshot()).toContain("An empty Allow list selects no tools");
-    expect(await snapshot()).toContain("This engine cannot limit native tools");
+    expect(await snapshot()).toContain("This AI cannot limit native tools");
     await click("Save tool selection");
     await expect.poll(() => scope()).toEqual({ allow: [], deny: ["mcp:mail:send"] });
-    expect(await snapshot()).toContain("No tools selected");
+    await expect.poll(snapshot).toContain("No tools selected");
     await mode("all"); await click("Save tool selection");
     await expect.poll(() => scope()).toBeUndefined();
 

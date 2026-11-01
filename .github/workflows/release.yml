@@ -149,7 +149,7 @@ jobs:
     name: macOS arm64 + x64 (sign, notarize, staple)
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -183,7 +183,7 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
 
       - name: Package both architectures
-        # macos-14 runners have 7 GB, so Node's default heap stops near 2 GB; the server typecheck now needs a little more.
+        # macos-15 runners have 7 GB, so Node's default heap stops near 2 GB; the server typecheck now needs a little more.
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm package:mac
@@ -291,10 +291,20 @@ jobs:
 
       - name: Staple, re-zip, regenerate blockmaps and the feed
         run: |
-          xcrun stapler staple release/OpenMausBot-*-arm64.dmg
-          xcrun stapler staple release/OpenMausBot-*-x64.dmg
-          xcrun stapler staple release/mac-arm64/OpenMausBot.app
-          xcrun stapler staple release/mac/OpenMausBot.app
+          # stapler fetches the ticket from Apple's CloudKit: the connection drops now and then (error 68), and a
+          # ticket can lag notarytool's Accepted verdict by a minute (error 65).
+          staple() {
+            for attempt in 1 2 3 4 5 6; do
+              xcrun stapler staple "$1" && return 0
+              echo "stapling $1 failed (attempt $attempt of 6); trying again in 30 s"
+              sleep 30
+            done
+            echo "::error::could not staple $1 after 6 attempts"
+            return 1
+          }
+          for f in release/OpenMausBot-*-arm64.dmg release/OpenMausBot-*-x64.dmg release/mac-arm64/OpenMausBot.app release/mac/OpenMausBot.app; do
+            staple "$f"
+          done
           v=$(node -p "require('./package.json').version")
           rm -f "release/OpenMausBot-$v-arm64.zip" "release/OpenMausBot-$v-x64.zip"
           ditto -c -k --sequesterRsrc --keepParent release/mac-arm64/OpenMausBot.app "release/OpenMausBot-$v-arm64.zip"
@@ -498,7 +508,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
-      # to dispatch the npm and Docker publishes on the new tag
+      # to dispatch the npm, Docker and connector publishes on the new tag
       actions: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -701,9 +711,9 @@ jobs:
             --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
           echo "v$VERSION is live on the canonical feed and its legacy updater bridge"
           # Publishing created the tag with this workflow's token, and GitHub
-          # starts no workflow from events that token creates. Start the two
+          # starts no workflow from events that token creates. Start the
           # tag-driven publishes by hand, on the tag, so they see refs/tags/v*.
-          for workflow in npm-package.yml docker.yml; do
+          for workflow in npm-package.yml docker.yml connector-release.yml; do
             GH_TOKEN="$CANONICAL_TOKEN" gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
           done
-          echo "dispatched the npm package and Docker image publishes on v$VERSION"
+          echo "dispatched the npm package, Docker image and connector image publishes on v$VERSION"

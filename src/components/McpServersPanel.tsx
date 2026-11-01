@@ -30,6 +30,7 @@ import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
 import { WHOP_MCP_URL, isWhopServer, whopServerName } from "@/lib/whop-integration";
+import { POSTIZ_SERVER } from "../../shared/postiz";
 import { openBotSettings } from "./bot-panel/panel-link";
 
 export interface ProbeResult {
@@ -41,7 +42,13 @@ export interface ProbeResult {
   /** `keys`: the server refused the headers it was sent; `unreachable` and `timeout` may pass on a second try. */
   reason?: "keys" | "unreachable" | "timeout";
   status?: number;
+  /** This panel's own note: the test ran right after the server was saved, so a failure means it was saved but off. */
+  saved?: boolean;
 }
+
+/** A passing test after a save switches the server on by itself. A click on its switch this soon after was aimed at the
+ * Off the person saw, so it keeps the server on instead of switching it straight back off. */
+export const SWITCH_SETTLE_MS = 1_500;
 
 async function toolsCheck(
   name: string,
@@ -89,6 +96,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   onWhopConnection?: (connected: boolean) => void;
 } = {}) {
   const { state: store, dispatch } = useStore();
+  const botName = (id: string) => store.bots?.find((bot) => bot.id === id)?.name ?? id;
   const policy = store.config?.managedPolicy;
   const restricted = Boolean(policy && !policy.mcp.allowCustom);
   const [servers, setServers] = useState<McpServerListing[] | null>(null);
@@ -105,6 +113,9 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   const [callbackError, setCallbackError] = useState<string | null>(null);
   const [completingSignIn, setCompletingSignIn] = useState(false);
   const [fixingKeys, setFixingKeys] = useState(false);
+  /** Each server a passing test just switched on, and when; and the one being tested to switch it on. */
+  const switchedOn = useRef<Record<string, number>>({});
+  const [connecting, setConnecting] = useState<string | null>(null);
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const whopServer = servers?.find((server) => isRemoteMcpListing(server) && isWhopServer(server));
@@ -155,22 +166,26 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     setNotice(null);
   };
 
-  /** Tests a server and turns it on when it answers; what it said stays on its row. */
-  const connect = async (name: string): Promise<ProbeResult> => {
+  /** Tests a server and turns it on when it answers; what it said stays on its row. `saved`: it was just saved. */
+  const connect = async (name: string, saved = false): Promise<ProbeResult> => {
     setBusy(`test:${name}`);
+    setConnecting(name);
     loadGeneration.current += 1;
     forgetProbe(name);
-    let result = await toolsCheck(name, api);
+    let result: ProbeResult = await toolsCheck(name, api);
     if (result.ok) {
       try {
         listed((await api(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) })).servers);
+        switchedOn.current[name] = Date.now();
       } catch (cause) {
         result = { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
       }
     }
+    if (saved) result = { ...result, saved: true };
     if (mounted.current) {
       setProbe((current) => ({ ...current, [name]: result }));
       setBusy(null);
+      setConnecting(null);
     }
     return result;
   };
@@ -184,12 +199,18 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     let latest = servers ?? [];
     try {
       for (const item of items) {
-        latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...item.body }) })).servers);
-        added.push(item.name);
+        const body = item.ownKey
+          ? { ...item.body, headers: Object.fromEntries(Object.keys(item.body.headers ?? {}).map((name) => [name, ""])) }
+          : item.body;
+        latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...body }) })).servers);
         if (item.ownKey) {
           await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
-          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
+          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey, url: body.url }) });
+          latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
+            method: "PUT", body: JSON.stringify({ ...body, enabled: false }),
+          })).servers);
         }
+        added.push(item.name);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -197,7 +218,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     setBusy(null);
     if (added.length) closeEditor();
     for (const name of added) {
-      const result = await connect(name);
+      const result = await connect(name, true);
       const server = latest.find((each) => each.name === name);
       if (result.auth === "required" && server && added.length === 1 && mounted.current) await signIn(server);
     }
@@ -211,7 +232,22 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     setError(null);
     setNotice(null);
     try {
-      listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...item.body, enabled: existing.enabled }) })).servers);
+      let body = item.body;
+      let ownKey: string | undefined;
+      if (store.config?.team && existing.scope !== "team" && typeof body.url === "string" && !body.oauth) {
+        const connections = await api("/api/team/my-connections");
+        if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
+          const headers = (body.headers ?? {}) as Record<string, string | true>;
+          if (Object.keys(headers).length > 1) {
+            throw new Error("Personal MCP connections support one header. Remove the extra headers before saving.");
+          }
+          const value = Object.values(headers)[0];
+          ownKey = typeof value === "string" ? value : undefined;
+          body = { ...body, headers: Object.fromEntries(Object.keys(headers).map((name) => [name, ""])) };
+        }
+      }
+      listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...body, enabled: existing.enabled }) })).servers);
+      if (ownKey) await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: ownKey, url: body.url }) });
       closeEditor();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -219,10 +255,14 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
       return;
     }
     setBusy(null);
-    if (!existing.runsOn) await connect(item.name);
+    if (!existing.runsOn) await connect(item.name, true);
   };
 
   const toggle = async (server: McpServerListing) => {
+    if (server.enabled && Date.now() - (switchedOn.current[server.name] ?? 0) < SWITCH_SETTLE_MS) {
+      setNotice({ key: "mcp.switchedOnByTest", params: { name: server.name } });
+      return;
+    }
     setBusy(`toggle:${server.name}`);
     loadGeneration.current += 1;
     setError(null);
@@ -450,7 +490,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     </div>;
   }
 
-  const visibleServers = servers?.filter((server) => !hideWhop || !isRemoteMcpListing(server) || !isWhopServer(server));
+  const visibleServers = servers?.filter((server) => !hideWhop || !isRemoteMcpListing(server) || !(isWhopServer(server) || server.name === POSTIZ_SERVER));
 
   return (
     <section
@@ -535,6 +575,8 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                       </div>
                       {server.managedBy && <div className="mt-1 text-[12px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
                       {server.runsOn && <div data-mcp-runs-on className="mt-1 text-[12px] text-ink-secondary">{t("mcp.runsOn", { computer: server.runsOn.label })}</div>}
+                      {server.bot && <div data-mcp-own-bot className="mt-1 text-[12px] text-ink-secondary">{t("mcp.ownBot", { bot: botName(server.bot) })}</div>}
+                      {server.offFor?.length ? <div data-mcp-off-for className="mt-1 text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") })}</div> : null}
                       <div className="mt-1 truncate font-mono text-[12px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>
@@ -584,13 +626,18 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                     </details>
                   </div>}
                   <McpAppsSwitch<McpServerListing> server={server} disabled={busy !== null || signingIn !== null} onSaved={(next) => { loadGeneration.current += 1; listed(next); }} />{renderSignIn(server)}
+                  {connecting === server.name && !server.enabled && !result && (
+                    <div role="status" data-mcp-testing className="mt-3 flex items-center gap-2 rounded-lg bg-raised px-3 py-2 text-[12px] text-ink-secondary">
+                      <Loader2 size={13} className="animate-spin" aria-hidden="true" /> {t("mcp.check.testingOff")}
+                    </div>
+                  )}
                   {result && signingIn !== server.name && (
                     <div role="status" className={cn("mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : result.auth === "required" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger")}>
                       {result.auth === "required" ? t("mcp.auth.required") : result.ok ? (
                         <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> {connectedLabel(result)}</span>
                       ) : (
                         <>
-                          <span className="min-w-0 flex-1">{t(server.enabled ? "mcp.check.failed" : "mcp.check.failedOff", { reason: failureReason(server, result) })}</span>
+                          <span className="min-w-0 flex-1">{t(server.enabled ? "mcp.check.failed" : result.saved ? "mcp.check.savedOff" : "mcp.check.failedOff", { reason: failureReason(server, result) })}</span>
                           {(result.reason === "keys" && isRemoteMcpListing(server)) || result.reason === "unreachable" || result.reason === "timeout" ? (
                             <button type="button" disabled={busy !== null || signingIn !== null}
                               onClick={() => result.reason === "keys" ? openEditor(server.name, true) : void connect(server.name)}

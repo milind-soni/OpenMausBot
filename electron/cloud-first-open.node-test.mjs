@@ -158,11 +158,15 @@ test("a payment the Admin is still confirming shows the setup screen too, at its
 });
 
 test("nothing to open (no Cloud, or not signed in): asking says so, as before, and the window stays where it is", async () => {
-  for (const state of [{ status: "connected", account: ACCOUNT }, { status: "signed-out" }, ready({ status: "stopped" })]) {
+  for (const state of [{ status: "connected", account: ACCOUNT }, { status: "signed-out" }]) {
     const w = world({ state });
     await assert.rejects(w.home.openCloud(), /not ready/);
     assert.deepEqual([w.went, w.fetched, w.home.asking()], [[], [], false], JSON.stringify(state));
   }
+  // A Cloud the Admin says isn't running is something to say, on this computer's screen: never looked up, never dialled.
+  const w = world({ state: ready({ status: "stopped" }) });
+  await w.home.openCloud();
+  assert.deepEqual([w.home.view(), w.went, w.fetched, w.home.asking()], [{ screen: "plan", machine: "stopped" }, [[SCREEN, null]], [], true]);
 });
 
 test("going somewhere else from the setup screen lets My Cloud go: the Server menu's choice stands when it becomes ready", async () => {

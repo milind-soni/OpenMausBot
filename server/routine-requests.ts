@@ -844,7 +844,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
     if (duplicate) {
       // The tool cannot choose a result destination.
       throw new RoutineRequestError(
-        `An enabled routine with the same instructions and execution settings already exists (${duplicate.id}). Use list_triggers to review it, then change or run that trigger instead.`,
+        `An enabled routine with the same instructions and execution settings already exists (${duplicate.id}). Use trigger_info to review it, then change or run that trigger instead.`,
         409,
         { terminal: true },
       );

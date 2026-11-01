@@ -1,16 +1,24 @@
 import type { Bot, Group } from "@/state/store";
 import { effectiveDefaultResponder, groupComposerHint } from "@/lib/group-routing";
 import { t } from "@/lib/i18n";
-import { userBubbleTone } from "@/lib/user-bubble-tone";
+import { BOT_BUTTON, botButtonStyle, botButtonTone, type BotButton } from "@/lib/bot-button";
+
+/** Simple mode's composer pill on a wider screen: the field, the mic and the round button in one shell. */
+export const SIMPLE_COMPOSER = "bg-composer p-2 ring-[0.5px] ring-ink/10 hover:ring-ink/[0.22] focus-within:ring-ink/[0.22] shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03),0_0_0_1px_rgb(228_228_228/0.04)] [transition:border-radius_300ms,box-shadow_150ms]";
 
 /** Simple mode's small round controls in the composer: the +, the mic and Stop beside the round button. */
 export const SIMPLE_CONTROL = "size-7 rounded-full bg-ink/[0.05] ring-[0.5px] ring-inset ring-ink/[0.07] text-ink-tertiary hover:bg-ink/[0.09] hover:text-ink";
 
-/** The round call, Send and Stop button: the bot's flat tone with its own ink, or the accent in a room. */
-export function slotColors(color: Bot["color"] | undefined, room: boolean): { fill: string; ink: string } {
-  if (room) return { fill: "var(--color-accent)", ink: "var(--color-accent-ink)" };
-  const tone = userBubbleTone(color ?? "green");
-  return { fill: tone.background, ink: tone.ink };
+const ROOM_FILL = { fill: "var(--color-accent)", ink: "var(--color-accent-ink)" };
+
+/** The round call, Send and Stop button: the bot's own button, or the accent in a room. */
+export function slotColors(color: Bot["color"] | undefined, room: boolean): { fill: string; ink: string; button: BotButton } {
+  if (room) {
+    return { ...ROOM_FILL, button: { className: "hover:brightness-110 disabled:opacity-40", style: { backgroundColor: ROOM_FILL.fill, color: ROOM_FILL.ink } } };
+  }
+  const own = color ?? "green";
+  const tone = botButtonTone(own);
+  return { fill: tone.fill, ink: tone.ink, button: { className: BOT_BUTTON, style: botButtonStyle(own) } };
 }
 
 export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint }: {

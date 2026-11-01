@@ -84,3 +84,22 @@ describe("matchesReadyBot", () => {
     expect(matchesReadyBot(echo, "spreadsheet")).toBe(false);
   });
 });
+
+describe("the social media manager", () => {
+  const social = readyBot("social")!;
+
+  it("puts posts in Postiz as drafts or scheduled, and publishes at once only when asked", () => {
+    expect(social).toMatchObject({ title: "Social media manager", category: "work", apps: ["postiz"] });
+    expect(social.soul).toContain("Add every post to Postiz as a draft, unless the user gave it a time to go out: then schedule it for that time.");
+    expect(social.soul).toContain("Never publish a post straight away (type now) unless the user asks for that post to go out now.");
+    expect(social.routines).toEqual([expect.objectContaining({ name: "Weekly post plan", enabled: false })]);
+    expect(social.routines![0]!.prompt).toContain("as drafts");
+  });
+
+  it("brings its notes and leaves the person's approval level, so publishing asks as their other bots do", () => {
+    const template = readyBotTemplate(defaults(), social);
+    expect(template.profile.approvalMode).toBe("ask");
+    expect(template.memory["memory/social.md"]).toContain("title: Social media");
+    expect(template.memory["MEMORY.md"]).toContain("memory/social.md");
+  });
+});

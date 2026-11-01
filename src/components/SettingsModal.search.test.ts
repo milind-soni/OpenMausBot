@@ -5,7 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), scrolled: [] as Element[] }));
+vi.mock("@/lib/scroll-within", () => ({ scrollWithin: (_scroller: unknown, target: Element) => { fixture.scrolled.push(target); }, scrollParent: () => null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: vi.fn(async () => ({})),
@@ -29,7 +30,7 @@ for (const [path, name] of [
 
 let host: HTMLDivElement;
 let root: Root;
-const scrolled: Element[] = [];
+const scrolled = fixture.scrolled;
 
 beforeAll(() => {
   HTMLElement.prototype.checkVisibility ??= () => true;
@@ -40,7 +41,6 @@ beforeEach(async () => {
   setLocale("en");
   scrolled.length = 0;
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
-  Element.prototype.scrollIntoView = vi.fn(function (this: Element) { scrolled.push(this); });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);

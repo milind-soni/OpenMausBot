@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { isPickedBotName } from "./names.ts";
-import { hasSetupChoices } from "./initial-greeting.ts";
-import { aboutMeExcerpt, createSetupSuggestions, parseSetupSuggestions, setupSuggestionPrompt, suggestionBasis, worthAsking, type SuggestionApps,
-  type SuggestionBasis } from "./setup-suggestions.ts";
-import type { BotRecord } from "./store.ts";
+import { hasSetupChoices, setupChoices } from "./initial-greeting.ts";
+import { aboutMeExcerpt, createSetupSuggestions, parseSetupSuggestions, RENAME_SETTLE_MS, SETUP_SUGGESTIONS_DEADLINE_MS, setupSuggestionPrompt,
+  suggestionBasis, worthAsking, type SuggestionApps, type SuggestionBasis } from "./setup-suggestions.ts";
+import type { BotRecord, Message } from "./store.ts";
 import { cancelSetupRequest } from "./setup-request.ts";
 import type { SideJobText } from "./side-jobs.ts";
 import { Store } from "./store.ts";
@@ -227,5 +227,219 @@ describe("the card's answers", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(empty.calls).toHaveLength(0);
     expect(empty.greeting().setupChoicesPending).toBeUndefined();
+  });
+});
+
+describe("renaming a new bot before its card is answered", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const FIXED = setupChoices("en");
+  const RECRUITER = ["Screen my new candidates", "Draft a job post", "Schedule my interviews", "Find candidates on job sites", "Remind me to follow up"];
+  const GARDENER = ["Find plants for my balcony", "Remind me to water plants", "Check the weekly frost forecast", "Draft a planting plan", "Compare garden tools"];
+  const PLANNER = ["Find a party venue", "Draft my guest invitations", "Compare catering options", "Remind me to send invites", "Plan a party menu"];
+  type Reply = () => Promise<string>;
+  const replying = (choices: readonly string[]): Reply => async () => JSON.stringify(choices);
+  const later = () => {
+    let answer!: (text: string) => void;
+    const reply = new Promise<string>((resolve) => { answer = resolve; });
+    return { reply: () => reply, answer };
+  };
+
+  function setup(options: { name?: string; replies?: Record<string, Reply>; withinBudget?: () => boolean; canSetUp?: () => boolean } = {}) {
+    const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }), undefined, undefined, "en");
+    const bot = store.createBot({ name: options.name ?? "Pepper" });
+    const replies: Record<string, Reply> = { Recruiter: replying(RECRUITER), Gardener: replying(GARDENER), "Party Planner": replying(PLANNER), ...options.replies };
+    const calls: Array<{ name: string; signal?: AbortSignal }> = [];
+    const writer: SideJobText = { via: "engine", generateText: (prompt, callOptions) => {
+      const name = /^Bot name: (.*)$/m.exec(prompt)?.[1] ?? "";
+      calls.push({ name, ...(callOptions?.signal ? { signal: callOptions.signal } : {}) });
+      return (replies[name] ?? (async () => "[]"))();
+    } };
+    const patches: Array<Partial<Message>> = [];
+    const patchMessage = store.patchMessage.bind(store);
+    store.patchMessage = (threadId, id, patch) => { patches.push(patch); return patchMessage(threadId, id, patch); };
+    const suggestions = createSetupSuggestions({
+      store, enabled: () => true, canSetUp: () => options.canSetUp?.() ?? true, withinBudget: () => options.withinBudget?.() ?? true,
+      writer: () => writer, apps: () => null,
+      facts: (of) => suggestionBasis(of, { bots: store.bots, shared: false, languageCode: "en", canBrowse: true }),
+    });
+    suggestions.personalise(bot.id);
+    const greeting = () => store.messagesFor(bot.threadId)[0]!;
+    const rename = (name: string) => store.patchBotProfile(bot.id, { name });
+    const settle = () => vi.advanceTimersByTimeAsync(RENAME_SETTLE_MS);
+    return { store, bot, calls, patches, greeting, rename, settle, named: () => calls.map((call) => call.name) };
+  }
+
+  it("marks the card busy at once, writes it once the rename settles, and swaps the new answers in with the end of the wait", async () => {
+    const s = setup();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.calls).toHaveLength(0);
+    expect(s.greeting().setupChoices).toEqual(FIXED);
+    s.rename("Recruiter");
+    expect(s.greeting().setupChoicesUpdating).toBeTypeOf("number");
+    expect(s.greeting().setupChoices).toEqual(FIXED);
+    await vi.advanceTimersByTimeAsync(RENAME_SETTLE_MS - 1);
+    expect(s.calls).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.named()).toEqual(["Recruiter"]);
+    expect(s.greeting().setupChoices).toEqual(RECRUITER);
+    expect(s.greeting().setupChoicesUpdating).toBeUndefined();
+    expect(s.patches).toStrictEqual([
+      { setupChoicesPending: undefined, setupChoicesUpdating: expect.any(Number) },
+      { setupChoicesPending: undefined, setupChoicesUpdating: undefined, setupChoices: RECRUITER },
+    ]);
+  });
+
+  it("follows a rename by any path, and a new title or department too", async () => {
+    const s = setup();
+    s.store.patchBot(s.bot.id, { name: "Gardener" });
+    await s.settle();
+    expect(s.greeting().setupChoices).toEqual(GARDENER);
+    s.store.patchBotProfile(s.bot.id, { name: "Pepper", title: "Party Planner" });
+    await s.settle();
+    expect(s.calls.at(-1)!.name).toBe("");
+    s.store.patchBot(s.bot.id, { section: "Hiring" });
+    await s.settle();
+    expect(s.calls).toHaveLength(3);
+    s.store.patchBotProfile(s.bot.id, { notifications: false });
+    s.store.patchTask(s.bot.id, s.bot.threadId, { unread: true });
+    await s.settle();
+    expect(s.calls).toHaveLength(3);
+    expect(s.greeting().setupChoicesUpdating).toBeUndefined();
+  });
+
+  it("goes back to the fixed answers for a picked or blank name without asking, and does nothing between two picked names", async () => {
+    const s = setup({ name: "Recruiter" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.greeting().setupChoices).toEqual(RECRUITER);
+    s.rename("Pesto");
+    await s.settle();
+    expect(s.named()).toEqual(["Recruiter"]);
+    expect(s.greeting().setupChoices).toEqual(FIXED);
+    expect(s.greeting().setupChoicesUpdating).toBeUndefined();
+    const seen = s.patches.length;
+    s.rename("Pepper 2");
+    await s.settle();
+    expect(s.patches).toHaveLength(seen);
+    s.rename("Gardener");
+    await s.settle();
+    expect(s.greeting().setupChoices).toEqual(GARDENER);
+    s.store.patchBot(s.bot.id, { name: "   " });
+    await s.settle();
+    expect(s.named()).toEqual(["Recruiter", "Gardener"]);
+    expect(s.greeting().setupChoices).toEqual(FIXED);
+  });
+
+  it("never writes again once the person has written, picked or closed the card, or the bot has instructions", async () => {
+    const acts: Array<(s: ReturnType<typeof setup>) => void> = [
+      (s) => s.store.appendMessage(s.bot.threadId, { role: "user", kind: "text", text: "hello" }),
+      (s) => s.store.patchTask(s.bot.id, s.bot.threadId, { setupRequest: { at: Date.now() } }),
+      (s) => cancelSetupRequest(s.store, s.bot.id, s.bot.threadId),
+      (s) => s.store.patchBot(s.bot.id, { description: "Hires people." }),
+    ];
+    for (const act of acts) {
+      const s = setup();
+      act(s);
+      const seen = s.patches.length;
+      s.rename("Recruiter");
+      await s.settle();
+      expect(s.calls).toHaveLength(0);
+      expect(s.patches).toHaveLength(seen);
+    }
+  });
+
+  it("stops a rewrite the person answers while it is on its way, and keeps the answers they saw", async () => {
+    const waiting = setup();
+    waiting.rename("Recruiter");
+    waiting.store.appendMessage(waiting.bot.threadId, { role: "user", kind: "text", text: "find me a dentist" });
+    expect(waiting.greeting().setupChoicesUpdating).toBeUndefined();
+    await waiting.settle();
+    expect(waiting.calls).toHaveLength(0);
+
+    const reply = later();
+    const asked = setup({ replies: { Recruiter: reply.reply } });
+    asked.rename("Recruiter");
+    await asked.settle();
+    expect(asked.named()).toEqual(["Recruiter"]);
+    asked.store.patchTask(asked.bot.id, asked.bot.threadId, { setupRequest: { at: Date.now() } });
+    expect(asked.calls[0]!.signal?.aborted).toBe(true);
+    expect(asked.greeting().setupChoicesUpdating).toBeUndefined();
+    reply.answer(JSON.stringify(RECRUITER));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked.greeting().setupChoices).toEqual(FIXED);
+  });
+
+  it("waits for rapid renames to settle and cancels a stale writing, so the latest name wins", async () => {
+    const s = setup();
+    s.rename("Recruiter");
+    await vi.advanceTimersByTimeAsync(RENAME_SETTLE_MS / 2);
+    s.rename("Gardener");
+    await vi.advanceTimersByTimeAsync(RENAME_SETTLE_MS / 2);
+    expect(s.calls).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(RENAME_SETTLE_MS / 2);
+    expect(s.named()).toEqual(["Gardener"]);
+    expect(s.greeting().setupChoices).toEqual(GARDENER);
+
+    const stale = later();
+    const t = setup({ replies: { Recruiter: stale.reply } });
+    t.rename("Recruiter");
+    await t.settle();
+    t.rename("Party Planner");
+    expect(t.calls[0]!.signal?.aborted).toBe(true);
+    expect(t.greeting().setupChoicesUpdating).toBeTypeOf("number");
+    await t.settle();
+    expect(t.named()).toEqual(["Recruiter", "Party Planner"]);
+    expect(t.greeting().setupChoices).toEqual(PLANNER);
+    stale.answer(JSON.stringify(RECRUITER));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.greeting().setupChoices).toEqual(PLANNER);
+    expect(t.patches.filter((patch) => patch.setupChoices)).toHaveLength(1);
+  });
+
+  it("replaces the first answers' writing when the bot is renamed while the card still waits for them", async () => {
+    const first = later();
+    const s = setup({ name: "Max", replies: { Max: first.reply } });
+    expect(s.greeting().setupChoicesPending).toBe(true);
+    s.rename("Recruiter");
+    expect(s.calls[0]!.signal?.aborted).toBe(true);
+    expect(s.greeting().setupChoicesPending).toBeUndefined();
+    expect(s.greeting().setupChoicesUpdating).toBeTypeOf("number");
+    first.answer(JSON.stringify(GARDENER));
+    await s.settle();
+    expect(s.named()).toEqual(["Max", "Recruiter"]);
+    expect(s.greeting().setupChoices).toEqual(RECRUITER);
+    expect(s.greeting().setupChoicesUpdating).toBeUndefined();
+  });
+
+  it("keeps the answers it shows, and takes picks again, when the writing fails, is unusable, is late or cannot start", async () => {
+    const replies: Reply[] = [async () => { throw new Error("offline"); }, async () => "I cannot help with that.", () => new Promise<string>(() => {})];
+    for (const reply of replies) {
+      const s = setup({ name: "Recruiter", replies: { Gardener: reply } });
+      await vi.advanceTimersByTimeAsync(0);
+      s.rename("Gardener");
+      await s.settle();
+      await vi.advanceTimersByTimeAsync(SETUP_SUGGESTIONS_DEADLINE_MS);
+      expect(s.named()).toEqual(["Recruiter", "Gardener"]);
+      expect(s.greeting().setupChoices).toEqual(RECRUITER);
+      expect(s.greeting().setupChoicesUpdating).toBeUndefined();
+    }
+    let budget = true;
+    const broke = setup({ name: "Recruiter", withinBudget: () => budget });
+    await vi.advanceTimersByTimeAsync(0);
+    budget = false;
+    broke.rename("Gardener");
+    await broke.settle();
+    expect(broke.named()).toEqual(["Recruiter"]);
+    expect(broke.greeting().setupChoices).toEqual(RECRUITER);
+    expect(broke.greeting().setupChoicesUpdating).toBeUndefined();
+    const plain = setup({ canSetUp: () => false });
+    plain.rename("Recruiter");
+    await plain.settle();
+    expect(plain.calls).toHaveLength(0);
+    expect(plain.greeting().setupChoicesUpdating).toBeUndefined();
   });
 });
