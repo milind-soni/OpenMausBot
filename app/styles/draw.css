@@ -64,3 +64,4 @@
 .drawing-canvas:has(.excalidraw--mobile) .draw-presence-floating { position: absolute; left: 50%; bottom: calc(var(--space-6) + env(safe-area-inset-bottom)); z-index: 5; display: flex; transform: translateX(-50%); pointer-events: none; }
 .draw-presence-floating .draw-presence { height: auto; margin: 0; }
 .drawing-canvas:has(.excalidraw--mobile :is(.dropdown-menu, .sidebar, .Modal)) .draw-presence-floating { display: none; }
+.draw-view > .load-failed { min-height: 100%; padding-bottom: 12vh; }
