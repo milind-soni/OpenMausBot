@@ -317,8 +317,8 @@ export class LiveRouter {
     return chromeTarget(session, spec) ? this.#chrome.service.fileChooserOffered(session, owner, chooserId) : false;
   }
 
-  answerFileChooser({ session, spec }: SessionSpec, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
-    return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : Promise.resolve(false);
+  answerFileChooser({ session, spec }: SessionSpec, owner: string, chooserId: string, paths: readonly string[], isCurrent: () => boolean = () => true): Promise<boolean> {
+    return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths, isCurrent) : Promise.resolve(false);
   }
 
   download({ session, spec }: SessionSpec, id: string): Download | undefined {

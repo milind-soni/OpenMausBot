@@ -46,10 +46,10 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
   const CLOUD_HOME = deps.cloudHome;
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
-    const visible = deps.visibleFor(auth);
     const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
     if (method === "POST" && path === "/api/groups") {
       const body = await readBody(req);
+      const visible = deps.visibleFor(auth);
       const hiddenMember = Array.isArray(body?.memberIds) ? body.memberIds.find((id: unknown) => typeof id === "string" && store.bot(id) && !visible.bot(id)) : undefined;
       if (hiddenMember) return json(res, 400, { error: `unknown channel member: ${String(hiddenMember)}` });
       const group = createChannel(body);

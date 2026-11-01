@@ -86,15 +86,16 @@ async function uploadedFiles(req: IncomingMessage): Promise<Array<{ name: string
 }
 
 /** Gives an upload's files to the page's picker; null when it took them, else why not. Files it did not take are deleted. */
-async function answerUpload(req: IncomingMessage, deps: BrowserViewerRouteDeps, browser: { session: string; spec: Spec }, owner: string, chooser: string): Promise<(Failure & { unread?: boolean }) | null> {
+async function answerUpload(req: IncomingMessage, deps: BrowserViewerRouteDeps, browser: { session: string; spec: Spec }, owner: string, chooser: string, isCurrent: () => boolean): Promise<(Failure & { unread?: boolean }) | null> {
   let files: Array<{ name: string; bytes: Uint8Array }>;
   try { files = await uploadedFiles(req); }
   catch (error) {
     if (!(error instanceof UploadError)) throw error;
     return { status: error.status, error: error.message, unread: true };
   }
+  if (!isCurrent()) return { status: 409, error: "This browser session changed. Reopen the browser panel." };
   const paths = storeUploads(files, join(deps.dataDir, "browser-uploads"));
-  if (await deps.viewers.answerFileChooser(browser, owner, chooser, paths).catch(() => false)) return null;
+  if (await deps.viewers.answerFileChooser(browser, owner, chooser, paths, isCurrent).catch(() => false)) return null;
   for (const file of paths) rmSync(dirname(file), { recursive: true, force: true });
   return { status: 409, error: PICKER_CLOSED };
 }
@@ -172,7 +173,7 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
         return json(res, refused.status, { error: refused.error });
       }
       uploading.add(owner);
-      const unanswered = await answerUpload(req, deps, browser, owner, chooser).finally(() => uploading.delete(owner));
+      const unanswered = await answerUpload(req, deps, browser, owner, chooser, isCurrent).finally(() => uploading.delete(owner));
       if (!unanswered) {
         res.writeHead(204).end();
         return;

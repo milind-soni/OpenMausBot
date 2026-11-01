@@ -15,6 +15,12 @@ afterEach(async () => {
 
 const MESSAGE: Message = { id: "m1", at: 1, role: "bot", kind: "text", text: "Shall I send it?" };
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 async function fixture(overrides: Partial<ReactionRouteDeps> = {}) {
   const calls: Array<Parameters<ReactionRouteDeps["react"]>[0]> = [];
   const deps: ReactionRouteDeps = {
@@ -24,6 +30,7 @@ async function fixture(overrides: Partial<ReactionRouteDeps> = {}) {
     },
     reactorFor: () => ({ by: "p_alice", name: "alice@example.test" }),
     cloudGuestSendRefusal: () => null,
+    threadVisible: () => true,
     ...overrides,
   };
   const routes = [createReactionRoutes(deps)];
@@ -77,6 +84,34 @@ describe("POST /api/threads/:threadId/messages/:messageId/reactions", () => {
   it("answers a refused delivery with its status and code", async () => {
     const { send } = await fixture({ react: async () => { throw Object.assign(new Error("this workspace has reached its monthly spend limit"), { status: 409, code: "spend_cap" }); } });
     expect(await send({ emoji: "👍" })).toEqual({ status: 409, body: { error: "this workspace has reached its monthly spend limit", code: "spend_cap" } });
+  });
+
+  it("refuses a conversation hidden while its body was read", async () => {
+    const { calls, send } = await fixture({ threadVisible: () => false });
+    expect(await send({ emoji: "❤️" })).toEqual({ status: 404, body: { error: "no such conversation" } });
+    expect(calls).toEqual([]);
+  });
+
+  it("withholds the message when visibility changes during reaction delivery", async () => {
+    const started = deferred();
+    const finish = deferred();
+    let visible = true;
+    const { send } = await fixture({
+      threadVisible: () => visible,
+      react: async () => {
+        started.resolve();
+        await finish.promise;
+        return { message: { ...MESSAGE, text: "private text added after revocation" }, delivery: "started" };
+      },
+    });
+    const response = send({ emoji: "👍" });
+    try {
+      await started.promise;
+      visible = false;
+    } finally {
+      finish.resolve();
+    }
+    expect(await response).toEqual({ status: 404, body: { error: "no such conversation" } });
   });
 
   it("leaves every other path and method to the routes after it", async () => {

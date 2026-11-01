@@ -229,7 +229,7 @@ describe("the live view router", () => {
     expect(chrome.service.fileChooserOffered).toHaveBeenCalledWith("s", "o", "c");
     await expect(live.answerFileChooser({ session: "s", spec: AGENT_BROWSER }, "o", "c", [])).resolves.toBe(false);
     await expect(live.answerFileChooser({ session: "s", spec: CHROME }, "o", "c", ["/f"])).resolves.toBe(true);
-    expect(chrome.service.answerFileChooser).toHaveBeenCalledWith("s", "o", "c", ["/f"]);
+    expect(chrome.service.answerFileChooser).toHaveBeenCalledWith("s", "o", "c", ["/f"], expect.any(Function));
     expect(live.download({ session: "s", spec: AGENT_BROWSER }, "d1")).toBeUndefined();
     expect(live.download({ session: "s", spec: CHROME }, "d1")).toEqual({ id: "d1" });
   });

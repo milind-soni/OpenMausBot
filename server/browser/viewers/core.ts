@@ -642,12 +642,14 @@ export class ViewerHub {
   }
 
   /** The holder's files for the picker it was offered; false when that picker is no longer open, or is not theirs. */
-  async answerFileChooser(owner: string, id: string, paths: readonly string[]): Promise<boolean> {
+  async answerFileChooser(owner: string, id: string, paths: readonly string[], isCurrent: () => boolean = () => true): Promise<boolean> {
     const chooser = this.#chooser;
     if (!chooser || !this.fileChooserOffered(owner, id)) return false;
     this.#hold.used();
-    await this.host.control.human(chooser.viewer.options.person, chooser.tab, () => chooser.tab.page.fileChoosers.answer(paths, { waitMs: 0 }));
-    return true;
+    return this.host.control.human(chooser.viewer.options.person, chooser.tab, () => chooser.tab.page.fileChoosers.answer(paths, {
+      waitMs: 0,
+      isCurrent: () => isCurrent() && this.viewers.has(chooser.viewer) && this.#chooser === chooser && this.fileChooserOffered(owner, id),
+    }));
   }
 
   tabsMessage(): ViewerOutput {
