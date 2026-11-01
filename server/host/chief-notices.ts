@@ -43,6 +43,8 @@ export interface ChiefNoticeDeps {
   quietThread?(botId: string, threadId: string): boolean;
   /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
   privateThread?(threadId: string): boolean;
+  /** The language a line about this conversation is written in for its person (server/server-lines.ts). */
+  threadLanguage?(threadId: string): string | undefined;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
    * is theirs alone), into a notices chat of that person's own. */
   routing?: {
@@ -207,7 +209,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const chief = chiefForBot(store.bots, bot);
     const report = (retry?: IncidentRetry): void => void deliver({
       chief, title: INCIDENTS_THREAD_TITLE, bot, threadId,
-      chip: incidentChip(incident), text: incidentText(incident, count, retry),
+      chip: incidentChip(incident, deps.threadLanguage?.(threadId)), text: incidentText(incident, count, retry),
       alreadyNotified: input.notified === true || input.kind === "could-not-start" || input.kind === "routine-failed",
     });
     const chiefRetries = Boolean(chief && !group && reachesChief(chief, bot, threadId));

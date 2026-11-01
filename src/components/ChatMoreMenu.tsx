@@ -19,6 +19,7 @@ import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
@@ -180,9 +181,21 @@ export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHead
 
 export const EXPORT_ITEMS = ["copy", "download"];
 
-/** The bot panel's round Share button: copy or download this conversation. */
+/** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation below;
+ * anywhere else a menu of those two. */
 export function ChatShareMenu({ bot, className }: { bot: Bot; className: string }): JSX.Element {
-  return <ShareMenu key={bot.threadId} bot={bot} className={className} />;
+  return useTeamName() ? <ShareBotButton bot={bot} className={className} footer={<ExportButtons key={bot.threadId} bot={bot} />} />
+    : <ShareMenu key={bot.threadId} bot={bot} className={className} />;
+}
+
+function ExportButtons({ bot }: { bot: Bot }) {
+  const { items } = useChatMoreItems(bot);
+  return items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => (
+    <button key={item.key} type="button" disabled={item.disabled} onClick={item.onSelect}
+      className="rounded-lg px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50">
+      {t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation")}{item.trailing && <> · {item.trailing}</>}
+    </button>
+  ));
 }
 
 function ShareMenu({ bot, className }: { bot: Bot; className: string }) {

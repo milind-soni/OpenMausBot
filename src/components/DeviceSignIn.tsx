@@ -19,7 +19,11 @@ export interface DeviceSignInStatus {
 }
 
 export function deviceSignInProvider(driverKind: string): DeviceSignInProvider {
-  return driverKind === "grokAgent" ? "grok" : "codex";
+  switch (driverKind) {
+    case "grokAgent": return "grok";
+    case "kimiAgent": return "kimi";
+    default: return "codex";
+  }
 }
 
 export const DEVICE_SIGN_IN_COPY: Record<DeviceSignInProvider, Record<"description" | "start" | "enterCode" | "open" | "security" | "connected" | "connectedAccount" | "failed" | "invalidChallenge", LocaleKey>> = {
@@ -44,6 +48,17 @@ export const DEVICE_SIGN_IN_COPY: Record<DeviceSignInProvider, Record<"descripti
     connectedAccount: "engineSetup.grok.connectedAccount",
     failed: "engineSetup.grok.failed",
     invalidChallenge: "engineSetup.grok.invalidChallenge",
+  },
+  kimi: {
+    description: "engineSetup.kimi.description",
+    start: "engineSetup.kimi.start",
+    enterCode: "engineSetup.kimi.enterCode",
+    open: "engineSetup.kimi.open",
+    security: "engineSetup.kimi.security",
+    connected: "engineSetup.kimi.connected",
+    connectedAccount: "engineSetup.kimi.connectedAccount",
+    failed: "engineSetup.kimi.failed",
+    invalidChallenge: "engineSetup.kimi.invalidChallenge",
   },
 };
 

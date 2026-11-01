@@ -620,7 +620,7 @@ describe("RuntimeCoordinator: the run adapter", () => {
     w.coordinator.tick(); await flush();
     const resumes = w.host.runs.filter(run => run.node.id === "gen-1");
     expect(resumes.map(run => run.resumed)).toEqual([true]);
-    expect(resumes[0]!.text).toMatch(/^A teammate you are waiting on stopped on a question for Milind; the rest of your requests are still open/);
+    expect(resumes[0]!.text).toMatch(/^A teammate you are waiting on stopped on a question for Milind or for you; the rest of your requests are still open/);
     expect(resumes[0]!.text).toContain(`\n\n[OpenMausBot question from @builder on assignment ${built.id}: waiting on Milind]\nIt asks Milind: "Which region should I deploy to?".`);
     expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
     expect(w.coordinator.node(tested.id)?.status).toBe("running");
@@ -1477,5 +1477,118 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
     w.coordinator.tick();
     expect("continuation" in w.coordinator.node("gen-1")!).toBe(false);
     expect(w.host.runs[0]!.composed.turn).toBe("continued");
+  });
+});
+
+describe("RuntimeCoordinator: who answers a teammate's question", () => {
+  /** A coordinator on the server's own limits, with a clock the test moves. */
+  function clocked(script: Script) {
+    const host = fakeHost(script);
+    let at = 1_800_000_000_000;
+    const coordinator = new RuntimeCoordinator({ dataDir: ":memory:", host, now: () => at, log: () => {} });
+    return { host, coordinator, logs: [], advance: (ms: number) => { at += ms; } } as World & { advance(ms: number): void };
+  }
+  const asks = (text: string): Script => (node, turn) =>
+    node.botId === "builder" && !/answered|Nobody was asked/.test(turn) ? { ok: true, text } : undefined;
+
+  it("keeps a question for the person waiting past 30 minutes, and days, on the server's own limits; the late answer still carries the work on", async () => {
+    const w = clocked(asks("Checked the export.\nNEEDS INPUT: Which region should I deploy to?"));
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Deploy it");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "Which region should I deploy to?" });
+    w.coordinator.tick(); await flush();
+    for (const ms of [30 * 60_000 + 1, 6 * 60 * 60_000, 3 * 24 * 60 * 60_000]) {
+      w.advance(ms);
+      w.coordinator.tick(); await flush();
+      expect(w.coordinator.node(node.id), `still waiting after ${ms} ms more`).toMatchObject({ status: "waiting", question: "Which region should I deploy to?" });
+    }
+    expect(w.host.reports).toEqual([]);
+    expect(w.coordinator.answerNode(node.id, "eu-west")).toBe(true);
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs.at(-1)?.text).toContain('The person answered: "eu-west".');
+    expect(w.coordinator.node(node.id)?.status).toBe("completed");
+  });
+
+  it("at Full access hands the question to its requester, and goes on with the asker's default when the requester sends no answer", async () => {
+    const w = world(asks("Two formats would work.\nNEEDS INPUT: CSV or Excel?\nDefault: CSV"));
+    w.host.levels.builder = { level: "full" };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Export the report");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", decide: { default: "CSV" } });
+    expect(w.host.parks.map(p => p.node.decide)).toEqual([{ default: "CSV" }]);
+    w.coordinator.tick(); await flush();
+    const resume = w.host.runs.find(run => run.node.id === "gen-1")!;
+    expect(resume.text).toContain(`[OpenMausBot question from @builder on assignment ${node.id}: yours to answer]\nIt asks: "CSV or Excel?". Its default: "CSV".`);
+    expect(resume.text).not.toContain("waiting on Milind");
+    w.coordinator.tick(); await flush();
+    const answered = w.host.runs.filter(run => run.node.id === node.id).at(-1)!;
+    expect(answered.node).toMatchObject({ answer: "CSV", answeredBy: { kind: "default" } });
+    expect(answered.text).toContain('Nobody was asked, at this level: go on with your default, "CSV", and say in one plain line what you chose.');
+    expect(w.coordinator.node(node.id)?.status).toBe("completed");
+  });
+
+  it("takes the requester's answer passed on by name over the default, and says which bot gave it", async () => {
+    const w = world(asks("NEEDS INPUT: CSV or Excel?\nDefault: CSV"));
+    w.host.levels.builder = { level: "full" };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Export the report");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.answerNode(node.id, "Excel, the sheet is for finance", { kind: "bot", botId: "chief" })).toBe(true);
+    w.coordinator.tick(); await flush();
+    const answered = w.host.runs.filter(run => run.node.id === node.id).at(-1)!;
+    expect(answered.node).toMatchObject({ answer: "Excel, the sheet is for finance", answeredBy: { kind: "bot", botId: "chief" } });
+    expect(answered.text).toContain('@chief answered: "Excel, the sheet is for finance".');
+  });
+
+  it("puts only what the person alone can give to the person at Full access, and every question to the person below it", async () => {
+    const full = world(asks("NEEDS INPUT: Please sign in to the bank portal so I can download the statement."));
+    full.host.levels.builder = { level: "full" };
+    const { node: signIn } = send(full, chief, "gen-1", undefined, builder, "Get the statement");
+    ended(full, "gen-1");
+    full.coordinator.tick(); await flush();
+    expect(full.coordinator.node(signIn.id)?.status).toBe("waiting");
+    expect(full.coordinator.node(signIn.id)?.decide).toBeUndefined();
+
+    const ask = world(asks("NEEDS INPUT: CSV or Excel?\nDefault: CSV"));
+    ask.host.levels.builder = { level: "ask" };
+    const { node: asked } = send(ask, chief, "gen-1", undefined, builder, "Export the report");
+    ended(ask, "gen-1");
+    ask.coordinator.tick(); await flush();
+    expect(ask.coordinator.node(asked.id)).toMatchObject({ status: "waiting", question: "CSV or Excel?\nDefault: CSV" });
+    expect(ask.coordinator.node(asked.id)?.decide).toBeUndefined();
+  });
+
+  it("leaves a question whose words stayed in one person's private chat to that person at Full access", async () => {
+    const w = world((node, turn) => node.botId === "builder" && !/answered|Nobody was asked/.test(turn)
+      ? { ok: true, text: "NEEDS INPUT: builder has a question for Ada, in builder's chat with Ada.", privateQuestion: true } : undefined);
+    w.host.levels.builder = { level: "full" };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Sort her inbox");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "builder has a question for Ada, in builder's chat with Ada." });
+    expect(w.coordinator.node(node.id)?.decide).toBeUndefined();
+  });
+
+  it("puts a question to the person at Full access when an outside event started the work: its brief is not the person's authority", async () => {
+    const w = world(asks("NEEDS INPUT: CSV or Excel?\nDefault: CSV"));
+    w.host.levels.builder = { level: "full" };
+    begun(w, chief, "gen-1", "A webhook asked for the export", { origin: undefined });
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Export the report");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "CSV or Excel?\nDefault: CSV" });
+    expect(w.coordinator.node(node.id)?.decide).toBeUndefined();
+    expect(w.host.runs.find(run => run.node.id === node.id)?.text).toContain("If something genuinely needs Milind");
+  });
+
+  it("lists the work a bot has parked, for an answer passed on to it", async () => {
+    const w = world(asks("NEEDS INPUT: CSV or Excel?"));
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Export the report");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.parkedFor("builder").map(n => n.id)).toEqual([node.id]);
+    expect(w.coordinator.parkedFor("tester")).toEqual([]);
   });
 });

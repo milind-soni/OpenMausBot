@@ -468,6 +468,11 @@ Try again. Afterwards the server is what the window opens, and this computer
 works for it by itself as it does for My Cloud: no access dialog, only the
 menu bar's item with Pause.
 
+Until then, a bot that asks for a teammate living in your other place says where
+that teammate lives and how to bring them together, instead of only that it
+can't reach it: the app tells each place of yours the names of the bots your
+other places have, and nothing more.
+
 This is offered only for a server that is yours alone: you paired with it as an
 admin, and its sign-in list names no members and no other admin (Settings →
 People). A server other people sign in to keeps the explicit **Share this
@@ -1244,9 +1249,11 @@ is not a positive finite number (empty, `65m`, `0`, a negative number,
 `Infinity`, `1e309`) leaves the default. Set them in the server's environment
 and restart it; the restart stops every running turn.
 
-A turn in a room also has a work ceiling of its own, `rooms.turnTimeoutMinutes`
-in `config.json` (default 5 minutes, 1-1440, which one conversation can
-replace). It stops a member's turn even while its tool runs, and these two
+A turn in a room also has a limit of its own, `rooms.turnTimeoutMinutes` in
+`config.json` (default 5 minutes, 1-1440, which one conversation can replace).
+It stops a member's turn that shows no progress for that long. While one of the
+turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
+an MCP call can be set to take) or the room's limit if that is longer. These two
 settings do not change it.
 
 ## Updating

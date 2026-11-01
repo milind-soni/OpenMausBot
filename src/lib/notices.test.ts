@@ -2,37 +2,41 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, localDay, nextNotice, noticeSeen, NOTICES,
-  OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, type NoticeFacts } from "./notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, launchNotice, localDay, markLaunchNotice, nextNotice, noticeSeen,
+  NOTICES, OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE, type NoticeFacts } from "./notices";
 
-let storage: Map<string, string>;
+let storage: Map<string, string>, session: Map<string, string>;
 beforeEach(() => {
-  storage = new Map();
+  storage = new Map(); session = new Map();
   vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
 const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
-  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false): NoticeFacts =>
-  ({ [SIMPLE_MODE_NOTICE]: simple, [CLOUD_PRO_UPDATE_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
+  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false, two: boolean | null = false): NoticeFacts =>
+  ({ [SIMPLE_MODE_NOTICE]: simple, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
     [BOAT_OFFER_NOTICE]: boat, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
 
-it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, Boat's credit offer, the star", () => {
+it("is one queue: the Simple mode popup first, then What's new, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, Boat's credit offer, the star", () => {
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), none)).toBe(SIMPLE_MODE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true, null), none), "nothing shows while the Simple mode popup waits").toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(CLOUD_PRO_UPDATE_NOTICE);
-  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE]);
-  expect(nextNotice(facts(true, true, true, true, true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === CLOUD_PRO_UPDATE_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(WHATS_NEW_NOTICE);
+  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, WHATS_NEW_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE]);
+  expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, true), none), "bots in two places come before any promotion").toBe(TWO_PLACES_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, false, true, false, false, true), none), "after the product-updates question").toBe(UPDATES_CONSENT_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, null), none), "nothing lower shows while main hasn't answered").toBeNull();
+  expect(nextNotice(facts(true, true, true, true, true, true, true), none)).toBe(WHATS_NEW_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === WHATS_NEW_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null, true), none)).toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, false, null), none)).toBeNull();
-  expect(CLOUD_PRO_UPDATE_NOTICE).toBe("cloud-pro-update-2026-10");
-  expect(nextNotice(facts(true, true, true, true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
+  expect(WHATS_NEW_NOTICE).toBe("whats-new-2026-11");
+  expect(nextNotice(facts(true, true, true, true, true, true), none)).toBe(WHATS_NEW_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null), none)).toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true, true), id => id === CLOUD_PRO_UPDATE_NOTICE)).toBe(PRODUCT_HUNT_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, true), id => id === WHATS_NEW_NOTICE)).toBe(PRODUCT_HUNT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true), none)).toBe(PRODUCT_HUNT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, null), none)).toBeNull();
   expect(nextNotice(facts(true, true, true, true, true), id => id === PRODUCT_HUNT_NOTICE)).toBe(CLOUD_INTRO);
@@ -52,8 +56,34 @@ it("is one queue: the Simple mode popup first, then the Cloud Pro popup, the pro
   expect(nextNotice(facts(false, false, false, false), none)).toBeNull();
 });
 
-it("Boat's credit offer is one the desktop keeps for its every page, as the Cloud Pro popup is", () => {
-  expect(DESKTOP_NOTICES).toEqual([CLOUD_PRO_UPDATE_NOTICE, BOAT_OFFER_NOTICE]);
+it("Boat's credit offer is one the desktop keeps for its every page, as What's new is", () => {
+  expect(DESKTOP_NOTICES).toEqual([WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE]);
+});
+
+it("one notice a launch: What's new goes first and Boat's credit offer waits for a later launch; only the product-updates question may follow", () => {
+  const both = facts(false, false, false, true, false, true, false, false, true);
+  expect(nextNotice(both, none)).toBe(WHATS_NEW_NOTICE);
+  expect(NOTICES.indexOf(WHATS_NEW_NOTICE), "What's new comes before the Boat card").toBeLessThan(NOTICES.indexOf(BOAT_OFFER_NOTICE));
+  expect(nextNotice(both, id => id === WHATS_NEW_NOTICE, WHATS_NEW_NOTICE), "What's new closed: nothing else this launch").toBeNull();
+  expect(nextNotice(facts(false, false, false, true, false, true, true, false, true), id => id === WHATS_NEW_NOTICE, WHATS_NEW_NOTICE), "but the question may follow")
+    .toBe(UPDATES_CONSENT_NOTICE);
+  expect(nextNotice(both, none, WHATS_NEW_NOTICE), "a reload while it is up shows it again").toBe(WHATS_NEW_NOTICE);
+  expect(nextNotice(both, id => id === WHATS_NEW_NOTICE), "the next launch").toBe(BOAT_OFFER_NOTICE);
+  expect(nextNotice(facts(false, null, false, true, false, false, false, false, true), none, BOAT_OFFER_NOTICE), "a notice this launch didn't take never holds it back")
+    .toBe(BOAT_OFFER_NOTICE);
+  expect(nextNotice(facts(false, true, false, true), none, BOAT_OFFER_NOTICE), "a trial's notice waits for the next launch too").toBeNull();
+});
+
+it("a launch keeps the notice it showed first for the window's session; storage that throws keeps it for the page", () => {
+  expect(launchNotice()).toBeNull();
+  markLaunchNotice(WHATS_NEW_NOTICE); markLaunchNotice(BOAT_OFFER_NOTICE);
+  expect(launchNotice()).toBe(WHATS_NEW_NOTICE);
+  expect(session.get("omb.launch.notice")).toBe(WHATS_NEW_NOTICE);
+  session.set("omb.launch.notice", "something-else");
+  expect(launchNotice(), "only a notice of the list").toBeNull();
+  vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
+  markLaunchNotice(STAR_NOTICE);
+  expect(launchNotice()).toBe(STAR_NOTICE);
 });
 
 it("waits while an earlier notice's answer is unknown, so a later one never shows first", () => {

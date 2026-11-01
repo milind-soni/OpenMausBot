@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { request as httpRequest, type IncomingMessage } from "node:http";
+import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { join } from "node:path";
@@ -165,18 +165,22 @@ export const PAGE_TIMEOUT_MS = 15_000;
 export const PAGE_MAX_BYTES = 2 * 1024 * 1024;
 export const PAGE_MAX_REDIRECTS = 3;
 
-export type PageResult = { ok: true; text: string } | { ok: false; refused: boolean; error: string };
+type Failure = { ok: false; refused: boolean; error: string };
+export type PageResult = { ok: true; text: string } | Failure;
+/** The 2xx answer a redirect chain ended on: its address, headers and at most `maxBytes` of its body. */
+export type PublicPage = { ok: true; url: URL; headers: IncomingHttpHeaders; body: Buffer } | Failure;
 
 export interface PageFetchOptions {
   allow?: (target: { host: string; address: string }) => boolean;
   lookup?: (host: string) => Promise<Array<{ address: string; family: number }>>;
   timeoutMs?: number;
   maxBytes?: number;
+  maxRedirects?: number;
 }
 
-type Answer = { status: number; location?: string; body: Buffer };
+type Answer = { status: number; location?: string; headers: IncomingHttpHeaders; body: Buffer };
 
-const fail = (error: string, refused = false): PageResult => ({ ok: false, refused, error });
+const fail = (error: string, refused = false): Failure => ({ ok: false, refused, error });
 
 function requestOnce(url: URL, address: { address: string; family: number }, signal: AbortSignal, maxBytes: number): Promise<Answer> {
   return new Promise((resolve, reject) => {
@@ -195,10 +199,10 @@ function requestOnce(url: URL, address: { address: string; family: number }, sig
       },
       (response: IncomingMessage) => {
         const status = response.statusCode ?? 0;
-        const location = response.headers.location;
+        const { headers } = response;
         if (status < 200 || status >= 300) {
           response.destroy();
-          resolve({ status, location, body: Buffer.alloc(0) });
+          resolve({ status, location: headers.location, headers, body: Buffer.alloc(0) });
           return;
         }
         const chunks: Buffer[] = [];
@@ -208,10 +212,10 @@ function requestOnce(url: URL, address: { address: string; family: number }, sig
           size += chunk.length;
           if (size >= maxBytes) {
             response.destroy();
-            resolve({ status, body: Buffer.concat(chunks).subarray(0, maxBytes) });
+            resolve({ status, headers, body: Buffer.concat(chunks).subarray(0, maxBytes) });
           }
         });
-        response.on("end", () => resolve({ status, body: Buffer.concat(chunks) }));
+        response.on("end", () => resolve({ status, headers, body: Buffer.concat(chunks) }));
         response.on("error", reject);
       },
     );
@@ -230,6 +234,13 @@ function withinSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 export async function fetchPageText(rawUrl: string, options: PageFetchOptions = {}): Promise<PageResult> {
+  const page = await fetchPublicPage(rawUrl, options);
+  return page.ok ? { ok: true, text: pageText(page.body.toString("utf8")) } : page;
+}
+
+/** Security: only a public address, checked again on every redirect and pinned for the request, so a page can't
+ * point this server at itself or a private network. */
+export async function fetchPublicPage(rawUrl: string, options: PageFetchOptions = {}): Promise<PublicPage> {
   const lookup = options.lookup ?? resolveTarget;
   const allow = options.allow ?? (({ address }) => addressClass(address, ownAddresses()) === "public");
   const maxBytes = options.maxBytes ?? PAGE_MAX_BYTES;
@@ -255,12 +266,12 @@ export async function fetchPageText(rawUrl: string, options: PageFetchOptions = 
       signal.throwIfAborted();
       const answer = await requestOnce(url, addresses[0], signal, maxBytes);
       if (answer.status >= 300 && answer.status < 400 && answer.location) {
-        if (hop >= PAGE_MAX_REDIRECTS) return fail("The page redirected too many times.");
+        if (hop >= (options.maxRedirects ?? PAGE_MAX_REDIRECTS)) return fail("The page redirected too many times.");
         url = new URL(answer.location, url);
         continue;
       }
       if (answer.status < 200 || answer.status >= 300) return fail(`The page answered ${answer.status}.`);
-      return { ok: true, text: pageText(answer.body.toString("utf8")) };
+      return { ok: true, url, headers: answer.headers, body: answer.body };
     }
   } catch {
     return signal.aborted ? fail("The page took too long to answer.") : fail("The page could not be reached.");
