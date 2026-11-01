@@ -346,6 +346,24 @@ function decodeConfig(raw: unknown): PiConfig {
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
+/** pi-ai's per-message usage: `input` excludes cached prompt tokens, and `cost` is pi's own priced USD. */
+type PiUsage = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
+type TurnUsage = { input: number; output: number; cachedInput?: number };
+
+const usageCount = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+/** Adds one pi message's tokens to the run's total in the app's shape, where input includes cached tokens like the other drivers. */
+function addPiUsage(total: TurnUsage | undefined, usage: PiUsage): TurnUsage {
+  const cacheRead = usageCount(usage.cacheRead);
+  const cachedInput = cacheRead === undefined ? total?.cachedInput : (total?.cachedInput ?? 0) + cacheRead;
+  return {
+    input: (total?.input ?? 0) + (usageCount(usage.input) ?? 0) + (cacheRead ?? 0) + (usageCount(usage.cacheWrite) ?? 0),
+    output: (total?.output ?? 0) + (usageCount(usage.output) ?? 0),
+    ...(cachedInput === undefined ? {} : { cachedInput }),
+  };
+}
+
 interface PiEvent {
   type: string;
   command?: string;
@@ -357,8 +375,8 @@ interface PiEvent {
   args?: unknown;
   result?: unknown;
   isError?: boolean;
-  message?: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } };
-  usage?: { input?: number; output?: number };
+  message?: { stopReason?: string; errorMessage?: string; usage?: PiUsage };
+  usage?: PiUsage;
   isTerminal?: boolean;
   willRetry?: boolean;
   id?: string;
@@ -467,8 +485,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let settled = false;
       let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
-      let endUsage: { input?: number; output?: number } | undefined;
-      let completionOutcome: { ok: boolean; stopReason: string; usage?: { input: number; output: number } } | null = null;
+      let endUsage: TurnUsage | undefined;
+      // pi's priced USD for the run. A zero is pi's default for a model without prices, so it stays unknown rather than booked as free.
+      let endCost: number | undefined;
+      let completionOutcome: { ok: boolean; stopReason: string; cost?: number; usage?: TurnUsage } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
       const images = readPiPromptImages(turn);
@@ -554,7 +574,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         if (completion) return completion;
         const outcome = completionOutcome ??= {
           ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
-          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+          ...(usage ? { usage } : {}),
+          ...(endCost === undefined ? {} : { cost: endCost }),
         };
         settled = true;
         if (agentEndTimer) {
@@ -761,7 +782,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             agentEndTimer = null;
             const sr = evt.message?.stopReason;
             const usage = evt.usage ?? evt.message?.usage;
-            if (usage) endUsage = { input: (endUsage?.input ?? 0) + (usage.input ?? 0), output: (endUsage?.output ?? 0) + (usage.output ?? 0) };
+            if (usage) {
+              endUsage = addPiUsage(endUsage, usage);
+              const cost = usageCount(usage.cost?.total);
+              if (cost) endCost = (endCost ?? 0) + cost;
+            }
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;
