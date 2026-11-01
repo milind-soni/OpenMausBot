@@ -1,16 +1,17 @@
 // Cua-backed Local VM: OMB owns only the sandbox boundary; desktop automation is Cua Driver's (`cua-driver mcp` in the container).
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { workspacePreparationDockerfile } from "./container-workspace.ts";
 import { DATA_DIR } from "./config.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
+import { appleWorkspaceMountIsSafe, assertPersistentAddonSources, dockerWorkspaceMountIsSafe, persistentAddonMounts, type PersistentLocalVmAddon } from "./local-vm-addons.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -41,6 +42,7 @@ export const WORKSPACE_LABEL = "com.openmausbot.workspace";
 export const TARGET_LABEL = "com.openmausbot.local-vm-target";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
+const VM_ADDONS_DIR = join(DATA_DIR, "vm-addons");
 export const DISPLAY = ":1";
 export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
 export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
@@ -61,47 +63,7 @@ export interface LocalVmTarget {
   label: string;
 }
 
-export interface PersistentLocalVmAddon {
-  name: string;
-  mounts: ReadonlyArray<{ source: string; guestPath: string }>;
-}
-
-/** Converts trusted add-on identifiers into the server-owned host bind paths. */
-function persistentAddonMounts(addons: ReadonlyArray<PersistentLocalVmAddon>) {
-  return addons.flatMap((addon) => addon.mounts.map((mount) => ({
-    source: join(DATA_DIR, "vm-addons", addon.name, mount.source),
-    guestPath: mount.guestPath,
-  })));
-}
-
-/** Returns whether a resolved path is strictly below its allowed root. */
-function isWithin(root: string, candidate: string): boolean {
-  const path = relative(root, candidate);
-  return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
-}
-
-/** Reject host aliases before the container runtime receives a bind source from persistent add-on configuration. */
-export function assertPersistentAddonSources(
-  addons: ReadonlyArray<PersistentLocalVmAddon>,
-  addonsDir = join(DATA_DIR, "vm-addons"),
-): void {
-  if (addons.length === 0) return;
-  const realAddonsDir = realpathSync(addonsDir);
-  for (const addon of addons) {
-    const addonDir = join(addonsDir, addon.name);
-    const realAddonDir = realpathSync(addonDir);
-    if (!isWithin(realAddonsDir, realAddonDir)) throw new Error(`Persistent add-on ${addon.name} is outside the add-on directory`);
-    for (const mount of addon.mounts) {
-      const source = resolve(addonDir, mount.source);
-      if (!isWithin(addonDir, source)) throw new Error(`Persistent add-on ${addon.name} source escapes its directory`);
-      const entry = lstatSync(source);
-      if (entry.isSymbolicLink()) throw new Error(`Persistent add-on ${addon.name} source cannot be a symbolic link`);
-      const realSource = realpathSync(source);
-      if (!isWithin(realAddonDir, realSource)) throw new Error(`Persistent add-on ${addon.name} source is outside its directory`);
-      if (entry.isFile() && entry.nlink > 1) throw new Error(`Persistent add-on ${addon.name} source cannot be a hard-linked file`);
-    }
-  }
-}
+export { assertPersistentAddonSources, type PersistentLocalVmAddon } from "./local-vm-addons.ts";
 
 export const SHARED_LOCAL_VM_TARGET: LocalVmTarget = {
   key: "shared",
@@ -560,7 +522,7 @@ export async function containerComputerStatus(
       status.imageMatches =
         appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id;
       status.managed = containerOwnershipLabelsMatch(detail?.configuration?.labels, target);
-      status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir, options.persistentAddons)
+      status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir, VM_WORKSPACE_GUEST, VM_ADDONS_DIR, options.persistentAddons)
         ? "durable"
         : "unsafe";
       const resources = detail?.configuration?.resources;
@@ -603,6 +565,8 @@ export async function containerComputerStatus(
         detail?.Mounts,
         platform,
         target.workspaceDir,
+        VM_WORKSPACE_GUEST,
+        VM_ADDONS_DIR,
         status.runtime,
         options.persistentAddons,
       ) ? "durable" : "unsafe";
@@ -726,77 +690,6 @@ function appleViewerPort(
     (binding) => binding.containerPort === INTERNAL_VIEWER_PORT && loopback(binding.hostAddress),
   )?.hostPort;
   return Number.isInteger(raw) && Number(raw) > 0 && Number(raw) <= 65_535 ? Number(raw) : fallback;
-}
-
-function sameWorkspaceSource(
-  source: string | undefined,
-  platform: NodeJS.Platform,
-  expectedWorkspace: string,
-): boolean {
-  if (!source) return false;
-  const actual = resolve(source);
-  const expected = resolve(expectedWorkspace);
-  return platform === "win32" ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
-}
-
-/** Podman Machine exposes a Windows bind source through its WSL mount path; accept only the exact translation. */
-function samePodmanWindowsWorkspaceSource(source: string | undefined, expectedWorkspace: string): boolean {
-  if (!source) return false;
-  const match = expectedWorkspace.match(/^([A-Za-z]):[\\/](.+)$/);
-  if (!match) return false;
-  const expected = `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
-  const actual = source.replaceAll("\\", "/");
-  return actual.toLowerCase() === expected.toLowerCase();
-}
-
-/** Matches a bind source, including Podman Machine's Windows-to-WSL translation. */
-function sameMountSource(source: string | undefined, expected: string, platform: NodeJS.Platform, runtime: Runtime): boolean {
-  return sameWorkspaceSource(source, platform, expected) ||
-    (runtime === "podman" && platform === "win32" && samePodmanWindowsWorkspaceSource(source, expected));
-}
-
-/** Requires the writable workspace plus exactly the configured read-only add-on binds. */
-function dockerWorkspaceMountIsSafe(
-  mounts:
-    | Array<{ Type?: string; Source?: string; Destination?: string; RW?: boolean }>
-    | undefined,
-  platform: NodeJS.Platform,
-  expectedWorkspace: string,
-  runtime: Runtime = "docker",
-  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
-): boolean {
-  const workspace = mounts?.find((mount) => mount.Type === "bind" && mount.Destination === VM_WORKSPACE_GUEST && mount.RW !== false);
-  const addons = persistentAddonMounts(persistentAddons);
-  return Boolean(
-    workspace &&
-      sameMountSource(workspace.Source, expectedWorkspace, platform, runtime) &&
-      mounts?.length === addons.length + 1 &&
-      addons.every((addon) => mounts.some((mount) =>
-        mount.Type === "bind" && mount.RW === false && mount.Destination === addon.guestPath &&
-        sameMountSource(mount.Source, addon.source, platform, runtime),
-      )),
-  );
-}
-
-/** Requires the writable workspace plus exactly the configured read-only add-on binds. */
-function appleWorkspaceMountIsSafe(
-  mounts: Array<{ source?: string; destination?: string; options?: string[] }> | undefined,
-  platform: NodeJS.Platform,
-  expectedWorkspace: string,
-  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
-): boolean {
-  const workspace = mounts?.find((mount) => mount.destination === VM_WORKSPACE_GUEST && !mount.options?.some((option) => option === "ro" || option === "readonly"));
-  const addons = persistentAddonMounts(persistentAddons);
-  return Boolean(
-    workspace &&
-      mounts?.length === addons.length + 1 &&
-      sameWorkspaceSource(workspace.source, platform, expectedWorkspace) &&
-      addons.every((addon) => mounts.some((mount) =>
-        mount.destination === addon.guestPath &&
-        mount.options?.some((option) => option === "ro" || option === "readonly") &&
-        sameWorkspaceSource(mount.source, platform, addon.source),
-      )),
-  );
 }
 
 export interface DockerHardeningConfig {
@@ -952,7 +845,7 @@ export function containerRunArgs(
   }
   // Podman's default seccomp profile gates chroot on this capability, and Firefox chroots to build its sandbox.
   if (runtime === "podman") common.push("--cap-add", "SYS_CHROOT");
-  for (const mount of persistentAddonMounts(persistentAddons)) {
+  for (const mount of persistentAddonMounts(persistentAddons, VM_ADDONS_DIR)) {
     common.push(
       "--mount",
       runtime === "podman"
@@ -1038,7 +931,7 @@ export async function containerComputerAction(
     await prepareManagedImage(runtime, runner);
   } else {
     if (action === "run") {
-      assertPersistentAddonSources(persistentAddons);
+      assertPersistentAddonSources(persistentAddons, VM_ADDONS_DIR);
       await ensureVmWorkspace(platform, target);
     }
     const args =

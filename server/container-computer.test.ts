@@ -1227,8 +1227,8 @@ describe("setupCommands", () => {
       ],
     }]);
 
-    expect(args).toContain(`type=bind,source=${DATA_DIR}/vm-addons/browseros-neo/browserclaw,target=/usr/lib/browserclaw,readonly,relabel=private`);
-    expect(args).toContain(`type=bind,source=${DATA_DIR}/vm-addons/browseros-neo/runtime,target=/opt/browseros-neo-runtime,readonly,relabel=private`);
+    expect(args).toContain(`type=bind,source=${join(DATA_DIR, "vm-addons", "browseros-neo", "browserclaw")},target=/usr/lib/browserclaw,readonly,relabel=private`);
+    expect(args).toContain(`type=bind,source=${join(DATA_DIR, "vm-addons", "browseros-neo", "runtime")},target=/opt/browseros-neo-runtime,readonly,relabel=private`);
   });
 
   it("includes persistent add-ons in the displayed setup command", () => {
@@ -1236,7 +1236,7 @@ describe("setupCommands", () => {
       name: "browseros-neo",
       mounts: [{ source: "runtime", guestPath: "/opt/browseros-neo-runtime" }],
     }]).run!;
-    expect(command).toContain(`source=${DATA_DIR}/vm-addons/browseros-neo/runtime,target=/opt/browseros-neo-runtime,readonly,relabel=private`);
+    expect(command).toContain(`source=${join(DATA_DIR, "vm-addons", "browseros-neo", "runtime")},target=/opt/browseros-neo-runtime,readonly,relabel=private`);
   });
 
   it("keeps per-bot Podman workspaces separate without recursively changing their owner", () => {
