@@ -255,7 +255,7 @@ export const retryRepo = mutation({
   handler: async (ctx, a) => {
     const p = await ctx.db.get(a.projectId); if (!p?.teamId || p.repoUrl) throw new ConvexError("No repository to create");
     const { member } = await requireMember(ctx, p._id, a.sessionToken);
-    if (!canEdit(member)) throw new ConvexError("Edit role required");
+    if (!canEdit(member)) throw new ConvexError("You have view-only access");
     await ctx.db.patch(p._id, { githubRepoState: "pending", githubRepoError: undefined });
     const shared = await ctx.db.query("teamGitHub").withIndex("by_teamId", q => q.eq("teamId", p.teamId!)).unique();
     if (shared) await ctx.scheduler.runAfter(0, internal.teamGitHub.autoCreate, { projectId: p._id, manual: true });

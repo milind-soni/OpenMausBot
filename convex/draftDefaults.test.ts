@@ -153,8 +153,8 @@ describe("Draft defaults at the task and workflow boundary", () => {
       const member = await ctx.db.query("teamMembers").withIndex("by_team_email", q => q.eq("teamId", f.teamId).eq("email", email)).unique();
       await ctx.db.patch(member!._id, { role: "viewer" });
     });
-    await expect(f.create("Forbidden default")).rejects.toThrow("Edit role required");
-    await expect(f.ensure()).rejects.toThrow("Edit role required");
+    await expect(f.create("Forbidden default")).rejects.toThrow("You have view-only access");
+    await expect(f.ensure()).rejects.toThrow("You have view-only access");
     await f.t.mutation(api.projects.importRepos, { sessionToken: f.sessionToken, repos: [{ name: "Draft fixture", repoUrl: "https://github.com/fixture/draft-defaults" }] });
     expect((await f.board()).columns.some(isDraftColumn)).toBe(false);
   });

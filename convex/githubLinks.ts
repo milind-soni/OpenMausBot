@@ -88,7 +88,7 @@ export const caller = internalQuery({
   handler: async (ctx, a) => {
     const user = await requireUser(ctx, a.sessionToken);
     const member = await ctx.db.query("teamMembers").withIndex("by_team_email", q => q.eq("teamId", a.teamId).eq("email", user.email)).unique();
-    if (!member || member.status !== "active" || (member.userId && member.userId !== user._id)) throw new ConvexError("No active team access");
+    if (!member || member.status !== "active" || (member.userId && member.userId !== user._id)) throw new ConvexError("You don't have access to this workspace");
     const link = await ctx.db.query("githubUserLinks").withIndex("by_userId", q => q.eq("userId", user._id)).unique();
     return { userId: user._id, link: link ? { login: link.login } : null };
   },

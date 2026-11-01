@@ -94,7 +94,7 @@ export const invite = mutation({
   },
   handler: async (ctx, args) => {
     const { user } = await requireAdmin(ctx, args.projectId, args.sessionToken);
-    if (args.role === "owner") throw new ConvexError("Owner role cannot be invited");
+    if (args.role === "owner") throw new ConvexError("Invite people as admin, member or viewer");
 
     const project = await ctx.db.get(args.projectId);
     if (!project) throw new ConvexError("Project not found");
@@ -107,7 +107,7 @@ export const invite = mutation({
       .unique();
 
     if (existing?.status === "active") {
-      throw new ConvexError("Member already active");
+      throw new ConvexError("Already a member");
     }
 
     const inviteToken = makeInviteToken();
@@ -162,8 +162,8 @@ export const updateRole = mutation({
     const { member: requester, project } = await requireAdmin(ctx, args.projectId, args.sessionToken);
     const member = await ctx.db.get(args.memberId);
     if (!member || member.projectId !== args.projectId) throw new ConvexError("Member not found");
-    if (member.role === "owner" && requester.role !== "owner") throw new ConvexError("Owner role required");
-    if (args.role === "owner" && requester.role !== "owner") throw new ConvexError("Owner role required");
+    if (member.role === "owner" && requester.role !== "owner") throw new ConvexError("Only the workspace owner can do this");
+    if (args.role === "owner" && requester.role !== "owner") throw new ConvexError("Only the workspace owner can do this");
     await ctx.db.patch(args.memberId, { role: args.role, updatedAt: Date.now() });
     await reviewGitHubAccess(ctx, project.teamId, member.email);
   },
@@ -179,8 +179,8 @@ export const remove = mutation({
     const { member: requester, user, project } = await requireAdmin(ctx, args.projectId, args.sessionToken);
     const member = await ctx.db.get(args.memberId);
     if (!member || member.projectId !== args.projectId) throw new ConvexError("Member not found");
-    if (member.role === "owner" && requester.role !== "owner") throw new ConvexError("Owner role required");
-    if (member.email === user.email) throw new ConvexError("Cannot remove yourself");
+    if (member.role === "owner" && requester.role !== "owner") throw new ConvexError("Only the workspace owner can do this");
+    if (member.email === user.email) throw new ConvexError("You can't remove yourself");
     await ctx.db.delete(args.memberId);
     await reviewGitHubAccess(ctx, project.teamId, member.email);
   },

@@ -79,7 +79,7 @@ describe("Project access", () => {
     const f = await fixture();
     expect(await f.t.query(api.projects.listForUser, { sessionToken: f.owner.token, teamId: f.teamId })).toHaveLength(2);
     expect((await f.t.query(api.projects.listForUser, { sessionToken: f.member.token, teamId: f.teamId })).map(p => p._id)).toEqual([f.shared]);
-    await expect(f.t.query(api.tasks.details, { sessionToken: f.member.token, projectId: f.privateProject, taskId: f.privateIssue })).rejects.toThrow("No active project access");
+    await expect(f.t.query(api.tasks.details, { sessionToken: f.member.token, projectId: f.privateProject, taskId: f.privateIssue })).rejects.toThrow("You don't have access to this project");
     const rows = await f.t.query(api.workspaceSearch.issues, { sessionToken: f.member.token, teamId: f.teamId, text: "issue" });
     expect(rows.map(row => row._id)).toEqual([f.issue]);
     // The lane title, for the Link issue picker's status icon.
@@ -92,7 +92,7 @@ describe("Project access", () => {
   test("workspace viewers cannot gain edit rights through a project role", async () => {
     const f = await fixture();
     expect((await f.t.query(api.projects.get, { sessionToken: f.viewer.token, projectId: f.shared })).memberRole).toBe("viewer");
-    await expect(f.t.mutation(api.tasks.updateTask, { sessionToken: f.viewer.token, projectId: f.shared, taskId: f.issue, done: true })).rejects.toThrow("Edit role required");
+    await expect(f.t.mutation(api.tasks.updateTask, { sessionToken: f.viewer.token, projectId: f.shared, taskId: f.issue, done: true })).rejects.toThrow("You have view-only access");
     await expect(f.t.mutation(api.members.addWorkspaceMember, { sessionToken: f.member.token, projectId: f.privateProject, email: f.member.email, role: "member" })).rejects.toThrow();
   });
 
@@ -220,7 +220,7 @@ test("a member who creates a project can share it, but not into projects they do
   const projectId = await f.t.mutation(api.projects.create, { sessionToken: f.member.token, teamId: f.teamId, name: "Member share", repoUrl: "https://github.com/example/member-share" });
   await f.t.mutation(api.members.addWorkspaceMember, { sessionToken: f.member.token, projectId, email: f.viewer.email, role: "viewer" });
   expect((await f.t.query(api.projects.get, { sessionToken: f.viewer.token, projectId })).memberRole).toBe("viewer");
-  await expect(f.t.mutation(api.members.addWorkspaceMember, { sessionToken: f.member.token, projectId: f.shared, email: f.viewer.email, role: "member" })).rejects.toThrow("Admin role required");
+  await expect(f.t.mutation(api.members.addWorkspaceMember, { sessionToken: f.member.token, projectId: f.shared, email: f.viewer.email, role: "member" })).rejects.toThrow("Only admins can do this");
 });
 
 test("assignees and legacy local attachments respect project membership", async () => {

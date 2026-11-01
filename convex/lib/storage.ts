@@ -98,13 +98,13 @@ export async function admitStorageReference(ctx: MutationCtx, storageId: Id<"_st
   let allowed = false;
   for (const admission of scopes) if (await canReadStorageScope(ctx, user, admission.scope)) { allowed = true; break; }
   if (!allowed) allowed = await canReadLegacyReference(ctx, storageId, user);
-  if (!allowed) throw new ConvexError("No access to this file. Upload it again from an updated Origin app");
+  if (!allowed) throw new ConvexError("No access to this file. Upload it again.");
   await addStorageScope(ctx, storageId, destination, (await storageMetadata(ctx, storageId))?.contentType);
 }
 
 export async function issueUpload(ctx: MutationCtx, sessionToken: string, target: UploadTarget) {
   const session = await getSessionUser(ctx, sessionToken);
-  if (!session) throw new ConvexError("Login required");
+  if (!session) throw new ConvexError("Your session has expired. Sign in again.");
   await writableUploadScope(ctx, session.user, target);
   if ((await ctx.db.query("storageUploadIntents").withIndex("by_userId_and_expiresAt", q => q.eq("userId", session.user._id).gte("expiresAt", Date.now())).take(100)).length >= 100) throw new ConvexError("Too many uploads. Try again in ten minutes");
   const siteUrl = process.env.CONVEX_SITE_URL;

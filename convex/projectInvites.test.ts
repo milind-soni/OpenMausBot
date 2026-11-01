@@ -37,8 +37,8 @@ describe("project email invitation acceptance", () => {
     expect(accepted.teamId).toBe(f.teamId);
     expect((await f.t.query(api.workspaces.access, { sessionToken: accepted.sessionToken, teamId: f.teamId })).role).toBe("member");
     expect((await f.t.query(api.projects.get, { sessionToken: accepted.sessionToken, projectId: f.projectId })).memberRole).toBe("admin");
-    await expect(f.t.query(api.projects.get, { sessionToken: accepted.sessionToken, projectId: f.otherProjectId })).rejects.toThrow("project access");
-    await expect(f.t.mutation(api.workspaces.update, { sessionToken: accepted.sessionToken, teamId: f.teamId, name: "Hijacked" })).rejects.toThrow("Admin role");
+    await expect(f.t.query(api.projects.get, { sessionToken: accepted.sessionToken, projectId: f.otherProjectId })).rejects.toThrow("access to this project");
+    await expect(f.t.mutation(api.workspaces.update, { sessionToken: accepted.sessionToken, teamId: f.teamId, name: "Hijacked" })).rejects.toThrow("Only admins");
   });
 
   test("acceptance preserves an existing read-only workspace role", async () => {

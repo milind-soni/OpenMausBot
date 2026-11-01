@@ -17,13 +17,13 @@ function rejectMcpToken(token: string) {
 export async function authorize(ctx: QueryCtx | MutationCtx, token: string, write = false, projectId?: Id<"projects">) {
   const tokenHash = await hashToken(token);
   const grant = await ctx.db.query("connectorGrants").withIndex("by_tokenHash", q => q.eq("tokenHash", tokenHash)).unique();
-  if (!grant || grant.revoked || grant.expiresAt <= Date.now()) throw new ConvexError("Connector authorization expired or revoked");
+  if (!grant || grant.revoked || grant.expiresAt <= Date.now()) throw new ConvexError("This connection expired or was revoked");
   if (grant.hostId) throw new ConvexError("Host token cannot access Origin actions");
   // Agent run tokens belong to the removed Agent feature and no longer authorize anything.
   if (grant.runId) throw new ConvexError("Run token cannot access Origin actions");
   const user = await ctx.db.get(grant.userId);
   const member = user?.status === "active" ? await getActiveTeamMember(ctx, grant.teamId, user.email) : null;
-  if (!user || !member || (member.userId && member.userId !== user._id) || (write && (!grant.write || !canEdit(member)))) throw new ConvexError("Connector access denied");
+  if (!user || !member || (member.userId && member.userId !== user._id) || (write && (!grant.write || !canEdit(member)))) throw new ConvexError("This connection does not allow that");
   if (projectId) {
     const project = await ctx.db.get(projectId);
     const access = project && await projectMember(ctx, project, user);
@@ -35,9 +35,9 @@ export async function authorize(ctx: QueryCtx | MutationCtx, token: string, writ
 /** Shared by connectors.createGrant (production parity) and mcp.createOAuthGrant (token prefix marks MCP grants). */
 export async function insertConnectorGrant(ctx: MutationCtx, args: { sessionToken: string; teamId: Id<"teams">; name: string; write: boolean }, prefix = "") {
   const { user, member } = await requireTeamMember(ctx, args.teamId, args.sessionToken);
-  if (args.write && !canEdit(member)) throw new ConvexError("Read-only workspace access");
+  if (args.write && !canEdit(member)) throw new ConvexError("You have view-only access to this workspace");
   const active = await ctx.db.query("connectorGrants").withIndex("by_userId_and_teamId_and_runId_and_hostId_and_revoked", q => q.eq("userId", user._id).eq("teamId", args.teamId).eq("runId", undefined).eq("hostId", undefined).eq("revoked", false)).take(21);
-  if (active.filter(g => !g.revoked && g.expiresAt > Date.now()).length >= 20) throw new ConvexError("Disconnect an existing connector first");
+  if (active.filter(g => !g.revoked && g.expiresAt > Date.now()).length >= 20) throw new ConvexError("Revoke an unused connection first");
   const token = prefix + Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("");
   const expiresAt = Date.now() + 90 * 86400000;
   const grantId = await ctx.db.insert("connectorGrants", { teamId: args.teamId, userId: user._id, name: args.name.slice(0, 120),

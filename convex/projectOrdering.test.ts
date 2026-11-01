@@ -59,12 +59,12 @@ test("a checked reorder must include the current visible set exactly once", asyn
 
 test("viewers and revoked members cannot change the order", async () => {
   const f = await fixture(), [a, , b, c] = f.ids;
-  await expect(f.t.mutation(api.projects.reorder, { sessionToken: f.viewer.token, teamId: f.teamId, projectIds: [c, b, a] })).rejects.toThrow("Edit role required");
+  await expect(f.t.mutation(api.projects.reorder, { sessionToken: f.viewer.token, teamId: f.teamId, projectIds: [c, b, a] })).rejects.toThrow("You have view-only access");
   await f.t.run(async ctx => {
     const member = await ctx.db.query("teamMembers").withIndex("by_team_email", q => q.eq("teamId", f.teamId).eq("email", f.member.email)).unique();
     await ctx.db.delete(member!._id);
   });
-  await expect(f.t.mutation(api.projects.reorder, { sessionToken: f.member.token, teamId: f.teamId, projectIds: [c, b, a] })).rejects.toThrow("No active team access");
+  await expect(f.t.mutation(api.projects.reorder, { sessionToken: f.member.token, teamId: f.teamId, projectIds: [c, b, a] })).rejects.toThrow("You don't have access to this workspace");
   expect(await f.list(f.owner.token)).toEqual(f.ids);
 });
 

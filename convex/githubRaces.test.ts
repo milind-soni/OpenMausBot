@@ -73,7 +73,7 @@ describe("GitHub fetch commit boundaries", () => {
     await f.requested.promise;
     await f.t.mutation(api.auth.logout, { sessionToken: f.sessionToken });
     f.released.resolve();
-    await expect(sync).rejects.toThrow("Login required");
+    await expect(sync).rejects.toThrow("Your session has expired. Sign in again.");
     expect(await f.t.run(ctx => ctx.db.query("tasks").collect())).toEqual([]);
     expect(await f.t.run(ctx => ctx.db.query("commits").collect())).toEqual([]);
   });

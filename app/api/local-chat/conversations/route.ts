@@ -2,10 +2,11 @@ import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { NextResponse } from "next/server";
 import { api } from "@/convex/_generated/api";
 import { getConvexClient, listDirectConversations, markConversationRead, openDirectConversation, requireLocalChat, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/localRealtime";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const failure = (error: unknown) => NextResponse.json({ error: error instanceof Error ? error.message : "Conversation unavailable" }, { status: error instanceof BodyTooLarge ? 413 : 400 });
+const failure = (error: unknown) => NextResponse.json({ error: errorText(error, "Conversation unavailable") }, { status: error instanceof BodyTooLarge ? 413 : 400 });
 
 export async function GET(request: Request) {
   try { return NextResponse.json({ conversations: listDirectConversations(await requireLocalWorkspace(request)) }); }

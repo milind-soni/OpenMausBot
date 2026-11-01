@@ -76,7 +76,7 @@ test("a removed project member cannot rebind its remembered storage ID in their 
   const rememberedId = (await t.query(api.design.list, { sessionToken: people.member.token, projectId: sourceProjectId })).assets[0]!.storageId!;
   const membership = (await t.query(api.members.list, { sessionToken: people.owner.token, projectId: sourceProjectId })).find(row => row.email === people.member.email)!;
   await t.mutation(api.members.remove, { sessionToken: people.owner.token, projectId: sourceProjectId, memberId: membership._id });
-  await expect(t.query(api.design.list, { sessionToken: people.member.token, projectId: sourceProjectId })).rejects.toThrow("project access");
+  await expect(t.query(api.design.list, { sessionToken: people.member.token, projectId: sourceProjectId })).rejects.toThrow("access to this project");
   const destinationTeam = await t.mutation(api.workspaces.create, { sessionToken: people.member.token, name: "Own workspace" });
   const destinationProjectId = await t.mutation(api.projects.create, { sessionToken: people.member.token, teamId: destinationTeam.teamId, name: "Own project", githubRepo: "later" });
   const rebind = async () => {

@@ -310,7 +310,7 @@ export const create = mutation({
     const user = await requireUser(ctx, args.sessionToken);
     if (!args.teamId) throw new ConvexError("Select a workspace before creating a project");
     const { member } = await requireTeamMember(ctx, args.teamId, args.sessionToken);
-    if (!canEdit(member)) throw new ConvexError("Edit role required");
+    if (!canEdit(member)) throw new ConvexError("You have view-only access");
     return createProjectRecord(ctx, { ...args, teamId: args.teamId }, user);
   },
 });

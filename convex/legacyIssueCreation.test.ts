@@ -81,7 +81,7 @@ describe("legacy GitHub issue creation", () => {
   });
 
   test("a viewer cannot use the legacy action", async () => {
-    await expect((await fixture({ role: "viewer" })).call()).rejects.toThrow("Edit role required");
+    await expect((await fixture({ role: "viewer" })).call()).rejects.toThrow("You have view-only access");
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -97,7 +97,7 @@ describe("legacy GitHub issue creation", () => {
       const other = await ctx.db.insert("projects", { name: "Other fixture", ownerEmail: legacyEmail, status: "active", accent: "#4b57db", createdAt: 1, updatedAt: 1 });
       await ctx.db.patch(f.taskId, { projectId: other });
     });
-    await expect(f.call()).rejects.toThrow("Task not found");
+    await expect(f.call()).rejects.toThrow("Issue not found");
     expect(post).not.toHaveBeenCalled();
   });
 

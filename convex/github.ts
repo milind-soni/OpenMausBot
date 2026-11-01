@@ -31,7 +31,7 @@ type GitHubPullRequestSnapshot = {
 
 async function requireEditor(ctx: QueryCtx | MutationCtx, projectId: Id<"projects">, sessionToken: string) {
   const result = await requireMember(ctx, projectId, sessionToken);
-  if (!canEdit(result.member)) throw new ConvexError("Edit role required");
+  if (!canEdit(result.member)) throw new ConvexError("You have view-only access");
   return result;
 }
 
@@ -93,7 +93,7 @@ export const syncRepo = action({
       return { ok: false, repo: "", issueCount: 0, pullRequestCount: 0, error: "Add a valid GitHub repo URL in Settings." };
     }
 
-    if (project.memberRole === "viewer") throw new ConvexError("Edit role required");
+    if (project.memberRole === "viewer") throw new ConvexError("You have view-only access");
     const user = await ctx.runQuery(api.auth.me, { sessionToken: args.sessionToken });
     const headers = githubHeaders(user?.email === DEFAULT_OWNER_EMAIL && project.ownerEmail === DEFAULT_OWNER_EMAIL);
     const [issuesResponse, pullRequestsResponse] = await Promise.all([
@@ -193,7 +193,7 @@ export const createIssueForTask = action({
     const parsed = parseGitHubRepo(project.repoUrl);
     if (!parsed) return { ok: false, issueUrl: "", manualUrl: "", message: "Add a valid GitHub repo URL in Settings." };
 
-    if (project.memberRole === "viewer") throw new ConvexError("Edit role required");
+    if (project.memberRole === "viewer") throw new ConvexError("You have view-only access");
     if (details.task.githubIssueNumber) {
       return {
         ok: true,
@@ -226,7 +226,7 @@ export const linkTaskIssue = internalMutation({
     const { project } = await requireEditor(ctx, args.projectId, args.sessionToken);
     if (project.repoUrl !== args.repoUrl) throw new ConvexError("Repository changed; sync cancelled");
     const task = await ctx.db.get(args.taskId);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     if (task.githubIssueNumber && task.githubIssueNumber !== args.githubIssueNumber) throw new ConvexError("Issue already linked");
     await ctx.db.patch(args.taskId, {
       githubIssueNumber: args.githubIssueNumber,

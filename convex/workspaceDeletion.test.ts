@@ -110,10 +110,10 @@ describe("deleting a workspace", () => {
     vi.useFakeTimers();
     const f = await fixture();
     const teamId = f.doomed.teamId;
-    await expect(f.t.mutation(api.workspaces.remove, { sessionToken: f.member.token, teamId, confirmName: "Doomed" })).rejects.toThrow("Admin role required");
-    await expect(f.t.mutation(api.workspaces.remove, { sessionToken: f.outsider.token, teamId, confirmName: "Doomed" })).rejects.toThrow("No active team access");
+    await expect(f.t.mutation(api.workspaces.remove, { sessionToken: f.member.token, teamId, confirmName: "Doomed" })).rejects.toThrow("Only admins can do this");
+    await expect(f.t.mutation(api.workspaces.remove, { sessionToken: f.outsider.token, teamId, confirmName: "Doomed" })).rejects.toThrow("You don't have access to this workspace");
     await expect(f.t.mutation(api.workspaces.remove, { sessionToken: f.admin.token, teamId, confirmName: "doomed" })).rejects.toThrow("Type the workspace name");
-    await expect(f.t.query(api.workspaces.deletionSummary, { sessionToken: f.member.token, teamId })).rejects.toThrow("Admin role required");
+    await expect(f.t.query(api.workspaces.deletionSummary, { sessionToken: f.member.token, teamId })).rejects.toThrow("Only admins can do this");
     expect(await f.t.query(api.workspaces.deletionSummary, { sessionToken: f.admin.token, teamId })).toEqual({
       name: "Doomed", projects: ["Doomed app", "Doomed site"], projectCount: 2, agentCount: 1, memberCount: 3, openIssueCount: 4, countsCapped: false,
     });
@@ -199,7 +199,7 @@ describe("deleting a workspace", () => {
     }
     expect(await deleted(f.outsider)).toEqual([]);
     expect(await deleted(pending)).toEqual([]);
-    await expect(f.t.query(api.workspaces.deleted, { sessionToken: "not-a-session" })).rejects.toThrow("Login required");
+    await expect(f.t.query(api.workspaces.deleted, { sessionToken: "not-a-session" })).rejects.toThrow("Your session has expired. Sign in again.");
 
     await runScheduled(f.t);
     expect((await deleted(f.member)).map(row => row.name)).toEqual(["Doomed"]);

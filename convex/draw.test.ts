@@ -56,7 +56,7 @@ test("retired Studio canvases stay hidden and viewers or outsiders cannot draw",
   expect(await f.t.query(api.draw.canvases, { sessionToken: f.owner.token, projectId: f.projectId })).toEqual([]);
   await expect(f.t.query(api.draw.scene, { sessionToken: f.owner.token, teamId: f.teamId, canvasId: studio })).rejects.toThrow(/Canvas not found/);
   expect(await f.t.query(api.draw.scene, { sessionToken: f.viewer.token, teamId: f.teamId })).toEqual([]);
-  await expect(f.t.mutation(api.draw.updateElements, { sessionToken: f.viewer.token, teamId: f.teamId, elements: [element("a", 1)] })).rejects.toThrow(/Edit role required/);
+  await expect(f.t.mutation(api.draw.updateElements, { sessionToken: f.viewer.token, teamId: f.teamId, elements: [element("a", 1)] })).rejects.toThrow(/You have view-only access/);
   await expect(f.t.query(api.draw.scene, { sessionToken: f.outsider.token, teamId: f.teamId })).rejects.toThrow();
 });
 
@@ -71,7 +71,7 @@ test("images upload through the scoped upload route and presence tracks the poin
   await f.t.mutation(api.draw.saveFile, { ...workspace, fileId: "img-1", storageId, mimeType: "image/png" });
   await f.t.mutation(api.draw.saveFile, { ...workspace, fileId: "img-1", storageId, mimeType: "image/png" });
   expect(await f.t.query(api.draw.files, workspace)).toMatchObject([{ fileId: "img-1", mimeType: "image/png" }]);
-  await expect(f.t.mutation(api.draw.uploadUrl, { sessionToken: f.viewer.token, teamId: f.teamId })).rejects.toThrow(/Edit role required/);
+  await expect(f.t.mutation(api.draw.uploadUrl, { sessionToken: f.viewer.token, teamId: f.teamId })).rejects.toThrow(/You have view-only access/);
 
   await f.t.mutation(api.draw.setPresence, { ...workspace, x: 5, y: 6, button: "down" });
   expect(await f.t.query(api.draw.presence, { sessionToken: f.viewer.token, teamId: f.teamId })).toMatchObject([{ name: "owner", x: 5, y: 6, button: "down" }]);

@@ -77,7 +77,7 @@ export const projectAccess = internalQuery({
     const project = await ctx.db.get(a.projectId);
     if (!project) throw new ConvexError("Project not found");
     const member = await projectMember(ctx, project, user);
-    if (!member) throw new ConvexError("No active project access");
+    if (!member) throw new ConvexError("You don't have access to this project");
     const { _id, teamId, name, description, repoUrl, status, githubWorkspaceAccess, githubRepoVisibility } = project;
     return { userId: user._id, role: member.role, project: { _id, teamId, name, description, repoUrl, status, githubWorkspaceAccess, githubRepoVisibility } };
   },
@@ -218,7 +218,7 @@ function extraOf(value: unknown): Record<string, string> {
 async function requireProject(ctx: ActionCtx, sessionToken: string, projectId: unknown, need: "member" | "editor" | "admin" = "member"): Promise<ProjectAccess> {
   if (typeof projectId !== "string") throw new ConvexError("Project required");
   const found = await ctx.runQuery(internal.teamGitHub.projectAccess, { sessionToken, projectId: projectId as Id<"projects"> });
-  if (need === "editor" && !canEdit(found)) throw new ConvexError("Edit role required");
+  if (need === "editor" && !canEdit(found)) throw new ConvexError("You have view-only access");
   if (need === "admin" && !ADMIN_ROLES.has(found.role)) throw new ConvexError("A project admin approves and merges pull requests");
   return found;
 }

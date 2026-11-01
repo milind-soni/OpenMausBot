@@ -9,12 +9,13 @@ import {
   type LocalVoiceSignal,
 } from "@/lib/localRealtime";
 import type { Id } from "@/convex/_generated/dataModel";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function errorResponse(error: unknown, status = 400) {
-  return callJson({ error: error instanceof Error ? error.message : "Request failed" }, { status: error instanceof BodyTooLarge ? 413 : status });
+  return callJson({ error: errorText(error, "Request failed") }, { status: error instanceof BodyTooLarge ? 413 : status });
 }
 
 export async function GET(request: Request) {

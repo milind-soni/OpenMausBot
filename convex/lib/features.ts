@@ -5,7 +5,7 @@ import { canEdit, requireTeamMember } from "./permissions";
 
 export async function requireWorkspaceEditor(ctx: QueryCtx | MutationCtx, teamId: Id<"teams">, sessionToken: string) {
   const result = await requireTeamMember(ctx, teamId, sessionToken);
-  if (!canEdit(result.member)) throw new ConvexError("Edit role required");
+  if (!canEdit(result.member)) throw new ConvexError("You have view-only access");
   return result;
 }
 

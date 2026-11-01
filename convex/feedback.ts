@@ -47,9 +47,9 @@ export const submit = internalMutation({
   args: { slug: v.string(), title: v.string(), body: v.string(), kind }, returns: v.null(),
   handler: async (ctx, args) => {
     const portal = await ctx.db.query("feedbackPortals").withIndex("by_slug", q => q.eq("slug", args.slug)).unique();
-    if (!portal?.enabled) throw new ConvexError("Feedback portal unavailable");
+    if (!portal?.enabled) throw new ConvexError("This feedback form is closed");
     const recent = await ctx.db.query("feedbackEntries").withIndex("by_portalId_and_createdAt", q => q.eq("portalId", portal._id).gt("createdAt", Date.now() - 3600000)).take(100);
-    if (recent.length >= 100) throw new ConvexError("This portal is receiving too many requests. Please try later.");
+    if (recent.length >= 100) throw new ConvexError("Too many submissions right now. Try again later.");
     await ctx.db.insert("feedbackEntries", { portalId: portal._id, title: cleanText(args.title, 180, "Title"), body: cleanText(args.body, 8000, "Feedback"), kind: args.kind, status: "new", createdAt: Date.now() });
     return null;
   },
@@ -61,7 +61,7 @@ export const list = query({
   handler: async (ctx, args) => {
     await requireTeamMember(ctx, args.teamId, args.sessionToken);
     const portal = await ctx.db.get(args.portalId);
-    if (portal?.teamId !== args.teamId) throw new ConvexError("Portal not found");
+    if (portal?.teamId !== args.teamId) throw new ConvexError("Feedback form not found");
     await requireMember(ctx, portal.projectId, args.sessionToken);
     const rows = await ctx.db.query("feedbackEntries").withIndex("by_portalId_and_createdAt", q => q.eq("portalId", portal._id)).order("desc").take(200);
     return Promise.all(rows.map(async row => {
@@ -78,7 +78,7 @@ export const dismiss = mutation({
     const entry = await ctx.db.get(args.entryId);
     const portal = entry && await ctx.db.get(entry.portalId);
     if (!entry || portal?.teamId !== args.teamId) throw new ConvexError("Feedback not found");
-    if (!canEdit((await requireMember(ctx, portal.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!canEdit((await requireMember(ctx, portal.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     await ctx.db.patch(entry._id, { status: args.dismissed ? "dismissed" : entry.taskId ? "planned" : "new" });
     return null;
   },
@@ -91,7 +91,7 @@ export const convert = mutation({
     const entry = await ctx.db.get(args.entryId);
     const portal = entry && await ctx.db.get(entry.portalId);
     if (!entry || !portal || portal.teamId !== args.teamId) throw new ConvexError("Feedback not found");
-    if (!canEdit((await requireMember(ctx, portal.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!canEdit((await requireMember(ctx, portal.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     if (entry.taskId && await ctx.db.get(entry.taskId)) return entry.taskId;
     const taskId = await createTaskRecord(ctx, { projectId: portal.projectId, columnId: args.columnId, title: entry.title, description: `${entry.body}\n\nSource: customer feedback (${entry.kind})`, priority: args.priority ?? (entry.kind === "bug" ? "high" : "medium"), assignedToEmail: args.assignedToEmail, dueDate: args.dueDate }, user._id);
     await ctx.db.patch(entry._id, { taskId, status: "planned" });

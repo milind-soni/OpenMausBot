@@ -1,5 +1,6 @@
 import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { callJson, callOptions } from "@/lib/call-http";
+import { errorText } from "@/lib/error-text";
 import {
   joinLocalVoice,
   leaveLocalVoice,
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function errorResponse(error: unknown, status = 400) {
-  return callJson({ error: error instanceof Error ? error.message : "Request failed" }, { status: error instanceof BodyTooLarge ? 413 : status });
+  return callJson({ error: errorText(error, "Request failed") }, { status: error instanceof BodyTooLarge ? 413 : status });
 }
 
 export async function GET(request: Request) {

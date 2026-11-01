@@ -98,8 +98,8 @@ describe("workspace GitHub held by the backend", () => {
     expect(fake.tokenScope(write.token)).toEqual({ repositories: ["app"], permissions: { contents: "write" } });
     const read = await bridge(f.viewer.token, "githubToken", { projectId, access: "read" }) as { token: string };
     expect(fake.tokenScope(read.token)?.permissions.contents).toBe("read");
-    await expect(bridge(f.viewer.token, "githubToken", { projectId, access: "write" })).rejects.toThrow("Edit role required");
-    await expect(bridge(f.viewer.token, "githubToken", { projectId, access: "read", extra: { actions: "write" } })).rejects.toThrow("Edit role required");
+    await expect(bridge(f.viewer.token, "githubToken", { projectId, access: "write" })).rejects.toThrow("You have view-only access");
+    await expect(bridge(f.viewer.token, "githubToken", { projectId, access: "read", extra: { actions: "write" } })).rejects.toThrow("You have view-only access");
     await expect(bridge(f.member.token, "githubToken", { projectId, access: "write", extra: { administration: "write" } })).rejects.toThrow("Actions");
     await expect(bridge(f.member.token, "repoResult", { projectId, state: "ready", repoUrl: "https://github.com/octo/other" })).rejects.toThrow("not available");
   });
@@ -155,7 +155,7 @@ describe("workspace GitHub held by the backend", () => {
       const row = await ctx.db.query("teamMembers").withIndex("by_team_email", (q) => q.eq("teamId", f.teamId).eq("email", "owner@test.dev")).unique();
       await ctx.db.patch(row!._id, { role: "owner" });
     });
-    await expect(f.t.mutation(api.teamGitHub.unshare, { sessionToken: f.member.token, teamId: f.teamId })).rejects.toThrow("Admin role");
+    await expect(f.t.mutation(api.teamGitHub.unshare, { sessionToken: f.member.token, teamId: f.teamId })).rejects.toThrow("Only admins");
     await f.t.mutation(api.teamGitHub.unshare, { sessionToken: f.owner.token, teamId: f.teamId });
     expect((await f.t.query(api.teamGitHub.status, { sessionToken: f.owner.token, teamId: f.teamId })).shared).toBeNull();
   });

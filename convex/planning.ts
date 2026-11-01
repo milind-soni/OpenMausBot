@@ -48,7 +48,7 @@ export const assignMilestone = mutation({
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new ConvexError("Issue not found");
     await workspaceProject(ctx, args.teamId, task.projectId);
-    if (!canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     if (args.milestoneId) {
       if ((await ctx.db.get(args.milestoneId))?.teamId !== args.teamId) throw new ConvexError("Milestone not found");
       if (task.milestoneId !== args.milestoneId && (await ctx.db.query("tasks").withIndex("by_milestoneId", q => q.eq("milestoneId", args.milestoneId!)).take(200)).length >= 200) throw new ConvexError("Split milestones with more than 200 issues");
@@ -93,7 +93,7 @@ export const saveRelease = mutation({
   handler: async (ctx, args) => {
     await requireWorkspaceEditor(ctx, args.teamId, args.sessionToken);
     await workspaceProject(ctx, args.teamId, args.projectId);
-    if (!canEdit((await requireMember(ctx, args.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!canEdit((await requireMember(ctx, args.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     const taskIds = [...new Set(args.taskIds)];
     if (taskIds.length > 200 || args.body.length > 60000) throw new ConvexError("Release is too large");
     for (const id of taskIds) {
@@ -119,7 +119,7 @@ export const removeRelease = mutation({
     await requireWorkspaceEditor(ctx, args.teamId, args.sessionToken);
     const release = await ctx.db.get(args.releaseId);
     if (release?.teamId !== args.teamId) throw new ConvexError("Release not found");
-    if (!canEdit((await requireMember(ctx, release.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!canEdit((await requireMember(ctx, release.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     const links = await ctx.db.query("releaseIssues").withIndex("by_releaseId", q => q.eq("releaseId", args.releaseId)).take(201);
     if (links.length > 200) throw new ConvexError("Release is too large");
     for (const row of links) await ctx.db.delete(row._id);

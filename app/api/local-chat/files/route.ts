@@ -5,6 +5,7 @@ import { getConvexClient, getLocalFile, limitLocalAction, localDataDir, register
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { BodyTooLarge, readBoundedBytes } from "@/lib/http-body";
+import { errorText } from "@/lib/error-text";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     const projectId = new URL(request.url).searchParams.get("projectId") as Id<"projects"> | null;
     if (projectId) {
       const project = await getConvexClient().query(api.projects.get, { sessionToken: sessionTokenFromRequest(request), projectId });
-      if (project.teamId !== user.teamId || project.memberRole === "viewer") throw new Error("Edit role required");
+      if (project.teamId !== user.teamId || project.memberRole === "viewer") throw new Error("You have view-only access");
     }
     limitLocalAction(`upload:${user._id}`, 30, 60000);
     if (Number(request.headers.get("content-length")) > 16 * 1024 * 1024) throw new Error("Files must be smaller than 15 MB");
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     const dir = path.join(localDataDir(), "files"); await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, metadata.id), Buffer.from(await file.arrayBuffer()), { flag: "wx" });
     registerLocalFile(user, metadata); return NextResponse.json({ file: metadata });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Upload failed" }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
+  } catch (error) { return NextResponse.json({ error: errorText(error, "Upload failed") }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
 }
 export async function GET(request: Request) {
   try {

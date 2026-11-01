@@ -5,6 +5,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { getConvexClient, limitLocalAction, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/localRealtime";
 import { consumeGithubState, createGithubState, exchangeGitHubToken, githubAppConfig, githubAuthorizeUrl, githubRequest, peekGithubState, saveWorkspaceGitHub } from "@/lib/github-workspace";
 import { originUrl } from "@/lib/integration-bridge";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export async function POST(request: NextRequest, context: { params: Promise<{ step: string }> }) {
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ st
     const response = NextResponse.json({ url });
     response.cookies.set("origin.github", browser, { httpOnly: true, secure: originUrl().startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });
     return response;
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not connect" }, { status: 400 }); }
+  } catch (error) { return NextResponse.json({ error: errorText(error, "Could not connect") }, { status: 400 }); }
 }
 export async function GET(request: NextRequest, context: { params: Promise<{ step: string }> }) {
   const { step } = await context.params;
