@@ -3,7 +3,36 @@ import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
 import { probeMcpServer, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
 import { MAX_MCP_SERVERS, isRemoteMcpServer, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
 import { postizKeyHeaders } from "../postiz/connection.ts";
-import type { McpServerRouteDeps } from "../routes/mcp-servers.ts";
+import type { AppConfig } from "../config.ts";
+import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
+import type { CloudHomeConfig } from "../cloud-home.ts";
+import type { BusyFlag } from "../routes/config.ts";
+import type { SessionRegistry } from "../sessions.ts";
+import type { TeamConnectionsHost } from "./team-connections-host.ts";
+
+export interface McpConfigDeps {
+  cfg: Pick<AppConfig, "mcpServers" | "postiz">;
+  sessions: Pick<SessionRegistry, "isLive">;
+  mcpOAuth: McpOAuthManager;
+  teamConnections: Pick<TeamConnectionsHost, "personMcp" | "people">;
+  cloudHome: Pick<CloudHomeConfig, "publicOrigin"> | null;
+  fallbackPublicUrl: string | null;
+  mcpConfigBusy: BusyFlag;
+  /** Secrets as booleans, sign-in state attached. */
+  mcpServerResponse(): Record<string, unknown>;
+  mcpPolicyRefusal(name: string, server: object): string | undefined;
+  persistMcpServers(next: Record<string, unknown>): void;
+  savedCustomDomain(): string | null;
+  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
+  /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
+  forgetPeople?(name: string): void;
+  /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
+  health?: { changed(name: string): void };
+  /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
+  connectionsChanged?(change: "added" | "removed"): void;
+  /** How bots' turns reach a URL server here: through the broker where turns are boxed (null: directly). */
+  botsPath?(): BrokerPath | null;
+}
 
 export type McpConfigResult =
   | { status: number; body: Record<string, unknown> }
@@ -12,6 +41,8 @@ export type McpConfigResult =
 export interface McpConfig {
   add(name: string, server: StoredMcpServer): McpConfigResult;
   replace(name: string, server: StoredMcpServer): McpConfigResult;
+  /** Several servers at once, all or none; they arrive disabled. */
+  addMany(servers: Record<string, StoredMcpServer>): McpConfigResult;
   setEnabled(name: string, enabled: boolean): McpConfigResult;
   setApps(name: string, apps: boolean): McpConfigResult;
   remove(name: string): McpConfigResult;
@@ -23,7 +54,7 @@ export interface McpConfig {
     person?: (url: string) => { oauth: McpOAuthManager; key?: { header: string; value: string } } | null;
   }): Promise<McpConfigResult>;
   /** The one flag every writer of `cfg.mcpServers` takes: two writers must not interleave a read with a save. */
-  busy: McpServerRouteDeps["mcpConfigBusy"];
+  busy: BusyFlag;
 }
 
 /** Where turns are boxed, a URL server is tested the way bots reach it: through the broker. If that fails but the server
@@ -46,14 +77,14 @@ async function probeAsBots(path: BrokerPath, name: string, target: StoredRemoteM
 /** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
 export const runsElsewhere = (runsOn: McpRunsOn) => `This server runs on ${runsOn.label}, so it isn't started here.`;
 
-export const personalHeaderValueRefusal = (personal: string[], name: string, server: StoredMcpServer) =>
+const personalHeaderValueRefusal = (personal: string[], name: string, server: StoredMcpServer) =>
   personal.includes(name) && isRemoteMcpServer(server) && Object.values(server.headers).some((value) => value !== "")
     ? "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection."
     : null;
 
 const MAX_CONCURRENT_MCP_PROBES = 2;
 
-export function createMcpConfig(deps: McpServerRouteDeps & { changed(): void }): McpConfig {
+export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpConfig {
   const { cfg, mcpOAuth, mcpConfigBusy, mcpServerResponse, mcpPolicyRefusal, persistMcpServers, appCatalog, forgetPeople, health } = deps;
   const personalHeaderRefusal = (name: string, server: StoredMcpServer) => personalHeaderValueRefusal(deps.teamConnections.personMcp(), name, server);
   let mcpProbesInFlight = 0;
@@ -98,6 +129,24 @@ export function createMcpConfig(deps: McpServerRouteDeps & { changed(): void }):
       health?.changed(name);
       deps.connectionsChanged?.("added");
       return saved(201);
+    }),
+    addMany: (servers) => write(() => {
+      const current = cfg.mcpServers ?? {};
+      const names = Object.keys(servers);
+      const taken = names.filter((name) => Object.hasOwn(current, name));
+      if (taken.length) {
+        return { status: 409, error: `Already added: ${taken.join(", ")}. Remove or rename ${taken.length === 1 ? "it" : "them"} first.` };
+      }
+      if (Object.keys(current).length + names.length > MAX_MCP_SERVERS) {
+        return { status: 400, error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` };
+      }
+      const personalRefusal = names.map((name) => personalHeaderRefusal(name, servers[name]!)).find(Boolean);
+      if (personalRefusal) return { status: 400, error: personalRefusal };
+      const blocked = names.filter((name) => mcpPolicyRefusal(name, servers[name] as object));
+      if (blocked.length) return { status: 403, error: `${mcpPolicyRefusal(blocked[0]!, servers[blocked[0]!] as object)} Not approved: ${blocked.join(", ")}.`, code: "managed_policy" };
+      persistMcpServers({ ...current, ...servers });
+      deps.connectionsChanged?.("added");
+      return { status: 201, body: { ...mcpServerResponse(), added: names } };
     }),
     replace: (name, server) => write(() => {
       const found = stored(name);
@@ -150,7 +199,7 @@ export function createMcpConfig(deps: McpServerRouteDeps & { changed(): void }):
       deps.connectionsChanged?.("removed");
       return saved(200);
     }),
-    test: async (name, { signal, person }) => {
+    test: async (name, { signal, person, asBot }) => {
       const raw = cfg.mcpServers?.[name];
       if (raw === undefined) return { status: 404, error: "MCP server not found." };
       const parsed = parseStoredMcpServer(name, raw);
@@ -176,7 +225,7 @@ export function createMcpConfig(deps: McpServerRouteDeps & { changed(): void }):
           const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
           if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
         }
-        const options = personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {};
+        const options = { ...(personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {}), ...(asBot ? { asBot } : {}) };
         const viaBots = isRemoteMcpServer(target) ? deps.botsPath?.() ?? null : null;
         const result = viaBots && isRemoteMcpServer(target)
           ? await probeAsBots(viaBots, name, target, signal, options)

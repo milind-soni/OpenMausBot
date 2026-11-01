@@ -1,44 +1,15 @@
-import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
-import type { CloudHomeConfig } from "../cloud-home.ts";
-import type { AppConfig } from "../config.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
-import { createMcpConfig, personalHeaderValueRefusal, runsElsewhere, type McpConfig, type McpConfigResult } from "../host/mcp-config.ts";
-import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
-import { McpOAuthError, McpSignInError, mcpCallbackOrigin, type McpOAuthManager } from "../mcp-oauth.ts";
-import type { BrokerPath } from "../bot-box/broker-probe.ts";
-import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
+import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
+import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
+import { isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
-import type { SessionRegistry } from "../sessions.ts";
-import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import type { json } from "../harness/http.ts";
 import { sessionMember } from "./team-phone.ts";
 
-export interface McpServerRouteDeps {
-  cfg: Pick<AppConfig, "mcpServers" | "postiz">;
-  sessions: Pick<SessionRegistry, "isLive">;
-  mcpOAuth: McpOAuthManager;
-  teamConnections: Pick<TeamConnectionsHost, "personMcp" | "people">;
-  cloudHome: Pick<CloudHomeConfig, "publicOrigin"> | null;
-  fallbackPublicUrl: string | null;
-  mcpConfigBusy: BusyFlag;
-  /** Secrets as booleans, sign-in state attached. */
-  mcpServerResponse(): Record<string, unknown>;
-  mcpPolicyRefusal(name: string, server: object): string | undefined;
-  persistMcpServers(next: Record<string, unknown>): void;
-  savedCustomDomain(): string | null;
-  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
-  /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
-  forgetPeople?(name: string): void;
-  /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
-  health?: { changed(name: string): void };
-  /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
-  connectionsChanged?(change: "added" | "removed"): void;
-  /** How bots' turns reach a URL server here: through the credential broker where turns are boxed (null: directly). */
-  botsPath?(): BrokerPath | null;
-  /** The mutation service shared with bots; made here, silent, when the caller has none. */
-  config?: McpConfig;
+export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "mcpServerResponse" | "savedCustomDomain" | "appCatalog"> {
+  config: McpConfig;
 }
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
@@ -57,13 +28,12 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
     };
   };
   const {
-    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
-    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain,
+    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL,
+    mcpServerResponse, savedCustomDomain, config,
   } = deps;
   const answer = (res: Parameters<typeof json>[0], send: typeof json, result: McpConfigResult) => "body" in result
     ? send(res, result.status, withServerDetails(result.body))
     : send(res, result.status, { error: result.error, ...(result.code ? { code: result.code } : {}) });
-  const config = deps.config ?? createMcpConfig({ ...deps, changed: () => {} });
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, withServerDetails(mcpServerResponse()));
@@ -165,36 +135,15 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
-      mcpConfigBusy.set(true);
-      try {
-        const body = await readBody(req);
-        const text = typeof body?.json === "string" ? body.json : "";
-        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
-          return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
-        }
-        if (!text.trim()) return json(res, 400, { error: "Paste the JSON block first." });
-        const parsed = parseMcpServersImport(text);
-        if (!parsed.ok) return json(res, 400, { error: parsed.error });
-        const current = cfg.mcpServers ?? {};
-        const names = Object.keys(parsed.servers);
-        const taken = names.filter((name) => Object.hasOwn(current, name));
-        if (taken.length) {
-          return json(res, 409, { error: `Already added: ${taken.join(", ")}. Remove or rename ${taken.length === 1 ? "it" : "them"} first.` });
-        }
-        if (Object.keys(current).length + names.length > MAX_MCP_SERVERS) {
-          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
-        }
-        const personalRefusal = names.map((name) => personalHeaderValueRefusal(deps.teamConnections.personMcp(), name, parsed.servers[name]!)).find(Boolean);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
-        const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
-        if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
-        persistMcpServers({ ...current, ...parsed.servers });
-        deps.connectionsChanged?.("added");
-        return json(res, 201, { ...withServerDetails(mcpServerResponse()), added: names });
-      } finally {
-        mcpConfigBusy.set(false);
+      const body = await readBody(req);
+      const text = typeof body?.json === "string" ? body.json : "";
+      if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+        return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
       }
+      if (!text.trim()) return json(res, 400, { error: "Paste the JSON block first." });
+      const parsed = parseMcpServersImport(text);
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      return answer(res, json, config.addMany(parsed.servers));
     }
 
     const mcpServerRoute = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
@@ -204,11 +153,11 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       }
       const name = mcpServerRoute[1]!;
       if (method === "DELETE") return answer(res, json, config.remove(name));
+      const body = await readBody(req);
       const current = cfg.mcpServers ?? {};
       if (!Object.hasOwn(current, name)) return json(res, 404, { error: "MCP server not found." });
       const existing = parseStoredMcpServer(name, current[name]);
       if (!existing.ok) return json(res, 400, { error: existing.error });
-      const body = await readBody(req);
       if (method === "PATCH") {
         const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
         if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
