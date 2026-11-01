@@ -1923,6 +1923,7 @@
   "connectors.card.resumed": "Connexion sécurisée établie. Votre bot poursuit la tâche.",
   "connectors.card.paused": "Connexion sécurisée établie. Reprenez la tâche en pause quand vous voulez.",
   "connectors.card.signInHint": "Connectez-vous ou saisissez la clé de l'app sur la page de connexion sécurisée — jamais dans le chat.",
+  "connectors.card.mcpSignInHint": "Connectez-vous sur la page qui s'ouvre — jamais dans le chat.",
   "connectors.card.notNow": "Pas maintenant",
   "connectors.card.waiting": "En attente de la connexion…",
   "connectors.card.readyToUse": "Prêt à l'emploi",

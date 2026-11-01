@@ -3791,6 +3791,7 @@
   "connectors.card.resumed": "Güvenli bir şekilde bağlandı. Botunuz göreve devam ediyor.",
   "connectors.card.paused": "Güvenli bir şekilde bağlandı. Hazır olduğunuzda duraklatılan göreve devam edin.",
   "connectors.card.signInHint": "Güvenli bağlantı sayfasında oturum açın veya uygulama anahtarını girin — asla sohbette girmeyin.",
+  "connectors.card.mcpSignInHint": "Açılan sayfada oturum aç — asla sohbette değil.",
   "connectors.card.notNow": "Şimdi değil",
   "connectors.card.waiting": "Oturum açılması bekleniyor…",
   "connectors.card.readyToUse": "Kullanıma hazır",

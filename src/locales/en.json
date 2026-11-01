@@ -5257,6 +5257,7 @@
   "connectors.card.resumed": "Connected securely. Your bot is continuing the task.",
   "connectors.card.paused": "Connected securely. Continue the paused task when you're ready.",
   "connectors.card.signInHint": "Sign in or enter the app key on the secure connection page, never in chat.",
+  "connectors.card.mcpSignInHint": "Sign in on the page that opens, never in chat.",
   "connectors.card.notNow": "Not now",
   "connectors.card.waiting": "Waiting for sign-in…",
   "connectors.card.readyToUse": "Ready to use",

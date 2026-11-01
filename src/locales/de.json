@@ -1936,6 +1936,7 @@
   "connectors.card.resumed": "Sicher verbunden. Dein Bot setzt die Aufgabe fort.",
   "connectors.card.paused": "Sicher verbunden. Setz die pausierte Aufgabe fort, wenn du so weit bist.",
   "connectors.card.signInHint": "Melde dich an oder gib den App-Schlüssel auf der sicheren Verbindungsseite ein — nie im Chat.",
+  "connectors.card.mcpSignInHint": "Melde dich auf der Seite an, die sich öffnet — nie im Chat.",
   "connectors.card.notNow": "Jetzt nicht",
   "connectors.card.waiting": "Warte auf die Anmeldung…",
   "connectors.card.readyToUse": "Einsatzbereit",

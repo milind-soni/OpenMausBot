@@ -2306,6 +2306,7 @@
   "connectors.card.resumed": "Підключено безпечно. Ваш бот продовжує завдання.",
   "connectors.card.paused": "Підключено безпечно. Продовжте призупинене завдання, коли будете готові.",
   "connectors.card.signInHint": "Входьте або вводьте ключ застосунку на сторінці безпечного підключення — ніколи в чаті.",
+  "connectors.card.mcpSignInHint": "Увійдіть на сторінці, що відкриється, — ніколи в чаті.",
   "connectors.card.notNow": "Не зараз",
   "connectors.card.waiting": "Чекаємо на вхід…",
   "connectors.card.readyToUse": "Готовий до використання",

@@ -2577,6 +2577,7 @@
   "connectors.card.resumed": "已安全连接。机器人正在继续这项任务。",
   "connectors.card.paused": "已安全连接。准备好后可继续已暂停的任务。",
   "connectors.card.signInHint": "请在安全连接页面登录或输入应用密钥——绝不要在聊天里输入。",
+  "connectors.card.mcpSignInHint": "请在打开的页面中登录，绝不要在聊天里输入。",
   "connectors.card.notNow": "暂不",
   "connectors.card.waiting": "正在等待登录…",
   "connectors.card.readyToUse": "可以使用",

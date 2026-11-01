@@ -5119,6 +5119,7 @@
   "connectors.card.resumed": "안전하게 연결됐어요. 봇이 작업을 이어 가고 있어요.",
   "connectors.card.paused": "안전하게 연결됐어요. 준비되면 일시 중지된 작업을 계속하세요.",
   "connectors.card.signInHint": "안전한 연결 페이지에서 로그인하거나 앱 키를 입력하세요 — 채팅에는 절대 입력하지 마세요.",
+  "connectors.card.mcpSignInHint": "열리는 페이지에서 로그인하세요 — 채팅에는 절대 입력하지 마세요.",
   "connectors.card.notNow": "나중에",
   "connectors.card.waiting": "로그인을 기다리는 중…",
   "connectors.card.readyToUse": "사용 준비 완료",

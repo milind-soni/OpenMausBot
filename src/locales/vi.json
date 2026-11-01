@@ -3791,6 +3791,7 @@
   "connectors.card.resumed": "Đã kết nối an toàn. Bot của bạn đang tiếp tục nhiệm vụ.",
   "connectors.card.paused": "Đã kết nối an toàn. Hãy tiếp tục nhiệm vụ đã tạm dừng khi bạn sẵn sàng.",
   "connectors.card.signInHint": "Đăng nhập hoặc nhập khóa ứng dụng trên trang kết nối an toàn — không bao giờ nhập trong cuộc trò chuyện.",
+  "connectors.card.mcpSignInHint": "Đăng nhập trên trang được mở ra, đừng bao giờ trong cuộc trò chuyện.",
   "connectors.card.notNow": "Để sau",
   "connectors.card.waiting": "Đang chờ đăng nhập…",
   "connectors.card.readyToUse": "Sẵn sàng sử dụng",

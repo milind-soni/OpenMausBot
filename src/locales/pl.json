@@ -4682,6 +4682,7 @@
   "connectors.card.resumed": "Połączono bezpiecznie. Bot kontynuuje zadanie.",
   "connectors.card.paused": "Połączono bezpiecznie. Kontynuuj wstrzymane zadanie, gdy zechcesz.",
   "connectors.card.signInHint": "Zaloguj się lub wpisz klucz aplikacji na bezpiecznej stronie połączenia — nigdy na czacie.",
+  "connectors.card.mcpSignInHint": "Zaloguj się na stronie, która się otworzy — nigdy na czacie.",
   "connectors.card.notNow": "Nie teraz",
   "connectors.card.waiting": "Oczekiwanie na logowanie…",
   "connectors.card.readyToUse": "Gotowe do użycia",

@@ -4566,6 +4566,7 @@
   "connectors.card.resumed": "Conectado com segurança. Seu bot está continuando a tarefa.",
   "connectors.card.paused": "Conectado com segurança. Continue a tarefa pausada quando quiser.",
   "connectors.card.signInHint": "Faça login ou informe a chave do app na página de conexão segura — nunca no chat.",
+  "connectors.card.mcpSignInHint": "Faça login na página que abrir, nunca no chat.",
   "connectors.card.notNow": "Agora não",
   "connectors.card.waiting": "Esperando o login…",
   "connectors.card.readyToUse": "Pronto para usar",

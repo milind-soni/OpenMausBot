@@ -3300,6 +3300,7 @@
   "connectors.card.resumed": "已安全連線。你的機器人正在繼續執行這項任務。",
   "connectors.card.paused": "已安全連線。你準備好時即可繼續已暫停的任務。",
   "connectors.card.signInHint": "請在安全連線頁面上登入或輸入應用程式金鑰 — 切勿在對話中輸入。",
+  "connectors.card.mcpSignInHint": "請在開啟的頁面上登入，切勿在聊天中輸入。",
   "connectors.card.notNow": "暫時不要",
   "connectors.card.waiting": "正在等待登入…",
   "connectors.card.readyToUse": "可以開始使用",

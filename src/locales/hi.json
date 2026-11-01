@@ -1923,6 +1923,7 @@
   "connectors.card.resumed": "सुरक्षित रूप से जुड़ गया। आपका बॉट काम जारी रख रहा है।",
   "connectors.card.paused": "सुरक्षित रूप से जुड़ गया। तैयार हों तो रुका हुआ काम जारी रखें।",
   "connectors.card.signInHint": "सुरक्षित कनेक्शन पेज पर साइन इन करें या ऐप कुंजी डालें — चैट में कभी नहीं।",
+  "connectors.card.mcpSignInHint": "खुलने वाले पेज पर साइन इन करें — चैट में कभी नहीं।",
   "connectors.card.notNow": "अभी नहीं",
   "connectors.card.waiting": "साइन इन की प्रतीक्षा…",
   "connectors.card.readyToUse": "उपयोग के लिए तैयार",

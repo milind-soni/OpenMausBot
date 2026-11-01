@@ -65,9 +65,13 @@ describe("ConnectorCard ask card", () => {
     expect(mcp).toContain("Sign in to Linear");
     expect(mcp).toMatch(/<button[^>]*>(?:(?!<\/button>)[^])*Sign in<\/button>/);
     expect(mcp).not.toContain(t("connectors.card.connectSecurely"));
+    expect(mcp).toContain(t("connectors.card.mcpSignInHint"));
+    expect(mcp).not.toContain(t("connectors.card.signInHint"));
     const composio = view({ source: "composio" });
     expect(composio).toContain(t("connectors.card.connectSecurely"));
     expect(composio).not.toContain("Sign in to");
+    expect(composio).toContain(t("connectors.card.signInHint"));
+    expect(composio).not.toContain(t("connectors.card.mcpSignInHint"));
   });
 
   it("draws nothing once superseded", () => {

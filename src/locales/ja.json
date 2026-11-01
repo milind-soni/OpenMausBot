@@ -4789,6 +4789,7 @@
   "connectors.card.resumed": "安全に接続しました。ボットが作業を続けています。",
   "connectors.card.paused": "安全に接続しました。準備ができたら、一時停止中の作業を再開してください。",
   "connectors.card.signInHint": "サインインまたはアプリキーの入力は、安全な接続ページで行ってください。チャットには絶対に入力しないでください。",
+  "connectors.card.mcpSignInHint": "開いたページでサインインしてください。チャットには絶対に入力しないでください。",
   "connectors.card.notNow": "今はしない",
   "connectors.card.waiting": "サインインを待っています…",
   "connectors.card.readyToUse": "使用できます",

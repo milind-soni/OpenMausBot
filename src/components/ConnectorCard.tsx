@@ -205,7 +205,7 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
       }
     >
       <CardHint id="spot.connector" />
-      <p className="text-[12px] text-ink-tertiary">{t("connectors.card.signInHint")}</p>
+      <p className="text-[12px] text-ink-tertiary">{t(isMcp ? "connectors.card.mcpSignInHint" : "connectors.card.signInHint")}</p>
       {refusal && <p role="status" className="mt-1.5 text-[12px] text-ink-secondary">{refusal}</p>}
       {labelNeeded ? (
         <form
