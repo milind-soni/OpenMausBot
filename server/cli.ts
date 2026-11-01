@@ -16,7 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, basename, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
@@ -63,7 +63,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "fleet" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "fleet" | "workspace" | "help";
   port: number;
   dataDir: string;
   label?: string;
@@ -86,6 +86,12 @@ export interface CliOptions {
   browserAction?: "install" | "status";
   /** `fleet init|create|list|users|suspend|resume|delete|upgrade|agent` */
   fleetAction?: FleetInput["action"] | "agent";
+  /** `workspace list|create|switch|delete|forget` */
+  workspaceAction?: "list" | "create" | "switch" | "delete" | "forget";
+  workspaceId?: string;
+  workspaceName?: string;
+  workspaceDataDir?: string;
+  workspacePurge?: boolean;
   operator?: string;
   socket?: string;
   group?: string;
@@ -110,7 +116,7 @@ export interface CliOptions {
   phone?: "ios" | "android";
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "fleet", "workspace", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
@@ -187,6 +193,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (options.command === "fleet" && arg === "--dry-run") options.dryRun = true;
       else if (options.command === "fleet" && arg === "--yes") options.yes = true;
       else if (options.command === "fleet" && arg === "--keep-data") options.keepData = true;
+      else if (options.command === "workspace" && !options.workspaceAction && (arg === "list" || arg === "create" || arg === "switch" || arg === "delete" || arg === "forget")) options.workspaceAction = arg;
+      else if (options.command === "workspace" && options.workspaceAction === "create" && !options.workspaceName && !arg.startsWith("--")) options.workspaceName = arg;
+      else if (options.command === "workspace" && options.workspaceAction === "create" && arg === "--workspace-dir") options.workspaceDataDir = resolve(value());
+      else if (options.command === "workspace" && options.workspaceAction && arg === "--purge") options.workspacePurge = true;
+      else if (options.command === "workspace" && ["switch", "delete", "forget"].includes(options.workspaceAction ?? "") && !options.workspaceId && !arg.startsWith("--")) options.workspaceId = arg;
       else if (options.command === "fleet" && arg === "--chat-only") options.chatOnly = true;
       else return { error: `unknown argument "${arg}"` };
     } catch (error) {
@@ -201,12 +212,15 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
-  if (options.command === "fleet") {
+    if (options.command === "fleet") {
     if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST [--operator USER], create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade, agent" };
     if (["create", "users", "suspend", "resume", "delete"].includes(options.fleetAction) && !options.slug) return { error: `fleet ${options.fleetAction} needs a workspace name` };
     if (options.fleetAction === "users" && !options.fleetUserAction) return { error: "fleet users needs: NAME add|remove EMAIL [--chat-only]" };
     if (options.cap !== undefined && (!Number.isFinite(options.cap) || options.cap < 0)) return { error: "--cap must be a dollar amount of 0 or more" };
   }
+  if (options.command === "workspace" && !options.workspaceAction) return { error: "workspace needs one of: list, create NAME [--workspace-dir DIR], switch ID, delete ID [--purge], forget ID [--purge]" };
+  if (options.command === "workspace" && options.workspaceAction === "create" && !options.workspaceName) return { error: "workspace create needs a name" };
+  if (options.command === "workspace" && (options.workspaceAction === "switch" || options.workspaceAction === "delete" || options.workspaceAction === "forget") && !options.workspaceId) return { error: `workspace ${options.workspaceAction} needs an id` };
   return options;
 }
 
@@ -1003,6 +1017,148 @@ export async function runOnboardingCommand(
   }
 }
 
+async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
+  const { join } = await import("node:path");
+  const { readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync } = await import("node:fs");
+  const environmentsFilePath = join(options.dataDir, "environments.json");
+  let state: { environments: Array<{ id: string; kind: string; name: string; dataDir?: string; missing?: boolean; color?: string; origin?: string; home?: boolean; cloud?: { id: string; role: string } }>; activeId: string } | null = null;
+  try {
+    state = JSON.parse(readFileSync(environmentsFilePath, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      state = { environments: [], activeId: "local" };
+    } else {
+      io.error(`Cannot read environments registry: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
+  }
+  if (!state) state = { environments: [], activeId: "local" };
+
+  const save = () => {
+    mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+    const tmp = join(options.dataDir, `environments.${process.pid}.${Date.now()}.tmp`);
+    writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
+    try {
+      renameSync(tmp, environmentsFilePath);
+    } catch {
+      io.error(`Failed to save workspace registry; keeping the existing registry intact.`);
+      return 1;
+    }
+  };
+
+  if (options.workspaceAction === "list") {
+    for (const env of state.environments) {
+      const active = env.id === state.activeId ? " (current)" : "";
+      const dir = env.kind === "local" ? ` · ${env.dataDir ?? ""}` : env.origin ? ` · ${env.origin}` : "";
+      const missing = env.missing === true ? " [missing]" : "";
+      io.log(`${env.id}${active} · ${env.name}${dir}${missing}`);
+    }
+    return 0;
+  }
+
+  if (options.workspaceAction === "create") {
+    if (!options.workspaceName) { io.error("workspace create needs a name"); return 2; }
+    const name = options.workspaceName.trim();
+    if (!name) { io.error("workspace create needs a non-empty name"); return 2; }
+    const id = options.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || (Math.random().toString(36).slice(2, 10));
+    if (id === "local") { io.error("The id \"local\" is reserved; choose another workspace name."); return 1; }
+    if (id.length > 64) { io.error(`Workspace id “${id}” exceeds 64 characters; choose a shorter name.`); return 1; }
+    const dup = state.environments.find((e) => e.id === id);
+    if (dup) { io.error(`A workspace with id “${id}” already exists`); return 1; }
+    let dataDir: string | undefined;
+    if (options.workspaceDataDir) {
+      dataDir = resolve(options.workspaceDataDir);
+      const existing = state.environments.find((e) => e.kind === "local" && e.dataDir === dataDir);
+      if (existing) { io.error(`A local workspace already uses ${dataDir}`); return 1; }
+      const targetDir = dataDir!;
+      const canon = (dir: string) => { try { return realpathSync(dir); } catch { return dir; } };
+      const targetCanon = canon(targetDir);
+      const rootCanon = canon(options.dataDir);
+      const overlap = state.environments.find((e) => {
+        if (e.kind !== "local" || !e.dataDir) return false;
+        const a = canon(resolve(e.dataDir));
+        return a === targetCanon || a.startsWith(targetCanon + sep) || targetCanon.startsWith(a + sep);
+      });
+      if (overlap) { io.error(`The data folder overlaps an existing workspace (${overlap.dataDir})`); return 1; }
+      if (targetCanon === rootCanon || targetCanon.startsWith(rootCanon + sep) || rootCanon.startsWith(targetCanon + sep)) {
+        io.error(`The data folder overlaps the registry root (${options.dataDir})`);
+        return 1;
+      }
+    } else {
+      dataDir = join(options.dataDir, "workspaces", id);
+    }
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    state.environments.push({ id, kind: "local", name, dataDir });
+    state.activeId = id;
+    save();
+    io.log(`Created workspace “${name}” (id: ${id})${dataDir ? ` at ${dataDir}` : ""} and switched to it.`);
+    return 0;
+  }
+
+  if (options.workspaceAction === "switch") {
+    if (!options.workspaceId) { io.error("workspace switch needs an id"); return 2; }
+    const env = state.environments.find((e) => e.id === options.workspaceId!);
+    if (!env) { io.error(`No workspace with id “${options.workspaceId}”`); return 1; }
+    state.activeId = options.workspaceId;
+    save();
+    io.log(`Switched to workspace “${env.name}” (id: ${options.workspaceId}).`);
+    return 0;
+  }
+
+  if (options.workspaceAction === "delete" || options.workspaceAction === "forget") {
+    if (!options.workspaceId) { io.error(`workspace ${options.workspaceAction} needs an id`); return 2; }
+    const env = state.environments.find((e) => e.id === options.workspaceId!);
+    if (!env) { io.error(`No workspace with id “${options.workspaceId}”`); return 1; }
+    if (env.id === state.activeId) { io.error(`Cannot delete the active workspace; switch away first.`); return 1; }
+    if (env.kind === "local" && options.workspacePurge && env.dataDir) {
+      const { rmSync } = await import("node:fs");
+      const resolved = resolve(env.dataDir);
+      const root = resolve(options.dataDir);
+      const canonical = (dir: string) => { try { return realpathSync(dir); } catch { return dir; } };
+      const resolvedCanon = canonical(resolved);
+      const rootCanon = canonical(root);
+      if (!basename(resolved).startsWith(".openmausbot")) {
+        io.error(`Refusing to purge a folder not named .openmausbot-* (${resolved})`);
+        return 1;
+      }
+      if (resolvedCanon === rootCanon || resolvedCanon.startsWith(rootCanon + sep) || rootCanon.startsWith(resolvedCanon + sep)) {
+        io.error(`Refusing to purge inside or containing the registry root (${resolved})`);
+        return 1;
+      }
+      try {
+        rmSync(resolved, { recursive: true, force: true });
+      } catch (error) {
+        io.error(`Could not delete data folder: ${error instanceof Error ? error.message : String(error)}`);
+        return 1;
+      }
+    }
+    state.environments = state.environments.filter((e) => e.id !== options.workspaceId);
+    if (state.activeId === options.workspaceId) state.activeId = "local";
+    save();
+    io.log(`Forgot workspace “${env.name}” (id: ${options.workspaceId}).`);
+    return 0;
+  }
+
+  io.log(USAGE);
+  return 0;
+}
+
+/** Resolve the active local workspace's data directory from the environments registry,
+ * so `openmausbot start`/`serve` uses the workspace last selected with `workspace switch`. */
+function resolveActiveWorkspaceDataDir(defaultDataDir: string): string | undefined {
+  const environmentsFilePath = join(defaultDataDir, "environments.json");
+  let state: { environments: Array<{ id: string; kind: string; dataDir?: string }>; activeId: string } | null = null;
+  try {
+    state = JSON.parse(readFileSync(environmentsFilePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!state) return undefined;
+  const active = state.environments.find((e) => e.id === state.activeId);
+  if (!active || active.kind !== "local" || active.id === "local" || !active.dataDir) return undefined;
+  return resolve(active.dataDir);
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "sentinel") return runSentinelCli(argv.slice(1));
   if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
@@ -1012,6 +1168,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 2;
   }
   process.env.OMB_DATA_DIR = options.dataDir;
+  if (options.command === "start" || options.command === "serve") {
+    const activeWorkspaceDir = resolveActiveWorkspaceDataDir(options.dataDir);
+    if (activeWorkspaceDir) {
+      options.dataDir = activeWorkspaceDir;
+      process.env.OMB_DATA_DIR = activeWorkspaceDir;
+    }
+  }
   switch (options.command) {
     case "setup":
     case "start":
@@ -1069,6 +1232,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         node: process.execPath,
         script: process.argv[1] ?? "",
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
+    case "workspace":
+      return runWorkspace(options, { log: (line) => console.log(line), error: (line) => console.error(line), ask: async () => "" });
     case "logout":
       return runLogout(options);
     case "browser":
