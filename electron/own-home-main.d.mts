@@ -7,6 +7,7 @@ export interface SavedPlace { id: string; kind: string; name: string; origin?: s
 type Answer = { ok: boolean; status: number; body: any };
 
 export declare const OWNER_KNOWN_MS: number;
+export declare const OWNER_RETRY_MS: number;
 export function parseChoice(value: unknown): OwnHomeChoice | null;
 export function handSaved(entry: unknown): entry is SavedPlace & { kind: "remote"; origin: string };
 export function serverRequests(place: { origin: string }, fetchImpl: typeof fetch): {

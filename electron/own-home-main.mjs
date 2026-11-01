@@ -15,6 +15,8 @@ const ORIGIN = /^https?:\/\/[^/\s]+$/u;
 const ENVIRONMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 /** How long a server's word on who owns it is kept for the rail. */
 export const OWNER_KNOWN_MS = 10 * 60_000;
+/** How long a server that did not say who owns it is left alone before it is asked again. */
+export const OWNER_RETRY_MS = 60_000;
 /** A chosen move that could not begin (this computer's server did not answer) looks again this often. */
 const START_RETRY_MS = 30_000;
 
@@ -159,20 +161,33 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     log,
   });
 
-  /** The server's own word on whether this window's sign-in there is its one owner's, kept OWNER_KNOWN_MS. */
-  async function owner(place) {
-    try {
-      const who = await serverRequests(place, fetchImpl).who();
-      const known = { own: who.own && who.takesMove && who.environmentId !== null, environmentId: who.environmentId, at: now() };
-      const before = owners.get(place.id);
-      owners.set(place.id, known);
-      if (before?.own !== known.own) onChange();
-      return known;
-    } catch (error) {
-      log(`own home: ${place.name} did not say who owns it (${error?.message ?? error})`);
-      owners.delete(place.id);
-      return { own: false, environmentId: null, at: now() };
-    }
+  /** The asks under way, one per server. */
+  const asking = new Map();
+  /** The server's own word on whether this window's sign-in there is its one owner's, kept OWNER_KNOWN_MS. A server that
+   * did not say is left alone for OWNER_RETRY_MS. */
+  function owner(place) {
+    const pending = asking.get(place.id);
+    if (pending) return pending;
+    const ask = (async () => {
+      try {
+        const who = await serverRequests(place, fetchImpl).who();
+        const known = { own: who.own && who.takesMove && who.environmentId !== null, environmentId: who.environmentId, at: now() };
+        const before = owners.get(place.id);
+        owners.set(place.id, known);
+        if (before?.own !== known.own) onChange();
+        return known;
+      } catch (error) {
+        log(`own home: ${place.name} did not say who owns it (${error?.message ?? error})`);
+        const before = owners.get(place.id);
+        owners.set(place.id, { own: false, environmentId: null, at: now(), unanswered: true });
+        if (before?.own) onChange();
+        return { own: false, environmentId: null, at: now() };
+      } finally {
+        asking.delete(place.id);
+      }
+    })();
+    asking.set(place.id, ask);
+    return ask;
   }
   const owns = (place) => {
     const known = handSaved(place) ? owners.get(place.id) : null;
@@ -226,7 +241,7 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     refresh() {
       for (const place of environments().filter(handSaved)) {
         const known = owners.get(place.id);
-        if (!known || now() - known.at >= OWNER_KNOWN_MS) void owner(place);
+        if (!known || now() - known.at >= (known.unanswered ? OWNER_RETRY_MS : OWNER_KNOWN_MS)) void owner(place);
       }
     },
     /** The person chose this server as their home: asked once more, then the move starts. */

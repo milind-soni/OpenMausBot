@@ -105,6 +105,41 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 /** Must match the server's IMAGE_MAX_BYTES. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
+export const TURN_IMAGE_MAX_COUNT = 4;
+
+export function imageLimitNotice(leftOut: readonly string[]): string {
+  return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
+}
+
+/** Splits images by the slots left: an image over IMAGE_MAX_BYTES is kept to fail with its own size error but takes no slot. */
+export function fitImagesToSlots<T extends { size: number }>(images: readonly T[], slots: number): { kept: T[]; leftOut: T[] } {
+  const kept: T[] = [];
+  const leftOut: T[] = [];
+  let room = slots;
+  for (const image of images) {
+    if (image.size > IMAGE_MAX_BYTES) kept.push(image);
+    else if (room > 0) {
+      room -= 1;
+      kept.push(image);
+    } else leftOut.push(image);
+  }
+  return { kept, leftOut };
+}
+
+/** Images a draft holding these attachments can still take. */
+export function imageSlotsLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
+}
+
+/** The images that fit the slots left; the rest are named in one notice. */
+export function imagesThatFit<T extends { name: string; size: number }>(images: readonly T[], slots: number, onNotice: (notice: string) => void): T[] {
+  const { kept, leftOut } = fitImagesToSlots(images, slots);
+  if (leftOut.length) onNotice(imageLimitNotice(leftOut.map((image) => image.name)));
+  return kept;
+}
+
+const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   txt: "text/plain",
@@ -715,10 +750,15 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
     uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** Images the message can still take; the rest are left out and named in the notice. */
+    imageSlots?: number;
   },
 ): Promise<{ attachments: Attachment[]; notice: string | null }> {
-  const files = [..._files];
   const { allowImages, getPath, uploadImage } = _opts;
+  const images = allowImages ? _files.filter((file) => isImageFile(file)) : [];
+  const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity).leftOut);
+  const leftOut = [...overflow].map((file) => file.name);
+  const files = _files.filter((file) => !overflow.has(file));
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
@@ -757,14 +797,19 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   }));
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);
+  const archives = rejectedNames.filter((name) => ARCHIVE_NAME.test(name));
+  const unsupported = rejectedNames.filter((name) => !ARCHIVE_NAME.test(name));
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
-  const pathless = rejectedNames.length
-    ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
-    : null;
+  const pathless = [
+    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, or audio file.` : "",
+    archives.length ? `Archives can't be attached: unzip ${archives.join(", ")} and attach the files inside.` : "",
+  ].filter(Boolean).join(" ") || null;
   const failed = uploadErrors.length ? uploadErrors.join("; ") : null;
+  const notice = pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed);
+  const limited = leftOut.length ? imageLimitNotice(leftOut) : null;
   return {
     attachments,
-    notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
+    notice: limited && notice ? `${limited} ${notice}` : (limited ?? notice),
   };
 }
 
