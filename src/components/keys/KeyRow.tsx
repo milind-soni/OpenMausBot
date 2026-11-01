@@ -109,6 +109,7 @@ export function KeyRow({
   const [verdict, setVerdict] = useState<string | null>(null);
   const [works, setWorks] = useState(false);
   const [enginesChecking, setEnginesChecking] = useState(false);
+  const [engineCheckError, setEngineCheckError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const generation = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -135,7 +136,7 @@ export function KeyRow({
   const keyEngines = saved.configured ? (state.instances ?? []).filter((instance) => keyForInstance(instance.instanceId) === entry.id) : [];
   const missingEngine = keyEngines.some((instance) => instance.snapshot.state === "available")
     ? undefined
-    : keyEngines.find((instance) => instance.snapshot.state === "unavailable");
+    : keyEngines.find((instance) => instance.snapshot.state === "unavailable" && installCommandFor(instance.install) !== null);
   const installCommand = installCommandFor(missingEngine?.install);
   const rejected = !works && (rejectedHere ?? (saved.configured && engineRejected));
   const failure = problem ?? (rejected && !busy ? t("keys.testRejected") : null);
@@ -202,6 +203,18 @@ export function KeyRow({
     } finally {
       busyRef.current = false;
       setBusy(null);
+    }
+  };
+
+  const checkEngines = async () => {
+    setEnginesChecking(true);
+    setEngineCheckError(null);
+    try {
+      await refreshInstances({ reportErrors: true });
+    } catch (cause) {
+      setEngineCheckError(errorText(cause));
+    } finally {
+      setEnginesChecking(false);
     }
   };
 
@@ -367,9 +380,10 @@ export function KeyRow({
                 </p>
                 <code className="select-all break-all rounded-md bg-inset px-2 py-1 font-mono text-[12px] text-ink">{installCommand}</code>
                 <button type="button" data-key-engine-check className="cursor-pointer self-start text-ink-secondary hover:text-ink hover:underline disabled:opacity-50" disabled={enginesChecking}
-                  onClick={() => { setEnginesChecking(true); void refreshInstances().finally(() => setEnginesChecking(false)); }}>
+                  onClick={() => void checkEngines()}>
                   {enginesChecking ? t("common.checking") : t("common.checkAgain")}
                 </button>
+                {engineCheckError && <p role="alert" className="text-danger">{t("engineSetup.checkFailed", { reason: engineCheckError })}</p>}
               </div>
             )}
             {note && <p className="text-ink-secondary">{note}</p>}

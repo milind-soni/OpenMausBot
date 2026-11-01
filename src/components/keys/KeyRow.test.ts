@@ -112,6 +112,9 @@ describe("a saved key", () => {
     expect(render({ id: "xai" })).not.toContain("data-key-engine-missing");
     fixture.instances = [{ ...deepseek("unavailable"), instanceId: "grok", displayName: "Grok" }];
     expect(render({ id: "xai" })).toContain("data-key-engine-missing");
+    // An unavailable engine with nothing to install (xAI API on a custom URL) doesn't hide the one that has a command.
+    fixture.instances = [{ ...deepseek("unavailable"), instanceId: "xaiApi", displayName: "xAI API", install: undefined }, { ...deepseek("unavailable"), instanceId: "grok", displayName: "Grok" }];
+    expect(render({ id: "xai" })).toContain("Saved, but Grok can&#x27;t run on this computer yet");
     fixture.config = {};
     fixture.instances = [deepseek("unavailable")];
     expect(render({ id: "deepseek" })).not.toContain("data-key-engine-missing");
