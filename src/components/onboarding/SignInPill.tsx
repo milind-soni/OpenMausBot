@@ -37,17 +37,18 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   const [error, setError] = useState<string | null>(null);
   const id = instance?.instanceId ?? "";
   const method = instance?.authentication?.method;
+  const provider = deviceSignInProvider(instance?.driverKind ?? "");
   const base = `/api/instances/${encodeURIComponent(id)}`;
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
 
   const done = useCallback(async () => {
-    engineSignedIn(method === "paste-code" ? "claude" : deviceSignInProvider(instance?.driverKind ?? ""),
+    engineSignedIn(method === "paste-code" ? "claude" : provider,
       method === "browser-pkce" ? "browser" : method === "paste-code" ? "code" : "device_code");
     try { await refreshInstances(); } catch {}
     try { await refreshModels(id); } catch {}
     if (live.current) setSlot({ kind: "start" });
-  }, [id, instance?.driverKind, method, refreshInstances, refreshModels]);
+  }, [id, provider, method, refreshInstances, refreshModels]);
 
   const fail = (cause: unknown) => {
     if (!live.current) return;
@@ -81,7 +82,6 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
         if (link) await openExternalLink(link).catch(() => {});
         setSlot({ kind: "waiting", flowId: auth.flowId, link });
       } else {
-        const provider = deviceSignInProvider(instance?.driverKind ?? "");
         const code = isDeviceSignInCode(provider, auth.userCode) ? auth.userCode! : "";
         const link = deviceSignInLink(provider, auth.authorizationUrl, auth.userCode);
         if (link) await openExternalLink(link).catch(() => {});
@@ -112,6 +112,11 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
         .then(({ auth }: { auth: DeviceSignInStatus }) => {
           if (auth.phase === "succeeded") void done();
           else if (auth.phase !== "waiting") fail(new Error(auth.message ?? t("engineSetup.device.failed")));
+          else if (isDeviceSignInCode(provider, auth.userCode)) {
+            const code = auth.userCode;
+            setSlot((current) => current.kind === "code" && current.flowId === polling && current.code !== code
+              ? { ...current, code, link: deviceSignInLink(provider, auth.authorizationUrl, code) } : current);
+          }
         })
         .catch(() => {});
     }, POLL_MS);
@@ -119,7 +124,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
       window.clearInterval(timer);
       controller.abort();
     };
-  }, [polling, base, done]);
+  }, [polling, base, done, provider]);
 
   return { slot, error, install, start, submit };
 }

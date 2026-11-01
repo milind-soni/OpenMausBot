@@ -33,7 +33,7 @@ vi.mock("./MenuMotion", () => ({
 }));
 vi.mock("./DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }) };
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
@@ -44,7 +44,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
-import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
+import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
 import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { SidebarFooter } from "./SidebarFooter";
@@ -52,7 +52,7 @@ import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { SidebarTileGrid } from "./SidebarTiles";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
+import { SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
@@ -207,7 +207,7 @@ describe("Simple-mode sidebar layout", () => {
     for (const action of ["onAddBots", "onRename", "onShare", "onDelete"] as const) expect(items[action]).toBeTypeOf("function");
   });
 
-  it("keeps a saved order for the departments and writes a Simple move back without moving the fixed lists", () => {
+  it("starts from the shared order for the departments, and a Simple move is saved for Simple only", () => {
     fixture.state = { ...fixture.state, sections: ["Work", "Home"] };
     const saved = [userSectionId("Home"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")];
     fixture.storage.set(SIDEBAR_SECTION_ORDER_KEY, JSON.stringify(saved));
@@ -215,11 +215,21 @@ describe("Simple-mode sidebar layout", () => {
     const work = () => headers(render().tree).find((header) => header.props.name === "Work")!;
     expect(work().props.reorderable).toBe(true);
     work().props.onMove!(-1);
-    const moved = [userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Home")];
-    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
-    expect(sectionOrder(render().tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work"), userSectionId("Home")]);
-    work().props.onMove!(-1);
-    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
+    const moved = [BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work"), userSectionId("Home")];
+    expect(JSON.parse(fixture.storage.get(SIMPLE_SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
+    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(saved);
+    expect(sectionOrder(render().tree)).toEqual(moved);
+  });
+
+  it("moves group chats above the bots, which then get their own heading, and leaves Advanced's order alone", () => {
+    const chats = () => headers(render().tree).find((header) => header.props.name === "Group chats")!;
+    expect(chats().props.reorderable).toBe(true);
+    chats().props.onMove!(-1);
+    const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")]);
+    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Bots", "Work"]);
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
+    expect(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)).toBeUndefined();
   });
 
   it("never hides the heading-less bots behind a collapse saved in Advanced", () => {
@@ -279,11 +289,13 @@ describe("Simple-mode sidebar layout", () => {
     }
     expect(width()).toBe("360px");
   });
-  it("collapses to a rail from the edge bump, keeping the Simple order with a hairline between sections", () => {
-    const toggle = render().tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0];
-    expect(toggle.collapsed).toBe(false);
-    toggle.onToggle();
-    expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("icons");
+  const edge = (tree: ReactElement<Props>[]) => tree.find((node) => node.type === SidebarResizeHandle)?.props as Parameters<typeof SidebarResizeHandle>[0] | undefined;
+
+  it("becomes a rail when its edge is dragged narrow, keeping the Simple order with a hairline between sections", () => {
+    const handle = edge(render().tree)!;
+    expect(handle.avatars).toBe(false);
+    handle.onAvatars(true);
+    expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("avatars");
     const { root, tree } = render();
     expect(root.props.className).toContain("w-[92px]");
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
@@ -291,11 +303,12 @@ describe("Simple-mode sidebar layout", () => {
     expect(headers(tree)).toEqual([]);
     expect(tree.filter((node) => node.type === SidebarRailSeparator)).toHaveLength(2);
     expect(tree.some((node) => node.type === SidebarSearchToggle)).toBe(false);
-    expect((tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0]).collapsed).toBe(true);
+    expect(edge(tree)?.avatars, "the rail keeps its edge, to drag it open again").toBe(true);
+    expect(edge(tree)?.avatarsWidth).toBe(92);
     expect(tree.some((node) => node.props["data-sidebar-top-buttons"] !== undefined)).toBe(false);
   });
 
-  it("puts round search and the same + menu at the top of the rail, and the edge bump expands it again", () => {
+  it("puts round search and the same + menu at the top of the rail, and dragging its edge out opens it again", () => {
     setSidebarDensity("icons");
     const top = () => render().tree.find((node) => node.props["data-sidebar-rail-top"] !== undefined)!;
     const plus = () => nodes(top().props.children).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
@@ -310,7 +323,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(item("New bot")).toBeDefined();
     expect(item("New group chat")).toBeDefined();
     expect(item("Templates")).toBeDefined();
-    (render().tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0]).onToggle();
+    edge(render().tree)!.onAvatars(false);
     expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("comfortable");
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
   });
@@ -350,7 +363,7 @@ describe("Simple-mode sidebar layout", () => {
     const opened = vi.fn();
     window.addEventListener("omb:open-command-palette", opened);
     const search = railSearch(render(true).tree);
-    expect(render(true).tree.some((node) => node.type === SidebarEdgeToggle)).toBe(false);
+    expect(edge(render(true).tree), "no edge to drag while a side panel holds it collapsed").toBeUndefined();
     search();
     expect(opened).toHaveBeenCalledOnce();
     expect(render(true).tree.some((node) => node.type === SimpleRailFooter)).toBe(true);

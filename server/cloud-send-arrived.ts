@@ -9,6 +9,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import { switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
+import { serverLine, type LineLanguage } from "./server-lines.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { Store } from "./store.ts";
@@ -26,8 +27,9 @@ export function movedFrom(dataDir: string): MovedFrom | null {
   } catch { return null; }
 }
 
-export const webhookMovedLine = (name: string) =>
-  `Now that I live on My Cloud, my webhook "${name}" has a new address. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
+/** `place`: the server of the person's own the bot moved to, by the name they know it by; My Cloud without one. */
+export const webhookMovedLine = (name: string, place = "My Cloud", language?: string) =>
+  serverLine(language, "server.moves.webhookMoved", { name, place });
 
 export const webhookHomeLine = (name: string) =>
   `I'm back on this computer, so my webhook "${name}" has an address here again. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
@@ -37,16 +39,19 @@ export interface ArrivedDeps {
   store: Pick<Store, "bot" | "appendMessage">;
   webhooks(): Pick<WebhookManager, "list"> | null;
   owner(auth: RequestAuth): CloudOwner | null;
+  lineLanguage?: LineLanguage;
 }
 
-const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500) });
+const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500),
+  place: z.string().trim().min(1).max(120).optional() });
 
 /** False when the path is not this route. */
 export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, auth, json, readBody }: RouteContext): Promise<boolean> {
   if (path !== "/api/cloud-send/arrived") return false;
   const refuse = (status: number, error: string) => { json(res, status, { error }); return true; };
   if (method !== "POST") return refuse(405, "method not allowed");
-  if (!deps.owner(auth)) return refuse(403, "Only My Cloud's owner can finish a move into it.");
+  const owner = deps.owner(auth);
+  if (!owner) return refuse(403, "Only My Cloud's owner can finish a move into it.");
   const body = arrivedBody.safeParse(await readBody(req, 64 * 1024));
   if (!body.success) return refuse(400, "send { v: 1, computer, webhooks }");
   const kept = movedFrom(deps.dataDir);
@@ -60,7 +65,7 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   for (const { id } of telling) told.add(id);
   // Recorded before the lines go: a move cut short here never has a bot say it twice.
   writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told] }), { mode: 0o600 });
-  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name) });
+  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name, body.data.place, deps.lineLanguage?.(owner.person)) });
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }

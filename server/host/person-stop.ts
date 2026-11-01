@@ -1,5 +1,5 @@
 // What a person's Stop does to a direct thread: the Stop button (POST /api/bots/:id/interrupt), a typed "stop"
-// while the bot works (acceptDirectSend), and the pills for teammates a stop leaves running.
+// while the bot works (acceptDirectSend), "Restart turn" from the send menu, and the pills for teammates a stop leaves running.
 import type { HandoffView } from "../coordinator.ts";
 import type { Handoffs } from "../delta-context.ts";
 import { isStopCommand } from "../room-holds.ts";
@@ -57,6 +57,14 @@ export function createPersonStop(deps: PersonStopDeps) {
     return { ok: true as const, threadId, message };
   }
 
+  /** "Restart turn": the message already waits in the queue, ahead of all but the person's own earlier messages, and the
+   * queue survives Stop, so stopping the running turn starts it over with that message. Like a typed stop, only a
+   * person's own send may end the turn. */
+  async function restartForPerson(botId: string, threadId: string, trigger: UsageTrigger): Promise<void> {
+    if (trigger.kind !== "user" && trigger.kind !== "owner") return;
+    await stopThreadForPerson(botId, threadId);
+  }
+
   /** Stop left teammates mid-turn: one pill each links to the conversation where Stop reaches that turn. */
   function noteTeammatesLeftRunning(threadId: string, running: HandoffView[]): void {
     if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return;
@@ -72,5 +80,5 @@ export function createPersonStop(deps: PersonStopDeps) {
     }
   }
 
-  return { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning };
+  return { stopThreadForPerson, stopOnTypedCommand, restartForPerson, noteTeammatesLeftRunning };
 }

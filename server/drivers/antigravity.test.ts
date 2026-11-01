@@ -969,6 +969,34 @@ describe("Antigravity driver over shared ACP", () => {
     )).toBe(true);
   });
 
+  it("succeeds when ACP server does not advertise the mode config option", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-unadvertised-mode";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: undefined,
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.8-flash-high",
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "thread-unadvertised-mode",
+      text: "hello",
+      cwd: fake.directory,
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({
+      ok: true,
+    });
+  });
+
   it("runs each turn of a pooled, resumed session under that turn's own permission mode", async () => {
     ensureDirs();
     const fake = fakeRuntime();

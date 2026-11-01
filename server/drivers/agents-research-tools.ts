@@ -1,6 +1,7 @@
 // The agents catalog's X and research tools (through treg) and the internal route behind each. Every call is paid, from
-// the person's own treg balance or their Cloud plan's allowance, so a bot is shown these tools only when a treg key or a
-// plan credential is held and its research switch is on; each route checks both again before it spends.
+// the person's own treg balance or their Cloud plan's allowance, so a bot is shown x_search only when a treg key or a
+// plan credential is held and its research switch is on, and the research tools only when research also works for that
+// credential (a plan's relay can have X without research); each route checks again before it spends.
 import { agentsCallMember } from "../../shared/agents-tool-names.ts";
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
@@ -11,6 +12,8 @@ const RESEARCH_ROUTES: Readonly<Record<string, string>> = {
   research_search: "research/search", research_endpoint: "research/endpoint", research_call: "research/call",
 };
 export const RESEARCH_TOOL_NAMES: ReadonlySet<string> = new Set(["x_search", "research_search", "research_endpoint", "research_call"]);
+/** The ones that need only X: shown without research. */
+export const X_TOOL_NAMES: ReadonlySet<string> = new Set(["x_search"]);
 
 /** What each X read cannot go without, said before anything is spent. */
 const X_NEEDS: Readonly<Record<string, string>> = { x_search: "query", x_user_posts: "handle", x_post: "post", x_profile: "handle" };

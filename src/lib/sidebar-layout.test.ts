@@ -5,7 +5,6 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
-  keepFixedSectionSlots,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -18,6 +17,7 @@ import {
   sidebarGoalRunPreview,
   sidebarSectionCollapsed,
   sidebarSectionLabel,
+  simpleOrderedSections,
   simpleSidebarSections,
   userSectionId,
   userSectionName,
@@ -138,7 +138,7 @@ describe("sidebar virtual sections", () => {
 
   it("shows pinned-circle thread rows only while the circle grid is showing", () => {
     expect(pinnedCircleThreadListVisible(true, "comfortable", 1)).toBe(true);
-    expect(pinnedCircleThreadListVisible(true, "compact", 2)).toBe(true);
+    expect(pinnedCircleThreadListVisible(true, "comfortable", 2)).toBe(true);
     expect(pinnedCircleThreadListVisible(false, "comfortable", 1)).toBe(false);
     expect(pinnedCircleThreadListVisible(true, "icons", 1)).toBe(false);
     expect(pinnedCircleThreadListVisible(true, "comfortable", 0)).toBe(false);
@@ -148,8 +148,8 @@ describe("sidebar virtual sections", () => {
     expect(sidebarLayoutInteractive("comfortable", "")).toBe(true);
     expect(sidebarLayoutInteractive("comfortable", "writer")).toBe(false);
     expect(sidebarLayoutInteractive("icons", "")).toBe(false);
-    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "compact", "")).toBe(true);
-    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "compact", "writer")).toBe(false);
+    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "comfortable", "")).toBe(true);
+    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "comfortable", "writer")).toBe(false);
     expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "icons", "")).toBe(false);
   });
 
@@ -264,18 +264,22 @@ describe("Simple-mode section order", () => {
     expect(simpleSidebarSections(saved)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, home, work]);
   });
 
-  it("writes a Simple reorder of departments back without moving the fixed lists in the saved order", () => {
-    const full = [PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home];
-    const shown = simpleSidebarSections(full);
-    const moved = simpleSidebarSections(placeSection(shown, home, work, "before"));
-    expect(moved).toEqual([PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, home, work]);
-    expect(keepFixedSectionSlots(full, moved)).toEqual([PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, home, work]);
-    expect(keepFixedSectionSlots(full, shown)).toEqual(full);
+  it("keeps that default until a section is moved in Simple, then follows Simple's own saved order", () => {
+    const ordered = [PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home];
+    expect(simpleOrderedSections(ordered, [])).toEqual([PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, work, home]);
+    const moved = [CHANNELS_SECTION_ID, home, PINNED_SECTION_ID, BOTS_SECTION_ID, work];
+    expect(simpleOrderedSections(ordered, moved)).toEqual(moved);
   });
 
-  it("cannot move a department above the fixed lists", () => {
-    const shown = [BOTS_SECTION_ID, CHANNELS_SECTION_ID, work];
-    expect(simpleSidebarSections(moveSection(shown, work, -1))).toEqual(shown);
+  it("can move any section, the bots and group chats included, above the others", () => {
+    const shown = simpleOrderedSections([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work], []);
+    expect(moveSection(shown, work, -1)).toEqual([BOTS_SECTION_ID, work, CHANNELS_SECTION_ID]);
+    expect(placeSection(shown, CHANNELS_SECTION_ID, BOTS_SECTION_ID, "before")).toEqual([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work]);
+  });
+
+  it("slots a department added after a Simple move in beside its neighbours from the default", () => {
+    const saved = [work, CHANNELS_SECTION_ID, BOTS_SECTION_ID];
+    expect(simpleOrderedSections([CHANNELS_SECTION_ID, BOTS_SECTION_ID, work, home], saved)).toEqual([work, home, CHANNELS_SECTION_ID, BOTS_SECTION_ID]);
   });
 });
 

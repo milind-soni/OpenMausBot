@@ -20,6 +20,7 @@ import { audienceMember, type Audience } from "../audience.ts";
 import { isRestricted } from "../bot-visibility.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import { peerStatus, peerStatusWords } from "../peer-roster.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import type { Representative, SharedFacts } from "./representative.ts";
 import { clip, oneLine } from "./text-clip.ts";
@@ -209,10 +210,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   const line = (item: Item) => store.messagesFor(item.threadId).find((message) => message.id === item.id);
 
-  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. */
-  const asking = (item: Item) => item.requestId && item.origin
+  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. An ask that
+   * came from no conversation (someone asking for access to a bot) is its own card. */
+  const asking = (item: Item) => !item.requestId ? undefined : item.origin
     ? store.messagesFor(item.origin.threadId).findLast((message) => message.card?.requestId === item.requestId && !message.inbox)
-    : undefined;
+    : line(item);
   /** An ask waits on its person while its copy here and the card that asked are open, however either is answered or
    * closed. */
   const askWaits = (item: Item, copy = line(item)) => item.kind === "ask" && liveCardKind(copy?.card) !== null && liveCardKind(asking(item)?.card) !== null;
@@ -317,7 +319,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       console.warn(`person inbox: the assistant could not answer: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (answer && answerItem(item, answer, "assistant").status === 200) {
-      notifyItem(item, `${delivery.title} · your assistant answered`, delivery.notify, `${delivery.text} → ${answer}`);
+      notifyItem(item, serverLine(conversationLanguage(item.threadId), "server.notify.assistantAnswered", { title: delivery.title }), delivery.notify, `${delivery.text} → ${answer}`);
     } else notifyItem(item, delivery.title, delivery.notify, delivery.text);
   }
 
@@ -325,7 +327,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   function answerItem(item: Item, text: string, by: "person" | "assistant"): Passed {
     const replier = deps.person(item.person);
     if (!replier) return { status: 410, text: "This inbox's person has left the team." };
-    const label = by === "assistant" ? `${replier.name}'s assistant answered` : `${replier.name} replied`;
+    const label = (threadId: string) => serverLine(conversationLanguage(threadId), by === "assistant" ? "server.teammates.personAssistantAnswered" : "server.teammates.personReplied", { name: replier.name });
     const relay: Relay = { kind: by === "assistant" ? "assistant" : "reply", email: replier.email, name: replier.name };
     let passed: Passed;
     if (item.to === "bot" && item.origin) {
@@ -336,7 +338,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
         return { status: 410, text: `The conversation ${item.from} asked from is gone, so the answer can't reach it.` };
       }
       if (group) {
-        store.appendMessage(threadId, { role: "bot", kind: "text", text: `${label}: ${text}`, relay, from: { botId: asker.id, name: asker.name, color: asker.color } });
+        store.appendMessage(threadId, { role: "bot", kind: "text", text: `${label(threadId)}: ${text}`, relay, from: { botId: asker.id, name: asker.name, color: asker.color } });
         store.patchGroup(group.id, { unread: true });
       } else {
         const quoted = JSON.stringify(oneLine(item.text, 160));
@@ -348,7 +350,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     } else if (item.to === "person" && item.asker) {
       const delivered = deliver(item.asker, {
         kind: "message", from: { name: replier.name, email: replier.email }, to: "person", asker: item.person,
-        ...(item.origin ? { origin: item.origin } : {}), text, title: label, notify: "mention", ...(by === "assistant" ? { assistant: true } : {}),
+        ...(item.origin ? { origin: item.origin } : {}), text, title: label(item.origin?.threadId ?? ""), notify: "mention", ...(by === "assistant" ? { assistant: true } : {}),
       });
       if (!delivered) return { status: 409, text: `${item.from} has no inbox here, so the answer can't reach them.` };
       passed = { status: 200, text: `Passed back to ${item.from}'s inbox; they were notified.` };

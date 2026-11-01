@@ -25,6 +25,8 @@ export interface AcpDiscoveryOptions {
   variants?: boolean;
   /** The catalog default when the agent offers it; otherwise the session's current model. */
   default?: string;
+  /** Sent as `clientCapabilities._meta` in initialize, as a turn session sends it, so both see the same model list. */
+  clientCapabilitiesMeta?: Record<string, unknown>;
   /** The picker label for an advertised model, given session/new's result verbatim. */
   label?(model: { id: string; label: string }, sessionNew: unknown): string;
   /** Close stdin and give the agent this many milliseconds to exit on its own, so it can release what it holds,
@@ -170,7 +172,11 @@ export async function discoverAcpModels(
     await request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: DISCOVERY_CLIENT_NAME, version: "1" },
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+        ...(discovery.clientCapabilitiesMeta ? { _meta: discovery.clientCapabilitiesMeta } : {}),
+      },
     });
     const initial = await request("session/new", { cwd, mcpServers: [] });
     const rawSessionId = record(initial)?.sessionId;

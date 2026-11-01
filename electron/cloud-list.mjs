@@ -18,6 +18,8 @@ const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 /** Each status as the app's machine summary (cloud-home.mjs CLOUD_MACHINE_STATUSES) reads it; a Cloud still at checkout
  * has none yet, and one offline is opened, so its own screen says it does not answer. */
 const MACHINE_STATUS = Object.freeze({ setting_up: "provisioning", ready: "ready", stopped: "stopped", payment_problem: "payment-problem", ended: "stopped", offline: "ready" });
+/** The statuses of a Cloud that isn't running: its files' day and Remove from list are said only for these. */
+const DEAD = Object.freeze(["ended", "stopped", "payment_problem"]);
 /** How far along each setup step is, for an Admin that names the step only. */
 const STEP_PROGRESS = Object.freeze({ reserving: 0.15, storage: 0.4, starting: 0.65, checking: 0.9 });
 
@@ -57,9 +59,23 @@ function parseCloudEntry(input) {
   const version = typeof input.version === "string" && VERSION.test(input.version) ? input.version : null;
   // Additive (Oct 30): as `cloud.power`, for a Ready Cloud whose plan sleeps; this app never reaches one the Admin says is asleep.
   const power = input.status === "ready" ? parseCloudPower(input.power) : null;
+  // Additive (Oct 30): when a Cloud that isn't running has its kept files deleted, and whether its owner may take it off their
+  // list (an Admin with Remove from list says so only for one of their own, in no team, that ended or was never paid for).
+  const deleteAfter = DEAD.includes(input.status) && Number.isSafeInteger(input.deleteAfter) && input.deleteAfter > 0 ? input.deleteAfter : null;
+  const removable = input.removable === true && DEAD.includes(input.status) && managed && input.role === "owner" && teamId === null;
   return { id: input.id, name, color: Object.hasOwn(CLOUD_SWATCH_COLORS, input.color) ? input.color : null, role: input.role,
     tier: typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null, runsOn: input.runsOn, status: input.status, origin, teamId,
-    primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}), ...(power ? { power } : {}) };
+    primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}), ...(power ? { power } : {}),
+    ...(deleteAfter ? { deleteAfter } : {}), ...(removable ? { removable: true } : {}) };
+}
+
+/** What this app says of a listed Cloud it doesn't open, on this computer's own screen (never by its address): it has ended
+ * (stopped too), its checkout wasn't finished, its payment has a problem, or it is being set up. Null for one that opens:
+ * ready, or offline (its own screen then says it doesn't answer). */
+export function cloudState(cloud) {
+  const status = cloud?.status;
+  return status === "ended" || status === "stopped" ? "ended" : status === "checkout" ? "checkout" : status === "payment_problem" ? "payment"
+    : status === "setting_up" ? "setup" : null;
 }
 
 /** An OpenMausBot release as the Admin names it ("0.1.130"), or null: anything else is no version at all. */
@@ -169,4 +185,30 @@ export function listedColors(clouds) {
 /** A Cloud of the person's own besides My Cloud, as a saved place (environments.cjs withOwnCloud): its id, name, colour and address. */
 export function ownCloudPlaces(clouds) {
   return otherOwnClouds(clouds).filter(cloud => cloud.origin).map(cloud => ({ id: cloud.id, role: cloud.role, name: cloud.name, color: swatchColor(cloud.color), origin: cloud.origin }));
+}
+
+/** The saved places once the session says where the account's own machine is: the place listed as home at another
+ * address was My Cloud before this one. It leaves the list when the session's list has it as ended, or not at all;
+ * otherwise (still one of the person's Clouds, or an Admin without the list) it stays, as a place of its own. */
+export function withoutOldCloudHome(saved, state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  if (!machine?.origin || machine.status === "provisioning") return saved;
+  const clouds = state.clouds;
+  let next = saved;
+  for (const entry of saved.environments) {
+    if (entry.home !== true || entry.origin === machine.origin) continue;
+    const listed = Array.isArray(clouds) ? clouds.find(cloud => cloud.origin === entry.origin) ?? null : null;
+    if (Array.isArray(clouds) && (!listed || cloudState(listed) === "ended")) { next = environments.withoutEnvironment(next, entry.id); continue; }
+    const { home: _home, ...rest } = entry;
+    next = { ...next, environments: next.environments.map(candidate => (candidate.id === entry.id ? rest : candidate)) };
+  }
+  return next;
+}
+
+/** The name and colour the Admin lists the account's own machine's Cloud under, for its saved place; null when the
+ * session lists none. */
+export function homeLook(state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  const listed = machine?.origin && Array.isArray(state.clouds) ? state.clouds.find(cloud => ownCloud(cloud) && cloud.origin === machine.origin) : null;
+  return listed?.name ? { name: listed.name, color: swatchColor(listed.color) } : null;
 }

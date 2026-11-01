@@ -3,6 +3,7 @@ import type { InboxRow, InboxTab, InboxView } from "../../../shared/inbox";
 import { liveCardKind } from "../../../shared/live-approval";
 import { t } from "@/lib/i18n";
 import { dismissResponse, type CardResponse } from "@/lib/card-answer";
+import { accessRequestWords, cardAnswerFor } from "../bot-access/access-card";
 
 export const INBOX_TABS: readonly InboxTab[] = ["needs-you", "info", "done"];
 /** The Needs you lines the inbox's card in the chat shows, the newest first. */
@@ -33,13 +34,16 @@ export const choicesOf = (row: InboxRow): string[] => {
   const card = row.card;
   if (askOf(row) !== "question" || !card) return [];
   if (card.questionRequest) return questionChoices(card.questionRequest.questions) ?? [];
-  return card.options;
+  return accessRequestWords(card)?.options ?? card.options;
 };
+
+/** What a line says: an ask for access in this person's language, anything else as it came. */
+export const textOf = (row: InboxRow): string => accessRequestWords(row.card)?.question ?? row.text;
 
 /** What a tap on one of a question's choices sends. */
 export function choiceResponse(row: InboxRow, label: string): CardResponse {
   const questions = row.card?.questionRequest?.questions;
-  return { behavior: "answer", message: questions ? formatQuestionAnswers(questions, [[label]]) : label };
+  return { behavior: "answer", message: questions ? formatQuestionAnswers(questions, [[label]]) : cardAnswerFor(row.card, label) };
 }
 
 /** What closing a question without an answer sends; an approval closes as a deny. */

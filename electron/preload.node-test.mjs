@@ -47,8 +47,14 @@ const subscriberCount = (channel) => listeners.get(channel)?.size ?? 0;
 test("exposes the full local-shell bridge on window.ogb", () => {
   assert.equal(exposed.name, "ogb");
   assert.equal(typeof exposed.api, "object");
-  // The settings channel is local-shell only, and this page is local (no --omb-local-origin in argv here).
   assert.equal(typeof exposed.api.onOpenAppSettings, "function");
+});
+
+test("desktopNotices keeps shown() for a Cloud page on an older release, and asks main nothing", async () => {
+  // 0.1.135's page calls desktopNotices.shown(...) as its Cloud Pro popup opens; without it the page threw and went blank.
+  const before = invocations.length;
+  assert.equal(await exposed.api.desktopNotices.shown("cloud-pro-update-2026-10"), false);
+  assert.deepEqual(invocations.slice(before), []);
 });
 
 test("openLogsFolder asks main for its own logs folder and names no path", async () => {

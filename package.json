@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.134",
+  "version": "0.1.138",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -46,6 +46,7 @@
     "bench:persistence": "node --experimental-strip-types scripts/bench-persistence.ts",
     "bench:today": "node --experimental-strip-types scripts/bench-today.ts",
     "bench:browser-stream": "node --experimental-strip-types scripts/bench-browser-stream.ts",
+    "bench:desktop": "node --experimental-strip-types scripts/bench-desktop.ts",
     "test:watch": "vitest",
     "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
@@ -59,6 +60,7 @@
     "build:cua": "node scripts/prepare-cua.mjs",
     "build:cua:win": "node scripts/prepare-cua-win.mjs",
     "smoke:cua-win": "node scripts/smoke-cua-win-embedded.mjs",
+    "smoke:cua-win-lend": "node scripts/smoke-cua-win-lend.mjs",
     "build:android-tools": "node scripts/prepare-android-tools.mjs",
     "build:cloudflared": "node scripts/prepare-cloudflared.mjs",
     "build:browser": "node scripts/prepare-browser.mjs",
@@ -159,7 +161,7 @@
     "electron-builder": "^26.15.3",
     "electron-updater": "^6.8.9",
     "esbuild": "^0.28.2",
-    "happy-dom": "^20.14.5",
+    "happy-dom": "^21.0.4",
     "oxlint": "1.80.0",
     "tailwindcss": "^4.1.11",
     "typebox": "1.3.7",

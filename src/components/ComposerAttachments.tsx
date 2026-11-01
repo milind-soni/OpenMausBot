@@ -5,6 +5,7 @@ import {
   attachmentImageUrl,
   intakeFiles,
   formatSize,
+  imageSlotsLeft,
   pasteSummary,
   type Attachment,
   type PasteAttachment,
@@ -45,8 +46,10 @@ export function ComposerAttachments({
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   // dragenter/dragleave fire once per element crossed, so the overlay tracks depth.
   const depth = useRef(0);
-  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, uploadImage });
-  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, uploadImage };
+  // A drop past the images the message can still take is left out with a notice.
+  const imageSlots = imageSlotsLeft(items);
+  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, imageSlots, uploadImage });
+  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, imageSlots, uploadImage };
   const pendingDrops = useRef(new Set<symbol>());
 
   useEffect(() => {
@@ -80,6 +83,7 @@ export function ComposerAttachments({
           allowImages: callbacks.current.allowImages,
           getPath: pathForFile,
           uploadImage: callbacks.current.uploadImage,
+          imageSlots: callbacks.current.imageSlots,
         });
         if (attachments.length) callbacks.current.onAdd(attachments);
         if (message) callbacks.current.onNotice(message);

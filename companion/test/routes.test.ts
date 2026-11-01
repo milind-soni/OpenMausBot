@@ -54,6 +54,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
     ["GET", "/api/bots/bot_123/overview"],
     ["GET", "/api/bots/bot_123/activity"],
+    ["GET", "/api/bots/bot_123/mcp-servers"],
     ["GET", "/api/team-memory"],
     ["POST", "/api/team-memory"],
     ["PATCH", "/api/team-memory/entry_1"],
@@ -164,6 +165,26 @@ describe("what it may not", () => {
       status: 403,
       error: "Remote access settings are managed on the host computer",
     });
+  });
+
+  it("reads a bot's MCP servers and nothing of MCP settings", () => {
+    expect(ask("GET", "/api/bots/bot_123/mcp-servers", false)?.status).toBe(401);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/mcp-servers"],
+      ["PATCH", "/api/bots/bot_123/mcp-servers"],
+      ["PUT", "/api/bots/bot_123/mcp-servers"],
+      ["DELETE", "/api/bots/bot_123/mcp-servers"],
+      ["GET", "/api/bots/bot_123/mcp-servers/warehouse"],
+      ["GET", "/api/bots/bot_123/../mcp-servers"],
+      ["GET", "/api/mcp/servers"],
+      ["POST", "/api/mcp/servers"],
+      ["POST", "/api/mcp/servers/import"],
+      ["PATCH", "/api/mcp/servers/warehouse"],
+      ["POST", "/api/mcp/servers/warehouse/test"],
+      ["POST", "/api/mcp/servers/warehouse/sign-in"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
   });
 
   it("keeps endpoint refresh authenticated and exact-method only", () => {
