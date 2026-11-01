@@ -553,6 +553,7 @@
   "twoPlaces.bring": "Bring them together",
   "twoPlaces.failed": "Your bots didn't start moving. Try again in a moment.",
   "rail.removeAsk": "Remove “{name}” from your list? You can buy a new Cloud any time.",
+  "rail.removeServerAsk": "Remove “{name}” from your list? This app signs out of it; nothing on that server changes.",
   "rail.removeYes": "Remove",
   "rail.removeNo": "Cancel",
   "rail.removeRefused": "It can't be removed right now: it is running again, or still has a plan.",

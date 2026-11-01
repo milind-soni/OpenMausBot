@@ -148,7 +148,7 @@ function RemoveRow({ place, onRemoved }: { place: RailPlace; onRemoved: () => vo
   return <div data-rail-remove className="flex flex-col gap-1.5 border-t border-hairline/50 px-0.5 pt-1.5">
     {asking
       ? <div role="alertdialog" aria-label={t("rail.remove")} className="flex flex-col gap-2 px-1.5 pb-1">
-        <p className="text-[12px] leading-snug text-ink">{t("rail.removeAsk", { name: place.name })}</p>
+        <p className="text-[12px] leading-snug text-ink">{t(place.forget ? "rail.removeServerAsk" : "rail.removeAsk", { name: place.name })}</p>
         <div className="flex gap-2">
           <button type="button" data-rail-remove-confirm className="ui-button ui-button-primary" disabled={busy} onClick={confirm}>{t("rail.removeYes")}</button>
           <button type="button" className="ui-button" disabled={busy} onClick={() => setAsking(false)}>{t("rail.removeNo")}</button>

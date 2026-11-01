@@ -41,7 +41,7 @@ function circle(entry, { activeId, mine, state, offers }) {
   const paint = railPaint(placeLook(entry, { clouds: connected?.clouds ?? null, homeOrigin: mine }), color);
   return { id: entry.id, name: entry.name, color, kind, opens: true, ...(paint ? { paint } : {}), ...(entry.id === activeId ? { active: true } : {}),
     ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}),
-    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}),
+    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}), ...(kind === "server" ? { removable: true, forget: true } : {}),
     ...(kind === "server" && offers(entry) ? { makeHome: true } : {}) };
 }
 
@@ -141,7 +141,7 @@ const CHOICES = Object.freeze(["cloud", "link", "address"]);
  * MausBot Cloud sign-in; `targets()` the pages told when something changed; `makeHome(id)` starts the move to a server
  * of the person's own (own-home-main.mjs `start`).
  */
-export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null }) {
+export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null, forget = null }) {
   let sheetOpen = false, sent = "";
   const allowed = (channel, handler) => guard((event, ...args) => {
     if (!trusted(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -164,10 +164,12 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     if (!place) throw new Error("That place isn't here any more.");
     return place.id.startsWith(PENDING) ? openCloud(place.cloudId) : open(place.id);
   });
-  // Remove from list, from a circle's menu (the page asked the person first): only a Cloud main listed as removable.
+  // Remove from list, from a circle's menu (the page asked the person first): only a Cloud or a server saved by hand that
+  // main listed as removable. A server is forgotten here; a Cloud is taken off the person's list at the Admin.
   listed("workspaces:remove", async (_event, id) => {
-    const place = places().find(entry => entry.id === plain(id) && entry.removable && entry.cloudId);
+    const place = places().find(entry => entry.id === plain(id) && entry.removable && (entry.cloudId || entry.forget));
     if (!place) throw new Error("That place isn't here any more.");
+    if (place.forget) return { outcome: forget ? ((await forget(place.id)) === false ? "failed" : "removed") : "unsupported" };
     const client = account();
     return { outcome: client?.hideCloud ? (await client.hideCloud(place.cloudId)).outcome : "unsupported" };
   });

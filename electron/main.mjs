@@ -104,7 +104,7 @@ import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createClou
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget } from "./lending-target.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
-import { installOneHome } from "./one-home-main.mjs"; import { installOwnHome } from "./own-home-main.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
+import { installOneHome } from "./one-home-main.mjs"; import { handSaved, installOwnHome } from "./own-home-main.mjs"; import { serverOpens } from "./saved-server.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
 import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
@@ -1704,8 +1704,8 @@ async function switchEnvironment(id) {
       if (!(await cloudHomeSignedIn(entry.origin))) { await openCloudSettings(); return; }
     }
   }
-  persistEnvironments(withActive(environmentsState, id));
-  navigateMainWindow(activeOrigin());
+  if (entry && handSaved(entry) && !(await serverOpens(entry, { fetch: (...args) => session.defaultSession.fetch(...args), dialog, forget: (gone) => forgetEnvironment(gone, false, true) }))) return;
+  persistEnvironments(withActive(environmentsState, id)); navigateMainWindow(activeOrigin());
 }
 
 function createLocalEnvironment(name, dataDir) {
@@ -1923,11 +1923,11 @@ function askRemoteMicrophone(origin) {
   return remoteMicrophoneAsks.get(origin);
 }
 
-async function forgetEnvironment(id, purge = false) {
+async function forgetEnvironment(id, purge = false, confirmed = false) {
   const env = environmentsState.environments.find((e) => e.id === id);
   if (!env) return;
   if (env.kind === "local" && environmentsState.activeId === id) return { ok: false, error: "active" };
-  if (env.kind !== "local") {
+  if (env.kind !== "local" && !confirmed) {
     const { response } = await dialog.showMessageBox({
       type: "warning",
       buttons: ["Forget", "Cancel"],
@@ -2694,7 +2694,7 @@ const rail = installCloudRail({ ipcMain, clipboard, openCloud: openOwnCloud, acc
   guard: handler => (event, ...args) => (chromeRail.owns(event) ? handler(event, ...args) : workspaceOnly(handler)(event, ...args)),
   lists: event => chromeRail.owns(event), trusted: event => chromeRail.owns(event) || senderIsLocal(event), beside: () => chromeRail.shown(),
   targets: () => [mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null, { send: channel => chromeRail.send(channel), isDestroyed: () => false }],
-  places: railList, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id),
+  places: railList, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id), forget: id => forgetEnvironment(id, false, true),
   add: { choices: () => ({ cloud: cloudOffersAllowed(), link: !desktopRemoteAccess, address: !desktopRemoteAccess && !homeWindow.cloudOrigin() }),
     run: (choice, link) => (choice === "link" ? (link ? connectHostedWorkspace(link) : addServerFromClipboard()) : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
 const announceAddedCloud = createAddedCloudNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()), sheetOpen: rail.sheetOpen,
