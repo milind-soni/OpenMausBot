@@ -130,9 +130,10 @@ export function botServerTarget(server: StoredMcpServer): string {
   return [redactSecretsInText(server.command), ...redactedArgs(server.args)].join(" ");
 }
 
-/** What an update changes, as `field: old → new` lines, and the secrets it sends anew by key. `next` is the merged server;
- * env and header values show only where `sent` (the bot's own fields) gives them as literals, so no saved secret shows. */
-export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer, sent: Record<string, unknown>): { lines: string[]; keys: string[] } {
+/** What an update changes, as `field: old → new` lines, the secrets it sends anew by key, and whether it sets a new OAuth
+ * client secret. `next` is the merged server; env and header values show only where `sent` (the bot's own fields) gives
+ * them as literals, and never an old value, so no saved secret shows. */
+export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer, sent: Record<string, unknown>): { lines: string[]; keys: string[]; clientSecret: boolean } {
   const lines: string[] = [];
   const change = (field: string, before: string, after: string, shown: readonly [string, string] = [before, after]) => {
     if (before !== after) lines.push(`${field}: ${shown[0] || "–"} → ${shown[1] || "–"}`);
@@ -155,8 +156,8 @@ export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer,
       else if (typeof value === "string") lines.push(`${label}.${key} → ${redactSecretsInText(value)}`);
     }
   }
-  if (isSecretRef(record(sent.oauth).clientSecret)) keys.push("oauth.clientSecret");
-  return { lines, keys };
+  const secret = (server: StoredMcpServer) => (isRemoteMcpServer(server) ? server.oauth?.clientSecret : undefined);
+  return { lines, keys, clientSecret: secret(next) !== undefined && secret(next) !== secret(existing) };
 }
 
 export function botListing(

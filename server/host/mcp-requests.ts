@@ -1,15 +1,21 @@
 import type { McpChangeRequest, OptionCardData } from "../../shared/wire.ts";
-import { redactSecretsInText } from "../../shared/redact.ts";
+import { redactSecretsInText, scrubHeldSecrets } from "../../shared/redact.ts";
 import { newId } from "../contracts.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
 
 export type McpCardAction = McpChangeRequest["action"];
 export type McpChangeResult = NonNullable<McpChangeRequest["result"]>;
+/** The change a card stands for: what the server reached (url, or command and args) when it was asked, and the bot's
+ * fields for an update. Security: held in memory only, never on the card, since the fields can carry secrets. */
+export type McpHeldChange = { target: string; body?: Record<string, unknown> };
+/** `note`: the card's reason when it did not apply. `busy`: another change holds the config, so the card stays open. */
+export type McpApplied = (McpChangeResult & { note?: string }) | { state: "busy" };
 type RequestFrom = { botId: string; name: string; color: string };
 type Decision = "card-shown" | "user-approved" | "user-denied";
 
 const MCP_CARD_PROPOSED = "A card is now visible to the person. End this turn and wait for the decision.";
 export const MCP_KEY_EXPIRED = "The key expired. Ask for it again with request_credential.";
+const RESTARTED = "OpenMausBot restarted, so this request expired. Ask again if you still need it.";
 
 /** The negative option is "Cancel": phones send deny only for Deny, Cancel, Dismiss or Skip. */
 const CARDS: Record<McpCardAction, { title: ServerLineKey; option: string; denied: (name: string) => string }> = {
@@ -40,7 +46,7 @@ export interface McpRequestOptions {
   };
   /** Allow on a Team Cloud also needs a workspace admin. */
   teamCloud: boolean;
-  apply(request: McpChangeRequest): Promise<McpChangeResult>;
+  apply(request: McpChangeRequest, change: McpHeldChange): Promise<McpApplied>;
   /** Hands the decision to the turn parked on this card; false when none took it. */
   answer(threadId: string, messageId: string, text: string): boolean;
   decide(row: { threadId: string; requestId: string; botId: string; summary: string; decision: Decision }): void;
@@ -48,29 +54,34 @@ export interface McpRequestOptions {
 }
 
 type Respond = { status: number; body: Record<string, unknown> };
+type Settled = McpChangeResult & { note?: string };
 
 export class McpRequestService {
   private readonly resolving = new Set<string>();
+  private readonly held = new Map<string, McpHeldChange>();
   private readonly options: McpRequestOptions;
   constructor(options: McpRequestOptions) { this.options = options; }
 
   /** An older open card about the same server is superseded, so only the newest proposal can be answered. */
-  propose(request: Omit<McpChangeRequest, "requestId" | "result" | "resumed">, subtitle: string, from?: RequestFrom): { requestId: string; messageId: string; text: string } {
+  propose(request: Omit<McpChangeRequest, "requestId" | "result" | "resumed">, subtitle: string, change: McpHeldChange, from?: RequestFrom): { requestId: string; messageId: string; text: string } {
     const { store } = this.options;
     for (const line of store.messagesFor(request.threadId)) {
       const card = line.card, open = card?.mcpRequest;
       if (card && open && open.botId === request.botId && open.name === request.name && !card.answered && !card.dismissed && !card.expired) {
+        this.held.delete(open.requestId);
         store.patchMessage(request.threadId, line.id, { card: { ...card, expired: true, options: [] } });
       }
     }
     const requestId = newId();
     const kind = CARDS[request.action];
+    const shown = scrubHeldSecrets(redactSecretsInText(subtitle));
     const card: OptionCardData = {
-      title: serverLine(this.options.language?.(request.threadId), kind.title, { name: request.name }), subtitle,
+      title: serverLine(this.language(request.threadId), kind.title, { name: request.name }), subtitle: shown,
       options: [kind.option, "Cancel"], requestId, tool: "mcp_server", fixedOptions: true, mcpRequest: { ...request, requestId },
     };
+    this.held.set(requestId, change);
     const message = store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card });
-    this.options.decide({ threadId: request.threadId, requestId, botId: request.botId, summary: `${card.title}\n${subtitle}`, decision: "card-shown" });
+    this.options.decide({ threadId: request.threadId, requestId, botId: request.botId, summary: `${card.title}\n${shown}`, decision: "card-shown" });
     return { requestId, messageId: message.id, text: MCP_CARD_PROPOSED };
   }
 
@@ -90,16 +101,30 @@ export class McpRequestService {
     if (!duplicate) {
       if (this.resolving.has(request.requestId)) return { status: 409, body: { error: "This change is already being applied." } };
       this.resolving.add(request.requestId);
+      let result: Settled | "busy";
       try {
-        settled = await this.settle(args.threadId, message.id, request, args.behavior);
+        result = await this.resultOf(args.threadId, request, args.behavior);
       } finally {
         this.resolving.delete(request.requestId);
       }
+      if (result === "busy") return { status: 409, body: { error: "MCP servers are already being updated. Try again in a moment." } };
+      settled = this.record(args.threadId, message.id, request, result, args.behavior);
       this.options.decide({ threadId: args.threadId, requestId: request.requestId, botId: request.botId, summary: `${card.title}\n${card.subtitle}`,
         decision: args.behavior === "allow" ? "user-approved" : "user-denied" });
     }
     if (settled.result && !settled.resumed) this.resume(args.threadId, message.id, (text) => this.options.answer(args.threadId, message.id, text));
     return { status: 200, body: { ok: true, outcome: settled.result?.state === "applied" ? "allowed-once" : "rejected", result: settled.result, alreadySettled: duplicate } };
+  }
+
+  /** Whether the card has a decision for the turn parked on it. An open card whose held change a restart lost expires
+   * now, so the turn hears why instead of waiting on a card nothing can apply. */
+  decided(threadId: string, messageId: string): boolean {
+    const card = this.options.store.messagesFor(threadId).find((line) => line.id === messageId)?.card, request = card?.mcpRequest;
+    if (!card || !request) return false;
+    if (request.result) return true;
+    if (card.answered || card.dismissed || card.expired || this.held.has(request.requestId)) return false;
+    this.record(threadId, messageId, request, this.restarted(threadId), "allow");
+    return true;
   }
 
   /** Hands the card's decision to a parked turn; true once that turn took it. A restart calls it again for a card
@@ -112,15 +137,37 @@ export class McpRequestService {
     return true;
   }
 
-  private async settle(threadId: string, messageId: string, request: McpChangeRequest, behavior: "allow" | "deny"): Promise<McpChangeRequest> {
-    const result = behavior === "deny" ? { state: "denied" as const, text: CARDS[request.action].denied(request.name) } : await this.options.apply(request);
+  private async resultOf(threadId: string, request: McpChangeRequest, behavior: "allow" | "deny"): Promise<Settled | "busy"> {
+    if (behavior === "deny") return { state: "denied", text: CARDS[request.action].denied(request.name) };
+    const change = this.held.get(request.requestId);
+    if (!change) return this.restarted(threadId);
+    let applied: McpApplied;
+    try {
+      applied = await this.options.apply(request, change);
+    } catch (error) {
+      applied = { state: "failed", text: error instanceof Error ? error.message : String(error), note: serverLine(this.language(threadId), "server.mcp.card.failed") };
+    }
+    return applied.state === "busy" ? "busy" : applied;
+  }
+
+  private record(threadId: string, messageId: string, request: McpChangeRequest, result: Settled, behavior: "allow" | "deny"): McpChangeRequest {
+    this.held.delete(request.requestId);
     const settled: McpChangeRequest = { ...request, result: { state: result.state, text: redactSecretsInText(result.text) } };
     const current = this.options.store.messagesFor(threadId).find((line) => line.id === messageId)?.card;
     if (current) {
-      const closed = result.state === "applied" || result.state === "denied" ? { answered: behavior } : { expired: true, options: [] };
+      const closed = result.state === "applied" || result.state === "denied" ? { answered: behavior }
+        : { expired: true, options: [], held: redactSecretsInText(result.note ?? result.text) };
       this.options.store.patchMessage(threadId, messageId, { card: { ...current, ...closed, mcpRequest: settled } });
     }
     return settled;
+  }
+
+  private restarted(threadId: string): Settled {
+    return { state: "expired", text: RESTARTED, note: serverLine(this.language(threadId), "server.mcp.card.restarted") };
+  }
+
+  private language(threadId: string): string | undefined {
+    return this.options.language?.(threadId);
   }
 
   private find(threadId: string, requestId: string): CardLine | undefined {

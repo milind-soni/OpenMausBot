@@ -4,7 +4,7 @@ import type { McpChangeRequest, WireMessage as Message } from "../../shared/wire
 import type { AppConfig } from "../config.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
-import { MCP_KEY_EXPIRED, type McpCardAction, type McpChangeResult } from "../host/mcp-requests.ts";
+import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpHeldChange } from "../host/mcp-requests.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
@@ -66,14 +66,14 @@ export interface InternalMcpDeps {
   /** The other bots that use this server now, by name. */
   usedBy(name: string): string[];
   /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
-  requestApproval(proposal: { action: McpCardAction; name: string; body?: Record<string, unknown>; subtitle: string }): { text: string };
+  requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; change: McpHeldChange }): { text: string };
 }
 
 type Deps = Omit<InternalMcpDeps, "readBody">;
 /** `approved`: applying what the person allowed on a card, so the turn it resumes already has the change. */
 type Ctx = Deps & { approved?: true };
 
-type Outcome = { status: number; text: string; dropped?: string[] } | { status: number; error: string };
+type Outcome = { status: number; text: string; dropped?: string[] } | { status: number; error: string; busy?: true };
 /** Which call a line is about, to find that call's own row. */
 export type McpCall = { action: McpAction; name?: string };
 
@@ -199,7 +199,7 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
 
   if (!deps.fullAccess()) {
     say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
-    const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server) });
+    const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server), change: { target: targetOf(server) } });
     return { status: 201, text: `Saved MCP server ${name} switched off.${where} ${card.text}` };
   }
   const on = deps.config.setEnabled(name, true);
@@ -299,13 +299,24 @@ function remove(deps: Ctx, name: string, server: StoredMcpServer): Outcome {
 
 /** Runs a change the person allowed on its card as Full access would, against the server as it is now, so a proposal
  * made before a newer change never overwrites it. */
-export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest, "action" | "name" | "body">): Promise<McpChangeResult> {
-  if (!Object.hasOwn(deps.cfg().mcpServers ?? {}, request.name)) return { state: "failed", text: `${request.name} no longer exists.` };
-  if (request.body && !deps.redeem(trimmedRefs(request.body)).ok) return { state: "expired", text: MCP_KEY_EXPIRED };
+export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest, "action" | "name">, change: McpHeldChange): Promise<McpApplied> {
+  const { name } = request;
+  const language = deps.language();
+  const servers = deps.cfg().mcpServers ?? {};
+  if (!Object.hasOwn(servers, name)) return { state: "failed", text: `${name} no longer exists.`, note: serverLine(language, "server.mcp.card.gone", { name }) };
+  const parsed = parseStoredMcpServer(name, servers[name]);
+  if (parsed.ok && targetOf(parsed.server) !== change.target) {
+    return { state: "failed", text: `${name} changed since you were asked, so nothing was applied.`, note: serverLine(language, "server.mcp.card.changedSince", { name }) };
+  }
+  if (change.body && !deps.redeem(trimmedRefs(change.body)).ok) return { state: "expired", text: MCP_KEY_EXPIRED, note: serverLine(language, "server.mcp.card.keyExpired") };
   const approved: Ctx = { ...deps, approved: true, fullAccess: () => true, teamAdmin: () => true, decide: () => {}, activity: () => {} };
-  const outcome = await act(approved, { ...request.body, action: request.action, name: request.name }, new AbortController().signal);
-  return "error" in outcome ? { state: "failed", text: outcome.error } : { state: "applied", text: outcome.text };
+  const outcome = await act(approved, { ...change.body, action: request.action, name }, new AbortController().signal);
+  if ("error" in outcome) return outcome.busy ? { state: "busy" } : { state: "failed", text: outcome.error };
+  return { state: "applied", text: outcome.text };
 }
+
+/** What a card's answer must still find: a different address or command is a different server. */
+const targetOf = (server: StoredMcpServer) => JSON.stringify(isRemoteMcpServer(server) ? [server.url] : [server.command, ...server.args]);
 
 function propose(deps: Deps, action: McpCardAction, name: string, server: StoredMcpServer, fields: Record<string, unknown>): Outcome {
   if (action === "update") {
@@ -313,23 +324,24 @@ function propose(deps: Deps, action: McpCardAction, name: string, server: Stored
     if ("error" in planned) return planned;
     const refusal = deps.policyRefusal(name, planned.server);
     if (refusal) return { status: 403, error: refusal };
-    const { lines, keys } = botChangeLines(server, planned.server, fields);
-    if (!lines.length && !keys.length && !planned.dropped.length) return { status: 200, text: `${name} already has these settings, so nothing changed.` };
+    const { lines, keys, clientSecret } = botChangeLines(server, planned.server, fields);
+    if (!lines.length && !keys.length && !clientSecret && !planned.dropped.length) return { status: 200, text: `${name} already has these settings, so nothing changed.` };
     const language = deps.language();
     const subtitle = [...lines, ...keys.map((key) => serverLine(language, "server.mcp.card.newKey", { key })),
+      ...(clientSecret ? [serverLine(language, "server.mcp.card.newClientSecret")] : []),
       ...(planned.dropped.length ? [serverLine(language, "server.mcp.card.cleared", { items: planned.dropped.join(", ") })] : [])].join("\n");
-    return ask(deps, { action, name, body: fields, subtitle });
+    return ask(deps, { action, name, subtitle, change: { target: targetOf(server), body: fields } });
   }
   const refusal = deps.policyRefusal(name, server);
   if (refusal) return { status: 403, error: refusal };
   if (action === "remove") {
     const others = deps.usedBy(name);
     const language = deps.language();
-    return ask(deps, { action, name, subtitle: others.length
+    return ask(deps, { action, name, change: { target: targetOf(server) }, subtitle: others.length
       ? serverLine(language, "server.mcp.card.usedBy", { names: others.join(", ") }) : serverLine(language, "server.mcp.card.usedByNone") });
   }
   if (server.enabled && (!deps.sender.mcpServers || deps.sender.mcpServers.includes(name))) return { status: 200, text: `${name} is already on.` };
-  return ask(deps, { action, name, subtitle: turnOnText(deps, server) });
+  return ask(deps, { action, name, subtitle: turnOnText(deps, server), change: { target: targetOf(server) } });
 }
 
 function ask(deps: Deps, proposal: Parameters<Deps["requestApproval"]>[0]): Outcome {
@@ -346,7 +358,7 @@ const when = (deps: Ctx) => (deps.approved ? WHEN.approved : WHEN.live);
 
 async function test(deps: Deps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<Outcome> {
   if (!server.enabled && !deps.fullAccess()) {
-    return { status: 403, error: `${name} is off, and testing it would start it. Ask the person to turn it on first.` };
+    return { status: 403, error: `${name} is off, and testing it would start it. Call mcp_server with action enable to ask the person to turn it on.` };
   }
   const outcome = await probe(deps, name, server, signal);
   say(deps, { action: "test", name }, ["server.mcp.tested", { name }], outcome.line);
@@ -383,8 +395,8 @@ async function probe(deps: Deps, name: string, server: StoredMcpServer, signal: 
   return { text: `Test: failed. ${probed.error}`, line: ["server.mcp.testFailed"] };
 }
 
-function refused(result: McpConfigRefusal): { status: number; error: string } {
-  return { status: result.status, error: result.error === MCP_CONFIG_BUSY ? `${result.error} Try again in a moment.` : result.error };
+function refused(result: McpConfigRefusal): { status: number; error: string; busy?: true } {
+  return result.error === MCP_CONFIG_BUSY ? { status: result.status, error: `${result.error} Try again in a moment.`, busy: true } : { status: result.status, error: result.error };
 }
 
 /** Same command, arguments and environment: nothing a bot's folder rules judge has changed. */

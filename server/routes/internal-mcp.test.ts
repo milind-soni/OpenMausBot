@@ -74,7 +74,7 @@ function fixture(options: Options = {}) {
       patchMessage: (_threadId, id, patch) => { const row = chat.find((item) => item.id === id); if (row) row.card = patch.card; },
     },
     teamCloud: false,
-    apply: (request) => applyMcpChange(deps, request),
+    apply: (request, change) => applyMcpChange(deps, request, change),
     answer: (_threadId, _messageId, text) => { answers.push(text); return true; },
     decide: (row) => { decisions.push(row.decision); },
   });
@@ -102,7 +102,7 @@ function fixture(options: Options = {}) {
     activity: (label) => { lines.push(label); },
     language: () => undefined,
     usedBy: (name) => options.usedBy?.[name] ?? [],
-    requestApproval: ({ subtitle, ...change }) => cards.propose({ ...change, botId: BOT, threadId: THREAD }, subtitle),
+    requestApproval: ({ action, name, subtitle, change }) => cards.propose({ action, name, botId: BOT, threadId: THREAD }, subtitle, change),
   };
   const route = createInternalMcpRoutes(deps);
   const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
@@ -562,14 +562,12 @@ describe("internal mcp_server route, below Full access", () => {
     const fresh = ref("fresh-token");
     expect((await post({ action: "update", name: "notes", env: { NOTES_TOKEN: fresh } })).status).toBe(202);
     expect(card()?.subtitle).toBe("new key for NOTES_TOKEN");
-    expect(card()?.mcpRequest?.body).toEqual({ env: { NOTES_TOKEN: fresh } });
-    expect(JSON.stringify(card())).not.toContain("fresh-token");
 
     later(61 * 60_000);
     expect(await respond("allow")).toMatchObject({ status: 200 });
     expect(stored("notes")).toHaveProperty("env", { NOTES_TOKEN: "saved-token" });
     expect(probe).not.toHaveBeenCalled();
-    expect(card()).toMatchObject({ expired: true, options: [], mcpRequest: { result: { state: "expired" } } });
+    expect(card()).toMatchObject({ expired: true, options: [], held: "The key expired before this was answered.", mcpRequest: { result: { state: "expired" } } });
     expect(answers).toHaveLength(1);
     expect(answers[0]).toContain("The key expired. Ask for it again with request_credential.");
   });
@@ -592,8 +590,55 @@ describe("internal mcp_server route, below Full access", () => {
     expect("error" in config.remove("linear")).toBe(false);
     await respond("allow");
     expect(cfg.mcpServers).toEqual({});
-    expect(card()).toMatchObject({ expired: true, mcpRequest: { result: { state: "failed" } } });
+    expect(card()).toMatchObject({ expired: true, held: "linear no longer exists.", mcpRequest: { result: { state: "failed" } } });
     expect(answers[0]).toContain("linear no longer exists");
+  });
+
+  it("allow after the server's address or command changed applies nothing and resumes with \"notes changed since you were asked, so nothing was applied.\"", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, respond, stored, config, card, answers } = fixture({ full: false, servers: { notes: { ...notes, enabled: false } } });
+    await post({ action: "enable", name: "notes" });
+    expect("error" in config.replace("notes", { ...notes, args: ["-y", "other-mcp"], enabled: false } as StoredMcpServer)).toBe(false);
+    await respond("allow");
+    expect(stored("notes")).toMatchObject({ args: ["-y", "other-mcp"], enabled: false });
+    expect(probe).not.toHaveBeenCalled();
+    expect(card()).toMatchObject({ expired: true, held: "notes changed after this was asked, so nothing was applied.", mcpRequest: { result: { state: "failed" } } });
+    expect(answers[0]).toContain("notes changed since you were asked, so nothing was applied.");
+  });
+
+  it("a busy config during allow answers 409 and leaves the card open, and a later allow applies it", async () => {
+    probeWith({ ok: true, tools: [] });
+    const { post, respond, stored, card, answers, setBusy } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
+    await post({ action: "enable", name: "linear" });
+    setBusy(true);
+    expect(await respond("allow")).toEqual({ status: 409, body: { error: "MCP servers are already being updated. Try again in a moment." } });
+    expect(stored("linear")?.enabled).toBe(false);
+    expect(card()).not.toHaveProperty("answered");
+    expect(card()).not.toHaveProperty("expired");
+    expect(answers).toEqual([]);
+    setBusy(false);
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { result: { state: "applied" } } });
+    expect(stored("linear")?.enabled).toBe(true);
+  });
+
+  it("no field value the bot sent, literal or secretRef, reaches the stored card message", async () => {
+    const { post, chat, ref } = fixture({ full: false, servers: { notes } });
+    const fresh = ref("fresh-token");
+    expect((await post({ action: "update", name: "notes", args: ["-y", "notes-mcp", "--token", "sk-live-9"], env: { NOTES_TOKEN: fresh } })).status).toBe(202);
+    const stored = JSON.stringify(chat);
+    for (const sent of [fresh, "sk-live-9", "fresh-token", "saved-token"]) expect(stored, sent).not.toContain(sent);
+    expect(Object.keys(chat[0]!.card.mcpRequest!).sort()).toEqual(["action", "botId", "name", "requestId", "threadId"]);
+  });
+
+  it("a new literal OAuth client secret shows as its own change line without its value", async () => {
+    probeWith({ ok: true, tools: [] });
+    const signedApp = { ...linear, enabled: false, oauth: { clientId: "omb-app", clientSecret: "old-client-secret" } };
+    const { post, respond, stored, card } = fixture({ full: false, servers: { linear: signedApp } });
+    expect((await post({ action: "update", name: "linear", oauth: { clientSecret: "new-client-secret" } })).status).toBe(202);
+    expect(card()?.subtitle).toBe("new OAuth client secret");
+    expect(JSON.stringify(card())).not.toMatch(/new-client-secret|old-client-secret/);
+    await respond("allow");
+    expect(stored("linear")).toMatchObject({ oauth: { clientId: "omb-app", clientSecret: "new-client-secret" } });
   });
 
   it("a Change card lists each field as old → new with no secret value, and allow merges onto the server as it is then", async () => {
@@ -606,9 +651,9 @@ describe("internal mcp_server route, below Full access", () => {
     expect(card()?.subtitle).toBe("args: -y notes-mcp → -y notes-mcp --token ***\nenv.LOG_LEVEL → debug\nnew key for NOTES_TOKEN");
     expect(JSON.stringify(card()), "no saved or redeemed secret value is stored").not.toMatch(/fresh-token|saved-token/);
 
-    expect("error" in config.replace("notes", { ...notes, command: "bunx" } as StoredMcpServer)).toBe(false);
+    expect("error" in config.replace("notes", { ...notes, resultBudget: 4000 } as StoredMcpServer)).toBe(false);
     await respond("allow");
-    expect(stored("notes")).toMatchObject({ command: "bunx", args: ["-y", "notes-mcp", "--token", "sk-live-9"], enabled: true });
+    expect(stored("notes")).toMatchObject({ resultBudget: 4000, args: ["-y", "notes-mcp", "--token", "sk-live-9"], enabled: true });
     expect(stored("notes")).toHaveProperty("env", { NOTES_TOKEN: "fresh-token", LOG_LEVEL: "debug" });
     expect(probe).toHaveBeenCalledOnce();
     expect(answers[0]).toContain("Changed MCP server notes.");

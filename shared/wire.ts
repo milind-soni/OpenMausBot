@@ -715,15 +715,14 @@ export interface OptionCardData extends WaitCardField, ComputerAskField {
   yourComputer?: { app?: string; site?: string };
 }
 
-/** Security: `body` holds the bot's fields with secretRefs unredeemed. A ref is not the secret: it works once, for an hour,
- * for this bot and conversation, and is redeemed only when the person allows, so no secret value is ever stored here. */
+/** Security: display data only. The change itself (the bot's fields, its secretRefs) stays in the server's memory until
+ * the person answers and never reaches the wire or messages.json, so after a restart the card can only expire. */
 export interface McpChangeRequest {
   requestId: string;
   botId: string;
   threadId: string;
   action: "enable" | "update" | "remove";
   name: string;
-  body?: Record<string, unknown>;
   result?: { state: "applied" | "denied" | "expired" | "failed"; text: string };
   /** The bot's parked turn took the result. */
   resumed?: boolean;
