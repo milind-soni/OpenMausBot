@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { desktopText } from "./i18n.mjs";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -11,7 +12,7 @@ const ORIGIN = "http://127.0.0.1:48993";
 function preload({ company = true } = {}) {
   const invoked = [];
   let bridge;
-  const context = vm.createContext({
+  const context = vm.createContext({ desktopText,
     process: { platform: "fixture", argv: [`--omb-local-origin=${ORIGIN}`, ...(company ? ["--omb-company-desktop=1"] : [])] },
     location: { origin: ORIGIN }, TextEncoder, localStorage: { getItem: () => null },
     require: name => {
@@ -46,7 +47,7 @@ function main() {
   const frame = { url: `${ORIGIN}/` }, contents = { mainFrame: frame };
   const client = { reopen: (...args) => { calls.push(args); return { status: "connecting" }; } };
   localOrigin.setLocalOrigin(ORIGIN);
-  const context = vm.createContext({
+  const context = vm.createContext({ desktopText,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow: { webContents: contents }, rendererOrigin: () => ORIGIN, environmentsState: { environments: [], activeId: "local" },

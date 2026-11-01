@@ -1,6 +1,8 @@
 import type { BotRoutineTemplate, NewBotDefaults } from "../../shared/new-bot-defaults";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { MausColor } from "../../shared/wire";
+import { t } from "./i18n";
+import type { LocaleKey } from "@/locales";
 
 export type ReadyBotCategory = "everyday" | "work" | "writing" | "design" | "sales" | "personal";
 
@@ -351,4 +353,14 @@ export function matchesReadyBot(bot: ReadyBot, query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   return [bot.name, bot.title, bot.description, bot.category].some((field) => field.toLowerCase().includes(needle));
+}
+
+export function readyBotDisplay(bot: ReadyBot): Pick<ReadyBot, "name" | "title" | "description"> & { prompt: string } {
+  const prefix = `ui.final.readyBot.${bot.id}`;
+  return {
+    name: t(`${prefix}.name` as LocaleKey),
+    title: t(`${prefix}.title` as LocaleKey),
+    description: t(`${prefix}.description` as LocaleKey),
+    prompt: t(`${prefix}.prompt` as LocaleKey),
+  };
 }

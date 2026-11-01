@@ -54,6 +54,20 @@ describe("AskChoices", () => {
     expect(html).toMatch(/class="block break-words[^"]*">Yes, the welcome text too/);
   });
 
+  it("keeps a choice's wire value while showing a localized label", () => {
+    const onPick = vi.fn();
+    const tree = AskChoices({
+      choices: [{ label: "暂不", value: "Not now" }],
+      label: "Choose", onPick, picked: ["Not now"], sending: "Not now",
+    });
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain("暂不");
+    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain('aria-busy="true"');
+    tree.props.children[0].props.onClick();
+    expect(onPick).toHaveBeenCalledWith("Not now");
+  });
+
   it("has no letter keys: a choice is pressed, never typed", () => {
     const html = render();
     expect(html).not.toContain("aria-keyshortcuts");

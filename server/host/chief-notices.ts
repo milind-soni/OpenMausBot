@@ -1,3 +1,4 @@
+import { conversationLanguage } from "../server-lines.ts";
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
 import { memoryStopped } from "../engine-memory.ts";
@@ -252,7 +253,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       const chief = chiefForBot(store.bots, bot);
       return deliver({
         chief: chief && escalationDeliverable(chief, bot) ? chief : null, title: ESCALATIONS_THREAD_TITLE, bot, threadId,
-        chip: escalationChip(escalation), text: escalationText(escalation, count), alreadyNotified: input.alreadyNotified,
+        chip: escalationChip(escalation, conversationLanguage(threadId)), text: escalationText(escalation, count), alreadyNotified: input.alreadyNotified,
       });
     } catch (error) {
       console.warn(`escalation for thread ${input.threadId} not delivered: ${error instanceof Error ? error.message : String(error)}`);

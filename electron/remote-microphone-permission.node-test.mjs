@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
+import vm from "node:vm";
+import { desktopText } from "./i18n.mjs";
 import { appPermissionHandlers } from "./app-permissions.mjs";
 
 const require = createRequire(import.meta.url);
@@ -150,10 +152,20 @@ test("the answer is saved with the server and survives a restart, only as true",
   assert.equal(environments.withMicrophone(allowed, "missing"), allowed, "unknown id changes nothing");
 });
 
-test("main asks through its dialog, remembers on the record and clears a refusal on forget", () => {
+test("main asks through its dialog, remembers on the record and clears a refusal on forget", async () => {
   assert.match(mainSource, /activeRemoteMicrophone: \(\) => activeEnvironment\(environmentsState\)\?\.microphone === true,/);
   assert.match(mainSource, /\n    askRemoteMicrophone,\n/);
   assert.match(mainSource, /persistEnvironments\(withMicrophone\(environmentsState, env\.id\)\)/);
   assert.match(mainSource, /sharingController\(\)\.forget\(env\);\n  remoteMicrophoneRefused\.delete\(env\.origin\);/);
-  assert.match(mainSource, /defaultId: 1,\n        cancelId: 1,\n        message: `Allow “\$\{env\.name\}” to use the microphone\?`/, "Don't Allow is the default");
+  const shown = [], refused = new Set();
+  const context = { URL, desktopText, activeEnvironment: environments.activeEnvironment,
+    environmentsState: viewing("vps"), remoteMicrophoneAsks: new Map(), remoteMicrophoneRefused: refused, mainWindow: null,
+    dialog: { showMessageBox: async options => { shown.push(options); return { response: 1 }; } } };
+  vm.runInNewContext(mainSource.slice(mainSource.indexOf("function askRemoteMicrophone("), mainSource.indexOf("async function forgetEnvironment(")), context);
+  await context.askRemoteMicrophone(VPS);
+  assert.deepEqual(JSON.parse(JSON.stringify(shown[0].buttons)), ["Allow", "Don’t Allow"]);
+  assert.equal(shown[0].defaultId, 1);
+  assert.equal(shown[0].cancelId, 1);
+  assert.equal(refused.has(VPS), true);
+  assert.equal(environments.activeEnvironment(context.environmentsState).microphone, undefined);
 });

@@ -6,7 +6,7 @@ import { formatCallDuration } from "../../shared/live-call";
 import { stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { callConversation, type CallConversationEntry, type CallRecordLine } from "@/lib/call-record";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { activityStepLabel } from "@/lib/live-activity";
 import type { Message } from "@/state/store";
 import { approvalCardOutcome, toolLabel } from "./ApprovalCard";
@@ -174,7 +174,7 @@ function SheetBlock({ block, busy, threadId }: { block: Block; busy: boolean; th
   return (
     <div className="flex justify-start">
       <div className="w-fit min-w-0 max-w-[85%] rounded-2xl bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
-        <ChatMarkdown text={text} message={threadId ? { threadId, messageId: block.message.id } : undefined} />
+        <ChatMarkdown locale={activeLocale()} text={text} message={threadId ? { threadId, messageId: block.message.id } : undefined} />
       </div>
     </div>
   );

@@ -2168,10 +2168,10 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
     const waitedMs = waitedSince === undefined ? 0 : Date.now() - waitedSince;
     if (outcome === "acquired") turnResources.noteWait(resource, waitedMs);
     const text = outcome === "acquired"
-      ? computerFreeAfterText(holder, waitedMs)
+      ? computerFreeAfterText(holder, waitedMs, threadLanguage(owner.threadId))
       : outcome === "parked"
-        ? computerParkedText(holder, COMPUTER_WAIT_MAX_MS)
-        : computerStoppedWaitingText(holder, waitedMs);
+        ? computerParkedText(holder, COMPUTER_WAIT_MAX_MS, threadLanguage(owner.threadId))
+        : computerStoppedWaitingText(holder, waitedMs, threadLanguage(owner.threadId));
     store.appendMessage(owner.threadId, {
       role: "bot", kind: "activity",
       tool: { name: text, ok: true },
@@ -2205,7 +2205,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
           : undefined;
         waitingMessage = store.appendMessage(owner.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: computerWaitingText(holder, { position, estimateMs }) },
+          tool: { name: computerWaitingText(holder, { position, estimateMs }, threadLanguage(owner.threadId)) },
           ...(holderThreadRef ? { threadRef: holderThreadRef } : {}),
         });
         waitedSince = Date.now();
@@ -2599,7 +2599,7 @@ async function moveOffComputerEngine(): Promise<void> {
   });
   writeComputerEngineMoveLines(moves, (move) => {
     const bot = store.bot(move.botId);
-    if (bot) store.appendMessage(move.threadId, { role: "bot", kind: "activity", tool: { name: computerEngineMoveText(move, bot.name, engine), ok: true } });
+    if (bot) store.appendMessage(move.threadId, { role: "bot", kind: "activity", tool: { name: computerEngineMoveText(move, bot.name, engine, threadLanguage(move.threadId)), ok: true } });
   });
 }
 let computerEngineMoveRunning: Promise<void> | null = null;
@@ -2757,7 +2757,7 @@ function healThreadModel(botId: string, threadId: string): void {
   if (!bot || !own || bot.approvalGrant || threadBusy(botId, threadId)) return;
   if (!store.followBotModel(botId, [threadId], (from, to) => hostedModels?.resetTask(from, to) ?? {}).length) return;
   store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
-    name: `notice: This thread's model (${modelName(own)}) isn't available, so it now uses ${bot.name}'s model (${modelName(bot.modelSelection)}).`,
+    name: `notice: ${serverLine(threadLanguage(threadId), "server.localeCoverage.threadModelFallback", { old: modelName(own), bot: bot.name, model: modelName(bot.modelSelection) })}`,
     ok: true,
   } });
 }
@@ -3888,7 +3888,7 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
     return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
   }
   if (composed.turn === "rerun") {
-    store.appendMessage(node.threadId, { role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color }, tool: { name: "Resuming after a restart", ok: true } });
+    store.appendMessage(node.threadId, { role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color }, tool: { name: serverLine(threadLanguage(node.threadId), "server.localeCoverage.resumeAfterRestart"), ok: true } });
   }
   parkedSeats.delete(node.id);
   return runRoomNode(node, group, bot, signal, undefined, (operation, result, coordination) =>
@@ -3898,7 +3898,7 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
 }
 
 function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> {
-  if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
+  if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(node.threadId), "server.localeCoverage.resumeAfterRestart"), ok: true } });
   parkedSeats.delete(node.id);
   const owner = directRequestOwners.get(node.threadId);
   const ownRequest = owner && !owner.stopped && owner.generations.has(node.id) ? owner : undefined;
@@ -4077,12 +4077,12 @@ const coordinator: Coordinator = createCoordinator({
         }
       if (!node.parentId && !quiet) reviewAnswerThreads.add(node.threadId);
       } else if (node.restart === "rerun" && !group) {
-        store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
+        store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(node.threadId), "server.localeCoverage.resumeAfterRestart"), ok: true } });
       }
       if (node.restart === "rerun" && !group && parent && !parent.groupId) store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} was cut off by a restart; resuming`, ok: true },
-        threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work" } });
+        tool: { name: serverLine(threadLanguage(parent.threadId), "server.localeCoverage.teammateResumingAfterRestart", { bot: bot.name }), ok: true },
+        threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? serverLine(threadLanguage(parent.threadId), "server.teammates.teammateWork") } });
       if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
       if (!group) return new Promise<HostTurnResult>(resolve => {
         let done = false;
@@ -4899,7 +4899,7 @@ async function answerRequest(
       commandAllowlist.add(remembered.botId, remembered.candidate);
     } catch {
       store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
-        name: "Command allowed once, but its allowlist rule could not be saved. Try again from the permissions menu.", ok: false,
+        name: serverLine(threadLanguage(threadId), "server.localeCoverage.commandAllowlistSaveFailed"), ok: false,
       } });
     }
   }
@@ -4936,7 +4936,7 @@ async function answerRequest(
     if (!persistentQuestion && !existing?.card?.answered) store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: "Couldn't deliver that answer — the request is no longer open, so the action was not run", ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.localeCoverage.answerDeliveryClosed"), ok: false },
     });
   }
   return outcome;
@@ -5524,14 +5524,14 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   if (name === "PreCompact" || (name === "SessionStart" && payload.source === "compact")) roomSessions.distrust(threadId, capability.botId);
   if (name === "PreCompact") {
     const trigger = payload.trigger === "manual" ? "manual" : "auto";
-    chip(`context compaction started (${trigger})`);
+    chip(serverLine(threadLanguage(threadId), "server.localeCoverage.contextCompactionStarted", { trigger: serverLine(threadLanguage(threadId), trigger === "manual" ? "server.localeCoverage.compactionManual" : "server.localeCoverage.compactionAuto") }));
     return { ok: true };
   }
   if (name === "SessionStart") {
     if (payload.source !== "compact") return { ok: true, ignored: `SessionStart ${String(payload.source ?? "")}` };
     const bot = store.bot(capability.botId);
     const digests = store.activePath(threadId).filter((m) => m.kind === "digest" && m.digest).slice(-DIGESTS_AFTER_COMPACTION);
-    chip(`context compacted — re-sent the last ${digests.length} digest${digests.length === 1 ? "" : "s"}`);
+    chip(serverLine(threadLanguage(threadId), digests.length === 1 ? "server.localeCoverage.contextCompactedOne" : "server.localeCoverage.contextCompactedMany", { count: digests.length }));
     if (!digests.length) return { ok: true };
     const context = digests.map((m) => digestPromptLine(m.digest!, m.from?.name ?? store.bot(m.digest!.botId)?.name ?? bot?.name ?? "the bot")).join("\n");
     return { ok: true, context };
@@ -6199,7 +6199,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
     void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).catch(error => {
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity",
-        tool: { name: `Could not continue on ${surfaceLabel(surface)}: ${error instanceof Error ? error.message : String(error)}`, ok: false } });
+        tool: { name: serverLine(threadLanguage(threadId), "server.localeCoverage.surfaceContinuationFailed", { surface: serverLine(threadLanguage(threadId), ({ cloud: "server.localeCoverage.surfaceCloud", vm: "server.localeCoverage.surfaceVm", local: "server.localeCoverage.surfaceLocal", browser: "server.localeCoverage.surfaceBrowser" } as const)[surface]), error: error instanceof Error ? error.message : String(error) }), ok: false } });
     });
   });
   return true;
@@ -6508,7 +6508,7 @@ bus.subscribe((event: RuntimeEvent) => {
             role: "bot",
             kind: "activity",
             tool: {
-              name: `generated image could not be attached — ${error instanceof Error ? error.message : "invalid image"}`.slice(0, 160),
+              name: serverLine(threadLanguage(event.threadId), "server.localeCoverage.imageAttachFailed", { error: error instanceof Error ? error.message : serverLine(threadLanguage(event.threadId), "server.localeCoverage.imageInvalid") }).slice(0, 160),
               ok: false,
             },
           });
@@ -6597,7 +6597,7 @@ bus.subscribe((event: RuntimeEvent) => {
           role: "bot",
           kind: "activity",
           tool: {
-            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}, so this bot asks before each action. Choose a model it supports, or Full access, to stop the prompts.`,
+            name: serverLine(threadLanguage(event.threadId), model ? "server.localeCoverage.automaticReviewUnavailableModel" : "server.localeCoverage.automaticReviewUnavailable", { provider: providerLabel(event.provider), model: model ?? "" }),
             ok: true,
           },
         });
@@ -6623,7 +6623,7 @@ bus.subscribe((event: RuntimeEvent) => {
           if (!isCurrent()) return;
           if (outcome !== "allowed-once") {
             watchdog.setWaitingOnHuman(event.threadId, false);
-            if (outcome !== "unavailable") pushMessage({ role: "bot", kind: "activity", tool: undeliveredApprovalTool(outcome, verdict.source) });
+            if (outcome !== "unavailable") pushMessage({ role: "bot", kind: "activity", tool: undeliveredApprovalTool(outcome, verdict.source, threadLanguage(event.threadId)) });
             return;
           }
           pushMessage({
@@ -6657,10 +6657,10 @@ bus.subscribe((event: RuntimeEvent) => {
         card: {
           title:
             permission && event.approvalScope === "local-computer"
-              ? "Local computer approval"
+              ? serverLine(threadLanguage(event.threadId), "server.localeCoverage.localComputerApproval")
               : permission
-                ? "Approval needed"
-                : "Your bot has a question",
+                ? serverLine(threadLanguage(event.threadId), "server.localeCoverage.approvalNeeded")
+                : serverLine(threadLanguage(event.threadId), "server.localeCoverage.botQuestion"),
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
@@ -6743,7 +6743,7 @@ bus.subscribe((event: RuntimeEvent) => {
       pushMessage({
         role: "bot",
         kind: "activity",
-        tool: { name: `retrying — attempt ${event.attempt + 1}/${RETRY_MAX_ATTEMPTS} in ${Math.round(event.delayMs / 1000)}s — ${event.reason}`, ok: true },
+        tool: { name: serverLine(threadLanguage(event.threadId), "server.localeCoverage.retryingTurn", { attempt: event.attempt + 1, max: RETRY_MAX_ATTEMPTS, seconds: Math.round(event.delayMs / 1000), reason: event.reason }), ok: true },
       });
       break;
     case "runtime.notice":
@@ -11407,6 +11407,7 @@ function appendSkillRequestCard(args: {
 } & Pick<SkillRequestCardData, "shared">): { requestId: string; summary: string } {
   const requestId = randomUUID();
   const copy = skillCardCopy(args.staged);
+  const shown = skillCardCopy(args.staged, threadLanguage(args.threadId));
   const payload: SkillRequestCardData = {
     version: 1,
     requestId,
@@ -11431,8 +11432,8 @@ function appendSkillRequestCard(args: {
     kind: "options",
     from: from ? { botId: from.id, name: from.name, color: from.color } : undefined,
     card: {
-      title: copy.title,
-      subtitle: copy.subtitle,
+      title: shown.title,
+      subtitle: shown.subtitle,
       options: args.applied ? [] : [args.staged.action === "create" ? "Enable" : "Update", "Deny"],
       ...(args.applied ? { answered: "allow", autoApplied: true, title: `Skill "${args.staged.name}" ${args.staged.action === "create" ? "enabled" : "updated"}` } : {}),
       requestId,
@@ -12073,7 +12074,7 @@ async function stopCompanyInstances(ids: string[]) {
     watchdog.settle(threadId); closeOpenApprovals(threadId); directTurnBots.delete(threadId);
     routines?.failThread(threadId, "Company connection changed while this thread was running", { stopReason: "interrupted" });
     if (store.taskByThread(botId, threadId)) {
-      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Company connection changed — choose whether to reconnect or use a personal model", ok: false } });
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.localeCoverage.companyConnectionChanged"), ok: false } });
       store.setTaskActivity(botId, threadId, "idle");
     }
   }
@@ -14143,7 +14144,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         store.appendMessage(fromThreadId, {
           role: "bot",
           kind: "activity",
-          tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true },
+          tool: { name: serverLine(threadLanguage(fromThreadId), "server.localeCoverage.retriedThread", { bot: target.name, title: task.title }), ok: true },
           threadRef: { botId: target.id, threadId, title: task.title },
         });
         return json(res, 200, { started: true, message: `${target.name}'s thread #${task.title} is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.` });
@@ -15652,7 +15653,7 @@ for (const row of chatFollowups()) {
   if (!messages.some((message) => message.queueId === row.id && message.kind === "activity")) {
     store.appendMessage(row.threadId, {
       role: "bot", kind: "activity", queueId: row.id,
-      tool: { name: "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.", ok: false },
+      tool: { name: serverLine(threadLanguage(row.threadId), "server.localeCoverage.queuedFollowupInterrupted"), ok: false },
     });
   }
   settleChatFollowups([row.id], null);

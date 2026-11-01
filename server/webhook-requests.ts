@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 // Webhook triggers a bot makes or changes from chat. Every change applies at once (OpenMausBot adds no confirmation
 // card of its own); the conversation gets a receipt card with Undo, which never carries the address.
 import { z } from "zod";
@@ -94,19 +95,19 @@ function managerInput(definition: Partial<WebhookRequestDefinition>) {
 }
 
 /** What the card and the tool result say the trigger does, credential-scrubbed. */
-export function webhookTriggerSentence(webhook: Pick<WebhookTrigger, "prompt" | "eventTypes">, botName: string): string {
+export function webhookTriggerSentence(webhook: Pick<WebhookTrigger, "prompt" | "eventTypes">, botName: string, language?: string): string {
   const instructions = redactSecretsInText(webhook.prompt).trim();
-  const events = webhook.eventTypes?.length ? ` (only ${webhook.eventTypes.join(", ")})` : "";
-  return `When another app sends something${events}, ${botName} ${instructions ? `follows: ${instructions.slice(0, 400)}` : "does what it is asked"}`;
+  const events = webhook.eventTypes?.length ? serverLine(language, "server.localeCoverage.webhookEvents", { events: webhook.eventTypes.join(", ") }) : "";
+  return serverLine(language, "server.localeCoverage.webhookTriggerSummary", { events, bot: botName, action: instructions ? serverLine(language, "server.localeCoverage.instructionsFollows", { instructions: instructions.slice(0, 400) }) : serverLine(language, "server.localeCoverage.webhookDefaultAction") });
 }
 
-const ACTION_TITLE: Record<WebhookRequestOperation["action"], string> = {
-  create: "Automation set up",
-  update: "Automation changed",
-  pause: "Automation paused",
-  resume: "Automation resumed",
-  run_now: "Automation ran once",
-  delete: "Automation deleted",
+const ACTION_TITLE: Record<WebhookRequestOperation["action"], ServerLineKey> = {
+  create: "server.localeCoverage.automationCreated",
+  update: "server.localeCoverage.automationChanged",
+  pause: "server.localeCoverage.automationPaused",
+  resume: "server.localeCoverage.automationResumed",
+  run_now: "server.localeCoverage.automationRan",
+  delete: "server.localeCoverage.automationDeleted",
 };
 
 interface WebhookRequestServiceOptions {
@@ -200,8 +201,8 @@ export class WebhookRequestService {
       role: "bot",
       kind: "options",
       card: {
-        title: `${ACTION_TITLE[operation.action]}: ${redactSecretsInText(subject.name)}`,
-        subtitle: summary,
+        title: serverLine(conversationLanguage(args.threadId), "server.localeCoverage.automationTitle", { action: serverLine(conversationLanguage(args.threadId), ACTION_TITLE[operation.action]), name: redactSecretsInText(subject.name) }),
+        subtitle: webhookTriggerSentence(subject, botName, conversationLanguage(args.threadId)),
         options: [],
         answered: "allow",
         dismissed: true,

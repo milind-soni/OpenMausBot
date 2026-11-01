@@ -23,7 +23,10 @@ function fixture(language?: string) {
       lines.push(full);
       return full;
     },
-    patchMessage: () => null,
+    patchMessage: (_threadId: string, id: string, patch: Partial<Message>) => {
+      const message = lines.find(line => line.id === id);
+      return message ? Object.assign(message, patch) : null;
+    },
     botByThread: () => null,
     groupByThread: () => undefined,
     onChange: () => () => {},
@@ -39,15 +42,35 @@ function fixture(language?: string) {
 }
 
 describe("the card a bot asks for a key or secret with", () => {
+  it("final credential display translates only a new built-in card and preserves history, reason and custom input", () => {
+    const { cards, lines, bot } = fixture("zh-TW");
+    lines.push({ id: "history", at: 1, role: "bot", kind: "secret", text: "Historical card text", secret: {
+      target: "boxToken", label: "Boat API key", description: "Historical description", placeholder: "Historical placeholder",
+      helpUrl: "https://docs.boat.dev/api-keys", requestKey: "historical-request",
+    } } as Message);
+    const reason = "Keep {reason} exactly as written.";
+    const result = cards.requestCredential(bot, "ledger-main", { credentialId: "boxToken", reason });
+    expect(result.status).toBe(201);
+    expect(result.body.label).toBe("Boat API key");
+    expect(lines[1]!.secret).toMatchObject({ target: "boxToken", label: "Boat API 金鑰", placeholder: "貼上你的 Boat API 金鑰", helpUrl: "https://docs.boat.dev/api-keys" });
+    expect(lines[1]!.secret!.description).toContain("選擇 Boat 時");
+    expect(lines[1]!.secret!.description).toContain(reason);
+    expect(lines[0]!.secret).toMatchObject({ label: "Boat API key", description: "Historical description", placeholder: "Historical placeholder", superseded: true });
+    cards.requestCredential(bot, "ledger-main", { credentialId: "xaiApiKey" });
+    expect(lines[2]!.secret!.placeholder).toBe("xai-…");
+    cards.requestCredential(bot, "ledger-main", { label: "Original custom label", reason, placeholder: "Original custom hint", delivery: "ref" });
+    expect(lines[3]!.secret).toMatchObject({ target: "customSecret", label: "Original custom label", reason, placeholder: "Original custom hint" });
+  });
+
   it("asks in the language of the conversation's person", () => {
     const { cards, lines, bot } = fixture("de");
     expect(cards.requestCredential(bot, "ledger-main", { credentialId: "xaiApiKey" }).status).toBe(201);
     expect(cards.requestCredential(bot, "ledger-main", { label: "Stripe-Testschlüssel", reason: "Für Testzahlungen.", delivery: "file" }).status).toBe(201);
     expect(lines.map((line) => line.text)).toEqual([
-      "Gib xAI API key sicher in OpenMausBot auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.",
+      "Gib xAI API-Schlüssel sicher in OpenMausBot auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.",
       "Gib Stripe-Testschlüssel sicher in OpenMausBot auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.",
     ]);
-    expect(lines[0]!.secret!.description).toBe("Used by the built-in Grok provider. Ledger kann es verwenden, aber nie auslesen.");
+    expect(lines[0]!.secret!.description).toBe("Für den integrierten Grok-Anbieter. Ledger kann es verwenden, aber nie auslesen.");
     expect(lines[1]!.secret!.description)
       .toBe("Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen.");
   });

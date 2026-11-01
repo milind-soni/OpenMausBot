@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 // Which engine each bot runs on, on a Cloud home with the trial's Claude credit. While nothing of the person's own has
 // ever been signed in there, a bot on an engine that can't run (a copied bot's desktop engine, signed out here) runs on
 // the credit, and where it came from is remembered under providers/, which never travels in a backup or a move. Once an
@@ -137,8 +138,7 @@ export function createCreditMoves(options: CreditMovesOptions) {
       const pinned = moving.filter(task => task.modelSelection !== undefined).map(task => task.threadId);
       if (pinned.length) store.followBotModel(bot.id, pinned);
       if (moved.delete(bot.id)) forgot = true;
-      const notice = `notice: ${options.engineName(next.instanceId)} is connected, so this conversation uses it now instead of the trial Claude credit.`;
-      for (const task of moving) store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: { name: notice, ok: true } });
+      for (const task of moving) store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(conversationLanguage(task.threadId), "server.localeCoverage.creditReplaced", { engine: options.engineName(next.instanceId) })}`, ok: true } });
     }
     if (forgot) remember(moved!);
   }

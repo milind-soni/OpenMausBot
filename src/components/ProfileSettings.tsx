@@ -171,7 +171,7 @@ export function ProfileFields() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
     })
-      .then((r) => { if (!r.ok) throw new Error("Profile save failed"); return r.json(); })
+      .then((r) => { if (!r.ok) throw new Error(t("ui.profileSettings.profileSaveFailed")); return r.json(); })
       .then((config: ConfigStatus) => {
         if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email } });
       })

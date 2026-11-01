@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
 import { botShowsUnread } from "./bot-unread";
 import { lastNonReceipt } from "./receipts";
@@ -193,4 +194,22 @@ export function stateForBot(bot: MascotBotProfile): MausState {
   }
 
   return "idle";
+}
+
+const EXPRESSION_LABELS: Partial<Record<MausState, LocaleKey>> = {
+  idle: "ui.mascot.idle",
+  happy: "ui.mascot.happy",
+  curious: "ui.mascot.curious",
+  drowsy: "ui.mascot.drowsy",
+  working: "ui.mascot.working",
+  thinking: "ui.mascot.thinking",
+  listening: "ui.mascot.listening",
+  sleeping: "ui.mascot.sleeping",
+  suspicious: "ui.mascot.suspicious",
+  proud: "ui.mascot.proud",
+};
+
+export function expressionLabel(expression: MausState): string {
+  const key = EXPRESSION_LABELS[expression];
+  return key ? t(key) : expression;
 }

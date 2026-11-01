@@ -3,6 +3,7 @@ import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, pars
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { desktopText } from "./i18n.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 /** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
@@ -68,7 +69,7 @@ export function checkoutDestination(value, { fixture = false, staging = false } 
 export function cloudOrigin(value = CLOUD_ORIGIN, fixture = false) {
   const url = new URL(value);
   if (value !== url.origin || (![CLOUD_ORIGIN, STAGING_CLOUD_ORIGIN].includes(value) && !(fixture && url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname)))) {
-    throw new Error("Invalid MausBot Cloud address.");
+    throw new Error(desktopText("desktop.extra.cloudError.address"));
   }
   return value;
 }
@@ -154,7 +155,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     try {
       if (reader) while (true) {
         const { done, value: chunk } = await reader.read(); if (done) break;
-        size += chunk.byteLength; if (size > 64 * 1024) throw new Error("Cloud response too large.");
+        size += chunk.byteLength; if (size > 64 * 1024) throw new Error(desktopText("desktop.extra.cloudError.tooLarge"));
         chunks.push(chunk);
       }
     } catch (error) { await reader?.cancel().catch(() => {}); throw error; }
@@ -162,7 +163,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     let data;
     try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {
       if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true });
-      throw new Error("Invalid Cloud response.");
+      throw new Error(desktopText("desktop.extra.cloudError.response"));
     }
     if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked,
       ...(typeof data?.checkoutUrl === "string" ? { checkoutUrl: data.checkoutUrl } : {}) });
@@ -170,20 +171,20 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   }
   function identity(result) {
     if (result?.cloudContractVersion !== 1 || !timestamp(result.expiresAt) || !text(result.device?.id, 128) ||
-      !text(result.account?.id, 128) || !text(result.account?.email, 254)) throw new Error("Invalid Cloud identity.");
+      !text(result.account?.id, 128) || !text(result.account?.email, 254)) throw new Error(desktopText("desktop.extra.cloudError.identity"));
     return { expiresAt: result.expiresAt, device: { id: result.device.id }, account: { id: result.account.id, email: result.account.email } };
   }
   function validateGrant(saved) {
-    if (saved?.origin !== origin || !TOKEN.test(saved.token)) throw new Error("Invalid Cloud credential.");
+    if (saved?.origin !== origin || !TOKEN.test(saved.token)) throw new Error(desktopText("desktop.extra.cloudError.credential"));
     return { origin, token: saved.token, ...identity({ ...saved, cloudContractVersion: 1 }) };
   }
   /** A plan newer than this app is paid with its tier, never a lockout; a malformed tier is no tier. */
   function entitlement(input) {
     const newer = typeof input?.plan === "string" && !["free", "pro"].includes(input.plan) && TIER.test(input.plan);
     if (!input || !(newer || ["free", "pro"].includes(input.plan)) || !["active", "inactive"].includes(input.status) ||
-      !(input.expiresAt === null || timestamp(input.expiresAt)) || !Number.isSafeInteger(input.version) || input.version < 0) throw new Error("Invalid Cloud entitlement.");
+      !(input.expiresAt === null || timestamp(input.expiresAt)) || !Number.isSafeInteger(input.version) || input.version < 0) throw new Error(desktopText("desktop.extra.cloudError.entitlement"));
     const plan = input.plan === "free" ? "free" : "pro";
-    if (input.status === "active" && (plan !== "pro" || input.expiresAt === null || input.expiresAt <= now())) throw new Error("Invalid active Cloud entitlement.");
+    if (input.status === "active" && (plan !== "pro" || input.expiresAt === null || input.expiresAt <= now())) throw new Error(desktopText("desktop.extra.cloudError.activeEntitlement"));
     if (newer && !newerPlans.has(input.plan)) { newerPlans.add(input.plan); warn(`[cloud] MausBot Cloud sent plan "${input.plan}", newer than this app; treating it as paid.`); }
     const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : newer ? input.plan : undefined;
     return { plan, ...(tier ? { tier } : {}), status: input.status,
@@ -317,7 +318,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   async function adopt(result, stamp, wanted = () => true) {
     const next = validateGrant({ origin, token: result?.accessToken, ...identity(result) });
     if (!current(stamp) || !wanted()) { await revoke(next).catch(() => {}); return false; }
-    if (next.expiresAt <= now()) throw new Error("Expired Cloud credential.");
+    if (next.expiresAt <= now()) throw new Error(desktopText("desktop.extra.cloudError.expiredCredential"));
     issued = next;
     await store.write(next);
     if (!current(stamp)) return false;
@@ -350,17 +351,17 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     }
   }
   async function begin(intent = null) {
-    if (closed || restoring || clearing || grant || issued || cleanupNeeded) throw new Error("Sign out before starting another Cloud connection.");
+    if (closed || restoring || clearing || grant || issued || cleanupNeeded) throw new Error(desktopText("desktop.extra.cloudError.signOutFirst"));
     const stamp = reset();
     opened = intent ? { plan: intent.plan, source: intent.source, startedAt: now(), signIn: true } : null;
     publish({ status: "connecting" });
     try {
-      if (!text(deviceName, 100) || !["darwin", "win32", "linux"].includes(platform)) throw new Error("Invalid desktop.");
+      if (!text(deviceName, 100) || !["darwin", "win32", "linux"].includes(platform)) throw new Error(desktopText("desktop.extra.cloudError.desktop"));
       const result = await request("authorize", { method: "POST", body: { deviceName, platform, ...(text(appVersion, 40) ? { appVersion } : {}) } });
       if (!current(stamp)) return state();
       if (result.cloudContractVersion !== 1 || !PRIVATE_CODE.test(result.deviceCode) || !CODE.test(result.userCode) ||
         result.verificationUriComplete !== `${origin}/cloud/desktop?code=${result.userCode}` || !Number.isSafeInteger(result.expiresIn) || result.expiresIn < 1 || result.expiresIn > MAX_ENROLL_SECONDS ||
-        !Number.isSafeInteger(result.interval) || result.interval < 5 || result.interval > 60) throw new Error("Invalid Cloud authorization.");
+        !Number.isSafeInteger(result.interval) || result.interval < 5 || result.interval > 60) throw new Error(desktopText("desktop.extra.cloudError.authorization"));
       const next = intent ? `&${new URLSearchParams({ next: "checkout", plan: intent.plan, src: intent.source })}` : "";
       pending = { deviceCode: result.deviceCode, verificationUri: `${result.verificationUriComplete}${next}`, expiresAt: now() + result.expiresIn * 1000, interval: result.interval * 1000 };
       publish({ status: "connecting", enrollment: { userCode: result.userCode, expiresAt: pending.expiresAt } });
@@ -372,7 +373,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   const signInBlocked = () => closed || restoring || clearing || grant || issued || cleanupNeeded;
   /** Sends the 8-digit code to `email`. Nothing is signed in yet; the answer says what the sheet shows next. */
   async function emailStart(email) {
-    if (signInBlocked() || value.status === "connecting") throw new Error("Sign out before starting another Cloud connection.");
+    if (signInBlocked() || value.status === "connecting") throw new Error(desktopText("desktop.extra.cloudError.signOutFirst"));
     const address = cleanEmail(email), app = signInIdentity({ deviceName, platform, appVersion });
     if (!address) return { outcome: "invalid-email" };
     if (!app) return { outcome: "browser" };
@@ -394,7 +395,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     const attempt = emailed, digits = cleanCode(code);
     if (!attempt || now() >= attempt.expiresAt) { emailed = null; return { outcome: "expired" }; }
     if (!digits) return { outcome: "wrong-code", triesLeft: SIGN_IN_TRIES - attempt.wrong };
-    if (signInBlocked()) throw new Error("Sign out before starting another Cloud connection.");
+    if (signInBlocked()) throw new Error(desktopText("desktop.extra.cloudError.signOutFirst"));
     const stamp = generation;
     try {
       const result = await request(null, { method: "POST", path: SIGN_IN_VERIFY, body: { attempt: attempt.attempt, code: digits } });
@@ -413,10 +414,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     }
   }
   async function openCheckout(plan, source) {
-    if (typeof plan !== "string" || !TIER.test(plan) || !CHECKOUT_SOURCES.includes(source)) throw new Error("Invalid Cloud checkout.");
+    if (typeof plan !== "string" || !TIER.test(plan) || !CHECKOUT_SOURCES.includes(source)) throw new Error(desktopText("desktop.extra.cloudError.checkout"));
     const current = state();
     if (current.status === "signed-out" && !grant) return { outcome: "signing-in", state: await begin({ plan, source }) };
-    if (current.status !== "connected" || !grant) throw new Error("Sign in to MausBot Cloud before choosing a plan.");
+    if (current.status !== "connected" || !grant) throw new Error(desktopText("desktop.extra.cloudError.signInBeforePlan"));
     const signedIn = grant;
     let destination;
     try {
@@ -491,7 +492,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     /** The Cloud this checkout bought was opened, announced or shown ready: the purchase is over (Add a Cloud… says one Cloud for now). */
     checkoutDone() { if (opened && !opened.done) { opened = { ...opened, done: true }; publish(value); } },
     async signInAgain() {
-      if (state().status !== "reauth-required") throw new Error("This computer is still signed in to MausBot Cloud.");
+      if (state().status !== "reauth-required") throw new Error(desktopText("desktop.extra.cloudError.stillSignedIn"));
       publish({ status: "connecting" });
       const forgotten = await forget({ quiet: true });
       if (forgotten.status === "unavailable") return forgotten;
@@ -505,7 +506,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     refresh, signOut,
     async openDashboard() { await openBrowser(`${origin}/cloud`); return state(); },
     async upgradePreview(plan, source) {
-      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error(desktopText("desktop.extra.cloudError.upgrade"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       let result;
@@ -521,7 +522,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         chargeNow: result.chargeNow, tax: result.tax ?? 0, ...(timestamp(result.nextBillingAt) ? { nextBillingAt: result.nextBillingAt } : {}), expiresAt: result.expiresAt } };
     },
     async upgrade(plan, source) {
-      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error(desktopText("desktop.extra.cloudError.upgrade"));
       const signedIn = grant, agreed = confirmations.get(plan);
       confirmations.delete(plan);
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
@@ -595,11 +596,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       } catch { return "failed"; }
     },
     async interest(kind) {
-      if (kind !== "another_cloud") throw new Error("Invalid Cloud interest.");
+      if (kind !== "another_cloud") throw new Error(desktopText("desktop.extra.cloudError.interest"));
       const signedIn = grant;
-      if (!signedIn || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      if (!signedIn || state().status !== "connected") throw new Error(desktopText("desktop.extra.cloudError.signInFirst"));
       const result = await request("interest", { method: "POST", body: { kind }, token: signedIn.token });
-      if (result?.ok !== true) throw new Error("Invalid Cloud response.");
+      if (result?.ok !== true) throw new Error(desktopText("desktop.extra.cloudError.response"));
     },
     homeTarget,
     /** The Admin's last verified word on a Cloud whose plan sleeps, kept while a re-check fails; null for any other. */
@@ -631,8 +632,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     },
     async growDisk(sizeGb) {
       const current = grant;
-      if (!current || state().status !== "connected") throw new Error("My Cloud is not ready yet.");
-      if (!Number.isSafeInteger(sizeGb) || sizeGb < 1 || sizeGb > 10_000) throw new Error("Invalid Cloud disk size.");
+      if (!current || state().status !== "connected") throw new Error(desktopText("desktop.extra.cloudError.notReady"));
+      if (!Number.isSafeInteger(sizeGb) || sizeGb < 1 || sizeGb > 10_000) throw new Error(desktopText("desktop.extra.cloudError.diskSize"));
       let result;
       try { result = await request("disk", { method: "POST", body: { sizeGb }, token: current.token }); } catch (error) {
         if ([404, 405, 501].includes(error?.status)) return { supported: false };
@@ -640,7 +641,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw error;
       }
       const disk = result?.disk;
-      if (!disk || !Number.isSafeInteger(disk.gb) || !Number.isSafeInteger(disk.maxGb) || disk.gb < 1 || disk.maxGb < disk.gb) throw new Error("Invalid Cloud disk response.");
+      if (!disk || !Number.isSafeInteger(disk.gb) || !Number.isSafeInteger(disk.maxGb) || disk.gb < 1 || disk.maxGb < disk.gb) throw new Error(desktopText("desktop.extra.cloudError.diskResponse"));
       return { supported: true, disk: { gb: disk.gb, maxGb: disk.maxGb } };
     },
     /** The code goes to main only, for one navigation, and is not kept. `cloudId`: another Cloud of the person's own
@@ -651,26 +652,26 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (cloudId !== null) {
         const cloud = otherOwnCloud(cloudId);
         if (!current || !cloud) throw Object.assign(new Error("That Cloud is no longer one of yours."), { gone: true });
-        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(`${cloud.name} isn't ready to open yet.`);
+        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(desktopText("desktop.extra.cloudError.namedNotReady", { name: cloud.name }));
         let result;
         try { result = await request("pairing", { method: "POST", body: { cloudId }, token: current.token }); } catch (error) {
           if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`${cloud.name} is no longer one of your Clouds.`), { gone: true }); }
-          if (error?.status === 409) throw new Error(`${cloud.name} isn't running right now.`);
+          if (error?.status === 409) throw new Error(desktopText("desktop.extra.cloudError.namedNotRunning", { name: cloud.name }));
           throw error;
         }
         const pairing = parsePairingGrant(result, cloud.origin, now());
-        if (!pairing) throw new Error("Invalid Cloud pairing response.");
+        if (!pairing) throw new Error(desktopText("desktop.extra.cloudError.pairingResponse"));
         return pairing;
       }
       const target = homeTarget();
-      if (!target || !current) throw new Error("My Cloud is not ready to connect yet.");
+      if (!target || !current) throw new Error(desktopText("desktop.extra.home.notReady"));
       let result;
       try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
         const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);
         throw why ? new Error(why) : error;
       }
       const pairing = parsePairingGrant(result, target.origin, now());
-      if (!pairing) throw new Error("Invalid Cloud pairing response.");
+      if (!pairing) throw new Error(desktopText("desktop.extra.cloudError.pairingResponse"));
       return pairing;
     },
     /** `origin` is the address of a Cloud the person owns (My Cloud or another of theirs), by the verified session only. */
@@ -687,7 +688,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const cleanName = cleanCloudListName(name);
       if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))
         || !(source === null || CHECKOUT_SOURCES.includes(source))) {
-        throw new Error("Invalid Cloud to add.");
+        throw new Error(desktopText("desktop.extra.cloudError.addCloud"));
       }
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
@@ -728,7 +729,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * with the Admin's reason; `taken` when another of the plan's has that name; `unsupported` from an Admin without it. */
     async addOrganization({ name, color = null } = {}) {
       const cleanName = cleanCloudListName(name);
-      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid organization to add.");
+      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(desktopText("desktop.extra.cloudError.addOrganization"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.organizations) return { outcome: "unsupported" };
@@ -748,7 +749,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
      * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
     async setCloudColor(cloudId, color) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid Cloud color.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(desktopText("desktop.extra.cloudError.color"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.managed !== false)) return { outcome: "unsupported" };
@@ -767,7 +768,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
      * Remove from list (whose session never says `removable`). */
     async hideCloud(cloudId) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error(desktopText("desktop.extra.cloudError.removeCloud"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };
@@ -802,15 +803,15 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const current = grant, team = value.status === "connected" ? value.teams?.find(entry => entry.id === teamId) ?? null : null;
       if (!current || !team) throw Object.assign(new Error("You're no longer in this team."), { gone: true });
       const origin = team.machine?.origin;
-      if (!origin || !CLOUD_MACHINE_CONNECTABLE.includes(team.machine.status)) throw new Error(`${team.name} isn't ready to open yet.`);
+      if (!origin || !CLOUD_MACHINE_CONNECTABLE.includes(team.machine.status)) throw new Error(desktopText("desktop.extra.cloudError.namedNotReady", { name: team.name }));
       let result;
       try { result = await request(`teams/${encodeURIComponent(teamId)}/pairing`, { method: "POST", body: {}, token: current.token }); } catch (error) {
         if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`You're no longer in ${team.name}.`), { gone: true }); }
-        if (error?.status === 409) throw new Error(`${team.name} isn't running right now.`);
+        if (error?.status === 409) throw new Error(desktopText("desktop.extra.cloudError.namedNotRunning", { name: team.name }));
         throw error;
       }
       const pairing = parsePairingGrant(result, origin, now());
-      if (!pairing) throw new Error("Invalid Cloud pairing response.");
+      if (!pairing) throw new Error(desktopText("desktop.extra.cloudError.pairingResponse"));
       return pairing;
     },
     /** A Cloud that ended and that the Admin still holds, started for its owner's export only: a one-time code for it
@@ -818,7 +819,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * `installation`: this computer, which the Admin lets take it only if it is the one the Cloud's things come home to. */
     async exportHome({ installation } = {}) {
       const current = grant;
-      if (!current) throw new Error("Sign in to MausBot Cloud first.");
+      if (!current) throw new Error(desktopText("desktop.extra.cloudError.signInFirst"));
       let result;
       try { result = await request("export", { method: "POST", body: installation ? { installation } : {}, token: current.token }); } catch (error) {
         if (error?.status === 409) return { notHeld: true };
@@ -827,7 +828,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       if (result?.cloudContractVersion === 1 && result.state === "starting") return { starting: true };
       const pairing = typeof result?.origin === "string" && result.origin.startsWith("https://") ? parsePairingGrant(result, result.origin, now()) : null;
-      if (!pairing) throw new Error("Invalid Cloud export response.");
+      if (!pairing) throw new Error(desktopText("desktop.extra.cloudError.exportResponse"));
       return { grant: pairing };
     },
     /** Tells the Admin that this computer's move to My Cloud is done, as `installation` (POST /api/cloud/desktop/moved):
@@ -869,7 +870,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       let relay = null;
       try { relay = typeof result?.url === "string" ? new URL(result.url) : null; } catch { relay = null; }
       if (result?.cloudContractVersion !== 1 || !relay || relay.origin !== origin || typeof result.token !== "string" || !/^omb_xd_[A-Za-z0-9_-]{43}$/.test(result.token)) {
-        throw new Error("Invalid Cloud X research response.");
+        throw new Error(desktopText("desktop.extra.cloudError.researchResponse"));
       }
       return { url: result.url, token: result.token };
     },
@@ -885,31 +886,31 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       let target = null;
       try { target = typeof result?.url === "string" ? new URL(result.url) : null; } catch { target = null; }
       if (result?.cloudContractVersion !== 1 || !target || target.origin !== origin || typeof result.token !== "string" || !/^omb_pd_[A-Za-z0-9_-]{43}$/.test(result.token)) {
-        throw new Error("Invalid Cloud pages response.");
+        throw new Error(desktopText("desktop.extra.cloudError.pagesResponse"));
       }
       return { url: result.url, token: result.token };
     },
     /** The account's answer to the product-updates question (GET /api/cloud/desktop/updates-consent), as the Admin sends it. */
     async updatesConsent() {
       const current = grant;
-      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      if (!current || state().status !== "connected") throw new Error(desktopText("desktop.extra.cloudError.signInFirst"));
       return request("updates-consent", { token: current.token, signal: AbortSignal.timeout(10_000) });
     },
     async recordUpdatesConsent(status, textVersion) {
       const current = grant;
-      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      if (!current || state().status !== "connected") throw new Error(desktopText("desktop.extra.cloudError.signInFirst"));
       const result = await request("updates-consent", { method: "POST", body: { status, textVersion }, token: current.token, signal: AbortSignal.timeout(10_000) });
-      if (result?.cloudContractVersion !== 1 || result.consent?.status !== status) throw new Error("Invalid Cloud consent response.");
+      if (result?.cloudContractVersion !== 1 || result.consent?.status !== status) throw new Error(desktopText("desktop.extra.cloudError.consentResponse"));
     },
     /** No sign-in: an email typed in the app (POST /api/updates-consent). Returns the receipt that can withdraw it. */
     async updatesConsentByEmail({ email, installId, textVersion }) {
       const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status: "opted_in", email, installId, textVersion }, signal: AbortSignal.timeout(10_000) });
-      if (typeof result?.receipt !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(result.receipt)) throw new Error("Invalid Cloud consent response.");
+      if (typeof result?.receipt !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(result.receipt)) throw new Error(desktopText("desktop.extra.cloudError.consentResponse"));
       return result.receipt;
     },
     async withdrawUpdatesConsent({ status, receipt }) {
       const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status, receipt }, signal: AbortSignal.timeout(10_000) });
-      if (result?.ok !== true) throw new Error("Invalid Cloud consent response.");
+      if (result?.ok !== true) throw new Error(desktopText("desktop.extra.cloudError.consentResponse"));
     },
     close() { closed = true; reset(); },
   };
@@ -919,10 +920,10 @@ export function cloudMenuSublabel(state, date) {
   if (state?.status !== "connected") return null;
   const trial = state.trial;
   if (state.entitlement?.plan === "pro" && state.entitlement.status === "active") {
-    if (trial?.state === "active" || trial?.state === "ending") return `Free trial until ${date(trial.endsAt)}`;
-    return state.machine?.power?.sleeps ? "Sleeps when idle" : "Always on";
+    if (trial?.state === "active" || trial?.state === "ending") return desktopText("desktop.extra.cloud.freeTrialUntil", { date: date(trial.endsAt) });
+    return desktopText(state.machine?.power?.sleeps ? "desktop.extra.cloud.sleeps" : "desktop.extra.cloud.alwaysOn");
   }
-  return state.machine || trial ? "Stopped" : null;
+  return state.machine || trial ? desktopText("desktop.extra.cloud.stopped") : null;
 }
 
 /** What the person's own Cloud page may show of the plan: never the account, a credential or an address. */

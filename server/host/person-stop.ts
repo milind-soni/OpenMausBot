@@ -3,6 +3,7 @@
 import type { HandoffView } from "../coordinator.ts";
 import type { Handoffs } from "../delta-context.ts";
 import { isStopCommand } from "../room-holds.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { Message, Store } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
@@ -61,12 +62,13 @@ export function createPersonStop(deps: PersonStopDeps) {
   function noteTeammatesLeftRunning(threadId: string, running: HandoffView[]): void {
     if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return;
     for (const node of running) {
-      const name = store.bot(node.botId)?.name ?? "A teammate";
+      const language = conversationLanguage(threadId);
+      const name = store.bot(node.botId)?.name ?? serverLine(language, "server.localeCoverage.unnamedTeammate");
       const task = store.taskByThread(node.botId, node.threadId);
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `Stopped here — ${name} is still working; open to stop it too`, ok: true },
+        tool: { name: serverLine(language, "server.localeCoverage.teammateStillRunning", { name }), ok: true },
         ...(task ? { threadRef: { botId: node.botId, threadId: node.threadId, title: task.title } } : {}),
       });
     }

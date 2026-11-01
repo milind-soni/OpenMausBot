@@ -5,6 +5,7 @@ import { deflateSync } from "node:zlib";
 import environments from "./environments.cjs";
 import { CHECKOUT_SOURCES } from "./cloud-account.mjs";
 import { CLOUD_HOME_NAME } from "./cloud-home.mjs";
+import { desktopText } from "./i18n.mjs";
 
 export const CLOUD_COLORS = environments.ENTRY_COLORS;
 export const DEFAULT_CLOUD_COLOR = "blue";
@@ -95,7 +96,7 @@ export function createCloudLook({ store, accountId, homeEntry, saveEntry }) {
     current,
     save(name, color) {
       const look = { name: cleanCloudName(name), color: cleanCloudColor(color) };
-      if (!look.name || !look.color) throw new Error(`Choose a name of up to ${CLOUD_NAME_MAX} characters and one of the colours.`);
+      if (!look.name || !look.color) throw new Error(desktopText("desktop.extra.cloudError.chooseName", { max: CLOUD_NAME_MAX }));
       const id = accountId();
       if (id) store.write({ accountId: id, ...look });
       const entry = homeEntry();
@@ -128,7 +129,7 @@ export function createCloudReadyNotice({ Notification, focused, sheetOpen, name,
     if (!key || state.status !== "connected" || state.machine?.status !== "ready" || announced === key) return false;
     announced = key; watched = false;
     if ((focused() && sheetOpen()) || !Notification.isSupported()) return false;
-    const note = new Notification({ title: `${name()} is ready`, body: "Click to open it. It keeps your bots running 24/7." });
+    const note = new Notification({ title: desktopText("desktop.extra.cloud.readyTitle", { name: name() }), body: desktopText("desktop.extra.cloud.readyBody") });
     note.on("click", () => open());
     note.show();
     shown();
@@ -147,12 +148,12 @@ export function installCloudBuy({ ipcMain, guard, client, offersReady, clipboard
   handle("signInVerify", (_event, code) => client().emailVerify(plain(code)));
   handle("signInCancel", () => { client().emailCancel(); });
   handle("reopenCheckout", async (_event, plan, source) => {
-    if (!(await offersReady())) throw new Error("MausBot Cloud isn't offered in this app.");
+    if (!(await offersReady())) throw new Error(desktopText("desktop.extra.error.cloudNotOffered"));
     const account = client();
     if (account.checkoutLink()) return account.reopenCheckout();
-    if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error("Choose a plan to continue.");
+    if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error(desktopText("desktop.extra.error.choosePlan"));
     const offer = await account.offer();
-    if (!offer?.plans.some(entry => entry.tier === plan)) throw new Error("Choose a plan to continue.");
+    if (!offer?.plans.some(entry => entry.tier === plan)) throw new Error(desktopText("desktop.extra.error.choosePlan"));
     return account.reopenCheckout(plan, source);
   });
   handle("copyCheckoutLink", () => {

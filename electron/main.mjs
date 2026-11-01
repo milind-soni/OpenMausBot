@@ -89,6 +89,7 @@ import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
+import { desktopText, setNativeLanguageResolver } from "./i18n.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
 import { createHostScreenLease } from "./host-screen-lease.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
@@ -169,7 +170,7 @@ function applyUnreadBadge(win = mainWindow) {
     unreadOverlayIcon ??= nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
     win.setOverlayIcon(
       count > 0 && !unreadOverlayIcon.isEmpty() ? unreadOverlayIcon : null,
-      count > 0 ? `${count} unread conversation${count === 1 ? "" : "s"}` : "No unread conversations",
+      count > 0 ? desktopText(count === 1 ? "desktop.extra.main.unreadOne" : "desktop.extra.main.unreadMany", { count }) : desktopText("desktop.extra.main.unreadNone"),
     );
     return;
   }
@@ -271,6 +272,7 @@ let runningDataDir = null;
 let localSwitchInFlight = false;
 let managedDesktop = null;
 let cloudAccount = null, updatesConsent = null, desktopPrefs = null, ownHome = null, twoPlaces = null, windowFrameMade = null;
+setNativeLanguageResolver(() => desktopPrefs?.language() || app.getLocale?.() || "en");
 let cloudAccountStarted = Promise.resolve();
 let cloudAccountRestoring = false;
 let cloudSignInRestored = false;
@@ -326,9 +328,8 @@ const serverSupervisor = createServerSupervisor({
   onExhausted() {
     slog("server recovery paused after repeated failures; quit and reopen to retry");
     dialog.showErrorBox(
-      "The bot server stopped",
-      "Automatic recovery could not restart the background server. Quit and reopen OpenMausBot to try again. Interrupted chat turns were not resent.\n\n" +
-        `Server log: ${path.join(LOG_DIR, "server.log")}`,
+      desktopText("desktop.extra.main.recoveryTitle"),
+      desktopText("desktop.extra.main.recoveryDetail", { log: path.join(LOG_DIR, "server.log") }),
     );
   },
   log: slog,
@@ -383,10 +384,10 @@ async function loadSecureCredentials() {
 async function saveSecureCredentials(credentials) {
   // Writing from an unread store would drop the secrets it could not read.
   if (credentialStoreUnavailable) {
-    throw new Error("The operating-system credential store could not be read this launch");
+    throw new Error(desktopText("desktop.extra.error.credentialUnreadable"));
   }
   if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-    throw new Error("The operating-system credential store is unavailable");
+    throw new Error(desktopText("desktop.extra.error.credentialUnavailable"));
   }
   fs.mkdirSync(path.dirname(CREDENTIALS_FILE), { recursive: true });
   const encrypted = await safeStorage.encryptStringAsync(JSON.stringify(credentials));
@@ -543,7 +544,7 @@ let advertisementTransition = Promise.resolve();
 
 /** Every credential writer goes through this one serialized hook, so concurrent saves never overwrite each other. */
 export async function updateSecureCredentialDocument(derive, afterPersist) {
-  if (!secureCredentialState) throw new Error("Secure credentials are not ready");
+  if (!secureCredentialState) throw new Error(desktopText("desktop.extra.error.credentialNotReady"));
   try {
     return await secureCredentialState.update(derive, afterPersist);
   } finally {
@@ -821,7 +822,7 @@ function syncPhoneSecretKey(proc) {
 
 function ensureCloudAccount() {
   if (cloudAccount) return cloudAccount;
-  if (!app.isPackaged || desktopRemoteAccess) throw new Error("MausBot Cloud sign-in requires the local desktop app.");
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error(desktopText("desktop.extra.error.cloudLocalApp"));
   cloudAccount = createCloudAccountClient({
     store: createCloudAccountStore({ file: path.join(app.getPath("userData"), cloudTarget(process.env).file), encryption: {
       available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
@@ -867,7 +868,7 @@ async function cloudOffersReady() {
   if (brandedBuild === null && serverReady) await readCloudOfferBrand();
   return cloudOffersAllowed();
 }
-const menuDate = value => new Intl.DateTimeFormat(app.getLocale() || "en-US", { day: "numeric", month: "short" }).format(new Date(value));
+const menuDate = value => new Intl.DateTimeFormat(desktopPrefs?.language() || app.getLocale() || "en-US", { day: "numeric", month: "short" }).format(new Date(value));
 function cloudHomeEntry() {
   const homeOrigin = cloudAccount?.homeTarget()?.origin ?? null;
   return environmentsState.environments.find(candidate => isCloudHomeEntry(candidate, { homeOrigin, remembered: rememberedHome })) ?? null;
@@ -905,7 +906,7 @@ const announceCloudReady = createCloudReadyNotice({ Notification, focused: () =>
 
 function ensureManagedDesktop() {
   if (managedDesktop) return managedDesktop;
-  if (!app.isPackaged || desktopRemoteAccess) throw new Error("Organization sign-in requires the installed desktop app running on this computer.");
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error(desktopText("desktop.extra.error.orgLocalApp"));
   const encryption = {
     available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
       (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
@@ -1034,7 +1035,7 @@ function publishCompanyBackupState(value) {
 
 function localBackupRequest(proc, route, init = {}) {
   if (!proc || proc !== serverProc || !serverReady || !/^\/api\/workspace-backup\/(?:status|export|upload|preview|restore|download\/[A-Za-z0-9_-]+)$/.test(route)) {
-    throw new Error("This installation changed. Start this backup operation again.");
+    throw new Error(desktopText("desktop.extra.error.backupChanged"));
   }
   return fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit",
     headers: { ...Object.fromEntries(new Headers(init.headers)), [DESKTOP_MUTATION_HEADER]: desktopMutationToken } });
@@ -1042,16 +1043,16 @@ function localBackupRequest(proc, route, init = {}) {
 
 async function localBackupStatus(proc) {
   const response = await localBackupRequest(proc, "/api/workspace-backup/status", { signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error("Local backup status is unavailable. Try again when this installation is ready.");
+  if (!response.ok) throw new Error(desktopText("desktop.extra.error.backupStatus"));
   const status = await response.json();
-  if (proc !== serverProc || typeof status.busy !== "boolean" || typeof status.pendingRestore !== "boolean") throw new Error("This installation changed. Check backup status again.");
+  if (proc !== serverProc || typeof status.busy !== "boolean" || typeof status.pendingRestore !== "boolean") throw new Error(desktopText("desktop.extra.error.backupChangedStatus"));
   return status;
 }
 
 async function runCompanyBackup(kind, input, scheduled = null) {
   if (companyBackupController || companyRestoreCommitting || desktopShutdownStarted || (scheduled && preparedCompanyRestore)) throw companyBackupDeferred();
   const client = ensureManagedDesktop(), connection = client.connection();
-  if (!connection || !client.state().cloudBackups) throw new Error("Connect your organization and ask its administrator to enable cloud backups first.");
+  if (!connection || !client.state().cloudBackups) throw new Error(desktopText("desktop.extra.error.backupConnectOrg"));
   const generation = client.backupGeneration();
   if (scheduled) {
     scheduled.signal.throwIfAborted();
@@ -1070,7 +1071,7 @@ async function runCompanyBackup(kind, input, scheduled = null) {
     const status = await localBackupStatus(proc);
     if (status.pendingRestore) {
       publishCompanyBackupState({ busy: false, pendingRestore: true });
-      throw new Error("Restart OpenMausBot to finish the pending restore before starting another backup operation.");
+      throw new Error(desktopText("desktop.extra.error.backupPendingRestore"));
     }
     if (status.busy) throw companyBackupDeferred();
     const transfers = createCompanyBackups({
@@ -1085,13 +1086,13 @@ async function runCompanyBackup(kind, input, scheduled = null) {
     const result = kind === "backup" ? await transfers.backup({ ...input, appVersion: app.getVersion() }, controller.signal, progress)
       : await transfers.prepareRestore(input, controller.signal, progress);
     controller.signal.throwIfAborted();
-    if (proc !== serverProc || client.backupGeneration() !== generation || client.connection()?.deviceId !== connection.deviceId) throw new Error("This installation or its organization connection changed.");
+    if (proc !== serverProc || client.backupGeneration() !== generation || client.connection()?.deviceId !== connection.deviceId) throw new Error(desktopText("desktop.extra.error.backupOrgChanged"));
     if (kind === "restore") preparedCompanyRestore = { id: result.id, proc, deviceId: connection.deviceId };
     publishCompanyBackupState({ busy: false, ...(kind === "backup" ? { lastBackupAt: Date.now() } : {}) });
     return result;
   } catch (error) {
-    const message = controller.signal.aborted ? "Cloud backup cancelled. This installation has not been replaced."
-      : error?.name === "CompanyBackupError" ? error.message : "Cloud backup could not complete. Check your organization connection and available disk space, then try again.";
+    const message = controller.signal.aborted ? desktopText("desktop.extra.error.backupCancelled")
+      : error?.name === "CompanyBackupError" ? error.message : desktopText("desktop.extra.error.backupFailed");
     publishCompanyBackupState({ busy: false, pendingRestore: companyBackupState.pendingRestore, message });
     throw Object.assign(new Error(message), error?.code === "workspace_busy" ? { code: "workspace_busy" } : {});
   } finally {
@@ -1274,10 +1275,10 @@ function notifyDesktopViewer(open) {
 }
 
 function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed()) throw new Error(desktopText("desktop.extra.error.appWindowUnavailable"));
   const url = desktopViewerUrl(rawUrl);
   const titleCandidate = Object.prototype.toString.call(rawTitle) === "[object String]" ? rawTitle.trim() : "";
-  const title = titleCandidate ? titleCandidate.slice(0, 80) : "Live desktop";
+  const title = titleCandidate ? titleCandidate.slice(0, 80) : desktopText("desktop.extra.main.liveDesktop");
 
   const nextContextId =
     Object.prototype.toString.call(contextId) === "[object String]" ? contextId.slice(0, 120) : null;
@@ -1362,22 +1363,22 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
   });
   viewer.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || code === -3 || viewer.isDestroyed() || failedUrl.startsWith("data:")) return;
-    void viewer.loadURL(desktopViewerErrorPage(description || "The viewer did not respond.", url.toString()));
+    void viewer.loadURL(desktopViewerErrorPage(description || desktopText("desktop.extra.main.viewerNoResponse"), url.toString()));
   });
 
   notifyDesktopViewer(true);
   void viewer.loadURL(url.toString()).catch((error) => {
     if (viewer.isDestroyed()) return;
-    void viewer.loadURL(desktopViewerErrorPage(error?.message ?? "The viewer did not respond.", url.toString()));
+    void viewer.loadURL(desktopViewerErrorPage(error?.message ?? desktopText("desktop.extra.main.viewerNoResponse"), url.toString()));
   });
   return true;
 }
 
 function ensureDesktopWorkspace(owner) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed()) throw new Error(desktopText("desktop.extra.error.appWindowUnavailable"));
   if (desktopWorkspaceManager) {
     if (desktopWorkspaceOwner !== owner) {
-      throw new Error("The two-desktop view belongs to another app window");
+      throw new Error(desktopText("desktop.extra.error.workspaceOwner"));
     }
     return desktopWorkspaceManager;
   }
@@ -1413,10 +1414,10 @@ function ensureDesktopWorkspace(owner) {
 function desktopWorkspaceForEvent(event, create = false) {
   const owner = mainWindow;
   if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
-    throw new Error("The two-desktop view is available only to the main app window");
+    throw new Error(desktopText("desktop.extra.error.workspaceMainOnly"));
   }
   if (desktopWorkspaceManager && desktopWorkspaceOwner !== owner) {
-    throw new Error("The two-desktop view belongs to another app window");
+    throw new Error(desktopText("desktop.extra.error.workspaceOwner"));
   }
   return create ? ensureDesktopWorkspace(owner) : desktopWorkspaceManager;
 }
@@ -1449,7 +1450,7 @@ async function refreshSharedComputersAllowed() {
 
 async function requireSharedComputers() {
   if (await refreshSharedComputersAllowed()) return;
-  throw new Error("Computer sharing is turned off on this server.");
+  throw new Error(desktopText("desktop.extra.error.sharingOff"));
 }
 
 function sharingController() {
@@ -1526,9 +1527,9 @@ async function offerComputerSharing(win) {
     const info = await sharingController().observe(env);
     if (!info || win.isDestroyed() || activeEnvironment(environmentsState)?.id !== env.id || new URL(win.webContents.getURL()).origin !== env.origin) return;
     const choice = await dialog.showMessageBox(win, {
-      type: "question", message: `Share this computer with ${env.name}?`,
-      detail: "Let this server’s bots use folders and capabilities you choose while this desktop app is running. Nothing is shared unless you enable it. You can change this later in Settings → Servers.",
-      buttons: ["Choose access", "Not now"], defaultId: 1, cancelId: 1,
+      type: "question", message: desktopText("desktop.extra.main.offerSharingTitle", { name: env.name }),
+      detail: desktopText("desktop.extra.main.offerSharingDetail"),
+      buttons: [desktopText("desktop.extra.main.chooseAccess"), desktopText("desktop.common.notNow")], defaultId: 1, cancelId: 1,
     });
     sharingController().decline(env, info);
     if (choice.response === 0) openWorkspaceSettings(env.id);
@@ -1574,7 +1575,7 @@ function persistEnvironments(next) {
 
 async function workspaceMenuAction(action) {
   try { await action(); } catch (error) {
-    await dialog.showMessageBox({ type: "error", message: "Could not update servers", detail: error.message });
+    await dialog.showMessageBox({ type: "error", message: desktopText("desktop.extra.main.updateServers"), detail: error.message });
   }
 }
 
@@ -1601,8 +1602,8 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
   let switchSucceeded = false;
   const failedSwitch = () => {
     dialog.showErrorBox(
-      "Could not switch environments",
-      "OpenMausBot could not switch to that environment. The app log has the details.",
+      desktopText("desktop.extra.main.switchEnvTitle"),
+      desktopText("desktop.extra.main.switchEnvDetail"),
     );
     return { ok: false, error: "switch-failed" };
   };
@@ -1739,10 +1740,10 @@ const organizationEntry = createOrganizationEntry({
   confirm: async ({ kind, name, origin }) => {
     const { response } = await dialog.showMessageBox({
       type: "question",
-      buttons: [kind === "companion" ? "Disconnect and restart locally" : "Use this computer", "Cancel"],
+      buttons: [kind === "companion" ? desktopText("desktop.extra.main.disconnectLocally") : desktopText("desktop.extra.main.useThisComputer"), desktopText("common.cancel")],
       defaultId: 1, cancelId: 1,
-      message: kind === "companion" ? `Disconnect from ${name} to sign in locally?` : `Leave ${name} and sign in on this computer?`,
-      detail: `${origin}\n\nOrganization sign-in connects company models to this computer. ${kind === "companion" ? "This disconnects desktop companion access and restarts the app. You can pair again later." : "The hosted connection stays saved and can be selected again from the Server menu."} No remote bots, conversations or provider accounts are moved or deleted.`,
+      message: desktopText(kind === "companion" ? "desktop.extra.main.orgCompanionTitle" : "desktop.extra.main.orgHostedTitle", { name }),
+      detail: desktopText(kind === "companion" ? "desktop.extra.main.orgCompanionDetail" : "desktop.extra.main.orgHostedDetail", { origin }),
     });
     return response === 0;
   },
@@ -1751,7 +1752,7 @@ const organizationEntry = createOrganizationEntry({
     await updateSecureCredentialDocument(credentials => {
       const current = desktopCompanionAccess(credentials);
       if (!current || current.endpoint !== expected.endpoint || current.deviceId !== expected.deviceId || current.token !== expected.token) {
-        throw new Error("The companion connection changed. Choose organization sign-in again.");
+        throw new Error(desktopText("desktop.extra.error.companionChanged"));
       }
       return withOrganizationRestartIntent(credentials);
     });
@@ -1761,9 +1762,9 @@ const organizationEntry = createOrganizationEntry({
     organizationRestartIntent(credentials) && !desktopCompanionAccess(credentials)
       ? withoutOrganizationRestartIntent(credentials) : credentials),
   openLocalSettings: async () => {
-    if (!app.isPackaged) throw new Error("Organization sign-in requires the installed desktop app.");
-    if (!serverReady) throw new Error("This installation is unavailable. Restart the app and try organization sign-in again.");
-    if (desktopRemoteAccess || activeRemote(environmentsState)) throw new Error("Choose this computer before signing in with your organization.");
+    if (!app.isPackaged) throw new Error(desktopText("desktop.extra.error.orgInstalledApp"));
+    if (!serverReady) throw new Error(desktopText("desktop.extra.error.orgNotReady"));
+    if (desktopRemoteAccess || activeRemote(environmentsState)) throw new Error(desktopText("desktop.extra.error.orgChooseComputer"));
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
     if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) {
       win.webContents.send("app:open-settings", "organization");
@@ -1791,9 +1792,9 @@ async function deliverOrganizationEntry() {
 }
 
 async function openCloudEntry() {
-  if (!app.isPackaged) throw new Error("MausBot Cloud requires the installed desktop app.");
-  if (desktopRemoteAccess) throw new Error("This app is connected to another computer. Disconnect it to use MausBot Cloud on this computer.");
-  if (!serverReady) throw new Error("This installation is unavailable. Restart the app and open My Cloud again.");
+  if (!app.isPackaged) throw new Error(desktopText("desktop.extra.error.cloudInstalledApp"));
+  if (desktopRemoteAccess) throw new Error(desktopText("desktop.extra.error.cloudDisconnect"));
+  if (!serverReady) throw new Error(desktopText("desktop.extra.error.cloudNotReady"));
   await cloudAccountRestored();
   if ((await homeWindow.refresh()).kind !== "computer") { await showHome({ place: "cloud" }); return true; }
   const active = activeRemote(environmentsState);
@@ -1826,7 +1827,7 @@ async function addServerFromClipboard() {
   try {
     return await connectHostedWorkspace(clipboard.readText());
   } catch (error) {
-    await dialog.showMessageBox({ type: "info", message: "Could not connect to the server", detail: `${error.message}\nYou can also choose Connect to a server to enter an address in Settings.` });
+    await dialog.showMessageBox({ type: "info", message: desktopText("desktop.extra.main.connectFailed"), detail: desktopText("desktop.extra.main.connectFailedDetail", { error: error.message }) });
     return false;
   }
 }
@@ -1834,18 +1835,18 @@ async function addServerFromClipboard() {
 async function connectHostedWorkspace(input, name) {
   const link = parseHostedWorkspaceLink(input);
   if (!link) {
-    throw new Error("Enter an HTTPS server address or a full pairing link. Keep the pairing code after #, not in the URL query.");
+    throw new Error(desktopText("desktop.extra.error.serverAddress"));
   }
   const host = new URL(link.origin).host;
   const { response } = await dialog.showMessageBox({
     type: "question",
-    buttons: ["Connect", "Cancel"],
+    buttons: [desktopText("desktop.extra.main.connect"), desktopText("common.cancel")],
     defaultId: 0,
     cancelId: 1,
-    message: `Connect to ${host}?`,
+    message: desktopText("desktop.extra.main.connectTitle", { host }),
     detail: link.code
-      ? "The pairing code in the link is used once, then this app stays signed in to that server."
-      : "The link has no pairing code; the server will ask for one.",
+      ? desktopText("desktop.extra.main.pairCode")
+      : desktopText("desktop.extra.main.noPairCode"),
   });
   if (response !== 0) return false;
   let next = withEnvironment(environmentsState, { origin: link.origin, name }, () => randomUUID());
@@ -1878,14 +1879,14 @@ async function connectCloudHome(open = null) {
 function activateCloud(origin) {
   const next = withCloudHome(environmentsState, { status: "ready", origin }, () => randomUUID(), cloudLook.pending());
   const entry = next.environments.find((candidate) => candidate.origin === origin);
-  if (!entry) throw new Error("My Cloud could not be added to Servers.");
+  if (!entry) throw new Error(desktopText("desktop.extra.error.cloudNotAdded"));
   persistEnvironments(withActive(next, entry.id)); cloudAccount?.checkoutDone();
 }
 /** A team's or another own Cloud listed under Servers as the Admin names it (never a page), and the server this window shows. */
 function activatePlace(place) {
   const next = place.kind === "own" ? withOwnCloud(environmentsState, { ...place, role: place.role ?? "owner", color: undefined }, () => randomUUID()) : withTeam(environmentsState, place, () => randomUUID());
   const entry = next.environments.find((candidate) => candidate.origin === place.origin);
-  if (!entry) throw new Error(`${place.name} could not be added to Servers.`);
+  if (!entry) throw new Error(desktopText("desktop.extra.error.placeNotAdded", { name: place.name }));
   persistEnvironments(withActive(next, entry.id));
 }
 
@@ -1906,11 +1907,11 @@ function askRemoteMicrophone(origin) {
     const ask = (async () => {
       const options = {
         type: "question",
-        buttons: ["Allow", "Don’t Allow"],
+        buttons: [desktopText("desktop.extra.main.allowMic"), desktopText("desktop.extra.main.denyMic")],
         defaultId: 1,
         cancelId: 1,
-        message: `Allow “${env.name}” to use the microphone?`,
-        detail: `${new URL(origin).host} wants to hear you for a Live call. Allow only a server you trust; this app remembers your answer for this server until you forget it.`,
+        message: desktopText("desktop.extra.main.micTitle", { name: env.name }),
+        detail: desktopText("desktop.extra.main.micDetail", { host: new URL(origin).host }),
       };
       const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
       const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -1929,11 +1930,11 @@ async function forgetEnvironment(id, purge = false) {
   if (env.kind !== "local") {
     const { response } = await dialog.showMessageBox({
       type: "warning",
-      buttons: ["Forget", "Cancel"],
+      buttons: [desktopText("desktop.extra.main.forget"), desktopText("common.cancel")],
       defaultId: 1,
       cancelId: 1,
-      message: `Forget “${env.name}”?`,
-      detail: "This app signs out of that server. The server keeps its own session list; revoke it there too if the device is gone.",
+      message: desktopText("desktop.extra.main.forgetTitle", { name: env.name }),
+      detail: desktopText("desktop.extra.main.forgetDetail"),
     });
     if (response !== 0) return;
   }
@@ -1970,7 +1971,7 @@ async function forgetEnvironment(id, purge = false) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (error) {
     slog(`forget server: logout skipped (${error?.message ?? error})`);
-    await dialog.showMessageBox({ type: "warning", message: "Connection forgotten; server sign-out could not be confirmed", detail: "Computer sharing is stopped. Revoke this desktop’s session on that server when it is reachable again." });
+    await dialog.showMessageBox({ type: "warning", message: desktopText("desktop.extra.main.forgetWarning"), detail: desktopText("desktop.extra.main.forgetWarningDetail") });
   }
   try {
     // Not cookies: Chromium's cookie storage is host-wide, not port-scoped, so other saved servers would sign out.
@@ -1995,20 +1996,20 @@ function showContextMenu(win, params) {
   }
   if (params.linkURL) {
     menuItems.push(
-      { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) },
+      { label: desktopText("desktop.extra.main.copyLink"), click: () => clipboard.writeText(params.linkURL) },
       { type: "separator" },
     );
   }
   menuItems.push(
-    { label: "Undo", role: "undo", enabled: params.editFlags.canUndo },
-    { label: "Redo", role: "redo", enabled: params.editFlags.canRedo },
+    { label: desktopText("desktop.role.undo"), role: "undo", enabled: params.editFlags.canUndo },
+    { label: desktopText("desktop.role.redo"), role: "redo", enabled: params.editFlags.canRedo },
     { type: "separator" },
-    { label: "Cut", role: "cut", enabled: params.editFlags.canCut },
-    { label: "Copy", role: "copy", enabled: params.editFlags.canCopy },
+    { label: desktopText("desktop.role.cut"), role: "cut", enabled: params.editFlags.canCut },
+    { label: desktopText("desktop.role.copy"), role: "copy", enabled: params.editFlags.canCopy },
     pasteMenuItem(params, clipboard, win.webContents),
-    { label: "Paste and Match Style", role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
+    { label: desktopText("desktop.role.pasteAndMatchStyle"), role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
     { type: "separator" },
-    { label: "Select All", role: "selectAll", enabled: params.editFlags.canSelectAll },
+    { label: desktopText("desktop.role.selectAll"), role: "selectAll", enabled: params.editFlags.canSelectAll },
   );
   Menu.buildFromTemplate(menuItems).popup({ window: win, frame: params.frame });
 }
@@ -2117,8 +2118,8 @@ function createWindow({ deferNavigation = false } = {}) {
     slog(`remote server unreachable (${errorDescription}); back to Local`);
     void dialog.showMessageBox({
       type: "warning",
-      message: `${remote.name} is not reachable`,
-      detail: `${cloudUnreachableText(cloudAccount?.state(), remote.origin) ?? `${errorDescription}.`} Showing the local server instead; choose it again from the Server menu when it is back.`,
+      message: desktopText("desktop.extra.main.unreachableTitle", { name: remote.name }),
+      detail: desktopText("desktop.extra.main.unreachableDetail", { reason: cloudUnreachableText(cloudAccount?.state(), remote.origin) ?? `${errorDescription}.` }),
     });
     void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
   });
@@ -2278,7 +2279,7 @@ ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event
 ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (event, current) => {
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const result = await dialog.showOpenDialog(win, {
-    title: "Choose a working folder",
+    title: desktopText("desktop.extra.main.pickFolder"),
     properties: ["openDirectory", "createDirectory"],
     ...(typeof current === "string" && current ? { defaultPath: current } : {}),
   });
@@ -2290,9 +2291,9 @@ ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnos
   const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const report = await gatherDiagnostics();
   const result = await dialog.showSaveDialog(owner, {
-    title: "Export diagnostics",
+    title: desktopText("desktop.extra.main.exportDiagnostics"),
     defaultPath: diagnosticsFileName(),
-    filters: [{ name: "Text", extensions: ["txt"] }],
+    filters: [{ name: desktopText("desktop.extra.main.textFile"), extensions: ["txt"] }],
   });
   if (result.canceled || !result.filePath) return null;
   if (process.platform === "win32") {
@@ -2316,10 +2317,10 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
     const parent = BrowserWindow.fromWebContents(event.sender);
     const defaultPath = await defaultSaveName(app.getPath("downloads"), defaultName);
     const choice = await dialog.showSaveDialog(parent ?? undefined, {
-      title: "Where do you want to save it?",
-      message: "Where do you want to save it?",
+      title: desktopText("desktop.extra.main.saveWhere"),
+      message: desktopText("desktop.extra.main.saveWhere"),
       defaultPath,
-      buttonLabel: "Save",
+      buttonLabel: desktopText("common.save"),
       properties: ["createDirectory", "showOverwriteConfirmation"],
     });
     if (choice.canceled || !choice.filePath) return null;
@@ -2330,7 +2331,7 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
 }));
 
 ipcMain.handle("desktop:reveal-file", localOnly("desktop:reveal-file", async (_event, rawPath) => {
-  if (desktopRemoteAccess) throw new Error("That file is on the computer this app is connected to");
+  if (desktopRemoteAccess) throw new Error(desktopText("desktop.extra.error.remoteFile"));
   return revealInFolder(rawPath, { reveal: (target) => shell.showItemInFolder(target) });
 }));
 ipcMain.handle("desktop:open-logs", localOrHome("desktop:open-logs", () => openLogsFolder(LOG_DIR, { open: (folder) => shell.openPath(folder) })));
@@ -2480,7 +2481,7 @@ function requireMainWindowSender(event) {
   const sender = BrowserWindow.fromWebContents(event.sender);
   if (!sender || sender !== mainWindow || sender.isDestroyed() ||
       !event.senderFrame || event.senderFrame !== event.sender.mainFrame) {
-    throw new Error("The desktop client window is unavailable");
+    throw new Error(desktopText("desktop.extra.error.clientWindowUnavailable"));
   }
 }
 
@@ -2533,7 +2534,7 @@ ipcMain.handle("companion-account:prepare", localOnly("companion-account:prepare
 ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));
 
 const workspaceOnly = (handler) => (event, ...args) => {
-  if (!workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin())) throw new Error("These controls are only available in the main desktop window");
+  if (!workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin())) throw new Error(desktopText("desktop.extra.error.mainControlsOnly"));
   return handler(event, ...args);
 };
 const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnly(handler));
@@ -2542,11 +2543,11 @@ for (const method of ["state", "begin", "signInAgain", "reopen", "cancel", "refr
   ipcMain.handle(`cloud-account:${method}`, localWorkspaceOnly(`cloud-account:${method}`, () => ensureCloudAccount()[method]()));
 }
 ipcMain.handle("cloud-account:checkout", localWorkspaceOnly("cloud-account:checkout", async (_event, plan, source) => {
-  if (!(await cloudOffersReady())) throw new Error("MausBot Cloud isn't offered in this app.");
+  if (!(await cloudOffersReady())) throw new Error(desktopText("desktop.extra.error.cloudNotOffered"));
   const client = ensureCloudAccount();
-  if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error("Choose a plan to continue.");
+  if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error(desktopText("desktop.extra.error.choosePlan"));
   const offer = await client.offer();
-  if (!offer?.plans.some(entry => entry.tier === plan)) throw new Error("Choose a plan to continue.");
+  if (!offer?.plans.some(entry => entry.tier === plan)) throw new Error(desktopText("desktop.extra.error.choosePlan"));
   return client.checkout(plan, source);
 }));
 // The machine and its code come from the verified session in main, never from the renderer.
@@ -2556,7 +2557,7 @@ ipcMain.handle("cloud-account:connectHomeForPhone", localWorkspaceOnly("cloud-ac
 ipcMain.handle("cloud-account:openTeam", localWorkspaceOnly("cloud-account:openTeam", async (_event, teamId) => {
   const current = ensureCloudAccount().state();
   const team = current.status === "connected" ? current.teams?.find(entry => entry.id === teamId) ?? null : null;
-  if (!team) throw new Error("You're not in that team.");
+  if (!team) throw new Error(desktopText("desktop.extra.error.notInTeam"));
   await showHome({ place: { team: team.id, name: team.name } });
 }));
 // Cancel trial / Cancel plan and Keep my plan: the page sends the survey's words only; the Cloud is the verified session's own.
@@ -2597,20 +2598,20 @@ ipcMain.handle("company-backups:create", localWorkspaceOnly("company-backups:cre
 ipcMain.handle("company-backups:preview", localWorkspaceOnly("company-backups:preview", (_event, input) => runCompanyBackup("restore", input)));
 ipcMain.handle("company-backups:cancel", localWorkspaceOnly("company-backups:cancel", () => { companyBackupController?.abort(); }));
 ipcMain.handle("company-backups:delete", localWorkspaceOnly("company-backups:delete", (_event, input) => {
-  if (companyBackupController || input?.confirmation !== "DELETE" || !/^[a-f0-9-]{36}$/.test(input?.id)) throw new Error("Confirm the exact backup to delete when no transfer is running.");
+  if (companyBackupController || input?.confirmation !== "DELETE" || !/^[a-f0-9-]{36}$/.test(input?.id)) throw new Error(desktopText("desktop.extra.error.deleteBackupConfirm"));
   return ensureManagedDesktop().requestBackup(`/api/desktop/backups/${input.id}`, { method: "DELETE" });
 }));
 ipcMain.handle("company-backups:restore", localWorkspaceOnly("company-backups:restore", async (_event, input) => {
   const client = ensureManagedDesktop(), connection = client.connection();
   if (companyBackupController || companyRestoreCommitting || !preparedCompanyRestore || preparedCompanyRestore.id !== input?.id || input?.confirmation !== "REPLACE" ||
       !connection || client.state().status !== "connected" || !client.state().cloudBackups || connection.expiresAt <= Date.now() ||
-      preparedCompanyRestore.proc !== serverProc || preparedCompanyRestore.deviceId !== connection.deviceId) throw new Error("Preview this backup again and type REPLACE to confirm.");
+      preparedCompanyRestore.proc !== serverProc || preparedCompanyRestore.deviceId !== connection.deviceId) throw new Error(desktopText("desktop.extra.error.restoreConfirm"));
   // Consume the preview before yielding, so duplicate IPC cannot commit it twice.
   preparedCompanyRestore = null;
   companyRestoreCommitting = true;
   try {
     const response = await localBackupRequest(serverProc, "/api/workspace-backup/restore", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: input.id, confirmation: "REPLACE" }) });
-    if (!response.ok) throw new Error("This installation could not be replaced. Check local backup status before trying again.");
+    if (!response.ok) throw new Error(desktopText("desktop.extra.error.restoreFailed"));
     publishCompanyBackupState({ busy: false, pendingRestore: true });
     return await response.json();
   } finally { companyRestoreCommitting = false; }
@@ -2627,7 +2628,7 @@ const cloudPageAsking = (event) => {
 };
 const cloudPageSender = (channel, handler) => (event) => {
   const asking = cloudPageAsking(event);
-  if (!asking) throw new Error(`${channel} is only available in this app's window`);
+  if (!asking) throw new Error(desktopText("desktop.extra.error.appWindowOnly", { channel }));
   return handler(asking === "cloud");
 };
 /** The page of another Cloud of the person's own, open as this window's active server: that Cloud, as the session lists it. */
@@ -2650,7 +2651,7 @@ installCloudPlanIpc({ ipcMain, pageSender: cloudPageSender, account: () => cloud
 
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);
-  if (!env) throw new Error("This server is no longer connected");
+  if (!env) throw new Error(desktopText("desktop.extra.error.serverDisconnected"));
   return env;
 };
 // The buying sheet (cloud-buy.mjs): its channels, and the Cloud's name and colour (Servers entry once listed).
@@ -2744,7 +2745,7 @@ ipcMain.handle("dialog:confirm", localWorkspaceOnly("dialog:confirm", async (_ev
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: "warning",
     message,
-    buttons: ["OK", "Cancel"],
+    buttons: [desktopText("common.ok"), desktopText("common.cancel")],
     defaultId: 1,
     cancelId: 1,
   });
@@ -2811,14 +2812,14 @@ ipcMain.handle("desktop:capabilities", async (event) =>
 async function saveWorkspaceCredential(name, value) {
   const patchFor = CREDENTIAL_PATCH[name];
   if (!patchFor || typeof value !== "string") {
-    throw new Error("Unsupported credential");
+    throw new Error(desktopText("desktop.extra.error.unsupportedCredential"));
   }
   if (app.isPackaged && !(await safeStorage.isAsyncEncryptionAvailable())) {
-    throw new Error("The operating-system credential store is unavailable");
+    throw new Error(desktopText("desktop.extra.error.credentialUnavailable"));
   }
   const secret = value.trim();
   const applyToHarness = async () => {
-    if (app.isPackaged && !serverReady) throw new Error("The embedded bot server is unavailable");
+    if (app.isPackaged && !serverReady) throw new Error(desktopText("desktop.extra.error.botServerUnavailable"));
     const secretStorage = app.isPackaged ? "?secretStorage=external" : "";
     const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config${secretStorage}`, {
       method: "PUT",
@@ -2852,7 +2853,7 @@ ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, valu
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
   // A separately launched dev server is outside this trust path: never degrade this grant to loopback HTTP.
   if (!app.isPackaged || !serverProc) {
-    throw new Error("Full and Custom approval modes require the embedded desktop server");
+    throw new Error(desktopText("desktop.extra.error.trustedModeServer"));
   }
   return trustedApprovalMode.request(serverProc, botId, mode, options);
 }));
@@ -2887,6 +2888,7 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),
@@ -2928,8 +2930,8 @@ app.whenReady().then(async () => {
       slog(`boot environment ${boot.missingDir} is missing; falling back to the default data dir`);
       persistEnvironments({ ...environmentsState, activeId: LOCAL_ID });
       dialog.showErrorBox(
-        "The environment's folder is missing",
-        `${boot.missingDir} is not there anymore, so OpenMausBot came up on this computer's default data folder instead. Restore or remount that folder, then choose the environment again from the Server menu.`,
+        desktopText("desktop.extra.main.missingEnvTitle"),
+        desktopText("desktop.extra.main.missingEnvDetail", { path: boot.missingDir }),
       );
     }
     bootDataDir = boot.dataDir;
@@ -2943,8 +2945,8 @@ app.whenReady().then(async () => {
       runningDataDir = bootDataDir;
     } catch (error) {
       dialog.showErrorBox(
-        "OpenMausBot could not start safely",
-        error?.message ?? "Another process is using this OpenMausBot data folder.",
+        desktopText("desktop.extra.main.safeStartTitle"),
+        error?.message ?? desktopText("desktop.extra.main.busyDataFolder"),
       );
       app.quit();
       return;
@@ -3028,12 +3030,15 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
-  desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
   updatesConsent = registerDesktopPrefs({ ipcMain, cloudAccount: () => cloudAccount, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
     frame: { made: () => windowFrameMade, restarts: process.platform === "win32", changed: () => void broadcastDesktopCapabilities() },
     languageChanged: (language, sender) => {
       for (const win of appWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
       chromeRail.send("desktop-language:changed", language);
+      refreshApplicationMenu();
+      desktopTray?.refresh();
+      lendingTray?.refresh();
+      applyUnreadBadge();
     },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
   talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), away: () => homeWindow.current().kind !== "computer", starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir });
@@ -3077,8 +3082,8 @@ app.whenReady().then(async () => {
         runningDataDir = desktopDataDir();
       } catch (error) {
         dialog.showErrorBox(
-          "OpenMausBot could not start safely",
-          error?.message ?? "Another process is using this OpenMausBot data folder.",
+          desktopText("desktop.extra.main.safeStartTitle"),
+          error?.message ?? desktopText("desktop.extra.main.busyDataFolder"),
         );
         app.quit();
         return;
@@ -3086,13 +3091,13 @@ app.whenReady().then(async () => {
       const retried = await startServerPackaged();
       if (retried) {
         dialog.showErrorBox(
-          "The environment was unhealthy",
-          `OpenMausBot could not start on ${bootDataDir} and came up on this computer's default data folder instead. Choose that environment again from the Server menu once it is available.`,
+          desktopText("desktop.extra.main.unhealthyTitle"),
+          desktopText("desktop.extra.main.unhealthyDetail", { path: bootDataDir }),
         );
       } else {
         dialog.showErrorBox(
-          "OpenMausBot could not start",
-          `OpenMausBot could not start on ${bootDataDir} or on this computer's default data folder. Check that both folders are readable, then start the app again.`,
+          desktopText("desktop.extra.main.startFailedTitle"),
+          desktopText("desktop.extra.main.startFailedDetail", { path: bootDataDir }),
         );
         app.quit();
       }

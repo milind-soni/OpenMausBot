@@ -239,7 +239,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
         if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
           const headers = (body.headers ?? {}) as Record<string, string | true>;
           if (Object.keys(headers).length > 1) {
-            throw new Error("Personal MCP connections support one header. Remove the extra headers before saving.");
+            throw new Error(t("ui.mcpServersPanel.personalMCPConnectionsSupportOneHeaderRemoveTheExtraHeaders"));
           }
           const value = Object.values(headers)[0];
           ownKey = typeof value === "string" ? value : undefined;

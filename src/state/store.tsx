@@ -75,7 +75,7 @@ import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } fr
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
 
-export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest"> {
+export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "quotaSwitch" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest"> {
   title: string;
   subtitle: string;
   options: string[];
@@ -1412,7 +1412,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const patch = taskPatchFields(action.patch);
       return reconcileModelVariantSessions(updateBot(state, action.botId, (bot) => ({
         ...bot,
-        tasks: (bot.tasks ?? [{ threadId: bot.threadId, title: "New thread", createdAt: Date.now() }]).map((task) =>
+        tasks: (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: Date.now() }]).map((task) =>
           task.threadId === action.threadId ? { ...task, ...patch } : task),
       })));
     }
@@ -1950,7 +1950,7 @@ export async function persistTaskApproval(
 ): Promise<BotAnnouncement> {
   const { approvalMode, autoApprove, acknowledgeLocalAuto, ...ordinary } = patch;
   const mode = approvalMode ?? (autoApprove === undefined ? undefined : autoApprove ? "auto" : "ask");
-  if (mode === "custom" && !bridge) throw new Error("This approval change requires the packaged desktop app");
+  if (mode === "custom" && !bridge) throw new Error(t("ui.store.thisApprovalChangeRequiresThePackagedDesktopApp"));
   if (mode && bridge) {
     if (Object.keys(ordinary).length) await request(`/api/bots/${botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify(ordinary) });
     return bridge.setMode(botId, mode, { threadId, threadOnly: true, acknowledgeLocalAuto: acknowledgeLocalAuto === true });
@@ -1993,7 +1993,7 @@ export async function persistBotUpdate(
   }
 
   if (!trustedApprovals || approvalMode === undefined) {
-    throw new Error("This approval-level change requires the packaged desktop app");
+    throw new Error(t("ui.store.thisApprovalLevelChangeRequiresThePackagedDesktopApp"));
   }
 
   const trustedOptions = {
@@ -2205,7 +2205,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           persisted.modelSelection.effort !== expectedSelection.effort ||
           persisted.modelSelection.variant !== expectedSelection.variant
         ) {
-          throw new Error("The approval level, memory setting, or model could not be saved, so this work was not started");
+          throw new Error(t("ui.store.theApprovalLevelMemorySettingOrModelCouldNotBe"));
         }
       })]);
       if (threadId) await taskWrites.get(threadId)?.execution;
@@ -2778,7 +2778,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((candidate) => candidate.id === action.botId);
           const task = bot?.tasks?.find((candidate) => candidate.threadId === action.threadId);
           if (!bot || !task) {
-            showError(new Error("That thread is no longer available"));
+            showError(new Error(t("ui.store.thatThreadIsNoLongerAvailable")));
             break;
           }
           const mode = approvalModeFor(bot);
@@ -2791,7 +2791,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? bridge.setMode(action.botId, mode, {
                 threadId: action.threadId, threadOnly: true, refreshPermissions: true, acknowledgeLocalAuto,
               })
-              : Promise.reject(new Error("This approval change requires the packaged desktop app"))
+              : Promise.reject(new Error(t("ui.store.thisApprovalChangeRequiresThePackagedDesktopApp")))
             : api<{ bot: BotAnnouncement }>(`/api/bots/${action.botId}/tasks/${action.threadId}`, {
               method: "PATCH",
               body: JSON.stringify({ refreshPermissions: true, ...(acknowledgeLocalAuto ? { acknowledgeLocalAuto: true } : {}) }),

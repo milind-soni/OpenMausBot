@@ -44,7 +44,7 @@ export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
   running: [],
 };
 
-export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: string[] = []): TeamMapSection<T>[] {
+export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: string[] = [], generalName = t("ui.final.team.general")): TeamMapSection<T>[] {
   const sections = new Map<string, T[]>();
   for (const bot of bots) {
     if (bot.hidden) continue;
@@ -57,7 +57,7 @@ export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: str
   }
   return [...sections].map(([key, sectionBots]) => ({
     key,
-    name: key || "General",
+    name: key || generalName,
     chiefs: sectionBots.filter((bot) => bot.chiefOfStaff),
     members: sectionBots.filter((bot) => !bot.chiefOfStaff),
   }));
@@ -106,10 +106,10 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
 }
 
 export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
-  if (bot.activity === "waiting-on-you") return { label: "Waiting for you", tone: "warning" };
-  if (bot.activity === "dead" || bot.activity === "no-signal") return { label: "No signal", tone: "danger" };
-  if (bot.busy || bot.activity === "working") return { label: "Working", tone: "success" };
-  return { label: "Ready", tone: "idle" };
+  if (bot.activity === "waiting-on-you") return { label: t("ui.dynamic.teamMap.waiting"), tone: "warning" };
+  if (bot.activity === "dead" || bot.activity === "no-signal") return { label: t("ui.dynamic.teamMap.noSignal"), tone: "danger" };
+  if (bot.busy || bot.activity === "working") return { label: t("ui.dynamic.teamMap.working"), tone: "success" };
+  return { label: t("ui.dynamic.teamMap.ready"), tone: "idle" };
 }
 
 export function teamMapBotCount(count: number): string {
