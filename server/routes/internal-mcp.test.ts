@@ -693,6 +693,18 @@ describe("internal mcp_server route, below Full access", () => {
     expect(remote.card()!.mcpRequest!.targetHash).toBe(sha("https://mcp.zapier.com/api/mcp/s/…/mcp"));
   });
 
+  it("a client-id-only update does not say the destination changed, and a url change still names it", async () => {
+    probeWith({ ok: true, tools: [] });
+    const app = { ...linear, oauth: { clientId: "omb-app", clientSecret: "old-client-secret" } };
+    const idOnly = await fixture({ servers: { linear: app } }).post({ action: "update", name: "linear", oauth: { clientId: "other-app" } });
+    expect(idOnly.body.dropped).toEqual(["oauth client secret"]);
+    expect(idOnly.body.text).toContain("OAuth client id changed");
+    expect(idOnly.body.text).toContain("request_credential");
+    expect(idOnly.body.text).not.toMatch(/destination changed/);
+    const moved = await fixture({ servers: { linear: app } }).post({ action: "update", name: "linear", url: "https://mcp.linear.app/v2" });
+    expect(moved.body.text).toMatch(/destination or OAuth client id changed/);
+  });
+
   it("a new literal OAuth client secret shows as its own change line without its value", async () => {
     probeWith({ ok: true, tools: [] });
     const signedApp = { ...linear, enabled: false, oauth: { clientId: "omb-app", clientSecret: "old-client-secret" } };

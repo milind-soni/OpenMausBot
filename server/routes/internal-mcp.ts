@@ -255,7 +255,7 @@ async function update(deps: Ctx, name: string, existing: StoredMcpServer, fields
   planned.commit();
   deps.decide(`Changed MCP server ${name}`, "full-access");
   const cleared = dropped.length
-    ? ` Its destination changed, so these saved values were cleared: ${dropped.join(", ")}. If it still needs them, ask again with request_credential (delivery ref) and send the secretRef with action update.`
+    ? ` The destination or OAuth client id changed, so these saved values were cleared: ${dropped.join(", ")}. If it still needs them, ask again with request_credential (delivery ref) and send the secretRef with action update.`
     : "";
   const where = folderText(deps, server, moved);
   const changed: Line[] = [["server.mcp.changed", { name }], ...(dropped.length ? [["server.mcp.keysCleared"] as Line] : [])];
