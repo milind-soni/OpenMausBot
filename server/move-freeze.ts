@@ -25,8 +25,10 @@ const FILE = /\.[A-Za-z0-9]+$/u;
 export const ENDED_REFUSAL = "My Cloud has ended. It is open only so you can take your things home.";
 
 /** What a frozen server still changes: the freeze itself, the move's reads and lets-go, signing in and out, the backup
- * that takes things home, the Admin's signed routes, Files and the computers lent to it. */
-const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/)/u;
+ * that takes things home, the Admin's signed routes, Files and the computers lent to it. A computer lent to the move's
+ * destination keeps taking its own screen lease (#4122): without it every screen call from the new home dies on the
+ * frozen copy's 409, while files and the terminal keep working. */
+const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/|desktop\/shared-computer-control)/u;
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** What a frozen copy keeps once its workspace is deleted: the marker, this server's identity, Files, downloaded tools
  * and caches, and its own runtime files. Everything else, credentials included, is the person's workspace. */
