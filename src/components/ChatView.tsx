@@ -1001,7 +1001,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     ? { link: currentLink, assign: (link: string | null) => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { link } }) }
     : null, [canWrite, currentLink, bot.id, bot.threadId, dispatch]);
 
-  const routineExecution = state.routineRuns.find((run) => run.target === "bot" && run.botId === bot.id && run.threadId === bot.threadId);
+  // A run that joined the person's own chat (a wait's follow-up, a limit-reset continuation) has no run page of its own there.
+  const routineExecution = state.routineRuns.find((run) => run.target === "bot" && run.botId === bot.id && run.threadId === bot.threadId &&
+    run.threadId !== run.resultsThreadId && run.threadId !== run.sourceThreadId);
   const resultsThreadId = routineExecution?.resultsThreadId ?? routineExecution?.sourceThreadId;
   const canOpenResults = resultsThreadId && [...state.bots, ...state.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId));
 
