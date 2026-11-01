@@ -39,7 +39,8 @@ function service(options: Partial<McpRequestOptions> & { store?: ReturnType<type
     answer: (_threadId, _messageId, text) => { answers.push(text); return parked; },
     decide: (row) => { decisions.push(row); },
   });
-  const propose = () => cards.propose({ botId: BOT, threadId: THREAD, action: "enable", name: "linear" }, "https://mcp.linear.app/mcp", { target: "[\"https://mcp.linear.app/mcp\"]" });
+  const propose = (action: "enable" | "update" = "enable") => cards.propose({ botId: BOT, threadId: THREAD, action, name: "linear", targetHash: "0".repeat(64) },
+    "https://mcp.linear.app/mcp", action === "update" ? { resultBudget: 4000 } : undefined);
   const respond = (requestId: string, behavior: "allow" | "deny", ownerReview = true) =>
     cards.respond({ botId: BOT, threadId: THREAD, requestId, behavior }, ownerReview);
   const waiting = () => resumableCards(store as unknown as Pick<Store, "activePath">, THREAD, 0);
@@ -108,9 +109,9 @@ describe("MCP approval cards", () => {
     expect(after.apply, "the restart applies nothing again").not.toHaveBeenCalled();
   });
 
-  it("a restart-then-allow resumes with the expired text and applies nothing", async () => {
+  it("a restart-then-allow on a Change card resumes with the expired text and applies nothing", async () => {
     const before = service();
-    const { requestId } = before.propose();
+    const { requestId } = before.propose("update");
     const after = service({ store: before.store });
     expect(await after.respond(requestId, "allow")).toMatchObject({ status: 200, body: { alreadySettled: false, result: { state: "expired" } } });
     expect(after.apply).not.toHaveBeenCalled();
@@ -119,9 +120,9 @@ describe("MCP approval cards", () => {
     expect(after.store.rows[0]!.card).toMatchObject({ expired: true, options: [], held: "OpenMausBot restarted, so this request expired.", mcpRequest: { resumed: true } });
   });
 
-  it("a restart expires an open card for the turn parked on it, which hears why", () => {
+  it("a restart expires an open Change card for the turn parked on it, which hears why, and leaves a Turn on card open", () => {
     const before = service();
-    const { messageId } = before.propose();
+    const { messageId } = before.propose("update");
     expect(before.cards.decided(THREAD, messageId), "the change is still held before a restart").toBe(false);
     const after = service({ store: before.store });
     expect(after.cards.decided(THREAD, messageId)).toBe(true);
@@ -129,6 +130,12 @@ describe("MCP approval cards", () => {
     expect(after.cards.resume(THREAD, messageId, (text) => { parked.push(text); return true; })).toBe(true);
     expect(parked[0]).toContain("OpenMausBot restarted, so this request expired. Ask again if you still need it.");
     expect(after.waiting()).toEqual([]);
+
+    const turnOn = service();
+    const open = turnOn.propose("enable");
+    const restarted = service({ store: turnOn.store });
+    expect(restarted.cards.decided(THREAD, open.messageId), "a Turn on card holds no fields, so it waits for the person").toBe(false);
+    expect(restarted.waiting().map((card) => card.id)).toEqual([open.messageId]);
   });
 
   it("a busy config answers 409 and leaves the card open for another try", async () => {
@@ -153,13 +160,13 @@ describe("MCP approval cards", () => {
     expect(local.decisions.map((row) => row.decision)).toEqual(["card-shown", "user-approved"]);
   });
 
-  it("a new card about the same server frees the held change of every earlier one, a Stop-closed card's included", () => {
+  it("a new card about the same server frees the held fields of every earlier one, a Stop-closed card's included", () => {
     const { store, cards, propose } = service();
-    const stopped = propose();
+    const stopped = propose("update");
     store.patchMessage(THREAD, stopped.messageId, { card: closedByStop(store.rows[0]!.card)! });
     const held = (cards as unknown as { held: Map<string, unknown> }).held;
     expect(held.has(stopped.requestId)).toBe(true);
-    const newer = propose();
+    const newer = propose("update");
     expect([...held.keys()]).toEqual([newer.requestId]);
   });
 });

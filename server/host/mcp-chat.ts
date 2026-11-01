@@ -49,9 +49,9 @@ export function createMcpChat(deps: McpChatDeps) {
   const { store, cfg, mcpOAuth, teamConnections, mcpServersHost, managedPolicy, threadLanguage, answerCardNode, fullAccessForSource, cloudGuestDriven, liveTurnByThread, broadcast } = deps;
   const mcpRequests = new McpRequestService({
     store, teamCloud: deps.teamCloud, language: threadLanguage,
-    apply: async (request, change) => {
+    apply: async (request, fields) => {
       const bot = store.bot(request.botId);
-      return bot ? applyMcpChange(mcpServerDeps(bot, request.threadId), request, change) : { state: "failed", text: "This bot no longer exists." };
+      return bot ? applyMcpChange(mcpServerDeps(bot, request.threadId), request, fields) : { state: "failed", text: "This bot no longer exists." };
     },
     answer: answerCardNode,
     decide: (row) => appendDecision(DATA_DIR, { ...row, botName: store.bot(row.botId)?.name, tool: "mcp_server", source: row.decision === "card-shown" ? "no-grant" : "user" }),
@@ -104,7 +104,7 @@ export function createMcpChat(deps: McpChatDeps) {
       activity: (label, call) => showMcpActivity(store, { threadId, turnId: liveTurnByThread.get(threadId), ...(from ? { from } : {}) }, call, label),
       language: () => threadLanguage(threadId),
       usedBy: (name) => store.bots.filter((bot) => bot.id !== sender.id && !bot.hidden && Object.hasOwn(mcpServersHost.mounted(bot), name) && canUseMcpServer(bot.toolScope, name)).map((bot) => bot.name),
-      requestApproval: ({ action, name, subtitle, change }) => mcpRequests.propose({ action, name, botId: sender.id, threadId }, subtitle, change, from),
+      requestApproval: ({ action, name, subtitle, targetHash, fields }) => mcpRequests.propose({ action, name, botId: sender.id, threadId, targetHash }, subtitle, fields, from),
       requestSignIn: (name, server) => mcpSignInCards.request({ bot: sender, threadId, ...(from ? { from } : {}) }, name, server),
     };
   }

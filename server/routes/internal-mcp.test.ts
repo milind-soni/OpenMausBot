@@ -73,17 +73,18 @@ function fixture(options: Options = {}) {
   const answers: string[] = [];
   const decisions: string[] = [];
   const signIns: Array<{ name: string; url: string }> = [];
-  const cards = new McpRequestService({
+  const service = () => new McpRequestService({
     store: {
       messagesFor: () => chat,
       appendMessage: (_threadId, message) => { const row = { ...message, id: `card-${chat.length + 1}` }; chat.push(row); return row; },
       patchMessage: (_threadId, id, patch) => { const row = chat.find((item) => item.id === id); if (row) row.card = patch.card; },
     },
     teamCloud: false,
-    apply: (request, change) => applyMcpChange(deps, request, change),
+    apply: (request, fields) => applyMcpChange(deps, request, fields),
     answer: (_threadId, _messageId, text) => { answers.push(text); return true; },
     decide: (row) => { decisions.push(row.decision); },
   });
+  let cards = service();
   let body: unknown = {};
   const deps: InternalMcpDeps = {
     readBody: async () => body as Record<string, unknown>,
@@ -108,7 +109,7 @@ function fixture(options: Options = {}) {
     activity: (label) => { lines.push(label); },
     language: () => undefined,
     usedBy: (name) => options.usedBy?.[name] ?? [],
-    requestApproval: ({ action, name, subtitle, change }) => cards.propose({ action, name, botId: BOT, threadId: THREAD }, subtitle, change),
+    requestApproval: ({ action, name, subtitle, targetHash, fields }) => cards.propose({ action, name, botId: BOT, threadId: THREAD, targetHash }, subtitle, fields),
     requestSignIn: (name, server) => {
       if (options.signInRefusal) return options.signInRefusal;
       signIns.push({ name, url: server.url });
@@ -143,7 +144,9 @@ function fixture(options: Options = {}) {
   const card = () => chat.at(-1)?.card;
   const respond = (behavior: "allow" | "deny") => cards.respond({ botId: BOT, threadId: THREAD, requestId: card()!.requestId!, behavior }, true);
   const later = (ms: number) => { clock += ms; };
-  return { cfg, config, mcpOAuth, deps, sender, call, post, stored, ref, listedOn, decided, lines, dataDir, setBusy, chat, card, respond, answers, decisions, later, signIns };
+  /** A fresh request service over the same chat, as after OpenMausBot restarts. */
+  const restart = () => { cards = service(); };
+  return { cfg, config, mcpOAuth, deps, sender, call, post, stored, ref, listedOn, decided, lines, dataDir, setBusy, chat, card, respond, answers, decisions, later, signIns, restart };
 }
 
 async function createInternalMcpRoutesCall(deps: InternalMcpDeps, payload: Record<string, unknown>) {
@@ -542,7 +545,7 @@ describe("internal mcp_server route, below Full access", () => {
       title: "Turn on linear?",
       subtitle: "https://mcp.linear.app/mcp\nReached over the internet. Once on, your bots can use its tools.",
       options: ["Turn on", "Cancel"], requestId: expect.any(String), tool: "mcp_server", fixedOptions: true,
-      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "linear" },
+      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "linear", targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
     });
   });
 
@@ -656,7 +659,7 @@ describe("internal mcp_server route, below Full access", () => {
     expect((await post({ action: "update", name: "notes", args: ["-y", "notes-mcp", "--token", "sk-live-9"], env: { NOTES_TOKEN: fresh } })).status).toBe(202);
     const stored = JSON.stringify(chat);
     for (const sent of [fresh, "sk-live-9", "fresh-token", "saved-token"]) expect(stored, sent).not.toContain(sent);
-    expect(Object.keys(chat[0]!.card.mcpRequest!).sort()).toEqual(["action", "botId", "name", "requestId", "threadId"]);
+    expect(Object.keys(chat[0]!.card.mcpRequest!).sort()).toEqual(["action", "botId", "name", "requestId", "targetHash", "threadId"]);
   });
 
   it("a literal under a secret's name shows as a new key, never its value, while other literals still show", async () => {
@@ -778,6 +781,66 @@ describe("internal mcp_server route, below Full access", () => {
     const { post } = fixture({ servers: { linear } });
     expect(await post({ action: "add", name: "linear", url: "https://mcp.linear.app/mcp" }))
       .toEqual({ status: 409, body: { error: "linear already exists. Use update, or pick another name." } });
+  });
+});
+
+describe("a card answered after OpenMausBot restarts", () => {
+  it("Turn on applies and resumes the bot with the test result", async () => {
+    const probe = probeWith({ ok: true, tools: [{ name: "list_issues" }] });
+    const { post, respond, restart, stored, card, answers } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
+    await post({ action: "enable", name: "linear" });
+    restart();
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { result: { state: "applied" } } });
+    expect(stored("linear")?.enabled).toBe(true);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(card()).toMatchObject({ answered: "allow", mcpRequest: { resumed: true, result: { state: "applied" } } });
+    expect(answers[0]).toContain("Turned on MCP server linear. Test: it works. Its tools: list_issues.");
+  });
+
+  it("Remove removes the server", async () => {
+    const { post, respond, restart, cfg, card } = fixture({ full: false, servers: { linear } });
+    await post({ action: "remove", name: "linear" });
+    restart();
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { result: { state: "applied" } } });
+    expect(cfg.mcpServers).toEqual({});
+    expect(card()).toMatchObject({ answered: "allow" });
+  });
+
+  it("a server whose address or command changed meanwhile is left alone", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, respond, restart, stored, config, card, answers } = fixture({ full: false, servers: { notes: { ...notes, enabled: false } } });
+    await post({ action: "enable", name: "notes" });
+    expect("error" in config.replace("notes", { ...notes, args: ["-y", "other-mcp"], enabled: false } as StoredMcpServer)).toBe(false);
+    restart();
+    await respond("allow");
+    expect(stored("notes")).toMatchObject({ args: ["-y", "other-mcp"], enabled: false });
+    expect(probe).not.toHaveBeenCalled();
+    expect(card()).toMatchObject({ expired: true, held: "notes changed after this was asked, so nothing was applied.", mcpRequest: { result: { state: "failed" } } });
+    expect(answers[0]).toContain("notes changed since you were asked, so nothing was applied.");
+  });
+
+  it("a Change card expires, and no field the bot sent is on the stored card", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, respond, restart, stored, card, chat, answers, ref } = fixture({ full: false, servers: { notes } });
+    const fresh = ref("fresh-token");
+    await post({ action: "update", name: "notes", args: ["-y", "notes-mcp", "--token", "sk-live-9"], env: { NOTES_TOKEN: fresh } });
+    restart();
+    await respond("allow");
+    expect(stored("notes")).toMatchObject({ args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "saved-token" } });
+    expect(probe).not.toHaveBeenCalled();
+    expect(card()).toMatchObject({ expired: true, held: "OpenMausBot restarted, so this request expired.", mcpRequest: { result: { state: "expired" } } });
+    expect(answers[0]).toContain("OpenMausBot restarted, so this request expired. Ask again if you still need it.");
+    for (const sent of [fresh, "sk-live-9", "fresh-token", "saved-token"]) expect(JSON.stringify(chat), sent).not.toContain(sent);
+  });
+
+  it("Cancel settles as the person's no", async () => {
+    const { post, respond, restart, stored, card, answers } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
+    await post({ action: "enable", name: "linear" });
+    restart();
+    await respond("deny");
+    expect(stored("linear")?.enabled).toBe(false);
+    expect(card()).toMatchObject({ answered: "deny", mcpRequest: { result: { state: "denied" } } });
+    expect(answers[0]).toContain("The person kept it off. Don't add it again unless they ask.");
   });
 });
 

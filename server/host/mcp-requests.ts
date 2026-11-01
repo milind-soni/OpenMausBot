@@ -6,9 +6,8 @@ import { serverLine, type ServerLineKey } from "../server-lines.ts";
 
 export type McpCardAction = McpChangeRequest["action"];
 export type McpChangeResult = NonNullable<McpChangeRequest["result"]>;
-/** The change a card stands for: what the server reached (url, or command and args) when it was asked, and the bot's
- * fields for an update. Security: held in memory only, never on the card, since the fields can carry secrets. */
-export type McpHeldChange = { target: string; body?: Record<string, unknown> };
+/** The bot's fields for an update. Security: held in memory only, never on the card, since they can carry secrets. */
+export type McpUpdateFields = Record<string, unknown>;
 /** `note`: the card's reason when it did not apply. `busy`: another change holds the config, so the card stays open. */
 export type McpApplied = (McpChangeResult & { note?: string }) | { state: "busy" };
 type RequestFrom = { botId: string; name: string; color: string };
@@ -47,7 +46,7 @@ export interface McpRequestOptions {
   };
   /** Allow on a Team Cloud also needs a workspace admin. */
   teamCloud: boolean;
-  apply(request: McpChangeRequest, change: McpHeldChange): Promise<McpApplied>;
+  apply(request: McpChangeRequest, fields?: McpUpdateFields): Promise<McpApplied>;
   /** Hands the decision to the turn parked on this card; false when none took it. */
   answer(threadId: string, messageId: string, text: string): boolean;
   decide(row: { threadId: string; requestId: string; botId: string; summary: string; decision: Decision }): void;
@@ -59,13 +58,13 @@ type Settled = McpChangeResult & { note?: string };
 
 export class McpRequestService {
   private readonly resolving = new Set<string>();
-  private readonly held = new Map<string, McpHeldChange>();
+  private readonly held = new Map<string, McpUpdateFields>();
   private readonly options: McpRequestOptions;
   constructor(options: McpRequestOptions) { this.options = options; }
 
   /** An older open card about the same server is superseded, so only the newest proposal can be answered, and every
-   * earlier card's held change is freed, a Stop-closed one's included. */
-  propose(request: Omit<McpChangeRequest, "requestId" | "result" | "resumed">, subtitle: string, change: McpHeldChange, from?: RequestFrom): { requestId: string; messageId: string; text: string } {
+   * earlier card's held fields are freed, a Stop-closed one's included. `fields`: an update's. */
+  propose(request: Omit<McpChangeRequest, "requestId" | "result" | "resumed">, subtitle: string, fields?: McpUpdateFields, from?: RequestFrom): { requestId: string; messageId: string; text: string } {
     const { store } = this.options;
     for (const line of store.messagesFor(request.threadId)) {
       const card = line.card, earlier = card?.mcpRequest;
@@ -80,7 +79,7 @@ export class McpRequestService {
       title: serverLine(this.language(request.threadId), kind.title, { name: request.name }), subtitle: shown,
       options: [kind.option, "Cancel"], requestId, tool: "mcp_server", fixedOptions: true, mcpRequest: { ...request, requestId },
     };
-    this.held.set(requestId, change);
+    if (fields) this.held.set(requestId, fields);
     const message = store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card });
     this.options.decide({ threadId: request.threadId, requestId, botId: request.botId, summary: `${card.title}\n${shown}`, decision: "card-shown" });
     return { requestId, messageId: message.id, text: MCP_CARD_PROPOSED };
@@ -117,13 +116,13 @@ export class McpRequestService {
     return { status: 200, body: { ok: true, outcome: settled.result?.state === "applied" ? "allowed-once" : "rejected", result: settled.result, alreadySettled: duplicate } };
   }
 
-  /** Whether the card has a decision for the turn parked on it. An open card whose held change a restart lost expires
+  /** Whether the card has a decision for the turn parked on it. An open Change card whose fields a restart lost expires
    * now, so the turn hears why instead of waiting on a card nothing can apply. */
   decided(threadId: string, messageId: string): boolean {
     const card = this.options.store.messagesFor(threadId).find((line) => line.id === messageId)?.card, request = card?.mcpRequest;
     if (!card || !request) return false;
     if (request.result) return true;
-    if (card.answered || card.dismissed || card.expired || this.held.has(request.requestId)) return false;
+    if (card.answered || card.dismissed || card.expired || !this.lost(request)) return false;
     this.record(threadId, messageId, request, this.restarted(threadId), "allow");
     return true;
   }
@@ -140,11 +139,10 @@ export class McpRequestService {
 
   private async resultOf(threadId: string, request: McpChangeRequest, behavior: "allow" | "deny"): Promise<Settled | "busy"> {
     if (behavior === "deny") return { state: "denied", text: CARDS[request.action].denied(request.name) };
-    const change = this.held.get(request.requestId);
-    if (!change) return this.restarted(threadId);
+    if (this.lost(request)) return this.restarted(threadId);
     let applied: McpApplied;
     try {
-      applied = await this.options.apply(request, change);
+      applied = await this.options.apply(request, this.held.get(request.requestId));
     } catch (error) {
       applied = { state: "failed", text: error instanceof Error ? error.message : String(error), note: serverLine(this.language(threadId), "server.mcp.card.failed") };
     }
@@ -161,6 +159,11 @@ export class McpRequestService {
       this.options.store.patchMessage(threadId, messageId, { card: { ...current, ...closed, mcpRequest: settled } });
     }
     return settled;
+  }
+
+  /** Only an update needs fields from memory; a restart loses them. */
+  private lost(request: McpChangeRequest): boolean {
+    return request.action === "update" && !this.held.has(request.requestId);
   }
 
   private restarted(threadId: string): Settled {

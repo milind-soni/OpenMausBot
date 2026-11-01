@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { relative } from "node:path";
 
 import type { McpChangeRequest } from "../../shared/mcp-request.ts";
@@ -5,7 +6,7 @@ import type { WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
-import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpHeldChange } from "../host/mcp-requests.ts";
+import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpUpdateFields } from "../host/mcp-requests.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
@@ -67,7 +68,7 @@ export interface InternalMcpDeps {
   /** The other bots that use this server now, by name. */
   usedBy(name: string): string[];
   /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
-  requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; change: McpHeldChange }): { text: string };
+  requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; targetHash: string; fields?: McpUpdateFields }): { text: string };
   /** Shows the person a Sign in card for a server reached by URL; the bot ends its turn and OpenMausBot resumes it when
    * they finish or set the card aside. */
   requestSignIn(name: string, server: StoredRemoteMcpServer): { posted: true } | { status: number; error: string };
@@ -205,7 +206,7 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
 
   if (!deps.fullAccess()) {
     say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
-    const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server), change: { target: targetOf(server) } });
+    const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server), targetHash: targetHash(server) });
     return { status: 201, text: `Saved MCP server ${name} switched off.${where} ${card.text}` };
   }
   const on = deps.config.setEnabled(name, true);
@@ -323,24 +324,25 @@ function remove(deps: Ctx, name: string, server: StoredMcpServer): Outcome {
 
 /** Runs a change the person allowed on its card as Full access would, against the server as it is now, so a proposal
  * made before a newer change never overwrites it. */
-export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest, "action" | "name">, change: McpHeldChange): Promise<McpApplied> {
+export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest, "action" | "name" | "targetHash">, fields?: McpUpdateFields): Promise<McpApplied> {
   const { name } = request;
   const language = deps.language();
   const servers = deps.cfg().mcpServers ?? {};
   if (!Object.hasOwn(servers, name)) return { state: "failed", text: `${name} no longer exists.`, note: serverLine(language, "server.mcp.card.gone", { name }) };
   const parsed = parseStoredMcpServer(name, servers[name]);
-  if (parsed.ok && targetOf(parsed.server) !== change.target) {
+  if (parsed.ok && targetHash(parsed.server) !== request.targetHash) {
     return { state: "failed", text: `${name} changed since you were asked, so nothing was applied.`, note: serverLine(language, "server.mcp.card.changedSince", { name }) };
   }
-  if (change.body && !deps.redeem(trimmedRefs(change.body)).ok) return { state: "expired", text: MCP_KEY_EXPIRED, note: serverLine(language, "server.mcp.card.keyExpired") };
+  if (fields && !deps.redeem(trimmedRefs(fields)).ok) return { state: "expired", text: MCP_KEY_EXPIRED, note: serverLine(language, "server.mcp.card.keyExpired") };
   const approved: Ctx = { ...deps, approved: true, fullAccess: () => true, teamAdmin: () => true, decide: () => {}, activity: () => {} };
-  const outcome = await act(approved, { ...change.body, action: request.action, name }, new AbortController().signal);
+  const outcome = await act(approved, { ...fields, action: request.action, name }, new AbortController().signal);
   if ("error" in outcome) return outcome.busy ? { state: "busy" } : { state: "failed", text: outcome.error };
   return { state: "applied", text: outcome.text };
 }
 
 /** What a card's answer must still find: a different address or command is a different server. */
-const targetOf = (server: StoredMcpServer) => JSON.stringify(isRemoteMcpServer(server) ? [server.url] : [server.command, ...server.args]);
+const targetHash = (server: StoredMcpServer) =>
+  createHash("sha256").update(JSON.stringify(isRemoteMcpServer(server) ? [server.url] : [server.command, ...server.args])).digest("hex");
 
 function propose(deps: Deps, action: McpCardAction, name: string, server: StoredMcpServer, fields: Record<string, unknown>): Outcome {
   if (action === "update") {
@@ -354,18 +356,18 @@ function propose(deps: Deps, action: McpCardAction, name: string, server: Stored
     const subtitle = [...lines, ...keys.map((key) => serverLine(language, "server.mcp.card.newKey", { key })),
       ...(clientSecret ? [serverLine(language, "server.mcp.card.newClientSecret")] : []),
       ...(planned.dropped.length ? [serverLine(language, "server.mcp.card.cleared", { items: planned.dropped.join(", ") })] : [])].join("\n");
-    return ask(deps, { action, name, subtitle, change: { target: targetOf(server), body: fields } });
+    return ask(deps, { action, name, subtitle, targetHash: targetHash(server), fields });
   }
   const refusal = deps.policyRefusal(name, server);
   if (refusal) return { status: 403, error: refusal };
   if (action === "remove") {
     const others = deps.usedBy(name);
     const language = deps.language();
-    return ask(deps, { action, name, change: { target: targetOf(server) }, subtitle: others.length
+    return ask(deps, { action, name, targetHash: targetHash(server), subtitle: others.length
       ? serverLine(language, "server.mcp.card.usedBy", { names: others.join(", ") }) : serverLine(language, "server.mcp.card.usedByNone") });
   }
   if (server.enabled && (!deps.sender.mcpServers || deps.sender.mcpServers.includes(name))) return { status: 200, text: `${name} is already on.` };
-  return ask(deps, { action, name, subtitle: turnOnText(deps, server), change: { target: targetOf(server) } });
+  return ask(deps, { action, name, subtitle: turnOnText(deps, server), targetHash: targetHash(server) });
 }
 
 function ask(deps: Deps, proposal: Parameters<Deps["requestApproval"]>[0]): Outcome {

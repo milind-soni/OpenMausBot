@@ -6,7 +6,7 @@ import type { OptionCardData } from "../../shared/wire.ts";
 import type { Store } from "../store.ts";
 import { resumableCards } from "./resumable-cards.ts";
 
-const request: McpChangeRequest = { requestId: "r1", botId: "kiwi", threadId: "t1", action: "enable", name: "linear" };
+const request: McpChangeRequest = { requestId: "r1", botId: "kiwi", threadId: "t1", action: "enable", name: "linear", targetHash: "0".repeat(64) };
 const card = (extra: Partial<OptionCardData> = {}, mcp: Partial<McpChangeRequest> = {}): OptionCardData => ({
   title: "Turn on linear?", subtitle: "https://mcp.linear.app/mcp", options: ["Turn on", "Cancel"], requestId: "r1", tool: "mcp_server",
   ...extra, mcpRequest: { ...request, ...mcp },

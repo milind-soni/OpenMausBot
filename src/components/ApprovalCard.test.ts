@@ -827,7 +827,7 @@ describe("ApprovalCard MCP server changes", () => {
       tool: "mcp_server",
       fixedOptions: true,
       answered,
-      mcpRequest: { requestId: "req-mcp", botId: "bot-1", threadId: "thread-1", action: "enable", name: "linear" },
+      mcpRequest: { requestId: "req-mcp", botId: "bot-1", threadId: "thread-1", action: "enable", name: "linear", targetHash: "0".repeat(64) },
     },
   });
   const bot = { id: "bot-1", name: "Kiwi" } as never as Bot;
