@@ -436,6 +436,41 @@ describe("start_thread on another model, reporting back", () => {
       await cleanup([pm.id]);
     }
   }, 60_000);
+  it("opens threads on two models in one turn and resumes the opener once, with both results named by thread and model", async () => {
+    const pm = await createBot("Pam", "gated");
+    const opus = { instanceId: "gated", model: "claude-opus-5" };
+    try {
+      const token = await heldTurn(pm, "Get two reviews.");
+      const engines = (await api("GET", "/api/internal/models?search=plain", undefined, token)).body.instances;
+      expect(engines.map((instance: any) => instance.instanceId)).toEqual(["plain"]);
+      const cursor = { instanceId: "plain", model: engines[0].models.default || engines[0].models.options[0].id };
+      const first = await api("POST", "/api/internal/threads",
+        { title: "Review: Opus", message: "Review the diff. [[gate:batch-opus]]", modelSelection: opus, reportBack: true, role: "review", requestId: "review-opus" }, token);
+      expect(first.status, JSON.stringify(first.body)).toBe(201);
+      const again = await api("POST", "/api/internal/threads",
+        { title: "Review: Opus", message: "Review the diff. [[gate:batch-opus]]", modelSelection: opus, reportBack: true, role: "review", requestId: "review-opus" }, token);
+      expect([again.status, again.body.existing, again.body.threadId, again.body.requestId]).toEqual([200, true, first.body.threadId, first.body.requestId]);
+      const second = await api("POST", "/api/internal/threads", { title: "Review: Cursor", message: "Review the diff.", modelSelection: cursor, reportBack: true }, token);
+      expect(second.status, JSON.stringify(second.body)).toBe(201);
+      expect((await botState(pm.id)).tasks).toHaveLength(3);
+
+      release(pm.threadId);
+      await expect.poll(() => handoffs().find((node) => node.id === second.body.requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      const resumedRows = async () => (await messages(pm.threadId)).filter((message) => message.tool?.name?.startsWith("Resumed with"));
+      expect(await resumedRows()).toEqual([]);
+      expect(promptsOf("batch-opus")[0].message.content).toContain("Act as the review helper for this task.\n\nReview the diff.");
+      release("batch-opus");
+      await expect.poll(async () => (await resumedRows()).map((message) => message.tool.name), { timeout: 15_000 })
+        .toEqual(["Resumed with #Review: Opus, #Review: Cursor results, reviewing"]);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+      expect(await resumedRows()).toHaveLength(1);
+      const resume = promptsOf("batch-opus").at(-1)?.message.content ?? "";
+      expect(resume).toContain(`[OpenMausBot report from @Pam (your thread #Review: Opus, on claude-opus-5) on assignment ${first.body.requestId}: done]`);
+      expect(resume).toContain(`[OpenMausBot report from @Pam (your thread #Review: Cursor, on ${cursor.model}) on assignment ${second.body.requestId}: done]`);
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
 });
 
 describe("coordinate_bots on a teammate", () => {

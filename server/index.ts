@@ -595,6 +595,7 @@ import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts";
+import { MAX_THREADS_OPENED_PER_TURN, openInternalThread } from "./routes/internal-thread-open.ts"; import { createOwnThreadRequests } from "./host/own-threads.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
@@ -7499,7 +7500,7 @@ const personReplies = createPersonReplies({
 const deliverLateQuestionAnswer: typeof personReplies.deliverLateQuestionAnswer = async (auth, threadId, requestId, answer, cardMessage, owner, via, callId) =>
   askCards.answerParked(threadId, requestId, answer) ? { queued: false } : personReplies.deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, owner, via, callId);
 
-const MAX_THREADS_OPENED_PER_TURN = 5;
+const ownThreadRequests = createOwnThreadRequests<Record<string, unknown>>();
 
 /** Its provenance survives the queue: the bot's own request never passes for a human one authorizing more fan-out. */
 async function startOrQueueOpenedThread(
@@ -13683,7 +13684,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (await dispatchRoutes([createInternalChiefTeamRoutes({ bot: () => store.bot(internalCapability.botId), requireActive: requireActiveInternalCapability,
         teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() }),
-        createInternalModelRoutes({ requireActive: requireActiveInternalCapability, instances: () => registry.describe() })], { req, res, url, path, method, auth, json, readBody })) return;
+        createInternalModelRoutes({ requireActive: requireActiveInternalCapability, instances: () => registry.describe(),
+          pinned: () => store.bots.flatMap((bot) => [bot.modelSelection, ...store.tasks(bot.id).flatMap((task) => task.modelSelection ? [task.modelSelection] : [])]) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
         const parsed = z.object({ fromBotId: z.string().optional(), fromThreadId: z.string().optional(), plan: z.unknown() }).strict().safeParse(await readInternalBody());
         if (!parsed.success) return json(res, 400, { error: "Invalid team setup request" });
@@ -14277,83 +14279,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // start_thread never activates: a bot must not move what the person is looking at.
       if (method === "POST" && path === "/api/internal/threads") {
-        const body = await readInternalBody();
-        const from = internalSender;
-        const fromThreadId = internalCapability.threadId;
-        const owner = connectorThread(from.id, fromThreadId);
-        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
-        if (
-          body.depth !== undefined &&
-          (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
-        ) {
-          return json(res, 403, { error: "the recursion depth does not match this turn" });
-        }
-        const title = String(body.title ?? "").trim();
-        const message = String(body.message ?? "").trim();
-        if (!title || !message) return json(res, 400, { error: "title and message are required" });
-        if (title.length > 80) return json(res, 400, { error: "title must be at most 80 characters" });
-        if (!fitsOnOneLine(title)) return json(res, 400, { error: "title must fit on one line" });
-        if (internalCapability.openedThreads >= MAX_THREADS_OPENED_PER_TURN) {
-          return json(res, 429, { error: `You have already opened ${MAX_THREADS_OPENED_PER_TURN} threads this turn, which is the limit. Do not retry — finish your turn and tell the person which threads you still wanted to open, so they can open them or ask you again.` });
-        }
-        const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
-        const target = store.bot(toBotId);
-        if (!target) return json(res, 404, { error: "no such bot" });
-        const folder = typeof body.folder === "string" ? body.folder.trim() : "";
-        let projectId: string | undefined;
-        if (folder) {
-          const project = (target.projects ?? []).find(
-            (candidate) => candidate.id === folder || candidate.name.trim().toLowerCase() === folder.toLowerCase(),
-          );
-          if (!project) {
-            const names = (target.projects ?? []).map((candidate) => candidate.name).join(", ");
-            return json(res, 400, { error: `@${target.name} has no folder named "${folder}"${names ? ` — the folders are: ${names}` : " — it has no folders; leave folder out"}` });
-          }
-          projectId = project.id;
-        }
-        const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
-        if (target.id === from.id) {
-          const chosen = body.modelSelection === undefined ? undefined : checkedModelSelection(body.modelSelection, undefined, true);
-          if (chosen && !chosen.ok) return json(res, chosen.status, { error: chosen.error });
-          // A second opinion must never quietly come from the opener's own model: refuse what turn start would swap out.
-          const givesWay = chosen && modelGivesWay(chosen.selection, from.modelSelection);
-          if (givesWay) return json(res, 409, { error: `${modelName(chosen.selection)} can't run now: ${givesWay === "signed-out" ? "it is signed out" : "its engine is unavailable"}. Pick a model whose engine list_models shows as available, or leave modelSelection out.` });
-          const inherited = chosen ? { modelSelection: chosen.selection, ...(engineSwitchNeedsAsk(approvalModeFor(from), from.modelSelection, chosen.selection) ? { approvalMode: "ask" as const } : {}) }
-            : parentThreadModel(from.id, fromThreadId);
-          if (body.reportBack === true) {
-            if (owner.group) return json(res, 400, { error: "report_back works only from your own conversation, not a room. Leave it out; the thread's result then stays in that thread." });
-            const result = await coordinateBots({ botIds: [from.id], message, rework: false, thread: "new", reply: "resume", consult: false, title, projectId, ownThread: inherited });
-            const receipt = (result.body.receipts as PeerDeliveryReceipt[] | undefined)?.[0];
-            return json(res, result.status === 200 ? 201 : result.status, { ...result.body, self: true, reportBack: true, title, botId: from.id, botName: from.name, threadId: receipt?.threadId, requestId: receipt?.requestId });
-          }
-          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() },
-            inherited.approvalMode, inherited.modelSelection);
-          if (!task) return json(res, 500, { error: "couldn't create that thread" });
-          threadStarters.set(task.threadId, (CLOUD_TEAM ? teamConnections.handOnFor(internalCapability.threadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId));
-          internalCapability.openedThreads += 1;
-          const chip: Omit<Message, "id" | "at"> = {
-            role: "bot",
-            kind: "activity",
-            tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.openedThread", { title: task.title }), ok: true },
-            threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
-          };
-          if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };
-          store.appendMessage(fromThreadId, chip);
-          // Mark the bot's own words, so a later turn never mistakes the request for the person's.
-          const opening = `[Thread you opened yourself${sourceTitle ? ` from #${sourceTitle}` : ""}. The request below is your own words, not the person's: do the work here and end with a clear result they can read.]\n\n${message}`;
-          const outcome = await startOrQueueOpenedThread(from.id, task.threadId, opening, isUnattended(from.id, fromThreadId), withPerson(turnOrigin(internalCapability), actingPeople.requester(internalCapability.threadId, internalCapability.generation)));
-          return json(res, 201, {
-            threadId: task.threadId,
-            title: task.title,
-            botId: from.id,
-            botName: from.name,
-            self: true,
-            limit: maxConcurrentBotThreads(cfg),
-            ...outcome,
-          });
-        }
-        const result = await coordinateBots({ botIds: [target.id], message, rework: false, thread: "new", reply: "resume", consult: false, title, projectId });
-        return json(res, result.status, result.body);
+        const from = internalSender, fromThreadId = internalCapability.threadId;
+        const opened = await openInternalThread({ store, from, fromThreadId, depth: internalCapability.depth, owner: connectorThread(from.id, fromThreadId),
+          openedThisTurn: () => internalCapability.openedThreads, countOpened: () => { internalCapability.openedThreads += 1; },
+          checkModel: (raw) => checkedModelSelection(raw, undefined, true), givesWay: (selection) => modelGivesWay(selection, from.modelSelection), modelName,
+          switchNeedsAsk: (selection) => engineSwitchNeedsAsk(approvalModeFor(from), from.modelSelection, selection), parentModel: () => parentThreadModel(from.id, fromThreadId),
+          openerLevel: () => sourceApprovalMode(from.id, fromThreadId), botLevel: () => approvalModeFor(from), engineRuns: supportsApprovalMode, coordinate: coordinateBots,
+          startOpened: (threadId, text) => {
+            threadStarters.set(threadId, (CLOUD_TEAM ? teamConnections.handOnFor(fromThreadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId));
+            return startOrQueueOpenedThread(from.id, threadId, text, isUnattended(from.id, fromThreadId), withPerson(turnOrigin(internalCapability), actingPeople.requester(fromThreadId, internalCapability.generation)));
+          }, language: threadLanguage(fromThreadId), limit: maxConcurrentBotThreads(cfg), requests: ownThreadRequests }, await readInternalBody());
+        return json(res, opened.status, opened.body);
       }
       if (method === "POST" && path === "/api/internal/create-bot") {
         const body = await readInternalBody();

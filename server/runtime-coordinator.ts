@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
-import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
+import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote, fairShares } from "./runtime/envelope.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
@@ -10,6 +10,11 @@ import { personOnly, requesterDecides, withDefault } from "./runtime/questions.t
 import { childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
 import type { Answerer, Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
+
+/** What a bot's own threads' results may take of the one turn that resumes it with them, in characters. */
+export const OWN_THREAD_RESULTS_MAX = 16_000;
+const sameBotDirect = (child: Assignment, parent: Assignment) => child.assignee.botId === parent.assignee.botId
+  && child.assignee.destination.groupId === undefined && parent.assignee.destination.groupId === undefined;
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -502,8 +507,7 @@ export class RuntimeCoordinator implements Coordinator {
     const asked = input.asked ?? [];
     const root = a.parentId === undefined;
     const body = resumed
-      ? composeResume(a, this.host.names(node, parent && this.project(parent)),
-        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
+      ? composeResume(a, this.host.names(node, parent && this.project(parent)), this.reports(settled, a, node),
         asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))))
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
@@ -571,6 +575,14 @@ export class RuntimeCoordinator implements Coordinator {
 
   private direct(a: Assignment, threadId: string): boolean {
     return a.assignee.destination.groupId === undefined && a.assignee.destination.threadId === threadId;
+  }
+
+  /** A bot's own threads share OWN_THREAD_RESULTS_MAX of the turn they resume; a teammate's report keeps its whole result. */
+  private reports(settled: readonly Assignment[], parent: Assignment, parentView: HandoffView): string[] {
+    const readable = settled.map(child => this.readable(child, parent, parentView));
+    const own = readable.filter(child => sameBotDirect(child, parent));
+    const shares = new Map(fairShares(own.map(child => child.result.length), OWN_THREAD_RESULTS_MAX).map((share, index) => [own[index]!.id, share]));
+    return readable.map(child => composeReport(child, this.host.names(view(child, parent), parentView), shares.get(child.id)));
   }
 
   /** A route or membership that no longer admits the child withholds its words; only the reason travels. */

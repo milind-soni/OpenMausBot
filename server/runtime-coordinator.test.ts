@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
-import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
+import { needsInputQuestion, OWN_THREAD_RESULTS_MAX, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import type { Assignment, Level, Limits } from "./runtime/types.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -432,6 +432,58 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     const rework = send(w, chief, "gen-1", undefined, builder, "Build it", { rework: true });
     expect(rework.duplicate).toBe(false);
     expect(rework.node.id).not.toBe(first.node.id);
+  });
+});
+
+describe("RuntimeCoordinator: a bot's own threads report back", () => {
+  const ownThreads = (w: World, count: number) => {
+    begun(w, chief, "gen-1");
+    return Array.from({ length: count }, (_, index) =>
+      w.coordinator.enqueue(chief, "gen-1", undefined, { botId: "chief", threadId: `chief-helper-${index + 1}` }, `Review ${index + 1}`, { ownThread: true }).node);
+  };
+  const resumes = (w: World) => w.host.runs.filter(run => run.node.id === "gen-1" && run.resumed);
+
+  it("resumes the opener once, when the last of one turn's threads settles, with every result, failed ones too", async () => {
+    const w = world((node) => node.threadId.startsWith("chief-helper") ? "hold" : undefined);
+    const [first, second, third] = ownThreads(w, 3);
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.host.held.size).toBe(3);
+    await w.host.release(first!.id, { ok: true, text: "Looks right." });
+    w.coordinator.tick(); await flush();
+    await w.host.release(second!.id, { ok: false, text: "The engine stopped answering." });
+    w.coordinator.tick(); await flush();
+    expect(resumes(w)).toEqual([]);
+    expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
+    await w.host.release(third!.id, { ok: true, text: "One nit in the tests." });
+    w.coordinator.tick(); await flush();
+    w.coordinator.tick(); await flush();
+    expect(resumes(w)).toHaveLength(1);
+    const text = resumes(w)[0]!.text;
+    expect(text).toContain(`[OpenMausBot report from @chief on assignment ${first!.id}: done]`);
+    expect(text).toContain(`[OpenMausBot report from @chief on assignment ${second!.id}: failed (provider_error)]`);
+    expect(text).toContain(`[OpenMausBot report from @chief on assignment ${third!.id}: done]`);
+    expect(w.coordinator.node("gen-1")?.status).toBe("completed");
+  });
+
+  it("shares about 16 KB of the resume across the threads' results and says where the rest is, leaving a teammate's whole", async () => {
+    const long = (tag: string) => tag.repeat(12_000);
+    const w = world((node) => node.botId === "builder" ? { ok: true, text: long("b") } : node.threadId === "chief-helper-1" ? { ok: true, text: long("x") }
+      : node.threadId === "chief-helper-2" ? { ok: true, text: long("y") } : node.threadId === "chief-helper-3" ? { ok: true, text: "Short and fine." } : undefined);
+    const [first, , third] = ownThreads(w, 3);
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    w.coordinator.tick(); await flush();
+    const text = resumes(w)[0]!.text;
+    const shown = Math.floor((OWN_THREAD_RESULTS_MAX - "Short and fine.".length) / 2);
+    expect(text).toContain(`"${"x".repeat(shown)}"`);
+    expect(text).not.toContain("x".repeat(shown + 1));
+    expect(text).toContain(`That result was cut after ${shown} of its 12000 characters, to keep this turn small. Read all of it with assignment_status id "${first!.id}"`);
+    expect(text.match(/That result was cut/g)).toHaveLength(2);
+    expect(text).toContain(`[OpenMausBot report from @chief on assignment ${third!.id}: done]`);
+    expect(text).toContain('"Short and fine."');
+    expect(text).toContain(`"${long("b")}"`);
   });
 });
 

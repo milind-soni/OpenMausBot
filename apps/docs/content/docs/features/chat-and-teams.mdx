@@ -112,6 +112,8 @@ A bot doesn't need a teammate to get work done on another model. It can open a t
 
 A model whose provider is signed out or unavailable is refused when the thread is opened, so a second opinion never quietly comes from the bot's own model. These threads can't be opened from a group chat, and a thread opened this way can't open more of its own.
 
+When a bot opens several of these threads in one turn, it waits for all of them and then carries on once, with every answer side by side; a thread that fails or runs out of time counts as answered, with what went wrong. Very long answers are shortened in what the bot reads (the bot is told where to read the rest), and you always see the whole answer in the thread. A bot can give each thread a role, such as review or research, so the other model knows what it is there for. A thread never runs with more permission than the conversation that opened it: if that conversation asks you before acting, so does the thread.
+
 ### Creating a specialist with a chosen model
 
 A Chief also adds a specialist on its own when a job needs one: an ongoing area of work, a different skill set, or work to run in parallel. The bot is created at once, the Chief tells you in one line, and the change has an **Undo**. When what you want matches a ready-made team in the library, the Chief reads its roles with `list_team_library` and creates them the same way.

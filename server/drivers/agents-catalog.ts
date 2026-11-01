@@ -304,6 +304,8 @@ const TOOL_DEFINITIONS = [
           instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
         }, required: ["instanceId", "model"] },
         report_back: { type: "boolean", description: "True: its result comes back to you here; end your turn. Not from a room." },
+        role: { type: "string", enum: ["implementation", "research", "review", "design", "test", "general"], description: "Optional: the helper's role in the thread." },
+        request_id: { type: "string", maxLength: 128, description: "Optional key: the same key again returns the thread already opened." },
       },
       required: ["title", "message"],
     },
@@ -311,7 +313,9 @@ const TOOL_DEFINITIONS = [
   {
     name: "list_models",
     description: "Read-only: engines (instanceId), their models, state and efforts, for start_thread's modelSelection. Never invent an id.",
-    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      search: { type: "string", maxLength: 200, description: "Optional words: an engine's name picks it, others filter models. Without it long lists are cut short." },
+    } },
   },
   {
     name: "vm_exec",

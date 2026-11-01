@@ -405,8 +405,13 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (folder) body.folder = folder;
     if (args.modelSelection !== undefined) body.modelSelection = args.modelSelection;
     if (args.report_back === true) body.reportBack = true;
+    if (args.role !== undefined) body.role = args.role;
+    if (args.request_id !== undefined) body.requestId = args.request_id;
     const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify(body) });
     if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
+    if (r.existing === true) {
+      return { text: `#${String(r.title ?? title)} is already open for this request_id [thread id: ${String(r.threadId ?? "")}]; nothing new was opened. ${r.reportBack === true ? "Its result still comes back here and resumes you." : "Its result stays in that thread."}` };
+    }
     if (r.reportBack === true) {
       return { text: `Opened thread #${String(r.title ?? title)} on yourself [thread id: ${String(r.threadId ?? "")}]. It starts when this turn ends, and its result comes back to this conversation and resumes you automatically (assignment id: ${String(r.requestId ?? "unknown")}). Mention it to the person as #${String(r.title ?? title)} and finish your turn; do not check or wait for it in this turn.` };
     }
@@ -438,7 +443,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (name === "list_models") {
-    const r = await api("/api/internal/models");
+    const search = typeof args.search === "string" ? args.search.trim() : "";
+    const r = await api(`/api/internal/models${search ? `?search=${encodeURIComponent(search)}` : ""}`);
     if (r.error) return { text: `Couldn't list models: ${String(r.error)}`, isError: true };
     return { text: JSON.stringify(r) };
   }
