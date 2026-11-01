@@ -287,7 +287,7 @@ import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts";
 import { TRIAL_CREDIT_OWN_AI, TRIAL_KEY_HELD } from "./trial-credit.ts"; import { createHeldKeys } from "./cloud-held-keys.ts";
 import type { ProviderInstance } from "./contracts.ts";
-import { readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts"; import { configIdentity, createTestedAi } from "./tested-ai.ts";
+import { readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts"; import { configIdentity, createTestedAi } from "./tested-ai.ts"; import { instanceIcon } from "./provider-icon.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -12016,7 +12016,7 @@ async function describeInstances() {
     const entry = configs[instance.instanceId];
     const described = {
       ...instance, ...testedAi.info(instance),
-      ...(entry?.icon ? { icon: entry.icon } : {}),
+      ...instanceIcon(entry),
       ...(entry?.access ? { access: entry.access } : {}), ...(entry?.driver === "openai-compat" && typeof (entry.config as { replyWaitMinutes?: unknown } | undefined)?.replyWaitMinutes === "number" ? { replyWaitMinutes: (entry.config as { replyWaitMinutes: number }).replyWaitMinutes } : {}), ...(heldKeys?.refusal(instance.instanceId) ? { snapshot: { state: "unavailable" as const, reason: TRIAL_KEY_HELD } } : {}),
     };
     if (hostedModels) return { ...described, readOnly: true,
