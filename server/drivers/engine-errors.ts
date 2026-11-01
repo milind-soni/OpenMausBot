@@ -2,8 +2,10 @@
 // overloaded or failing service, or any other HTTP refusal names the provider and keeps its own short reason. Each
 // sentence keeps the words classifyError (retry.ts) reads, so retries, account switching and health codes are unchanged.
 import { redactSecretsInText } from "../redact.ts";
+import { hostTimeZone } from "../turn-clock.ts";
 import { toolCountLimitFromError } from "../tool-count-limit.ts";
 import { USAGE_LIMIT } from "./retry.ts";
+import { usageLimitWait } from "./acp/quiet-status.ts";
 
 export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "tool_schema" | "tool_count" | "refused";
 
@@ -83,7 +85,7 @@ export function engineFailureKind(text: string, status = httpStatusOf(text)): En
 export function engineFailureMessage(
   provider: string,
   text: string,
-  { kind, status }: { kind?: EngineFailureKind | null; status?: number | null } = {},
+  { kind, status, resetsAt, timeZone }: { kind?: EngineFailureKind | null; status?: number | null; resetsAt?: number; timeZone?: string } = {},
 ): string | null {
   const http = status === undefined ? httpStatusOf(text) : status;
   const what = kind ?? engineFailureKind(text, http);
@@ -94,7 +96,9 @@ export function engineFailureMessage(
   const code = http ? `HTTP ${http}` : null;
   switch (what) {
     case "credits": return `Your ${provider} account is out of credits${detail(says)}. Add credits with ${provider}, then run it again.`;
-    case "usage_limit": return `This ${provider} account has reached its usage limit${detail(says)}. Wait for it to reset, or switch this bot to another AI.`;
+    case "usage_limit": return resetsAt
+      ? `This ${provider} account has reached its usage limit${detail(says)}, which resets ${limitResetTime(resetsAt, timeZone)}. Until then, switch this bot to another AI.`
+      : `This ${provider} account has reached its usage limit${detail(says)}. Wait for it to reset, or switch this bot to another AI.`;
     case "rate_limit": return `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.`;
     case "overloaded": return `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.`;
     case "server": return `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.`;
@@ -108,6 +112,55 @@ export function engineFailureMessage(
       + "and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.";
     case "refused": return `${provider} stopped with an error${detail(code, says)}.`;
   }
+}
+
+/** When a usage limit resets, in `timeZone` with its name, or in UTC when the zone is unknown. */
+export function limitResetTime(epochMs: number, timeZone = hostTimeZone()): string {
+  try {
+    return `${new Date(epochMs).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`;
+  } catch {
+    return `${new Date(epochMs).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  }
+}
+
+/** A provider's HTTP error an engine posted as its whole reply instead of failing the turn (omp 18.12's ACP mode sends
+ * it as message text and ends with end_turn): the status, an Anthropic `{"type":"error",…}` or OpenAI `{"error":{…}}`
+ * body, and omp's ` retry-after-ms=<n>` when the provider named a wait. */
+const ERROR_REPLY = /^([45]\d\d) (\{[\s\S]*\})(?: retry-after-ms=(\d+))?$/;
+
+function isErrorBody(body: string): boolean {
+  try {
+    const value = JSON.parse(body);
+    return value?.type === "error" || (typeof value?.error === "object" && value.error !== null);
+  } catch {
+    return false;
+  }
+}
+
+export interface ErrorReplyFailure {
+  message: string;
+  stopReason: "quota" | "auth_required" | "rpc_error";
+  setup?: true;
+  limit?: "engine";
+  limitResetsAt?: number;
+}
+
+/** A reply that is only a provider's error body, as the failed turn it is; null for any other text. It reads by its
+ * words, as the same failure thrown would, and an account out of credits needs the person's setup. A 429 whose wait is
+ * longer than an engine retries on its own is a usage limit too, and the wait names its reset. */
+export function errorReplyFailure(provider: string, text: string, now = Date.now(), timeZone?: string): ErrorReplyFailure | null {
+  const match = ERROR_REPLY.exec(text.trim());
+  const body = match?.[2];
+  if (!match || !body || !isErrorBody(body)) return null;
+  const status = Number(match[1]);
+  const waitMs = Number(match[3] ?? 0);
+  const said = engineFailureKind(body, status);
+  const kind = said !== "credits" && usageLimitWait(status, waitMs) ? "usage_limit" : said;
+  const resetsAt = kind === "usage_limit" && waitMs > 0 ? now + waitMs : undefined;
+  const message = engineFailureMessage(provider, body, { kind, status, resetsAt, timeZone })!;
+  if (kind === "credits") return { message, stopReason: "auth_required", setup: true };
+  if (kind !== "usage_limit") return { message, stopReason: "rpc_error" };
+  return { message, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
 }
 
 /** Only an out-of-credits failure or a refused tool schema or tool count in plain words; any other text stays as it is. */
