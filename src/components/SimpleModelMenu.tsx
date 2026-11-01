@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Loader2, LogIn, RefreshCw, Search, Settings, X } from "lucide-react";
+import { Check, ChevronRight, Download, Loader2, LogIn, RefreshCw, Search, Settings, X } from "lucide-react";
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { MenuGroup, MenuModelRow, SimpleMenu } from "@/lib/simple-model-menu";
@@ -20,7 +20,6 @@ export interface SimpleMenuActions {
   onPick: (instance: InstanceInfo, model: string, variant?: string) => void;
   onPickCurrent: () => void;
   onFollowBot: () => void;
-  onToggle: (instance: InstanceInfo) => void;
   onSetUp: (instance: InstanceInfo, keyboard: boolean) => void;
   onCheckAgain: (instance: InstanceInfo) => void;
   onManage: () => void;
@@ -29,6 +28,7 @@ export interface SimpleMenuActions {
 
 export interface SimpleModelMenuProps extends SimpleMenuActions {
   menu: SimpleMenu;
+  providers?: ReactNode;
   query: string;
   bot: Pick<Bot, "name" | "color" | "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody">;
   botModel: { label: string; title: string };
@@ -132,18 +132,6 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
               <Forward />
             </button>
           )}
-          {body.toggle && (
-            <div className={cn(body.toggle === "less" && "sticky bottom-0 z-[1] -mx-1.5 bg-linear-to-b from-transparent to-menu to-[12px] px-1.5 pt-3")}>
-              <button type="button" data-menu-row data-simple-show-all tabIndex={-1} aria-expanded={body.toggle === "less"}
-                onClick={() => props.onToggle(instance)} className={cn(MENU_ROW, "text-ink-secondary hover:text-ink focus:text-ink")}>
-                <Gutter />
-                <span className="min-w-0 flex-1 truncate">{body.toggle === "less" ? t("model.showSuggested") : t("model.showAll", { count: body.total })}</span>
-                {body.toggle === "less"
-                  ? <ChevronUp size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
-                  : <ChevronDown size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />}
-              </button>
-            </div>
-          )}
         </>
       );
   }
@@ -196,6 +184,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
   const top = Boolean(current || menu.follow);
   return (
     <div data-simple-model-menu className="flex min-h-0 flex-1 flex-col">
+      {props.providers}
       {menu.search && (
         <div data-simple-model-search className="group/search flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 pl-3.5 pr-2">
           <Search size={16} strokeWidth={MENU_STROKE} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
@@ -204,7 +193,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
             value={query}
             onChange={(event) => props.onQuery(event.target.value)}
             placeholder={t("model.search")}
-            aria-label={menu.groups.every((group) => group.instance.access === "custom") ? t("model.searchLocal") : t("model.search")}
+            aria-label={menu.localSearch ? t("model.searchLocal") : t("model.search")}
             className="min-w-0 flex-1 bg-transparent text-[13px] leading-[18px] text-ink outline-none placeholder:text-ink-tertiary"
           />
           {query && (
@@ -217,8 +206,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
         </div>
       )}
 
-      <div data-simple-models className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain",
-        menu.groups.some((group) => group.body.kind === "models" && group.body.toggle === "less") && "scroll-pt-8 scroll-pb-12")}>
+      <div data-simple-models className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="flex flex-col gap-0.5 p-1.5">
           {current && (
             <button
@@ -259,11 +247,10 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
 
           {menu.groups.map((group, index) => {
             const labelId = `${idPrefix}-group-${index}`;
-            const expanded = group.body.kind === "models" && group.body.toggle === "less";
             return (
               <div key={group.instance.instanceId} role="group" aria-labelledby={labelId} data-simple-provider={group.instance.instanceId}
                 className={cn("flex flex-col gap-0.5", index > 0 && "mt-1")}>
-                <div id={labelId} className={cn(MENU_LABEL, expanded && "sticky top-0 z-[1] -mx-1.5 bg-menu px-3.5")}>
+                <div id={labelId} className={MENU_LABEL}>
                   <Gutter><InstanceProviderMark instance={group.instance} size={14} subtle /></Gutter>
                   <span className="min-w-0 truncate">{group.label}</span>
                 </div>

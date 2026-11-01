@@ -209,7 +209,7 @@ describe("the way into API keys", () => {
   it("ends the rail's API keys group with a way to add one", () => {
     fixture.instances = [codex];
     const opened = open(bot("codex", "gpt-5.6"));
-    expect(opened.html).toContain(">API keys<");
+    expect(opened.html).toContain("data-model-providers");
     const add = rail(opened)!.props as { onAddApiKeys?: () => void };
     add.onAddApiKeys!();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });

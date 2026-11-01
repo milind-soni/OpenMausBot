@@ -1,16 +1,12 @@
 import type { InstanceInfo, ModelSelection } from "@/state/store";
 import { needsCli, needsSignIn } from "@/components/EngineSetup";
 import { t } from "./i18n";
-import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
+import { filterCustomModels, partitionCustomModels } from "./custom-models";
 import { isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
 import { choiceIsSelected, modelChoices, type ModelChoice } from "./model-choices";
 
 export type ModelOption = InstanceInfo["models"]["options"][number];
-
-export const SIMPLE_SEARCH_AFTER = 12;
-export const CURRENT_GROUP_SUGGESTIONS = 4;
-export const GROUP_SUGGESTIONS = 3;
 
 export interface MenuModelRow {
   option: ModelChoice;
@@ -30,7 +26,6 @@ export type MenuGroupBody =
     kind: "models";
     rows: MenuModelRow[];
     total: number;
-    toggle: "more" | "less" | null;
     localFrom: number | null;
     signInForOwn: boolean;
     probing: boolean;
@@ -58,6 +53,7 @@ export interface SimpleMenu {
   follow: boolean;
   groups: MenuGroup[];
   search: boolean;
+  localSearch: boolean;
   query: string;
   results: number | null;
   empty: "loading" | "none" | null;
@@ -70,7 +66,6 @@ export interface SimpleMenuInput {
   selection: ModelSelection;
   bot: { name: string; selection: ModelSelection; follows?: boolean };
   query: string;
-  expanded: ReadonlySet<string>;
   probing: ReadonlySet<string>;
   loading: boolean;
   refreshing?: string | null;
@@ -137,12 +132,9 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
 }
 
 export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
-  const { listed, selection, bot, expanded, probing } = input;
+  const { listed, selection, bot, probing } = input;
   const models = new Map(listed.map((instance) => [instance.instanceId, listedModels(instance)]));
-  const total = listed.filter((instance) => !instance.policy && !needsCli(instance))
-    .reduce((sum, instance) => sum + models.get(instance.instanceId)!.all.length, 0);
-  const search = total > SIMPLE_SEARCH_AFTER;
-  const query = search ? input.query.trim() : "";
+  const query = input.query.trim();
   const { subscription, api, custom } = splitEngineRail(listed);
   const ordered = [...subscription, ...api, ...custom];
   const current = ordered.find((instance) => instance.instanceId === selection.instanceId);
@@ -167,20 +159,15 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     if (query) {
       const rows = filterCustomModels(all, query).map(row);
       return rows.length === 0 ? null
-        : { kind: "models", rows, total: all.length, toggle: null, localFrom: localFrom(rows, mixed), signInForOwn: false, probing: false };
+        : { kind: "models", rows, total: all.length, localFrom: localFrom(rows, mixed), signInForOwn: false, probing: false };
     }
     const others = all.filter((option) => (!currentSelection || !choiceIsSelected(option, currentSelection))
       && (!botSelection || !choiceIsSelected(option, botSelection)));
-    const suggested = suggestedModels(others, instance.models.default, undefined,
-      currentSelection === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS);
-    const rest = others.filter((option) => !suggested.includes(option));
-    const open = expanded.has(instance.instanceId) || rest.length === 1;
-    const rows = (open ? [...suggested, ...rest] : suggested).map(row);
+    const rows = others.map(row);
     const looking = probing.has(instance.instanceId) && own.length === all.length;
     if (rows.length === 0 && !signedOut && !looking) return null;
     return {
       kind: "models", rows, total: all.length,
-      toggle: rest.length > 1 ? (expanded.has(instance.instanceId) ? "less" : "more") : null,
       localFrom: localFrom(rows, mixed), signInForOwn: signedOut, probing: looking,
     };
   }
@@ -192,10 +179,11 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
   });
 
   return {
-    current: query ? null : currentRow(input),
+    current: query || (input.instances.some((instance) => instance.instanceId === selection.instanceId) && !listed.some((instance) => instance.instanceId === selection.instanceId)) ? null : currentRow(input),
     follow: !query && bot.follows === false,
     groups,
-    search,
+    search: true,
+    localSearch: listed.length > 0 && listed.every(isCustomOnly),
     query,
     results: query ? groups.reduce((sum, group) => sum + (group.body.kind === "models" ? group.body.rows.length : 0), 0) : null,
     empty: listed.length > 0 ? null : input.loading ? "loading" : "none",

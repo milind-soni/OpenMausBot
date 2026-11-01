@@ -4,12 +4,13 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bot, InstanceInfo } from "@/state/store";
+import type { AppState, Bot, InstanceInfo } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
   instances: [] as InstanceInfo[],
   bots: [] as Bot[],
+  modelVariantSessions: {} as AppState["modelVariantSessions"],
   dispatch: vi.fn(),
   refreshModels: vi.fn(() => Promise.resolve()),
   refreshInstances: vi.fn(() => Promise.resolve()),
@@ -17,7 +18,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
-    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: {}, config: {} },
+    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: fixture.modelVariantSessions, config: {} },
     dispatch: fixture.dispatch,
     refreshInstances: fixture.refreshInstances,
     refreshModels: fixture.refreshModels,
@@ -83,6 +84,7 @@ const openWith = async (key: "ArrowDown" | "click") => {
 beforeEach(() => {
   fixture.advanced = false;
   fixture.bots = [];
+  fixture.modelVariantSessions = {};
   fixture.instances = [claude(three)];
   fixture.dispatch.mockReset();
   parentKey.mockReset();
@@ -99,10 +101,11 @@ afterEach(() => {
 });
 
 describe("choosing a model with the keyboard", () => {
-  it("opens from the chip, starts on the current model, moves with the arrows and picks with Enter", async () => {
+  it("opens into search, moves to models with the arrows and picks with Enter", async () => {
     await openWith("ArrowDown");
     expect(menu()).not.toBeNull();
     expect(host.contains(menu())).toBe(false);
+    press("ArrowDown");
     expect(focused()?.hasAttribute("data-current-model")).toBe(true);
     expect(chip().getAttribute("aria-expanded")).toBe("true");
 
@@ -124,6 +127,7 @@ describe("choosing a model with the keyboard", () => {
   it("closes on Enter right after opening, from the checked row it starts on, changing nothing", async () => {
     render(ownModelThread("claude-sonnet-5-5", "claude-opus-5-5", [["kept", "claude-haiku-5-5"]]));
     await openWith("ArrowDown");
+    press("ArrowDown");
     expect(focused()?.hasAttribute("data-current-model")).toBe(true);
     press("Enter");
     await settle();
@@ -133,28 +137,28 @@ describe("choosing a model with the keyboard", () => {
     expect(document.querySelector("[data-thread-models-notice]")).toBeNull();
   });
 
-  it("keeps a Space inside a name being typed, instead of pressing the row it has reached", async () => {
-    render(scout("claude-sonnet-5-5"));
+  it("keeps spaces in search without selecting a model", async () => {
     await openWith("click");
-    press("o");
-    expect(focused()?.textContent).toBe("Opus 5.5");
-    press("p");
-    expect(press(" ").defaultPrevented).toBe(true);
-    expect(focused()?.textContent).toBe("Opus 5.5");
+    const search = focused() as HTMLInputElement;
+    expect(search.hasAttribute("data-menu-search")).toBe(true);
+    type(search, "opus ");
+    expect(search.value).toBe("opus ");
     expect(fixture.dispatch).not.toHaveBeenCalled();
     expect(menu()).not.toBeNull();
   });
 
-  it("wraps around the rows, and jumps to a row by the letters typed", async () => {
+  it("wraps around model rows and returns to search above the first row", async () => {
     await openWith("click");
+    const search = focused();
+    press("ArrowDown");
     press("ArrowUp");
+    expect(focused()).toBe(search);
+    press("ArrowDown");
+    press("End");
     expect(focused()?.hasAttribute("data-simple-manage")).toBe(true);
     press("ArrowDown");
     expect(focused()?.hasAttribute("data-current-model")).toBe(true);
-    press("h");
-    expect(focused()?.textContent).toBe("Haiku 5.5");
     press("End");
-    expect(focused()?.hasAttribute("data-simple-manage")).toBe(true);
     press("Home");
     expect(focused()?.hasAttribute("data-current-model")).toBe(true);
   });
@@ -275,19 +279,99 @@ describe("the floating menu and the pointer", () => {
     vi.spyOn(chip(), "getBoundingClientRect").mockImplementation(() =>
       ({ left: right - 80, right, top: 40, bottom: 72, width: 80, height: 32, x: right - 80, y: 40, toJSON: () => ({}) }) as DOMRect);
     await openWith("click");
-    expect(menu()!.style.left).toBe(`${980 - 300}px`);
+    expect(menu()!.style.left).toBe(`${980 - 320}px`);
     right = 952;
     flushSync(() => chip().parentElement!.dispatchEvent(new Event("animationend", { bubbles: true })));
-    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    expect(menu()!.style.left).toBe(`${952 - 320}px`);
     right = 900;
     flushSync(() => menu()!.dispatchEvent(new Event("animationend", { bubbles: true })));
-    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    expect(menu()!.style.left).toBe(`${952 - 320}px`);
   });
 
   it("moves the keyboard highlight to the row under the mouse once the keyboard is in the list", async () => {
     await openWith("click");
+    press("ArrowDown");
     const rows = [...document.querySelectorAll<HTMLElement>("[data-simple-provider] [data-menu-row]")];
     flushSync(() => rows[1]!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" })));
     expect(focused()).toBe(rows[1]);
+  });
+});
+
+describe("single-model cloud catalogs", () => {
+  it("keeps the visible search labeled for cloud models when the current row is the whole catalog", async () => {
+    fixture.instances = [claude([three[0]!])];
+    render();
+    await openWith("click");
+    expect(document.querySelector("[data-menu-search]")?.getAttribute("aria-label")).toBe("Search models");
+  });
+});
+
+describe("session variant labels on the model chip", () => {
+  it.each([false, true])("uses matching session labels with advanced=%s and keeps catalog/id fallbacks", (advanced) => {
+    fixture.advanced = advanced;
+    const instance: InstanceInfo = { ...claude([{ id: "provider/model", label: "Model", variants: [{ id: "deep/custom", label: "Catalog deep" }] }]),
+      instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", capabilities: { modelVariants: true } };
+    fixture.instances = [instance];
+    const bot: Bot = { ...scout(), modelSelection: { instanceId: "opencode", model: "provider/model", variant: "deep/custom" } };
+    const session = { instanceId: "opencode", model: "provider/model", turnId: "turn", startedAt: "2026-11-01T00:00:00Z", acceptingUpdates: false,
+      variants: { options: [{ id: "deep/custom", label: "Session deep" }], currentValue: "deep/custom" } };
+    fixture.modelVariantSessions[bot.threadId] = session;
+    render(bot);
+    expect(chip().textContent).toContain("Session deep");
+    expect(chip().title).toContain("Session deep");
+
+    fixture.modelVariantSessions[bot.threadId] = { ...session, instanceId: "other-account" };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    fixture.modelVariantSessions[bot.threadId] = { ...session, model: "other-model" };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    fixture.modelVariantSessions = { "other-thread": session };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    fixture.modelVariantSessions[bot.threadId] = { ...session, variants: { options: [], currentValue: "deep/custom" } };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    instance.models.options[0]!.variants = [];
+    render(bot);
+    expect(chip().textContent).toContain("deep/custom");
+  });
+});
+
+describe("provider tabs", () => {
+  it.each([false, true])("starts each provider catalog at the top with advanced=%s", async (advanced) => {
+    fixture.advanced = advanced;
+    const codex: InstanceInfo = { ...claude(numbered(24)), instanceId: "codex", driverKind: "codex", displayName: "Codex" };
+    fixture.instances = [claude(numbered(24)), codex];
+    render(scout("model-0"));
+    await openWith("click");
+    const selector = advanced ? "[data-model-catalog-scroll]" : "[data-simple-models]";
+    document.querySelector<HTMLElement>(selector)!.scrollTop = 250;
+    const tab = document.querySelector<HTMLButtonElement>('[data-provider-tab][aria-label="OpenAI"]')!;
+    flushSync(() => tab.click());
+    await settle();
+    expect(document.querySelector<HTMLElement>(selector)!.scrollTop).toBe(0);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("browses with left and right, reaches search with down, and never changes the model until picked", async () => {
+    const codex: InstanceInfo = { ...claude([{ id: "gpt-fixture", label: "GPT fixture" }]), instanceId: "codex", driverKind: "codex", displayName: "Codex" };
+    fixture.instances = [claude(three), codex];
+    render();
+    await openWith("click");
+    const currentTab = document.querySelector<HTMLElement>('[data-provider-tab][aria-pressed="true"]')!;
+    currentTab.focus();
+    press("ArrowRight");
+    expect(focused()?.getAttribute("aria-label")).toBe("OpenAI");
+    expect(focused()?.getAttribute("aria-pressed")).toBe("true");
+    expect(menu()?.textContent).toContain("GPT fixture");
+    expect(menu()?.querySelector("[data-simple-thinking]")).toBeNull();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    press("ArrowDown");
+    expect(focused()?.hasAttribute("data-menu-search")).toBe(true);
+    type(focused() as HTMLInputElement, "gpt");
+    press("Enter");
+    await settle();
+    expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.objectContaining({ instanceId: "codex", model: "gpt-fixture" }) }));
   });
 });
