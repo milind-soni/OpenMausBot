@@ -1,24 +1,20 @@
 import { Activity, ChevronDown, ChevronRight, PinOff } from "lucide-react";
-import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { AttentionThreadRows, type AttentionThread } from "./SidebarBotActivity";
 
-export function SidebarAttentionPanel({ entries, density, onUnpin, onJump, collapsed, onToggle }: {
+export function SidebarAttentionPanel({ entries, onUnpin, onJump, collapsed, onToggle }: {
   entries: AttentionThread[];
-  density: SidebarDensity;
   onUnpin: () => void;
   onJump: (entry: AttentionThread) => void;
   collapsed: boolean;
   onToggle?: () => void;
 }) {
-  const compact = density === "compact";
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
     <section
       data-testid="sidebar-attention-panel"
       aria-label={t("attention.title")}
-      className={cn("mx-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/30", compact ? "mb-1.5" : "mb-2")}
+      className="mx-2 mb-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/30"
     >
       <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[12px] font-medium text-ink-secondary">
         <button
@@ -29,9 +25,9 @@ export function SidebarAttentionPanel({ entries, density, onUnpin, onJump, colla
           aria-label={t(collapsed ? "sidebar.section.expand" : "sidebar.section.collapse", { name: t("attention.title") })}
           className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <Chevron size={compact ? 11 : 12} aria-hidden="true" />
+          <Chevron size={12} aria-hidden="true" />
         </button>
-        <Activity size={compact ? 11 : 12} aria-hidden="true" className="shrink-0" />
+        <Activity size={12} aria-hidden="true" className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t("attention.title")}</span>
         {entries.length > 0 && (
           <span className="text-[11px] font-normal tabular-nums">{entries.length}</span>
@@ -43,7 +39,7 @@ export function SidebarAttentionPanel({ entries, density, onUnpin, onJump, colla
           title={t("attention.unpin")}
           className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <PinOff size={compact ? 11 : 12} aria-hidden="true" />
+          <PinOff size={12} aria-hidden="true" />
         </button>
       </div>
       {!collapsed && (entries.length === 0 ? (

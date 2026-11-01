@@ -87,6 +87,11 @@ export function workspaceDir(botId: string): string {
   return join(WORKSPACES_DIR, botId);
 }
 
+/** One per bot, for every thread: its working folder's Claude Code settings, else its own folder's. */
+export function botSettingsFile(bot: { id: string; cwd?: string }): string {
+  return join(bot.cwd ?? workspaceDir(bot.id), ".claude", "settings.json");
+}
+
 /** On a Cloud home memory is read only from regular files, never through a link. */
 let regularMemoryFilesOnly = false;
 export function readMemoryOnlyFromRegularFiles(): void {

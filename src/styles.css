@@ -162,11 +162,10 @@
      there `raised` is pure white and a card is too. */
   --color-control: #282828;
   --color-hairline: #383838;
-  /* the window's frame: its top bar and the rail of places, around the app's
-     rounded card. A step from the sidebar toward the ink, so every skin gets
-     one without naming it: a shade darker on the light skins, lighter on the
-     dark ones. */
-  --color-frame: color-mix(in oklab, var(--color-panel) 93%, var(--color-ink));
+  /* the window's frame: its top bar, the rail of places and the sidebar,
+     around the app's rounded card. The app's own colour a step darker, so it
+     stays in the skin's family: --frame-shade of black. */
+  --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -232,6 +231,10 @@
 
 :root {
   --code-color-scheme: dark;
+  /* how far the frame steps from the app's colour toward black: further on
+     the dark skins, whose colours sit close to black, and a small step on the
+     light ones (2.5%), where the quiet ink must still clear 4.5:1 on it */
+  --frame-shade: 30%;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -317,6 +320,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
   --code-color-scheme: light;
+  --frame-shade: 3%;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -461,6 +465,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
   --code-color-scheme: light;
+  --frame-shade: 4%;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -590,6 +595,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
   --code-color-scheme: light;
+  --frame-shade: 3.5%;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -713,6 +719,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #fcfcfc;           /* the thread */
   --color-panel: #f5f5f5;         /* sidebar, one step down from the thread */
   --color-raised: #e4e4e4;
@@ -783,6 +790,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #ffffff;           /* the thread */
   --color-panel: #f6f8f6;         /* sidebar */
   --color-raised: #e9eeea;
@@ -844,6 +852,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="pop"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #fdf5ea;           /* the page */
   --color-panel: #f6ebdb;         /* sidebar */
   --color-raised: #efe3d1;
@@ -1583,6 +1592,9 @@ body {
   .place-banner img { --place-banner-strength: 0.26; filter: blur(1.5px) saturate(0.85) brightness(0.8); }
 }
 .place-tint[data-under-banner] { display: none; }
+/* In a framed window the sidebar sits on the frame, under the top bar and beside the rail: its colour or picture rounds
+   its top-left corner where the two meet, as the card beside it does. */
+[data-sidebar][data-framed] :is(.place-tint, .place-banner) { border-top-left-radius: 12px; }
 @media (prefers-reduced-transparency: reduce) {
   .place-banner { display: none; }
   .place-tint[data-under-banner] { display: block; }

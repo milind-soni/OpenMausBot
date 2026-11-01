@@ -424,8 +424,8 @@ bot's question tool, the bot's own choices as buttons, and anything else as a ca
 `NEEDS INPUT:` line (docs/runtime-contract.md). It waits however long they take. Its copy reaches their inbox with the
 same buttons, and the conversation that handed the work on gets no chip about it when that conversation is the inbox
 itself. A line the person types while the bot waits on its own question card answers that card, as a tap would, and so
-does a reply to the card or to its copy, and an answer their Chief or another bot passes on with `coordinate_bots`
-(`answers`, the question's assignment id). A question whose work ended, or that the bot replaced with a newer one, closes,
+does a reply to the card or to its copy, an answer their Chief or another bot passes on with `coordinate_bots`
+(`answers`, the question's assignment id), and anything the bot that handed the work on sends to that thread later. A question whose work ended, or that the bot replaced with a newer one, closes,
 and its copy, Needs you and the overview follow; a restart posts nothing again.
 
 **Answering is replying.** A reply to a line (the chat's Reply) goes back as the table says, and the inbox's bot takes no
