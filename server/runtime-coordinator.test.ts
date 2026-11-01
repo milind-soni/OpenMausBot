@@ -347,10 +347,12 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     expect(() => w.coordinator.enqueue(builder, "gen-1", node.id, { ...chief, threadId: "chief-other" }, "They said yes", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
     const answer = w.coordinator.enqueue(builder, "gen-1", node.id, chief, "They said yes", { mode: "notify", reply: "none" });
     expect(answer).toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-chat", status: "queued" } });
+    expect(w.coordinator.answersTo(node.id)).toEqual({ botId: "chief", threadId: "chief-chat" });
     await w.host.release(node.id, { ok: true, text: "done" });
     const awaited = send(w, chief, "gen-2", undefined, builder, "Build it");
     w.coordinator.tick();
     expect(() => w.coordinator.enqueue(builder, "gen-2", awaited.node.id, chief, "Done", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    expect(w.coordinator.answersTo(awaited.node.id)).toBeUndefined();
     await w.host.release(awaited.node.id, { ok: true, text: "done" });
   });
 

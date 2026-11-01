@@ -153,6 +153,9 @@ export interface CoordinatorHost {
 
 export interface Coordinator {
   node(id: string): HandoffView | undefined;
+  /** The conversation the running assignment `id` may answer with a one-way notice: its requester, when it was handed
+   * with reply none outside rooms. */
+  answersTo(id: string): { botId: string; threadId: string } | undefined;
   has(id: string): boolean;
   all(): HandoffView[];
   active(): HandoffView[];

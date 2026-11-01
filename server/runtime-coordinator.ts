@@ -164,6 +164,13 @@ export class RuntimeCoordinator implements Coordinator {
     return a && this.project(a);
   }
 
+  answersTo(id: string): { botId: string; threadId: string } | undefined {
+    this.ready();
+    const a = this.store.get(id);
+    const { botId, threadId } = a?.requester ?? {};
+    return a && botId && threadId && answersSender(a, "notify", { botId, threadId }) ? { botId, threadId } : undefined;
+  }
+
   has(id: string): boolean {
     this.ready();
     return this.store.get(id) !== undefined;
