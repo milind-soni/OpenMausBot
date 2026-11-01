@@ -1,9 +1,9 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStore, type Group } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
-import { ThreadBrowser } from "./ThreadBrowser";
+import { GroupThreadPicker } from "./TaskPicker";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useRevealedThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 
 export function GroupThreadList({ group, selected, query = "" }: { group: Group; selected: boolean; query?: string }) {
@@ -18,7 +18,8 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
     };
   });
   const bulk = useBulkSelect();
-  const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], bulk.active));
+  const [showAll, setShowAll] = useState(false);
+  const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll || bulk.active));
   const selection = bulk.forRows(visible);
   useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
   const latest = useRef(group);
@@ -38,8 +39,8 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
     {bulk.active && <BulkSelectFilters rows={visible} selected={selection} now={now} onChange={bulk.setSelected} onDone={bulk.finish} />}
     {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} ownerId={group.id} current={selected && task.threadId === group.threadId}
       now={stampClock(threadRecency(task), now)} locale={locale} {...actions} selectMode={bulk.active} checked={selection.has(task.threadId)} onToggleSelect={bulk.toggle} />)}
-    <ThreadListFooter bulk={bulk} rows={visible} selected={selection} canSelect={tasks.length > 1 && !group.dm}
-      browser={<ThreadBrowser tasks={tasks} name={group.name} currentThreadId={group.threadId} onOpen={(threadId) => actions.onSelect({ threadId })} />}
-      maxDeletable={tasks.length - 1} freshConversation={false} onDelete={(threadIds) => deleteThreadsInBulk({ groupId }, threadIds, dispatch)} />
+    <ThreadListFooter bulk={bulk} rows={visible} selected={selection} total={tasks.length} canShowAll={!query && !showAll && tasks.length > visible.length} canSelect={tasks.length > 1 && !group.dm}
+      browser={<GroupThreadPicker group={group} dispatch={dispatch} placement="sidebar" onOpen={(threadId) => actions.onSelect({ threadId })} />}
+      onShowAll={() => setShowAll(true)} maxDeletable={tasks.length - 1} freshConversation={false} onDelete={(threadIds) => deleteThreadsInBulk({ groupId }, threadIds, dispatch)} />
   </div>;
 }

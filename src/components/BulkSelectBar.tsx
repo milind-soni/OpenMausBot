@@ -133,10 +133,13 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
   </div>;
 }
 
-export function ThreadListFooter({ bulk, rows, selected, browser, canSelect, maxDeletable, freshConversation, onDelete }: {
+export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, onShowAll, browser, canSelect, maxDeletable, freshConversation, onDelete }: {
   bulk: ReturnType<typeof useBulkSelect>;
   rows: readonly SelectableRow[];
   selected: Selection;
+  total: number;
+  canShowAll: boolean;
+  onShowAll: () => void;
   browser: ReactNode;
   canSelect: boolean;
   maxDeletable?: number;
@@ -146,7 +149,9 @@ export function ThreadListFooter({ bulk, rows, selected, browser, canSelect, max
   if (bulk.active) {
     return <BulkSelectBar rows={rows} selected={selected} maxDeletable={maxDeletable} freshConversation={freshConversation} onChange={bulk.setSelected} onDelete={onDelete} />;
   }
+  if (total < 2) return null;
   return <div className="flex flex-wrap items-center justify-between gap-x-2 pl-5 pr-2">
+    {canShowAll && <button type="button" onClick={onShowAll} className="inline-flex min-h-8 items-center rounded px-1 text-[13px] font-medium text-ink-secondary hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">{t("task.showAll", { count: total })}</button>}
     {browser}
     {canSelect && <button type="button" onClick={bulk.start} className="inline-flex min-h-8 items-center rounded px-1 text-[12px] text-ink-secondary hover:text-danger focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">{t("task.bulk.selectForDeletion")}</button>}
   </div>;

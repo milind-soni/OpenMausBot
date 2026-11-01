@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Activity, Check, ChevronDown, FolderInput, Pin, PinOff, Search, SquarePen, Trash2 } from "lucide-react";
-import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
+import { useStore, type Action, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { roomThreadsWorkingElsewhere } from "@/lib/room-threads";
@@ -15,6 +16,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
 import { Select } from "./Select";
+import { anchoredMenuPosition } from "./SidebarPopoverMenu";
 
 export const TASK_PICKER_DISMISS_MS = 500;
 
@@ -87,7 +89,9 @@ function ConversationTaskPicker({
   attention,
   onAttentionJump,
   workingElsewhere = 0,
+  placement = "header",
 }: {
+  placement?: "header" | "sidebar";
   threadId: string;
   tasks: PickerTask[];
   busy: boolean;
@@ -108,6 +112,9 @@ function ConversationTaskPicker({
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState({ left: 8, top: 8 });
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishingRename = useRef(false);
   const now = useRelativeNow();
@@ -126,7 +133,20 @@ function ConversationTaskPicker({
     setRenaming(null);
     setQuery("");
     setOpen(false);
+    triggerRef.current?.focus();
   };
+
+  useLayoutEffect(() => {
+    if (!open || placement !== "sidebar") return;
+    const positionMenu = () => {
+      if (!triggerRef.current || !menuRef.current) return;
+      setPosition(anchoredMenuPosition(triggerRef.current.getBoundingClientRect(), menuRef.current.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, getComputedStyle(triggerRef.current).direction === "rtl"));
+    };
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => { window.removeEventListener("resize", positionMenu); window.removeEventListener("scroll", positionMenu, true); };
+  }, [open, placement]);
 
   const queueDismiss = () => {
     clearDismiss();
@@ -161,7 +181,7 @@ function ConversationTaskPicker({
     const onDown = (e: MouseEvent) => {
       if (e.target instanceof Element && e.target.closest("[data-thread-overlay]")) return;
       // SAFETY: a mousedown target inside a document is always a DOM Node
-      if (!ref.current?.contains(e.target as Node)) {
+      if (!ref.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) {
         if (dismissTimer.current) {
           clearTimeout(dismissTimer.current);
           dismissTimer.current = null;
@@ -180,6 +200,7 @@ function ConversationTaskPicker({
       }
       setRenaming(null);
       setOpen(false);
+      triggerRef.current?.focus();
     };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
@@ -216,9 +237,8 @@ function ConversationTaskPicker({
   const looking = query.trim();
   const results = [...attentionRows.map((entry) => ({ kind: "attention" as const, entry })), ...visible.map((task) => ({ kind: "task" as const, task }))];
 
-  return (
-    <div className="relative" ref={ref}>
-      <button
+  const trigger = <button
+        ref={triggerRef}
         type="button"
         onClick={() => {
           if (open) closeMenu();
@@ -226,9 +246,10 @@ function ConversationTaskPicker({
         }}
         title={switchTitle}
         aria-label={t("task.switch")}
+        aria-expanded={open}
         className={cn(
-          "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
-          COMPACT_BUBBLE,
+          placement === "sidebar" ? "inline-flex min-h-8 items-center gap-1 rounded px-1 text-[13px] font-medium text-ink-secondary hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus" : "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
+          placement === "header" && COMPACT_BUBBLE,
         )}
       >
         <span className="truncate @max-4xl/chathead:hidden">{t("task.switch")}</span>
@@ -243,10 +264,10 @@ function ConversationTaskPicker({
           />
         )}
         <ChevronDown size={12} className="shrink-0 @max-4xl/chathead:hidden" />
-      </button>
-
-      {motion.shown && (
-        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+      </button>;
+  const menu = motion.shown && (
+        <div ref={menuRef} data-task-picker="" style={placement === "sidebar" ? position : undefined}
+          className={cn("flex w-[300px] max-w-[calc(100vw-16px)] flex-col overflow-hidden", placement === "sidebar" ? "fixed z-50 max-h-[calc(100dvh-16px)]" : "absolute right-0 top-full z-40 mt-1", MENU_SHEET, motion.className)} {...motion.exitProps}>
           <div>
             <div className="flex items-center gap-2 rounded-md bg-ink/[0.05] px-2 py-1.5 focus-within:ring-2 focus-within:ring-focus/60">
               <Search size={14} className="shrink-0 text-ink-secondary" />
@@ -269,7 +290,7 @@ function ConversationTaskPicker({
                     const first = results[0];
                     if (!first) return;
                     if (first.kind === "attention") onAttentionJump?.(first.entry);
-                    else if (first.task.threadId !== threadId) onSwitch(first.task.threadId);
+                    else if (first.task.threadId !== threadId || placement === "sidebar") onSwitch(first.task.threadId);
                     closeMenu();
                   }
                 }}
@@ -279,7 +300,7 @@ function ConversationTaskPicker({
               />
             </div>
           </div>
-          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: results.length }) : t("task.list")}>
+          <div className="min-h-0 max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: results.length }) : t("task.list")}>
             {attentionRows.length > 0 && <div className="pb-1">
               <div className="flex items-center gap-1.5 px-2 pb-1 pt-1.5 text-[12px] font-medium text-ink-secondary"><Activity size={14} />{t("attention.title")}</div>
               <AttentionThreadRows inset entries={attentionRows} onJump={(entry) => { onAttentionJump?.(entry); closeMenu(); }} />
@@ -296,6 +317,7 @@ function ConversationTaskPicker({
                 <Fragment key={task.threadId}>
                 {bot?.projects?.length && heading ? <div className={cn("flex items-center gap-1.5 px-2 pb-1 pt-2 text-[12px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.id && <FolderIcon emoji={heading.emoji} size={12} />}{heading.name}</div> : null}
                 <div
+                  data-task-picker-row={task.threadId}
                   className={cn("group flex items-center gap-2 rounded-md px-2 py-1.5", active ? "bg-menu-active" : "hover:bg-menu-hover")}
                 >
                   <Check size={14} className={cn("shrink-0", active ? "text-accent" : "opacity-0")} />
@@ -329,7 +351,7 @@ function ConversationTaskPicker({
                       type="button"
                       onClick={(e) => {
                         if (taskPickerPointerIntent("click", e.detail) !== "select") return;
-                        if (!active) onSwitch(task.threadId);
+                        if (!active || placement === "sidebar") onSwitch(task.threadId);
                         queueDismiss();
                       }}
                       onDoubleClick={(e) => {
@@ -413,9 +435,8 @@ function ConversationTaskPicker({
             <SquarePen size={16} className="text-ink-secondary" /> {t("task.newShort")}
           </button>}
         </div>
-      )}
-    </div>
-  );
+      );
+  return <div className="relative" ref={ref}>{trigger}{placement === "sidebar" && menu ? createPortal(menu, document.body) : menu}</div>;
 }
 
 export function BotActivityPicker({ bot }: { bot: Bot }) {
@@ -445,15 +466,22 @@ export function TaskPicker({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   if (!showThreads) return null;
+  return <BotThreadPicker bot={bot} dispatch={dispatch} attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)} />;
+}
+
+type ThreadPickerProps = { dispatch: (action: Action) => void; placement?: "header" | "sidebar"; onOpen?: (threadId: string) => void };
+
+export function BotThreadPicker({ bot, dispatch, placement, onOpen, attention }: ThreadPickerProps & { bot: Bot; attention?: AttentionThread[] }) {
   return (
     <ConversationTaskPicker
+      placement={placement}
       threadId={bot.threadId}
       tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
       busy={false}
       bot={bot}
-      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}
+      attention={attention}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
-      onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
+      onSwitch={onOpen ?? ((threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId }))}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
@@ -465,6 +493,10 @@ export function TaskPicker({ bot }: { bot: Bot }) {
 
 export function GroupTaskPicker({ group }: { group: Group }) {
   const { dispatch } = useStore();
+  return <GroupThreadPicker group={group} dispatch={dispatch} />;
+}
+
+export function GroupThreadPicker({ group, dispatch, placement, onOpen }: ThreadPickerProps & { group: Group }) {
   const tasks = useMemo(() => {
     return (group.tasks ?? []).map((task) => ({
       ...task,
@@ -473,12 +505,13 @@ export function GroupTaskPicker({ group }: { group: Group }) {
   }, [group.tasks]);
   return (
     <ConversationTaskPicker
+      placement={placement}
       threadId={group.threadId}
       tasks={orderedThreadList(tasks)}
       busy={false}
       workingElsewhere={roomThreadsWorkingElsewhere(group)}
       onNew={() => dispatch({ type: "newGroupTask", groupId: group.id })}
-      onSwitch={(threadId) => dispatch({ type: "switchGroupTask", groupId: group.id, threadId })}
+      onSwitch={onOpen ?? ((threadId) => dispatch({ type: "switchGroupTask", groupId: group.id, threadId }))}
       onRename={(threadId, title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId })}
       onPin={(threadId, pinned) => {

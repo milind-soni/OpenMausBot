@@ -122,7 +122,7 @@ describe("sidebar bot threads", () => {
     expect(markup).toContain('data-sidebar-thread-row="review"');
     for (let index = 1; index < 7; index += 1) expect(markup).toContain(`data-sidebar-thread-row="own-${index}"`);
     expect(markup).toContain("All threads");
-    expect(markup).toContain('text-ink-tertiary">10</span>');
+    expect(markup).toMatch(/aria-label="All threads"[^>]*>.*?>10<\/span>/);
     const searched = renderToStaticMarkup(threadList({ ...bot, threadId: "own-6", tasks: [...own, ...helpers] }, "pricing"));
     expect(searched).toContain('data-sidebar-thread-row="pricing"');
     expect(searched).not.toContain("data-sidebar-helper-threads");

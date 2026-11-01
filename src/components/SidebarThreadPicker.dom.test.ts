@@ -4,10 +4,10 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type Bot, type Group, type Task } from "@/state/store";
-import { setLocale, t } from "@/lib/i18n";
+import { setLocale } from "@/lib/i18n";
 import { BotThreadList, botRowProps } from "./Sidebar";
 import { GroupThreadList } from "./SidebarGroupThreadList";
-import { ThreadBrowser } from "./ThreadBrowser";
+import { TASK_PICKER_DISMISS_MS } from "./TaskPicker";
 
 const dispatch = vi.hoisted(() => vi.fn());
 vi.mock("@/state/store", async (original) => ({
@@ -37,7 +37,13 @@ const type = (value: string) => {
   flushSync(() => input().dispatchEvent(new Event("input", { bubbles: true })));
 };
 const key = (key: string, extra: KeyboardEventInit = {}) => flushSync(() => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra })));
-const listed = () => [...document.querySelectorAll<HTMLElement>("[data-thread-browser-row]")].map((entry) => entry.dataset.threadBrowserRow);
+const listed = () => [...document.querySelectorAll<HTMLElement>("[data-task-picker-row]")].map((entry) => entry.dataset.taskPickerRow);
+const menu = () => document.querySelector<HTMLElement>("[data-task-picker]");
+const row = (id: string) => document.querySelector<HTMLElement>(`[data-task-picker-row="${id}"]`)!;
+const choose = (id: string) => {
+  click(row(id).querySelector("button")!);
+  flushSync(() => vi.advanceTimersByTime(TASK_PICKER_DISMISS_MS));
+};
 const open = () => {
   const trigger = buttons().find((entry) => entry.textContent?.startsWith("All threads"))!;
   trigger.focus();
@@ -46,12 +52,14 @@ const open = () => {
 };
 beforeEach(() => {
   dispatch.mockReset();
+  vi.useFakeTimers();
+  document.documentElement.dataset.reducedMotion = "true";
   setLocale("en");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
 });
-afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
+afterEach(() => { flushSync(() => root.unmount()); host.remove(); vi.useRealTimers(); delete document.documentElement.dataset.reducedMotion; });
 
 describe("finding conversations from the sidebar", () => {
   const renderBot = () => flushSync(() => root.render(createElement(BotThreadList, { ...botRowProps(initialState, dispatch, bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true })));
@@ -64,12 +72,12 @@ describe("finding conversations from the sidebar", () => {
     expect(document.activeElement).toBe(input());
     expect(new Set(listed())).toEqual(new Set(tasks.map((task) => task.threadId)));
     expect(listed()).not.toContain("run");
-    click(document.querySelector<HTMLElement>('[data-thread-browser-row="anki"]')!);
+    choose("anki");
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: "leo", threadId: "anki" });
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(menu()).toBeNull();
   });
 
-  it("searches all titles and folders, recovers from no matches, and clears with focus retained", () => {
+  it("searches all titles and folders, recovers from no matches, and clears with Escape", () => {
     renderBot(); open();
     type("research");
     expect(listed()).toEqual(["filed"]);
@@ -77,8 +85,8 @@ describe("finding conversations from the sidebar", () => {
     expect(listed()).toEqual(["anki"]);
     type("missing title");
     expect(listed()).toEqual([]);
-    expect(document.querySelector('[role="dialog"]')!.textContent).toContain("Nothing matches");
-    click(button("Clear"));
+    expect(menu()!.textContent).toContain("Nothing matches");
+    key("Escape");
     expect(listed()).toHaveLength(tasks.length);
     expect(document.activeElement).toBe(input());
     expect(dispatch).not.toHaveBeenCalled();
@@ -92,17 +100,16 @@ describe("finding conversations from the sidebar", () => {
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: "leo", threadId: "anki" });
   });
 
-  it("traps keyboard focus and restores the browser button on Escape without navigation", () => {
+  it("restores focus on Escape, dismisses outside, and resets search on repeated opening", () => {
     renderBot();
     const trigger = open();
-    const close = button("Close");
-    close.focus(); key("Tab", { shiftKey: true });
-    expect(document.activeElement).toBe(document.querySelector('[data-thread-browser-row="anki"]'));
-    key("Tab"); expect(document.activeElement).toBe(close);
     input().focus(); key("Escape");
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(menu()).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(dispatch).not.toHaveBeenCalled();
+    open(); type("Anki");
+    flushSync(() => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    expect(menu()).toBeNull();
     open(); expect(input().value).toBe("");
   });
 
@@ -110,22 +117,57 @@ describe("finding conversations from the sidebar", () => {
     const group = { id: "team", name: "Team", threadId: "recent-7", createdAt: 1, tasks, memberIds: [], messages: [], unread: false, defaultResponder: { kind: "everyone" }, bulletin: "" } as Group;
     flushSync(() => root.render(createElement(GroupThreadList, { group, selected: true })));
     open(); type("archived");
-    click(document.querySelector<HTMLElement>('[data-thread-browser-row="archived"]')!);
+    choose("archived");
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchGroupTask", groupId: "team", threadId: "archived" });
   });
 
   it("still opens the owning chat when the chosen thread is already current", () => {
     renderBot(); open();
-    click(document.querySelector<HTMLElement>('[data-thread-browser-row="recent-7"]')!);
+    choose("recent-7");
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: "leo" });
   });
 
-  it("offers a localized empty state for an empty history", () => {
-    setLocale("fr");
-    flushSync(() => root.render(createElement(ThreadBrowser, { tasks: [], name: "Leo", currentThreadId: "none", onOpen: dispatch })));
-    click(host.querySelector("button")!);
-    expect(listed()).toEqual([]);
-    expect(document.querySelector('[role="dialog"]')!.textContent).toContain(t("task.empty"));
-    expect(document.activeElement?.getAttribute("aria-label")).not.toBe("Search threads");
+  it("keeps pin, rename and move actions in the shared picker", () => {
+    renderBot(); open(); type("Anki");
+    click(row("anki").querySelector<HTMLButtonElement>('[aria-label="Pin"]')!);
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "leo", threadId: "anki", patch: { pinned: true } });
+    const select = row("anki").querySelector("select")!;
+    flushSync(() => { select.value = "research"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "leo", threadId: "anki", patch: { projectId: "research" } });
+    click(row("anki").querySelector<HTMLButtonElement>('[aria-label="Rename Anki vocabulary deck"]')!);
+    const rename = row("anki").querySelector("input")!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(rename, "Renamed lesson");
+    flushSync(() => rename.dispatchEvent(new Event("input", { bubbles: true })));
+    rename.focus(); key("Enter");
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "renameTask", botId: "leo", threadId: "anki", title: "Renamed lesson" });
+  });
+
+  it("expands older bot and room threads inline and keeps search available", () => {
+    renderBot();
+    click(button(`Show all ${tasks.length} threads`));
+    expect(host.querySelector('[data-sidebar-thread-row="anki"]')).not.toBeNull();
+    expect(button(`Show all ${tasks.length} threads`)).toBeUndefined();
+    expect(button("All threads")).toBeDefined();
+    const group = { id: "team", name: "Team", threadId: "recent-7", createdAt: 1, tasks, memberIds: [], messages: [], unread: false, defaultResponder: { kind: "everyone" }, bulletin: "" } as Group;
+    flushSync(() => root.render(createElement(GroupThreadList, { group, selected: false })));
+    expect(host.querySelector('[data-sidebar-thread-row="anki"]')).toBeNull();
+    click(button(`Show all ${tasks.length} threads`));
+    expect(host.querySelector('[data-sidebar-thread-row="anki"]')).not.toBeNull();
+    open(); type("Anki"); key("Enter");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchGroupTask", groupId: "team", threadId: "anki" });
+  });
+
+  it("hides the single-thread bot and room footer and keeps deletion distinct", () => {
+    const single = { ...bot, tasks: [tasks[0]!] };
+    flushSync(() => root.render(createElement(BotThreadList, { ...botRowProps(initialState, dispatch, single, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true })));
+    expect(button("All threads")).toBeUndefined();
+    expect(button("Select to delete")).toBeUndefined();
+    const group = { id: "team", name: "Team", threadId: "recent-0", createdAt: 1, tasks: [tasks[0]!], memberIds: [], messages: [], unread: false, defaultResponder: { kind: "everyone" }, bulletin: "" } as Group;
+    flushSync(() => root.render(createElement(GroupThreadList, { group, selected: true })));
+    expect(button("All threads")).toBeUndefined();
+    renderBot(); click(button("Select to delete"));
+    expect(host.querySelector('[role="checkbox"]')).not.toBeNull();
+    expect(menu()).toBeNull();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });

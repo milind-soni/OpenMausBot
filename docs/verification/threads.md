@@ -14,21 +14,27 @@ switching and Stop can be exercised without a real provider or account.
 
 ## Check the real UI
 
-For the full-history browser, run `node --experimental-strip-types scripts/verify-thread-browser.ts`
+For full-history access, run `node --experimental-strip-types scripts/verify-thread-browser.ts`
 and open its printed `previewUrl`. The disposable fixture includes an older
 Anki conversation beyond the sidebar limit, an archived conversation, a folder
 with a long title, and a room with more than six conversations.
 
-- Expand Pepper and choose **All threads** beneath its recent conversations.
+- Expand Pepper and choose **Show all 13 threads**. Confirm older conversations
+  appear inline and **All threads** and **Select to delete** remain available.
+- Choose **All threads** beneath its conversations. It must use the same
+  searchable picker as the chat header, including pin, rename and move actions.
   Search for **Anki**, then click the result or press Enter. Confirm the
-  conversation opens and the dialog closes without entering deletion mode.
-- Open the browser again. Search **Research**, clear the search, and try a
-  nonexistent title. Check the result count, no-results text and recovery.
+  conversation opens and the picker closes without entering deletion mode.
+- Open the picker again. Search **Research**, clear the search, and try a
+  nonexistent title. Check the no-results text and recovery.
   Archived conversations must be present in the complete list.
-- Check Tab/Shift-Tab, Escape, focus returning to the opener, a narrow phone
-  viewport and both light and dark skins. Long titles must wrap inside the dialog.
-- Repeat browsing and opening for **Launch team**. **Select to delete** must
-  still enter the existing checkbox/confirmation flow separately.
+- Check Tab/Shift-Tab, Escape, focus returning to the opener, outside dismissal,
+  repeated opening, a narrow phone viewport and both light and dark skins.
+  Escape clears a search first, then closes the picker. The picker and its
+  scrollable list must stay inside the viewport with long titles.
+- Repeat inline expansion, browsing and opening for **Launch team**. Confirm
+  single-thread bots and rooms have no footer. **Select to delete** must still
+  enter the existing checkbox/confirmation flow separately.
 
 1. Expand Pepper and open Triage Gmail. Confirm its conversation and model.
 2. Send a message, then select Triage iCloud and send another. Both sidebar
