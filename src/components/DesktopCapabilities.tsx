@@ -65,8 +65,8 @@ export function windowFrameable(capabilities: Pick<DesktopCapabilities, "windowC
 }
 
 /** A window that draws its own frame: the top bar holding the traffic lights or the Windows caption buttons
- * (WindowFrameBar), the rail of places and the sidebar on the frame's colour, and the chat or page in a rounded card
- * beside them. Nothing under the bar makes room for the window's buttons. Off once the person turned the frame off. */
+ * (WindowFrameBar) and the rail of places in the frame's colour, and the app, its sidebar and the chat or page, in a
+ * rounded card beside them. Nothing under the bar makes room for the window's buttons. Off once the person turned the frame off. */
 export function windowFramed(capabilities: Pick<DesktopCapabilities, "windowChrome" | "windowFrame"> | undefined): boolean {
   return windowFrameable(capabilities) && capabilities?.windowFrame !== false;
 }

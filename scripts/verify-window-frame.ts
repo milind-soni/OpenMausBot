@@ -1,6 +1,6 @@
 // The window's own frame in the real app, as the desktop window draws it on macOS and Windows: the top bar (the
 // traffic lights or the caption buttons, the rail's button, the place on screen in its middle, an update, Settings),
-// the rail of places beside it, the sidebar on the frame's colour beside the app's card, the sidebar's edge dragged to
+// the rail of places beside it in the bar's colour, the sidebar and the chat in the app's card, the sidebar's edge dragged to
 // its avatars and back, the same window with the frame turned off, and the rail's tiles up close. Against a disposable fake-engine server, with the desktop bridge
 // of scripts/testing/rail-preview.tsx (the window's own rail drawn by its own page, in a frame).
 // Run: node --experimental-strip-types scripts/verify-window-frame.ts --shots <dir> [--only <view,view>] [--skins all]

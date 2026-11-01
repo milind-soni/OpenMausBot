@@ -162,8 +162,8 @@
      there `raised` is pure white and a card is too. */
   --color-control: #282828;
   --color-hairline: #383838;
-  /* the window's frame: its top bar, the rail of places and the sidebar,
-     around the app's rounded card. The app's own colour a step darker, so it
+  /* the window's frame: its top bar and the rail of places, around the
+     app's rounded card (the sidebar and the chat). The app's own colour a step darker, so it
      stays in the skin's family: --frame-shade of black. */
   --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
   --color-ink: #f5f5f5;
@@ -1592,9 +1592,6 @@ body {
   .place-banner img { --place-banner-strength: 0.26; filter: blur(1.5px) saturate(0.85) brightness(0.8); }
 }
 .place-tint[data-under-banner] { display: none; }
-/* In a framed window the sidebar sits on the frame, under the top bar and beside the rail: its colour or picture rounds
-   its top-left corner where the two meet, as the card beside it does. */
-[data-sidebar][data-framed] :is(.place-tint, .place-banner) { border-top-left-radius: 12px; }
 @media (prefers-reduced-transparency: reduce) {
   .place-banner { display: none; }
   .place-tint[data-under-banner] { display: block; }
@@ -2912,7 +2909,10 @@ button:disabled.bg-danger {
    scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
    AA pairs hold here exactly as on desktop. */
 @media (max-width: 767.98px) {
+  /* The window's frame keeps the desktop ground at any width: the rail of places is a page 36px wide beside a full
+     page, and both draw the frame's top bar or rail in one colour. */
   :is([data-skin="midnight"]) {
+    --color-frame: color-mix(in oklab, #121212, black var(--frame-shade));
     --color-app: #141414;
     --color-panel: #1c1c1e;
     --color-raised: #2c2c2e;
@@ -2931,6 +2931,7 @@ button:disabled.bg-danger {
     --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
+    --color-frame: color-mix(in oklab, #ffffff, black var(--frame-shade));
     --color-app: #f6f8f6;
     --color-panel: #fcfdfc;
     --color-card: #ffffff;
