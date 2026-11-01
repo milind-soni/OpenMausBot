@@ -93,6 +93,26 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text?.includes("QA sent") || message.text?.includes("Release QA complete"))).toBe(false);
 }), 60_000);
 
+it("lets a teammate answer a one-way ask in the thread that asked, with a notice and nothing more", () => fixture(async f => {
+  const asking = f.chief.activeTaskId;
+  f.plan[f.chief.id] = { steps: [{ arguments: {
+    bot_ids: [f.lead.id], message: `Ask the person which day suits, then tell me in thread ${asking}.`, thread: "new", reply: "none",
+  } }], reply: "Asked Engineering", byPrompt: [{ promptIncludes: "Tuesday suits", plan: { reply: "Got Tuesday from Engineering" } }] };
+  f.plan[f.lead.id] = { steps: [
+    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits, please plan for it", thread: asking }, expectError: true },
+    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits", thread: asking, reply: "none" } },
+  ], reply: "Told Clive" };
+  await f.start();
+  const sends = () => f.evidence().find((turn: any) => turn.botId === f.lead.id)?.evidence.filter((entry: any) => entry.step?.arguments?.thread === asking);
+  await expect.poll(() => sends()?.length, { timeout: 15_000 }).toBe(2);
+  const [work, notice] = sends().map((entry: any) => entry.response.result);
+  expect(JSON.stringify(work)).toContain("handed you work: answer it there with reply");
+  expect(notice.isError).toBeFalsy();
+  expect(JSON.parse(notice.content[0].text).receipts[0]).toMatchObject({ threadId: asking });
+  await expect.poll(async () => (await f.messages(asking)).some((message: any) => message.text === "Got Tuesday from Engineering"), { timeout: 15_000 }).toBe(true);
+  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.filter((task: any) => task.title?.includes("Tuesday"))).toEqual([]);
+}), 60_000);
+
 it("marks a failed one-way send so restart recovery cannot duplicate its notice", () => fixture(async f => {
   // The failed send reports an incident to Clive, the lead's Chief; answering it must not send the task again.
   f.plan[f.chief.id] = { steps: [{ arguments: {
