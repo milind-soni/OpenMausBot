@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir, uptime as osUptime } from "node:os";
@@ -58,6 +58,16 @@ async function exitedPid() {
     child.once("close", resolve);
   });
   return pid;
+}
+
+function wmicAvailable() {
+  if (process.platform !== "win32") return false;
+  try {
+    execFileSync("wmic", ["/?"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test.afterEach(() => {
@@ -652,8 +662,8 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
 });
 
 test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
-  // With or without wmic: Windows 11 no longer installs it, and the check must still tell a reused pid apart.
-  if (process.platform !== "win32") return t.skip("Windows-only: process-identity check");
+  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
+  if (!wmicAvailable()) return t.skip("wmic is not available; the Windows process-identity check cannot be exercised");
   const { dataDir } = temporaryDirectory();
   const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
   const siblingPid = sibling.pid;
@@ -679,6 +689,69 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
     assert.equal(lease.ownerPid, process.pid);
   } finally {
     lease.release();
+  }
+});
+
+// Windows 11 no longer installs wmic: these hold with or without it.
+const windowsProgram = (name) => path.join(process.env.SystemRoot || "C:\\Windows", "System32", name);
+
+async function liveOtherProgram(t) {
+  // ping.exe ships with every Windows and stays alive while it counts; any program but this one's would do.
+  const other = spawn(windowsProgram("PING.EXE"), ["-n", "60", "127.0.0.1"], { stdio: "ignore", windowsHide: true });
+  t.after(() => other.kill());
+  await new Promise((resolve, reject) => { other.once("spawn", resolve); other.once("error", reject); });
+  return other.pid;
+}
+
+test("on Windows the lease records the program this process runs", (t) => {
+  if (process.platform !== "win32") return t.skip("Windows-only: the lease's program name");
+  const { dataDir } = temporaryDirectory();
+  const record = recordWrittenByThisProcess(dataDir);
+  assert.equal(record.image, path.basename(process.execPath).toLowerCase());
+});
+
+test("a Windows pid reused by another program after a crash is treated as stale", async (t) => {
+  if (process.platform !== "win32") return t.skip("Windows-only: program-name check");
+  const { dataDir } = temporaryDirectory();
+  // The record a crashed OpenMausBot left, a minute old; Windows has since given its pid to another program.
+  plantOwner(dataDir, { pid: await liveOtherProgram(t), token: randomUUID(), createdAt: Date.now() - 60_000, image: "openmausbot.exe" });
+
+  const started = Date.now();
+  const lease = acquireDataDirLease(dataDir);
+  try {
+    assert.equal(lease.ownerPid, process.pid);
+    assert.ok(Date.now() - started < 4_000, `recovery took ${Date.now() - started} ms`);
+  } finally {
+    lease.release();
+  }
+});
+
+test("a live Windows owner running the recorded program still blocks a second instance", (t) => {
+  if (process.platform !== "win32") return t.skip("Windows-only: program-name check");
+  const { dataDir } = temporaryDirectory();
+  // This process is alive and runs the program its own record names, as a real second instance finds.
+  plantOwner(dataDir, { pid: process.pid, token: randomUUID() });
+
+  const started = Date.now();
+  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/);
+  assert.ok(Date.now() - started < 4_000, `refusal took ${Date.now() - started} ms`);
+});
+
+test("a lease from a build that recorded no program keeps blocking on a live pid without wmic", async (t) => {
+  if (process.platform !== "win32") return t.skip("Windows-only: program-name check");
+  const { dataDir } = temporaryDirectory();
+  const { image: _image, ...older } = recordWrittenByThisProcess(dataDir);
+  // Without a creation time or a program name there is nothing to prove the pid reused: refusing stays the safe answer.
+  writeFileSync(path.join(dataDir, LEASE_NAME), `${JSON.stringify({ ...older, pid: await liveOtherProgram(t), token: randomUUID(), createdAt: Date.now() + 60_000 })}\n`);
+  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/);
+});
+
+test("a lease naming a program with a folder or a quote in it is refused as invalid", () => {
+  const { dataDir } = temporaryDirectory();
+  const record = recordWrittenByThisProcess(dataDir);
+  for (const image of ["C:\\Windows\\ping.exe", "a\"b.exe", "", 7]) {
+    writeFileSync(path.join(dataDir, LEASE_NAME), `${JSON.stringify({ ...record, token: randomUUID(), image })}\n`);
+    assert.throws(() => acquireDataDirLease(dataDir), /lease is invalid/, JSON.stringify(image));
   }
 });
 
