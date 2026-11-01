@@ -52,10 +52,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           signal: controller.signal,
           person: (url) => {
             const member = auth.kind === "session" ? sessionMember(auth.session) : null;
-            if (!member) return null;
-            const person = personKey({ id: "", email: member.member.email });
-            const key = deps.teamConnections.people.key(person, name, url);
-            return { oauth: deps.teamConnections.people.oauth(person), ...(key ? { key } : {}) };
+            return member ? deps.teamConnections.people.connection(personKey({ id: "", email: member.member.email }), name, url) : null;
           },
         });
         return answer(res, json, result);
@@ -135,15 +132,16 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const body = await readBody(req);
-      const text = typeof body?.json === "string" ? body.json : "";
-      if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
-        return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
-      }
-      if (!text.trim()) return json(res, 400, { error: "Paste the JSON block first." });
-      const parsed = parseMcpServersImport(text);
-      if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      return answer(res, json, config.addMany(parsed.servers));
+      return answer(res, json, await config.addMany(async () => {
+        const body = await readBody(req);
+        const text = typeof body?.json === "string" ? body.json : "";
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+          return { status: 401, error: "unauthorized: this session has expired or was revoked" };
+        }
+        if (!text.trim()) return { status: 400, error: "Paste the JSON block first." };
+        const parsed = parseMcpServersImport(text);
+        return parsed.ok ? { servers: parsed.servers } : { status: 400, error: parsed.error };
+      }));
     }
 
     const mcpServerRoute = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})$/.exec(path);

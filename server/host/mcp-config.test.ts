@@ -41,19 +41,19 @@ describe("shared MCP config", () => {
     expect(cfg.mcpServers.blocked).toMatchObject({ enabled: false });
   });
 
-  it("every successful add, replace, setEnabled and remove calls changed() once", () => {
+  it("every successful add, replace, setEnabled and remove calls changed() once", async () => {
     const { config, changed } = fixture();
     const steps = [
       () => config.add("warehouse", remote()),
       () => config.replace("warehouse", remote("https://other.example.com/mcp")),
       () => config.setEnabled("warehouse", true),
       () => config.setApps("warehouse", false),
-      () => config.addMany({ nightwatch: remote("https://nightwatch.example.com/mcp") }),
+      () => config.addMany(async () => ({ servers: { nightwatch: remote("https://nightwatch.example.com/mcp") } })),
       () => config.remove("warehouse"),
     ];
     for (const [index, step] of steps.entries()) {
       changed.mockClear();
-      expect(step().status, `step ${index}`).toBeLessThan(300);
+      expect((await step()).status, `step ${index}`).toBeLessThan(300);
       expect(changed, `step ${index}`).toHaveBeenCalledTimes(1);
     }
     changed.mockClear();
@@ -61,12 +61,31 @@ describe("shared MCP config", () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it("bringing in several servers is all or none and keeps the taken-name and policy refusals", () => {
+  it("an import holds the flag while its body is read, so another writer is refused until it ends", async () => {
+    const { config, cfg } = fixture();
+    let finish!: () => void;
+    const body = new Promise<void>((resolve) => { finish = resolve; });
+    const importing = config.addMany(async () => { await body; return { servers: { nightwatch: remote("https://nightwatch.example.com/mcp") } }; });
+    expect(config.add("warehouse", remote())).toEqual({ status: 409, error: "MCP servers are already being updated." });
+    expect(await config.addMany(async () => ({ servers: {} }))).toEqual({ status: 409, error: "MCP servers are already being updated." });
+    finish();
+    expect((await importing).status).toBe(201);
+    expect(Object.keys(cfg.mcpServers ?? {})).toEqual(["nightwatch"]);
+    expect(config.add("warehouse", remote()).status).toBe(201);
+  });
+
+  it("an import that fails while reading its body lets the next writer in", async () => {
+    const { config } = fixture();
+    await expect(config.addMany(async () => { throw new Error("body too large"); })).rejects.toThrow("body too large");
+    expect(config.add("warehouse", remote()).status).toBe(201);
+  });
+
+  it("bringing in several servers is all or none and keeps the taken-name and policy refusals", async () => {
     const { cfg, config, changed } = fixture({ refuse: (name) => name === "blocked" ? "Not allowed here." : undefined });
     config.add("warehouse", remote());
     changed.mockClear();
-    expect(config.addMany({ warehouse: remote(), fresh: remote("https://f.example.com/mcp") }).status).toBe(409);
-    expect(config.addMany({ fresh: remote("https://f.example.com/mcp"), blocked: remote("https://b.example.com/mcp") })).toMatchObject({ status: 403, code: "managed_policy" });
+    expect((await config.addMany(async () => ({ servers: { warehouse: remote(), fresh: remote("https://f.example.com/mcp") } }))).status).toBe(409);
+    expect(await config.addMany(async () => ({ servers: { fresh: remote("https://f.example.com/mcp"), blocked: remote("https://b.example.com/mcp") } }))).toMatchObject({ status: 403, code: "managed_policy" });
     expect(Object.keys(cfg.mcpServers ?? {})).toEqual(["warehouse"]);
     expect(changed).not.toHaveBeenCalled();
   });

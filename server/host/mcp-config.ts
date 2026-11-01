@@ -34,15 +34,15 @@ export interface McpConfigDeps {
   botsPath?(): BrokerPath | null;
 }
 
-export type McpConfigResult =
-  | { status: number; body: Record<string, unknown> }
-  | { status: number; error: string; code?: string };
+export type McpConfigRefusal = { status: number; error: string; code?: string };
+export type McpConfigResult = { status: number; body: Record<string, unknown> } | McpConfigRefusal;
 
 export interface McpConfig {
   add(name: string, server: StoredMcpServer): McpConfigResult;
   replace(name: string, server: StoredMcpServer): McpConfigResult;
-  /** Several servers at once, all or none; they arrive disabled. */
-  addMany(servers: Record<string, StoredMcpServer>): McpConfigResult;
+  /** Several servers at once, all or none; they arrive disabled. `read` runs with the flag held, so another writer is
+   * refused for the whole request, its body included. */
+  addMany(read: () => Promise<{ servers: Record<string, StoredMcpServer> } | McpConfigRefusal>): Promise<McpConfigResult>;
   setEnabled(name: string, enabled: boolean): McpConfigResult;
   setApps(name: string, apps: boolean): McpConfigResult;
   remove(name: string): McpConfigResult;
@@ -90,13 +90,24 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
   const personalHeaderRefusal = (name: string, server: StoredMcpServer) => personalHeaderValueRefusal(deps.teamConnections.personMcp(), name, server);
   let mcpProbesInFlight = 0;
 
+  const held = async <T,>(run: () => T | Promise<T>): Promise<T | McpConfigRefusal> => {
+    if (mcpConfigBusy.get()) return { status: 409, error: MCP_CONFIG_BUSY };
+    mcpConfigBusy.set(true);
+    try {
+      return await run();
+    } finally {
+      mcpConfigBusy.set(false);
+    }
+  };
+  const announced = (result: McpConfigResult): McpConfigResult => {
+    if ("body" in result) deps.changed();
+    return result;
+  };
   const write = (run: () => McpConfigResult): McpConfigResult => {
     if (mcpConfigBusy.get()) return { status: 409, error: MCP_CONFIG_BUSY };
     mcpConfigBusy.set(true);
     try {
-      const result = run();
-      if ("body" in result) deps.changed();
-      return result;
+      return announced(run());
     } finally {
       mcpConfigBusy.set(false);
     }
@@ -131,7 +142,10 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
       deps.connectionsChanged?.("added");
       return saved(201);
     }),
-    addMany: (servers) => write(() => {
+    addMany: (read) => held(async () => {
+      const request = await read();
+      if ("error" in request) return request;
+      const { servers } = request;
       const current = cfg.mcpServers ?? {};
       const names = Object.keys(servers);
       const taken = names.filter((name) => Object.hasOwn(current, name));
@@ -147,7 +161,7 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
       if (blocked.length) return { status: 403, error: `${mcpPolicyRefusal(blocked[0]!, servers[blocked[0]!] as object)} Not approved: ${blocked.join(", ")}.`, code: "managed_policy" };
       persistMcpServers({ ...current, ...servers });
       deps.connectionsChanged?.("added");
-      return { status: 201, body: { ...mcpServerResponse(), added: names } };
+      return announced({ status: 201, body: { ...mcpServerResponse(), added: names } });
     }),
     replace: (name, server) => write(() => {
       const found = stored(name);
