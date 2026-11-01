@@ -1,11 +1,12 @@
 import { relative } from "node:path";
 
-import type { WireMessage as Message } from "../../shared/wire.ts";
+import type { McpChangeRequest, WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
+import { MCP_KEY_EXPIRED, type McpCardAction, type McpChangeResult } from "../host/mcp-requests.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
-import { BOT_STRIPPED_KEYS, botListing, botMayChange, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
+import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
 import type { McpProbeResult } from "../mcp-probe.ts";
 import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type StoredMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
@@ -19,8 +20,14 @@ const MAX_TOOL_NAMES = 100;
 
 const OWNER_ONLY = "MCP servers are managed by the owner.";
 const ASK_ADMIN = "Ask a workspace admin to add it.";
-const ASK_SETTINGS = "Ask the person to change this in Settings.";
-const NEXT_TURN = "The new tools arrive on your next turn.";
+
+/** When a change reaches the bot's tools: a turn's servers are fixed when it starts, and the person's answer to a card
+ * resumes the bot with a new turn that already has them. */
+const WHEN = {
+  live: { arrive: "The new tools arrive on your next turn.", leave: "Its tools leave on your next turn." },
+  approved: { arrive: "Its tools are yours from this turn.", leave: "Its tools are gone from this turn." },
+};
+const ASKED: Record<McpCardAction, ServerLineKey> = { enable: "server.mcp.askedTurnOn", update: "server.mcp.askedChange", remove: "server.mcp.askedRemove" };
 
 type Applied = "full-access" | "level";
 
@@ -56,7 +63,15 @@ export interface InternalMcpDeps {
   decide(summary: string, applied: Applied): void;
   activity(label: string, call: McpCall): void;
   language(): string | undefined;
+  /** The other bots that use this server now, by name. */
+  usedBy(name: string): string[];
+  /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
+  requestApproval(proposal: { action: McpCardAction; name: string; body?: Record<string, unknown>; subtitle: string }): { text: string };
 }
+
+type Deps = Omit<InternalMcpDeps, "readBody">;
+/** `approved`: applying what the person allowed on a card, so the turn it resumes already has the change. */
+type Ctx = Deps & { approved?: true };
 
 type Outcome = { status: number; text: string; dropped?: string[] } | { status: number; error: string };
 /** Which call a line is about, to find that call's own row. */
@@ -114,7 +129,7 @@ export function showMcpActivity(
   }
 }
 
-async function act(deps: InternalMcpDeps, body: unknown, signal: AbortSignal): Promise<Outcome> {
+async function act(deps: Ctx, body: unknown, signal: AbortSignal): Promise<Outcome> {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { status: 400, error: "request body must be a JSON object" };
   const { action, name, ...rest } = body as Record<string, unknown>;
   if (!ACTIONS.includes(action as McpAction)) return { status: 400, error: `mcp_server needs action: one of ${ACTIONS.join(", ")}.` };
@@ -144,13 +159,13 @@ async function act(deps: InternalMcpDeps, body: unknown, signal: AbortSignal): P
   // A deliberate exception to server/direct-apply.ts, which applies a bot's change at every level with Undo: turning an
   // MCP server on runs a command on the person's computer or sends their data to a new service, the kind of action the
   // approval mode governs for shell commands. Turning one off or signing out only lowers what bots can do.
-  if (!deps.fullAccess()) return { status: 403, error: ASK_SETTINGS };
+  if (!deps.fullAccess()) return propose(deps, action as McpCardAction, name, server, fields);
   if (action === "update") return update(deps, name, server, fields, signal);
   if (action === "enable") return enable(deps, name, server, signal);
   return remove(deps, name, server);
 }
 
-function list(deps: InternalMcpDeps): Outcome {
+function list(deps: Deps): Outcome {
   const personal = deps.personal();
   const rows = Object.entries(deps.cfg().mcpServers ?? {}).flatMap(([name, raw]) => {
     const parsed = parseStoredMcpServer(name, raw);
@@ -169,7 +184,7 @@ function list(deps: InternalMcpDeps): Outcome {
   return { status: 200, text: `MCP servers you can see (${rows.length}):\n${JSON.stringify(rows)}` };
 }
 
-async function add(deps: InternalMcpDeps, name: string, fields: Record<string, unknown>, signal: AbortSignal): Promise<Outcome> {
+async function add(deps: Deps, name: string, fields: Record<string, unknown>, signal: AbortSignal): Promise<Outcome> {
   if (!deps.teamAdmin()) return { status: 403, error: ASK_ADMIN };
   if (Object.hasOwn(deps.cfg().mcpServers ?? {}, name)) return { status: 409, error: `${name} already exists. Use update, or pick another name.` };
   const redeemed = deps.redeem(trimmedRefs({ name, ...fields }));
@@ -184,8 +199,8 @@ async function add(deps: InternalMcpDeps, name: string, fields: Record<string, u
 
   if (!deps.fullAccess()) {
     say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
-    const local = isRemoteMcpServer(server) ? "" : " Turning on a local command runs that command on their computer.";
-    return { status: 201, text: `Saved MCP server ${name} switched off. It stays off until the person turns it on in Settings → MCP servers.${local}${where}` };
+    const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server) });
+    return { status: 201, text: `Saved MCP server ${name} switched off.${where} ${card.text}` };
   }
   const on = deps.config.setEnabled(name, true);
   if ("error" in on) {
@@ -196,10 +211,12 @@ async function add(deps: InternalMcpDeps, name: string, fields: Record<string, u
   const outcome = await probe(deps, name, server, signal);
   deps.decide(`Added MCP server ${name} and turned it on`, "full-access");
   say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line);
-  return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where} ${NEXT_TURN}` };
+  return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where} ${WHEN.live.arrive}` };
 }
 
-async function update(deps: InternalMcpDeps, name: string, existing: StoredMcpServer, fields: Record<string, unknown>, signal: AbortSignal): Promise<Outcome> {
+/** The update merged onto the saved entry, its secretRefs redeemed but not spent until `commit`. */
+function planUpdate(deps: Deps, name: string, existing: StoredMcpServer, fields: Record<string, unknown>):
+  { server: StoredMcpServer; dropped: string[]; commit(): void } | { status: number; error: string } {
   const remote = isRemoteMcpServer(existing);
   const crossing = remote ? ["command", "args", "env"] : ["url", "type", "headers", "oauth"];
   if (crossing.some((key) => fields[key] !== undefined)) {
@@ -212,7 +229,14 @@ async function update(deps: InternalMcpDeps, name: string, existing: StoredMcpSe
   if (!redeemed.ok) return { status: 400, error: redeemed.error };
   const parsed = parseMcpServerMutation(name, redeemed.value, existing);
   if (!parsed.ok) return { status: 400, error: parsed.error };
-  let server = parsed.server;
+  return { server: parsed.server, dropped, commit: redeemed.commit };
+}
+
+async function update(deps: Ctx, name: string, existing: StoredMcpServer, fields: Record<string, unknown>, signal: AbortSignal): Promise<Outcome> {
+  const planned = planUpdate(deps, name, existing, fields);
+  if ("error" in planned) return planned;
+  const { dropped } = planned;
+  let server = planned.server;
   let moved: Array<{ from: string; to: string }> = [];
   if (!isRemoteMcpServer(server) && !isRemoteMcpServer(existing) && !sameRun(server, existing)) {
     const kept = deps.botKeep(server);
@@ -221,7 +245,7 @@ async function update(deps: InternalMcpDeps, name: string, existing: StoredMcpSe
   }
   const saved = deps.config.replace(name, server);
   if ("error" in saved) return refused(saved);
-  redeemed.commit();
+  planned.commit();
   deps.decide(`Changed MCP server ${name}`, "full-access");
   const cleared = dropped.length
     ? ` Its destination changed, so these saved values were cleared: ${dropped.join(", ")}. If it still needs them, ask again with request_credential (delivery ref) and send the secretRef with action update.`
@@ -234,28 +258,28 @@ async function update(deps: InternalMcpDeps, name: string, existing: StoredMcpSe
   }
   const outcome = await probe(deps, name, server, signal);
   say(deps, { action: "update", name }, ...changed, outcome.line);
-  return { status: 200, text: `Changed MCP server ${name}.${cleared}${where} ${outcome.text} ${NEXT_TURN}`, dropped };
+  return { status: 200, text: `Changed MCP server ${name}.${cleared}${where} ${outcome.text} ${when(deps).arrive}`, dropped };
 }
 
-async function enable(deps: InternalMcpDeps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<Outcome> {
+async function enable(deps: Ctx, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<Outcome> {
   const on = deps.config.setEnabled(name, true);
   if ("error" in on) return refused(on);
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
   deps.decide(`Turned on MCP server ${name}`, "full-access");
   say(deps, { action: "enable", name }, ["server.mcp.turnedOn", { name }], outcome.line);
-  return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)} ${NEXT_TURN}` };
+  return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)} ${when(deps).arrive}` };
 }
 
-function disable(deps: InternalMcpDeps, name: string): Outcome {
+function disable(deps: Deps, name: string): Outcome {
   const off = deps.config.setEnabled(name, false);
   if ("error" in off) return refused(off);
   deps.decide(`Turned off MCP server ${name}`, deps.fullAccess() ? "full-access" : "level");
   say(deps, { action: "disable", name }, ["server.mcp.turnedOff", { name }]);
-  return { status: 200, text: `Turned off MCP server ${name}. Its tools leave on your next turn.` };
+  return { status: 200, text: `Turned off MCP server ${name}. ${WHEN.live.leave}` };
 }
 
-async function signOut(deps: InternalMcpDeps, name: string, server: StoredMcpServer): Promise<Outcome> {
+async function signOut(deps: Deps, name: string, server: StoredMcpServer): Promise<Outcome> {
   if (!isRemoteMcpServer(server)) return { status: 400, error: `${name} runs a command, so it has no sign-in.` };
   await deps.signOut(name, server.url);
   deps.decide(`Signed out of MCP server ${name}`, deps.fullAccess() ? "full-access" : "level");
@@ -263,17 +287,64 @@ async function signOut(deps: InternalMcpDeps, name: string, server: StoredMcpSer
   return { status: 200, text: `Signed out of MCP server ${name}. It stays ${server.enabled ? "on" : "off"}; call mcp_server with action sign_in to sign in again.` };
 }
 
-function remove(deps: InternalMcpDeps, name: string, server: StoredMcpServer): Outcome {
+function remove(deps: Ctx, name: string, server: StoredMcpServer): Outcome {
   const refusal = deps.policyRefusal(name, server);
   if (refusal) return { status: 403, error: refusal };
   const gone = deps.config.remove(name);
   if ("error" in gone) return refused(gone);
   deps.decide(`Removed MCP server ${name}`, "full-access");
   say(deps, { action: "remove", name }, ["server.mcp.removed", { name }]);
-  return { status: 200, text: `Removed MCP server ${name}, its saved keys and its sign-in. Its tools leave on your next turn.` };
+  return { status: 200, text: `Removed MCP server ${name}, its saved keys and its sign-in. ${when(deps).leave}` };
 }
 
-async function test(deps: InternalMcpDeps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<Outcome> {
+/** Runs a change the person allowed on its card as Full access would, against the server as it is now, so a proposal
+ * made before a newer change never overwrites it. */
+export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest, "action" | "name" | "body">): Promise<McpChangeResult> {
+  if (!Object.hasOwn(deps.cfg().mcpServers ?? {}, request.name)) return { state: "failed", text: `${request.name} no longer exists.` };
+  if (request.body && !deps.redeem(trimmedRefs(request.body)).ok) return { state: "expired", text: MCP_KEY_EXPIRED };
+  const approved: Ctx = { ...deps, approved: true, fullAccess: () => true, teamAdmin: () => true, decide: () => {}, activity: () => {} };
+  const outcome = await act(approved, { ...request.body, action: request.action, name: request.name }, new AbortController().signal);
+  return "error" in outcome ? { state: "failed", text: outcome.error } : { state: "applied", text: outcome.text };
+}
+
+function propose(deps: Deps, action: McpCardAction, name: string, server: StoredMcpServer, fields: Record<string, unknown>): Outcome {
+  if (action === "update") {
+    const planned = planUpdate(deps, name, server, fields);
+    if ("error" in planned) return planned;
+    const refusal = deps.policyRefusal(name, planned.server);
+    if (refusal) return { status: 403, error: refusal };
+    const { lines, keys } = botChangeLines(server, planned.server, fields);
+    if (!lines.length && !keys.length && !planned.dropped.length) return { status: 200, text: `${name} already has these settings, so nothing changed.` };
+    const language = deps.language();
+    const subtitle = [...lines, ...keys.map((key) => serverLine(language, "server.mcp.card.newKey", { key })),
+      ...(planned.dropped.length ? [serverLine(language, "server.mcp.card.cleared", { items: planned.dropped.join(", ") })] : [])].join("\n");
+    return ask(deps, { action, name, body: fields, subtitle });
+  }
+  const refusal = deps.policyRefusal(name, server);
+  if (refusal) return { status: 403, error: refusal };
+  if (action === "remove") {
+    const others = deps.usedBy(name);
+    const language = deps.language();
+    return ask(deps, { action, name, subtitle: others.length
+      ? serverLine(language, "server.mcp.card.usedBy", { names: others.join(", ") }) : serverLine(language, "server.mcp.card.usedByNone") });
+  }
+  if (server.enabled && (!deps.sender.mcpServers || deps.sender.mcpServers.includes(name))) return { status: 200, text: `${name} is already on.` };
+  return ask(deps, { action, name, subtitle: turnOnText(deps, server) });
+}
+
+function ask(deps: Deps, proposal: Parameters<Deps["requestApproval"]>[0]): Outcome {
+  const card = deps.requestApproval(proposal);
+  say(deps, { action: proposal.action, name: proposal.name }, [ASKED[proposal.action], { name: proposal.name }]);
+  return { status: 202, text: card.text };
+}
+
+function turnOnText(deps: Deps, server: StoredMcpServer): string {
+  return `${botServerTarget(server)}\n${serverLine(deps.language(), isRemoteMcpServer(server) ? "server.mcp.card.internet" : "server.mcp.card.local")}`;
+}
+
+const when = (deps: Ctx) => (deps.approved ? WHEN.approved : WHEN.live);
+
+async function test(deps: Deps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<Outcome> {
   if (!server.enabled && !deps.fullAccess()) {
     return { status: 403, error: `${name} is off, and testing it would start it. Ask the person to turn it on first.` };
   }
@@ -282,7 +353,7 @@ async function test(deps: InternalMcpDeps, name: string, server: StoredMcpServer
   return { status: 200, text: `MCP server ${name}: ${outcome.text}` };
 }
 
-async function probe(deps: InternalMcpDeps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<{ text: string; line: Line }> {
+async function probe(deps: Deps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<{ text: string; line: Line }> {
   const result = await deps.config.test(name, {
     signal,
     asBot: { id: deps.sender.id, cwd: deps.ownCwd() },
@@ -322,15 +393,15 @@ function sameRun(a: StoredStdioMcpServer, b: StoredStdioMcpServer): boolean {
   return a.command === b.command && a.args.length === b.args.length && a.args.every((arg, i) => arg === b.args[i]) && env(a) === env(b);
 }
 
-function joinBotList(deps: InternalMcpDeps, name: string): void {
+function joinBotList(deps: Deps, name: string): void {
   if (deps.sender.mcpServers && !deps.sender.mcpServers.includes(name)) deps.addToBotList(name);
 }
 
-function selection(deps: InternalMcpDeps, name: string): string {
+function selection(deps: Deps, name: string): string {
   return deps.canUse(name) ? "" : ` Your tool selection leaves ${name} out. The person can change that in your settings.`;
 }
 
-function folderText(deps: InternalMcpDeps, server: StoredMcpServer, moved: ReadonlyArray<{ to: string }>): string {
+function folderText(deps: Deps, server: StoredMcpServer, moved: ReadonlyArray<{ to: string }>): string {
   if (isRemoteMcpServer(server)) return "";
   return (server.bot ? " It uses files in your own folder, so it works only for you, not for other bots." : "")
     + (moved.length ? ` Its files were in this conversation's temporary folder, so they were copied to ${moved.map(({ to }) => relative(deps.ownCwd(), to)).join(", ")} in your own folder, and it runs from there: change them there.` : "");
@@ -353,7 +424,7 @@ function trimmedRefs(body: Record<string, unknown>): Record<string, unknown> {
 
 type Line = [ServerLineKey, Readonly<Record<string, string>>?];
 
-function say(deps: InternalMcpDeps, call: McpCall, ...lines: Line[]): void {
+function say(deps: Deps, call: McpCall, ...lines: Line[]): void {
   const language = deps.language();
   deps.activity(lines.map(([key, params]) => serverLine(language, key, params)).join(" · "), call);
 }

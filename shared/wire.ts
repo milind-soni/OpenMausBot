@@ -702,6 +702,8 @@ export interface OptionCardData extends WaitCardField, ComputerAskField {
   /** A durable default-model proposal (propose_model). */
   modelRequest?: ModelRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
+  /** A bot's MCP server change waiting on the person (Ask, Edits or Auto). */
+  mcpRequest?: McpChangeRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
@@ -711,6 +713,20 @@ export interface OptionCardData extends WaitCardField, ComputerAskField {
   quotaSwitch?: QuotaSwitchCardData;
   /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
   yourComputer?: { app?: string; site?: string };
+}
+
+/** Security: `body` holds the bot's fields with secretRefs unredeemed. A ref is not the secret: it works once, for an hour,
+ * for this bot and conversation, and is redeemed only when the person allows, so no secret value is ever stored here. */
+export interface McpChangeRequest {
+  requestId: string;
+  botId: string;
+  threadId: string;
+  action: "enable" | "update" | "remove";
+  name: string;
+  body?: Record<string, unknown>;
+  result?: { state: "applied" | "denied" | "expired" | "failed"; text: string };
+  /** The bot's parked turn took the result. */
+  resumed?: boolean;
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the

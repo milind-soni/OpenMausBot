@@ -122,6 +122,43 @@ function redactArg(arg: string, previous: string | undefined): string {
   return redactSecretsInText(arg);
 }
 
+const redactedArgs = (args: readonly string[]) => args.map((arg, i) => redactArg(arg, args[i - 1]));
+
+/** Where a server reaches, as a person reads it: its address without the query, or its command line with secrets hidden. */
+export function botServerTarget(server: StoredMcpServer): string {
+  if (isRemoteMcpServer(server)) return withoutQuery(server.url);
+  return [redactSecretsInText(server.command), ...redactedArgs(server.args)].join(" ");
+}
+
+/** What an update changes, as `field: old → new` lines, and the secrets it sends anew by key. `next` is the merged server;
+ * env and header values show only where `sent` (the bot's own fields) gives them as literals, so no saved secret shows. */
+export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer, sent: Record<string, unknown>): { lines: string[]; keys: string[] } {
+  const lines: string[] = [];
+  const change = (field: string, before: string, after: string, shown: readonly [string, string] = [before, after]) => {
+    if (before !== after) lines.push(`${field}: ${shown[0] || "–"} → ${shown[1] || "–"}`);
+  };
+  if (isRemoteMcpServer(existing) && isRemoteMcpServer(next)) {
+    const address = (url: string) => withoutQuery(url) + (/[?#]/.test(url) ? "?…" : "");
+    change("url", existing.url, next.url, [address(existing.url), address(next.url)]);
+    change("type", existing.type, next.type);
+    change("oauth.clientId", existing.oauth?.clientId ?? "", next.oauth?.clientId ?? "");
+    change("oauth.scopes", (existing.oauth?.scopes ?? []).join(" "), (next.oauth?.scopes ?? []).join(" "));
+  } else if (!isRemoteMcpServer(existing) && !isRemoteMcpServer(next)) {
+    change("command", existing.command, next.command, [redactSecretsInText(existing.command), redactSecretsInText(next.command)]);
+    change("args", JSON.stringify(existing.args), JSON.stringify(next.args), [redactedArgs(existing.args).join(" "), redactedArgs(next.args).join(" ")]);
+  }
+  change("resultBudget", String(existing.resultBudget ?? ""), String(next.resultBudget ?? ""));
+  const keys: string[] = [];
+  for (const [label, values] of [["env", sent.env], ["headers", sent.headers]] as const) {
+    for (const [key, value] of Object.entries(record(values))) {
+      if (isSecretRef(value)) keys.push(key);
+      else if (typeof value === "string") lines.push(`${label}.${key} → ${redactSecretsInText(value)}`);
+    }
+  }
+  if (isSecretRef(record(sent.oauth).clientSecret)) keys.push("oauth.clientSecret");
+  return { lines, keys };
+}
+
 export function botListing(
   name: string,
   server: StoredMcpServer,
@@ -142,7 +179,7 @@ export function botListing(
     ...common,
     transport: "stdio",
     command: redactSecretsInText(server.command),
-    args: server.args.map((arg, i) => redactArg(arg, server.args[i - 1])),
+    args: redactedArgs(server.args),
     envKeys: Object.keys(server.env),
   };
 }

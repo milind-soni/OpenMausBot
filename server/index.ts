@@ -23,7 +23,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, UnansweredApprovals } from "./waiting-on-person.ts";
-import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts";
+import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { McpRequestService } from "./host/mcp-requests.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -590,7 +590,7 @@ import { createDeciderRoutes } from "./routes/decider.ts"; import { createCloudS
 import { createUpdateCheckRoutes, serverUpdateChecker } from "./routes/update-check.ts"; import { createTimeZoneRoutes } from "./routes/time-zone.ts";
 import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createInternalSignInRoutes } from "./routes/sign-in.ts";
-import { createInternalMcpRoutes, showMcpActivity } from "./routes/internal-mcp.ts";
+import { applyMcpChange, createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./routes/internal-mcp.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
@@ -1994,6 +1994,7 @@ function reconcileParkedNode(node: HandoffView): boolean {
       if (!request.resumed) store.patchMessage(node.threadId, message.id, { card: { ...message.card!, teamSetupRequest: { ...request, resumed: true } } });
       return true;
     }
+    if (message.card?.mcpRequest?.result) return mcpRequests.resume(node.threadId, message.id, (text) => coordinator.answerNode(node.id, text));
     if (message.connector) {
       const cards = connectorCards(node.threadId, message.connector.resumeKey);
       if (cards.some((item) => item.connector?.dismissed || item.connector?.status !== "connected")) continue;
@@ -2078,7 +2079,10 @@ function stopCards(threadId: string, ids: ReadonlySet<string>): void {
     if (message.secret) store.patchMessage(threadId, message.id, { secret: { ...message.secret, stopped: true } });
     else if (message.connector) store.patchMessage(threadId, message.id, { connector: { ...message.connector, stopped: true } });
     else if (message.signIn) store.patchMessage(threadId, message.id, { signIn: { ...message.signIn, stopped: true } });
-    else if (message.card?.teamSetupRequest && !message.card.answered && !message.card.dismissed && !message.card.expired) store.patchMessage(threadId, message.id, { card: { ...message.card, answered: "unavailable", dismissed: true } });
+    else {
+      const closed = closedByStop(message.card);
+      if (closed) store.patchMessage(threadId, message.id, { card: closed });
+    }
   }
 }
 
@@ -9435,6 +9439,54 @@ async function resolveAndSendTeamSetup(res: ServerResponse, args: { botId: strin
   json(res, 200, { ok: true, outcome: resolved.result.state === "applied" ? "allowed-once" : "rejected", result: resolved.result, alreadySettled: resolved.duplicate });
   return true;
 }
+
+const mcpRequests = new McpRequestService({
+  store, teamCloud: Boolean(CLOUD_TEAM), language: threadLanguage,
+  apply: async (request) => {
+    const bot = store.bot(request.botId);
+    return bot ? applyMcpChange(mcpServerDeps(bot, request.threadId), request) : { state: "failed", text: "This bot no longer exists." };
+  },
+  answer: answerCardNode,
+  decide: (row) => appendDecision(DATA_DIR, { ...row, botName: store.bot(row.botId)?.name, tool: "mcp_server", source: row.decision === "card-shown" ? "no-grant" : "user" }),
+});
+
+async function resolveAndSendMcp(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean> {
+  const outcome = await mcpRequests.respond(args, ownerReview);
+  if (!outcome) return false;
+  json(res, outcome.status, outcome.body);
+  return true;
+}
+
+/** The mcp_server route for one bot in one conversation. `generation` is the live turn's; absent when the person's answer
+ * to a card applies the change. */
+function mcpServerDeps(sender: BotRecord, threadId: string, generation?: string): Omit<InternalMcpDeps, "readBody"> {
+  const from = store.groupByThread(threadId) ? { botId: sender.id, name: sender.name, color: sender.color } : undefined;
+  return {
+    sender, threadId,
+    fullAccess: () => fullAccessForSource(sender.id, threadId),
+    guestDriven: () => cloudGuestDriven(threadId),
+    teamAdmin: () => teamConnections.actsForAdmin(threadId, generation),
+    canUse: (name) => canUseMcpServer(sender.toolScope, name),
+    config: mcpConfig, cfg: () => cfg, personal: () => teamConnections.personMcp(),
+    authState: (name, url) => mcpOAuth.authState(name, url),
+    managedBy: mcpManagedBy, policyRefusal: mcpPolicyRefusal,
+    signOut: async (name, url) => { await mcpOAuth.signOut(name, url); broadcast({ kind: "mcp.changed" }); },
+    testAs: (name, url) => {
+      const person = teamConnections.turnPerson(threadId, generation);
+      return person ? teamConnections.people.connection(person, name, url) : null;
+    },
+    redeem: (body) => secretCards.redeemMcpServer(body, sender.id, threadId),
+    addToBotList: (name) => { const bot = store.bot(sender.id); if (bot?.mcpServers) store.patchBot(bot.id, { mcpServers: [...new Set([...bot.mcpServers, name])] }); },
+    botAdd: (current, body) => mcpServersHost.botAdd(current, body, sender.id),
+    botKeep: (server) => mcpServersHost.botKeep(server, sender.id),
+    ownCwd: () => (existsSync(workspaceDir(sender.id)) ? workspaceDir(sender.id) : DATA_DIR),
+    decide: (summary, applied) => appendDecision(DATA_DIR, { threadId, botId: sender.id, botName: sender.name, tool: "mcp_server", summary, decision: "auto-approved", source: applied }),
+    activity: (label, call) => showMcpActivity(store, { threadId, turnId: liveTurnByThread.get(threadId), ...(from ? { from } : {}) }, call, label),
+    language: () => threadLanguage(threadId),
+    usedBy: (name) => store.bots.filter((bot) => bot.id !== sender.id && !bot.hidden && Object.hasOwn(mcpServersHost.mounted(bot), name) && canUseMcpServer(bot.toolScope, name)).map((bot) => bot.name),
+    requestApproval: ({ subtitle, ...change }) => mcpRequests.propose({ ...change, botId: sender.id, threadId }, subtitle, from),
+  };
+}
 const routineTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 function sendRoutineResolution(
   res: ServerResponse,
@@ -12272,7 +12324,7 @@ ROUTES.push(createBotMessageRoutes({
   acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal, relayRefusal: CLOUD_TEAM ? (bot, email) => relayedSendRefusal(bot, email, Boolean(email && teamOwners.people?.list().some((one) => one.email === email && one.role !== "member"))) : undefined,
   cardAnswerRefusal, commandRememberRefusal, requestBehavior, requestedTaskBot, botForThread, threadBusy,
   botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,
-  turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
+  turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup, resolveAndSendMcp,
   resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
   deliverLateQuestionAnswer, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: (threadId, requestId) => automationReports.answeredIn(teamMessages.inbox.answeredIn(threadId, requestId), requestId), pressRecords: proactive.brief.pressRecords, serverPress: proactive.brief.serverPress,
@@ -14538,28 +14590,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, { ok: true, memberIds: updated.memberIds, memberCount: updated.memberIds.length, message: `Updated room “${updated.name}”.` });
       }
       if (await dispatchRoutes([createInternalMcpRoutes({
-        readBody: readInternalBody, sender: internalSender, threadId: internalCapability.threadId,
-        fullAccess: () => fullAccessForSource(internalSender.id, internalCapability.threadId),
-        guestDriven: () => cloudGuestDriven(internalCapability.threadId),
-        teamAdmin: () => teamConnections.actsForAdmin(internalCapability.threadId, internalCapability.generation),
-        canUse: (name) => canUseMcpServer(internalSender.toolScope, name),
-        config: mcpConfig, cfg: () => cfg, personal: () => teamConnections.personMcp(),
-        authState: (name, url) => mcpOAuth.authState(name, url),
-        managedBy: mcpManagedBy, policyRefusal: mcpPolicyRefusal,
-        signOut: async (name, url) => { await mcpOAuth.signOut(name, url); broadcast({ kind: "mcp.changed" }); },
-        testAs: (name, url) => {
-          const person = teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation);
-          return person ? teamConnections.people.connection(person, name, url) : null;
-        },
-        redeem: (body) => secretCards.redeemMcpServer(body, internalSender.id, internalCapability.threadId),
-        addToBotList: (name) => { const bot = store.bot(internalSender.id); if (bot?.mcpServers) store.patchBot(bot.id, { mcpServers: [...new Set([...bot.mcpServers, name])] }); },
-        botAdd: (current, body) => mcpServersHost.botAdd(current, body, internalSender.id),
-        botKeep: (server) => mcpServersHost.botKeep(server, internalSender.id),
-        ownCwd: () => (existsSync(workspaceDir(internalSender.id)) ? workspaceDir(internalSender.id) : DATA_DIR),
-        decide: (summary, applied) => appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: internalSender.id, botName: internalSender.name, tool: "mcp_server", summary, decision: "auto-approved", source: applied }),
-        activity: (label, call) => showMcpActivity(store, { threadId: internalCapability.threadId, turnId: liveTurnByThread.get(internalCapability.threadId),
-          ...(store.groupByThread(internalCapability.threadId) ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }, call, label),
-        language: () => threadLanguage(internalCapability.threadId),
+        ...mcpServerDeps(internalSender, internalCapability.threadId, internalCapability.generation), readBody: readInternalBody,
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalSignInRoutes({

@@ -14,8 +14,9 @@ import { McpOAuthManager } from "../mcp-oauth.ts";
 import * as probeModule from "../mcp-probe.ts";
 import { listMcpServers, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
 import { SecretVault } from "../secret-vault.ts";
-import type { WireMessage } from "../../shared/wire.ts";
-import { createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
+import type { OptionCardData, WireMessage } from "../../shared/wire.ts";
+import { McpRequestService } from "../host/mcp-requests.ts";
+import { applyMcpChange, createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 const BOT = "kiwi";
@@ -37,6 +38,7 @@ interface Options {
   servers?: Record<string, unknown>;
   refuse?: (name: string) => string | undefined;
   boxed?: boolean;
+  usedBy?: Record<string, string[]>;
 }
 
 function fixture(options: Options = {}) {
@@ -55,12 +57,27 @@ function fixture(options: Options = {}) {
     savedCustomDomain: () => null,
     changed: () => {},
   });
-  const vault = new SecretVault();
+  let clock = Date.now();
+  const vault = new SecretVault(() => clock);
   const owner = { botId: BOT, threadId: THREAD };
   const sender = { id: BOT, ...(options.mcpServers ? { mcpServers: [...options.mcpServers] } : {}), toolScope: undefined as unknown };
   const listedOn: Array<{ bot: string; name: string }> = [];
   const decided: Array<{ summary: string; applied: string }> = [];
   const lines: string[] = [];
+  const chat: Array<{ id: string; kind: "options"; card: OptionCardData }> = [];
+  const answers: string[] = [];
+  const decisions: string[] = [];
+  const cards = new McpRequestService({
+    store: {
+      messagesFor: () => chat,
+      appendMessage: (_threadId, message) => { const row = { ...message, id: `card-${chat.length + 1}` }; chat.push(row); return row; },
+      patchMessage: (_threadId, id, patch) => { const row = chat.find((item) => item.id === id); if (row) row.card = patch.card; },
+    },
+    teamCloud: false,
+    apply: (request) => applyMcpChange(deps, request),
+    answer: (_threadId, _messageId, text) => { answers.push(text); return true; },
+    decide: (row) => { decisions.push(row.decision); },
+  });
   let body: unknown = {};
   const deps: InternalMcpDeps = {
     readBody: async () => body as Record<string, unknown>,
@@ -84,6 +101,8 @@ function fixture(options: Options = {}) {
     decide: (summary, applied) => { decided.push({ summary, applied }); },
     activity: (label) => { lines.push(label); },
     language: () => undefined,
+    usedBy: (name) => options.usedBy?.[name] ?? [],
+    requestApproval: ({ subtitle, ...change }) => cards.propose({ ...change, botId: BOT, threadId: THREAD }, subtitle),
   };
   const route = createInternalMcpRoutes(deps);
   const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
@@ -110,7 +129,10 @@ function fixture(options: Options = {}) {
     return parsed.ok ? parsed.server : undefined;
   };
   const setBusy = (value: boolean) => { busy = value; };
-  return { cfg, config, mcpOAuth, deps, sender, call, post, stored, ref, listedOn, decided, lines, dataDir, setBusy };
+  const card = () => chat.at(-1)?.card;
+  const respond = (behavior: "allow" | "deny") => cards.respond({ botId: BOT, threadId: THREAD, requestId: card()!.requestId!, behavior }, true);
+  const later = (ms: number) => { clock += ms; };
+  return { cfg, config, mcpOAuth, deps, sender, call, post, stored, ref, listedOn, decided, lines, dataDir, setBusy, chat, card, respond, answers, decisions, later };
 }
 
 async function createInternalMcpRoutesCall(deps: InternalMcpDeps, payload: Record<string, unknown>) {
@@ -475,25 +497,136 @@ describe("internal mcp_server route, Full access", () => {
 });
 
 describe("internal mcp_server route, below Full access", () => {
-  it("add saves the server off and changes nothing else", async () => {
+  const PROPOSED = "A card is now visible to the person. End this turn and wait for the decision.";
+
+  it("a non-Full add saves the server off and posts a Turn on card with options Turn on and Cancel", async () => {
     const probe = probeWith({ ok: true, tools: [] });
-    const { post, stored, lines } = fixture({ full: false });
-    const { status, body } = await post({ action: "add", name: "linear", url: "https://mcp.linear.app/mcp" });
+    const { post, stored, lines, chat, card } = fixture({ full: false });
+    const { status, body } = await post({ action: "add", name: "linear", url: "https://mcp.linear.app/mcp?team=acme" });
     expect(status).toBe(201);
     expect(stored("linear")?.enabled).toBe(false);
-    expect(body.text).toContain("switched off");
     expect(probe).not.toHaveBeenCalled();
+    expect(body.text).toContain(PROPOSED);
     expect(lines).toEqual(["Added MCP server linear · Switched off"]);
+    expect(chat).toHaveLength(1);
+    expect(card()).toEqual({
+      title: "Turn on linear?",
+      subtitle: "https://mcp.linear.app/mcp\nReached over the internet. Once on, your bots can use its tools.",
+      options: ["Turn on", "Cancel"], requestId: expect.any(String), tool: "mcp_server", fixedOptions: true,
+      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "linear" },
+    });
   });
 
-  it("update, enable and remove ask the person to change it in Settings", async () => {
-    const { post, cfg } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
-    for (const action of ["update", "enable", "remove"]) {
-      const out = await post({ action, name: "linear", url: "https://mcp.linear.app/v2" });
-      expect(out.status, action).toBe(403);
-      expect(out.body.error, action).toContain("Ask the person to change this in Settings");
-    }
+  it("a Turn on card for a command server shows its command with secrets hidden and says it runs on this computer", async () => {
+    const { post, card, lines } = fixture({ full: false, servers: { notes: { ...notes, args: ["notes-mcp", "--api-key", "sk-live-123"], enabled: false } } });
+    expect((await post({ action: "enable", name: "notes" })).status).toBe(202);
+    expect(card()?.subtitle).toBe("npx notes-mcp --api-key ***\nRuns on this computer.");
+    expect(JSON.stringify(card())).not.toContain("sk-live-123");
+    expect(lines).toEqual(["Asked to turn on MCP server notes"]);
+  });
+
+  it("allow applies the change, tests it and resumes the bot with the test result", async () => {
+    const probe = probeWith({ ok: true, tools: [{ name: "list_issues" }, { name: "create_issue" }] });
+    const { post, respond, stored, card, answers, decisions, dataDir, listedOn } = fixture({ full: false, mcpServers: ["notes"], servers: { linear: { ...linear, enabled: false } } });
+    expect((await post({ action: "enable", name: "linear" })).body.text).toBe(PROPOSED);
+    expect(stored("linear")?.enabled).toBe(false);
+
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { ok: true, alreadySettled: false } });
+    expect(stored("linear")?.enabled).toBe(true);
+    expect(listedOn).toEqual([{ bot: BOT, name: "linear" }]);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(probe.mock.calls[0]?.[3]).toMatchObject({ asBot: { id: BOT, cwd: dataDir } });
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toContain("Turned on MCP server linear. Test: it works. Its tools: list_issues, create_issue.");
+    expect(answers[0]).not.toContain("next turn");
+    expect(card()).toMatchObject({ answered: "allow", mcpRequest: { resumed: true, result: { state: "applied" } } });
+    expect(decisions).toEqual(["card-shown", "user-approved"]);
+  });
+
+  it("deny resumes the bot with the deny text and changes nothing", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, respond, cfg, card, answers, decisions } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
+    await post({ action: "enable", name: "linear" });
+    expect(await respond("deny")).toMatchObject({ status: 200, body: { ok: true, alreadySettled: false } });
     expect(cfg.mcpServers).toEqual({ linear: { ...linear, enabled: false } });
+    expect(probe).not.toHaveBeenCalled();
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toContain("The person kept it off. Don't add it again unless they ask.");
+    expect(card()).toMatchObject({ answered: "deny", mcpRequest: { resumed: true, result: { state: "denied" } } });
+    expect(decisions).toEqual(["card-shown", "user-denied"]);
+  });
+
+  it("an expired secretRef on allow marks the card expired and resumes with \"The key expired. Ask for it again with request_credential.\"", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, respond, stored, card, answers, ref, later } = fixture({ full: false, servers: { notes } });
+    const fresh = ref("fresh-token");
+    expect((await post({ action: "update", name: "notes", env: { NOTES_TOKEN: fresh } })).status).toBe(202);
+    expect(card()?.subtitle).toBe("new key for NOTES_TOKEN");
+    expect(card()?.mcpRequest?.body).toEqual({ env: { NOTES_TOKEN: fresh } });
+    expect(JSON.stringify(card())).not.toContain("fresh-token");
+
+    later(61 * 60_000);
+    expect(await respond("allow")).toMatchObject({ status: 200 });
+    expect(stored("notes")).toHaveProperty("env", { NOTES_TOKEN: "saved-token" });
+    expect(probe).not.toHaveBeenCalled();
+    expect(card()).toMatchObject({ expired: true, options: [], mcpRequest: { result: { state: "expired" } } });
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toContain("The key expired. Ask for it again with request_credential.");
+  });
+
+  it("a second allow returns alreadySettled and applies nothing", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, respond, stored, config, answers } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
+    await post({ action: "enable", name: "linear" });
+    await respond("allow");
+    expect("error" in config.setEnabled("linear", false)).toBe(false);
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { alreadySettled: true } });
+    expect(stored("linear")?.enabled).toBe(false);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(answers).toHaveLength(1);
+  });
+
+  it("allow after the server was removed resumes with \"linear no longer exists\"", async () => {
+    const { post, respond, cfg, config, card, answers } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
+    await post({ action: "enable", name: "linear" });
+    expect("error" in config.remove("linear")).toBe(false);
+    await respond("allow");
+    expect(cfg.mcpServers).toEqual({});
+    expect(card()).toMatchObject({ expired: true, mcpRequest: { result: { state: "failed" } } });
+    expect(answers[0]).toContain("linear no longer exists");
+  });
+
+  it("a Change card lists each field as old → new with no secret value, and allow merges onto the server as it is then", async () => {
+    const probe = probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, respond, stored, config, card, answers, ref } = fixture({ full: false, servers: { notes } });
+    const fresh = ref("fresh-token");
+    await post({ action: "update", name: "notes", args: ["-y", "notes-mcp", "--token", "sk-live-9"], env: { NOTES_TOKEN: fresh, LOG_LEVEL: "debug" } });
+    expect(card()?.title).toBe("Change notes?");
+    expect(card()?.options).toEqual(["Change", "Cancel"]);
+    expect(card()?.subtitle).toBe("args: -y notes-mcp → -y notes-mcp --token ***\nenv.LOG_LEVEL → debug\nnew key for NOTES_TOKEN");
+    expect(JSON.stringify(card()), "no saved or redeemed secret value is stored").not.toMatch(/fresh-token|saved-token/);
+
+    expect("error" in config.replace("notes", { ...notes, command: "bunx" } as StoredMcpServer)).toBe(false);
+    await respond("allow");
+    expect(stored("notes")).toMatchObject({ command: "bunx", args: ["-y", "notes-mcp", "--token", "sk-live-9"], enabled: true });
+    expect(stored("notes")).toHaveProperty("env", { NOTES_TOKEN: "fresh-token", LOG_LEVEL: "debug" });
+    expect(probe).toHaveBeenCalledOnce();
+    expect(answers[0]).toContain("Changed MCP server notes.");
+  });
+
+  it("a Remove card names the other bots that use the server, and allow removes it", async () => {
+    const { post, respond, cfg, card } = fixture({ full: false, servers: { linear }, usedBy: { linear: ["Clive", "Mo"] } });
+    expect((await post({ action: "remove", name: "linear" })).status).toBe(202);
+    expect(card()).toMatchObject({ title: "Remove linear?", subtitle: "Used by Clive, Mo.", options: ["Remove", "Cancel"] });
+    expect(cfg.mcpServers).toHaveProperty("linear");
+    await respond("allow");
+    expect(cfg.mcpServers).toEqual({});
+  });
+
+  it("a proposal the organisation's policy refuses posts no card", async () => {
+    const { post, chat } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } }, refuse: (name) => (name === "linear" ? "Acme IT blocks linear." : undefined) });
+    for (const action of ["enable", "remove"]) expect(await post({ action, name: "linear" }), action).toEqual({ status: 403, body: { error: "Acme IT blocks linear." } });
+    expect(chat).toEqual([]);
   });
 
   it("sign_in is not built yet", async () => {
