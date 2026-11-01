@@ -223,7 +223,7 @@ test.each(["resend", "brevo"])("a valid non-admin session cannot reserve or send
     const userId = await ctx.db.insert("users", { email: "outsider@invite.test", name: "Outsider", passwordHash: owner.passwordHash, salt: owner.salt, iterations: owner.iterations, role: "user", status: "active", createdAt: Date.now(), updatedAt: Date.now() });
     return createSession(ctx, userId);
   });
-  await expect(f.t.action(api.workspaces.sendEmailInvite, { ...f.args, sessionToken: outsiderSession })).rejects.toThrow("No active team access");
+  await expect(f.t.action(api.workspaces.sendEmailInvite, { ...f.args, sessionToken: outsiderSession })).rejects.toThrow("You don't have access to this workspace");
   expect(await f.t.query(api.workspaces.invitations, f.scope)).toHaveLength(0);
   expect(f.send).not.toHaveBeenCalled();
 });

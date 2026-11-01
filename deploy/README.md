@@ -2,6 +2,8 @@
 
 The standard deployment consists of a Next.js Node container, persistent local storage, a Convex backend, an HTTPS reverse proxy, and optionally coturn for calls across restrictive networks.
 
+Upgrading a deployment that still runs the desktop backend: see [UPGRADE.md](UPGRADE.md).
+
 ## 1. Configure Convex
 
 Create your own Convex project. Develop against a separate development deployment, and publish with `npx convex deploy` using its production deploy key. Never commit a deploy key. See [Convex custom hosting](https://docs.convex.dev/production/hosting/custom).

@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const user = await requireLocalWorkspace(request);
-    if (!["owner", "admin"].includes(user.workspaceRole)) throw new Error("Admin role required");
+    if (!["owner", "admin"].includes(user.workspaceRole)) throw new Error("Only admins can do this");
     await getConvexClient().mutation(api.integrations.configure, { sessionToken: sessionTokenFromRequest(request), teamId: user.teamId, disconnect: true });
     disconnectWorkspaceGitHub(user.teamId);
     return NextResponse.json({ ok: true });

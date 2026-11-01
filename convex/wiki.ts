@@ -9,7 +9,7 @@ import { cleanText } from "./lib/features";
 
 async function requireEditor(ctx: QueryCtx | MutationCtx, projectId: Id<"projects">, sessionToken: string) {
   const { member } = await requireMember(ctx, projectId, sessionToken);
-  if (!canEdit(member)) throw new ConvexError("Edit role required");
+  if (!canEdit(member)) throw new ConvexError("You have view-only access");
 }
 
 export const list = query({

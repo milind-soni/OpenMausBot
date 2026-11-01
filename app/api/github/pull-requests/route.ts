@@ -2,6 +2,7 @@ import { createTaskPR } from "@/lib/github-prs";
 import { githubProject } from "@/lib/githubLocal";
 import { limitLocalAction, sessionTokenFromRequest } from "@/lib/localRealtime";
 import { BodyTooLarge, readBoundedText } from "@/lib/http-body";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
@@ -12,5 +13,5 @@ export async function POST(request: Request) {
     const { user } = await githubProject(sessionToken, body.projectId, true);
     limitLocalAction(`github-pr:${user._id}`, 20, 60000);
     return Response.json(await createTaskPR(sessionToken, body.projectId, body.taskId));
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "PR creation failed" }, { status: error instanceof BodyTooLarge ? 413 : 400, headers: { "Cache-Control": "no-store" } }); }
+  } catch (error) { return Response.json({ error: errorText(error, "PR creation failed") }, { status: error instanceof BodyTooLarge ? 413 : 400, headers: { "Cache-Control": "no-store" } }); }
 }

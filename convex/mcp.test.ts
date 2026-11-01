@@ -46,7 +46,7 @@ describe("MCP tools", () => {
 
   test("viewers and read-only tokens cannot write", async () => {
     const f = await fixture();
-    await expect(f.token(f.viewer)).rejects.toThrow("Read-only");
+    await expect(f.token(f.viewer)).rejects.toThrow("view-only");
     const viewer = await f.token(f.viewer, false);
     expect(JSON.parse(await f.t.query(api.mcp.workspace, { token: viewer })).access).toBe("read");
     await expect(f.t.mutation(api.mcp.createIssue, { token: viewer, project: "Shared", title: "x", dueDate: "2030-01-01" })).rejects.toThrow();
@@ -83,6 +83,19 @@ describe("MCP tools", () => {
     expect(JSON.parse(await f.t.mutation(api.mcp.moveIssue, { token: f.ownerToken, issueId: ids[0]!, completed: true })).status).toBe("completed");
     const reopened = JSON.parse(await f.t.mutation(api.mcp.moveIssue, { token: f.ownerToken, issueId: ids[0]!, column: "In progress" }));
     expect([reopened.status, reopened.column]).toEqual(["open", "In progress"]);
+  });
+
+  test("issues carry their link; assignee and due date are optional and \"none\" clears them", async () => {
+    const f = await fixture();
+    const created = JSON.parse(await f.t.mutation(api.mcp.createIssue, { token: f.ownerToken, project: "Shared", title: "Loose", assignee: "none" }));
+    expect([created.assignee, created.dueDate, created.url]).toEqual([null, null, `/mcp?project=${f.shared}&issue=${created.id}`]);
+    const set = JSON.parse(await f.t.mutation(api.mcp.updateIssue, { token: f.ownerToken, issueId: created.id, assignee: "@member", dueDate: "2030-02-01" }));
+    expect([set.assignee?.email, set.dueDate]).toEqual([f.member.email, "2030-02-01"]);
+    const cleared = JSON.parse(await f.t.mutation(api.mcp.updateIssue, { token: f.ownerToken, issueId: created.id, assignee: "none", dueDate: "none" }));
+    expect([cleared.assignee, cleared.dueDate]).toEqual([null, null]);
+    const listed = JSON.parse(await f.t.query(api.mcp.issues, { token: f.ownerToken, text: "Loose" })).issues[0];
+    expect(listed.url).toBe(created.url);
+    expect(JSON.parse(await f.t.query(api.mcp.issue, { token: f.ownerToken, issueId: created.id })).url).toBe(created.url);
   });
 
   test("comments resolve @mentions and notify like the UI", async () => {

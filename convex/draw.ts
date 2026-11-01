@@ -34,7 +34,7 @@ async function sceneAccess(ctx: QueryCtx | MutationCtx, args: SceneArgs) {
 
 async function editableScene(ctx: MutationCtx, args: SceneArgs) {
   const access = await sceneAccess(ctx, args);
-  if (!canEdit(access.member)) throw new ConvexError("Edit role required");
+  if (!canEdit(access.member)) throw new ConvexError("You have view-only access");
   return access;
 }
 
@@ -63,7 +63,7 @@ export const createCanvas = mutation({
   returns: v.id("canvases"),
   handler: async (ctx, args) => {
     const { member, project } = await requireMember(ctx, args.projectId, args.sessionToken);
-    if (!canEdit(member) || !project.teamId) throw new ConvexError("Edit role required");
+    if (!canEdit(member) || !project.teamId) throw new ConvexError("You have view-only access");
     const name = canvasName(args.name);
     const existing = await ctx.db.query("canvases").withIndex("by_project", q => q.eq("projectId", project._id).eq("archived", false)).take(200);
     if (existing.filter(isDrawing).length >= MAX_CANVASES) throw new ConvexError(`A project can have up to ${MAX_CANVASES} canvases`);

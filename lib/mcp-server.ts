@@ -39,7 +39,7 @@ export function originMcpServer(token: string, write: boolean) {
     a => run(() => convex.query(api.mcp.projects, { token, ...a })));
   server.registerTool("list_issues", {
     title: "List issues",
-    description: "Issues in board order. Filters combine. Pass nextCursor as cursor for the next page.",
+    description: "Issues in board order, each with its url in Origin. Filters combine. Pass nextCursor as cursor for the next page.",
     inputSchema: z.object({
       project: ref("Project id or name").optional(), column: ref("Column name or id, e.g. \"In progress\"").optional(),
       status: z.enum(["open", "completed", "all"]).optional().describe("Default: open"),
@@ -47,7 +47,7 @@ export function originMcpServer(token: string, write: boolean) {
       limit: z.number().int().min(1).max(100).optional().describe("Default: 25"), cursor: z.string().max(20).optional(),
     }), annotations: read,
   }, a => run(() => convex.query(api.mcp.issues, { token, ...a })));
-  server.registerTool("get_issue", { title: "Get issue", description: "One issue with its description and comments.", inputSchema: z.object({ issueId: ref("Issue id") }), annotations: read },
+  server.registerTool("get_issue", { title: "Get issue", description: "One issue with its url, description and comments.", inputSchema: z.object({ issueId: ref("Issue id") }), annotations: read },
     a => run(() => convex.query(api.mcp.issue, { token, ...a })));
   server.registerTool("get_inbox", { title: "Inbox", description: "Your open assigned issues, soonest due first, and unread notifications.", inputSchema: z.object({}), annotations: read },
     () => run(() => convex.query(api.mcp.inbox, { token })));
@@ -55,7 +55,7 @@ export function originMcpServer(token: string, write: boolean) {
     a => run(() => convex.query(api.mcp.members, { token, ...a })));
   if (!write) return server;
   server.registerTool("create_issue", {
-    title: "Create issue", description: "Create an issue. It lands in Draft unless a column is given.",
+    title: "Create issue", description: "Create an issue. It lands in Draft unless a column is given. Assignee and due date are optional.",
     inputSchema: z.object({
       project: ref("Project id or name"), title: z.string().min(1).max(250), description: z.string().max(60000).optional().describe("Markdown"),
       column: ref("Column name or id").optional(), priority: priority.optional().describe("Default: medium"),
@@ -63,8 +63,8 @@ export function originMcpServer(token: string, write: boolean) {
     }), annotations: change,
   }, a => run(() => convex.mutation(api.mcp.createIssue, { token, ...a })));
   server.registerTool("update_issue", {
-    title: "Update issue", description: "Change the given fields of an issue.",
-    inputSchema: z.object({ issueId: ref("Issue id"), title: z.string().min(1).max(250).optional(), description: z.string().max(60000).optional(), priority: priority.optional(), assignee: ref("Email, @username or \"me\"").optional(), dueDate: date.optional() }),
+    title: "Update issue", description: "Change the given fields of an issue. \"none\" clears the assignee or due date.",
+    inputSchema: z.object({ issueId: ref("Issue id"), title: z.string().min(1).max(250).optional(), description: z.string().max(60000).optional(), priority: priority.optional(), assignee: ref("Email, @username, \"me\" or \"none\"").optional(), dueDate: date.or(z.literal("none")).optional().describe("YYYY-MM-DD or \"none\"") }),
     annotations: { ...change, idempotentHint: true },
   }, a => run(() => convex.mutation(api.mcp.updateIssue, { token, ...a })));
   server.registerTool("move_issue", {

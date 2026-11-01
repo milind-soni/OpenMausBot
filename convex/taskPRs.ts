@@ -23,7 +23,7 @@ export const configure = mutation({
   args: { sessionToken: v.string(), projectId: v.id("projects"), mode: v.union(v.literal("issue"), v.literal("pull_request")), reviewColumnId: v.optional(v.union(v.id("columns"), v.null())), doneColumnId: v.optional(v.id("columns")) }, returns: v.null(),
   handler: async (ctx, a) => {
     await requireAdmin(ctx, a.projectId, a.sessionToken);
-    for (const id of [a.reviewColumnId, a.doneColumnId]) if (id && (await ctx.db.get(id))?.projectId !== a.projectId) throw new ConvexError("Column not in project");
+    for (const id of [a.reviewColumnId, a.doneColumnId]) if (id && (await ctx.db.get(id))?.projectId !== a.projectId) throw new ConvexError("Column not found");
     if (a.reviewColumnId) {
       const review = (await ctx.db.get(a.reviewColumnId))!;
       if (review.isDone || /^done$/i.test(review.title.trim())) throw new ConvexError("The review column must be an active workflow column");
@@ -39,7 +39,7 @@ export const columns = query({
 export const list = query({
   args: { sessionToken: v.string(), taskId: v.id("tasks") }, returns: v.array(taskPullRequestsDoc),
   handler: async (ctx, a) => {
-    const task = await ctx.db.get(a.taskId); if (!task) throw new ConvexError("Task not found");
+    const task = await ctx.db.get(a.taskId); if (!task) throw new ConvexError("Issue not found");
     await requireMember(ctx, task.projectId, a.sessionToken);
     return ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", task._id)).take(50);
   },
@@ -50,9 +50,9 @@ export const humanContext = internalMutation({
   args: { sessionToken: v.string(), projectId: v.id("projects"), taskId: v.id("tasks"), choosePR: v.optional(v.boolean()) }, returns: v.string(),
   handler: async (ctx, a) => {
     const { project, member, user } = await requireMember(ctx, a.projectId, a.sessionToken);
-    if (!canEdit(member)) throw new ConvexError("Edit role required");
+    if (!canEdit(member)) throw new ConvexError("You have view-only access");
     const task = await ctx.db.get(a.taskId);
-    if (!task || task.projectId !== project._id) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== project._id) throw new ConvexError("Issue not found");
     if (!project.repoUrl || !project.githubWorkspaceAccess || project.status !== "active") throw new ConvexError("Authorize this active project's repository first");
     await reviewColumn(ctx, project);
     const existingPR = await ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", task._id)).first();
@@ -99,15 +99,15 @@ export const finalize = internalMutation({
   args: { sessionToken: v.string(), projectId: v.id("projects"), taskId: v.id("tasks"), snapshot }, returns: v.string(),
   handler: async (ctx, a) => {
     const access = await requireMember(ctx, a.projectId, a.sessionToken);
-    if (!canEdit(access.member)) throw new ConvexError("Edit role required");
+    if (!canEdit(access.member)) throw new ConvexError("You have view-only access");
     const requesterUserId = access.user._id;
     const task = await ctx.db.get(a.taskId), project = await ctx.db.get(a.projectId);
-    if (!task || task.projectId !== a.projectId || !project?.githubWorkspaceAccess || repoName(project.repoUrl) !== repoName(a.snapshot.url.split("/pull/")[0])) throw new ConvexError("Task repository mismatch");
+    if (!task || task.projectId !== a.projectId || !project?.githubWorkspaceAccess || repoName(project.repoUrl) !== repoName(a.snapshot.url.split("/pull/")[0])) throw new ConvexError("This issue belongs to another repository");
     let old = await ctx.db.query("taskPullRequests").withIndex("by_projectId_and_number", q => q.eq("projectId", a.projectId).eq("number", a.snapshot.number)).unique();
     if (old && (old.taskId !== task._id || old.url !== a.snapshot.url || old.branch !== a.snapshot.branch)) throw new ConvexError("PR linkage collision");
     // One lifecycle driver per task: avoid competing PRs completing/reopening a task.
     const existing = await ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", task._id)).first();
-    if (existing && existing._id !== old?._id) throw new ConvexError("Task already has a pull request");
+    if (existing && existing._id !== old?._id) throw new ConvexError("This issue already has a pull request");
     if (!old) {
       const id = await ctx.db.insert("taskPullRequests", { repository: repoName(a.snapshot.url.split("/pull/")[0]), projectId: a.projectId, taskId: task._id, requesterUserId, number: a.snapshot.number, url: a.snapshot.url, branch: a.snapshot.branch, state: "draft", checks: "unknown", review: "unknown", updatedAt: Date.now() });
       old = (await ctx.db.get(id))!;

@@ -28,7 +28,7 @@ vi.mock("./localRealtime", async importOriginal => ({
   limitLocalAction: vi.fn(),
   requireLocalUser: async (sessionToken: string) => {
     const user = await backend.client.query(api.auth.me, { sessionToken });
-    if (!user) throw new Error("Login required");
+    if (!user) throw new Error("Your session has expired. Sign in again.");
     return user;
   },
   requireLocalWorkspace: async (request: Request) => {

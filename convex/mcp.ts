@@ -288,8 +288,10 @@ export const updateIssue = mutation({
   handler: (ctx, a) => guard(async () => {
     const access = await writer(ctx, a.token);
     const { task, project } = await resolveIssue(ctx, access, a.issueId, true);
-    const assignedToEmail = a.assignee === undefined ? undefined : await assigneeEmail(ctx, access, project, a.assignee);
-    await updateTaskRecord(ctx, { projectId: project._id, taskId: task._id, title: a.title, description: a.description, priority: a.priority, assignedToEmail, dueDate: a.dueDate }, access.user._id);
+    // "none" clears the assignee or due date (an empty value clears it in updateTaskRecord).
+    const assignedToEmail = a.assignee === undefined ? undefined : UNASSIGNED.has(fold(a.assignee)) ? "" : await assigneeEmail(ctx, access, project, a.assignee);
+    const dueDate = a.dueDate === undefined ? undefined : fold(a.dueDate) === "none" ? "" : a.dueDate;
+    await updateTaskRecord(ctx, { projectId: project._id, taskId: task._id, title: a.title, description: a.description, priority: a.priority, assignedToEmail, dueDate }, access.user._id);
     return issueResult(ctx, access, task._id);
   }),
 });
@@ -349,7 +351,7 @@ export const createToken = mutation({
   returns: v.object({ token: v.string(), grantId: v.id("connectorGrants"), expiresAt: v.number() }),
   handler: (ctx, a) => guard(async () => {
     const { user, member } = await requireTeamMember(ctx, a.teamId, a.sessionToken);
-    if (a.write && !canEdit(member)) throw new ConvexError("Read-only workspace access");
+    if (a.write && !canEdit(member)) throw new ConvexError("You have view-only access to this workspace");
     const name = a.name.trim().slice(0, 120);
     if (!name) throw new ConvexError("Name the token");
     const days = [30, 90, 365].includes(a.days ?? 90) ? a.days ?? 90 : 90;

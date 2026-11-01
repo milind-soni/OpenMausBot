@@ -8,7 +8,7 @@ import type { Id } from "./_generated/dataModel";
 
 async function requireEditor(ctx: QueryCtx | MutationCtx, projectId: Id<"projects">, sessionToken: string) {
   const result = await requireMember(ctx, projectId, sessionToken);
-  if (!canEdit(result.member)) throw new ConvexError("Edit role required");
+  if (!canEdit(result.member)) throw new ConvexError("You have view-only access");
   return result;
 }
 
@@ -136,7 +136,7 @@ export const syncGitHub = action({
   args: { projectId: v.id("projects"), sessionToken: v.string() },
   handler: async (ctx, args) => {
     const project = await ctx.runQuery(api.projects.get, args);
-    if (project.memberRole === "viewer") throw new ConvexError("Edit role required");
+    if (project.memberRole === "viewer") throw new ConvexError("You have view-only access");
     const user = await ctx.runQuery(api.auth.me, { sessionToken: args.sessionToken });
     const parsed = parseGitHubRepo(project.repoUrl);
     if (!parsed) return { ok: false, count: 0, repo: "", error: "Add a valid GitHub repo URL in Settings, e.g. https://github.com/owner/repo" };

@@ -108,7 +108,7 @@ test('O-013 members see only their projects; viewer cannot write across APIs and
     ['credentials:create', { ...f.project, kind: 'secret', title: 'Forbidden', ciphertext: 'fixture', iv: 'fixture', salt: 'fixture', iterations: 600000, kdf: 'PBKDF2' }],
     ['feedback:configure', { ...f.scope, title: 'Forbidden', description: '', enabled: false }],
   ];
-  for (const [name, args] of writes) await expect(f.viewer.api.m(name, args)).rejects.toThrow(/Edit role required|Admin role required/);
+  for (const [name, args] of writes) await expect(f.viewer.api.m(name, args)).rejects.toThrow(/You have view-only access|Only admins can do this/);
   const deniedChat = await page.request.post('/api/local-chat/messages', { headers: { Authorization: `Bearer ${f.viewer.sessionToken}` }, data: { teamId: f.teamId, body: 'Forbidden' } });
   expect(deniedChat.status()).toBe(400);
   expect((await deniedChat.json()).error).toMatch(/read.only|view.only|write|edit/i);

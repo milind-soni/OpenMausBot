@@ -5,6 +5,7 @@ import { createProjectRepository } from "@/lib/github-sync";
 import { workspaceGitHubInfo } from "@/lib/github-workspace";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ type GitHubPullRequest = {
 };
 
 function errorResponse(error: unknown, status = 400) {
-  return NextResponse.json({ error: error instanceof Error ? error.message : "Request failed" }, { status });
+  return NextResponse.json({ error: errorText(error, "Request failed") }, { status });
 }
 
 export async function POST(request: Request) {

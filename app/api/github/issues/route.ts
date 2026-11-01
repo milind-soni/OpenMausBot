@@ -5,6 +5,7 @@ import { getConvexClient, limitLocalAction, sessionTokenFromRequest } from "@/li
 import { api } from "@/convex/_generated/api";
 import { createTaskPR } from "@/lib/github-prs";
 import type { Id } from "@/convex/_generated/dataModel";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
@@ -26,5 +27,5 @@ export async function POST(request: Request) {
     const task = await getConvexClient().query(api.tasks.details, { sessionToken, projectId: project._id, taskId: body.taskId as Id<"tasks"> });
     if (task.task.githubTaskMode === "pull_request" || (!task.task.githubTaskMode && project.githubTaskMode === "pull_request")) return Response.json(await createTaskPR(sessionToken, body.projectId, body.taskId));
     return Response.json(await createGitHubTask(body.projectId, body.taskId));
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub issue creation failed" }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
+  } catch (error) { return Response.json({ error: errorText(error, "GitHub issue creation failed") }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
 }

@@ -307,7 +307,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
                     onDragOver={event => { if (dragProject) event.preventDefault(); }}
                     onDrop={event => { event.preventDefault(); void moveProject(project._id); }}
                     onDragEnd={() => setDragProject(null)}
-                    onKeyDown={event => { if (event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key) && workspace.role !== "viewer") { event.preventDefault(); const ids = sidebarProjects.map(p => p._id); const at = ids.indexOf(project._id); const target = at + (event.key === "ArrowUp" ? -1 : 1); if (target >= 0 && target < ids.length) { [ids[at], ids[target]] = [ids[target], ids[at]]; changeProjectSort("manual"); void reorder({ sessionToken, teamId: workspace._id, projectIds: ids }).catch(error => setShellNotice(error.message)); } } }}
+                    onKeyDown={event => { if (event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key) && workspace.role !== "viewer") { event.preventDefault(); const ids = sidebarProjects.map(p => p._id); const at = ids.indexOf(project._id); const target = at + (event.key === "ArrowUp" ? -1 : 1); if (target >= 0 && target < ids.length) { [ids[at], ids[target]] = [ids[target], ids[at]]; changeProjectSort("manual"); void reorder({ sessionToken, teamId: workspace._id, projectIds: ids }).catch(error => setShellNotice(errorText(error, "Could not reorder projects"))); } } }}
                     onClick={() => openProject(project._id)}
                   >
                     <ProjectIcon project={project} />

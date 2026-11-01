@@ -24,7 +24,7 @@ const person = {
 
 async function requireEditor(ctx: QueryCtx | MutationCtx, projectId: Id<"projects">, sessionToken: string) {
   const result = await requireMember(ctx, projectId, sessionToken);
-  if (!canEdit(result.member)) throw new ConvexError("Edit role required");
+  if (!canEdit(result.member)) throw new ConvexError("You have view-only access");
   return result;
 }
 
@@ -149,7 +149,7 @@ export const details = query({
   handler: async (ctx, args) => {
     const { project } = await requireMember(ctx, args.projectId, args.sessionToken);
     const task = await ctx.db.get(args.taskId);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     const [comments, assets, members, columns] = await Promise.all([
       ctx.db.query("taskComments").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect(),
       ctx.db.query("taskAssets").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect(),
@@ -389,7 +389,7 @@ export const updateTask = mutation({
 
 export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks">; title?: string; description?: string; priority?: "low" | "medium" | "high"; assignedToEmail?: string; dueDate?: string; done?: boolean; }, actorId: Id<"users">) {
   const task = await ctx.db.get(args.taskId);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     const patch: Partial<{
       title: string;
       description: string | undefined;
@@ -451,7 +451,7 @@ export const moveTask = mutation({
 
 export async function moveTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks">; columnId: Id<"columns">; beforeTaskId?: Id<"tasks"> }) {
     const [task, column] = await Promise.all([ctx.db.get(args.taskId), ctx.db.get(args.columnId)]);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     if (!column || column.projectId !== args.projectId) throw new ConvexError("Column not found");
     if (!task.done && isDoneColumn(column)) throw new ConvexError("Complete this issue before moving it to Done");
     const reopenAsDraft = task.done && isDraftColumn(column);
@@ -483,7 +483,7 @@ export const addComment = mutation({
 
 export async function addCommentRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks">; body: string; mentions?: { userId: Id<"users">; token: string }[]; references?: { type: "project" | "issue"; id: string; projectId: Id<"projects">; label: string }[]; attachments?: { id: string; name: string; size: number; contentType: string }[] }, user: Doc<"users">, project: Doc<"projects">) {
     const task = await ctx.db.get(args.taskId);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     if ((!args.body.trim() && !args.attachments?.length) || args.body.length > 8000) throw new ConvexError("Enter a comment under 8,000 characters or attach a file");
     if ((args.references?.length || 0) > 12 || (args.attachments?.length || 0) > 8) throw new ConvexError("Add up to 12 references and 8 files per comment");
     if ((args.mentions?.length || 0) > 20) throw new ConvexError("Mention up to 20 people per comment");
@@ -564,7 +564,7 @@ export const addAsset = mutation({
   handler: async (ctx, args) => {
     const { user } = await requireEditor(ctx, args.projectId, args.sessionToken);
     const task = await ctx.db.get(args.taskId);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     if (!args.name.trim() || args.name.length > 200) throw new ConvexError("Enter an attachment name under 200 characters");
     if (args.localFileId) {
       if (!/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(args.localFileId) || args.size === undefined || !Number.isInteger(args.size) || args.size <= 0 || args.size > 15 * 1024 * 1024) throw new ConvexError("Invalid attachment");
@@ -607,7 +607,7 @@ export const authorizeLocalFile = query({
     if (!assets.length) return null;
     for (const asset of assets) {
       const project = await ctx.db.get(asset.projectId);
-      if (project?.teamId !== args.teamId || !await projectMember(ctx, project, user)) throw new ConvexError("No active project access");
+      if (project?.teamId !== args.teamId || !await projectMember(ctx, project, user)) throw new ConvexError("You don't have access to this project");
     }
     return null;
   },
@@ -615,7 +615,7 @@ export const authorizeLocalFile = query({
 
 export async function deleteTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks"> }) {
     const task = await ctx.db.get(args.taskId);
-    if (!task || task.projectId !== args.projectId) throw new ConvexError("Task not found");
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     const comments = await ctx.db.query("taskComments").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect();
     const assets = await ctx.db.query("taskAssets").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect();
     for (const comment of comments) await ctx.db.delete(comment._id);

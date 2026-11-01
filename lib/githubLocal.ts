@@ -12,7 +12,7 @@ export async function githubProject(sessionToken: string, projectId: string | un
   if (!projectId) throw new Error("Project required");
   const user = await requireLocalUser(sessionToken);
   const project = await getConvexClient().query(api.projects.get, { sessionToken, projectId: projectId as Id<"projects"> });
-  if (write && project.memberRole === "viewer") throw new Error("Edit role required");
+  if (write && project.memberRole === "viewer") throw new Error("You have view-only access");
   const repo = parseGitHubRepo(project.repoUrl);
   const repoName = repo ? `${repo.owner}/${repo.repo}`.toLowerCase() : null;
   const saved = repoName ? githubConnectionInfo(project._id, repoName) : null;

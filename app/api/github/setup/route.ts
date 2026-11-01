@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { limitLocalAction, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/localRealtime";
 import { canSetupGitHubApp, createGithubState, githubAppConfig } from "@/lib/github-workspace";
 import { originUrl } from "@/lib/integration-bridge";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
@@ -22,5 +23,5 @@ export async function POST(request: Request) {
     } });
     response.cookies.set("origin.github", browser, { httpOnly: true, secure: origin.startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });
     return response;
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Setup failed" }, { status: 403 }); }
+  } catch (error) { return NextResponse.json({ error: errorText(error, "Setup failed") }, { status: 403 }); }
 }

@@ -5,6 +5,7 @@ import { deleteGitHubConnection, githubConnectionInfo, saveGitHubConnection } fr
 import { getConvexClient, limitLocalAction, sessionTokenFromRequest } from "@/lib/localRealtime";
 import { workspaceGitHubInfo } from "@/lib/github-workspace";
 import { api } from "@/convex/_generated/api";
+import { errorText } from "@/lib/error-text";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ async function context(request: Request) {
   const repo = parseGitHubRepo(result.project.repoUrl);
   return { ...result, repo: repo ? `${repo.owner}/${repo.repo}`.toLowerCase() : null };
 }
-function failure(error: unknown) { return NextResponse.json({ error: error instanceof Error ? error.message : "GitHub connection failed" }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
+function failure(error: unknown) { return NextResponse.json({ error: errorText(error, "GitHub connection failed") }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
 export async function GET(request: Request) {
   try {
     const { project, repo, token } = await context(request);

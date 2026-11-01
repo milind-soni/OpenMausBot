@@ -4,9 +4,10 @@ import { editLocalMessage, flushChatNotifications, getConvexClient, listLocalMes
 import { after } from "next/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { errorText } from "@/lib/error-text";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-function failure(error: unknown) { return NextResponse.json({ error: error instanceof Error ? error.message : "Request failed" }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
+function failure(error: unknown) { return NextResponse.json({ error: errorText(error, "Request failed") }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
 export async function GET(request: Request) {
   try { const user = await requireLocalChat(request); const params = new URL(request.url).searchParams; const focus = params.get("focus"); const search = params.get("search"); const before = Number(params.get("before")) || undefined; const messages = search ? await searchLocalMessages(user, search, before) : focus ? await localMessageContext(user, focus) : await listLocalMessages(user, before); return NextResponse.json({ messages, hasMore: messages.length === 100 }); } catch (error) { return failure(error); }
 }

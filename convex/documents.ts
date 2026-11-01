@@ -50,7 +50,7 @@ export const create = mutation({
   args: { ...scope, projectId: v.id("projects"), title: v.string(), type: wikiTypeValidator, content: v.optional(v.string()) }, returns: v.id("wikiPages"),
   handler: async (ctx, args) => {
     const { member } = await requireMember(ctx, args.projectId, args.sessionToken);
-    if (!canEdit(member)) throw new ConvexError("Edit role required");
+    if (!canEdit(member)) throw new ConvexError("You have view-only access");
     await workspaceProject(ctx, args.teamId, args.projectId);
     const doc = new Y.Doc();
     try {
@@ -83,7 +83,7 @@ export const applyUpdate = mutation({
     const page = await ctx.db.get(args.pageId);
     if (!page) throw new ConvexError("Document not found");
     const { member, project } = await requireMember(ctx, page.projectId, args.sessionToken);
-    if (!canEdit(member)) throw new ConvexError("Edit role required");
+    if (!canEdit(member)) throw new ConvexError("You have view-only access");
     if (!page.collaborationState || args.update.byteLength > 150000) throw new ConvexError("Reload this document before editing");
     const doc = new Y.Doc();
     try {
@@ -103,7 +103,7 @@ export const rename = mutation({
   handler: async (ctx, args) => {
     const page = await ctx.db.get(args.pageId);
     if (!page) throw new ConvexError("Document not found");
-    if (!canEdit((await requireMember(ctx, page.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!canEdit((await requireMember(ctx, page.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     await ctx.db.patch(page._id, { title: cleanText(args.title, 160, "Title"), updatedAt: Date.now() });
     return null;
   },

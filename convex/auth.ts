@@ -119,7 +119,7 @@ export const signupAccount = internalMutation({
     }
     const userId = await createUser(ctx, { email, name: args.name, password: args.password });
     const user = await ctx.db.get(userId);
-    if (!user) throw new ConvexError("Account creation failed");
+    if (!user) throw new ConvexError("Could not create the account. Try again.");
     const workspace = args.inviteToken ? null : await createWorkspace(ctx, user, args.workspaceName || `${args.name.trim()}'s workspace`, args.slug);
     return { sessionToken: await createSession(ctx, userId), user: publicUser(user), slug: workspace?.slug || null };
   },
@@ -160,7 +160,7 @@ export const revokeOtherSessions = mutation({
   args: { sessionToken: v.string() }, returns: v.null(),
   handler: async (ctx, args) => {
     const result = await getSessionUser(ctx, args.sessionToken);
-    if (!result) throw new ConvexError("Login required");
+    if (!result) throw new ConvexError("Your session has expired. Sign in again.");
     await invalidateOtherSessions(ctx, result.user, result.session);
     return null;
   },
@@ -180,7 +180,7 @@ export const changePassword = mutation({
   handler: async (ctx, args) => {
     if (args.newPassword.length < 10 || args.newPassword.length > 128 || args.currentPassword.length > 128) throw new ConvexError("Use a password between 10 and 128 characters");
     const current = await getSessionUser(ctx, args.sessionToken);
-    if (!current) throw new ConvexError("Login required");
+    if (!current) throw new ConvexError("Your session has expired. Sign in again.");
     const { user } = current;
     if (!(await verifyPassword(user, args.currentPassword))) throw new ConvexError("Current password is wrong");
     const passwordRecord = await makePasswordRecord(args.newPassword);
@@ -205,7 +205,7 @@ export const acceptInviteAccount = internalMutation({
           .withIndex("by_token", (q) => q.eq("inviteToken", args.inviteToken))
           .unique();
     const invite = projectInvite ?? teamInvite;
-    if (!invite || invite.status !== "invited") throw new ConvexError("Invite not found");
+    if (!invite || invite.status !== "invited") throw new ConvexError("Invitation not found");
     const project = projectInvite ? await ctx.db.get(projectInvite.projectId) : null;
     if (projectInvite && !project) throw new ConvexError("Project no longer exists");
     const teamId = project?.teamId ?? teamInvite?.teamId;
@@ -229,7 +229,7 @@ export const acceptInviteAccount = internalMutation({
       });
       user = await ctx.db.get(userId);
     }
-    if (!user) throw new ConvexError("User creation failed");
+    if (!user) throw new ConvexError("Could not create the account. Try again.");
 
     const patch = {
       userId: user._id,
@@ -254,7 +254,7 @@ export const acceptInviteAccount = internalMutation({
       return { sessionToken, user: publicUser(user), projectId: projectInvite.projectId, teamId: project?.teamId ?? null };
     }
 
-    if (!teamInvite) throw new ConvexError("Invite not found");
+    if (!teamInvite) throw new ConvexError("Invitation not found");
     await ctx.db.patch(teamInvite._id, patch);
     const projects = await ctx.db
       .query("projects")

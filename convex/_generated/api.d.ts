@@ -33,6 +33,7 @@ import type * as inbox from "../inbox.js";
 import type * as integrationTables from "../integrationTables.js";
 import type * as integrations from "../integrations.js";
 import type * as issueRelations from "../issueRelations.js";
+import type * as legacyChat from "../legacyChat.js";
 import type * as legacyImport from "../legacyImport.js";
 import type * as lib_agentAccess from "../lib/agentAccess.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -112,6 +113,7 @@ declare const fullApi: ApiFromModules<{
   integrationTables: typeof integrationTables;
   integrations: typeof integrations;
   issueRelations: typeof issueRelations;
+  legacyChat: typeof legacyChat;
   legacyImport: typeof legacyImport;
   "lib/agentAccess": typeof lib_agentAccess;
   "lib/auth": typeof lib_auth;

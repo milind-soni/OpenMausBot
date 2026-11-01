@@ -17,7 +17,7 @@ export async function reorderWorkspaceProjects(ctx: MutationCtx, args: {
   expectedProjectIds?: Id<"projects">[];
 }): Promise<null> {
   const { member, user } = await requireTeamMember(ctx, args.teamId, args.sessionToken);
-  if (!canEdit(member)) throw new ConvexError("Edit role required");
+  if (!canEdit(member)) throw new ConvexError("You have view-only access");
   if (!validIds(args.projectIds) || (args.expectedProjectIds && !validIds(args.expectedProjectIds))) throw new ConvexError("Invalid project order");
   const rows = await ctx.db.query("projects").withIndex("by_team", q => q.eq("teamId", args.teamId)).take(501);
   if (rows.length > 500) throw new ConvexError("This workspace exceeds the supported project ordering limit");

@@ -28,7 +28,7 @@ export const labels = mutation({
   args: { sessionToken: v.string(), taskId: v.id("tasks"), labels: v.array(v.string()) }, returns: v.null(),
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.taskId);
-    if (!task || !canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!task || !canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     const labels = [...new Set(args.labels.map(label => label.trim()).filter(Boolean))];
     if (labels.length > 20 || labels.some(label => label.length > 32)) throw new ConvexError("Use up to 20 labels of 32 characters each");
     await ctx.db.patch(task._id, { labels, updatedAt: Date.now() }); return null;
@@ -41,7 +41,7 @@ export const connect = mutation({
     if (!from || !to || from._id === to._id) throw new ConvexError("Choose another issue");
     const source = await requireMember(ctx, from.projectId, args.sessionToken);
     const target = await requireMember(ctx, to.projectId, args.sessionToken);
-    if (!canEdit(source.member) || !canEdit(target.member)) throw new ConvexError("Edit role required");
+    if (!canEdit(source.member) || !canEdit(target.member)) throw new ConvexError("You have view-only access");
     if (!source.project.teamId || source.project.teamId !== target.project.teamId) throw new ConvexError("Issues must belong to the same workspace");
     const outgoing = await ctx.db.query("taskRelations").withIndex("by_fromTaskId", q => q.eq("fromTaskId", from._id)).take(31);
     if (outgoing.some(row => row.toTaskId === to._id && row.kind === args.kind)) return null;
@@ -66,7 +66,7 @@ export const disconnect = mutation({
   args: { sessionToken: v.string(), id: v.id("taskRelations") }, returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id); const task = row && await ctx.db.get(row.fromTaskId);
-    if (!row || !task || !canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("Edit role required");
+    if (!row || !task || !canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
     await ctx.db.delete(row._id); return null;
   },
 });
