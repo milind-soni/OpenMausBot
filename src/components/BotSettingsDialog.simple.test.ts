@@ -397,7 +397,7 @@ describe("the bot panel in Simple mode", () => {
 
   // App tool grants (PluginsPanel) and the working folder (the files pane) name a Simple page; MCP servers live on the
   // apps page, and tool selection names none, so it lands where Access does.
-  it.each([["apps", "apps"], ["folder", "folder"], ["mcp", undefined], ["tools", undefined]] as const)("lands an Access link naming %s on %s", (page, landing) => {
+  it.each([["apps", "apps"], ["folder", "folder"], ["mcp", "apps"], ["tools", undefined]] as const)("lands an Access link naming %s on %s", (page, landing) => {
     try {
       openBotSettings(fixture.dispatch, "access", { page });
       const rendered = panel(makeBot(), "access");
