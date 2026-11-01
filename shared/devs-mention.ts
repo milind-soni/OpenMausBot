@@ -8,8 +8,8 @@ export const DEVS_TAG = "devs";
 const startsWithName = (rest: string, name: string) =>
   rest.slice(0, name.length).toLowerCase() === name.toLowerCase() && !isMentionNameContinuation(rest.slice(name.length));
 
-/** The tag's length when `rest` (the text after an at-sign) starts with it. A bot named devs, or with a longer name
- * that starts with it, is tagged instead. */
+/** The tag's length when `rest` (the text after an at-sign) starts with it. A bot or department named devs, or with a
+ * longer name that starts with it, is tagged instead. */
 export function devsTagAt(rest: string, botNames: readonly string[] = []): number | undefined {
   if (!startsWithName(rest, DEVS_TAG)) return undefined;
   const bot = botNames.some((name) => name.trim().length >= DEVS_TAG.length && startsWithName(rest, name));
