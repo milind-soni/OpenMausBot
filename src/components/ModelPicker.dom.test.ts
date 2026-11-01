@@ -4,12 +4,13 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bot, InstanceInfo } from "@/state/store";
+import type { AppState, Bot, InstanceInfo } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
   instances: [] as InstanceInfo[],
   bots: [] as Bot[],
+  modelVariantSessions: {} as AppState["modelVariantSessions"],
   dispatch: vi.fn(),
   refreshModels: vi.fn(() => Promise.resolve()),
   refreshInstances: vi.fn(() => Promise.resolve()),
@@ -17,7 +18,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
-    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: {}, config: {} },
+    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: fixture.modelVariantSessions, config: {} },
     dispatch: fixture.dispatch,
     refreshInstances: fixture.refreshInstances,
     refreshModels: fixture.refreshModels,
@@ -83,6 +84,7 @@ const openWith = async (key: "ArrowDown" | "click") => {
 beforeEach(() => {
   fixture.advanced = false;
   fixture.bots = [];
+  fixture.modelVariantSessions = {};
   fixture.instances = [claude(three)];
   fixture.dispatch.mockReset();
   parentKey.mockReset();
@@ -304,7 +306,54 @@ describe("single-model cloud catalogs", () => {
   });
 });
 
+describe("session variant labels on the model chip", () => {
+  it.each([false, true])("uses matching session labels with advanced=%s and keeps catalog/id fallbacks", (advanced) => {
+    fixture.advanced = advanced;
+    const instance: InstanceInfo = { ...claude([{ id: "provider/model", label: "Model", variants: [{ id: "deep/custom", label: "Catalog deep" }] }]),
+      instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", capabilities: { modelVariants: true } };
+    fixture.instances = [instance];
+    const bot: Bot = { ...scout(), modelSelection: { instanceId: "opencode", model: "provider/model", variant: "deep/custom" } };
+    const session = { instanceId: "opencode", model: "provider/model", turnId: "turn", startedAt: "2026-11-01T00:00:00Z", acceptingUpdates: false,
+      variants: { options: [{ id: "deep/custom", label: "Session deep" }], currentValue: "deep/custom" } };
+    fixture.modelVariantSessions[bot.threadId] = session;
+    render(bot);
+    expect(chip().textContent).toContain("Session deep");
+    expect(chip().title).toContain("Session deep");
+
+    fixture.modelVariantSessions[bot.threadId] = { ...session, instanceId: "other-account" };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    fixture.modelVariantSessions[bot.threadId] = { ...session, model: "other-model" };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    fixture.modelVariantSessions = { "other-thread": session };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    fixture.modelVariantSessions[bot.threadId] = { ...session, variants: { options: [], currentValue: "deep/custom" } };
+    render(bot);
+    expect(chip().textContent).toContain("Catalog deep");
+    instance.models.options[0]!.variants = [];
+    render(bot);
+    expect(chip().textContent).toContain("deep/custom");
+  });
+});
+
 describe("provider tabs", () => {
+  it.each([false, true])("starts each provider catalog at the top with advanced=%s", async (advanced) => {
+    fixture.advanced = advanced;
+    const codex: InstanceInfo = { ...claude(numbered(24)), instanceId: "codex", driverKind: "codex", displayName: "Codex" };
+    fixture.instances = [claude(numbered(24)), codex];
+    render(scout("model-0"));
+    await openWith("click");
+    const selector = advanced ? "[data-model-catalog-scroll]" : "[data-simple-models]";
+    document.querySelector<HTMLElement>(selector)!.scrollTop = 250;
+    const tab = document.querySelector<HTMLButtonElement>('[data-provider-tab][aria-label="OpenAI"]')!;
+    flushSync(() => tab.click());
+    await settle();
+    expect(document.querySelector<HTMLElement>(selector)!.scrollTop).toBe(0);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
   it("browses with left and right, reaches search with down, and never changes the model until picked", async () => {
     const codex: InstanceInfo = { ...claude([{ id: "gpt-fixture", label: "GPT fixture" }]), instanceId: "codex", driverKind: "codex", displayName: "Codex" };
     fixture.instances = [claude(three), codex];

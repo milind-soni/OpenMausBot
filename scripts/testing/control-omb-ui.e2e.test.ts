@@ -283,9 +283,20 @@ describe("control-omb ui drives the real renderer", () => {
         return Boolean(row && row.top >= catalog.top && row.bottom <= catalog.bottom);
       })()`)).toBe(true);
       expect((await bounds()).footerGap).toBeCloseTo(before.footerGap, 1);
+      await ui("click", info.ui, "--name", "Claude");
+      expect(await evaluate("document.querySelector('[data-model-catalog-scroll]').scrollTop")).toBe(0);
       await ui("press", info.ui, "--keys", "Escape");
       if (width === 390) await ui("press", info.ui, "--keys", "Escape");
     }
+    await viewport(1280);
+    await evaluate("localStorage.setItem('omb-advanced-mode','0'); location.reload(); true");
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[data-tour=model]'))"), { timeout: 15_000 }).toBe(true);
+    await evaluate("document.documentElement.dataset.reducedMotion='true'; document.querySelector('[data-tour=model]').click(); true");
+    await ui("click", info.ui, "--name", "Claude");
+    await evaluate("const list=document.querySelector('[data-simple-models]'); list.scrollTop=list.scrollHeight; true");
+    await expect.poll(() => evaluate("document.querySelector('[data-simple-models]').scrollTop")).toBeGreaterThan(0);
+    await ui("click", info.ui, "--name", "OpenAI");
+    expect(await evaluate("document.querySelector('[data-simple-models]').scrollTop")).toBe(0);
     await waitForExit(launched.child, { signal: "SIGINT", graceMs: 30_000 });
     expect(launched.child.exitCode).toBe(0);
   }, LAUNCH_TIMEOUT_MS + 120_000);

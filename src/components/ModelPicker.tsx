@@ -308,7 +308,8 @@ export function ModelPicker({
   const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
   const pickerInstances = configuredModelInstances(state.instances, selection.instanceId);
   const selectedVariantLabel = selection.variant === undefined ? undefined : variantLabel(
-    active?.models.options.find((option) => option.id === selection.model)?.variants?.find((option) => option.id === selection.variant)
+    variantChoices(state, selection, threadId ?? bot.threadId)?.options.find((option) => option.id === selection.variant)
+      ?? active?.models.options.find((option) => option.id === selection.model)?.variants?.find((option) => option.id === selection.variant)
       ?? { id: selection.variant, label: selection.variant },
     active?.driverKind,
   );
@@ -374,6 +375,8 @@ export function ModelPicker({
 
   const resetList = () => {
     setQuery("");
+    const catalog = menuRef.current?.querySelector<HTMLElement>("[data-simple-models], [data-model-catalog-scroll]");
+    if (catalog) catalog.scrollTop = 0;
   };
 
   const openFor = (instance: InstanceInfo | undefined) => {
