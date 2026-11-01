@@ -281,8 +281,12 @@ function TaskModalContent({
 
   const actions = canEdit && details ? [
     details.task.done
-      ? { key: "reopen", label: "Reopen issue", icon: <RotateCcw size={14} />, run: async () => { await updateTask({ projectId, sessionToken, taskId, done: false }); } }
-      : { key: "complete", label: "Mark complete", icon: <CheckCircle2 size={14} />, run: async () => { await updateTask({ projectId, sessionToken, taskId, done: true }); } },
+      ? { key: "reopen", label: "Reopen", icon: <RotateCcw size={14} />, run: async () => { await updateTask({ projectId, sessionToken, taskId, done: false }); } }
+      : { key: "complete", label: "Mark complete", icon: <CheckCircle2 size={14} />, run: async () => {
+        await updateTask({ projectId, sessionToken, taskId, done: true });
+        // The same confirmation as completing a card on the board.
+        showIssueToast("Completed", () => void updateTask({ projectId, sessionToken, taskId, done: false }).catch(error => setNotice({ text: errorText(error, "Could not reopen issue"), tone: "danger" })));
+      } },
     ...(repo && !linkedGitHubUrl && taskMode !== "pull_request" ? [{ key: "github-issue", label: "Create GitHub issue", icon: <CircleDot size={14} />, run: async () => {
       flush(); await queue.current;
       const result = await localApi<{ message: string }>("/api/github/issues", sessionToken, { method: "POST", json: { projectId, taskId } });

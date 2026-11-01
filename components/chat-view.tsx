@@ -21,7 +21,6 @@ import {
   ArrowUp,
   AtSign,
   Check,
-  Circle,
   Ellipsis,
   File,
   Hash,
@@ -33,8 +32,9 @@ import {
   Reply,
   X,
 } from "lucide-react";
-import { createPortal } from "react-dom";
 import { Dialog } from "./dialog";
+import { IssueToastHost, showIssueToast } from "./issue-shared";
+import { SuggestionRow } from "./suggestion-row";
 import { CHAT_REACTIONS, MessageMenu, type MessageAction, type MessageMenuAnchor } from "./chat-message-menu";
 import type { Id } from "@/convex/_generated/dataModel";
 import type {
@@ -163,15 +163,9 @@ export function ChatThread({
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [menu, setMenu] = useState<{ message: LocalChatMessage; anchor: MessageMenuAnchor; opener: HTMLElement | null } | null>(null);
   const [deleting, setDeleting] = useState<LocalChatMessage | null>(null);
-  const [toast, setToast] = useState("");
   const [unreadFrom, setUnreadFrom] = useState("");
   const unreadPending = useRef(initialUnread);
   const longPress = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 1800);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -577,7 +571,7 @@ export function ChatThread({
     else if (action === "pin") await change(message.id, { pinned: !message.pinned });
     else if (action === "delete") setDeleting(message);
     else if (action === "copy") {
-      try { await navigator.clipboard.writeText(message.body); setToast("Copied"); }
+      try { await navigator.clipboard.writeText(message.body); showIssueToast("Copied"); }
       catch { setNotice("Could not copy message"); }
     }
   };
@@ -895,35 +889,15 @@ export function ChatThread({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => chooseSuggestion(option)}
                 >
-                  {option.member ? (
-                    <UserAvatar
-                      user={
-                        option.member.userId === user._id ? user : option.member
-                      }
-                    />
-                  ) : option.reference?.type === "project" ? (
-                    <Hash size={18} />
-                  ) : (
-                    <Circle size={17} />
-                  )}
-                  <span className="suggestion-copy">
-                    <strong>{option.label}</strong>
-                    <small>{option.detail}</small>
-                  </span>
+                  <SuggestionRow
+                    option={option}
+                    avatar={option.member?.userId === user._id ? user : undefined}
+                  />
                 </button>
               ))
             )}
             {!suggestions.loading && !suggestions.options.length && (
               <div className="suggestion-empty">No matches</div>
-            )}
-            {suggestions.loadMore && (
-              <button
-                type="button"
-                className="suggestion-more"
-                onClick={suggestions.loadMore}
-              >
-                More issues
-              </button>
             )}
           </div>
         )}
@@ -1149,7 +1123,7 @@ export function ChatThread({
           </div>
         </div>
       </Dialog>}
-      {toast && createPortal(<div className="board-toast chat-toast" role="status"><span className="board-toast-icon"><Check size={14} /></span><span>{toast}</span></div>, document.body)}
+      <IssueToastHost />
       {issueMessage && projects && <IssueComposer sessionToken={sessionToken} projects={projects} activeProjectId={null} initialDraft={{ title: issueMessage.body.split("\n")[0].slice(0, 250) || "Follow up on chat", description: `${issueMessage.body}\n\nFrom ${nameOf(issueMessage)}, ${formatDateTime(issueMessage.createdAt)}` }} onClose={() => setIssueMessage(null)} onCreated={onOpenReference} />}
     </section>
   );

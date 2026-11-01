@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Link2, Search, Trash2, Undo2, UserRound } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Link2, RotateCcw, Search, Trash2, UserRound } from "lucide-react";
 import { displayName, formatDue } from "@/lib/format";
 import { PriorityIcon, StatusIcon } from "./issue-icons";
 import { UserAvatar } from "./user-avatar";
@@ -36,16 +36,16 @@ export function MenuScrim({ onClose }: { onClose: () => void }) {
 
 /**
  * The issue card menu: right-click / long-press / ⋯ open it at the root; the card's priority and assignee chips open a
- * submenu directly. On phones it is a bottom sheet. A completed issue (`onRestore`) gets Restore, Copy link and Delete.
+ * submenu directly. On phones it is a bottom sheet. A completed issue (`onReopen`) gets Reopen, Copy link and Delete.
  */
-export function TaskMenu({ title, view: initialView, anchor, status, statuses, priority, assignee, members, currentEmail, dueDate, onStatus, onPriority, onAssignee, onDueDate, onCopyLink, onDelete, onRestore, onClose }: {
+export function TaskMenu({ title, view: initialView, anchor, status, statuses, priority, assignee, members, currentEmail, dueDate, onStatus, onPriority, onAssignee, onDueDate, onCopyLink, onDelete, onReopen, onClose }: {
   title: string; view: TaskMenuView; anchor: TaskMenuAnchor;
   status: string; statuses: { id: string; title: string }[];
   priority: string; assignee?: string; members: TaskMenuPerson[]; currentEmail?: string; dueDate?: string;
   onStatus: (columnId: string) => void; onPriority: (priority: Priority) => void; onAssignee: (email: string) => void;
   onDueDate: () => void; onCopyLink: () => void; onDelete: () => void;
-  /** The issue is completed: the menu offers Restore in place of the property submenus. */
-  onRestore?: () => void;
+  /** The issue is completed: the menu offers Reopen in place of the property submenus. */
+  onReopen?: () => void;
   /** `restoreFocus` is false when the menu closes because the pointer went elsewhere. */
   onClose: (restoreFocus: boolean) => void;
 }) {
@@ -101,9 +101,9 @@ export function TaskMenu({ title, view: initialView, anchor, status, statuses, p
     <button key={key} type="button" role="menuitemradio" aria-checked={checked} onClick={() => pick(run)}>{icon}<span>{label}</span>{extra}{checked && <Check size={14} className="task-menu-check" />}</button>;
 
   let body: ReactNode;
-  if (view === "root" && onRestore) {
+  if (view === "root" && onReopen) {
     body = <>
-      <button type="button" role="menuitem" onClick={() => pick(onRestore)}><Undo2 size={14} /><span>Restore</span></button>
+      <button type="button" role="menuitem" onClick={() => pick(onReopen)}><RotateCcw size={14} /><span>Reopen</span></button>
       <button type="button" role="menuitem" onClick={() => pick(onCopyLink)}><Link2 size={14} /><span>Copy link</span></button>
       <hr />
       <button type="button" role="menuitem" className="danger-text" onClick={() => pick(onDelete)}><Trash2 size={14} /><span>Delete issue</span></button>

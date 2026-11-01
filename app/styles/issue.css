@@ -165,7 +165,7 @@
 .issue-comment-composer .send-message svg { width: 15px; height: 15px; }
 .issue-comment-composer .send-message:disabled { background: var(--surface-4); color: var(--text-3); opacity: 1; }
 .issue-mention-input { position: relative; display: grid; }
-.issue-mention-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; width: min(280px, 100%); max-height: 240px; overflow-y: auto; padding: var(--space-1); border: 1px solid var(--border-2); border-radius: var(--radius-md); background: var(--surface-3); box-shadow: var(--shadow-md); animation: o-pop var(--duration) var(--ease-out); }
+.issue-mention-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; width: min(380px, 100%); max-height: 240px; overflow-y: auto; padding: var(--space-1); border: 1px solid var(--border-2); border-radius: var(--radius-md); background: var(--surface-3); box-shadow: var(--shadow-md); animation: o-pop var(--duration) var(--ease-out); }
 .issue-mention-menu button { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 36px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-1); text-align: left; }
 .issue-mention-menu button[aria-selected="true"], .issue-mention-menu button:hover { background: var(--surface-5); }
 .issue-mention-menu button > svg { flex: none; color: var(--text-3); }

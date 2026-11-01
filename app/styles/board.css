@@ -84,6 +84,8 @@
 .kanban-column[data-drop] .empty-lane { border-color: color-mix(in srgb, var(--lane) 45%, transparent); color: var(--text-2); }
 .archive-lane-link { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font-size: var(--text-sm); }
 .archive-lane-link:hover { background: var(--hover); color: var(--text-1); }
+/* Search on a phone: an empty lane points to the lane with matches (desktop shows the lanes side by side). */
+.lane-jump { display: none; }
 
 /* Empty lanes fold into a narrow strip (name + count) and open on click or when a card is dragged over them. */
 .kanban-column.is-collapsed { flex: 0 0 var(--lane-strip); min-width: var(--lane-strip); background: color-mix(in srgb, var(--surface-2) 40%, transparent); }
@@ -324,7 +326,12 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
   .board-header .board-filter-control:has(.board-search-chip) { order: 1; flex: 1 0 100%; }
   .board-search-chip { max-width: 100%; height: 32px; }
   .project-create-issue > span { display: none; }
-  .board-header-actions > .project-create-issue { width: 36px; min-height: 32px; padding: 0; }
+  .empty-lane:has(> .lane-jump) > .lane-empty-text { display: none; }
+  .empty-lane > .lane-jump { display: inline-flex; min-height: 44px; color: var(--text-2); }
+  /* Every control keeps its size; nothing in the row shrinks under its neighbour at 360px. */
+  .board-header-actions > * { flex: none; }
+  .board-header-actions .issue-layout-switch button { min-width: 36px; }
+  .board-header-actions > .project-create-issue { width: 36px; height: 36px; min-height: 36px; margin-left: 0; padding: 0; }
   /* Search covers the whole toolbar row; the ring in the page color hides the controls under its edges. */
   .board-header { position: relative; }
   .board-filter-control { position: static; }
@@ -366,6 +373,15 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
   .archive-row > time { display: none; }
   .archive-restore.ghost-button { width: 44px; min-height: 44px; padding: 0; border-color: transparent; background: transparent; color: var(--text-2); }
   .archive-restore > span { display: none; }
+}
+
+/* Narrow Android phones (360px): tighter gaps; below that the counts give way. */
+@media (max-width: 380px) {
+  .board-header-actions { gap: var(--space-1); }
+  .board-header .segmented-control button { padding: 0 5px; }
+}
+@media (max-width: 359px) {
+  .board-header .segmented-control button > span { display: none; }
 }
 
 /* Status rings follow the lane colors. */
