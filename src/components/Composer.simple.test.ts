@@ -361,6 +361,19 @@ describe("the Advanced composer", () => {
       expect(stacked()).toBe(false);
     });
 
+    it("measures each new message afresh, so a wrap from a narrower composer does not stick", () => {
+      const wrap = wrapPast20();
+      fixture.advanced = true;
+      render({ bot });
+      type("a".repeat(25));
+      expect(stacked()).toBe(true);
+      type("");
+      // Wider now: 30 characters fit on the one row.
+      wrap.mockImplementation(function (this: HTMLTextAreaElement) { return this.value.length > 40 ? 48 : 24; });
+      type("a".repeat(30));
+      expect(stacked()).toBe(false);
+    });
+
     it("never stacks an empty field, even when its placeholder wraps", () => {
       vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(48);
       fixture.advanced = true;
