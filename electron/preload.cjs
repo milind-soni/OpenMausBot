@@ -586,6 +586,9 @@ const bridge = {
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
+    // A Cloud or server page on 0.1.135 or older calls this as its Cloud Pro popup opens, and the whole page went blank
+    // when it was missing. Nothing asks main any more: never the first showing today, so that page reports nothing.
+    shown: () => Promise.resolve(false),
   },
   desktopAnalytics: {
     enabled: () => {
