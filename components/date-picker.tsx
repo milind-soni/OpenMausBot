@@ -51,7 +51,7 @@ export function DatePicker({ value, onChange, disabled, label = "Due date", plac
   const close = (restore = true) => { setOpen(false); if (restore) trigger.current?.focus({ preventScroll: true }); };
 
   return <div className={clsx("date-picker", className)}>
-    <button ref={trigger} type="button" className={clsx("date-picker-trigger", due && !done && `due-${due.tone}`)} data-empty={!due || undefined} aria-label={due ? `${label}: ${due.label}` : label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => { if (open) close(false); else setOpen(true); }} onKeyDown={event => {
+    <button ref={trigger} type="button" className={clsx("date-picker-trigger", due && !done && `due-${due.tone}`)} data-empty={!due || undefined} aria-label={`${label}: ${due ? due.label : "No due date"}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => { if (open) close(false); else setOpen(true); }} onKeyDown={event => {
       if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setOpen(true); }
       else if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
       else if (open && event.key === "Tab") close(false);

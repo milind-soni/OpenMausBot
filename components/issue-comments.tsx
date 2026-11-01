@@ -14,9 +14,9 @@ import { localApi } from "@/lib/client-api";
 import { validateAttachmentFiles } from "@/lib/dropped-content";
 import type { ChatReference } from "@/lib/localRealtime";
 import { displayName } from "@/lib/format";
-import { UserAvatar } from "./user-avatar";
 import { useMemberProfile, useWorkspace } from "./workspace-context";
 import { useChatSuggestions, type ChatSuggestion } from "./use-chat-suggestions";
+import { SuggestionRow } from "./suggestion-row";
 import { useFileDrop } from "./use-file-drop";
 
 type Person = { userId?: Id<"users">; name: string; username?: string; email: string; avatarUrl?: string | null };
@@ -140,9 +140,8 @@ export function IssueCommentComposer({ projectId, taskId, sessionToken, members 
   return <form className={`issue-comment-composer ${drop.dragging ? "drop-active" : ""}`} {...drop.handlers} onSubmit={event => { event.preventDefault(); void submit(); }} onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void upload(Array.from(event.clipboardData.files)); } }}>
     <div className="issue-mention-input">
       {trigger && <div className="issue-mention-menu" role="listbox" id={id} aria-label={trigger.kind === "member" ? "Mention a member" : "Reference a project or issue"}>
-        {candidates.map((option, index) => <button id={`${id}-${index}`} type="button" role="option" aria-selected={index === selection} key={option.key} onMouseDown={event => event.preventDefault()} onClick={() => choose(option)}>{option.member ? <UserAvatar user={option.member} size="small" /> : <Hash size={16} />}<span>{option.label}<small>{option.detail}</small></span></button>)}
+        {candidates.map((option, index) => <button id={`${id}-${index}`} type="button" role="option" aria-selected={index === selection} key={option.key} onMouseDown={event => event.preventDefault()} onClick={() => choose(option)}><SuggestionRow option={option} /></button>)}
         {!candidates.length && <p>{suggestions.loading ? "Searching..." : "No matches"}</p>}
-        {suggestions.loadMore && <button type="button" onClick={suggestions.loadMore}>Load more</button>}
       </div>}
       <textarea ref={input} aria-label="Comment" aria-controls={trigger ? id : undefined} aria-activedescendant={candidates.length ? `${id}-${selection % candidates.length}` : undefined} value={body} onChange={event => { setBody(event.target.value); setCursor(event.target.selectionStart); setDismissed(false); setSelection(0); }} onSelect={event => setCursor(event.currentTarget.selectionStart)} onKeyDown={event => {
         if (trigger && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissed(true); }

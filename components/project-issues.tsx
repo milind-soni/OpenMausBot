@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
 import type { OptimisticLocalStore } from "convex/browser";
 import clsx from "clsx";
-import { Check, CheckCircle2, Circle, Columns3, List, MoreHorizontal, PencilLine, Plus, Search, Trash2, Undo2, X } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, Circle, Columns3, List, MoreHorizontal, PencilLine, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { formatDate } from "@/lib/format";
@@ -119,7 +119,10 @@ function revealInBoard(element: HTMLElement) {
     // Horizontally, bring in the whole lane (a phone shows one lane at a time).
     const target = (scrollsX && element.closest("[data-column-id]")) || element;
     const rect = target.getBoundingClientRect(), own = element.getBoundingClientRect();
-    const left = !scrollsX ? 0 : rect.left < box.left ? rect.left - box.left : rect.right > box.right ? Math.min(rect.right - box.right, rect.left - box.left) : 0;
+    // A snapping board (phones) puts the lane start on the snap line, where a swipe would leave it.
+    const snapLeft = rect.left - box.left - (parseFloat(style.scrollPaddingLeft) || 0);
+    const hidden = rect.left < box.left || rect.right > box.right;
+    const left = !scrollsX || !hidden ? 0 : style.scrollSnapType.startsWith("x") ? snapLeft : rect.left < box.left ? rect.left - box.left : Math.min(rect.right - box.right, rect.left - box.left);
     const top = !scrollsY ? 0 : own.top < box.top ? own.top - box.top - 8 : own.bottom > box.bottom ? own.bottom - box.bottom + 8 : 0;
     if (left || top) scroller.scrollBy({ left, top, behavior: smooth ? "smooth" : "auto" });
   }
@@ -209,8 +212,12 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
    * fold; a lane emptied later (a drop, a completion, a move) stays open, so nothing slides after a card settles.
    */
   const [openLanes, setOpenLanes] = useState<Set<string>>(() => new Set());
-  /** Columns on the board when it first drew; a column added later (Add column) never folds. */
-  const [firstColumns, setFirstColumns] = useState<Set<string> | null>(null);
+  /**
+   * The lanes that may fold, decided once per visit when the board first draws: the empty lanes of a board that has
+   * active issues. A board with none folds nothing, so the first issue never collapses the lanes around it; a column
+   * added later (Add column) never folds. After that only the person's own click opens a folded lane.
+   */
+  const [foldLanes, setFoldLanes] = useState<Set<string> | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [laneCreate, setLaneCreate] = useState<Id<"columns"> | null>(null);
   /** A card to focus quietly once it is on the board (a new issue). */
@@ -247,7 +254,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   useCardFlip(boardScroll);
   const drag = dnd.drag;
   // Remember every lane that has cards (or that a dragged card opened), so it never folds under the person later.
-  if (board && !firstColumns) setFirstColumns(new Set(board.columns.map(column => column._id as string)));
+  if (board && !foldLanes) setFoldLanes(new Set(board.tasks.some(task => !task.done) ? board.columns.filter(column => !activeLaneTasks(board, column._id, () => true).length).map(column => column._id as string) : []));
   if (board) {
     const open = board.columns.filter(column => activeLaneTasks(board, column._id, () => true).length).map(column => column._id as string);
     if (drag) open.push(drag.target.columnId);
@@ -311,7 +318,10 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
         if (!card) return;
         setFocusId(revealId);
         card.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
-        revealInBoard(card);
+        // A folded lane the issue landed in opens first; scrolling while it still grows would stop short of it.
+        const growing = card.closest<HTMLElement>("[data-column-id]")?.getAnimations().map(animation => animation.finished.catch(() => undefined)) ?? [];
+        if (growing.length) void Promise.all(growing).then(() => { if (card.isConnected) revealInBoard(card); });
+        else revealInBoard(card);
       });
     });
     return () => cancelAnimationFrame(frame);
@@ -335,7 +345,6 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const archivedTasks = board.tasks.filter(task => task.done && matches(task)).sort((a, b) => (b.completedAt ?? b.updatedAt) - (a.completedAt ?? a.updatedAt));
   const visibleTasks = (columnId: string) => activeLaneTasks(board, columnId, matches);
   const activeTasks = visualColumns.flatMap(column => visibleTasks(column._id));
-  const boardHasActive = board.tasks.some(task => !task.done);
   const focusable = archive ? archivedTasks : activeTasks;
   const tabStopId = focusable.some(task => task._id === focusId) ? focusId : focusable[0]?._id ?? null;
   /** Column cards with the dragged card shown in its target slot. */
@@ -362,7 +371,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
       const next = neighbourOf(task._id);
       updateTask({ projectId, sessionToken, taskId: task._id, done: true })
         .then(() => clear())
-        .then(() => showToast("Completed", () => void updateTask({ projectId, sessionToken, taskId: task._id, done: false }).then(() => { dismissIssueToast(); focusCard(task._id); }).catch(report("Could not restore issue"))))
+        .then(() => showToast("Completed", () => void updateTask({ projectId, sessionToken, taskId: task._id, done: false }).then(() => { dismissIssueToast(); focusCard(task._id); }).catch(report("Could not reopen issue"))))
         .catch(error => { clear(); cardElement(boardScroll.current, task._id)?.getAnimations().forEach(animation => animation.cancel()); report("Could not complete issue")(error); });
       if (hadFocus || document.activeElement === document.body) focusCard(next);
     };
@@ -479,9 +488,9 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
 
-  const restore = async (task: Task, fromMenu = false) => {
+  const reopen = async (task: Task, fromMenu = false) => {
     const target = columnForTask(task);
-    if (!target) { setBoardNotice("Add a workflow column before restoring an issue"); return; }
+    if (!target) { setBoardNotice("Add a workflow column before reopening an issue"); return; }
     // The row leaves the completed list: keep focus on the list.
     const hadFocus = fromMenu || Boolean(document.activeElement?.closest(`[data-task-id="${CSS.escape(task._id)}"]`)) || document.activeElement === document.body;
     const next = neighbourOf(task._id);
@@ -489,7 +498,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
       if (!visibleColumnIds.has(task.columnId)) await moveTask({ projectId, sessionToken, taskId: task._id, columnId: target as Id<"columns"> });
       await updateTask({ projectId, sessionToken, taskId: task._id, done: false });
       if (hadFocus) focusCard(next);
-    } catch (error) { setBoardNotice(errorText(error, "Could not restore issue")); }
+    } catch (error) { setBoardNotice(errorText(error, "Could not reopen issue")); }
   };
   /** Delete confirmed in the issue view: close it and focus a neighbouring card, as a delete from the card menu does. */
   const deleteFromIssue = (taskId: Id<"tasks">) => {
@@ -502,7 +511,8 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     url.search = "";
     url.searchParams.set("project", projectId);
     url.searchParams.set("issue", task._id);
-    navigator.clipboard?.writeText(url.href).then(() => showToast("Link copied"), () => setBoardNotice("Could not copy the link"));
+    // Without a clipboard (plain-http preview) say so instead of doing nothing.
+    (navigator.clipboard ? navigator.clipboard.writeText(url.href) : Promise.reject()).then(() => showToast("Link copied"), () => setBoardNotice("Could not copy the link"));
   };
   const addColumn = async (title: string) => {
     if (!title.trim()) { setAddingColumn(false); return; }
@@ -562,7 +572,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
         <span className="check-done archive-check"><Check size={10} strokeWidth={3} /></span>
         <span className="archive-issue"><span className="issue-key">{taskKey(task._id)}</span><strong>{task.title}</strong></span>
         <time>{formatDate(task.completedAt ?? task.updatedAt)}</time>
-        {canEdit && <button className="ghost-button compact archive-restore" tabIndex={-1} aria-label={`Restore ${task.title}`} onClick={event => { event.stopPropagation(); void restore(task); }}><Undo2 size={14} /><span>Restore</span></button>}
+        {canEdit && <button className="ghost-button compact archive-restore" tabIndex={-1} aria-label={`Reopen ${task.title}`} onClick={event => { event.stopPropagation(); void reopen(task); }}><RotateCcw size={14} /><span>Reopen</span></button>}
       </div>)}
     </div>
   );
@@ -598,14 +608,28 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     </div>
   );
 
+  /** A phone shows one lane: while searching, an empty lane points to the nearest lane with matches. */
+  const matchCounts = filtered ? visualColumns.map(column => visibleTasks(column._id).length) : [];
+  const nearestMatch = (index: number) => {
+    for (let step = 1; step < visualColumns.length; step++) for (const at of [index + step, index - step]) if (matchCounts[at]) return at;
+    return -1;
+  };
+  const jumpToLane = (columnId: string) => {
+    const lane = boardScroll.current?.querySelector<HTMLElement>(`.kanban-scroll > [data-column-id="${CSS.escape(columnId)}"]`);
+    if (!lane) return;
+    revealInBoard(lane);
+    const first = lane.querySelector<HTMLElement>(".task-list > [data-task-id]")?.dataset.taskId;
+    if (first) focusCard(first);
+  };
   const boardView = (
     <div className={clsx("kanban-scroll", drag?.mode === "pointer" && "is-dragging")}>
-      {visualColumns.map(column => {
+      {visualColumns.map((column, columnIndex) => {
         const tasks = displayTasks(column._id);
+        const jump = filtered && !tasks.length ? nearestMatch(columnIndex) : -1;
         const tone = toneOf(column);
         const statusTitle = tone === "draft" ? "Draft" : column.title;
         // Only lanes that were empty from the start fold; a lane emptied by the search or filter stays open and says so.
-        const collapsed = boardHasActive && Boolean(firstColumns?.has(column._id)) && !openLanes.has(column._id) && !activeLaneTasks(board, column._id, () => true).length && drag?.target.columnId !== column._id && renaming !== column._id;
+        const collapsed = Boolean(foldLanes?.has(column._id)) && !openLanes.has(column._id) && !activeLaneTasks(board, column._id, () => true).length && drag?.target.columnId !== column._id && renaming !== column._id;
         const canDelete = visualColumns.length > 1 && !isDraftColumn(column);
         return (
           <div
@@ -635,7 +659,9 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
                   </div>}
                 </div>
                 <div className="task-list">
-                  {tasks.length === 0 ? <div className="empty-lane">{filtered ? "No matching issues" : canEdit && online ? <button className="archive-lane-link" onClick={() => setLaneCreate(column._id)}><Plus size={14} />Add issue</button> : "No issues"}</div> : null}
+                  {tasks.length === 0 ? <div className="empty-lane">{filtered
+                    ? <><span className="lane-empty-text">No matching issues</span>{jump >= 0 && <button type="button" className="archive-lane-link lane-jump" onClick={() => jumpToLane(visualColumns[jump]._id)}>{matchCounts[jump]} {matchCounts[jump] === 1 ? "match" : "matches"} in {visualColumns[jump].title}<ArrowRight size={14} /></button>}</>
+                    : canEdit && online ? <button className="archive-lane-link" onClick={() => setLaneCreate(column._id)}><Plus size={14} />Add issue</button> : "No issues"}</div> : null}
                   {tasks.map(task => <IssueCard
                     key={task._id}
                     task={task}
@@ -706,7 +732,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
         }}
         onCopyLink={() => copyLink(menuTask)}
         onDelete={() => setDeleting(menuTask)}
-        onRestore={menuTask.done ? () => void restore(menuTask, true) : undefined}
+        onReopen={menuTask.done ? () => void reopen(menuTask, true) : undefined}
         onClose={closeMenu}
       />}
       {datePick && datePickTask && <DatePopover

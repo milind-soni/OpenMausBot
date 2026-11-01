@@ -185,6 +185,10 @@
   .project-danger-row { padding-left: var(--space-3); }
   .project-settings-section { padding: var(--space-5) 0; }
 }
+/* 360px Android: all five tabs fit beside the gear. */
+@media (max-width: 380px) {
+  .project-tab { padding: 0 6px; font-size: var(--text-base); }
+}
 @media (pointer: coarse) {
   .project-settings-tab { width: 44px; height: 44px; }
   .icon-picker-grid { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }

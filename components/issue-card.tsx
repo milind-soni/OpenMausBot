@@ -90,7 +90,7 @@ export function DueChip({ task, canEdit, onDueDate, empty = false }: { task: Tas
   // A completed issue is never overdue.
   const tone = due && !task.done ? due.tone : undefined;
   if (!canEdit) return <span className={clsx("task-chip due-chip", tone)}><CalendarDays size={12} /><span>{due!.label}</span></span>;
-  return <button type="button" tabIndex={-1} className={clsx("task-chip due-chip", due ? tone : "is-empty")} aria-label={due ? `Due ${due.label}` : "Set due date"} aria-haspopup="dialog" onClick={event => { event.stopPropagation(); onDueDate(task, event.currentTarget); }}>
+  return <button type="button" tabIndex={-1} className={clsx("task-chip due-chip", due ? tone : "is-empty")} aria-label={`Due date: ${due ? due.label : "No due date"}`} aria-haspopup="dialog" onClick={event => { event.stopPropagation(); onDueDate(task, event.currentTarget); }}>
     <CalendarDays size={12} />{due && <span>{due.label}</span>}
   </button>;
 }
@@ -100,7 +100,7 @@ export function AssigneeChip({ task, assignee, canEdit, onMenu, withName = false
   const name = assignee ? displayName(assignee) : "";
   const face = assignee ? <UserAvatar user={assignee} /> : <span className="task-assignee-empty"><UserRound size={12} /></span>;
   const label = withName && assignee ? <span className="task-assignee-name">{name}</span> : null;
-  if (canEdit) return <button type="button" tabIndex={-1} className={clsx("task-assignee", !assignee && "is-empty", withName && "with-name")} aria-label={assignee ? `Assignee: ${name}` : "Assign"} title={!withName && name ? name : undefined} aria-haspopup="menu" onClick={openChip(task, "assignee", onMenu)}>{face}{label}</button>;
+  if (canEdit) return <button type="button" tabIndex={-1} className={clsx("task-assignee", !assignee && "is-empty", withName && "with-name")} aria-label={`Assignee: ${assignee ? name : "Unassigned"}`} title={!withName && name ? name : undefined} aria-haspopup="menu" onClick={openChip(task, "assignee", onMenu)}>{face}{label}</button>;
   return assignee ? <span className={clsx("task-assignee", withName && "with-name")} title={!withName ? name : undefined}>{face}{label}</span> : null;
 }
 

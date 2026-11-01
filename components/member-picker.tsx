@@ -28,8 +28,9 @@ export function MemberPicker({ members, value, onChange, label, disabled, allLab
   const [open, setOpen] = useState(false), [query, setQuery] = useState(""), [active, setActive] = useState(0), [focusSearch, setFocusSearch] = useState(false);
   const selected = members.find(member => member.email === value);
   const selectedLabel = selected ? displayName(selected) : value ? displayName({ email: value }) : allLabel || placeholder || label;
-  // The accessible name says "none" when the chip only shows its own label (the composer's "Assignee" placeholder).
-  const accessibleValue = value || allLabel || (placeholder && placeholder !== label) ? selectedLabel : "none";
+  // The accessible name says the empty value ("Unassigned") when the chip only shows its own label (the composer's
+  // "Assignee" placeholder), as the issue view does.
+  const accessibleValue = value || allLabel || (placeholder && placeholder !== label) ? selectedLabel : noneLabel || "none";
   const ordered = [...members].sort((a, b) => Number(b.email === currentEmail) - Number(a.email === currentEmail));
   const needle = query.trim().toLowerCase();
   const people = ordered.filter(member => !needle || `${displayName(member)} ${member.username || ""} ${member.email} ${member.email === currentEmail ? "you me" : ""}`.toLowerCase().includes(needle));
