@@ -476,6 +476,7 @@ import {
   startCompanion,
   stopCompanion,
 } from "./companion.mjs";
+import { startCompanionWithRetries } from "./companion-autostart.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
 
@@ -682,6 +683,7 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true } =
   const localState = await startCompanion(companionLaunchOptions());
   if (!localState.enabled || localState.error) {
     companionDesiredThisLaunch = false;
+    if (localState.error) slog(`companion could not start: ${localState.error}`);
     return desktopCompanionState();
   }
   if (remember) rememberCompanionEnabled(true);
@@ -3109,7 +3111,12 @@ app.whenReady().then(async () => {
   if (!desktopRemoteAccess && serverReady && companionEnabledAtRest() && !oneHome.away() && !ownHome?.away()) {
     // Wait until a saved organisation policy is known: it may turn remote access off.
     void (managedDesktop?.whenRestored() ?? Promise.resolve())
-      .then(() => startDesktopCompanion({ waitForHosted: false, remember: false }))
+      .then(() => startCompanionWithRetries({
+        start: () => startDesktopCompanion({ waitForHosted: false, remember: false }),
+        // The person may turn the phone off, start it by hand or quit while a retry waits.
+        wanted: () => !desktopShutdownStarted && companionEnabledAtRest() && !companionRunning() && !oneHome.away() && !ownHome?.away(),
+        log: slog,
+      }))
       .catch(error => slog(`companion auto-start skipped: ${error?.message ?? error}`));
   }
   setLocalOrigin(rendererOrigin());
