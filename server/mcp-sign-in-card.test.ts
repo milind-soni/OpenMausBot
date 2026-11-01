@@ -221,6 +221,18 @@ describe("the Sign in card", () => {
     expect(f.answers[0]!.text).not.toContain("Its tools are yours from this turn.");
   });
 
+  it("a server removed while its card waited: the bot hears the server is gone, not that it is off", async () => {
+    const f = await setup();
+    const { card } = await f.signIn();
+    const link = (await f.authorize(card)).body.url as string;
+    delete f.cfg.mcpServers!.linear;
+    expect(await f.approve(link)).toBe(200);
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.text).toContain("linear no longer exists.");
+    expect(f.answers[0]!.text).not.toContain("it is off");
+    expect(f.answers[0]!.text).not.toContain("action enable");
+  });
+
   it("the status poll path also resumes, and a second resume is a no-op", async () => {
     const f = await setup();
     const { card } = await f.signIn();

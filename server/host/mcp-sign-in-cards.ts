@@ -77,6 +77,8 @@ export function isCardOwnerLive(store: Pick<CardStore, "messagesFor">, owner: st
 const signedInText = (name: string, on: boolean) => (on
   ? `OpenMausBot MCP sign-in: the person signed in to ${name}. Its tools are yours from this turn. Continue the task that paused for this sign-in. Do not ask them to sign in again.`
   : `OpenMausBot MCP sign-in: the person signed in to ${name}, but it is off, so its tools aren't yours yet. Call mcp_server with action enable, then continue the task that paused for this sign-in. Do not ask them to sign in again.`);
+const signedInUnreachableText = (name: string, reason: string) =>
+  `OpenMausBot MCP sign-in: the person signed in to ${name}, but its tools aren't yours: ${reason} Continue the task that paused for this sign-in without them. Do not ask them to sign in again.`;
 const notSignedInText = (name: string) => `OpenMausBot MCP sign-in for ${name}: The person didn't sign in. The server stays on but signed out.`;
 
 export function createMcpSignInCards(deps: McpSignInCardDeps) {
@@ -111,7 +113,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
 
   const signedInTextNow = (name: string) => {
     const server = current(name);
-    return signedInText(name, !("reason" in server) && server.enabled);
+    return "reason" in server ? signedInUnreachableText(name, server.reason(undefined)) : signedInText(name, server.enabled);
   };
 
   function cancel(name: string, threadId: string, id: string): void {
