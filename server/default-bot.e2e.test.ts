@@ -80,7 +80,7 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
   }
 }, 120_000);
 
-it("lets MausBot read the unread notifications and mark finished work read, and gives no other bot the tools", async () => {
+it("lets MausBot read the unread notifications and mark finished work read, not once sign-in members share the workspace, and gives no other bot the tools", async () => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
   const api = async (path: string) => (await (await fetch(`${fixture.info.url}${path}`, { signal: AbortSignal.timeout(10_000) })).json()) as any;
   const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
@@ -105,6 +105,15 @@ it("lets MausBot read the unread notifications and mark finished work read, and 
     expect(text(marked)).toContain("Marked none read.");
     expect(text(marked)).toContain("no-such-notification: not an unread notification");
     expect((await callTool(agents, "mark_notifications_read", { ids: "all" })).result?.isError).toBe(true);
+
+    // Sign-in members make the workspace shared: the app filters the feed per viewer, which the bot cannot be.
+    const shared = await fetch(`${fixture.info.url}/api/config`, { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signIn: { admins: ["boss@example.test"], members: ["ada@example.test"] } }), signal: AbortSignal.timeout(10_000) });
+    expect(shared.status, await shared.text()).toBe(200);
+    const refused = await callTool(agents, "list_unread_notifications", {});
+    expect(refused.result?.isError, text(refused)).toBe(true);
+    expect(text(refused)).toContain("read in the app");
+    expect((await callTool(agents, "mark_notifications_read", { ids: ["no-such-notification"] })).result?.isError).toBe(true);
 
     const { bot: clive } = await control(["new-bot", "--name", "Clive"]);
     const other = await launch(clive.id);
