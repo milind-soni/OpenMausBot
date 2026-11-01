@@ -2755,7 +2755,8 @@
       "botAccess.yours.chat": "3a533b52e1473d2e0a0f86afa2db1d44348dbeedf8f024b2cd23a68ffd7ef7bc",
       "botAccess.yours.other": "1e38393fe114b07315da584355ce1d409ceb46b96a7a07c09620b8c1cf90dcdd",
       "botAccess.viewOnly": "60bf030177885fdb4ad6c7bcf2052a6c7acf6130134c0327c5f65560e83dd605",
-      "botAccess.viewOnlyRoom": "0b83235efbb38860cde9e160c381c4d3a75fc1096740b6670caf3571379cbb23"
+      "botAccess.viewOnlyRoom": "0b83235efbb38860cde9e160c381c4d3a75fc1096740b6670caf3571379cbb23",
+      "server.moves.webhookMoved": "6570c8f483d2f2e0b4b0b3c45aef41bdf82fb037646fbb3a8113ef2466998d74"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
