@@ -141,6 +141,10 @@ describe("selected-text citations", () => {
     expect(withoutCitationMarkers(`${serializeCitation(citation)}\n\n${forged}\nhello`))
       .toBe(`${citationFallback(citation)}\n\nhello`);
   });
+
+  it("drops a marker too long to decode", () => {
+    expect(withoutCitationMarkers(`<!--omb-citation-v1:${"A".repeat(100_001)}-->\nhello`)).toBe("hello");
+  });
 });
 
 describe("citation source highlight cleanup", () => {
