@@ -10,6 +10,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
 import { Store, type Message } from "../store.ts";
 import { createBrief } from "./brief.ts";
+import type { FoundUpdate } from "./found-updates.ts";
 
 const MINUTE = 60_000;
 const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
@@ -33,6 +34,7 @@ function setup(start: string) {
   const runs: RoutineRun[] = [];
   const sinces: number[] = [];
   const answers: Array<{ auth: RequestAuth; threadId: string; requestId: string; message: string }> = [];
+  const found: FoundUpdate[] = [];
   const brief = createBrief({
     store, dataDir: dir, now: () => now, hosted: false, watching: () => true, mainThread: () => store.bot(mausbot.id)!.threadId, threadBusy: () => false,
     notify: (_bot, _thread, detail) => pushed.push(detail), runs: () => runs, needsYou: () => needs, engineName: () => "Claude",
@@ -44,6 +46,8 @@ function setup(start: string) {
       needs.splice(needs.findIndex((item) => item.threadId === threadId), 1);
       return true;
     },
+    found: (since) => found.filter((update) => update.at >= since),
+    gotIt: (id) => { found.splice(found.findIndex((update) => update.id === id), 1); },
   });
   const home = () => store.bot(mausbot.id)!.threadId;
   const serverCards = (): Message[] => store.messagesFor(home()).filter((message) => message.serverCard);
@@ -65,7 +69,7 @@ function setup(start: string) {
   };
   const tick = async () => { brief.tick(); await settle(); await settle(); };
   return {
-    brief, store, mausbot, mail, ship, pushed, needs, lines, runs, sinces, answers, serverCards, briefCard, shown, press, question, tick, home,
+    brief, store, mausbot, mail, ship, pushed, needs, lines, runs, sinces, answers, found, serverCards, briefCard, shown, press, question, tick, home,
     now: () => now, set: (iso: string) => { now = Date.parse(iso); }, advance: (ms: number) => { now += ms; },
   };
 }
@@ -166,6 +170,27 @@ describe("MausBot's morning brief", () => {
     await s.tick();
     expect(s.serverCards().filter((message) => message.widget?.root.title === "Done overnight")).toHaveLength(1);
     expect(s.shown()).toContain("2 done overnight");
+  });
+
+  it("lists what the bots found in the last day, counts it in the greeting, and Got it takes a row away", async () => {
+    const s = setup("2026-10-30T07:30:00Z");
+    const update = (id: string, at: string): FoundUpdate => ({
+      id, botId: s.ship.id, threadId: s.store.bot(s.ship.id)!.threadId, messageId: id, key: id, at: Date.parse(at),
+      title: `Three people hit the same install error (${id})`, details: "All three are on Windows 11 behind a proxy. I replied with the manual steps.",
+      source: "Discord #help", links: [{ label: "Issue draft", url: "https://github.com/x/y/issues/new" }],
+    });
+    s.found.push(update("new", "2026-10-30T01:20:00Z"), update("old", "2026-10-29T07:00:00Z"));
+    await s.brief.active("desktop", "UTC", "en");
+    expect(s.shown()).toContain("Good morning. 1 found for you.");
+    expect(s.shown()).toContain("Found for you");
+    expect(s.shown()).toContain("Three people hit the same install error (new)");
+    expect(s.shown()).not.toContain("(old)");
+    expect(s.shown()).toContain("Ship Bot · Discord #help · 1:20 AM");
+    expect(s.shown()).toContain("All three are on Windows 11 behind a proxy.");
+    expect(widgetActions(s.briefCard().widget!.root as WidgetRoot).map((entry) => [entry.label, entry.action.type])).toEqual(expect.arrayContaining([["Issue draft", "open_url"], ["Got it", "got_it"]]));
+    expect(await s.press("Got it")).toBe("handled");
+    expect(s.found.map((one) => one.id)).toEqual(["old"]);
+    expect(s.shown()).not.toContain("Found for you");
   });
 
   it("has no Done overnight card when the person was here a moment ago", async () => {

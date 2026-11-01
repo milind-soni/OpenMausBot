@@ -20,11 +20,12 @@ import type { BotRecord, Message, Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
 import {
-  ANSWER_ACTION, briefCard, clockTime, DISMISS_ACTION, doneCard, DRAFT_ACTION, LATER_ACTION, MORNING_ACTION, MORNING_CHOICES, MORNING_OFF, prepCard, reminderCard,
-  type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type DoneRow, type NeedRow,
+  ANSWER_ACTION, briefCard, clockTime, DISMISS_ACTION, doneCard, DRAFT_ACTION, GOT_IT_ACTION, LATER_ACTION, MORNING_ACTION, MORNING_CHOICES, MORNING_OFF, prepCard,
+  reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type DoneRow, type FoundRow, type NeedRow,
 } from "./brief-cards.ts";
 import { morningWords, type MorningWords } from "./brief-morning-words.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
+import type { FoundUpdate } from "./found-updates.ts";
 import { proactiveOwner } from "./proactive-owner.ts";
 import type { CheckReport } from "./routine-checks.ts";
 import { clip, oneLine } from "./text-clip.ts";
@@ -119,6 +120,10 @@ export interface BriefDeps {
   done?(since: number): TodayLine[];
   /** Answers a bot's open question as the person who pressed; false when the question is no longer open. */
   answer?(auth: RequestAuth, threadId: string, requestId: string, message: string): Promise<boolean>;
+  /** What the bots reported with report_finding since a time and the person has not marked Got it, newest first. */
+  found?(since: number): FoundUpdate[];
+  /** The person marked a finding Got it: it leaves the brief. */
+  gotIt?(updateId: string): void;
 }
 
 export interface MorningDeps {
@@ -151,7 +156,7 @@ export interface PresenceAnswer {
   open?: { botId: string; threadId: string };
 }
 
-const SERVER_PRESSES: ReadonlySet<string> = new Set([DISMISS_ACTION, LATER_ACTION, MORNING_ACTION, ANSWER_ACTION]);
+const SERVER_PRESSES: ReadonlySet<string> = new Set([DISMISS_ACTION, LATER_ACTION, MORNING_ACTION, ANSWER_ACTION, GOT_IT_ACTION]);
 const BRIEF_ROWS_ANSWERED = 6;
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const addressOf = (from: string): string => (/<([^<>\s]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
@@ -314,6 +319,17 @@ export function createBrief(deps: BriefDeps) {
     });
   }
 
+  /** What the bots reported in the last day, for the brief's Found for you. */
+  function foundRows(): FoundRow[] {
+    return (deps.found?.(now() - DAY) ?? []).flatMap((update): FoundRow[] => {
+      const bot = deps.store.bot(update.botId);
+      if (!bot || bot.hidden) return [];
+      const open = deps.store.taskByThread(update.botId, update.threadId) ? { botId: update.botId, threadId: update.threadId } : undefined;
+      return [{ ref: update.id, bot: bot.name, title: update.title, details: update.details, links: update.links, at: update.at,
+        ...(update.source ? { source: update.source } : {}), ...(open ? { open } : {}) }];
+    });
+  }
+
   /** The morning's count of finished work and when it was counted, before its card is posted. */
   let overnight: { day: string; count: number; at: number } | undefined;
   /** The person is picking a new morning time on today's card. */
@@ -351,7 +367,7 @@ export function createBrief(deps: BriefDeps) {
     const dreamt = deps.ideas?.(chiefBot.id);
     const ideas = (dreamt?.ideas ?? []).map((idea): BriefRow => ({ text: idea, note: w.noticedAcross(dreamt!.conversations) }));
     const doneCount = doneToday?.count ?? counted?.count ?? 0;
-    const clock = morningClock();
+    const clock = morningClock(), found = foundRows();
     return {
       now: at, ...(zone ? { timeZone: zone } : {}), ...(language ? { language } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
       ...(state.morningLine?.day === day ? { overnight: state.morningLine.text } : {}),
@@ -359,6 +375,7 @@ export function createBrief(deps: BriefDeps) {
       meetings, emails, ...(waiting !== undefined ? { waiting } : {}), routines: done, ...(ideas.length ? { ideas } : {}),
       greetAt: state.card?.day === day ? state.card.postedAt : at, ...(doneCount ? { doneOvernight: doneCount } : {}),
       morning: { ...(clock ? { at: clock } : {}), choosing }, ...(receipts?.day === day && receipts.rows.length ? { answered: receipts.rows } : {}),
+      ...(found.length ? { found } : {}),
     };
   }
 
@@ -403,7 +420,7 @@ export function createBrief(deps: BriefDeps) {
       const threadId = existing?.card.threadId ?? home(bot);
       if (!threadId) return null;
       const needsPerson = built.needs.length > 0 || built.emails.length > 0;
-      const worth = needsPerson || (built.meetings?.length ?? 0) > 0 || (built.ideas?.length ?? 0) > 0 || Boolean(built.overnight) || Boolean(built.doneOvernight);
+      const worth = needsPerson || (built.meetings?.length ?? 0) > 0 || (built.ideas?.length ?? 0) > 0 || Boolean(built.overnight) || Boolean(built.doneOvernight) || Boolean(built.found?.length);
       if (!existing && !(options.create ? worth : needsPerson)) return null;
       if (deps.threadBusy(bot.id, threadId)) {
         dirty = true;
@@ -630,6 +647,8 @@ export function createBrief(deps: BriefDeps) {
       // The person is looking at today's brief as they pick: today's morning push is not owed any more.
       if (at) Object.assign(state, { morningAt: at, morningOn: today() });
       choosing = payload.pick === true && !at;
+    } else if (action.type === GOT_IT_ACTION && typeof payload.update === "string") {
+      deps.gotIt?.(payload.update);
     } else if (action.type === ANSWER_ACTION && ref && typeof payload.option === "number") {
       void answerRow(ref, payload.option, auth).catch((error: unknown) => console.warn("brief: the answer was not sent", error));
       return;

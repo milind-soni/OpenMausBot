@@ -44,8 +44,8 @@ desktop, headless and on a Cloud.
   hours away. Any other moment, it never takes the screen from the chat in use.
   Its first appearance says what it does and that the person can tell MausBot
   to stop or change it. It opens with a greeting for the time of day it was
-  first posted and a count of what is in it ("Good morning. 3 need you, 5 done
-  overnight, 2 meetings."). Sections:
+  first posted and a count of what is in it ("Good morning. 3 need you, 2 found
+  for you, 5 done overnight, 2 meetings."). Sections:
   1. **Needs you**: emails waiting on a reply, failed or missed routines,
      meetings that clash, an app that can't be read ("Couldn't read Gmail ·
      Reconnect Gmail in Connected apps"), a signed-out AI, a usage limit, a
@@ -59,9 +59,13 @@ desktop, headless and on a Cloud.
   2. **Your day**: today's meetings, with Join for an https meeting link;
   3. **Important emails**: what the watch picked, each with a one-line why,
      **Draft a reply**, **Open in Gmail** and **Dismiss**;
-  4. **Routines**: other routines' results today, after the Done overnight card
+  4. **Found for you**: what any bot reported with `report_finding` in the
+     last day and the person has not marked **Got it**: the finding, the bot,
+     where it came from and when, a few lines of the bot's own words as plain
+     text, its https links, **Open** and **Got it**;
+  5. **Routines**: other routines' results today, after the Done overnight card
      when there is one;
-  5. **The morning time**: "Morning brief at 8:00 AM" with **Change time**,
+  6. **The morning time**: "Morning brief at 8:00 AM" with **Change time**,
      which offers 6:00 to 10:00 and **Turn off**.
 - **Done overnight**: at the morning time, when the person was away, a second
   card lists what every bot finished since they were last here (16 hours at
