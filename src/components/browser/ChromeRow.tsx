@@ -60,6 +60,8 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
   hint?: string;
   /** Toolbar commands are open while connected and the browser is not held on another device. */
   commandsReady: boolean;
+  /** agent-browser refuses to close its last tab; OpenMausBot's Chrome engine opens a blank one first. */
+  closesLastTab: boolean;
   profileName: string;
   fullscreen: boolean;
   /** Maximized: the panel overlays the whole window, instead of its usual share of it. */
@@ -89,7 +91,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
             <div key={tab.tabId} className={`flex max-w-52 shrink-0 items-center gap-1 rounded-xl px-1 text-[12px] ${tab.active ? "bg-inset text-ink" : "text-ink-secondary"}`}>
               <Globe size={13} className="ml-1.5 shrink-0 opacity-60" aria-hidden="true" />
               <button role="tab" aria-selected={tab.active} className="truncate px-1 py-1.5 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabSelect", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || "New tab"}</button>
-              <button className={button} aria-label={`Close ${tab.title || "tab"}`} disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabClose", tabId: tab.tabId })}><X size={13} /></button>
+              {(tabs.length > 1 || props.closesLastTab) && <button className={button} aria-label={`Close ${tab.title || "tab"}`} disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabClose", tabId: tab.tabId })}><X size={13} /></button>}
             </div>
           )) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-1.5 text-[12px] text-ink-secondary"><Globe size={13} aria-hidden="true" />New tab</div>}
           <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label="New tab" title="New tab" onClick={() => props.onCommand({ type: "tabNew" })}><Plus size={16} /></button>
