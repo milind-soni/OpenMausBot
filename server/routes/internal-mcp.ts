@@ -291,6 +291,9 @@ function signIn(deps: Deps, name: string, server: StoredMcpServer, owner: Return
   if (server.runsOn) return { status: 409, error: runsElsewhere(server.runsOn) };
   if (!isRemoteMcpServer(server)) return { status: 400, error: "Only servers reached by URL can be signed in to." };
   if (owner === "shared" && !deps.teamAdmin()) return { status: 403, error: `Ask a workspace admin to sign in to ${name}.` };
+  if (!server.enabled) {
+    return { status: 403, error: `${name} is off. Call mcp_server with action enable ${deps.fullAccess() ? "first" : "to ask the person to turn it on"}.` };
+  }
   if (owner === "shared" && deps.authState(name, server.url) === "signed-in") {
     return { status: 200, text: `${name} is already signed in. Call mcp_server with action test to check it.` };
   }

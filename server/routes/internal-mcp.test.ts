@@ -748,6 +748,15 @@ describe("internal mcp_server route, below Full access", () => {
     expect(personal.signIns).toEqual([{ name: "linear", url: linear.url }]);
   });
 
+  it("sign_in on a server that is off posts no card and tells the bot to call enable", async () => {
+    const off = { linear: { ...linear, enabled: false } };
+    const full = fixture({ servers: off });
+    expect(await full.post({ action: "sign_in", name: "linear" })).toEqual({ status: 403, body: { error: "linear is off. Call mcp_server with action enable first." } });
+    const ask = fixture({ full: false, servers: off });
+    expect(await ask.post({ action: "sign_in", name: "linear" })).toEqual({ status: 403, body: { error: "linear is off. Call mcp_server with action enable to ask the person to turn it on." } });
+    expect([...full.signIns, ...ask.signIns]).toEqual([]);
+  });
+
   it("sign_in refuses what no card could sign in to, and passes on the card's own refusal", async () => {
     const { post, signIns, mcpOAuth, lines } = fixture({ servers: { linear, notes, far: { ...linear, runsOn: MAC } } });
     expect(await post({ action: "sign_in", name: "notes" })).toEqual({ status: 400, body: { error: "Only servers reached by URL can be signed in to." } });

@@ -73,9 +73,10 @@ export function isCardOwnerLive(store: Pick<CardStore, "messagesFor">, owner: st
   return Boolean(at && !at.card.connector.dismissed);
 }
 
-/** What the bot hears when the person signs in: the turn it resumes mounts the server with the new sign-in. */
-export const mcpSignedInText = (name: string) =>
-  `OpenMausBot MCP sign-in: the person signed in to ${name}. Its tools are yours from this turn. Continue the task that paused for this sign-in. Do not ask them to sign in again.`;
+/** What the bot hears when the person signs in: the turn it resumes mounts the server with the new sign-in if it is on. */
+const signedInText = (name: string, on: boolean) => (on
+  ? `OpenMausBot MCP sign-in: the person signed in to ${name}. Its tools are yours from this turn. Continue the task that paused for this sign-in. Do not ask them to sign in again.`
+  : `OpenMausBot MCP sign-in: the person signed in to ${name}, but it is off, so its tools aren't yours yet. Call mcp_server with action enable, then continue the task that paused for this sign-in. Do not ask them to sign in again.`);
 const notSignedInText = (name: string) => `OpenMausBot MCP sign-in for ${name}: The person didn't sign in. The server stays on but signed out.`;
 
 export function createMcpSignInCards(deps: McpSignInCardDeps) {
@@ -107,6 +108,11 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     if (elsewhere) return { status: 409, reason: () => runsElsewhere(elsewhere) };
     return server;
   }
+
+  const signedInTextNow = (name: string) => {
+    const server = current(name);
+    return signedInText(name, !("reason" in server) && server.enabled);
+  };
 
   function cancel(name: string, threadId: string, id: string): void {
     try {
@@ -187,7 +193,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
   function resume(threadId: string, id: string): boolean {
     const card = find(threadId, id);
     if (!card || card.connector.dismissed || card.connector.status !== "connected") return false;
-    if (!card.connector.resumed && deps.answer(threadId, id, mcpSignedInText(card.connector.slug))) patch(threadId, id, { resumed: true });
+    if (!card.connector.resumed && deps.answer(threadId, id, signedInTextNow(card.connector.slug))) patch(threadId, id, { resumed: true });
     return true;
   }
 
@@ -273,7 +279,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     /** What a turn that parked after the person already answered the card hears; null while there is nothing to hear. */
     parkedAnswer(card: ConnectorCardData): string | null {
       if (card.superseded || card.resumed) return null;
-      if (card.status === "connected") return mcpSignedInText(card.slug);
+      if (card.status === "connected") return signedInTextNow(card.slug);
       return card.dismissed ? notSignedInText(card.slug) : null;
     },
   };

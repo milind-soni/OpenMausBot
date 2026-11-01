@@ -209,6 +209,18 @@ describe("the Sign in card", () => {
     expect(f.answers).toEqual([{ messageId: card.id, text: expect.stringContaining("the person signed in to linear") }]);
   });
 
+  it("a server switched off while its card waited: the bot hears it signed in but the server is off, and to call enable", async () => {
+    const f = await setup();
+    const { card } = await f.signIn();
+    const link = (await f.authorize(card)).body.url as string;
+    (f.cfg.mcpServers!.linear as { enabled: boolean }).enabled = false;
+    expect(await f.approve(link)).toBe(200);
+    expect(f.current(card).connector).toMatchObject({ status: "connected", resumed: true });
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.text).toContain("the person signed in to linear, but it is off, so its tools aren't yours yet. Call mcp_server with action enable");
+    expect(f.answers[0]!.text).not.toContain("Its tools are yours from this turn.");
+  });
+
   it("the status poll path also resumes, and a second resume is a no-op", async () => {
     const f = await setup();
     const { card } = await f.signIn();
