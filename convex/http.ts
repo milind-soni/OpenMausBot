@@ -44,6 +44,7 @@ http.route({ path: "/integrations", method: "POST", handler: httpAction(async (c
       case "createRepository": result = await ctx.runAction(internal.teamGitHub.operatorCreateRepository, p.args); break;
       case "chatMentions": result = await ctx.runMutation(internal.notifications.chatMentions, p.args); break;
       case "feedback": result = await ctx.runMutation(internal.feedback.submit, p.args); break;
+      case "legacyChat": result = await ctx.runQuery(internal.legacyChat.exportPage, p.args); break;
       default: return new Response("Unknown operation", { status: 400 });
     }
     return Response.json(result);

@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ConvexHttpClient } from "convex/browser";
@@ -90,9 +91,9 @@ async function queryWithRetry<T>(run: () => Promise<T>) {
   }
 }
 export async function requireLocalUser(sessionToken: string) {
-  if (!sessionToken) throw new Error("Login required");
+  if (!sessionToken) throw new Error("Your session has expired. Sign in again.");
   const user = await queryWithRetry(() => getConvexClient().query(api.auth.me, { sessionToken })) as LocalUser | null;
-  if (!user) throw new Error("Login required"); return user;
+  if (!user) throw new Error("Your session has expired. Sign in again."); return user;
 }
 // Calls poll every second; reuse a recent access check instead of asking Convex on every request.
 const workspaceAccessCache = new Map<string, { user: LocalWorkspaceUser; expires: number }>();
@@ -106,6 +107,7 @@ export async function requireLocalWorkspace(request: Request, body?: { sessionTo
   const [user, access] = await Promise.all([requireLocalUser(token), queryWithRetry(() => getConvexClient().query(api.workspaces.access, { sessionToken: token, teamId: teamId as Id<"teams"> }))]);
   const scoped = { ...user, teamId: access.teamId, workspaceRole: access.role, slug: access.slug };
   if (process.env.ORIGIN_LEGACY_WORKSPACE_ID === access.teamId) migrateLegacy(scoped);
+  await importConvexChat(access.teamId);
   if (workspaceAccessCache.size > 500) for (const [entry, value] of workspaceAccessCache) if (value.expires <= Date.now()) workspaceAccessCache.delete(entry);
   workspaceAccessCache.set(key, { user: scoped, expires: Date.now() + WORKSPACE_ACCESS_TTL });
   return scoped;
@@ -149,6 +151,64 @@ function migrateLegacy(user: LocalWorkspaceUser) {
   try {
     for (const message of messages) database.prepare("INSERT OR IGNORE INTO messages(id,team,created,payload) VALUES(?,?,?,?)").run(message.id, user.teamId, message.createdAt, JSON.stringify(message));
     database.prepare("INSERT OR IGNORE INTO migrations VALUES('legacy-chat')").run(); database.exec("COMMIT");
+  } catch (error) { database.exec("ROLLBACK"); throw error; }
+}
+type ExportPage<T> = { rows: T[]; isDone: boolean; continueCursor: string };
+type ExportedMessage = { conversation: string; id: string; created: number; payload: string };
+type ExportedFile = { conversation: string; id: string; author: string; payload: string; url: string | null };
+const chatImports = new Map<string, Promise<void>>();
+const chatImportRetryAt = new Map<string, number>();
+/**
+ * Copies a workspace's chat from Convex (written by the desktop app before the upgrade) into the local store once:
+ * workspace and direct messages, direct conversations, read markers and attachment files. A failed copy is retried
+ * after five minutes and never blocks chat.
+ */
+export function importConvexChat(teamId: string): Promise<void> {
+  const name = `convex-chat:${teamId}`;
+  if (db().prepare("SELECT name FROM migrations WHERE name=?").get(name) || (chatImportRetryAt.get(teamId) ?? 0) > Date.now()) return Promise.resolve();
+  let running = chatImports.get(teamId);
+  if (!running) {
+    running = copyConvexChat(teamId, name)
+      .catch(error => { chatImportRetryAt.set(teamId, Date.now() + 300000); console.error("Chat import failed:", error instanceof Error ? error.message : error); })
+      .finally(() => chatImports.delete(teamId));
+    chatImports.set(teamId, running);
+  }
+  return running;
+}
+async function copyConvexChat(teamId: string, name: string) {
+  const all = async <T,>(table: string) => {
+    const rows: T[] = [];
+    for (let cursor: string | null = null; ;) {
+      const page: ExportPage<T> = await integrationBridge<ExportPage<T>>("legacyChat", { teamId, table, cursor });
+      rows.push(...page.rows);
+      if (page.isDone) return rows;
+      cursor = page.continueCursor;
+    }
+  };
+  const messages = await all<ExportedMessage>("messages");
+  const files = await all<ExportedFile>("files");
+  const directs = await all<{ id: string; userA: string; userB: string }>("directs");
+  const reads = await all<{ conversation: string; userId: string; seen: number }>("reads");
+  const dir = path.join(localDataDir(), "files");
+  if (files.length) await mkdir(dir, { recursive: true });
+  const copied = [];
+  for (const file of files) {
+    if (!/^[a-f0-9-]{36}$/.test(file.id) || !file.url) continue;
+    const response = await fetch(file.url, { signal: AbortSignal.timeout(60000), cache: "no-store" });
+    if (!response.ok) continue;
+    try { await writeFile(path.join(dir, file.id), Buffer.from(await response.arrayBuffer()), { flag: "wx" }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    copied.push(file);
+  }
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of messages) database.prepare("INSERT OR IGNORE INTO messages(id,team,created,payload,conversation) VALUES(?,?,?,?,?)").run(row.id, teamId, row.created, row.payload, row.conversation);
+    for (const row of copied) database.prepare("INSERT OR IGNORE INTO files(id,team,author,payload,conversation) VALUES(?,?,?,?,?)").run(row.id, teamId, row.author, row.payload, row.conversation);
+    for (const row of directs) database.prepare("INSERT OR IGNORE INTO direct_conversations(id,team,user_a,user_b) VALUES(?,?,?,?)").run(row.id, teamId, row.userA, row.userB);
+    for (const row of reads) database.prepare("INSERT INTO chat_reads VALUES(?,?,?,?) ON CONFLICT(team,conversation,user) DO UPDATE SET seen=MAX(seen,excluded.seen)").run(teamId, row.conversation, row.userId, row.seen);
+    database.prepare("INSERT OR IGNORE INTO migrations VALUES(?)").run(name);
+    database.exec("COMMIT");
   } catch (error) { database.exec("ROLLBACK"); throw error; }
 }
 function requireWriter(user: LocalWorkspaceUser) { if (user.workspaceRole === "viewer") throw new Error("View-only workspace access"); }
