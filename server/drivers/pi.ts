@@ -31,7 +31,6 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
   SteerOutcome,
-  TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -47,7 +46,8 @@ import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 
-import { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+import { decodePiFrame, PiRpcChunks, piLineReader, readPiPromptImages } from "./pi-rpc.ts";
+import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -66,20 +66,6 @@ const PI_SESSION_SLOW = "Pi is taking longer than usual to start this conversati
 
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
-
-type PiPromptImage = {
-  type: "image";
-  data: string;
-  mimeType: TurnImageInput["mime"];
-};
-
-function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
-  return (turn.images ?? []).map((image) => ({
-    type: "image",
-    data: readFileSync(image.path).toString("base64"),
-    mimeType: image.mime,
-  }));
-}
 
 /** Native logs go into bug reports: keep the RPC shape and size, never image bytes. */
 function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
@@ -346,24 +332,6 @@ function decodeConfig(raw: unknown): PiConfig {
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
-/** pi-ai's per-message usage: `input` excludes cached prompt tokens, and `cost` is pi's own priced USD. */
-type PiUsage = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
-type TurnUsage = { input: number; output: number; cachedInput?: number };
-
-const usageCount = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-
-/** Adds one pi message's tokens to the run's total in the app's shape, where input includes cached tokens like the other drivers. */
-function addPiUsage(total: TurnUsage | undefined, usage: PiUsage): TurnUsage {
-  const cacheRead = usageCount(usage.cacheRead);
-  const cachedInput = cacheRead === undefined ? total?.cachedInput : (total?.cachedInput ?? 0) + cacheRead;
-  return {
-    input: (total?.input ?? 0) + (usageCount(usage.input) ?? 0) + (cacheRead ?? 0) + (usageCount(usage.cacheWrite) ?? 0),
-    output: (total?.output ?? 0) + (usageCount(usage.output) ?? 0),
-    ...(cachedInput === undefined ? {} : { cachedInput }),
-  };
-}
-
 interface PiEvent {
   type: string;
   command?: string;
@@ -485,18 +453,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let settled = false;
       let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
-      let endUsage: TurnUsage | undefined;
-      // pi's priced USD for the run. A zero is pi's default for a model without prices, so it stays unknown rather than booked as free.
-      let endCost: number | undefined;
-      // pi sends a model call's usage on its assistant message_end, before any tool runs, and again on turn_end.
-      let turnUsageCounted = false;
-      const countUsage = (usage: PiUsage | undefined) => {
-        if (!usage || turnUsageCounted) return;
-        turnUsageCounted = true;
-        endUsage = addPiUsage(endUsage, usage);
-        const cost = usageCount(usage.cost?.total);
-        if (cost) endCost = (endCost ?? 0) + cost;
-      };
+      const runUsage = new PiRunUsage();
       let completionOutcome: { ok: boolean; stopReason: string; cost?: number; usage?: TurnUsage } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
@@ -579,12 +536,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
       };
 
-      const settle = (ok: boolean, stopReason?: string | null, usage = endUsage): Promise<void> => {
+      const settle = (ok: boolean, stopReason?: string | null, usage = runUsage.usage): Promise<void> => {
         if (completion) return completion;
         const outcome = completionOutcome ??= {
           ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
           ...(usage ? { usage } : {}),
-          ...(endCost === undefined ? {} : { cost: endCost }),
+          ...(runUsage.cost === undefined ? {} : { cost: runUsage.cost }),
         };
         settled = true;
         if (agentEndTimer) {
@@ -627,10 +584,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             type: "runtime.error",
             message: String(endErrorMessage ?? "pi turn failed").slice(0, 2_000),
           });
-          settle(false, "failed", endUsage);
+          settle(false, "failed", runUsage.usage);
           return;
         }
-        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", endUsage);
+        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", runUsage.usage);
       };
 
       const stop = () => {
@@ -783,11 +740,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             }
             return;
           }
-          case "message_end": {
-            // Counted now, so a stop while a tool runs still books the model call.
-            if (evt.message?.role === "assistant") countUsage(evt.message.usage);
+          case "message_end":
+            if (evt.message?.role === "assistant") runUsage.add(evt.message.usage);
             return;
-          }
           case "turn_end":
           {
             // A killed child can still flush one buffered frame after the turn settled.
@@ -795,8 +750,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
             const sr = evt.message?.stopReason;
-            countUsage(evt.usage ?? evt.message?.usage);
-            turnUsageCounted = false;
+            runUsage.endTurn(evt.usage ?? evt.message?.usage);
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;
