@@ -143,6 +143,51 @@ describe("createAutomationDestinations", () => {
       expect(opened).not.toHaveBeenCalled();
     });
 
+    it("does not reuse earlier results thread in cloud mode when that task is archived", () => {
+      const opened = vi.fn();
+      const { destinations, addTask, addMessage, runs } = fixture({
+        cloud: {
+          owner: "person-owner",
+          opener: () => "person-owner",
+          reportFromOthers: (msg) => typeof msg.text === "string" && msg.text.includes("report"),
+          opened,
+        },
+      });
+      const task = addTask("bot-1", "kept-thread", "Lead · Results");
+      task.archivedAt = Date.now();
+      addMessage("kept-thread", "an earlier report");
+      runs.push({ webhookId: "wh-1", botId: "bot-1", resultsThreadId: "kept-thread" });
+
+      const resolved = destinations.event({
+        webhookId: "wh-1",
+        webhookName: "Lead",
+        botId: "bot-1",
+      });
+      expect(resolved).not.toBe("kept-thread");
+      expect(opened).toHaveBeenCalledWith(resolved, "person-owner");
+    });
+
+    it("ignores caller resultsThreadId in cloud mode and routes to cloud destination", () => {
+      const opened = vi.fn();
+      const { destinations, addTask } = fixture({
+        cloud: {
+          owner: "person-owner",
+          opener: () => "person-owner",
+          reportFromOthers: () => false,
+          opened,
+        },
+      });
+      addTask("bot-1", "custom-thread", "Webhook Leads");
+      const resolved = destinations.event({
+        webhookId: "wh-1",
+        webhookName: "Lead",
+        botId: "bot-1",
+        resultsThreadId: "custom-thread",
+      });
+      expect(resolved).not.toBe("custom-thread");
+      expect(opened).toHaveBeenCalledWith(resolved, "person-owner");
+    });
+
     it("creates dedicated chatOfItsOwn in cloud mode when no earlier task exists", () => {
       const opened = vi.fn();
       const { destinations } = fixture({
