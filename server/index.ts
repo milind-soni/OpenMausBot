@@ -12530,7 +12530,7 @@ ROUTES.push(createInstanceRoutes({
   cliProbeEnvironment, threadBusy, botForThread, activeGroupTurnForBot, checkInstance: testedAi.check,
 }));
 ROUTES.push(createMcpServerRoutes({
-  cfg, sessions, mcpOAuth, teamConnections,
+  cfg, bot: (id) => store.bot(id), sessions, mcpOAuth, teamConnections,
   cloudHome: CLOUD_HOME,
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },

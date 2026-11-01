@@ -72,7 +72,7 @@ export function isRemoteMcpServer(server: McpServerSpec): server is RemoteMcpSpe
 }
 
 /** Whether `botId` may start this server: every bot may start one that is no bot's own. */
-export function mcpServerServes(server: McpServerSpec & { bot?: string }, botId: string | undefined): boolean {
+export function mcpServerServes(server: object & { bot?: string }, botId: string | undefined): boolean {
   return !server.bot || server.bot === botId;
 }
 
