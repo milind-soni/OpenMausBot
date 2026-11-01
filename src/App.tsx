@@ -26,6 +26,12 @@ import { useRoomPanelShown } from "@/lib/room-panel";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
+import { UpdateBanner } from "@/components/UpdateBanner";
+import { AppNotices } from "@/components/AppNotices";
+import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { LiveConnectionStrip } from "@/components/LiveConnectionStrip";
+import { CloudSendStrip } from "@/components/CloudSendStrip";
+import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { inboxVersion, useInboxLoader, useInboxPanel } from "@/state/inbox";
@@ -393,6 +399,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           )}
         </main>
       )}
+      </div>
+      </div>
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
       {state.settingsOpen && bot && (
         remoteClient
@@ -439,9 +447,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-hidden
         data-drawer-button-no-drag
         style={captionChrome.noDragStyle}
-        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
-      />}
-      </div>
+        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden" />
+      }
       {/* Last child on purpose: Blink resolves -webkit-app-region in DOM order, so no-drag buttons must follow every drag region. */}
       <WindowCaptionButtons
         visible={capabilities.windowChrome === "win-caption" && Boolean(window.ogb?.windowControls)}
