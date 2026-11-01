@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 
-import type { McpChangeRequest, WireMessage as Message } from "../../shared/wire.ts";
+import type { McpChangeRequest } from "../../shared/mcp-request.ts";
+import type { WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";

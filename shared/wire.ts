@@ -18,6 +18,7 @@ import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTrigger
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
+import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
@@ -715,47 +716,12 @@ export interface OptionCardData extends WaitCardField, ComputerAskField {
   yourComputer?: { app?: string; site?: string };
 }
 
-/** Security: display data only. The change itself (the bot's fields, its secretRefs) stays in the server's memory until
- * the person answers and never reaches the wire or messages.json, so after a restart the card can only expire. */
-export interface McpChangeRequest {
-  requestId: string;
-  botId: string;
-  threadId: string;
-  action: "enable" | "update" | "remove";
-  name: string;
-  result?: { state: "applied" | "denied" | "expired" | "failed"; text: string };
-  /** The bot's parked turn took the result. */
-  resumed?: boolean;
-}
-
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
  * message to resend, `rootId` the failed request's job-runtime root. */
 export interface QuotaSwitchCardData {
   engines: Array<{ instanceId: string; name: string }>;
   messageId?: string;
   rootId?: string;
-}
-
-export interface ConnectorCardData {
-  /** What the card connects: a Composio app (absent or "composio"), or a sign-in to an MCP server ("mcp"). */
-  source?: "composio" | "mcp";
-  /** Composio toolkit slug, or the MCP server's name. It is validated server-side before every action. */
-  slug: string;
-  label: string;
-  description: string;
-  status: "required" | "authorizing" | "connected" | "failed";
-  /** Cards created by one agent request resume together after all connect. */
-  resumeKey: string;
-  /** Account alias supplied by the agent when adding a second account. */
-  alias?: string;
-  error?: string;
-  dismissed?: boolean;
-  /** A newer card for the same request replaced this one: it is hidden as `dismissed` is, and nothing waits on it. */
-  superseded?: boolean;
-  resumed?: boolean;
-  /** Stop ended the turn this card paused: it offers no action, and a
-   * connection made afterwards is kept but continues nothing. */
-  stopped?: boolean;
 }
 
 export interface SecretRequestCardData {

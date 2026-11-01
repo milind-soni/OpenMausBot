@@ -1,4 +1,5 @@
-import type { McpChangeRequest, OptionCardData } from "../../shared/wire.ts";
+import type { McpChangeRequest } from "../../shared/mcp-request.ts";
+import type { OptionCardData } from "../../shared/wire.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
 import { newId } from "../contracts.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";

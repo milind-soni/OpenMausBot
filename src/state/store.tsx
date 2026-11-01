@@ -108,7 +108,7 @@ export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "w
   questionRequest?: QuestionRequestCardData;
 }
 
-export type ConnectorCardData = import("../../shared/wire").ConnectorCardData;
+export type ConnectorCardData = import("../../shared/connector-card").ConnectorCardData;
 
 export type SecretRequestCardData = Omit<import("../../shared/wire").SecretRequestCardData, "phoneOperationId" | "vm">;
 

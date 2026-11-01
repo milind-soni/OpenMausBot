@@ -5,7 +5,8 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
-import type { ConnectorCardData, WireMessage as Message } from "../../shared/wire.ts";
+import type { ConnectorCardData } from "../../shared/connector-card.ts";
+import type { WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { mcpSignInCardDescription, mcpSignInCardText } from "../connector-card-text.ts";
 import { cardOwner, McpOAuthError, McpSignInError, mcpCallbackOrigin, type McpOAuthManager, type McpSignInBrowser, type McpSignInPhase } from "../mcp-oauth.ts";

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConnectorCardData, McpChangeRequest, OptionCardData } from "../../shared/wire.ts";
+import type { ConnectorCardData } from "../../shared/connector-card.ts";
+import type { McpChangeRequest } from "../../shared/mcp-request.ts";
+import type { OptionCardData } from "../../shared/wire.ts";
 import type { Store } from "../store.ts";
 import { resumableCards } from "./resumable-cards.ts";
 

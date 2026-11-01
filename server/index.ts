@@ -23,7 +23,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, UnansweredApprovals } from "./waiting-on-person.ts";
-import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { McpRequestService } from "./host/mcp-requests.ts"; import { createMcpSignInCards, isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts";
+import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -106,7 +106,7 @@ import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
-import { canUseMcpServer, parseToolScope } from "../shared/tool-scope.ts";
+import { parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
@@ -215,11 +215,10 @@ import { decodeGeneratedImage } from "./generated-image.ts";
 import { createMcpServersHost } from "./host/mcp-servers-host.ts"; import { createLimitTakeover, signedOutStop } from "./host/limit-takeover.ts";
 import {
   isRemoteMcpServer,
-  listMcpServers,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
 import { attachCustomMcp } from "./mcp-result-budget.ts";
-import { MCP_OAUTH_CALLBACK_PATH, McpOAuthManager, mcpOAuthRedirectUri } from "./mcp-oauth.ts";
+import { MCP_OAUTH_CALLBACK_PATH, McpOAuthManager } from "./mcp-oauth.ts";
 import {
   GROUP_GOAL_WAIT_MAX_MS,
   groupGoalCompletionTurnId,
@@ -590,7 +589,7 @@ import { createDeciderRoutes } from "./routes/decider.ts"; import { createCloudS
 import { createUpdateCheckRoutes, serverUpdateChecker } from "./routes/update-check.ts"; import { createTimeZoneRoutes } from "./routes/time-zone.ts";
 import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createInternalSignInRoutes } from "./routes/sign-in.ts";
-import { applyMcpChange, createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./routes/internal-mcp.ts";
+import { createInternalMcpRoutes } from "./routes/internal-mcp.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
@@ -9448,67 +9447,9 @@ async function resolveAndSendTeamSetup(res: ServerResponse, args: { botId: strin
   return true;
 }
 
-const mcpRequests = new McpRequestService({
-  store, teamCloud: Boolean(CLOUD_TEAM), language: threadLanguage,
-  apply: async (request, change) => {
-    const bot = store.bot(request.botId);
-    return bot ? applyMcpChange(mcpServerDeps(bot, request.threadId), request, change) : { state: "failed", text: "This bot no longer exists." };
-  },
-  answer: answerCardNode,
-  decide: (row) => appendDecision(DATA_DIR, { ...row, botName: store.bot(row.botId)?.name, tool: "mcp_server", source: row.decision === "card-shown" ? "no-grant" : "user" }),
-});
-
-const mcpSignInCards = createMcpSignInCards({
-  store, cfg: () => cfg, mcpOAuth,
-  personal: () => teamConnections.personMcp(),
-  turnPerson: (threadId) => teamConnections.turnPerson(threadId),
-  oauthFor: (person) => teamConnections.people.oauth(person),
-  personName: (person) => teamConnections.nameOf(person),
-  publicOrigins: () => [CLOUD_HOME?.publicOrigin, hostedWorkspaceConfiguration()?.tenant.origin, savedCustomDomain(), FALLBACK_PUBLIC_URL],
-  language: threadLanguage,
-  answer: answerCardNode,
-  threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId),
-  changed: () => broadcast({ kind: "mcp.changed" }),
-});
-
-async function resolveAndSendMcp(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean> {
-  const outcome = await mcpRequests.respond(args, ownerReview);
-  if (!outcome) return false;
-  json(res, outcome.status, outcome.body);
-  return true;
-}
-
-/** The mcp_server route for one bot in one conversation. `generation` is the live turn's; absent when the person's answer
- * to a card applies the change. */
-function mcpServerDeps(sender: BotRecord, threadId: string, generation?: string): Omit<InternalMcpDeps, "readBody"> {
-  const from = store.groupByThread(threadId) ? { botId: sender.id, name: sender.name, color: sender.color } : undefined;
-  return {
-    sender, threadId,
-    fullAccess: () => fullAccessForSource(sender.id, threadId),
-    guestDriven: () => cloudGuestDriven(threadId),
-    teamAdmin: () => teamConnections.actsForAdmin(threadId, generation),
-    canUse: (name) => canUseMcpServer(sender.toolScope, name),
-    config: mcpConfig, cfg: () => cfg, personal: () => teamConnections.personMcp(),
-    authState: (name, url) => mcpOAuth.authState(name, url),
-    managedBy: mcpManagedBy, policyRefusal: mcpPolicyRefusal,
-    signOut: async (name, url) => { await mcpOAuth.signOut(name, url); broadcast({ kind: "mcp.changed" }); },
-    testAs: (name, url) => {
-      const person = teamConnections.turnPerson(threadId, generation);
-      return person ? teamConnections.people.connection(person, name, url) : null;
-    },
-    redeem: (body) => secretCards.redeemMcpServer(body, sender.id, threadId),
-    addToBotList: (name) => { const bot = store.bot(sender.id); if (bot?.mcpServers) store.patchBot(bot.id, { mcpServers: [...new Set([...bot.mcpServers, name])] }); },
-    botAdd: (current, body) => mcpServersHost.botAdd(current, body, sender.id),
-    botKeep: (server) => mcpServersHost.botKeep(server, sender.id),
-    ownCwd: () => (existsSync(workspaceDir(sender.id)) ? workspaceDir(sender.id) : DATA_DIR),
-    decide: (summary, applied) => appendDecision(DATA_DIR, { threadId, botId: sender.id, botName: sender.name, tool: "mcp_server", summary, decision: "auto-approved", source: applied }),
-    activity: (label, call) => showMcpActivity(store, { threadId, turnId: liveTurnByThread.get(threadId), ...(from ? { from } : {}) }, call, label),
-    language: () => threadLanguage(threadId),
-    usedBy: (name) => store.bots.filter((bot) => bot.id !== sender.id && !bot.hidden && Object.hasOwn(mcpServersHost.mounted(bot), name) && canUseMcpServer(bot.toolScope, name)).map((bot) => bot.name),
-    requestApproval: ({ action, name, subtitle, change }) => mcpRequests.propose({ action, name, botId: sender.id, threadId }, subtitle, change, from),
-    requestSignIn: (name, server) => mcpSignInCards.request({ bot: sender, threadId, ...(from ? { from } : {}) }, name, server),
-  };
-}
+const { mcpRequests, mcpSignInCards, mcpServerDeps, resolveAndSendMcp, mcpServerResponse, mcpPolicyRefusal } = createMcpChat({ store, cfg, mcpOAuth, teamConnections, mcpServersHost, managedPolicy,
+  secretCards: () => secretCards, mcpConfig: () => mcpConfig, teamCloud: Boolean(CLOUD_TEAM), threadLanguage, answerCardNode, fullAccessForSource, cloudGuestDriven, liveTurnByThread, broadcast,
+  publicOrigins: () => [CLOUD_HOME?.publicOrigin, hostedWorkspaceConfiguration()?.tenant.origin, savedCustomDomain(), FALLBACK_PUBLIC_URL], threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) });
 const routineTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 function sendRoutineResolution(
   res: ServerResponse,
@@ -12045,28 +11986,6 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
   };
-}
-
-function mcpServerResponse() {
-  const policy = managedPolicy.current();
-  const servers = listMcpServers(cfg.mcpServers).map((server) => {
-    if (!("url" in server)) return server;
-    const auth = mcpOAuth.authState(server.name, server.url);
-    const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: mcpOAuthRedirectUri(server.url) } } : server;
-    return auth === "none" ? listed : { ...listed, auth };
-  }).map(mcpServersHost.listing).map((server) => {
-    const managedBy = mcpManagedBy(server.name, server);
-    return managedBy ? { ...server, managedBy } : server;
-  });
-  return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
-}
-const mcpServerUrl = (server: object) => ("url" in server && typeof server.url === "string" ? server.url : undefined);
-function mcpPolicyRefusal(name: string, server: object): string | undefined {
-  return managedPolicy.mcpRefusal(name, mcpServerUrl(server));
-}
-/** The organisation whose policy leaves this server out, if one does. */
-function mcpManagedBy(name: string, server: object): string | undefined {
-  return managedPolicy.mcpAllowed(name, mcpServerUrl(server)) ? undefined : managedPolicy.current()?.organizationName;
 }
 
 function engineMcpServers(bot: BotRecord) { return teamConnections.engineMcp(bot); }
