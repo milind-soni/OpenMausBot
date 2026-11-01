@@ -12,6 +12,7 @@ import type { FunctionReturnType } from "convex/server";
 import { WorkspaceContext } from "./workspace-context";
 import { WorkspaceSkeleton } from "./content-skeleton";
 import { lazyComponent } from "./lazy-component";
+import { authFieldError, authFieldForServerError, authFormErrors, type AuthField, type AuthValues } from "@/lib/auth-form";
 
 const OriginWorkspace = lazyComponent(() => import("./origin-app").then(module => module.OriginWorkspace), <WorkspaceSkeleton />);
 
@@ -105,11 +106,8 @@ function SignedInAs({ email, onSignOut }: { email: string; onSignOut: () => void
 
 function PublicAuth({ signup: initialSignup, inviteToken, invitation, onSession }: { signup: boolean; inviteToken?: string; invitation?: { name: string; role: string; email?: string } | null; onSession: (token: string, slug?: string | null) => Promise<void> }) {
   const [signup, setSignup] = useState(initialSignup);
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [password, setPassword] = useState("");
+  const [values, setValues] = useState<AuthValues>({ name: "", email: "", password: "", workspaceName: "", slug: "" });
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<AuthField, string>>>({});
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -118,22 +116,57 @@ function PublicAuth({ signup: initialSignup, inviteToken, invitation, onSession 
   const register = useAction(api.auth.signup);
   const mode = useQuery(api.auth.signupMode, {});
   const inviteOnly = Boolean(mode?.inviteOnly) && !inviteToken;
+  const fields: AuthField[] = signup ? ["name", "email", "password", ...(inviteToken ? [] : ["workspaceName", "slug"] as const)] : ["email", "password"];
   useEffect(() => setHost(window.location.host), []);
-  useEffect(() => { if (invitation?.email) setEmail(invitation.email); }, [invitation?.email]);
+  useEffect(() => { if (invitation?.email) setValues(current => ({ ...current, email: invitation.email! })); }, [invitation?.email]);
   // The address follows the form, so a reload or a shared link opens the same screen.
   const switchMode = () => {
     const next = !signup;
-    setSignup(next); setError(""); setVisible(false);
+    setSignup(next); setError(""); setFieldErrors({}); setVisible(false);
     if (!inviteToken) window.history.replaceState(null, "", next ? "/signup" : "/login");
   };
+  const focusField = (field: AuthField) => document.getElementById(`auth-${field}`)?.focus();
+  // A shown message follows the typing and goes away once the field is right; new ones wait for blur or submit.
+  const change = (patch: Partial<AuthValues>) => {
+    const next = { ...values, ...patch };
+    setValues(next);
+    setFieldErrors(current => {
+      const updated = { ...current };
+      for (const field of Object.keys(patch) as AuthField[]) if (updated[field]) updated[field] = authFieldError(field, next, signup) || undefined;
+      return updated;
+    });
+  };
+  const blur = (field: AuthField) => {
+    if (!values[field]) return;
+    const message = authFieldError(field, values, signup);
+    setFieldErrors(current => current[field] === (message || undefined) ? current : { ...current, [field]: message || undefined });
+  };
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setError("");
+    event.preventDefault();
+    const errors = authFormErrors(fields, values, signup);
+    setFieldErrors(errors); setError("");
+    const first = fields.find(field => errors[field]);
+    if (first) { focusField(first); return; }
+    setBusy(true);
     try {
+      const { name, email, password, workspaceName, slug } = values;
       if (signup) { const result = await register({ email, password, name, ...(inviteToken ? { inviteToken } : { workspaceName, slug }) }); await onSession(result.sessionToken, result.slug); }
       else { const result = await login({ email, password }); await onSession(result.sessionToken); }
-    } catch (error) { setError(errorText(error, "Please try again")); }
+    } catch (error) {
+      const message = errorText(error, "Please try again");
+      const field = authFieldForServerError(message);
+      if (field && fields.includes(field)) { setFieldErrors({ [field]: message }); focusField(field); }
+      else setError(message);
+    }
     finally { setBusy(false); }
   };
+  const field = (name: AuthField) => ({
+    id: `auth-${name}`,
+    "aria-invalid": fieldErrors[name] ? true : undefined,
+    "aria-describedby": fieldErrors[name] ? `auth-${name}-error` : undefined,
+    onBlur: () => blur(name),
+  });
+  const message = (name: AuthField) => fieldErrors[name] ? <p id={`auth-${name}-error`} className="auth-field-error">{fieldErrors[name]}</p> : null;
   if (inviteToken && invitation === null) return <AuthFrame>
     <h1>Invitation unavailable</h1>
     <p>This link has expired or was revoked.</p>
@@ -141,11 +174,14 @@ function PublicAuth({ signup: initialSignup, inviteToken, invitation, onSession 
   </AuthFrame>;
   return <AuthFrame>
     <h1>{invitation ? `Join ${invitation.name}` : inviteToken ? "Join workspace" : signup ? "Create account" : "Sign in"}</h1>
-    {signup && inviteOnly ? <p className="notice">Sign-up is invite-only. Ask a workspace admin for an invitation link.</p> : <form className="stack-form" onSubmit={submit}>
-      {signup && <label>Your name<input autoComplete="name" value={name} onChange={e => setName(e.target.value)} required maxLength={100} autoFocus /></label>}
-      <label>Email<input autoComplete="email" type="email" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={e => setEmail(e.target.value)} required autoFocus={!signup} /></label>
-      <label>Password<span className="password-input"><input autoComplete={signup ? "new-password" : "current-password"} type={visible ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} required minLength={signup ? 10 : undefined} maxLength={128} placeholder={signup ? "At least 10 characters" : undefined} /><button type="button" aria-label={visible ? "Hide password" : "Show password"} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></label>
-      {signup && !inviteToken && <><label>Workspace name<input value={workspaceName} onChange={e => { setWorkspaceName(e.target.value); setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")); }} required maxLength={60} /></label><label>Workspace URL<span className="slug-input"><span>{host}/</span><input value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} required minLength={2} maxLength={48} autoCapitalize="none" spellCheck={false} /></span></label></>}
+    {signup && inviteOnly ? <p className="notice">Sign-up is invite-only. Ask a workspace admin for an invitation link.</p> : <form className="stack-form" onSubmit={submit} noValidate>
+      {signup && <div className="form-field"><label>Your name<input {...field("name")} autoComplete="name" value={values.name} onChange={e => change({ name: e.target.value })} maxLength={100} autoFocus /></label>{message("name")}</div>}
+      <div className="form-field"><label>Email<input {...field("email")} autoComplete="email" type="email" inputMode="email" autoCapitalize="none" spellCheck={false} value={values.email} onChange={e => change({ email: e.target.value })} maxLength={254} autoFocus={!signup} /></label>{message("email")}</div>
+      <div className="form-field"><label>Password<span className="password-input"><input {...field("password")} autoComplete={signup ? "new-password" : "current-password"} type={visible ? "text" : "password"} value={values.password} onChange={e => change({ password: e.target.value })} maxLength={128} placeholder={signup ? "At least 10 characters" : undefined} /><button type="button" aria-label={visible ? "Hide password" : "Show password"} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></label>{message("password")}</div>
+      {signup && !inviteToken && <>
+        <div className="form-field"><label>Workspace name<input {...field("workspaceName")} value={values.workspaceName} onChange={e => change({ workspaceName: e.target.value, slug: e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) })} maxLength={60} /></label>{message("workspaceName")}</div>
+        <div className="form-field"><label>Workspace URL<span className="slug-input" data-invalid={fieldErrors.slug ? true : undefined}><span>{host}/</span><input {...field("slug")} value={values.slug} onChange={e => change({ slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })} maxLength={48} autoCapitalize="none" spellCheck={false} /></span></label>{message("slug")}</div>
+      </>}
       {error && <p role="alert" className="notice danger">{error}</p>}
       <button type="submit" className="primary-button large" disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : signup ? "Create account" : "Sign in"}</button>
     </form>}{(signup || !inviteOnly) && <p className="auth-switch">{signup ? "Have an account?" : "No account?"} <button type="button" onClick={switchMode}>{signup ? "Sign in" : "Create an account"}</button></p>}

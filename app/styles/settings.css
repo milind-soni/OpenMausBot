@@ -201,9 +201,9 @@ label.file-button:has(input:focus-visible) { outline: 2px solid var(--focus); ou
   .invite-form > button { flex: 1; }
   .integration-section { grid-template-columns: minmax(0, 1fr); }
   .integration-actions { justify-content: flex-start; }
-  .agent-clients { flex-wrap: nowrap; margin: 0 calc(var(--space-4) * -1); padding: 0 var(--space-4); overflow-x: auto; scrollbar-width: none; }
-  .agent-clients::-webkit-scrollbar { display: none; }
-  .agent-clients button { flex: none; }
+  /* Every client stays in view down to 360px: two rows of three instead of a row that scrolls off the edge. */
+  .agent-clients { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .agent-clients button { min-width: 0; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .agent-token-form { grid-template-columns: 1fr 1fr; }
   .agent-token-form input, .agent-token-form button { grid-column: 1 / -1; }
   .agent-token-form select { width: 100%; }
