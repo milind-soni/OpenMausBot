@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake of the pi coding agent's `--mode rpc --no-session` stdio surface for pi.ts tests. Env knobs:
-//   FAKE_PI_MODE  happy (default) | tooluse | priced | permission | interleave | question-select | question-input
+//   FAKE_PI_MODE  happy (default) | tooluse | priced | priced-stop | permission | interleave | question-select | question-input
 //     | turn-error | no-models | exit-early | compaction | compaction-recovery
 //     | compaction-recovery-upstream | prompt-reject | omp-chunk
 //     | session-slow (answers new_session after FAKE_PI_SESSION_DELAY_MS, default 800, and dumps {sessionReplied})
@@ -194,14 +194,21 @@ const piUsage = (input: number, output: number, cacheRead: number, cacheWrite: n
   ({ input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
 
-const streamPricedTurn = () => {
+// Like pi, the assistant message_end carries the call's usage before its tool runs; turn_end repeats it.
+const startPricedToolTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
+  send({ type: "message_end", message: { role: "assistant", stopReason: "toolUse", usage: piUsage(5, 1, 100, 20, 0.0021) } });
   send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi" } });
+};
+
+const streamPricedTurn = () => {
+  startPricedToolTurn();
   send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false, result: { content: [{ type: "text", text: "hi" }] } });
   send({ type: "turn_end", message: { stopReason: "toolUse", usage: piUsage(5, 1, 100, 20, 0.0021) } });
   send({ type: "turn_start" });
   send({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "done" } });
+  send({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: piUsage(12, 2, 120, 0, 0.0004) } });
   send({ type: "turn_end", message: { stopReason: "stop", usage: piUsage(12, 2, 120, 0, 0.0004) } });
   send({ type: "agent_end" });
 };
@@ -363,6 +370,7 @@ function handle(cmd: any) {
       send({ type: "response", command: "prompt", success: true });
       if (mode === "tooluse") streamToolTurn();
       else if (mode === "priced") streamPricedTurn();
+      else if (mode === "priced-stop") startPricedToolTurn();
       else if (mode === "permission") streamPermissionTurn();
       else if (mode === "question-select") streamQuestionSelectTurn();
       else if (mode === "question-input") streamQuestionInputTurn();

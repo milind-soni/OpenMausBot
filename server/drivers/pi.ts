@@ -375,7 +375,7 @@ interface PiEvent {
   args?: unknown;
   result?: unknown;
   isError?: boolean;
-  message?: { stopReason?: string; errorMessage?: string; usage?: PiUsage };
+  message?: { role?: string; stopReason?: string; errorMessage?: string; usage?: PiUsage };
   usage?: PiUsage;
   isTerminal?: boolean;
   willRetry?: boolean;
@@ -488,6 +488,15 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let endUsage: TurnUsage | undefined;
       // pi's priced USD for the run. A zero is pi's default for a model without prices, so it stays unknown rather than booked as free.
       let endCost: number | undefined;
+      // pi sends a model call's usage on its assistant message_end, before any tool runs, and again on turn_end.
+      let turnUsageCounted = false;
+      const countUsage = (usage: PiUsage | undefined) => {
+        if (!usage || turnUsageCounted) return;
+        turnUsageCounted = true;
+        endUsage = addPiUsage(endUsage, usage);
+        const cost = usageCount(usage.cost?.total);
+        if (cost) endCost = (endCost ?? 0) + cost;
+      };
       let completionOutcome: { ok: boolean; stopReason: string; cost?: number; usage?: TurnUsage } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
@@ -774,6 +783,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             }
             return;
           }
+          case "message_end": {
+            // Counted now, so a stop while a tool runs still books the model call.
+            if (evt.message?.role === "assistant") countUsage(evt.message.usage);
+            return;
+          }
           case "turn_end":
           {
             // A killed child can still flush one buffered frame after the turn settled.
@@ -781,12 +795,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
             const sr = evt.message?.stopReason;
-            const usage = evt.usage ?? evt.message?.usage;
-            if (usage) {
-              endUsage = addPiUsage(endUsage, usage);
-              const cost = usageCount(usage.cost?.total);
-              if (cost) endCost = (endCost ?? 0) + cost;
-            }
+            countUsage(evt.usage ?? evt.message?.usage);
+            turnUsageCounted = false;
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;
