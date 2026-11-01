@@ -8,7 +8,7 @@ const THREAD = /^[\w-]{1,128}$/;
 const MAX_ENTRIES = 50_000;
 
 export class ThreadStarters {
-  private readonly starters = new Map<string, string>();
+  private starters = new Map<string, string>();
   private readonly file: string;
 
   constructor(file: string) {
@@ -45,25 +45,28 @@ export class ThreadStarters {
 
   reassign(move: (person: string) => boolean, to: string): string[] {
     if (!KEY.test(to)) return [];
+    const starters = new Map(this.starters);
     const moved: string[] = [];
     for (const [threadId, person] of this.starters) {
       if (person === to || !move(person)) continue;
-      this.starters.set(threadId, to);
+      starters.set(threadId, to);
       moved.push(threadId);
     }
-    if (moved.length) writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
+    if (moved.length) this.save(starters);
     return moved;
   }
 
   /** Record once; a thread keeps the person it was first opened for. */
   set(threadId: string, person: string | undefined): void {
     if (!person || !KEY.test(person) || !THREAD.test(threadId) || this.starters.has(threadId)) return;
-    this.starters.set(threadId, person);
-    while (this.starters.size > MAX_ENTRIES) this.starters.delete(this.starters.keys().next().value!);
-    try {
-      writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
-    } catch (error) {
-      console.warn(`thread starters: could not save ${this.file}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    if (this.starters.size >= MAX_ENTRIES) throw new Error("Thread owner registry is full");
+    const starters = new Map(this.starters);
+    starters.set(threadId, person);
+    this.save(starters);
+  }
+
+  private save(starters: Map<string, string>): void {
+    writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(starters)) + "\n", { mode: 0o600 });
+    this.starters = starters;
   }
 }

@@ -6,7 +6,6 @@
 // inbox. A question that a fact the person shares with the team answers, their assistant may answer (representative.ts).
 // Security: a line carries only what was addressed to the person, and links its conversation only when they may read
 // it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists.
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -23,6 +22,7 @@ import { peerStatus, peerStatusWords } from "../peer-roster.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import type { Representative, SharedFacts } from "./representative.ts";
+import { loadLegacyRelayState, loadPrivateDeliveryState } from "./private-delivery-state.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
 export const PERSON_INBOX_FILE = "person-inbox.json";
@@ -91,7 +91,7 @@ export interface Delivery {
 export interface PersonInboxDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
+  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "backfillPrivateTasks" | "privateTasksSaved" | "createTask" | "deleteTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   audienceOf(threadId: string): Audience;
   personKeyOf(email: string): string;
@@ -117,25 +117,27 @@ export interface PersonInboxDeps {
   now?: () => number;
 }
 
+export function loadPersonInboxState(dataDir: string) {
+  return loadPrivateDeliveryState(dataDir, PERSON_INBOX_FILE, fileSchema, { version: 1, homes: {}, items: [] });
+}
+
 export function createPersonInbox(deps: PersonInboxDeps) {
   const { team, store } = deps;
   const now = deps.now ?? Date.now;
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
-  let homes: Record<string, { botId: string; threadId: string }> = {};
-  let items: Item[] = [];
-  if (team) {
-    try {
-      const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-      if (parsed.success) ({ homes, items } = parsed.data);
-      else console.warn(`person inbox: ${file} is not an inbox file; starting fresh`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`person inbox: ${file} is unreadable; starting fresh`);
-    }
-  }
+  const inbox = team ? loadPersonInboxState(deps.dataDir) : { state: { homes: {}, items: [] }, prepareSave: () => true };
+  let { homes, items }: Pick<z.infer<typeof fileSchema>, "homes" | "items"> = inbox.state;
+  const legacy = team ? loadLegacyRelayState(deps.dataDir).state.relays : [];
+  store.backfillPrivateTasks([...Object.values(homes), ...items, ...legacy]);
+  let savePending = false;
   const save = () => {
+    savePending = true;
     items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
+    // Keep the durable classification evidence until the registry has saved the private flags.
+    if (!store.privateTasksSaved || !inbox.prepareSave()) return;
     try {
       writeFileAtomic(file, `${JSON.stringify({ version: 1, homes, items })}\n`, { mode: 0o600 });
+      savePending = false;
     } catch (error) {
       console.warn(`person inbox: could not save ${file}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -157,15 +159,26 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     const bot = representativeOf(person);
     if (!bot) return null;
     const standing = standingHome(person, bot);
-    if (standing?.kept) return { bot, threadId: standing.threadId };
+    if (standing?.kept) {
+      const task = store.taskByThread(bot.id, standing.threadId);
+      if (task && !task.private) store.patchTask(bot.id, task.threadId, { private: true });
+      return { bot, threadId: standing.threadId };
+    }
     let threadId = standing?.threadId;
     if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
     else if (!standing) {
       const created = store.createTask(bot.id, INBOX_TITLE, false);
       if (!created) return null;
-      deps.starters.set(created.threadId, person);
+      try {
+        store.patchTask(bot.id, created.threadId, { private: true });
+        deps.starters.set(created.threadId, person);
+      } catch (error) {
+        store.deleteTask(bot.id, created.threadId);
+        throw error;
+      }
       threadId = created.threadId;
     }
+    if (standing && !store.taskByThread(bot.id, standing.threadId)?.private) store.patchTask(bot.id, standing.threadId, { private: true });
     homes[person] = { botId: bot.id, threadId: threadId! };
     indexHomes();
     save();
@@ -175,7 +188,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   function standingHome(person: string, bot: BotRecord): { threadId: string; kept: boolean; brief: boolean } | null {
     const kept = homes[person];
     const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
-    if (task && !task.archivedAt) return { threadId: task.threadId, kept: true, brief: false };
+    if (task && !task.archivedAt && deps.starters.get(task.threadId) === person) return { threadId: task.threadId, kept: true, brief: false };
     const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
     const brief = own.find((one) => one.title === BRIEF_TITLE);
     const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
@@ -409,7 +422,9 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   }
 
   const unsubscribe = team ? store.onChange((change: StoreChange) => {
-    if (change.type === "message.patch" && change.message.card?.requestId && !change.message.inbox) {
+    if (change.type === "private.tasks.saved") {
+      if (savePending) save();
+    } else if (change.type === "message.patch" && change.message.card?.requestId && !change.message.inbox) {
       const card = change.message.card;
       for (const item of items) if (item.requestId === card.requestId && item.origin?.threadId === change.threadId) follow(item, card);
     } else if (change.type === "thread.deleted") {

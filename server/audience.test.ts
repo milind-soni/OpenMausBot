@@ -49,6 +49,15 @@ describe("a conversation's audience", () => {
     expect(threadAudienceFrom({ room: null, starter: "p_outsideoutsideoutside1", markers })).toBe("team");
     expect(threadAudienceFrom({ room: null, starter: "not a key!", markers })).toBe("team");
   });
+  it("gives private threads without a valid owner separate audiences that no person can see", () => {
+    for (const starter of [undefined, "not a key!", ...markers]) {
+      const first = threadAudienceFrom({ room: null, starter, markers, privateThread: "private-1" });
+      const second = threadAudienceFrom({ room: null, starter, markers, privateThread: "private-2" });
+      for (const person of [ADA, BEN, null]) expect(audienceIncludes(first, viewer(person, [], true))).toBe(false);
+      expect(mayRead(first, "team")).toBe(false);
+      expect(mayRead(first, second)).toBe(false);
+    }
+  });
 });
 
 describe("memory layers", () => {
