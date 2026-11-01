@@ -54,6 +54,8 @@ describe("remote connection Settings", () => {
     expect(html).toContain('<option value="companion">Desktop companion</option>');
     expect(html).toContain("Server pairing link");
     expect(html).toContain("npx openmausbot pair --client");
+    expect(html).toContain("Chat-only pairing cannot make this server");
+    expect(html).toContain("npx openmausbot pair</code>");
     expect(html).toContain("12-character code");
     expect(html).toContain("custom domains and Cloudflare Tunnel");
     expect(html).toContain("Connect to server");

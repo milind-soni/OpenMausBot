@@ -4296,6 +4296,8 @@
   "remote.client.connectionType": "Connection type",
   "remote.client.server.option": "Self-hosted server",
   "remote.client.server.hint": "On your server, run this command to create a fresh, single-use pairing link. Paste the full link below, including its 12-character code.",
+  "remote.client.server.chatOnlyHint": "Chat-only pairing cannot make this server your bots’ home.",
+  "remote.client.server.fullAccessHint": "For your own trusted server, use a full-access pairing link to enable Make my home and owner features:",
   "remote.client.server.pairingLink": "Server pairing link",
   "remote.client.server.domainHint": "Supports your server’s HTTPS address, including custom domains and Cloudflare Tunnel.",
   "remote.client.server.connect": "Connect to server",
