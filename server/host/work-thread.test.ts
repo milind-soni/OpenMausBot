@@ -14,12 +14,11 @@ const tasks: Record<string, TaskRecord[]> = {
     task("archived-ask", by("bugfixer", "Bugfixer", "archived-run"))],
 };
 const store = {
-  tasks: (botId: string) => tasks[botId] ?? [],
   taskByThread: (botId: string, threadId: string) => (tasks[botId] ?? []).find((t) => t.threadId === threadId),
   workThread: () => undefined,
 };
-const fromLiaison = (thread: string, notice: boolean, also: (task: TaskRecord) => boolean = () => true) => workThreadFor(store,
-  { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat", thread, notice, also });
+const fromLiaison = (thread: string, notice: boolean, also: (task: TaskRecord) => boolean = () => true, fromThreadId = "liaison-work") => workThreadFor(store,
+  { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId, thread, notice, also });
 
 describe("workThreadFor", () => {
   it("keeps a thread the sender opened", () => {
@@ -29,6 +28,10 @@ describe("workThreadFor", () => {
   it("lets a one-way notice answer the thread that handed the sender work, and refuses new work there", () => {
     expect(fromLiaison("run-1", true)?.threadId).toBe("run-1");
     expect(() => fromLiaison("run-1", false)).toThrow(/handed you work: answer it there with reply "none"/);
+  });
+
+  it("takes that notice only from the thread the work was handed to", () => {
+    expect(() => fromLiaison("run-1", true, () => true, "liaison-chat")).toThrow(/is not a thread you opened on Bugfixer/);
   });
 
   it("refuses any other thread, an archived one, or one `also` rules out, even for a notice", () => {

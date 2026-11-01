@@ -76,6 +76,8 @@ describe("composeEnvelope: assignment with person lineage", () => {
     expect(envelope).not.toContain("If it asked to hear back");
     const inRoom = assignment({ reply: "none", mode: "notify", assignee: { botId: "scout", destination: { kind: "room_thread", threadId: "th_2", groupId: "g_1" } } });
     expect(composeEnvelope(inRoom, names)).not.toContain("If it asked to hear back");
+    const roomParent = assignment({ assignee: { botId: "chief", destination: { kind: "room_thread", threadId: "th_1", groupId: "g_1" } } });
+    expect(composeEnvelope(assignment({ reply: "none", mode: "notify" }), names, roomParent)).not.toContain("If it asked to hear back");
   });
 
   it("tells a bot's assignee to ask its requester by ending the turn, never with coordinate_bots", () => {
