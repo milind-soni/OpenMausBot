@@ -25,6 +25,7 @@ import { loadMemory } from "../workspace.ts";
 import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
 import { createRepresentative, type RepresentativeDeps } from "./representative.ts";
 import { oneLine } from "./text-clip.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 
 export const MESSAGE_PERSON_PATH = "/api/internal/people/message";
 export const MESSAGE_PERSON_MAX = 2_000;
@@ -150,7 +151,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
   /** "Told Bob" in the conversation that passed it on, with what was passed under it. */
   function chip(threadId: string, at: Where | null, to: { name: string; email?: string }, message: string) {
     store.appendMessage(threadId, {
-      role: "bot", kind: "activity", tool: { name: `Told ${to.name}`, ok: true, output: message },
+      role: "bot", kind: "activity", tool: { name: serverLine(conversationLanguage(threadId), "server.teammates.told", { name: to.name }), ok: true, output: message },
       ...(to.email ? { relay: { kind: "told" as const, email: to.email, name: to.name } } : {}), ...(at?.group ? { from: from(at.bot) } : {}),
     });
   }
@@ -281,7 +282,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, ...(line.sendId ? { sendId: line.sendId } : {}),
       ...(line.sender ? { sender: line.sender } : {}), ...(line.reaction ? { reaction: line.reaction } : {}) });
     const back = answerFromInbox(threadId, null, item, text);
-    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Not passed to ${item.from}`, ok: false, output: back.text } });
+    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(conversationLanguage(threadId), "server.teammates.notPassed", { name: item.from }), ok: false, output: back.text } });
     return { status: 202, message: posted };
   }
 
@@ -310,6 +311,13 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     },
     pass,
     inbox,
+    /** Each teammate here and the tags that reach them ("@Ada", "@Ada Lovelace"); empty off a team. A bot sharing a tag
+     * is never reached by it: a tie is the person's (shared/person-mention.ts). */
+    people(): Array<{ name: string; tags: readonly string[] }> {
+      if (!team) return [];
+      const tags = new Map(mentionable().map((person) => [person.key, person.names]));
+      return current().map((one) => ({ name: one.name, tags: tags.get(one.key) ?? [] }));
+    },
     /** What a turn here is told about the team's people and message_person; empty off a team or without the tool. */
     prompt(_botId: string, threadId: string, tools: boolean): string {
       if (!team || !tools) return "";

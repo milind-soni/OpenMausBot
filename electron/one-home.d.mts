@@ -1,5 +1,7 @@
-/** The line either page shows for the one-time move to My Cloud (one-home.mjs). */
-export type OneHomeView =
+/** The line either page shows for the one-time move to My Cloud (one-home.mjs), or to a server of the person's own, named
+ * `place`. */
+export type OneHomeView = OneHomePhase & { place?: string };
+type OneHomePhase =
   /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, with why; `updating`: My Cloud is too old
    * to take a move and updates first. */
   | { phase: "copy"; chats?: { done: number; total: number }; failing?: { error: string | null }; updating?: true }
@@ -20,6 +22,8 @@ export interface OneHomeCounts { bots: number; skills: number; logins: number; o
 
 export interface OneHomeCloud {
   origin: string | null; account: string; machine: string | null; ready: boolean; moves: boolean; ended: boolean; paid: boolean;
+  /** A server of the person's own, by the name they know it by: the move's line and the frozen copy say it. */
+  name?: string;
   /** The computer an ended Cloud's things come home to, by installation (one-home-main.mjs `installationOf`). */
   homecoming?: { installationId: string; name: string };
   /** This app's sign-in (the Admin's device id), while connected. */

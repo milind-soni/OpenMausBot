@@ -35,7 +35,7 @@ async function scratch(t) {
   return dir;
 }
 
-function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false } = {}) {
+function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false, long = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
@@ -46,7 +46,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return state.paired ? json({ kind: "session", id: state.sessionId, scopes, ...(cloudHome ? { cloudHome: true } : {}) }) : json({ error: "unauthorized" }, 401);
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}), ...(long ? { longCommands: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -140,8 +140,8 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   await connected(sharing, 2, home);
   assert.equal(home.connects.at(-1).terminal, true);
   home.push({ action: "run_command", command: "echo fixture-terminal" });
-  // On Windows a command starts two PowerShells, which on a fresh CI runner can take longer than the default wait.
-  await until(() => home.results.length === 1, "the command result", 30_000);
+  // On Windows a command starts two PowerShells, whose first start on a fresh CI runner has taken over 30 seconds.
+  await until(() => home.results.length === 1, "the command result", 120_000);
   assert.notEqual(home.results[0].isError, true);
   assert.match(home.results[0].content[0].text, /fixture-terminal/);
   assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", true]]);
@@ -349,7 +349,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], using: [], paused: true, busy: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], using: [], paused: true, terminal: false, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 
@@ -453,4 +453,13 @@ test("another Cloud of the person's own is lent at its own address, apart from M
   listed = false;
   sharing.cloudChanged();
   assert.deepEqual([sharing.cloudState(other).enabled, sharing.cloudState(other).problem], [false, "machine-changed"]);
+});
+
+test("says it runs commands up to 900 seconds only to a Cloud that takes it, since an older Cloud refuses fields it does not know", async t => {
+  for (const long of [true, false]) {
+    const { folderPath, home, sharing } = await lendingFixture(t, { home: { timeouts: true, long } });
+    await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+    await connected(sharing, 1, home);
+    assert.equal(home.connects[0].longCommands, long ? true : undefined);
+  }
 });

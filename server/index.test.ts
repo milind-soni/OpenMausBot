@@ -2788,6 +2788,61 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const create = async (name: string, instructions: string) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name, role: "Analyst", instructions }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; error?: string } };
+      };
+      const role = `You own the weekly numbers.\n${"Check every figure against its source and say where it came from. ".repeat(80)}`.slice(0, 3999) + ".";
+      const made = await create(`Analyst ${chief.id}`, role);
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      createdId = made.body.id;
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.soul).toBe(role);
+      const longer = await create(`Longer analyst ${chief.id}`, `${role}x`);
+      expect(longer).toEqual({ status: 400, body: { error: "instructions must be at most 4000 characters; these are 4001. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to 24000 bytes." } });
+    } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("tells the Chief, and the bot in its own chat, when a bot it adds takes the person's own name", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const profile = (await api("GET", "/api/config")).body.profile as { name?: string } | undefined;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { profile: { name: "Dana Reyes" } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const response = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name: "dana reyes", role: "Ops", instructions: "Work." }),
+      });
+      const body = await response.json() as { id?: string; warning?: string };
+      expect(response.status, JSON.stringify(body)).toBe(201);
+      createdId = body.id;
+      expect(body.warning).toBe('Dana Reyes is also a person here, so "@dana reyes" reaches Dana Reyes, not this bot. Rename the bot to keep them apart.');
+      const made = ((await api("GET", "/api/bots?messages=20")).body.bots as Array<{ id: string; messages: Array<{ tool?: { name?: string } }> }>)
+        .find((bot) => bot.id === createdId)!;
+      expect(made.messages.filter((message) => message.tool?.name?.startsWith("notice: Dana Reyes is also a person here"))).toHaveLength(1);
+    } finally {
+      await api("PUT", "/api/config", { profile: { name: profile?.name ?? "" } });
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
   it("adds a specialist the Chief chose itself at once, at Ask too, with an Undo and no card, up to four a turn", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     const created: string[] = [];

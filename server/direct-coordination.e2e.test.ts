@@ -550,15 +550,14 @@ it("continues one recipient thread for every follow-up from the same conversatio
 it.each<[string, NodeJS.ProcessEnv]>([
   ["a headless server", {}],
   ["the desktop app", { OMB_TEST_DESKTOP_OWNER_TOKEN: randomBytes(32).toString("base64url") }],
-])("on %s, holds a follow-up sent while the teammate still works and runs it next in the same thread", (_where, env) => fixture(async f => {
+])("on %s, hands a follow-up sent while the teammate still works to its running turn, and one result comes back", (_where, env) => fixture(async f => {
   expect((await f.api("/.well-known/openmausbot/environment", undefined, "GET")).capabilities.selfUpdate)
     .toBe(env.OMB_TEST_DESKTOP_OWNER_TOKEN ? "desktop-managed" : "operator");
   const gate = join(f.session.info.dataDir, "first-request.gate");
-  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented" }, { reply: "Header row added" }] };
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented, with the header row" }] };
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Also add a header row to that export" } }], reply: "Sent the change" },
-    { reply: "Reviewed" },
     { reply: "Reviewed" },
   ] };
   const chiefTurns = () => f.evidence().filter((turn: any) => turn.botId === f.chief.id);
@@ -569,18 +568,16 @@ it.each<[string, NodeJS.ProcessEnv]>([
   await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Change of plan: the export also needs a header row.", threadId: f.chief.activeTaskId });
   await expect.poll(() => chiefTurns().length, { timeout: 20_000 }).toBe(2);
   expect(told(chiefTurns()[1])).toContain("send the change to the same teammate with coordinate_bots");
-  const [running, followUp] = f.nodes().filter((node: any) => node.botId === f.lead.id);
-  expect(followUp.threadId).toBe(running.threadId);
-  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "queued", threadId: running.threadId });
-  // It waits for the request already running there; never beside it.
-  await new Promise(resolve => setTimeout(resolve, 1_500));
-  expect(f.nodes().find((node: any) => node.id === followUp.id).status).toBe("queued");
-  expect(f.nodes().find((node: any) => node.id === running.id).status).toBe("running");
+  const [running, ...others] = f.nodes().filter((node: any) => node.botId === f.lead.id);
+  expect(others, "the change started no second job").toEqual([]);
+  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "injected", threadId: running.threadId, requestId: running.id });
+  expect((await f.messages(running.threadId)).filter((message: any) => message.peerAsk?.name === "Clive" && message.text === "Also add a header row to that export"))
+    .toHaveLength(1);
   writeFileSync(gate, "go");
   expect((await f.wait()).status).toBe("settled");
   await expect.poll(() => f.nodes().filter((node: any) => node.parentId).every((node: any) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
   const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
-  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId], [1, running.threadId]]);
+  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId]]);
   expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
   await stream.until(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
     && frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy);

@@ -59,6 +59,19 @@ const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as CSSProperties;
 
 export type WindowDragProps = { "data-window-drag"?: ""; style?: CSSProperties };
 
+/** A window with no title bar of its own, which the page can frame: the person may turn that frame off. */
+export function windowFrameable(capabilities: Pick<DesktopCapabilities, "windowChrome"> | undefined): boolean {
+  return capabilities?.windowChrome === "mac-inset" || capabilities?.windowChrome === "win-caption";
+}
+
+/** A window that draws its own frame: the top bar holding the traffic lights or the Windows caption buttons
+ * (WindowFrameBar), the rail of places and the sidebar on the frame's colour, and the chat or page in a rounded card
+ * beside them. Nothing under the bar makes room for the window's buttons. Off once the person turned the frame off. */
+export function windowFramed(capabilities: Pick<DesktopCapabilities, "windowChrome" | "windowFrame"> | undefined): boolean {
+  return windowFrameable(capabilities) && capabilities?.windowFrame !== false;
+}
+
+/** A window with no title bar of its own: the page's headers drag it, framed or not. */
 export function captionChrome(windowChrome: DesktopCapabilities["windowChrome"] | undefined) {
   const windowsCaption = windowChrome === "win-caption";
   const draggable = windowsCaption || windowChrome === "mac-inset";
@@ -69,13 +82,6 @@ export function captionChrome(windowChrome: DesktopCapabilities["windowChrome"] 
     dragProps,
     dragStyle: draggable ? DRAG_STYLE : undefined,
     noDragStyle: draggable ? NO_DRAG_STYLE : undefined,
-    // Margins, not a transform: Blink resolves -webkit-app-region from untransformed layout boxes, so translateY would
-    // leave dead clicks in the drag region.
-    controlsShiftStyle: windowsCaption
-      ? ({ WebkitAppRegion: "no-drag", marginTop: "16px", marginBottom: "-16px" } as CSSProperties)
-      : undefined,
-    // tailwind-merge in cn() lets this override only the pt half of py-*.
-    padClass: windowsCaption ? "pt-[28px]" : undefined,
   };
 }
 

@@ -246,8 +246,8 @@ export function createFirstHour(deps: FirstHourDeps) {
       say(place.bot, place.threadId, words().connect);
       for (const card of cards) {
         deps.store.appendMessage(place.threadId, {
-          role: "bot", kind: "connector", text: connectorCardText(card.label),
-          connector: { slug: card.slug, label: card.label, description: card.description || connectorCardText(card.label), status: "required", resumeKey: key },
+          role: "bot", kind: "connector", text: connectorCardText(card.label, undefined, deps.language()),
+          connector: { slug: card.slug, label: card.label, description: card.description || connectorCardText(card.label, undefined, deps.language()), status: "required", resumeKey: key },
         });
       }
       mark({ offeredAt: now(), offerKey: key });
