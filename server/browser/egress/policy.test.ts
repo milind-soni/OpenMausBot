@@ -7,6 +7,8 @@ import { addressClass, allowList, browserEgressConfigSchema, namesThisMachine, p
 const own = new BlockList();
 own.addAddress("198.51.100.7", "ipv4");
 own.addAddress("192.168.1.5", "ipv4");
+// The address a fake-IP proxy (Clash, Surge) gives its own TUN interface.
+own.addAddress("198.18.0.1", "ipv4");
 
 const rules = (host: EgressHost, over: Partial<EgressRules> = {}): EgressRules => ({
   host,
@@ -109,6 +111,19 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide("desktop", "nas.local:443", ["192.168.1.20"])).toBeNull();
     expect(await decide("desktop", "[fd12::5]:443", ["fd12::5"])).toBeNull();
     expect(await decide("desktop", "nas.local:443", ["192.168.1.20"], { localNetwork: false })).toBe("local-network");
+  });
+
+  it("lets the desktop reach a proxy's fake-IP answers (198.18.0.0/15) like the local network; servers and Cloud keep refusing them", async () => {
+    // Clash, Surge and similar proxies in TUN + fake-IP mode answer every name with an address in 198.18.0.0/15.
+    expect(await decide("desktop", "example.com:443", ["198.18.0.7"])).toBeNull();
+    expect(await decide("desktop", "github.com:443", ["198.19.255.254", "::ffff:198.18.1.2"])).toBeNull();
+    expect(await decide("desktop", "example.com:443", ["198.18.0.7"], { localNetwork: false })).toBe("local-network");
+    // The proxy's own interface is this computer: only a name for this machine reaches it, never a public one.
+    expect(await decide("desktop", "example.com:443", ["198.18.0.1"])).toBe("rebinding");
+    expect(await decide("desktop", "198.18.0.1:8080", ["198.18.0.1"])).toBeNull();
+    for (const host of ["server", "cloud"] as const) {
+      expect(await decide(host, "example.com:443", ["198.18.0.7"], { allowed: () => true }), host).toBe("reserved");
+    }
   });
 
   it("lets a server reach only the loopback ports a bot's own processes opened, or that an admin allowed", async () => {
