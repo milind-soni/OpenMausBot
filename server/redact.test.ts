@@ -143,6 +143,7 @@ describe("redactSecretsInText", () => {
       [`fine-grained ${"github_" + "pat_"}11ABCDEFG0${alpha}`, /github_pat_/],
       [`slack ${"xox" + "b-"}${"123456789012"}-${"1234567890123"}-${alpha.slice(0, 24)}`, /xoxb-/],
       [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
+      [`aws temporary ${"ASIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
       [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
       [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
       [`xai ${"xai-"}${alpha}`, /xai-/],
@@ -290,7 +291,7 @@ describe("holdsCredential", () => {
   it("knows a provider key or a private key block, never a name, a placeholder or code that reads one", () => {
     for (const text of [
       '{"apiKey": "sk-ant-api03-0123456789abcdefABCD"}', "GITHUB_TOKEN=ghp_0123456789abcdefghij0123", "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n",
-      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `git clone https://oauth2:${"glp" + "at-"}0123456789abcdefABCD@gitlab.example.com/x.git`, `runner token ${"glr" + "tr-"}0123456789abcdefABCD`, `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
+      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `temporary aws key ${"ASIA" + "ABCDEFGHIJKLMNOP"}`, `git clone https://oauth2:${"glp" + "at-"}0123456789abcdefABCD@gitlab.example.com/x.git`, `runner token ${"glr" + "tr-"}0123456789abcdefABCD`, `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
     ]) expect(holdsCredential(text), text).toBe(true);
     for (const text of [
       "token = os.environ['GITHUB_TOKEN']", "API_KEY=your-key-here", "Authorization: Bearer YOUR_TOKEN_HERE", "Keep credentials out of the repo.",
