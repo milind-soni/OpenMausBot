@@ -112,7 +112,6 @@ export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclos
       {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><AdminOnly><EnginesSettings simple more={disclose("ai-more")} /></AdminOnly></div>}
       {has("connections") && (
         <AdminOnly>
-          {/* The same name as the Advanced nav item and every "Settings → API keys" hint that points here. */}
           <SettingsDisclosureRow title={t("settings.section.connections")} block="connections" {...disclose("ai-keys")}>
             {connections}
           </SettingsDisclosureRow>
