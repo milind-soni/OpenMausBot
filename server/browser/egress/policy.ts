@@ -109,7 +109,11 @@ export async function refusalFor(
   for (const { address } of addresses) {
     let kind = addressClass(address, own);
     // On the desktop these come from the person's own proxy: the local network, unless this computer holds the address.
-    if (kind === "reserved" && rules.host === "desktop" && listed(FAKE_IP, address)) kind = listed(own, address) ? "this-machine" : "private";
+    if (kind === "reserved" && rules.host === "desktop" && listed(FAKE_IP, address)) {
+      // The proxy picks the real destination, which may be this computer: never let it reach OpenMausBot's own ports.
+      if (rules.ownPort(port)) return "omb";
+      kind = listed(own, address) ? "this-machine" : "private";
+    }
     if (kind === "public") continue;
     if (kind === "metadata" || kind === "link-local" || kind === "reserved") return kind;
     if (kind === "private") {
