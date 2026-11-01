@@ -14,6 +14,8 @@ export function createPublishedPages(options: {
   dataDir: string;
   /** This server's Cloud home configuration, or null on a desktop or any other server. */
   cloudHome: { adminOrigin: string; machineId: string; bootstrapSecret: string } | null;
+  /** True for `openmausbot serve`: no desktop app hands over a MausBot sign-in and there is no Cloud home. */
+  selfHosted?: boolean;
   patch: (threadId: string, messageId: string, text: string, card: PublishedPageCard) => void;
   fetch?: typeof fetch;
   apps?: {
@@ -23,6 +25,7 @@ export function createPublishedPages(options: {
 }) {
   const store = new PublishedPagesStore(join(options.dataDir, "published-pages.json"));
   const client = createPagesClient({ access: () => pagesAccess(options.cloudHome), notOffered: () => pagesNotOffered(options.cloudHome),
+    selfHosted: options.selfHosted === true,
     ...(options.fetch ? { fetch: options.fetch } : {}) });
   const apps = options.apps;
   const pageRow = (threadId: string, messageId: string) => apps?.store.messagesFor(threadId).find((message) => message.id === messageId && message.kind === "app");
