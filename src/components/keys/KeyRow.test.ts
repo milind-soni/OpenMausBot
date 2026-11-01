@@ -106,15 +106,19 @@ describe("a saved key", () => {
     expect(render({ id: "deepseek" })).toContain("data-key-engine-missing");
     fixture.instances = [deepseek("available")];
     expect(render({ id: "deepseek" })).not.toContain("data-key-engine-missing");
-    // The xAI key also feeds the xAI API engine, so a missing Grok CLI doesn't leave it unused.
+    // The Grok CLI drops XAI_API_KEY (it uses a grok.com sign-in), so its install never makes the xAI key usable.
+    const grokCli = { ...deepseek("unavailable"), instanceId: "grok", driverKind: "grokAgent", displayName: "Grok" } as InstanceInfo;
     fixture.config = { xai: { configured: true, last4: "8y8y" } };
-    fixture.instances = [{ ...deepseek("unavailable"), instanceId: "grok", displayName: "Grok" }, { ...deepseek("available"), instanceId: "xaiApi", install: undefined }];
+    fixture.instances = [grokCli, { ...deepseek("available"), instanceId: "xaiApi", install: undefined }];
     expect(render({ id: "xai" })).not.toContain("data-key-engine-missing");
-    fixture.instances = [{ ...deepseek("unavailable"), instanceId: "grok", displayName: "Grok" }];
-    expect(render({ id: "xai" })).toContain("data-key-engine-missing");
-    // An unavailable engine with nothing to install (xAI API on a custom URL) doesn't hide the one that has a command.
-    fixture.instances = [{ ...deepseek("unavailable"), instanceId: "xaiApi", displayName: "xAI API", install: undefined }, { ...deepseek("unavailable"), instanceId: "grok", displayName: "Grok" }];
-    expect(render({ id: "xai" })).toContain("Saved, but Grok can&#x27;t run on this computer yet");
+    fixture.instances = [grokCli];
+    expect(render({ id: "xai" })).not.toContain("data-key-engine-missing");
+    fixture.instances = [{ ...deepseek("unavailable"), instanceId: "xaiApi", displayName: "xAI API", install: undefined }, grokCli];
+    expect(render({ id: "xai" })).not.toContain("data-key-engine-missing");
+    // An unavailable engine with nothing to install doesn't hide one that has a command.
+    fixture.config = { deepseek: { configured: true, last4: "9z9z" } };
+    fixture.instances = [{ ...deepseek("unavailable"), displayName: "Other", install: undefined }, deepseek("unavailable")];
+    expect(render({ id: "deepseek" })).toContain("Saved, but DeepSeek Harness can&#x27;t run on this computer yet");
     fixture.config = {};
     fixture.instances = [deepseek("unavailable")];
     expect(render({ id: "deepseek" })).not.toContain("data-key-engine-missing");
