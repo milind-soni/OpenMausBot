@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { useStore } from "@/state/store";
+import { installCommandFor } from "@/state/engine-install";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { KeyResult, KeyVia } from "@/lib/analytics-allowlist";
@@ -96,7 +97,7 @@ export function KeyRow({
   className?: string;
   children?: ReactNode;
 }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, refreshInstances } = useStore();
   const titleId = useId();
   const [draft, setDraft] = useState("");
   const [shown, setShown] = useState(false);
@@ -107,6 +108,7 @@ export function KeyRow({
   const [notice, setNotice] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [works, setWorks] = useState(false);
+  const [enginesChecking, setEnginesChecking] = useState(false);
   const busyRef = useRef(false);
   const generation = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -134,8 +136,7 @@ export function KeyRow({
   const missingEngine = keyEngines.some((instance) => instance.snapshot.state === "available")
     ? undefined
     : keyEngines.find((instance) => instance.snapshot.state === "unavailable");
-  const missingInstall = missingEngine?.install;
-  const installCommand = missingInstall?.platform ? missingInstall.command?.[missingInstall.platform] : undefined;
+  const installCommand = installCommandFor(missingEngine?.install);
   const rejected = !works && (rejectedHere ?? (saved.configured && engineRejected));
   const failure = problem ?? (rejected && !busy ? t("keys.testRejected") : null);
   const editing = !saved.configured || replacing;
@@ -365,6 +366,10 @@ export function KeyRow({
                   <span>{t("keys.row.engineMissing", { engine: missingEngine.displayName })}</span>
                 </p>
                 <code className="select-all break-all rounded-md bg-inset px-2 py-1 font-mono text-[12px] text-ink">{installCommand}</code>
+                <button type="button" data-key-engine-check className="cursor-pointer self-start text-ink-secondary hover:text-ink hover:underline disabled:opacity-50" disabled={enginesChecking}
+                  onClick={() => { setEnginesChecking(true); void refreshInstances().finally(() => setEnginesChecking(false)); }}>
+                  {enginesChecking ? t("common.checking") : t("common.checkAgain")}
+                </button>
               </div>
             )}
             {note && <p className="text-ink-secondary">{note}</p>}
