@@ -7,8 +7,9 @@
 .drawing-status { display: flex; flex-shrink: 0; justify-content: space-between; gap: var(--space-3); padding: 6px var(--space-6); background: var(--surface-3); color: var(--text-2); font-size: var(--text-sm); }
 .drawing-status.error { color: var(--red); }
 
-/* Excalidraw in Origin's colours, type and shadows (its dark theme reads these variables). */
-.drawing-canvas .excalidraw.theme--dark {
+/* Excalidraw in Origin's colours, type and shadows (its dark theme reads these variables). Its dialogs (Help,
+   Save to, Export image) render in their own container on <body>. */
+.drawing-canvas .excalidraw.theme--dark, .excalidraw.excalidraw-modal-container.theme--dark {
   --ui-font: var(--font-sans);
   --island-bg-color: var(--surface-3);
   --default-bg-color: var(--surface-2);
@@ -48,6 +49,11 @@
 /* Calm canvas: no tool hints, Origin's own presence avatars (below) instead of Excalidraw's list, no "Generate" tools
    (they need Excalidraw's hosted services). */
 .drawing-canvas .excalidraw :is(.HintViewer, .UserList, .UserList_mobile) { display: none; }
+/* Only Origin's canvas: no shortcut numbers on the tools, no library (trigger, sidebar, "Add to library"), no help
+   button (Help stays in the menu), and Help shows the shortcuts without Excalidraw's docs/blog/GitHub/YouTube links. */
+.drawing-canvas .excalidraw :is(.ToolIcon__keybinding, .default-sidebar-trigger, .help-icon) { display: none; }
+.excalidraw.excalidraw-modal-container .HelpDialog .HelpDialog__header { display: none; }
+.drawing-canvas .excalidraw .context-menu li[data-testid="addToLibrary"] { display: none; }
 .drawing-canvas .App-toolbar__extra-tools-dropdown .dropdown-menu-container > div:not([class]),
 .drawing-canvas .App-toolbar__extra-tools-dropdown .dropdown-menu-container > div:not([class]) ~ * { display: none; }
 .draw-presence { display: flex; align-items: center; height: var(--control-lg); margin-right: var(--space-2); }
@@ -64,3 +70,11 @@
 .drawing-canvas:has(.excalidraw--mobile) .draw-presence-floating { position: absolute; left: 50%; bottom: calc(var(--space-6) + env(safe-area-inset-bottom)); z-index: 5; display: flex; transform: translateX(-50%); pointer-events: none; }
 .draw-presence-floating .draw-presence { height: auto; margin: 0; }
 .drawing-canvas:has(.excalidraw--mobile :is(.dropdown-menu, .sidebar, .Modal)) .draw-presence-floating { display: none; }
+
+/* Excalidraw's switches and radio groups draw themselves around an invisible input; Origin's field and switch styles
+   (base.css, controls.css) would paint over them (dark knob, hidden "1× 2× 3×" labels). */
+.excalidraw :is(.Switch, .RadioGroup__choice) input[type],
+.excalidraw :is(.Switch, .RadioGroup__choice) input[type]:is(:hover, :focus, :checked, :disabled) { min-width: 0; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.excalidraw .Switch input[type]::after { content: none; }
+/* Help is the keyboard shortcuts: not on touch screens. */
+@media (pointer: coarse) { .drawing-canvas .excalidraw .dropdown-menu [data-testid="help-menu-item"] { display: none; } }

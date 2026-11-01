@@ -22,6 +22,7 @@ import {
   AtSign,
   Check,
   Circle,
+  Download,
   Ellipsis,
   File,
   Hash,
@@ -163,6 +164,7 @@ export function ChatThread({
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [menu, setMenu] = useState<{ message: LocalChatMessage; anchor: MessageMenuAnchor; opener: HTMLElement | null } | null>(null);
   const [deleting, setDeleting] = useState<LocalChatMessage | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
   const [toast, setToast] = useState("");
   const [unreadFrom, setUnreadFrom] = useState("");
   const unreadPending = useRef(initialUnread);
@@ -220,6 +222,12 @@ export function ChatThread({
     const member = members?.find(m => m.userId === message.authorUserId || m.email.toLowerCase() === message.authorEmail.toLowerCase());
     return member ? displayName(member) : message.authorUserId === user._id ? displayName(user) : message.authorName;
   };
+  // A message as plain text, with mentions under the teammate's current name (the same names the message shows).
+  const plainText = (message: LocalChatMessage) => chatMessageParts(message.body, message.mentions, message.references).map(part => {
+    if (part.kind !== "mention") return part.text;
+    const target = members?.find(member => member.userId === part.mention.userId);
+    return target ? `@${displayName(target)}` : part.text;
+  }).join("");
   const others = useMemo(() => members?.filter(member => member.userId !== user._id), [members, user._id]);
   const suggestions = useChatSuggestions(
     trigger,
@@ -730,12 +738,14 @@ export function ChatThread({
           </time>;
           return (
             <Fragment key={message.id}>
+              {/* The first unread message of a day gets one row: the day, then the red "New" line. */}
               {newDay && (
-                <div className="chat-day">
+                <div className={`chat-day ${unreadStart ? "is-unread" : ""}`} id={unreadStart ? "chat-unread-divider" : undefined}>
                   <span>{dayLabel(message.createdAt)}</span>
+                  {unreadStart && <b>New</b>}
                 </div>
               )}
-              {unreadStart && <div className="chat-unread" id="chat-unread-divider"><span>New</span></div>}
+              {unreadStart && !newDay && <div className="chat-unread" id="chat-unread-divider"><span>New</span></div>}
               <article
                 id={`message-${message.id}`}
                 className={`conversation-message ${grouped ? "is-grouped" : ""} ${message.id === focusedMessage ? "notification-focus" : ""} ${menu?.message.id === message.id ? "is-active" : ""}`}
@@ -775,7 +785,7 @@ export function ChatThread({
                     >
                       <Reply size={12} />
                       <strong>{nameOf(replyMessage)}</strong>
-                      <span>{replyMessage.body || "Attachment"}</span>
+                      <span>{plainText(replyMessage) || "Attachment"}</span>
                     </button>
                   )}
                   {(message.body || message.editedAt || message.pinned) && <p className="chat-message-text">{chatMessageParts(message.body, message.mentions, message.references).map((part, index) => {
@@ -788,7 +798,13 @@ export function ChatThread({
                     return <Fragment key={index}>{part.text}</Fragment>;
                   })}{message.editedAt ? <small className="message-meta" title={formatDateTime(message.editedAt)}>(edited)</small> : null}{message.pinned ? <small className="message-meta message-pinned" aria-label="Pinned"><Pin size={11} /></small> : null}</p>}
                   {message.attachments?.length ? (
-                    <div className="message-files">
+                    <div className="message-files" onClick={event => {
+                      // Images open in place; other files keep their download link.
+                      const link = (event.target as HTMLElement).closest<HTMLAnchorElement>("a.image-attachment[href]");
+                      if (!link || event.metaKey || event.ctrlKey || event.shiftKey || longPress.current?.fired) return;
+                      event.preventDefault();
+                      setLightbox({ url: link.href, name: link.getAttribute("download") || "" });
+                    }}>
                       {message.attachments.map((file) => (
                         <LocalAttachment
                           key={file.id}
@@ -1128,7 +1144,7 @@ export function ChatThread({
       </form>
       {menu && menuMessage && <MessageMenu
         anchor={menu.anchor}
-        preview={menuMessage.body || menuMessage.attachments?.[0]?.name || ""}
+        preview={plainText(menuMessage) || menuMessage.attachments?.[0]?.name || ""}
         own={menuMessage.authorUserId === user._id}
         pinned={Boolean(menuMessage.pinned)}
         reacted={key => Boolean(menuMessage.reactions?.[key]?.includes(user._id))}
@@ -1142,12 +1158,19 @@ export function ChatThread({
       />}
       {deleting && <Dialog title="Delete message" className="confirm-dialog" onClose={() => setDeleting(null)}>
         <div className="dialog-body">
-          <p className="confirm-text chat-delete-preview">{deleting.body || deleting.attachments?.map(file => file.name).join(", ")}</p>
+          <p className="confirm-text chat-delete-preview">{plainText(deleting) || deleting.attachments?.map(file => file.name).join(", ")}</p>
           <div className="dialog-actions">
             <button type="button" className="ghost-button compact" onClick={() => setDeleting(null)}>Cancel</button>
             <button type="button" className="primary-button danger compact" autoFocus onClick={() => { const target = deleting; setDeleting(null); void change(target.id, { delete: true }); }}>Delete</button>
           </div>
         </div>
+      </Dialog>}
+      {lightbox && <Dialog title={lightbox.name || "Image"} className="chat-lightbox" heading={<>
+        <h2>{lightbox.name || "Image"}</h2>
+        <a className="icon-button" href={lightbox.url} download={lightbox.name} aria-label={`Download ${lightbox.name}`} title="Download"><Download size={17} /></a>
+      </>} onClose={() => setLightbox(null)}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- a local blob URL */}
+        <div className="chat-lightbox-image"><img src={lightbox.url} alt={lightbox.name} /></div>
       </Dialog>}
       {toast && createPortal(<div className="board-toast chat-toast" role="status"><span className="board-toast-icon"><Check size={14} /></span><span>{toast}</span></div>, document.body)}
       {issueMessage && projects && <IssueComposer sessionToken={sessionToken} projects={projects} activeProjectId={null} initialDraft={{ title: issueMessage.body.split("\n")[0].slice(0, 250) || "Follow up on chat", description: `${issueMessage.body}\n\nFrom ${nameOf(issueMessage)}, ${formatDateTime(issueMessage.createdAt)}` }} onClose={() => setIssueMessage(null)} onCreated={onOpenReference} />}
