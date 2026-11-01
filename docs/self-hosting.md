@@ -905,6 +905,12 @@ and the person hears it once for that stretch of the limit, as a notification:
 "Codex reached its limit until 14:00, so Kai is using Claude meanwhile." With
 no AI to carry on, it says the bot waits instead. Nobody is asked.
 
+An engine that posts the provider's raw error as its whole reply instead of
+failing the turn (omp's ACP mode sends `429 {"type":"error",…} retry-after-ms=…`
+that way) has that turn count as failed, not as a reply: the person reads it
+in plain words, and a 429 that names its wait is a usage limit held until
+then. A reply that only quotes such an error among other words stays a reply.
+
 - **Which AI.** For one model's own limit, the same AI's default model first;
   then the backups chosen for the bot or in Automatic recovery; then the AI a
   new bot would get. Only an AI that can run a turn now (installed, signed in,

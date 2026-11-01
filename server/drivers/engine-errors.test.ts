@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { engineFailureKind, engineFailureMessage, httpStatusOf, plainFailureMessage, providerReason, stopCause } from "./engine-errors.ts";
+import { engineFailureKind, engineFailureMessage, errorReplyFailure, httpStatusOf, plainFailureMessage, providerReason, stopCause } from "./engine-errors.ts";
 import { classifyError } from "./retry.ts";
 
 const reason = (text: string) => classifyError({ text }).reason;
@@ -102,6 +102,44 @@ describe("a provider refusing a tool's schema", () => {
     expect(plainFailureMessage("Kimi", KIMI)).toBe(engineFailureMessage("Kimi", KIMI));
     expect(plainFailureMessage("Groq", "Groq HTTP 400: model_decommissioned")).toBe("Groq HTTP 400: model_decommissioned");
     expect(engineFailureKind("Mistral HTTP 400: Invalid model: kimi")).toBe("refused");
+  });
+});
+
+describe("errorReplyFailure", () => {
+  const NOW = Date.parse("2026-10-27T06:12:46Z");
+  const anthropic = (status: number, type: string, message: string) =>
+    `${status} {"type":"error","error":{"type":"${type}","message":"${message}"},"request_id":"req_011CgY35mSFzqEa1NBU5nq8i"}`;
+
+  it("names a usage limit and its reset from a 429's retry-after, in the zone given", () => {
+    const reply = `${anthropic(429, "rate_limit_error", "[1308][Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 15:22:19][2026]")} retry-after-ms=4171000`;
+    expect(errorReplyFailure("omp", reply, NOW, "UTC")).toEqual({
+      message: 'This omp account has reached its usage limit (omp says: "[1308][Usage limit reached for 5 hour"), which resets Oct 27, 7:22 AM (UTC). Until then, switch this bot to another AI.',
+      stopReason: "quota",
+      limit: "engine",
+      limitResetsAt: NOW + 4_171_000,
+    });
+  });
+
+  it("reads a 429 without a wait by its words, and an OpenAI-style body too", () => {
+    const limit = errorReplyFailure("omp", anthropic(429, "rate_limit_error", "You've reached your 5-hour usage limit."), NOW);
+    expect(limit).toMatchObject({ stopReason: "quota", limit: "engine" });
+    expect(limit).not.toHaveProperty("limitResetsAt");
+    expect(errorReplyFailure("omp", '429 {"error":{"message":"Rate limit reached for requests","type":"requests","code":"rate_limit_exceeded"}}'))
+      .toEqual({ message: 'omp hit a rate limit (HTTP 429; omp says: "Rate limit reached for requests"). Wait a minute, then run it again.', stopReason: "rpc_error" });
+    expect(errorReplyFailure("omp", '  529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n'))
+      .toEqual({ message: "omp is overloaded right now (HTTP 529). This is usually temporary, so try again in a few minutes.", stopReason: "rpc_error" });
+  });
+
+  it("leaves any other text a reply: an error quoted in words, a success status, a body that is no error", () => {
+    for (const text of [
+      `Here is what came back: ${anthropic(403, "permission_error", "OAuth authentication is currently not allowed for this organization.")}`,
+      `${anthropic(403, "permission_error", "refused")} and then I stopped`,
+      '200 {"type":"error","error":{"type":"x","message":"y"}}',
+      '403 {"type":"message","content":[]}',
+      '403 {"error":"refused"}',
+      "403 {not json}",
+      `${anthropic(429, "rate_limit_error", "slow down")} retry-after-ms=soon`,
+    ]) expect(errorReplyFailure("omp", text), text).toBeNull();
   });
 });
 
