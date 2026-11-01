@@ -68,7 +68,7 @@ it("a bot adds an OAuth server and asks the person to sign in; they sign in on t
   const member = await fetch(`${url}${cardPath}/authorize`, {
     method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${paired.token}` }, body: JSON.stringify({ threadId: iris.threadId }),
   });
-  expect({ status: member.status, body: await member.json() }).toEqual({ status: 403, body: { error: "Only an admin of this installation can sign in to Postiz." } });
+  expect({ status: member.status, body: await member.json() }).toEqual({ status: 409, body: { error: "Only an admin of this installation can sign in to Postiz." } });
   expect(provider.counts.register).toBe(0);
 
   const { url: link } = await api("POST", `${cardPath}/authorize`, { threadId: iris.threadId });

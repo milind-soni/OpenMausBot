@@ -322,7 +322,7 @@ describe("the Sign in card", () => {
     const f = await setup();
     const { card } = await f.signIn();
     delete f.cfg.mcpServers!.linear;
-    expect(await f.authorize(card, session("ada@acme.test"))).toEqual({ status: 403, body: { error: "Only an admin of this installation can sign in to Linear." } });
+    expect(await f.authorize(card, session("ada@acme.test"))).toEqual({ status: 409, body: { error: "Only an admin of this installation can sign in to Linear." } });
     expect(f.current(card).connector).toMatchObject({ status: "required" });
     expect(f.current(card).connector!.resumed).toBeFalsy();
     expect(f.answers).toEqual([]);
@@ -384,13 +384,13 @@ describe("the Sign in card", () => {
   it("on a Team Cloud a non-admin member cannot authorize a shared server's card; the turn's person can authorize their personal server's card and another member cannot", async () => {
     const f = await setup({ team: true });
     const shared = (await f.signIn("main-chat")).card;
-    expect(await f.authorize(shared, session("ada@acme.test"))).toEqual({ status: 403, body: { error: "Only an admin of this installation can sign in to Linear." } });
+    expect(await f.authorize(shared, session("ada@acme.test"))).toEqual({ status: 409, body: { error: "Only an admin of this installation can sign in to Linear." } });
     expect(f.provider.counts.register).toBe(0);
 
     f.team.scopes.set("mcp", "linear", "person");
     const own = await f.signIn("ada-chat");
     expect(own.status).toBe(202);
-    expect(await f.authorize(own.card, session("cleo@acme.test"), ON_THE_MAC, "ada-chat")).toEqual({ status: 403, body: { error: "Only ada@acme.test can sign in to this." } });
+    expect(await f.authorize(own.card, session("cleo@acme.test"), ON_THE_MAC, "ada-chat")).toEqual({ status: 409, body: { error: "Only ada@acme.test can sign in to this." } });
     const hers = await f.authorize(own.card, session("ada@acme.test"), ON_THE_MAC, "ada-chat");
     expect(hers.status).toBe(200);
     expect(await f.approve(hers.body.url as string)).toBe(200);

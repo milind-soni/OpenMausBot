@@ -123,14 +123,12 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
   }
 
   /** A shared server's sign-in becomes every bot's, so it takes an admin, as Settings does. A personal one is the turn's
-   * person's own sign-in, so only they may make it. */
-  function mayAuthorize(auth: RequestAuth, name: string, label: string, threadId: string, language: string | undefined): Refusal | null {
-    if (!deps.personal().includes(name)) {
-      return auth.scopes.includes("admin") ? null : { status: 403, error: serverLine(language, "server.mcp.signIn.adminOnly", { label }) };
-    }
+   * person's own sign-in, so only they may make it. Null: this asker may; else the sentence the card shows them. */
+  function mayAuthorize(auth: RequestAuth, name: string, label: string, threadId: string, language: string | undefined): string | null {
+    if (!deps.personal().includes(name)) return auth.scopes.includes("admin") ? null : serverLine(language, "server.mcp.signIn.adminOnly", { label });
     const person = deps.turnPerson(threadId);
     if (person && auth.kind === "session" && personKey(auth.session) === person) return null;
-    return { status: 403, error: person ? serverLine(language, "server.mcp.signIn.onlyPerson", { name: deps.personName(person) }) : serverLine(language, "server.mcp.signIn.onlyOwner") };
+    return person ? serverLine(language, "server.mcp.signIn.onlyPerson", { name: deps.personName(person) }) : serverLine(language, "server.mcp.signIn.onlyOwner");
   }
 
   /** Where the person's browser comes back after the provider's page: this computer's loopback listener, or this home's
@@ -150,7 +148,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     const language = deps.language(threadId);
     if (card.connector.dismissed) return { status: 409, body: { error: "This sign-in request was set aside. Ask the bot again." } };
     const denied = mayAuthorize(auth, name, label, threadId, language);
-    if (denied) return { status: denied.status, body: { error: denied.error } };
+    if (denied) return { status: 409, body: { error: denied } };
     const server = current(name);
     if ("reason" in server) return unreachable(threadId, card, server);
     const browser = browserFor(auth, req, label, language);
