@@ -23,8 +23,13 @@ it("moves one bot and one conversation between Claude, GitHub Copilot and a cust
     expect((await cli("wait", "--bot", botId, "--task", threadId, "--timeout", "25")).status).toBe("settled");
   };
   try {
+    // Never read at startup, its built-in "Auto" is marked so the picker asks for the real list.
+    const unread = (await api("GET", "/api/instances")).instances.find((entry: any) => entry.instanceId === "githubCopilot");
+    expect(unread.models).toEqual({ default: "auto", options: [{ id: "auto", label: "Auto" }], placeholder: true });
     const copilot = (await api("POST", "/api/instances/githubCopilot/refresh-models", {})).instances
       .find((entry: any) => entry.instanceId === "githubCopilot");
+    expect(copilot.models.placeholder).toBeUndefined();
+    expect(existsSync(join(dataDir, "providers", "engine-models", "githubCopilot.json"))).toBe(true);
     expect(copilot).toMatchObject({ driverKind: "copilotAgent", access: "subscription", snapshot: { state: "available" } });
     expect(copilot.snapshot.authenticated).toBe(true);
     expect(copilot.models.options.map((option: any) => option.id)).toEqual(["auto", "claude-haiku-4.5", "gpt-5.6-luna"]);

@@ -30,3 +30,11 @@ export function modelSelectionForPick(selection: ModelSelection, instance: Insta
   }
   return next;
 }
+
+export function modelLabel(instance: InstanceInfo | undefined, model: string): string {
+  return instance?.models.options.find((option) => option.id === model)?.label ?? model;
+}
+
+export function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
+  return instance?.models.options.find((option) => option.id === model)?.provider;
+}

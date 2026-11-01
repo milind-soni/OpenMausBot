@@ -463,6 +463,8 @@ export interface ModelCatalog {
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
   }>;
+  /** The driver's built-in list, still waiting for its first read from the engine: the picker asks for one. */
+  placeholder?: boolean;
 }
 
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */

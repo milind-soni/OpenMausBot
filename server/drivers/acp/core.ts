@@ -339,7 +339,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         return env;
       };
       let models = support.resolveModels && support.resolveModelsOnCreate === false
-        ? readStartupModelCache(instanceId) ?? support.models : support.models;
+        ? readStartupModelCache(instanceId, support.models) ?? support.models : support.models;
       let accountModels: ReadonlySet<string> | null = null;
       const refreshModels = async () => {
         if (!support.resolveModels) return;

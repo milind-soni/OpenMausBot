@@ -72,7 +72,8 @@ describe("GitHub Copilot ACP driver", () => {
     expect(existing.githubCopilot?.driver).toBe("copilotAgent");
     expect(existing.copilot?.driver).toBe("customAcp");
     expect(CopilotAgentDriver.metadata.access).toBe("subscription");
-    expect(CopilotAgentDriver.models).toEqual({ default: "auto", options: [{ id: "auto", label: "Auto" }] });
+    // Only a stand-in until the first read, so the picker asks for the real list.
+    expect(CopilotAgentDriver.models).toEqual({ default: "auto", options: [{ id: "auto", label: "Auto" }], placeholder: true });
   });
 
   it("lists the advertised models with Auto as the default and each model's own effort levels, without a prompt", async () => {
