@@ -244,13 +244,14 @@ function processCreationTimeMs(pid) {
   return wmicCreationTimeMs(pid) ?? cimCreationTimeMs(pid);
 }
 
+/** A Windows probe's stdout, its window hidden; throws when it fails or runs past `timeout`. */
+function windowsOutput(file, args, timeout) {
+  return execFileSync(file, args, { encoding: "utf8", timeout, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+}
+
 function wmicCreationTimeMs(pid) {
   try {
-    const output = execFileSync(
-      "wmic",
-      ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"],
-      { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
-    );
+    const output = windowsOutput("wmic", ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"], 5_000);
     for (const line of output.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -273,14 +274,10 @@ function wmicCreationTimeMs(pid) {
 function cimCreationTimeMs(pid) {
   const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   try {
-    const output = execFileSync(
-      powershell,
-      [
-        "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-        `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }`,
-      ],
-      { encoding: "utf8", timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
-    );
+    const output = windowsOutput(powershell, [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+      `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }`,
+    ], 15_000);
     const ms = Number(output.trim());
     return output.trim() && Number.isSafeInteger(ms) && ms > 0 ? ms : null;
   } catch {
