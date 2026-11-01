@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { t } from "@/lib/i18n";
 import { archivedIds, chunkIds, clearSelection, clickRow, isTickable, olderThanIds, selectAll, summarizeDelete, type DeleteResponse, type SelectableRow } from "@/lib/bulk-select";
 import { api, type Action, type BotAnnouncement, type Group } from "@/state/store";
@@ -133,14 +133,15 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
   </div>;
 }
 
-export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canSelect, onShowAll, maxDeletable, freshConversation, onDelete }: {
+export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, onShowAll, browser, canSelect, maxDeletable, freshConversation, onDelete }: {
   bulk: ReturnType<typeof useBulkSelect>;
   rows: readonly SelectableRow[];
   selected: Selection;
   total: number;
   canShowAll: boolean;
-  canSelect: boolean;
   onShowAll: () => void;
+  browser: ReactNode;
+  canSelect: boolean;
   maxDeletable?: number;
   freshConversation: boolean;
   onDelete: (threadIds: string[]) => Promise<BulkDeleteResult>;
@@ -148,10 +149,10 @@ export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canS
   if (bulk.active) {
     return <BulkSelectBar rows={rows} selected={selected} maxDeletable={maxDeletable} freshConversation={freshConversation} onChange={bulk.setSelected} onDelete={onDelete} />;
   }
-  if (!canShowAll && !canSelect) return null;
-  const link = "inline-flex h-7 items-center text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink";
-  return <div className="flex items-center justify-between pl-6 pr-2">
-    {canShowAll ? <button type="button" onClick={onShowAll} className={link}>{t("task.showAll", { count: total })}</button> : <span />}
-    {canSelect && <button type="button" onClick={bulk.start} className={link}>{t("task.bulk.select")}</button>}
+  if (total < 2) return null;
+  return <div className="flex flex-wrap items-center justify-between gap-x-2 pl-5 pr-2">
+    {canShowAll && <button type="button" onClick={onShowAll} className="inline-flex min-h-8 items-center rounded px-1 text-[13px] font-medium text-ink-secondary hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">{t("task.showAll", { count: total })}</button>}
+    {browser}
+    {canSelect && <button type="button" onClick={bulk.start} className="inline-flex min-h-8 items-center rounded px-1 text-[12px] text-ink-secondary hover:text-danger focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus">{t("task.bulk.selectForDeletion")}</button>}
   </div>;
 }

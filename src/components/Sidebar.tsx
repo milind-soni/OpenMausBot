@@ -21,6 +21,7 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
+import { BotThreadPicker } from "./TaskPicker";
  
 import { StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
@@ -448,7 +449,6 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
 }
 
 const NO_FOLDERS: BotProject[] = [];
-
 export function BotThreadList({ bot, selected, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false }: BotRowProps & {
   activityLabel?: string;
   hidden?: boolean;
@@ -613,7 +613,6 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
           {open && <div role="group" aria-label={t("task.namedList", { name: project.name })}>
             {visible.map(renderThread)}
             {projectTasks.length === 0 && <p className="px-2.5 py-1 text-[11px] text-ink-tertiary">{t("task.empty")}</p>}
-            {/* The short list keeps only the newest threads, so an open folder can hold none of them: offer the rest. */}
             {!query && !bulk.active && visible.length < projectTasks.length && <button type="button" data-sidebar-folder-show-all={project.id} onClick={() => setShowAll(true)}
               className="inline-flex h-7 items-center pl-6 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">{t("folder.showAll")}</button>}
           </div>}
@@ -626,7 +625,8 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
       {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[11px] text-ink-tertiary">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
       <HelperThreadGroup tasks={orderedThreadList(helpers)} busy={helpers.some((task) => currentTaskBot(bot, task.threadId).busy)} renderThread={renderThread} />
-      <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
+      <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={tasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
+        browser={<BotThreadPicker bot={bot} dispatch={dispatch} placement="sidebar" now={now} onOpen={(threadId) => actions.onSelect({ threadId })} />}
         onShowAll={() => setShowAll(true)} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)} />
       <LocalComputerAutoWarning
         open={permissionRefresh?.kind === "local-auto"}

@@ -3552,5 +3552,6 @@
   "botAccess.yours.chat": "你可以和 {bot} 聊天，也可以和它开始自己的对话。能编辑它的人决定谁有访问权限。",
   "botAccess.yours.other": "能编辑 {bot} 的人决定谁有访问权限。",
   "botAccess.viewOnly": "你可以查看 {bot}，但不能和它聊天。",
-  "botAccess.viewOnlyRoom": "你只能查看 {bot}，所以可以阅读这个聊天室，但不能在里面发言。"
+  "botAccess.viewOnlyRoom": "你只能查看 {bot}，所以可以阅读这个聊天室，但不能在里面发言。",
+  "task.bulk.selectForDeletion": "选择要删除的会话"
 }

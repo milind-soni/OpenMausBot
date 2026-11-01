@@ -2701,5 +2701,6 @@
   "botAccess.yours.chat": "Vous pouvez discuter avec {bot} et commencer vos propres conversations avec lui. Les personnes qui peuvent le modifier choisissent qui y a accès.",
   "botAccess.yours.other": "Les personnes qui peuvent modifier {bot} choisissent qui y a accès.",
   "botAccess.viewOnly": "Vous pouvez voir {bot}, mais pas discuter avec lui.",
-  "botAccess.viewOnlyRoom": "Vous pouvez seulement voir {bot} : vous pouvez lire ce salon, mais pas y écrire."
+  "botAccess.viewOnlyRoom": "Vous pouvez seulement voir {bot} : vous pouvez lire ce salon, mais pas y écrire.",
+  "task.bulk.selectForDeletion": "Sélectionner pour supprimer"
 }

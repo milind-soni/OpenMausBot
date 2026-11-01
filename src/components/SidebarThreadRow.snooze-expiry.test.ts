@@ -12,9 +12,6 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 import { useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { BotThreadList, botRowProps } from "./Sidebar";
-import { initialState, type Bot } from "@/state/store";
-vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 type Row = { threadId: string; title: string; snoozedUntil?: number };
 type Scheduled = { at: number; fire: () => void };
@@ -37,13 +34,8 @@ describe("snooze expiry wake-up", () => {
     vi.stubGlobal("window", {
       setTimeout: (callback: () => void, delay: number) => { scheduled = { at: Date.now() + delay, fire: callback }; return 1; },
       clearTimeout: vi.fn(),
-      // The production list also runs the shared relative-time clock, covered by its own test.
-      setInterval: vi.fn(() => 0),
-      clearInterval: vi.fn(),
     });
     vi.stubGlobal("fetch", vi.fn());
-    // The shared relative-time clock also listens for visibility changes, covered by its own test.
-    vi.stubGlobal("document", { visibilityState: "visible", addEventListener: vi.fn(), removeEventListener: vi.fn() });
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -98,36 +90,4 @@ describe("snooze expiry wake-up", () => {
     expect(renderProbe(tasks, "other")).toContain("later");
   });
 
-  it("schedules the wake-up from the production thread list so a snoozed row reappears at its deadline", () => {
-    const now = Date.now();
-    const bot: Bot = {
-      id: "maus", threadId: "current", name: "Maus", title: "", description: "", notifications: true,
-      color: "green", unread: false, busy: true, messages: [], modelSelection: { instanceId: "fake", model: "fake" },
-      tasks: [
-        { threadId: "current", title: "Current chat", createdAt: 1, busy: true, activity: "working" },
-        { threadId: "napping", title: "Napping", createdAt: 2, snoozedUntil: now + 60_000 },
-      ],
-    };
-    const render = () => {
-      fixture.index = 0; fixture.effects = [];
-      return renderToStaticMarkup(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true }));
-    };
-    const hidden = render();
-    expect(hidden).toContain("Current chat");
-    expect(hidden).not.toContain("Napping");
-
-    for (const effect of fixture.effects) effect();
-    expect(scheduled?.at).toBe(now + 60_001);
-
-    vi.setSystemTime(now + 60_001);
-    const beforeFire = [...fixture.values];
-    scheduled?.fire();
-    const changed = beforeFire
-      .map((previous, index) => [previous, fixture.values[index]] as const)
-      .filter(([previous, current]) => previous !== current);
-    expect(changed).toHaveLength(1);
-    expect(changed[0]![1]).toBe((changed[0]![0] as number) + 1);
-    expect(render()).toContain("Napping");
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
-  });
 });

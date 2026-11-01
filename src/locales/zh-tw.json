@@ -4532,5 +4532,6 @@
   "botAccess.yours.chat": "你可以和 {bot} 聊天，也可以和它開始自己的對話。能編輯它的人決定誰有存取權。",
   "botAccess.yours.other": "能編輯 {bot} 的人決定誰有存取權。",
   "botAccess.viewOnly": "你可以檢視 {bot}，但不能和它聊天。",
-  "botAccess.viewOnlyRoom": "你只能檢視 {bot}，所以可以閱讀這個聊天室，但不能在裡面發言。"
+  "botAccess.viewOnlyRoom": "你只能檢視 {bot}，所以可以閱讀這個聊天室，但不能在裡面發言。",
+  "task.bulk.selectForDeletion": "選取要刪除的對話"
 }

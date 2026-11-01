@@ -5141,5 +5141,6 @@
   "botAccess.yours.chat": "Bạn có thể trò chuyện với {bot} và bắt đầu cuộc trò chuyện riêng với nó. Người có thể chỉnh sửa nó sẽ chọn ai có quyền truy cập.",
   "botAccess.yours.other": "Người có thể chỉnh sửa {bot} sẽ chọn ai có quyền truy cập.",
   "botAccess.viewOnly": "Bạn có thể xem {bot}, nhưng không thể trò chuyện với nó.",
-  "botAccess.viewOnlyRoom": "Bạn chỉ có thể xem {bot}, nên bạn đọc được phòng này nhưng không thể viết vào đó."
+  "botAccess.viewOnlyRoom": "Bạn chỉ có thể xem {bot}, nên bạn đọc được phòng này nhưng không thể viết vào đó.",
+  "task.bulk.selectForDeletion": "Chọn để xóa"
 }

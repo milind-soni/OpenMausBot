@@ -5141,5 +5141,6 @@
   "botAccess.yours.chat": "{bot} ile sohbet edebilir ve onunla kendi sohbetlerini başlatabilirsin. Kimin erişimi olacağını onu düzenleyebilenler seçer.",
   "botAccess.yours.other": "Kimin erişimi olacağını {bot} botunu düzenleyebilenler seçer.",
   "botAccess.viewOnly": "{bot} botunu görüntüleyebilirsin ama onunla sohbet edemezsin.",
-  "botAccess.viewOnlyRoom": "{bot} botunu yalnızca görüntüleyebildiğin için bu odayı okuyabilirsin ama yazamazsın."
+  "botAccess.viewOnlyRoom": "{bot} botunu yalnızca görüntüleyebildiğin için bu odayı okuyabilirsin ama yazamazsın.",
+  "task.bulk.selectForDeletion": "Silmek için seç"
 }
