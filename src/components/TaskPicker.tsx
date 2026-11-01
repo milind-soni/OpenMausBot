@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Check, ChevronDown, FolderInput, Pin, PinOff, Search, SquarePen, Trash2 } from "lucide-react";
 import { useStore, type Action, type Bot, type BotProject, type Group, type Task } from "@/state/store";
@@ -90,8 +90,10 @@ function ConversationTaskPicker({
   onAttentionJump,
   workingElsewhere = 0,
   placement = "header",
+  now = Date.now(),
 }: {
   placement?: "header" | "sidebar";
+  now?: number;
   threadId: string;
   tasks: PickerTask[];
   busy: boolean;
@@ -117,7 +119,6 @@ function ConversationTaskPicker({
   const [position, setPosition] = useState({ left: 8, top: 8 });
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishingRename = useRef(false);
-  const now = useRelativeNow();
 
   const current = tasks.find((t) => t.threadId === threadId);
 
@@ -469,12 +470,19 @@ export function TaskPicker({ bot }: { bot: Bot }) {
   return <BotThreadPicker bot={bot} dispatch={dispatch} attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)} />;
 }
 
-type ThreadPickerProps = { dispatch: (action: Action) => void; placement?: "header" | "sidebar"; onOpen?: (threadId: string) => void };
+function TimedConversationTaskPicker(props: ComponentProps<typeof ConversationTaskPicker>) {
+  const now = useRelativeNow();
+  return <ConversationTaskPicker {...props} now={now} />;
+}
 
-export function BotThreadPicker({ bot, dispatch, placement, onOpen, attention }: ThreadPickerProps & { bot: Bot; attention?: AttentionThread[] }) {
+type ThreadPickerProps = { dispatch: (action: Action) => void; placement?: "header" | "sidebar"; now?: number; onOpen?: (threadId: string) => void };
+
+export function BotThreadPicker({ bot, dispatch, placement, now, onOpen, attention }: ThreadPickerProps & { bot: Bot; attention?: AttentionThread[] }) {
+  const Picker = now === undefined ? TimedConversationTaskPicker : ConversationTaskPicker;
   return (
-    <ConversationTaskPicker
+    <Picker
       placement={placement}
+      now={now}
       threadId={bot.threadId}
       tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
       busy={false}
@@ -496,7 +504,8 @@ export function GroupTaskPicker({ group }: { group: Group }) {
   return <GroupThreadPicker group={group} dispatch={dispatch} />;
 }
 
-export function GroupThreadPicker({ group, dispatch, placement, onOpen }: ThreadPickerProps & { group: Group }) {
+export function GroupThreadPicker({ group, dispatch, placement, now, onOpen }: ThreadPickerProps & { group: Group }) {
+  const Picker = now === undefined ? TimedConversationTaskPicker : ConversationTaskPicker;
   const tasks = useMemo(() => {
     return (group.tasks ?? []).map((task) => ({
       ...task,
@@ -504,8 +513,9 @@ export function GroupThreadPicker({ group, dispatch, placement, onOpen }: Thread
     }));
   }, [group.tasks]);
   return (
-    <ConversationTaskPicker
+    <Picker
       placement={placement}
+      now={now}
       threadId={group.threadId}
       tasks={orderedThreadList(tasks)}
       busy={false}

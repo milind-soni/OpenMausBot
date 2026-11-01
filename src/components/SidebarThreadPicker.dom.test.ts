@@ -59,7 +59,7 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
 });
-afterEach(() => { flushSync(() => root.unmount()); host.remove(); vi.useRealTimers(); delete document.documentElement.dataset.reducedMotion; });
+afterEach(() => { flushSync(() => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); delete document.documentElement.dataset.reducedMotion; });
 
 describe("finding conversations from the sidebar", () => {
   const renderBot = () => flushSync(() => root.render(createElement(BotThreadList, { ...botRowProps(initialState, dispatch, bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true })));
@@ -169,5 +169,33 @@ describe("finding conversations from the sidebar", () => {
     expect(host.querySelector('[role="checkbox"]')).not.toBeNull();
     expect(menu()).toBeNull();
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("shares the list clock with the picker and wakes a snoozed row without opening the picker", () => {
+    const interval = vi.spyOn(window, "setInterval");
+    const now = Date.now();
+    const snoozing: Bot = { ...bot, projects: [], threadId: "current", tasks: [
+      { threadId: "current", title: "Current chat", createdAt: now - 10_000 },
+      { threadId: "napping", title: "Napping", createdAt: now - 300_000, snoozedUntil: now + 60_000 },
+    ] };
+    flushSync(() => root.render(createElement(BotThreadList, { ...botRowProps(initialState, dispatch, snoozing, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true })));
+    expect(interval).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 30_000);
+    expect(host.querySelector('[data-sidebar-thread-row="napping"]')).toBeNull();
+    open();
+    expect(interval).toHaveBeenCalledTimes(1);
+    key("Escape");
+    flushSync(() => vi.advanceTimersByTime(60_001));
+    expect(host.querySelector('[data-sidebar-thread-row="napping"]')).not.toBeNull();
+    expect(menu()).toBeNull();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("shares the room list clock while its picker is open", () => {
+    const interval = vi.spyOn(window, "setInterval");
+    const group = { id: "team", name: "Team", threadId: "recent-7", createdAt: 1, tasks, memberIds: [], messages: [], unread: false, defaultResponder: { kind: "everyone" }, bulletin: "" } as Group;
+    flushSync(() => root.render(createElement(GroupThreadList, { group, selected: true })));
+    expect(interval).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 30_000);
+    open();
+    expect(interval).toHaveBeenCalledTimes(1);
   });
 });

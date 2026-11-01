@@ -626,7 +626,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
       {ungrouped.map(renderThread)}
       <HelperThreadGroup tasks={orderedThreadList(helpers)} busy={helpers.some((task) => currentTaskBot(bot, task.threadId).busy)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={tasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
-        browser={<BotThreadPicker bot={bot} dispatch={dispatch} placement="sidebar" onOpen={(threadId) => actions.onSelect({ threadId })} />}
+        browser={<BotThreadPicker bot={bot} dispatch={dispatch} placement="sidebar" now={now} onOpen={(threadId) => actions.onSelect({ threadId })} />}
         onShowAll={() => setShowAll(true)} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)} />
       <LocalComputerAutoWarning
         open={permissionRefresh?.kind === "local-auto"}
