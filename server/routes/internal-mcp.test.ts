@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -673,6 +674,23 @@ describe("internal mcp_server route, below Full access", () => {
     await remote.post({ action: "update", name: "linear", headers: { "X-Api-Key": "opaque-value-123", Authorization: "Bearer abc123" } });
     expect(remote.card()?.subtitle).toBe("new key for X-Api-Key\nnew key for Authorization");
     expect(JSON.stringify(remote.chat)).not.toMatch(/opaque-value-123|abc123/);
+  });
+
+  it("the card's targetHash is the hash of the display target, so a secret in the args or url cannot be guessed from it", async () => {
+    const value = "sk-live-hunter2-secret";
+    const keyed = { command: "npx", args: ["-y", "notes-mcp", "--api-key", value], enabled: false };
+    const local = fixture({ full: false, servers: { notes: keyed } });
+    await local.post({ action: "enable", name: "notes" });
+    const hash = local.card()!.mcpRequest!.targetHash;
+    const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+    expect(hash).toBe(sha("npx -y notes-mcp --api-key ***"));
+    expect(hash).not.toBe(sha(JSON.stringify(["npx", "-y", "notes-mcp", "--api-key", value])));
+    expect(JSON.stringify(local.card())).not.toContain(value);
+
+    const urlKey = "Zk9QxW2mT7aBcD4eF6gH8jK1";
+    const remote = fixture({ full: false, servers: { zap: { type: "http", url: `https://mcp.zapier.com/api/mcp/s/${urlKey}/mcp`, headers: {}, enabled: false } } });
+    await remote.post({ action: "enable", name: "zap" });
+    expect(remote.card()!.mcpRequest!.targetHash).toBe(sha("https://mcp.zapier.com/api/mcp/s/…/mcp"));
   });
 
   it("a new literal OAuth client secret shows as its own change line without its value", async () => {

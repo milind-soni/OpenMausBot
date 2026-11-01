@@ -341,8 +341,7 @@ export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest,
 }
 
 /** What a card's answer must still find: a different address or command is a different server. */
-const targetHash = (server: StoredMcpServer) =>
-  createHash("sha256").update(JSON.stringify(isRemoteMcpServer(server) ? [server.url] : [server.command, ...server.args])).digest("hex");
+const targetHash = (server: StoredMcpServer) => createHash("sha256").update(botServerTarget(server)).digest("hex");
 
 function propose(deps: Deps, action: McpCardAction, name: string, server: StoredMcpServer, fields: Record<string, unknown>): Outcome {
   if (action === "update") {
