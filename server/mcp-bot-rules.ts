@@ -66,7 +66,8 @@ function mergeSecrets(
 export function mergeBotUpdate(existing: StoredMcpServer, patch: Record<string, unknown>): { body: Record<string, unknown>; dropped: string[] } {
   const dropped: string[] = [];
   if (isRemoteMcpServer(existing)) {
-    const url = typeof patch.url === "string" ? patch.url : existing.url;
+    // The address as `list` showed it, sent back unchanged, is the saved one: a bot never sees the masked parts to resend.
+    const url = typeof patch.url === "string" && patch.url !== botAddress(existing.url) ? patch.url : existing.url;
     const moved = url !== existing.url;
     const headers = mergeSecrets(existing.headers ?? {}, record(patch.headers), moved, "header", dropped);
     const body: Record<string, unknown> = {
@@ -107,15 +108,16 @@ export function mergeBotUpdate(existing: StoredMcpServer, patch: Record<string, 
   return { body, dropped };
 }
 
-function withoutQuery(url: string): string {
-  try {
-    const parsed = new URL(url);
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return url.split(/[?#]/)[0] ?? "";
-  }
+/** One run of 16+ URL-safe characters with a letter and a digit: an opaque key, never a word like `mcp-server-production`. */
+const KEY_SEGMENT = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_-]{16,}$/;
+
+/** A remote server's address as a bot or a card shows it: scheme, host, port and path, with every key-shaped path
+ * segment masked. Security: a key can ride in the userinfo, the query or the path (a Zapier-style link), and a bot must
+ * never read a stored secret. */
+function botAddress(url: string): string {
+  const { protocol, host, pathname } = new URL(url);
+  const path = pathname.split("/").map((segment) => (KEY_SEGMENT.test(segment) ? "…" : segment)).join("/");
+  return redactSecretsInText(`${protocol}//${host}${path}`);
 }
 
 function redactArg(arg: string, previous: string | undefined): string {
@@ -125,9 +127,9 @@ function redactArg(arg: string, previous: string | undefined): string {
 
 const redactedArgs = (args: readonly string[]) => args.map((arg, i) => redactArg(arg, args[i - 1]));
 
-/** Where a server reaches, as a person reads it: its address without the query, or its command line with secrets hidden. */
+/** Where a server reaches, as a person reads it: its address as `botAddress` shows it, or its command line with secrets hidden. */
 export function botServerTarget(server: StoredMcpServer): string {
-  if (isRemoteMcpServer(server)) return withoutQuery(server.url);
+  if (isRemoteMcpServer(server)) return botAddress(server.url);
   return [redactSecretsInText(server.command), ...redactedArgs(server.args)].join(" ");
 }
 
@@ -140,7 +142,7 @@ export function botChangeLines(existing: StoredMcpServer, next: StoredMcpServer,
     if (before !== after) lines.push(`${field}: ${shown[0] || "–"} → ${shown[1] || "–"}`);
   };
   if (isRemoteMcpServer(existing) && isRemoteMcpServer(next)) {
-    const address = (url: string) => withoutQuery(url) + (/[?#]/.test(url) ? "?…" : "");
+    const address = (url: string) => botAddress(url) + (/[?#]/.test(url) ? "?…" : "");
     change("url", existing.url, next.url, [address(existing.url), address(next.url)]);
     change("type", existing.type, next.type);
     change("oauth.clientId", existing.oauth?.clientId ?? "", next.oauth?.clientId ?? "");
@@ -175,7 +177,7 @@ export function botListing(
     ...(extra.managedBy ? { managedBy: extra.managedBy } : {}),
   };
   if (isRemoteMcpServer(server)) {
-    return { ...common, transport: server.type ?? "http", url: withoutQuery(server.url), headerKeys: Object.keys(server.headers ?? {}) };
+    return { ...common, transport: server.type ?? "http", url: botAddress(server.url), headerKeys: Object.keys(server.headers ?? {}) };
   }
   return {
     ...common,

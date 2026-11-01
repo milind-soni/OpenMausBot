@@ -27,6 +27,10 @@ const ASK_ADMIN = "Ask a workspace admin to add it.";
 
 const linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true };
 const notes = { command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "saved-token" }, enabled: true };
+const PATH_TOKEN = "Zk9QxW2mT7aBcD4eF6gH8jK1";
+const USER_TOKEN = "tok3n9876userinfo";
+const zapier = { type: "http", url: `https://mcp.zapier.com/api/mcp/s/${PATH_TOKEN}/mcp`, headers: { "X-Api-Key": "zap-header-value" }, enabled: true };
+const userinfo = `https://ada:${USER_TOKEN}@mcp.example.com/mcp-server-production/mcp`;
 
 interface Options {
   full?: boolean;
@@ -490,6 +494,24 @@ describe("internal mcp_server route, Full access", () => {
     ]);
   });
 
+  it("an update that sends back the address list showed keeps the saved address, headers and sign-in; a new address drops them", async () => {
+    probeWith({ ok: true, tools: [] });
+    const { call, post, stored, mcpOAuth } = fixture({ servers: { zap: zapier } });
+    mcpOAuth.adopt("zap", zapier.url, { url: zapier.url, state: "signed-in", tokens: { access: "token" } });
+    const listed = await call("GET");
+    const shown = (JSON.parse(listed.body.text!.slice(listed.body.text!.indexOf("\n") + 1)) as Array<{ url: string }>)[0]!.url;
+
+    const kept = await post({ action: "update", name: "zap", url: shown, resultBudget: 4000 });
+    expect(kept.status).toBe(200);
+    expect(kept.body.dropped).toBeUndefined();
+    expect(stored("zap")).toMatchObject({ url: zapier.url, headers: { "X-Api-Key": "zap-header-value" }, resultBudget: 4000 });
+    expect(mcpOAuth.authState("zap", zapier.url)).toBe("signed-in");
+
+    const moved = await post({ action: "update", name: "zap", url: "https://mcp.zapier.com/api/mcp/s/Other123Token456abc/mcp" });
+    expect(moved.body.dropped).toEqual(["header X-Api-Key", "sign-in"]);
+    expect(stored("zap")).toMatchObject({ url: "https://mcp.zapier.com/api/mcp/s/Other123Token456abc/mcp", headers: {} });
+  });
+
   it("list returns botListing rows for servers this bot can see and hides another bot's own", async () => {
     const servers = { linear, notes: { ...notes, bot: BOT }, scout: { ...notes, bot: "scout" }, docs: { type: "http", url: "https://docs.example/mcp?key=1", headers: { "X-Key": "k" }, enabled: false } };
     const { call } = fixture({ servers, personal: ["docs"] });
@@ -686,6 +708,23 @@ describe("internal mcp_server route, below Full access", () => {
     expect(cfg.mcpServers).toHaveProperty("linear");
     await respond("allow");
     expect(cfg.mcpServers).toEqual({});
+  });
+
+  it("a key in an address's path or userinfo reaches neither the bot's list nor a Turn on or Change card", async () => {
+    const { call, post, card, chat, lines } = fixture({ full: false, servers: { zap: { ...zapier, enabled: false }, team: { ...linear, url: userinfo, enabled: false } } });
+    const listed = await call("GET");
+    const rows = JSON.parse(listed.body.text!.slice(listed.body.text!.indexOf("\n") + 1)) as Array<{ name: string; url: string }>;
+    expect(rows.map((row) => [row.name, row.url]), "a stored address with userinfo never parses, so it is not listed").toEqual([["zap", "https://mcp.zapier.com/api/mcp/s/…/mcp"]]);
+
+    expect((await post({ action: "enable", name: "zap" })).status).toBe(202);
+    expect(card()?.subtitle.split("\n")[0]).toBe("https://mcp.zapier.com/api/mcp/s/…/mcp");
+    const refused = [await post({ action: "enable", name: "team" }), await post({ action: "update", name: "zap", url: userinfo })];
+    expect(refused.map((outcome) => outcome.status)).toEqual([400, 400]);
+    expect((await post({ action: "update", name: "zap", url: "https://mcp.example.com/mcp-server-production/mcp" })).status).toBe(202);
+    expect(card()?.subtitle.split("\n")[0]).toBe("url: https://mcp.zapier.com/api/mcp/s/…/mcp → https://mcp.example.com/mcp-server-production/mcp");
+
+    const everything = JSON.stringify([listed, refused, chat, lines]);
+    for (const token of [PATH_TOKEN, USER_TOKEN]) expect(everything).not.toContain(token);
   });
 
   it("a proposal the organisation's policy refuses posts no card", async () => {

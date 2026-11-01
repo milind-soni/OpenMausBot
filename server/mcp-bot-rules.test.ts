@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botChangeLines, botListing, botMayChange, mcpOwner, mergeBotUpdate } from "./mcp-bot-rules.ts";
+import { botChangeLines, botListing, botMayChange, botServerTarget, mcpOwner, mergeBotUpdate } from "./mcp-bot-rules.ts";
 import { parseMcpServerMutation, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 
 const REF = `secret-ref:${"a".repeat(32)}`;
@@ -145,6 +145,18 @@ describe("botListing", () => {
     const listing = botListing("s", stdio({ args: ["--api-key", secret, "--token", secret, `--api-key=${secret}`, "--name", "visible"] }), extra);
     expect(JSON.stringify(listing)).not.toContain(secret);
     expect(listing.args).toContain("visible");
+  });
+
+  it("shows an address without userinfo, query or a key-shaped path segment, on the listing, the Turn on target and a change line", () => {
+    const pathKey = "Zk9QxW2mT7aBcD4eF6gH8jK1", userKey = "tok3n9876userinfo";
+    const zapier = remote({ url: `https://mcp.zapier.com/api/mcp/s/${pathKey}/mcp?team=acme#top` });
+    const userinfo = remote({ url: `https://ada:${userKey}@mcp.example.com:8443/mcp-server-production/mcp` });
+    expect(botListing("z", zapier, extra).url).toBe("https://mcp.zapier.com/api/mcp/s/…/mcp");
+    expect(botServerTarget(userinfo)).toBe("https://mcp.example.com:8443/mcp-server-production/mcp");
+    const { lines } = botChangeLines(zapier, userinfo, { url: userinfo.url });
+    expect(lines).toEqual(["url: https://mcp.zapier.com/api/mcp/s/…/mcp?… → https://mcp.example.com:8443/mcp-server-production/mcp"]);
+    const shown = JSON.stringify([botListing("u", userinfo, extra), botServerTarget(zapier), lines]);
+    for (const secret of [pathKey, userKey, "ada", "team=acme"]) expect(shown).not.toContain(secret);
   });
 
   it("reports owner managed when a policy manages the server", () => {
