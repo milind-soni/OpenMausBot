@@ -165,6 +165,15 @@ describe("botListing", () => {
     for (const secret of [pathKey, userKey, "ada", "team=acme"]) expect(shown).not.toContain(secret);
   });
 
+  it("masks base64 and dotted key segments and leaves plain words readable", () => {
+    const pair = Buffer.from("3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d:7e1a2b3c-4d5e-4f60-9a7b-8c9d0e1f2a3b").toString("base64");
+    expect(pair.endsWith("==")).toBe(true);
+    expect(botServerTarget(remote({ url: `https://mcp.example.com/${pair}/mcp` }))).toBe("https://mcp.example.com/…/mcp");
+    expect(botServerTarget(remote({ url: "https://mcp.example.com/abc123.def456.ghi789/mcp" }))).toBe("https://mcp.example.com/…/mcp");
+    expect(botServerTarget(remote({ url: "https://mcp.example.com/mcp-server-production/mcp" }))).toBe("https://mcp.example.com/mcp-server-production/mcp");
+    expect(botServerTarget(remote({ url: "https://mcp.zapier.com/api/mcp/s/mcp" }))).toBe("https://mcp.zapier.com/api/mcp/s/mcp");
+  });
+
   it("reports owner managed when a policy manages the server", () => {
     const listing = botListing("s", stdio(), { ...extra, managedBy: "Acme policy" });
     expect(listing.owner).toBe("managed");
