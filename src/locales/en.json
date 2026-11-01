@@ -7214,6 +7214,7 @@
   "keys.row.didntWork": "Didn't work",
   "keys.row.failed": "Didn't work: {reason}",
   "keys.row.looksLike": "That looks like the {label}, not this one.",
+  "keys.row.engineMissing": "Saved, but {engine} can't run on this computer yet, so this key isn't used. Install it with this command, then check again:",
   "keys.row.notKept": "The key didn't stay saved. Try again.",
   "keys.row.newKey": "Paste the new key",
   "keys.row.show": "Show key",
