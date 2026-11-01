@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,8 +62,9 @@ describe("OpenMausBot data-directory lease", () => {
     // boot/uptime identify which boot wrote the record, so a pid recycled
     // across a restart cannot be mistaken for a live owner, and ns/start which
     // pid namespace and process, so a container's reused pid cannot either.
-    // Each is null where the platform does not expose it.
-    const { boot, ns, start, ...rest } = stored;
+    // Each is null where the platform does not expose it. On Windows, image
+    // names the owner's program, so a pid another program reuses is not it.
+    const { boot, ns, start, image, ...rest } = stored;
     expect(rest).toEqual({
       version: 1,
       pid: process.pid,
@@ -74,9 +75,10 @@ describe("OpenMausBot data-directory lease", () => {
     });
     expect(boot === null || (typeof boot === "string" && boot.length > 0)).toBe(true);
     expect(process.platform === "linux" ? /^[1-9]\d*$/.test(ns) && Number.isSafeInteger(start) : ns === null && start === null).toBe(true);
-    expect(Object.keys(stored).sort()).toEqual(
-      ["boot", "createdAt", "host", "ns", "pid", "start", "token", "uptime", "version"],
-    );
+    expect(image).toBe(process.platform === "win32" ? basename(process.execPath).toLowerCase() : undefined);
+    expect(Object.keys(stored).sort()).toEqual([
+      "boot", "createdAt", "host", ...(process.platform === "win32" ? ["image"] : []), "ns", "pid", "start", "token", "uptime", "version",
+    ]);
     expect(() => acquireDataDirLease(dir)).toThrow(/already using this data directory/i);
 
     expect(lease.release()).toBe(true);
