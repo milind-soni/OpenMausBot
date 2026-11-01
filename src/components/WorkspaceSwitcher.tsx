@@ -173,7 +173,6 @@ export function WorkspaceSwitcher() {
             {locals.map((entry) => {
               const isActive = entry.id === envs?.activeId;
               const isDefault = entry.id === "local";
-              const isPurgeable = Boolean(entry.dataDir && basename(entry.dataDir).startsWith(".openmausbot"));
               return (
                 <div key={entry.id} className="flex w-full items-center justify-between gap-3 px-3 py-2">
                   <button
@@ -195,7 +194,7 @@ export function WorkspaceSwitcher() {
                     <button
                       type="button"
                       aria-label={t("workspaceSwitcher.forgetEntry", { name: entry.name })}
-                      onClick={() => { setForgetId(entry.id); setPurge(isPurgeable); }}
+                      onClick={() => { setForgetId(entry.id); setPurge(false); }}
                       className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger"
                     >
                       <Trash2 size={14} />

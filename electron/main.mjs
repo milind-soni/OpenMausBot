@@ -241,8 +241,14 @@ function queueChatLink(rawLink) {
   return true;
 }
 
+function queueDesktopLink(rawLink) {
+  if (rawLink !== "openmausbot://desktop") return false;
+  revealForLink();
+  return true;
+}
+
 app.on("open-url", (event, url) => {
-  if (!queueOrganizationEntry(url) && !cloudEntry.fromUrl(url) && !queuePackageInstall(url) && !queueChatLink(url)) return;
+  if (!queueOrganizationEntry(url) && !cloudEntry.fromUrl(url) && !queuePackageInstall(url) && !queueChatLink(url) && !queueDesktopLink(url)) return;
   event.preventDefault();
 });
 

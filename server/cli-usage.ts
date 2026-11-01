@@ -37,7 +37,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
                     [--sentinel]   (the health scan below, every two minutes, instead of the server)
   openmausbot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]   (read-only health scan; see --help)
   openmausbot browser install [--with-deps] | status
-  openmausbot workspace list | create NAME [--data-dir DIR] | switch ID | delete ID [--purge] | forget ID [--purge]
+  openmausbot workspace list | create NAME [--workspace-dir DIR] | switch ID | delete ID [--purge] | forget ID [--purge]
   openmausbot fleet init --domain HOST [--operator USER] | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
                     [--anthropic-key-file FILE] [--cap USD] [--license-key KEY] [--memory 1G]
                   | list | users NAME add|remove EMAIL [--chat-only] | suspend NAME | resume NAME
@@ -66,6 +66,9 @@ browser install: the bots' browser engine (agent-browser, pinned) into the
         the Linux libraries Chrome needs (run as root once). Then run
         browser install as the user running serve, from that user's home.
         status: what the current user and data directory have.
+workspace   list, create, switch, delete, forget local workspaces.
+            --workspace-dir DIR sets the new workspace's folder; --data-dir DIR sets the
+            registry root used by setup/serve and is not the workspace directory.
 fleet   many client workspaces on one Linux server, each its own account,
         service, data folder, brand, sign-in list and keys at NAME.HOST
         behind the system Caddy. Plans are printed unless run as root;

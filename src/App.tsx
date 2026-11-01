@@ -26,12 +26,6 @@ import { useRoomPanelShown } from "@/lib/room-panel";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
-import { UpdateBanner } from "@/components/UpdateBanner";
-import { AppNotices } from "@/components/AppNotices";
-import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
-import { LiveConnectionStrip } from "@/components/LiveConnectionStrip";
-import { CloudSendStrip } from "@/components/CloudSendStrip";
-import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { inboxVersion, useInboxLoader, useInboxPanel } from "@/state/inbox";
@@ -322,12 +316,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           meet the frame are round, and the card runs to the window's right and bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
         className={framed ? "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app ring-1 ring-ink/[0.06]" : "contents"}>
-      <UpdateBanner sidebarIndicator={framed || (!calendarFocus && (sidebarInline || drawerOpen))} />
-      <CloudAsleepStrip />
-      <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
-      <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
-      <HomeLine />
-      <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button

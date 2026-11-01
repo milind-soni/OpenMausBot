@@ -1041,7 +1041,8 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
     try {
       renameSync(tmp, environmentsFilePath);
     } catch {
-      writeFileSync(environmentsFilePath, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
+      io.error(`Failed to save workspace registry; keeping the existing registry intact.`);
+      return 1;
     }
   };
 
@@ -1060,6 +1061,8 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
     const name = options.workspaceName.trim();
     if (!name) { io.error("workspace create needs a non-empty name"); return 2; }
     const id = options.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || (Math.random().toString(36).slice(2, 10));
+    if (id === "local") { io.error("The id \"local\" is reserved; choose another workspace name."); return 1; }
+    if (id.length > 64) { io.error(`Workspace id “${id}” exceeds 64 characters; choose a shorter name.`); return 1; }
     const dup = state.environments.find((e) => e.id === id);
     if (dup) { io.error(`A workspace with id “${id}” already exists`); return 1; }
     let dataDir: string | undefined;
@@ -1068,13 +1071,23 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
       const existing = state.environments.find((e) => e.kind === "local" && e.dataDir === dataDir);
       if (existing) { io.error(`A local workspace already uses ${dataDir}`); return 1; }
       const targetDir = dataDir!;
+      const canon = (dir: string) => { try { return realpathSync(dir); } catch { return dir; } };
+      const targetCanon = canon(targetDir);
+      const rootCanon = canon(options.dataDir);
       const overlap = state.environments.find((e) => {
         if (e.kind !== "local" || !e.dataDir) return false;
-        const a = resolve(e.dataDir);
-        return a.startsWith(targetDir + sep) || targetDir.startsWith(a + sep) || a === targetDir;
+        const a = canon(resolve(e.dataDir));
+        return a === targetCanon || a.startsWith(targetCanon + sep) || targetCanon.startsWith(a + sep);
       });
       if (overlap) { io.error(`The data folder overlaps an existing workspace (${overlap.dataDir})`); return 1; }
+      if (targetCanon === rootCanon || targetCanon.startsWith(rootCanon + sep) || rootCanon.startsWith(targetCanon + sep)) {
+        io.error(`The data folder overlaps the registry root (${options.dataDir})`);
+        return 1;
+      }
+    } else {
+      dataDir = join(options.dataDir, "workspaces", id);
     }
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     state.environments.push({ id, kind: "local", name, dataDir });
     state.activeId = id;
     save();
@@ -1108,8 +1121,8 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
         io.error(`Refusing to purge a folder not named .openmausbot-* (${resolved})`);
         return 1;
       }
-      if (resolvedCanon === rootCanon || resolvedCanon.startsWith(rootCanon + sep)) {
-        io.error(`Refusing to purge inside the registry root (${resolved})`);
+      if (resolvedCanon === rootCanon || resolvedCanon.startsWith(rootCanon + sep) || rootCanon.startsWith(resolvedCanon + sep)) {
+        io.error(`Refusing to purge inside or containing the registry root (${resolved})`);
         return 1;
       }
       try {
@@ -1130,6 +1143,22 @@ async function runWorkspace(options: CliOptions, io: CliIo): Promise<number> {
   return 0;
 }
 
+/** Resolve the active local workspace's data directory from the environments registry,
+ * so `openmausbot start`/`serve` uses the workspace last selected with `workspace switch`. */
+function resolveActiveWorkspaceDataDir(defaultDataDir: string): string | undefined {
+  const environmentsFilePath = join(defaultDataDir, "environments.json");
+  let state: { environments: Array<{ id: string; kind: string; dataDir?: string }>; activeId: string } | null = null;
+  try {
+    state = JSON.parse(readFileSync(environmentsFilePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!state) return undefined;
+  const active = state.environments.find((e) => e.id === state.activeId);
+  if (!active || active.kind !== "local" || active.id === "local" || !active.dataDir) return undefined;
+  return resolve(active.dataDir);
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "sentinel") return runSentinelCli(argv.slice(1));
   if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
@@ -1139,6 +1168,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 2;
   }
   process.env.OMB_DATA_DIR = options.dataDir;
+  if (options.command === "start" || options.command === "serve") {
+    const activeWorkspaceDir = resolveActiveWorkspaceDataDir(options.dataDir);
+    if (activeWorkspaceDir) {
+      options.dataDir = activeWorkspaceDir;
+      process.env.OMB_DATA_DIR = activeWorkspaceDir;
+    }
+  }
   switch (options.command) {
     case "setup":
     case "start":
