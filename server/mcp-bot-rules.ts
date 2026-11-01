@@ -29,7 +29,7 @@ export function botMayChange(owner: McpOwner, server?: StoredMcpServer): { ok: t
 }
 
 /** Exactly one ref, bare or as {secretRef}: a string that merely embeds one is a literal, since redeeming it can build any text. */
-function isSecretRef(value: unknown): boolean {
+export function isSecretRef(value: unknown): boolean {
   if (typeof value === "string") return WHOLE_REF.test(value.trim());
   const ref = record(value).secretRef;
   return typeof ref === "string" && WHOLE_REF.test(ref.trim());

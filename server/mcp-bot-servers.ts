@@ -123,7 +123,7 @@ export function keepInBotFolder(server: StoredStdioMcpServer, use: BotFolderUse,
 
 export type BotMcpServerAdd = DisabledMcpServerAdd & { moved?: Array<{ from: string; to: string }> };
 
-/** A bot's add_mcp_server: saved off as always, with files from one of its conversation folders kept in its own folder.
+/** A bot's mcp_server add: saved off first, with files from one of its conversation folders kept in its own folder.
  * `boxed`: no bot reaches another's folders, so a server using this bot's files becomes its own, and one using another
  * bot's files is refused; unboxed, every bot reaches them and the server stays every bot's. */
 export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string, boxed: boolean): BotMcpServerAdd {

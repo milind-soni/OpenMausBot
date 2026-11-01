@@ -109,6 +109,15 @@ describe("whose connection a turn may use", () => {
     expect(setup({ team: false }).host.turnPerson("ada-chat"), "off a team nothing is anyone's").toBeNull();
   });
 
+  it("lets a turn change the team's MCP servers only when the person it acts for is an owner or admin", () => {
+    const team = setup({ roster: ROSTER, requester: { "main-chat": OLIVE, "work-chat": BEN, "ada-chat": ADA, "room-chat": "" } }).host;
+    expect(team.actsForAdmin("main-chat"), "the owner").toBe(true);
+    expect(team.actsForAdmin("work-chat"), "an admin").toBe(true);
+    expect(team.actsForAdmin("ada-chat"), "a User").toBe(false);
+    expect(team.actsForAdmin("room-chat"), "a turn that acts for nobody").toBe(false);
+    expect(setup({ team: false }).host.actsForAdmin("ada-chat"), "off a Team Cloud").toBe(true);
+  });
+
   it("opens work a person's request hands on in the receiving bot's chat with them, when they connected anything of their own", () => {
     const { host, dataDir } = setup({ requester: { "main-chat": CLEO, "work-chat": "" } });
     expect(host.handOnFor("room-chat", "g"), "nothing of hers connected: the work opens where it always did").toBeNull();

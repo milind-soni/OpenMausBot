@@ -99,7 +99,7 @@ function internalDispatch(factory: string): { call: ts.CallExpression; before: s
   return { call, before: text.slice(enclosing!.getStart(source), call.getStart(source)), source };
 }
 
-it.each(["createInternalSignInRoutes", "createInternalThreadRoutes"])("keeps %s inside the internal capability gate", (factory) => {
+it.each(["createInternalSignInRoutes", "createInternalThreadRoutes", "createInternalMcpRoutes"])("keeps %s inside the internal capability gate", (factory) => {
   const { before } = internalDispatch(factory);
   for (const guard of [
     "authorizedInternalCapability(req.headers.authorization)", "!internalCapability", "!internalSender",

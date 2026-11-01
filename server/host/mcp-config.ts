@@ -83,6 +83,7 @@ const personalHeaderValueRefusal = (personal: string[], name: string, server: St
     : null;
 
 const MAX_CONCURRENT_MCP_PROBES = 2;
+export const MCP_CONFIG_BUSY = "MCP servers are already being updated.";
 
 export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpConfig {
   const { cfg, mcpOAuth, mcpConfigBusy, mcpServerResponse, mcpPolicyRefusal, persistMcpServers, appCatalog, forgetPeople, health } = deps;
@@ -90,7 +91,7 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
   let mcpProbesInFlight = 0;
 
   const write = (run: () => McpConfigResult): McpConfigResult => {
-    if (mcpConfigBusy.get()) return { status: 409, error: "MCP servers are already being updated." };
+    if (mcpConfigBusy.get()) return { status: 409, error: MCP_CONFIG_BUSY };
     mcpConfigBusy.set(true);
     try {
       const result = run();

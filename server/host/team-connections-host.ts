@@ -193,6 +193,12 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     personMcp,
     link,
     turnPerson,
+    /** Off a Team Cloud, always; on one, the person this turn acts for is its owner or an admin, as Settings requires. */
+    actsForAdmin(threadId: string, generation?: string): boolean {
+      if (!team) return true;
+      const person = actingFor(threadId, generation);
+      return person !== null && isAdmin(person);
+    },
     /** The person whose private chat work this turn hands on opens in, so it can use their own connections there: the
      * person the turn acts for, when they connected anything of their own. Null: it opens where it always did. */
     handOnFor(threadId: string, generation: string): string | null {

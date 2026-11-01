@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
 import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
@@ -106,7 +106,7 @@ import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
-import { parseToolScope } from "../shared/tool-scope.ts";
+import { canUseMcpServer, parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
@@ -590,6 +590,7 @@ import { createDeciderRoutes } from "./routes/decider.ts"; import { createCloudS
 import { createUpdateCheckRoutes, serverUpdateChecker } from "./routes/update-check.ts"; import { createTimeZoneRoutes } from "./routes/time-zone.ts";
 import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createInternalSignInRoutes } from "./routes/sign-in.ts";
+import { createInternalMcpRoutes } from "./routes/internal-mcp.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
@@ -14529,32 +14530,31 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const updated = updateChannel(room.id, patch);
         return json(res, 200, { ok: true, memberIds: updated.memberIds, memberCount: updated.memberIds.length, message: `Updated room “${updated.name}”.` });
       }
-      if (method === "POST" && path === "/api/internal/mcp-servers") {
-        // Single-flight with the MCP servers route: two writers must not interleave a read of cfg.mcpServers with a save.
-        if (mcpConfig.busy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
-        mcpConfig.busy.set(true);
-        try {
-          const redeemed = secretCards.redeemMcpServer(await readInternalBody(), internalSender.id, internalCapability.threadId);
-          if (!redeemed.ok) return json(res, 400, { error: redeemed.error });
-          const added = mcpServersHost.botAdd(cfg.mcpServers ?? {}, redeemed.value, internalSender.id);
-          if (!added.ok) return json(res, added.status, { error: added.error });
-          const refusal = mcpPolicyRefusal(added.name, added.server);
-          if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
-          persistAnnouncedMcpServers(added.next); redeemed.commit();
-          const server = added.server;
-          const remote = isRemoteMcpServer(server);
-          return json(res, 201, {
-            name: added.name, ...(!remote && server.bot ? { own: true } : {}), ...(added.moved?.length ? { keptIn: added.moved.map(({ to }) => relative(workspaceDir(internalSender.id), to)) } : {}),
-            enabled: false,
-            transport: remote ? server.type : "command",
-            target: remote ? server.url : server.command,
-            envKeys: remote ? [] : Object.keys(server.env).sort(),
-            headerKeys: remote ? Object.keys(server.headers).sort() : [],
-          });
-        } finally {
-          mcpConfig.busy.set(false);
-        }
-      }
+      if (await dispatchRoutes([createInternalMcpRoutes({
+        readBody: readInternalBody, sender: internalSender, threadId: internalCapability.threadId,
+        fullAccess: () => fullAccessForSource(internalSender.id, internalCapability.threadId),
+        guestDriven: () => cloudGuestDriven(internalCapability.threadId),
+        teamAdmin: () => teamConnections.actsForAdmin(internalCapability.threadId, internalCapability.generation),
+        canUse: (name) => canUseMcpServer(internalSender.toolScope, name),
+        config: mcpConfig, cfg: () => cfg, personal: () => teamConnections.personMcp(),
+        authState: (name, url) => mcpOAuth.authState(name, url),
+        managedBy: (name, server) => (managedPolicy.mcpAllowed(name, isRemoteMcpServer(server) ? server.url : undefined) ? undefined : managedPolicy.current()?.organizationName),
+        signOut: async (name, url) => { await mcpOAuth.signOut(name, url); broadcast({ kind: "mcp.changed" }); },
+        testAs: (name, url) => {
+          const person = teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation);
+          const key = person ? teamConnections.people.key(person, name, url) : null;
+          return person ? { oauth: teamConnections.people.oauth(person), ...(key ? { key } : {}) } : null;
+        },
+        redeem: (body) => secretCards.redeemMcpServer(body, internalSender.id, internalCapability.threadId),
+        addToBotList: (name) => { const bot = store.bot(internalSender.id); if (bot?.mcpServers) store.patchBot(bot.id, { mcpServers: [...new Set([...bot.mcpServers, name])] }); },
+        botAdd: (current, body) => mcpServersHost.botAdd(current, body, internalSender.id),
+        ownCwd: () => (existsSync(workspaceDir(internalSender.id)) ? workspaceDir(internalSender.id) : DATA_DIR),
+        decide: (summary) => appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: internalSender.id, botName: internalSender.name, tool: "mcp_server", summary,
+          decision: "auto-approved", source: fullAccessForSource(internalSender.id, internalCapability.threadId) ? "full-access" : "level" }),
+        activity: (label) => store.appendMessage(internalCapability.threadId, { role: "bot", kind: "activity", tool: { name: label, ok: true },
+          ...(store.groupByThread(internalCapability.threadId) ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }),
+        language: () => threadLanguage(internalCapability.threadId),
+      })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalSignInRoutes({
         readBody: readInternalBody,
