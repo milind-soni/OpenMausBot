@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TURN_IMAGE_MAX_COUNT as SERVER_TURN_IMAGE_MAX_COUNT } from "../../server/turn-images";
-import { fitImagesToSlots, IMAGE_MAX_BYTES, intakeFiles, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
+import { fitImagesToSlots, IMAGE_MAX_BYTES, imageSlotsLeft, imagesThatFit, intakeFiles, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
 
 type Fake = { name: string; size: number; type: string; text: () => Promise<string> };
 const file = (name: string, type: string, size = 10): Fake => ({
@@ -167,6 +167,18 @@ describe("intakeFiles", () => {
     expect(out.notice).toBe(
       "Unable to attach run.exe. Choose a supported image, document, or audio file. Archives can't be attached: unzip 아카이브.zip and attach the files inside.",
     );
+  });
+
+  it("counts the images already in the draft, and names pasted images past the slots left", () => {
+    const draft = [{ kind: "image" }, { kind: "file" }, { kind: "image" }] as unknown as Attachment[];
+    expect(imageSlotsLeft(draft)).toBe(TURN_IMAGE_MAX_COUNT - 2);
+    expect(imageSlotsLeft(Array.from({ length: TURN_IMAGE_MAX_COUNT + 1 }, () => ({ kind: "image" })) as unknown as Attachment[])).toBe(0);
+    const notices: string[] = [];
+    const pasted = [file("a.png", "image/png"), file("b.png", "image/png"), file("c.png", "image/png")];
+    expect(imagesThatFit(pasted, 2, (notice) => notices.push(notice)).map((image) => image.name)).toEqual(["a.png", "b.png"]);
+    expect(notices).toEqual([`A message takes up to ${TURN_IMAGE_MAX_COUNT} images. c.png wasn't attached.`]);
+    expect(imagesThatFit(pasted, 3, (notice) => notices.push(notice))).toHaveLength(3);
+    expect(notices).toHaveLength(1);
   });
 
   it("keeps the image cap in step with the server", () => {

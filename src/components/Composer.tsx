@@ -51,21 +51,20 @@ import {
   discardUnsentUpload,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
-  fitImagesToSlots,
   imageAttachmentFromFile,
-  imageLimitNotice,
+  imageSlotsLeft,
+  imagesThatFit,
   replyTargetTakesFocus,
   intakeFiles,
   isLongPaste,
   optimisticImageAttachment,
   pasteAttachment,
   releaseAttachmentImagePreview,
-  TURN_IMAGE_MAX_COUNT,
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, SIMPLE_CONTROL, slotColors } from "./composer-simple";
+import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
@@ -94,8 +93,6 @@ import {
   type ComposerSlashCommand,
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
-
-const SIMPLE_COMPOSER = "bg-composer p-2 ring-[0.5px] ring-ink/10 hover:ring-ink/[0.22] focus-within:ring-ink/[0.22] shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03),0_0_0_1px_rgb(228_228_228/0.04)] [transition:border-radius_300ms,box-shadow_150ms]";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -170,7 +167,6 @@ export function Composer({
     !group && bot ? `bot:${bot.id}` : undefined,
   );
   const attachmentPending = useDraftAttachmentPending(draftId);
-  const imageSlots = Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
   const failedSends = useFailedComposerSends(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
   const editText = useCallback(
@@ -523,7 +519,7 @@ export function Composer({
         allowImages: engineSupportsImages,
         getPath: pathForFile,
         uploadImage,
-        imageSlots,
+        imageSlots: imageSlotsLeft(attachments),
       });
       if (added.length) addAttachments(added);
       if (notice) setAttachmentNotice(notice);
@@ -641,28 +637,24 @@ export function Composer({
         dispatch({ type: "error", message: t("composer.error.clipboardImage") });
         return;
       }
-      if (imageFiles.length > 0) {
-        const { kept, leftOut } = fitImagesToSlots(imageFiles, imageSlots);
-        if (leftOut.length) setAttachmentNotice(imageLimitNotice(leftOut.map((file) => file.name)));
-        if (!kept.length) return;
-        changeDraftAttachmentPending(draftId, true);
-        void (async () => {
-          try {
-            const results = await Promise.allSettled(kept.map(uploadImage));
-            for (const result of results) {
-              if (result.status === "rejected") {
-                dispatch({
-                  type: "error",
-                  message: result.reason instanceof Error ? result.reason.message : "image upload failed",
-                });
-              }
+      const kept = imagesThatFit(imageFiles, imageSlotsLeft(attachments), setAttachmentNotice);
+      changeDraftAttachmentPending(draftId, true);
+      void (async () => {
+        try {
+          const results = await Promise.allSettled(kept.map(uploadImage));
+          for (const result of results) {
+            if (result.status === "rejected") {
+              dispatch({
+                type: "error",
+                message: result.reason instanceof Error ? result.reason.message : "image upload failed",
+              });
             }
-          } finally {
-            changeDraftAttachmentPending(draftId, false);
           }
-        })();
-        return;
-      }
+        } finally {
+          changeDraftAttachmentPending(draftId, false);
+        }
+      })();
+      return;
     }
     const pasted = e.clipboardData.getData("text/plain");
     const reference = threadTokenFromPaste(pasted, threads, currentBotId);
@@ -771,7 +763,6 @@ export function Composer({
           onChangeCitation={(citation: CitationAttachment) => editAttachments((current) => current.map((attachment) => attachment.id === citation.id ? citation : attachment))}
           onDisplayInChatBox={displayPasteInChatBox}
           allowImages={engineSupportsImages}
-          imageSlots={imageSlots}
           notice={attachmentNotice}
           onNotice={setAttachmentNotice}
           onPendingChange={(pending) => changeDraftAttachmentPending(draftId, pending)}

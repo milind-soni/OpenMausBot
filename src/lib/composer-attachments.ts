@@ -127,6 +127,18 @@ export function fitImagesToSlots<T extends { size: number }>(images: readonly T[
   return { kept, leftOut };
 }
 
+/** Images a draft holding these attachments can still take. */
+export function imageSlotsLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
+}
+
+/** The images that fit the slots left; the rest are named in one notice. */
+export function imagesThatFit<T extends { name: string; size: number }>(images: readonly T[], slots: number, onNotice: (notice: string) => void): T[] {
+  const { kept, leftOut } = fitImagesToSlots(images, slots);
+  if (leftOut.length) onNotice(imageLimitNotice(leftOut.map((image) => image.name)));
+  return kept;
+}
+
 const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
