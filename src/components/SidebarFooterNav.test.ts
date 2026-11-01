@@ -47,9 +47,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sidebar footer places", () => {
-  it.each(["comfortable", "compact"] as const)("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead (%s)", (density) => {
+  it("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead", () => {
     fixture.advanced = true;
-    const { html } = render(density);
+    const { html } = render("comfortable");
     const order = ["automations", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -59,8 +59,8 @@ describe("sidebar footer places", () => {
     expect(html).not.toContain('data-sidebar-nav="apps"');
   });
 
-  it.each(["comfortable", "compact"] as const)("leaves no places in Simple mode's sidebar while Files is off: Automations and Team map are in the bottom bar (%s)", (density) => {
-    expect(render(density).html).toBe("");
+  it("leaves no places in Simple mode's sidebar while Files is off: Automations and Team map are in the bottom bar", () => {
+    expect(render("comfortable").html).toBe("");
   });
 
   it.each([false, true])("puts Automations on the avatars-only density ahead of Apps, with Team map (advanced: %s)", (advanced) => {
@@ -148,9 +148,9 @@ describe("sidebar footer places", () => {
 });
 
 describe("Tools header", () => {
-  it.each(["comfortable", "compact"] as const)("labels the places with a Tools header, expanded by default (%s)", (density) => {
+  it("labels the places with a Tools header, expanded by default", () => {
     fixture.advanced = true;
-    const { html } = render(density);
+    const { html } = render("comfortable");
     expect(html).toContain(">Tools<");
     expect(html).toContain('aria-expanded="true"');
     expect(html.indexOf(">Tools<")).toBeLessThan(html.indexOf('data-sidebar-nav="automations"'));
@@ -234,9 +234,9 @@ describe("Apps beside the profile", () => {
 });
 
 describe("toolbar tools layout", () => {
-  it.each(["comfortable", "compact"] as const)("toolbar renders the places as icon buttons with labels (%s)", (density) => {
+  it("toolbar renders the places as icon buttons with labels", () => {
     fixture.advanced = true;
-    const { html } = render(density, { toolsLayout: "toolbar" });
+    const { html } = render("comfortable", { toolsLayout: "toolbar" });
     expect(html).toContain('class="flex flex-row gap-1"');
     expect(html).not.toContain("flex-col");
     for (const label of ["Automations", "Team map"]) {

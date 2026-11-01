@@ -1555,6 +1555,88 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
   });
 
+  describe("the bot's own settings file", () => {
+    const guard = { matcher: "Bash", hooks: [{ type: "command", command: "/opt/guards/no-force-push.sh" }] };
+    const botFolders = (name: string, settings: unknown) => {
+      const bot = join(scratch, `${name}-bot`), thread = join(scratch, `${name}-thread`);
+      mkdirSync(join(bot, ".claude"), { recursive: true });
+      mkdirSync(thread);
+      const file = join(bot, ".claude", "settings.json");
+      writeFileSync(file, JSON.stringify(settings));
+      return { bot, thread, file };
+    };
+
+    it("reaches a turn in a thread's own folder, beside OpenMausBot's own settings", async () => {
+      const dump = join(scratch, "bot-settings.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("reach", {
+        hooks: { PreToolUse: [guard], Stop: [{ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] }] },
+        enabledPlugins: { "guard@team": true },
+        permissions: { deny: ["Read(./.env)"], defaultMode: "bypassPermissions" },
+        env: { GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "false" },
+        model: 123,
+      });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings", botId: "b-settings", text: "hi", cwd: thread, botSettingsFile: file,
+        integrations: { hooks: { url: "http://127.0.0.1:1/hooks", token: "bearer" } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(realpathSync(seen.cwd)).toBe(realpathSync(thread));
+      expect(seen.settings.hooks.PreToolUse).toEqual([guard]);
+      expect(seen.settings.hooks.Stop).toHaveLength(2);
+      expect(seen.settings.hooks.Stop[0]).toEqual({ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] });
+      expect(Object.keys(seen.settings.hooks)).toEqual(expect.arrayContaining(Object.keys(claudeHookSettings("/helper.ts"))));
+      expect(seen.settings.enabledPlugins).toEqual({ "guard@team": true });
+      expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
+      expect(seen.settings.env).toMatchObject({ GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "true" });
+      expect(seen.settings).not.toHaveProperty("model");
+      expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+    });
+
+    it("is left to Claude Code when the turn runs in the folder that holds it", async () => {
+      const dump = join(scratch, "bot-settings-own-folder.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { bot, file } = botFolders("own-folder", { hooks: { PreToolUse: [guard] }, enabledPlugins: { "guard@team": true } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-own", text: "hi", cwd: bot, botSettingsFile: file });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.settings).not.toHaveProperty("enabledPlugins");
+      expect(seen.settings).not.toHaveProperty("hooks");
+    });
+
+    it("never reaches a guest's turn", async () => {
+      const dump = join(scratch, "bot-settings-guest.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create("echo", { FAKE_CLAUDE_VERSION: "2.1.284" });
+      const { thread, file } = botFolders("guest", { hooks: { PreToolUse: [guard] }, env: { GUARD_LEVEL: "strict" } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-guest", text: "hi", cwd: thread, botSettingsFile: file, approvalMode: "ask", guestConfined: true });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv).toContain("--restricted");
+      expect(seen.settings).not.toHaveProperty("hooks");
+      expect(seen.settings.env).not.toHaveProperty("GUARD_LEVEL");
+    });
+
+    it("starts a new process on the turn after it changes, and keeps the warm one while it does not", async () => {
+      const dump = join(scratch, "bot-settings-warm.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("warm", { enabledPlugins: { "guard@team": true } });
+      const turn = async (text: string) => {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-bot-settings-warm", text, cwd: thread, botSettingsFile: file });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        return JSON.parse(readFileSync(dump, "utf8"));
+      };
+      const first = await turn("one");
+      expect((await turn("two")).pid).toBe(first.pid);
+      writeFileSync(file, JSON.stringify({ enabledPlugins: { "guard@team": true, "review@team": true } }));
+      const changed = await turn("three");
+      expect(changed.pid).not.toBe(first.pid);
+      expect(changed.settings.enabledPlugins).toEqual({ "guard@team": true, "review@team": true });
+    });
+  });
+
   it("launches isolated from the machine's own Claude Code configuration", async () => {
     await create();
     const dump = join(scratch, "isolation.json");

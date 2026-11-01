@@ -10,7 +10,9 @@ export type CoordinateBotsCall = {
   message: string;
   reason?: string;
   rework: boolean;
-  thread: "standing" | "new";
+  /** "standing" (the conversation's one work thread with each teammate), "new", or the id of a thread the caller opened on
+   * that teammate. */
+  thread: string;
   reply: "resume" | "none";
   consult: boolean;
   inMyFolder?: boolean;

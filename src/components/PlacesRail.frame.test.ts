@@ -4,11 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RailState } from "../../electron/cloud-rail.mjs";
 
-const fixture = vi.hoisted(() => ({ windowChrome: "mac-inset" as "mac-inset" | "win-caption" }));
+const fixture = vi.hoisted(() => ({ windowChrome: "mac-inset" as "mac-inset" | "win-caption", windowFrame: undefined as boolean | undefined }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { windowChrome: fixture.windowChrome }, ready: true }),
+  useDesktopCapabilities: () => ({ capabilities: { windowChrome: fixture.windowChrome, windowFrame: fixture.windowFrame }, ready: true }),
 }));
 
 import { setLocale } from "@/lib/i18n";
@@ -22,6 +22,8 @@ const rail: RailState = { places: [{ id: "home", name: "My Cloud", color: null, 
 
 beforeEach(() => {
   setLocale("en");
+  fixture.windowChrome = "mac-inset";
+  fixture.windowFrame = undefined;
   Object.assign(window, { ogb: {
     workspaces: { places: async () => rail, onChanged: () => () => {} },
     rail: { expand: async () => {}, onSkin: () => () => {}, onFramed: (callback: (framed: boolean) => void) => { tell = callback; return () => {}; } },
@@ -44,6 +46,15 @@ it("starts its places under the frame's top bar while the page beside draws it, 
   expect(above(), "macOS: under the traffic lights where an older release put them").toContain("h-[52px]");
   await act(async () => tell(true));
   expect(above()).toContain("h-[37px]");
+});
+
+it("with the frame turned off, stands beside the sidebar as it did before the frame: under macOS's traffic lights, in the sidebar's colour", async () => {
+  fixture.windowFrame = false;
+  await mount();
+  expect(above()).toContain("h-[52px]");
+  const nav = host.querySelector("[data-places-rail]")!.className.split(" ");
+  expect(nav).toEqual(expect.arrayContaining(["bg-panel", "border-r"]));
+  expect(nav).not.toContain("bg-frame");
 });
 
 it("on Windows beside an older page, keeps that release's small gap: there are no traffic lights", async () => {
