@@ -39,6 +39,7 @@ interface Options {
   refuse?: (name: string) => string | undefined;
   boxed?: boolean;
   usedBy?: Record<string, string[]>;
+  signInRefusal?: { status: number; error: string };
 }
 
 function fixture(options: Options = {}) {
@@ -67,6 +68,7 @@ function fixture(options: Options = {}) {
   const chat: Array<{ id: string; kind: "options"; card: OptionCardData }> = [];
   const answers: string[] = [];
   const decisions: string[] = [];
+  const signIns: Array<{ name: string; url: string }> = [];
   const cards = new McpRequestService({
     store: {
       messagesFor: () => chat,
@@ -103,6 +105,11 @@ function fixture(options: Options = {}) {
     language: () => undefined,
     usedBy: (name) => options.usedBy?.[name] ?? [],
     requestApproval: ({ action, name, subtitle, change }) => cards.propose({ action, name, botId: BOT, threadId: THREAD }, subtitle, change),
+    requestSignIn: (name, server) => {
+      if (options.signInRefusal) return options.signInRefusal;
+      signIns.push({ name, url: server.url });
+      return { posted: true };
+    },
   };
   const route = createInternalMcpRoutes(deps);
   const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
@@ -132,7 +139,7 @@ function fixture(options: Options = {}) {
   const card = () => chat.at(-1)?.card;
   const respond = (behavior: "allow" | "deny") => cards.respond({ botId: BOT, threadId: THREAD, requestId: card()!.requestId!, behavior }, true);
   const later = (ms: number) => { clock += ms; };
-  return { cfg, config, mcpOAuth, deps, sender, call, post, stored, ref, listedOn, decided, lines, dataDir, setBusy, chat, card, respond, answers, decisions, later };
+  return { cfg, config, mcpOAuth, deps, sender, call, post, stored, ref, listedOn, decided, lines, dataDir, setBusy, chat, card, respond, answers, decisions, later, signIns };
 }
 
 async function createInternalMcpRoutesCall(deps: InternalMcpDeps, payload: Record<string, unknown>) {
@@ -687,9 +694,36 @@ describe("internal mcp_server route, below Full access", () => {
     expect(chat).toEqual([]);
   });
 
-  it("sign_in is not built yet", async () => {
-    const { post } = fixture({ servers: { linear } });
-    expect(await post({ action: "sign_in", name: "linear" })).toEqual({ status: 501, body: { error: "Not yet" } });
+  it("sign_in asks for a Sign in card at any level, in one activity line, and tells the bot to end its turn", async () => {
+    for (const full of [true, false]) {
+      const { post, signIns, lines, decided } = fixture({ full, servers: { linear } });
+      expect(await post({ action: "sign_in", name: "linear" })).toEqual({ status: 202, body: {
+        text: "A Sign in card for linear is now visible to the person. End this turn and wait; OpenMausBot resumes you when they finish.",
+      } });
+      expect(signIns).toEqual([{ name: "linear", url: linear.url }]);
+      expect(lines).toEqual(["Asked to sign in to MCP server linear"]);
+      expect(decided).toEqual([]);
+    }
+    const personal = fixture({ servers: { linear }, personal: ["linear"], admin: false });
+    expect((await personal.post({ action: "sign_in", name: "linear" })).status).toBe(202);
+    expect(personal.signIns).toEqual([{ name: "linear", url: linear.url }]);
+  });
+
+  it("sign_in refuses what no card could sign in to, and passes on the card's own refusal", async () => {
+    const { post, signIns, mcpOAuth, lines } = fixture({ servers: { linear, notes, far: { ...linear, runsOn: MAC } } });
+    expect(await post({ action: "sign_in", name: "notes" })).toEqual({ status: 400, body: { error: "Only servers reached by URL can be signed in to." } });
+    expect(await post({ action: "sign_in", name: "far" })).toEqual({ status: 409, body: { error: "This server runs on Ada's Mac, so it isn't started here." } });
+    expect(await post({ action: "sign_in", name: "gone" })).toEqual({ status: 404, body: { error: "gone no longer exists. Call mcp_server with action list to see the servers." } });
+    mcpOAuth.adopt("linear", linear.url, { url: linear.url, state: "signed-in", tokens: { access: "token" } });
+    expect(await post({ action: "sign_in", name: "linear" })).toEqual({ status: 200, body: { text: "linear is already signed in. Call mcp_server with action test to check it." } });
+    expect(signIns).toEqual([]);
+    expect(lines).toEqual([]);
+
+    const member = fixture({ admin: false, servers: { linear } });
+    expect(await member.post({ action: "sign_in", name: "linear" })).toEqual({ status: 403, body: { error: "Ask a workspace admin to sign in to linear." } });
+    const refused = fixture({ servers: { linear }, signInRefusal: { status: 409, error: "Nobody can sign in to linear from here." } });
+    expect(await refused.post({ action: "sign_in", name: "linear" })).toEqual({ status: 409, body: { error: "Nobody can sign in to linear from here." } });
+    expect(refused.lines).toEqual([]);
   });
 
   it("an existing name says to use update", async () => {

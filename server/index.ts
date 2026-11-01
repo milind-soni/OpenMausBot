@@ -23,7 +23,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, UnansweredApprovals } from "./waiting-on-person.ts";
-import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { McpRequestService } from "./host/mcp-requests.ts";
+import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { McpRequestService } from "./host/mcp-requests.ts"; import { createMcpSignInCards, isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -1415,7 +1415,8 @@ function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported 
 const providerAuthSessions = new ProviderAuthSessions({ signedIn: (instanceId) => limitTakeover.signedIn(instanceId) }); const mcpServersHost = createMcpServersHost({ dataDir: DATA_DIR, cfg: () => cfg, persist: persistMcpServers, bots: () => store.bots, policy: (servers) => managedPolicy.filterMcp(servers), tell: (text, about) => notify(buildNoticeNotification(about, store.bot(about.id)?.threadId ?? "", text)), startsServers: (botId) => { const bot = store.bot(botId); return Boolean(bot && registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.customMcp === true); }, boxed: () => botBox.enabled() });
 const mcpOAuth = new McpOAuthManager({
   file: join(DATA_DIR, "mcp-oauth.json"),
-  isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner),
+  isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner) || isCardOwnerLive(store, owner),
+  onSettled: (name, phase, owner) => mcpSignInCards.settled(name, phase, owner),
   // Read the registered app when needed; never copy its secret into the token store.
   clients: (name, url) => {
     const raw = cfg.mcpServers?.[name];
@@ -1426,7 +1427,7 @@ const mcpOAuth = new McpOAuthManager({
 // Connector tool grants only filter tools/list; the relay's verdict decides each call.
 const teamConnections = createTeamConnectionsHost({ team: CLOUD_TEAM, dataDir: DATA_DIR, cfg: () => cfg, adminOrigin: CLOUD_HOME?.adminOrigin ?? null, harnessUrl: `http://127.0.0.1:${PORT}`, audienceOf: teamHost.audienceOf,
   requester: (threadId, generation) => actingPeople.requester(threadId, generation), personName: (person) => teamHost.personName(person), roster: () => (teamOwners.people?.list() ?? []).map((member) => ({ person: personKey({ id: "", email: member.email }), email: member.email, role: member.role })),
-  mint: (capability) => mintInternalCapability({ ...capability, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }), mcpOAuth, isSessionLive: (id) => sessions.isLive(id),
+  mint: (capability) => mintInternalCapability({ ...capability, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }), mcpOAuth, isOwnerLive: (owner) => sessions.isLive(owner) || isCardOwnerLive(store, owner), onSettled: (name, phase, owner) => mcpSignInCards.settled(name, phase, owner),
   botMcp: (bot) => mcpServersHost.mounted(bot), brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio }); teamConnections.primeApps();
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from its environment. Wired before the first catalog probe below.
 let openCodeOrganisationManaged = (): boolean => false;
@@ -1998,7 +1999,8 @@ function reconcileParkedNode(node: HandoffView): boolean {
     if (message.connector) {
       const cards = connectorCards(node.threadId, message.connector.resumeKey);
       if (cards.some((item) => item.connector?.dismissed || item.connector?.status !== "connected")) continue;
-      if (!coordinator.answerNode(node.id, connectionUpdateText(cards.map((item) => item.connector!.label)))) return false;
+      const resumeText = isMcpSignInCard(message) ? mcpSignInCards.resumeText(message.connector) : connectionUpdateText(cards.map((item) => item.connector!.label));
+      if (!coordinator.answerNode(node.id, resumeText)) return false;
       for (const item of cards) store.patchMessage(node.threadId, item.id, { connector: { ...item.connector!, resumed: true, error: undefined } });
       return true;
     }
@@ -9450,6 +9452,19 @@ const mcpRequests = new McpRequestService({
   decide: (row) => appendDecision(DATA_DIR, { ...row, botName: store.bot(row.botId)?.name, tool: "mcp_server", source: row.decision === "card-shown" ? "no-grant" : "user" }),
 });
 
+const mcpSignInCards = createMcpSignInCards({
+  store, cfg: () => cfg, mcpOAuth,
+  personal: () => teamConnections.personMcp(),
+  turnPerson: (threadId) => teamConnections.turnPerson(threadId),
+  oauthFor: (person) => teamConnections.people.oauth(person),
+  personName: (person) => teamConnections.nameOf(person),
+  publicOrigins: () => [CLOUD_HOME?.publicOrigin, hostedWorkspaceConfiguration()?.tenant.origin, savedCustomDomain(), FALLBACK_PUBLIC_URL],
+  language: threadLanguage,
+  answer: answerCardNode,
+  threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId),
+  changed: () => broadcast({ kind: "mcp.changed" }),
+});
+
 async function resolveAndSendMcp(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean> {
   const outcome = await mcpRequests.respond(args, ownerReview);
   if (!outcome) return false;
@@ -9485,6 +9500,7 @@ function mcpServerDeps(sender: BotRecord, threadId: string, generation?: string)
     language: () => threadLanguage(threadId),
     usedBy: (name) => store.bots.filter((bot) => bot.id !== sender.id && !bot.hidden && Object.hasOwn(mcpServersHost.mounted(bot), name) && canUseMcpServer(bot.toolScope, name)).map((bot) => bot.name),
     requestApproval: ({ action, name, subtitle, change }) => mcpRequests.propose({ action, name, botId: sender.id, threadId }, subtitle, change, from),
+    requestSignIn: (name, server) => mcpSignInCards.request({ bot: sender, threadId, ...(from ? { from } : {}) }, name, server),
   };
 }
 const routineTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -15387,7 +15403,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const threadId = String(method === "GET" ? url.searchParams.get("threadId") ?? "" : body.threadId ?? "");
       const message = connectorMessage(m[1], threadId, m[2]);
       if (!message?.connector) return json(res, 404, { error: "no such connection request" });
+      if (isMcpSignInCard(message)) {
+        res.setHeader("Cache-Control", "no-store");
+        const answer = await mcpSignInCards.route(m[3], method, { auth, req, threadId, message });
+        return json(res, answer.status, answer.body);
+      }
       const connector = message.connector;
+      // Members reach authorize for an MCP server's Sign in card; connecting an app stays an admin's.
+      if (m[3] === "authorize" && !auth.scopes.includes("admin")) return json(res, 403, { error: "forbidden: this session lacks the admin scope" });
       if (m[3] === "authorize" && method === "POST") {
         const alias = composio.normalizeAccountAlias(typeof body.alias === "string" ? body.alias : undefined) ?? connector.alias;
         store.patchMessage(threadId, message.id, { connector: { ...connector, alias, status: "authorizing", error: undefined, dismissed: false } });

@@ -737,7 +737,9 @@ export interface QuotaSwitchCardData {
 }
 
 export interface ConnectorCardData {
-  /** Composio toolkit slug. It is validated server-side before every action. */
+  /** What the card connects: a Composio app (absent or "composio"), or a sign-in to an MCP server ("mcp"). */
+  source?: "composio" | "mcp";
+  /** Composio toolkit slug, or the MCP server's name. It is validated server-side before every action. */
   slug: string;
   label: string;
   description: string;

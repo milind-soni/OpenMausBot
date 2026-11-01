@@ -9,7 +9,7 @@ import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
 import type { McpProbeResult } from "../mcp-probe.ts";
-import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type StoredMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -67,6 +67,9 @@ export interface InternalMcpDeps {
   usedBy(name: string): string[];
   /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
   requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; change: McpHeldChange }): { text: string };
+  /** Shows the person a Sign in card for a server reached by URL; the bot ends its turn and OpenMausBot resumes it when
+   * they finish or set the card aside. */
+  requestSignIn(name: string, server: StoredRemoteMcpServer): { posted: true } | { status: number; error: string };
 }
 
 type Deps = Omit<InternalMcpDeps, "readBody">;
@@ -134,18 +137,20 @@ async function act(deps: Ctx, body: unknown, signal: AbortSignal): Promise<Outco
   const { action, name, ...rest } = body as Record<string, unknown>;
   if (!ACTIONS.includes(action as McpAction)) return { status: 400, error: `mcp_server needs action: one of ${ACTIONS.join(", ")}.` };
   if (action === "list") return list(deps);
-  if (action === "sign_in") return { status: 501, error: "Not yet" };
   if (typeof name !== "string" || !name) return { status: 400, error: `mcp_server ${String(action)} needs name.` };
   const fields = Object.fromEntries(Object.entries(rest).filter(([key]) => !BOT_STRIPPED_KEYS.includes(key)));
   if (action === "add") return add(deps, name, fields, signal);
 
   const servers = deps.cfg().mcpServers ?? {};
-  if (!Object.hasOwn(servers, name)) return { status: 404, error: `${name} doesn't exist. Call mcp_server with action list to see the servers.` };
+  if (!Object.hasOwn(servers, name)) {
+    return { status: 404, error: `${name} ${action === "sign_in" ? "no longer exists" : "doesn't exist"}. Call mcp_server with action list to see the servers.` };
+  }
   const parsed = parseStoredMcpServer(name, servers[name]);
   if (!parsed.ok) return { status: 400, error: parsed.error };
   const server = parsed.server;
   const owner = mcpOwner(name, server, deps.sender.id, deps.personal());
   const may = botMayChange(owner, server);
+  if (action === "sign_in") return signIn(deps, name, server, owner);
   if (action === "test") {
     if (server.runsOn) return { status: 409, error: runsElsewhere(server.runsOn) };
     if (owner === "theirs" && !may.ok) return { status: 403, error: may.error };
@@ -277,6 +282,21 @@ function disable(deps: Deps, name: string): Outcome {
   deps.decide(`Turned off MCP server ${name}`, deps.fullAccess() ? "full-access" : "level");
   say(deps, { action: "disable", name }, ["server.mcp.turnedOff", { name }]);
   return { status: 200, text: `Turned off MCP server ${name}. ${WHEN.live.leave}` };
+}
+
+/** A sign-in is the person's own act, so it takes a card at every level; a personal server's card signs in the turn's
+ * person. */
+function signIn(deps: Deps, name: string, server: StoredMcpServer, owner: ReturnType<typeof mcpOwner>): Outcome {
+  if (server.runsOn) return { status: 409, error: runsElsewhere(server.runsOn) };
+  if (!isRemoteMcpServer(server)) return { status: 400, error: "Only servers reached by URL can be signed in to." };
+  if (owner === "shared" && !deps.teamAdmin()) return { status: 403, error: `Ask a workspace admin to sign in to ${name}.` };
+  if (owner === "shared" && deps.authState(name, server.url) === "signed-in") {
+    return { status: 200, text: `${name} is already signed in. Call mcp_server with action test to check it.` };
+  }
+  const card = deps.requestSignIn(name, server);
+  if ("error" in card) return card;
+  say(deps, { action: "sign_in", name }, ["server.mcp.askedSignIn", { name }]);
+  return { status: 202, text: `A Sign in card for ${name} is now visible to the person. End this turn and wait; OpenMausBot resumes you when they finish.` };
 }
 
 async function signOut(deps: Deps, name: string, server: StoredMcpServer): Promise<Outcome> {

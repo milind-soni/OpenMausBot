@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { ensureManagedComposioCredentials, managedComposioAccess } from "../electron/managed-composio.mjs";
 import { writeFileAtomic } from "./atomic.ts";
-import { McpOAuthManager } from "./mcp-oauth.ts";
+import { McpOAuthManager, type McpSignInPhase } from "./mcp-oauth.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 
 export type ConnectionScope = "team" | "person";
@@ -96,6 +96,8 @@ export interface PeopleConnectionsOptions {
   /** The team server's sign-in app for an MCP server, when an admin set one (config.json `oauth`). */
   clients: (name: string, url: string) => McpOAuthClientConfig | undefined;
   isOwnerLive: (owner: string) => boolean;
+  /** Each member's sign-in ending, as McpOAuthManager's own option hears it. */
+  onSettled?: (name: string, phase: McpSignInPhase, owner: string) => void;
   fetchImpl?: typeof fetch;
 }
 
@@ -200,7 +202,10 @@ export class PeopleConnections {
     let manager = this.managers.get(person);
     if (!manager) {
       this.ensureDir();
-      manager = new McpOAuthManager({ file: join(this.dir, "mcp-oauth", `${person}.json`), clients: this.options.clients, isOwnerLive: this.options.isOwnerLive });
+      manager = new McpOAuthManager({
+        file: join(this.dir, "mcp-oauth", `${person}.json`), clients: this.options.clients, isOwnerLive: this.options.isOwnerLive,
+        ...(this.options.onSettled ? { onSettled: this.options.onSettled } : {}),
+      });
       this.managers.set(person, manager);
     }
     return manager;

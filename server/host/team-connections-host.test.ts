@@ -62,7 +62,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
       const server = raw as { url: string; headers: Record<string, string> };
       return [name, { type: "http", url: server.url, headers: server.headers } as McpServerSpec];
     })),
-    isSessionLive: () => true,
+    isOwnerLive: () => true,
     ...(options.roster ? { roster: () => options.roster! } : {}),
     brokerUrl: () => ADA_ACCESS.url,
     composio: composio as never,

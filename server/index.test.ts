@@ -11931,6 +11931,34 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps connecting an app from its card an admin's, though members reach the card's authorize for MCP sign-ins", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const requested = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "member-authorize-fixture", items: [{ slug: "gmail" }] }),
+      });
+      const [cardId] = ((await requested.json()) as { messageIds: string[] }).messageIds;
+      const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+      const paired = await fetch(`${BASE}/api/auth/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }) });
+      const memberToken = ((await paired.json()) as { token: string }).token;
+      const cardNow = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[]).find((message) => message.id === cardId).connector;
+      const untouched = await cardNow();
+      const before = connectorLinkRequests.length;
+      const asMember = await fetch(`${BASE}/api/bots/${bot.id}/connector-cards/${cardId}/authorize`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${memberToken}` }, body: JSON.stringify({ threadId: bot.threadId }),
+      });
+      expect({ status: asMember.status, body: await asMember.json() }).toEqual({ status: 403, body: { error: "forbidden: this session lacks the admin scope" } });
+      expect(connectorLinkRequests).toHaveLength(before);
+      expect(await cardNow()).toEqual(untouched);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps second-account cards separate and waits for the requested alias, not an existing account", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;
