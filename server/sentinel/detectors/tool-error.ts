@@ -1,7 +1,7 @@
 import { isHeldMemberLine } from "../../room-holds.ts";
 import { failureKey, HARNESS_NOTICE, signatureOf, toolOrigin } from "../normalize.ts";
 import type { Detector, Observation, Origin, Severity } from "../types.ts";
-import { TURN_TIMEOUT_NOTICE } from "./turn-stop.ts";
+import { isTurnTimeoutNotice } from "./turn-stop.ts";
 
 export const SEVERITY_BY_ORIGIN: Record<Origin, Severity> = { harness: "high", external: "medium", shell: "low" };
 
@@ -12,9 +12,9 @@ export const toolError: Detector = {
     for (const record of records) {
       if (record.type !== "tool" || record.ok) continue;
       // a stopped room turn is turn_timeout's, not a tool's
-      if (record.tool === HARNESS_NOTICE && TURN_TIMEOUT_NOTICE.test(record.text)) continue;
-      // a member the person held on purpose is not a failure
-      if (isHeldMemberLine(record.tool)) continue;
+      if (record.tool === HARNESS_NOTICE && isTurnTimeoutNotice(record.text)) continue;
+      // a member the person held on purpose is not a failure: a status row reaches here as a harness notice with its words
+      if (isHeldMemberLine(record.tool) || (record.tool === HARNESS_NOTICE && isHeldMemberLine(record.text))) continue;
       const origin = toolOrigin(record.tool);
       const { key, title } = failureKey(record.tool, record.text);
       observations.push({

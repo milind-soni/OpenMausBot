@@ -129,11 +129,13 @@ export function reachablePeers<T extends RosterMember>(bots: readonly T[], from:
   });
 }
 
-/** A name resolves only inside reachablePeers, so it can never reach a bot its id could not. */
+/** A name resolves only inside reachablePeers, so it can never reach a bot its id could not. `elsewhere(name)`: why no bot
+ * here has that name past "no such bot", when one of the person's other places has it, or when they work as one place. */
 export function resolveTeammate<T extends RosterMember>(
   bots: readonly T[],
   from: RosterMember,
   raw: string,
+  elsewhere: (name: string) => { where: string } | { hint: string } | null = () => null,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
   if (bots.some(bot => bot.id === wanted)) return { id: wanted, byName: false };
@@ -154,7 +156,9 @@ export function resolveTeammate<T extends RosterMember>(
   const offList = Array.isArray(from.peers) ? bots.find(bot => bot.id !== from.id && !bot.hidden && !from.peers!.includes(bot.id) &&
     sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) : undefined;
   if (offList) return { error: reachRefusal(from, offList)! };
-  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)} ${peerAccessHelp(from)}` };
+  const away = bots.some(bot => fold(bot.name) === name || loose(bot.name) === loose(wanted)) ? null : elsewhere(wanted);
+  if (away && "where" in away) return { error: away.where };
+  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${peerAccessHelp(from)}` };
 }
 
 const CHOICES_MAX = 12;

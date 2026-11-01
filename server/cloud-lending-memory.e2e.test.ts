@@ -863,3 +863,25 @@ it("no command the owner saved answers for a conversation a guest left behind: i
   again.close();
   await stop(bot, guests);
 }, 60_000);
+
+it("a conversation a guest left behind keeps its private folder when the owner gives the bot a working folder; the owner's own moves there", async () => {
+  const bot = await newBot("Working folder", "done");
+  const guests = await guestThread(bot);
+  const mine = await newThread(bot);
+  const idle = (threadId: string) => expect.poll(async () => ((await api("GET", "/api/bots?messages=0", { token: owner })).body.bots as any[])
+    .find((candidate) => candidate.id === bot.id).tasks.find((task: any) => task.threadId === threadId).busy, { timeout: 15_000 }).toBeFalsy();
+  const cwdOf = async (threadId: string, text: string) => {
+    rmSync(dumpOf("done"), { force: true });
+    await say(owner, bot, text, threadId);
+    const { cwd } = await dumped(dumpOf("done"));
+    await idle(threadId);
+    return realpathSync(cwd);
+  };
+  const guestFolder = await cwdOf(guests, "Hello.");
+  expect(guestFolder).toBe(realpathSync(join(home, ".openmausbot", "task-workspaces", bot.id, guests)));
+  expect(await cwdOf(mine, "Hello.")).toBe(realpathSync(join(home, ".openmausbot", "task-workspaces", bot.id, mine)));
+  const project = realpathSync(mkdtempSync(join(home, "project-")));
+  expect((await api("PATCH", `/api/bots/${bot.id}`, { token: owner, body: { cwd: project } })).status).toBe(200);
+  expect(await cwdOf(guests, "Hello again.")).toBe(guestFolder);
+  expect(await cwdOf(mine, "Hello again.")).toBe(project);
+}, 60_000);

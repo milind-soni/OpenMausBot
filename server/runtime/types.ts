@@ -124,8 +124,14 @@ export interface Assignment {
   rework: boolean;
   /** While parked: the exact question for the person. */
   question?: string;
-  /** The person's answer, harness-quoted, carried into the next turn. */
+  /** While parked under Full access ("Just do it"): the question is its requester's to answer, never the person's.
+   * Still unanswered when the requester's turn that carries it ends, the assignee goes on with `default`, or with its
+   * own pick when it named none. */
+  decide?: { default?: string };
+  /** The answer, harness-quoted, carried into the next turn. */
   answer?: string;
+  /** Who gave `answer` when the person did not: a bot that passed one on or decided it, or nobody (the default). */
+  answeredBy?: Answerer;
   /** On a root only: the budget window since its last durable progress. */
   budgets?: { since: number; requests: number; executions: number; wakes: number };
   /** While parked on the person's cards (a root): the ids of the cards the
@@ -146,6 +152,8 @@ export interface Assignment {
   batchKey?: string;
   version: 1;
 }
+
+export type Answerer = { kind: "bot"; botId: string } | { kind: "default" };
 
 export interface TurnEvidence {
   commands?: number;
@@ -239,7 +247,7 @@ export interface RunInput {
 export type RunResult =
   | { kind: "completed"; text: string; evidence?: TurnEvidence }
   | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
-  | { kind: "needs_input"; question: string; cards?: string[]; evidence?: TurnEvidence }
+  | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */
   | { kind: "continue"; text: string; note: string; handoffPath?: string; evidence?: TurnEvidence };
@@ -272,8 +280,11 @@ export interface EnvelopeNames {
   person?: string;
   /** The requester conversation's title, when there is one. */
   thread?: string;
-  /** The tool the assignee asks the person a question with set answers, when its engine has one. */
+  /** The tool the assignee asks the person a question with set answers, when its engine has one: the exact name its
+   * model calls. */
   askTool?: string;
+  /** The bot that gave the answer the turn carries, when a bot did (`answeredBy`). */
+  answerer?: string;
 }
 
 /** What the runtime needs from the server. No method may throw into the runtime: a throw is logged and read as "not now". */
@@ -324,8 +335,8 @@ export interface Limits {
   /** A turn with no activity for this long is stalled (the host says what
    * counts as activity by touching progress()). */
   turnStallMs: number;
-  /** How long a parked assignment waits on the person before it expires:
-   * not run, not refused. */
+  /** How long a parked assignment waits on the person's words before it expires: not run, not refused. Infinite
+   * unless a host sets it: a question waits for the person. */
   inputWaitMs: number;
 }
 
@@ -337,7 +348,7 @@ export const DEFAULT_LIMITS: Limits = {
   queueMs: 24 * 60 * 60_000,
   stallMs: 4 * 60 * 60_000,
   turnStallMs: 20 * 60_000,
-  inputWaitMs: 30 * 60_000,
+  inputWaitMs: Number.POSITIVE_INFINITY,
 };
 
 export interface LiveEdge {

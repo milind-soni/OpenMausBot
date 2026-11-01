@@ -12,8 +12,6 @@ const fixture = vi.hoisted(() => ({
   setShowThreads: vi.fn(),
   showRunCard: true,
   setShowRunCard: vi.fn(),
-  sidebarDensity: "comfortable" as "comfortable" | "compact" | "icons",
-  setSidebarDensity: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
   advancedMode: false,
@@ -38,11 +36,6 @@ vi.mock("@/lib/thread-preferences", () => ({
 vi.mock("@/lib/run-card-preferences", () => ({
   useShowRunCard: () => fixture.showRunCard,
   setShowRunCard: fixture.setShowRunCard,
-}));
-vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
-  useSidebarDensity: () => fixture.sidebarDensity,
-  setSidebarDensity: fixture.setSidebarDensity,
 }));
 vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
@@ -73,7 +66,6 @@ beforeEach(() => {
   fixture.section = "appearance";
   fixture.showThreads = true;
   fixture.showRunCard = true;
-  fixture.sidebarDensity = "comfortable";
   fixture.notificationSounds = true;
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
