@@ -41,7 +41,7 @@ const api = async (
 
 /** A gate written before the turn starts lets it finish at once. Depth-1 turns (no thread id in their MCP config) share the "peer" gate. */
 const release = (threadId: string) => writeFileSync(join(gates, `${threadId}.gate`), "finish");
-const dumpOf = (threadId: string): { systemPrompt?: string; mcpConfig?: any } | undefined => {
+const dumpOf = (threadId: string): { argv?: string[]; systemPrompt?: string; mcpConfig?: any } | undefined => {
   try {
     return JSON.parse(readFileSync(join(gates, `${threadId}.json`), "utf8"));
   } catch {
@@ -193,6 +193,11 @@ beforeAll(async () => {
         driver: "claudeAgent",
         displayName: "Gated fixture",
         config: { cli: gated },
+      },
+      plain: {
+        driver: "cursorAgent",
+        displayName: "Plain fixture",
+        config: { cli: FAKE_ACP, fullAuto: true },
       },
       curious: {
         driver: "grokAgent",
@@ -354,6 +359,116 @@ describe("start_thread on yourself", () => {
       expect(await botState(pm.id)).toMatchObject({ modelSelection: sonnet, approvalMode: "edits" });
     } finally {
       await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
+});
+
+describe("start_thread on another model, reporting back", () => {
+  it("runs the thread on the chosen model and resumes the opener with its result", async () => {
+    const pm = await createBot("Pam", "gated");
+    const opus = { instanceId: "gated", model: "claude-opus-5" };
+    try {
+      const token = await heldTurn(pm, "Get a second opinion on the diff.");
+      const models = await api("GET", "/api/internal/models", undefined, token);
+      expect(models.status).toBe(200);
+      expect(models.body.instances.find((instance: any) => instance.instanceId === "gated")).toMatchObject({ driverKind: "claudeAgent" });
+      const unknown = await api("POST", "/api/internal/threads",
+        { title: "Review", message: "go", modelSelection: { instanceId: "gated", model: "no-such-model" }, reportBack: true }, token);
+      expect([unknown.status, unknown.body.error]).toEqual([400, 'model "no-such-model" is not offered by instance "gated"']);
+      expect((await botState(pm.id)).tasks).toHaveLength(1);
+
+      const opened = await api("POST", "/api/internal/threads",
+        { title: "Review: Opus", message: "Review the diff. [[gate:own-review]]", modelSelection: opus, reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      expect(opened.body).toMatchObject({ self: true, reportBack: true, title: "Review: Opus" });
+      const { threadId, requestId } = opened.body;
+      expect(await taskOf(pm.id, threadId)).toMatchObject({ title: "Review: Opus", modelSelection: opus, openedBy: { botId: pm.id, threadId: pm.threadId } });
+      expect((await messages(pm.threadId)).find((message) => message.threadRef?.threadId === threadId))
+        .toMatchObject({ tool: { name: "Opened thread #Review: Opus", ok: true } });
+
+      release(pm.threadId);
+      await expect.poll(() => dumpOf("own-review")?.argv?.join(" "), { timeout: 15_000 }).toContain("claude-opus-5");
+      expect(handoffs().find((node) => node.id === requestId)).toMatchObject({ botId: pm.id, threadId, status: "running" });
+      release("own-review");
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      await expect.poll(async () => (await messages(pm.threadId)).find((message) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")
+        ?.tool?.name, { timeout: 15_000 }).toBe("#Review: Opus replied");
+      expect(promptsOf("own-review")[0].message.content).toContain("Brief from @Pam (you, in #Get a second opinion on the diff.):\nReview the diff.");
+      await expect.poll(() => promptsOf("own-review").at(-1)?.message.content ?? "", { timeout: 15_000 })
+        .toContain(`[OpenMausBot report from @Pam (your thread #Review: Opus, on claude-opus-5) on assignment ${requestId}: done]`);
+      expect((await messages(pm.threadId)).some((message) => message.tool?.name === "Resumed with #Review: Opus results, reviewing")).toBe(true);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+      expect((await botState(pm.id)).modelSelection).toMatchObject({ model: "claude-sonnet-5" });
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+
+  it("runs it on another engine, and refuses report_back from a room", async () => {
+    const pm = await createBot("Pam", "gated");
+    try {
+      const token = await heldTurn(pm, "Ask a different engine.");
+      const engines = (await api("GET", "/api/internal/models", undefined, token)).body.instances;
+      const pick = (instanceId: string) => {
+        const engine = engines.find((instance: any) => instance.instanceId === instanceId);
+        return { instanceId, model: engine.models.default || engine.models.options[0].id };
+      };
+      const signedOut = await api("POST", "/api/internal/threads", { title: "Review: Grok", message: "Review the diff.", modelSelection: pick("curious"), reportBack: true }, token);
+      expect([signedOut.status, signedOut.body.error]).toEqual([409, expect.stringContaining("can't run now: it is signed out")]);
+      expect((await botState(pm.id)).tasks).toHaveLength(1);
+      const selection = pick("plain");
+      const opened = await api("POST", "/api/internal/threads", { title: "Review: Cursor", message: "Review the diff.", modelSelection: selection, reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      expect(await taskOf(pm.id, opened.body.threadId)).toMatchObject({ modelSelection: selection });
+      release(pm.threadId);
+      await expect.poll(() => handoffs().find((node) => node.id === opened.body.requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.tool?.name === "#Review: Cursor replied"), { timeout: 15_000 }).toBe(true);
+      expect((await messages(opened.body.threadId)).filter((message) => message.tool?.name?.startsWith("notice: This thread's model"))).toEqual([]);
+      expect(await taskOf(pm.id, opened.body.threadId)).toMatchObject({ modelSelection: selection });
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+
+      const { group } = (await api("POST", "/api/groups", { name: "Review room", memberIds: [pm.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: pm.id } } })).body;
+      const inRoom = await api("POST", "/api/internal/threads", { title: "Review", message: "go", reportBack: true }, await mintedToken(pm.id, group.threadId));
+      expect([inRoom.status, inRoom.body.error]).toEqual([400, "report_back works only from your own conversation, not a room. Leave it out; the thread's result then stays in that thread."]);
+      expect((await botState(pm.id)).tasks.some((task: any) => task.title === "Review")).toBe(false);
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+  it("opens threads on two models in one turn and resumes the opener once, with both results named by thread and model", async () => {
+    const pm = await createBot("Pam", "gated");
+    const opus = { instanceId: "gated", model: "claude-opus-5" };
+    try {
+      const token = await heldTurn(pm, "Get two reviews.");
+      const engines = (await api("GET", "/api/internal/models?search=plain", undefined, token)).body.instances;
+      expect(engines.map((instance: any) => instance.instanceId)).toEqual(["plain"]);
+      const cursor = { instanceId: "plain", model: engines[0].models.default || engines[0].models.options[0].id };
+      const first = await api("POST", "/api/internal/threads",
+        { title: "Review: Opus", message: "Review the diff. [[gate:batch-opus]]", modelSelection: opus, reportBack: true, role: "review", requestId: "review-opus" }, token);
+      expect(first.status, JSON.stringify(first.body)).toBe(201);
+      const again = await api("POST", "/api/internal/threads",
+        { title: "Review: Opus", message: "Review the diff. [[gate:batch-opus]]", modelSelection: opus, reportBack: true, role: "review", requestId: "review-opus" }, token);
+      expect([again.status, again.body.existing, again.body.threadId, again.body.requestId]).toEqual([200, true, first.body.threadId, first.body.requestId]);
+      const second = await api("POST", "/api/internal/threads", { title: "Review: Cursor", message: "Review the diff.", modelSelection: cursor, reportBack: true }, token);
+      expect(second.status, JSON.stringify(second.body)).toBe(201);
+      expect((await botState(pm.id)).tasks).toHaveLength(3);
+
+      release(pm.threadId);
+      await expect.poll(() => handoffs().find((node) => node.id === second.body.requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      const resumedRows = async () => (await messages(pm.threadId)).filter((message) => message.tool?.name?.startsWith("Resumed with"));
+      expect(await resumedRows()).toEqual([]);
+      expect(promptsOf("batch-opus")[0].message.content).toContain("Act as the review helper for this task.\n\nReview the diff.");
+      release("batch-opus");
+      await expect.poll(async () => (await resumedRows()).map((message) => message.tool.name), { timeout: 15_000 })
+        .toEqual(["Resumed with #Review: Opus, #Review: Cursor results, reviewing"]);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+      expect(await resumedRows()).toHaveLength(1);
+      const resume = promptsOf("batch-opus").at(-1)?.message.content ?? "";
+      expect(resume).toContain(`[OpenMausBot report from @Pam (your thread #Review: Opus, on claude-opus-5) on assignment ${first.body.requestId}: done]`);
+      expect(resume).toContain(`[OpenMausBot report from @Pam (your thread #Review: Cursor, on ${cursor.model}) on assignment ${second.body.requestId}: done]`);
+    } finally {
+      await cleanup([pm.id]);
     }
   }, 60_000);
 });

@@ -2187,7 +2187,7 @@ export class Store {
     bot.pinnedMessageId = task.pinnedMessageId;
   }
 
-  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: ApprovalMode,
     modelSelection?: ModelSelection, cwd?: string): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
@@ -2201,7 +2201,7 @@ export class Store {
     return task;
   }
 
-  private buildTask(bot: BotRecord, title?: string, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
+  private buildTask(bot: BotRecord, title?: string, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: ApprovalMode,
     modelSelection?: ModelSelection, cwd?: string): TaskRecord {
     const createdAt = Date.now();
     return {

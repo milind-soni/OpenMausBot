@@ -115,3 +115,23 @@ describe("a room job in a thread of its own", () => {
     expect(roomHandoffProblem({ botId: "e1", threadId: "lane" })).toMatch(/^The addressed agent is no longer a member of this room, so its room job stopped/);
   });
 });
+
+describe("roomHandoffProblem", () => {
+  const bots = {
+    coder: { id: "coder", name: "Coder", peers: ["tester"] },
+    tester: { id: "tester", name: "Tester" },
+    outsider: { id: "outsider", name: "Outsider" },
+  } as unknown as Record<string, BotRecord>;
+  const store = {
+    bot: (id: string) => bots[id],
+    taskByThread: (botId: string, threadId: string) => threadId.startsWith(botId) ? { threadId } : undefined,
+  } as unknown as Store;
+  const { roomHandoffProblem } = createRoomAccess({ store });
+  const from = { botId: "coder", threadId: "coder-chat" };
+
+  it("lets a bot reach its own thread whatever its teammate list, and keeps that list for every other bot", () => {
+    expect(roomHandoffProblem({ botId: "coder", threadId: "coder-review" }, from)).toBeUndefined();
+    expect(roomHandoffProblem({ botId: "tester", threadId: "tester-work" }, from)).toBeUndefined();
+    expect(roomHandoffProblem({ botId: "outsider", threadId: "outsider-work" }, from)).toMatch(/./);
+  });
+});

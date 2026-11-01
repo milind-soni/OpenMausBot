@@ -46,6 +46,7 @@ let lastAssignmentStatusUrl: string | null = null;
 let assignmentStatusResponse: unknown = DONE_ASSIGNMENT;
 let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
+let lastModelsUrl: string | null = null;
 let threadCalls = 0;
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
@@ -257,6 +258,12 @@ beforeAll(async () => {
       lastAssignmentStatusUrl = req.url;
       res.writeHead(assignmentStatusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(assignmentStatusResponse));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/models")) {
+      lastModelsUrl = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ instances: [] }));
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/threads") {
@@ -633,6 +640,7 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "start_thread",
+      "list_models",
       "vm_exec",
       "attach_file",
       "show_widget",
@@ -960,7 +968,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
     expect(start.inputSchema.required).toEqual(["title", "message"]);
-    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder", "modelSelection", "report_back", "role", "request_id"]);
     expect(start.inputSchema.properties.bot_id).toEqual({ type: "string", enum: ["bot-asker"], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." });
     expect(start.description).toContain("Open a separate job on yourself");
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');
@@ -986,6 +994,35 @@ describe("agents-proxy MCP surface", () => {
     } finally {
       threadResponse = previous;
     }
+  });
+
+  it("start_thread on another model forwards the model and report_back, and says the result resumes the opener", async () => {
+    const previous = threadResponse;
+    threadResponse = { receipts: [{ botId: "bot-asker", outcome: "queued", detail: "handed to the coordinator", requestId: "asg-own-1", threadId: "thread-own" }],
+      self: true, reportBack: true, title: "Review: GPT", botId: "bot-asker", threadId: "thread-own", requestId: "asg-own-1" };
+    try {
+      const modelSelection = { instanceId: "codex", model: "gpt-5.5", effort: "high" };
+      const res = await callTool("start_thread", { title: "Review: GPT", message: "Review the diff.", modelSelection, report_back: true, role: "review", request_id: "review-gpt" });
+      const text = res.result.content[0].text;
+      expect(res.result.isError).toBeFalsy();
+      expect(text).toContain("Opened thread #Review: GPT on yourself [thread id: thread-own].");
+      expect(text).toContain("its result comes back to this conversation and resumes you automatically (assignment id: asg-own-1)");
+      expect(text).toContain("finish your turn");
+      expect(lastThreadBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "Review: GPT", message: "Review the diff.",
+        depth: 0, modelSelection, reportBack: true, role: "review", requestId: "review-gpt" });
+      threadResponse = { ...(threadResponse as Record<string, unknown>), existing: true };
+      const again = await callTool("start_thread", { title: "Review: GPT", message: "Review the diff.", modelSelection, report_back: true, request_id: "review-gpt" });
+      expect(again.result.content[0].text).toBe("#Review: GPT is already open for this request_id [thread id: thread-own]; nothing new was opened. Its result still comes back here and resumes you.");
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("list_models forwards its search, and leaves it out when blank", async () => {
+    await callTool("list_models", { search: "codex gpt 5" });
+    expect(lastModelsUrl).toBe("/api/internal/models?search=codex%20gpt%205");
+    await callTool("list_models", { search: "  " });
+    expect(lastModelsUrl).toBe("/api/internal/models");
   });
 
   it("start_thread on yourself forwards the sender and says whether it runs or waits in line", async () => {

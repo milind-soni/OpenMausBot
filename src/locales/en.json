@@ -239,6 +239,7 @@
   "server.teammates.sentDirectly": "Sent to {bot} directly: it isn't in {room}.",
   "server.teammates.sentDirectlyHere": "Sent to {bot} directly: it isn't in this room.",
   "server.teammates.teammateWork": "Teammate work",
+  "server.teammates.openedThread": "Opened thread #{title}",
   "server.teammates.goalCoordinating": "{bot} is coordinating this goal.",
   "server.teammates.goal.working": "Goal in progress: {detail}",
   "server.teammates.goal.completed": "Goal completed: {detail}",

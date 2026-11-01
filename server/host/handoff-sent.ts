@@ -21,7 +21,8 @@ export function sentRow(input: { sender: Who; recipient: Who; threadId: string; 
   language?: string }): Omit<Message, "id" | "at"> {
   const { sender, recipient, threadId, room, via, language } = input;
   const outside = room && via === "direct" ? room : undefined;
-  const name = outside ? outside.here ? serverLine(language, "server.teammates.sentDirectlyHere", { bot: recipient.name })
+  const name = sender.id === recipient.id ? serverLine(language, "server.teammates.openedThread", { title: input.title ?? "Untitled" })
+    : outside ? outside.here ? serverLine(language, "server.teammates.sentDirectlyHere", { bot: recipient.name })
     : serverLine(language, "server.teammates.sentDirectly", { bot: recipient.name, room: outside.name })
     : room && !room.here ? serverLine(language, "server.teammates.sentInRoom", { bot: recipient.name, room: room.name })
     : serverLine(language, "server.teammates.sent", { bot: recipient.name });

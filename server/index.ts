@@ -594,7 +594,8 @@ import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts";
-import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts";
+import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts";
+import { MAX_THREADS_OPENED_PER_TURN, openInternalThread } from "./routes/internal-thread-open.ts"; import { createOwnThreadRequests } from "./host/own-threads.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
@@ -1027,6 +1028,12 @@ function openerFrom(fromThreadId: string): string | undefined {
   const person = threadPersonKey(fromThreadId);
   if (!CLOUD_HOME || !cloudGuestDriven(fromThreadId)) return person;
   return person && !cloudOwnerPerson(person) ? person : CLOUD_NOBODY_KEY;
+}
+
+/** A bot's own thread in its report: which thread, on which model, so several reviews on several models stay apart. */
+function ownThreadLabel(botId: string, threadId: string): string {
+  const task = store.taskByThread(botId, threadId);
+  return ` (your thread #${task?.title ?? "Thread"}${task?.modelSelection ? `, on ${task.modelSelection.model}` : ""})`;
 }
 
 function parentThreadModel(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
@@ -2731,14 +2738,18 @@ function threadEngine(instanceId: string): ThreadEngine | undefined {
   };
 }
 
+/** Why a thread on `own` would run on the bot's model instead at turn start, or null when it runs as chosen. */
+function modelGivesWay(own: ModelSelection, botModel: ModelSelection) {
+  return threadModelFallback(own, botModel, threadEngine, {
+    refusal: policyModelRefusal,
+    ...(hostedModels ? { allows: (selection: ModelSelection) => hostedModels!.allows(selection) } : {}),
+  });
+}
+
 function threadModelGivingWay(botId: string, threadId: string): ModelSelection | null {
   const bot = store.bot(botId);
   const own = store.taskByThread(botId, threadId)?.modelSelection;
-  if (!bot || !own) return null;
-  return threadModelFallback(own, bot.modelSelection, threadEngine, {
-    refusal: policyModelRefusal,
-    ...(hostedModels ? { allows: (selection: ModelSelection) => hostedModels!.allows(selection) } : {}),
-  }) ? own : null;
+  return bot && own && modelGivesWay(own, bot.modelSelection) ? own : null;
 }
 
 function turnSelection(botId: string, threadId: string): ModelSelection | undefined {
@@ -3958,7 +3969,7 @@ const coordinator: Coordinator = createCoordinator({
     validate: (node, parent) => node.mode === "notify" && node.status !== "queued" ? undefined
       : !node.parentId && node.groupId ? roomRootProblem(node)
       : roomHandoffProblem(node, parent) ??
-      (parent && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
+      (parent && !(parent.botId === node.botId && !parent.groupId && !node.groupId) && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
     busy: n => {
       const seat = parkedSeats.get(n.id);
       if (seat && !turnResources.free(seat)) return true;
@@ -4011,6 +4022,7 @@ const coordinator: Coordinator = createCoordinator({
       const group = parent.groupId ? store.group(parent.groupId) : undefined;
       if (parent.groupId ? !group || !store.groupTaskByThread(group.id, parent.threadId) : !store.taskByThread(parent.botId, parent.threadId)) return;
       const bot = store.bot(child.botId);
+      const who = child.botId === parent.botId && !child.groupId ? `#${store.taskByThread(child.botId, child.threadId)?.title ?? "Thread"}` : bot?.name;
       if (store.messagesFor(parent.threadId).some(m => m.roomRequest?.id === child.id && m.roomRequest.phase === "result")) return;
       const problem = roomHandoffProblem(child, parent);
       store.appendMessage(parent.threadId, {
@@ -4018,7 +4030,7 @@ const coordinator: Coordinator = createCoordinator({
         roomRequest: { id: child.id, phase: "result" },
         from: bot ? { botId: bot.id, name: bot.name, color: bot.color } : undefined,
         tool: {
-          name: teammateResultRow(threadLanguage(parent.threadId), child, bot?.name, problem, child.groupId ? store.group(child.groupId)?.name : undefined),
+          name: teammateResultRow(threadLanguage(parent.threadId), child, who, problem, child.groupId ? store.group(child.groupId)?.name : undefined),
           ok: child.status === "completed" && !problem,
           ...(child.status === "completed" && !problem && child.result.trim()
             ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}),
@@ -4064,7 +4076,8 @@ const coordinator: Coordinator = createCoordinator({
       usageTrace.expect(node.threadId, { node: node.id, ...(resumed ? { resumed } : {}) });
       if (resumed && !group) {
         const asking = coordinator.children(node.id).filter(child => child.question !== undefined);
-        const settledFrom = [...new Set((asking.length ? asking : coordinator.children(node.id)).map(child => store.bot(child.botId)?.name ?? "Teammate"))];
+        const settledFrom = [...new Set((asking.length ? asking : coordinator.children(node.id)).map(child => child.botId === node.botId && !child.groupId
+          ? `#${store.taskByThread(child.botId, child.threadId)?.title ?? "Thread"}` : store.bot(child.botId)?.name ?? "Teammate"))];
         const language = threadLanguage(node.threadId), who = settledFrom.length ? settledFrom.join(", ") : serverLine(language, "server.teammates.delegatedWork");
         store.appendMessage(node.threadId, {
           role: "bot", kind: "activity",
@@ -4116,13 +4129,14 @@ const coordinator: Coordinator = createCoordinator({
     },
     names: (node, parent) => {
       const scope = parent ?? node;
+      const own = parent?.botId === node.botId && !parent.groupId && !node.groupId;
       const person = personNameIn(scope.threadId);
       const thread = scope.groupId
         ? store.groupTaskByThread(scope.groupId, scope.threadId)?.title ?? store.group(scope.groupId)?.name
         : store.taskByThread(scope.botId, scope.threadId)?.title;
       return {
-        requester: parent ? store.bot(parent.botId)?.name ?? "Teammate" : person ?? "the user",
-        assignee: store.bot(node.botId)?.name ?? "Teammate",
+        requester: parent ? `${store.bot(parent.botId)?.name ?? "Teammate"}${own && thread !== undefined ? ` (you, in #${thread})` : ""}` : person ?? "the user",
+        assignee: `${store.bot(node.botId)?.name ?? "Teammate"}${own ? ownThreadLabel(node.botId, node.threadId) : ""}`,
         person,
         ...(thread !== undefined ? { thread } : {}), askTool: askToolName(botForThread(node.botId, node.threadId), (id) => registry.get(id)?.adapter.capabilities.askTool),
         ...(node.answeredBy?.kind === "bot" ? { answerer: store.bot(node.answeredBy.botId)?.name ?? "Teammate" } : {}),
@@ -7486,7 +7500,7 @@ const personReplies = createPersonReplies({
 const deliverLateQuestionAnswer: typeof personReplies.deliverLateQuestionAnswer = async (auth, threadId, requestId, answer, cardMessage, owner, via, callId) =>
   askCards.answerParked(threadId, requestId, answer) ? { queued: false } : personReplies.deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, owner, via, callId);
 
-const MAX_THREADS_OPENED_PER_TURN = 5;
+const ownThreadRequests = createOwnThreadRequests<Record<string, unknown>>();
 
 /** Its provenance survives the queue: the bot's own request never passes for a human one authorizing more fan-out. */
 async function startOrQueueOpenedThread(
@@ -13669,7 +13683,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 201, proposed);
       }
       if (await dispatchRoutes([createInternalChiefTeamRoutes({ bot: () => store.bot(internalCapability.botId), requireActive: requireActiveInternalCapability,
-        teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() })], { req, res, url, path, method, auth, json, readBody })) return;
+        teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() }),
+        createInternalModelRoutes({ requireActive: requireActiveInternalCapability, instances: () => registry.describe(),
+          pinned: () => store.bots.flatMap((bot) => [bot.modelSelection, ...store.tasks(bot.id).flatMap((task) => task.modelSelection ? [task.modelSelection] : [])]) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
         const parsed = z.object({ fromBotId: z.string().optional(), fromThreadId: z.string().optional(), plan: z.unknown() }).strict().safeParse(await readInternalBody());
         if (!parsed.success) return json(res, 400, { error: "Invalid team setup request" });
@@ -13898,14 +13914,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // Echo only the id the caller sent, never a bot's name.
           const addressed = store.bot(target.botId);
           const eligibility =
-            target.botId === internalSender.id ? "Choose a teammate, not yourself"
+            target.botId === internalSender.id && !call.ownThread ? "Choose a teammate, not yourself"
             : !addressed ? `No bot with id "${target.botId}" — call list_bots and copy the exact id from the result`
             : addressed.hidden ? `The bot with id "${target.botId}" is no longer available — call list_bots for the ones you can reach`
             : roomHandoffProblem(target, address);
           if (eligibility) return refuse(403, eligibility);
         }
         let approvalGranted = false;
-        if (peerReviewRequired(internalSender, address.threadId)) {
+        if (!call.ownThread && peerReviewRequired(internalSender, address.threadId)) {
           const verdicts = await Promise.all(targets.map(target =>
             requestPeerApproval(approvalBus, internalSender, store.bot(target.botId)!, call.message, call.consult ? "ask_bot" : "delegate_bot", address.threadId)));
           requireActiveInternalCapability();
@@ -13953,7 +13969,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!room) {
               const opened = { botId: internalSender.id, name: internalSender.name, threadId: address.threadId, at: Date.now() };
               const task = continued ?? (fresh
-                ? store.createTask(target.botId, call.title ?? (call.message.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${internalSender.name}`), false, call.projectId, opened, undefined, undefined, folder.cwd)
+                ? store.createTask(target.botId, call.title ?? (call.message.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${internalSender.name}`), false, call.projectId, opened, call.ownThread?.approvalMode, call.ownThread?.modelSelection, folder.cwd)
                 : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, undefined, undefined, folder.cwd));
               if (!task) throw new Error("The recipient no longer exists");
               target.threadId = task.threadId;
@@ -13962,7 +13978,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             const routed = lane ? { botId: target.botId, threadId: lane.threadId } : target;
             const { node, duplicate } = coordinator.enqueue(address, generation, internalCapability.roomHandoffId, routed, call.message, {
-              mode, reply, thread: lane || fresh ? "new" : "standing", approvalGranted, rework: call.rework, ...(lane ? {} : { requestBatchKey }),
+              mode, reply, thread: lane || fresh ? "new" : "standing", approvalGranted, rework: call.rework, ...(lane ? {} : { requestBatchKey }), ...(call.ownThread ? { ownThread: true } : {}),
               ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}),
             });
             usageTrace.link(node.id, node.parentId, { threadId: internalCapability.threadId, turnId: liveTurnByThread.get(internalCapability.threadId) ?? "" }); if (!duplicate) actingPeople.handOn(internalCapability, node);
@@ -14263,71 +14279,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // start_thread never activates: a bot must not move what the person is looking at.
       if (method === "POST" && path === "/api/internal/threads") {
-        const body = await readInternalBody();
-        const from = internalSender;
-        const fromThreadId = internalCapability.threadId;
-        const owner = connectorThread(from.id, fromThreadId);
-        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
-        if (
-          body.depth !== undefined &&
-          (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
-        ) {
-          return json(res, 403, { error: "the recursion depth does not match this turn" });
-        }
-        const title = String(body.title ?? "").trim();
-        const message = String(body.message ?? "").trim();
-        if (!title || !message) return json(res, 400, { error: "title and message are required" });
-        if (title.length > 80) return json(res, 400, { error: "title must be at most 80 characters" });
-        if (!fitsOnOneLine(title)) return json(res, 400, { error: "title must fit on one line" });
-        if (internalCapability.openedThreads >= MAX_THREADS_OPENED_PER_TURN) {
-          return json(res, 429, { error: `You have already opened ${MAX_THREADS_OPENED_PER_TURN} threads this turn, which is the limit. Do not retry — finish your turn and tell the person which threads you still wanted to open, so they can open them or ask you again.` });
-        }
-        const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
-        const target = store.bot(toBotId);
-        if (!target) return json(res, 404, { error: "no such bot" });
-        const folder = typeof body.folder === "string" ? body.folder.trim() : "";
-        let projectId: string | undefined;
-        if (folder) {
-          const project = (target.projects ?? []).find(
-            (candidate) => candidate.id === folder || candidate.name.trim().toLowerCase() === folder.toLowerCase(),
-          );
-          if (!project) {
-            const names = (target.projects ?? []).map((candidate) => candidate.name).join(", ");
-            return json(res, 400, { error: `@${target.name} has no folder named "${folder}"${names ? ` — the folders are: ${names}` : " — it has no folders; leave folder out"}` });
-          }
-          projectId = project.id;
-        }
-        const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
-        if (target.id === from.id) {
-          const inherited = parentThreadModel(from.id, fromThreadId);
-          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() },
-            inherited.approvalMode, inherited.modelSelection);
-          if (!task) return json(res, 500, { error: "couldn't create that thread" });
-          threadStarters.set(task.threadId, (CLOUD_TEAM ? teamConnections.handOnFor(internalCapability.threadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId));
-          internalCapability.openedThreads += 1;
-          const chip: Omit<Message, "id" | "at"> = {
-            role: "bot",
-            kind: "activity",
-            tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.openedThread", { title: task.title }), ok: true },
-            threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
-          };
-          if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };
-          store.appendMessage(fromThreadId, chip);
-          // Mark the bot's own words, so a later turn never mistakes the request for the person's.
-          const opening = `[Thread you opened yourself${sourceTitle ? ` from #${sourceTitle}` : ""}. The request below is your own words, not the person's: do the work here and end with a clear result they can read.]\n\n${message}`;
-          const outcome = await startOrQueueOpenedThread(from.id, task.threadId, opening, isUnattended(from.id, fromThreadId), withPerson(turnOrigin(internalCapability), actingPeople.requester(internalCapability.threadId, internalCapability.generation)));
-          return json(res, 201, {
-            threadId: task.threadId,
-            title: task.title,
-            botId: from.id,
-            botName: from.name,
-            self: true,
-            limit: maxConcurrentBotThreads(cfg),
-            ...outcome,
-          });
-        }
-        const result = await coordinateBots({ botIds: [target.id], message, rework: false, thread: "new", reply: "resume", consult: false, title, projectId });
-        return json(res, result.status, result.body);
+        const from = internalSender, fromThreadId = internalCapability.threadId;
+        const opened = await openInternalThread({ store, from, fromThreadId, depth: internalCapability.depth, owner: connectorThread(from.id, fromThreadId),
+          openedThisTurn: () => internalCapability.openedThreads, countOpened: () => { internalCapability.openedThreads += 1; },
+          checkModel: (raw) => checkedModelSelection(raw, undefined, true), givesWay: (selection) => modelGivesWay(selection, from.modelSelection), modelName,
+          switchNeedsAsk: (selection) => engineSwitchNeedsAsk(approvalModeFor(from), from.modelSelection, selection), parentModel: () => parentThreadModel(from.id, fromThreadId),
+          openerLevel: () => sourceApprovalMode(from.id, fromThreadId), botLevel: () => approvalModeFor(from), engineRuns: supportsApprovalMode, coordinate: coordinateBots,
+          startOpened: (threadId, text) => {
+            threadStarters.set(threadId, (CLOUD_TEAM ? teamConnections.handOnFor(fromThreadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId));
+            return startOrQueueOpenedThread(from.id, threadId, text, isUnattended(from.id, fromThreadId), withPerson(turnOrigin(internalCapability), actingPeople.requester(fromThreadId, internalCapability.generation)));
+          }, language: threadLanguage(fromThreadId), limit: maxConcurrentBotThreads(cfg), requests: ownThreadRequests }, await readInternalBody());
+        return json(res, opened.status, opened.body);
       }
       if (method === "POST" && path === "/api/internal/create-bot") {
         const body = await readInternalBody();
