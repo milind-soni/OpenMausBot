@@ -33,6 +33,10 @@ describe("mcpOwner and botMayChange", () => {
     expect(owner(stdio({ bot: "bot2" }), ["x"])).toBe("person");
     expect(botMayChange("person")).toEqual({ ok: false, error: "This connection is each person's own. Change it in Settings." });
   });
+  it("a bot's own server that runs elsewhere is elsewhere", () => {
+    expect(owner(stdio({ bot: "bot1", runsOn: { environmentId: "e1", label: "Mac" } }))).toBe("elsewhere");
+    expect(owner(stdio({ bot: "bot2", runsOn: { environmentId: "e1", label: "Mac" } }))).toBe("theirs");
+  });
   it("a server that runs elsewhere names the computer", () => {
     const server = stdio({ runsOn: { environmentId: "e1", label: "Studio Mac" } });
     expect(owner(server)).toBe("elsewhere");
@@ -56,8 +60,32 @@ describe("mergeBotUpdate", () => {
   it("keeps a key resupplied as a secretRef when the url changes", () => {
     const { body, dropped } = mergeBotUpdate(remote(), { url: "https://evil.example.com/mcp", headers: { Authorization: `Bearer ${REF}` } });
     expect(body.headers).toEqual({ Authorization: `Bearer ${REF}` });
+    expect(dropped).toEqual(["oauth client secret", "sign-in"]);
+  });
+
+  it("does not list a header the patch replaces with a literal", () => {
+    const { dropped } = mergeBotUpdate(remote(), { url: "https://evil.example.com/mcp", headers: { Authorization: "Bearer attacker" } });
     expect(dropped).not.toContain("header Authorization");
-    expect(dropped).toContain("oauth client secret");
+  });
+
+  it("drops saved keys when a value only embeds a secretRef", () => {
+    const { dropped } = mergeBotUpdate(stdio(), { env: { BASE_URL: `https://evil/?k=${REF}` } });
+    expect(dropped).toEqual(["env DODO_PAYMENTS_API_KEY", "env API_KEY"]);
+  });
+
+  it("counts the {secretRef} object form as a secretRef", () => {
+    const { dropped } = mergeBotUpdate(stdio(), { env: { API_KEY: { secretRef: REF } } });
+    expect(dropped).toEqual([]);
+  });
+
+  it("treats a literal equal to the saved value as a destination change", () => {
+    const { dropped } = mergeBotUpdate(stdio(), { env: { API_KEY: "k1" } });
+    expect(dropped).toEqual(["env DODO_PAYMENTS_API_KEY"]);
+  });
+
+  it("treats a command change as a destination change", () => {
+    const { dropped } = mergeBotUpdate(stdio(), { command: "node" });
+    expect(dropped).toEqual(["env DODO_PAYMENTS_API_KEY", "env API_KEY"]);
   });
 
   it("drops sign-in when the url changes", () => {
@@ -100,11 +128,18 @@ describe("botListing", () => {
   const extra = { owner: "shared", authState: "none", forThisBot: true } as const;
 
   it("strips the url query and redacts --api-key values in args", () => {
-    const secret = "sk-live-abcdef1234567890abcdef";
+    const secret = "hunter2hunter2";
     const remoteListing = botListing("r", remote({ url: "https://mcp.example.com/mcp?key=topsecret123" }), extra);
     expect(remoteListing.url).toBe("https://mcp.example.com/mcp");
-    const listing = botListing("s", stdio({ args: ["--api-key", secret, `--api-key=${secret}`] }), extra);
+    const listing = botListing("s", stdio({ args: ["--api-key", secret, "--token", secret, `--api-key=${secret}`, "--name", "visible"] }), extra);
     expect(JSON.stringify(listing)).not.toContain(secret);
+    expect(listing.args).toContain("visible");
+  });
+
+  it("reports owner managed when a policy manages the server", () => {
+    const listing = botListing("s", stdio(), { ...extra, managedBy: "Acme policy" });
+    expect(listing.owner).toBe("managed");
+    expect(listing.managedBy).toBe("Acme policy");
   });
 
   it("never includes env or header values", () => {

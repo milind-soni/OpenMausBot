@@ -7,12 +7,14 @@ export type McpOwner = "shared" | "own" | "theirs" | "person" | "elsewhere";
 /** A bot may never send these: they are the person's switches. */
 export const BOT_STRIPPED_KEYS: readonly string[] = ["bot", "runsOn", "apps", "enabled"];
 
-const SECRET_REF = /secret-ref:[0-9a-f]{32}/;
+const WHOLE_REF = /^secret-ref:[0-9a-f]{32}$/;
+const SECRET_FLAG_ARG = /^--(?:token|password|passwd|api-key|apikey|secret|access-key|auth-token)$/i;
 
 export function mcpOwner(name: string, server: StoredMcpServer, botId: string, personal: readonly string[]): McpOwner {
   if (personal.includes(name)) return "person";
-  if (!isRemoteMcpServer(server) && server.bot) return server.bot === botId ? "own" : "theirs";
+  if (!isRemoteMcpServer(server) && server.bot && server.bot !== botId) return "theirs";
   if (server.runsOn) return "elsewhere";
+  if (!isRemoteMcpServer(server) && server.bot) return "own";
   return "shared";
 }
 
@@ -26,8 +28,11 @@ export function botMayChange(owner: McpOwner, server?: StoredMcpServer): { ok: t
   }
 }
 
+/** Exactly one ref, bare or as {secretRef}: a string that merely embeds one is a literal, since redeeming it can build any text. */
 function isSecretRef(value: unknown): boolean {
-  return typeof value === "string" && SECRET_REF.test(value);
+  if (typeof value === "string") return WHOLE_REF.test(value.trim());
+  const ref = record(value).secretRef;
+  return typeof ref === "string" && WHOLE_REF.test(ref.trim());
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -38,7 +43,7 @@ function sameList(a: readonly string[], b: unknown): boolean {
   return Array.isArray(b) && a.length === b.length && a.every((item, i) => item === b[i]);
 }
 
-/** Saved secrets keep (`true`) unless `drop`; a value the patch supplies replaces the saved one either way. */
+/** A saved secret keeps (`true`) unless `drop`. Any value the patch supplies replaces the saved one, so it is never dropped. */
 function mergeSecrets(
   saved: Record<string, string>,
   patched: Record<string, unknown>,
@@ -50,7 +55,7 @@ function mergeSecrets(
   for (const key of Object.keys(saved)) {
     const sent = patched[key];
     if (sent !== undefined && sent !== true) continue;
-    if (drop && !isSecretRef(sent)) dropped.push(`${label} ${key}`);
+    if (drop) dropped.push(`${label} ${key}`);
     else out[key] = true;
   }
   for (const [key, value] of Object.entries(patched)) if (value !== true) out[key] = value;
@@ -90,7 +95,7 @@ export function mergeBotUpdate(existing: StoredMcpServer, patch: Record<string, 
   const patchedEnv = record(patch.env);
   const moved = (typeof patch.command === "string" && patch.command !== existing.command)
     || (patch.args !== undefined && !sameList(existing.args, patch.args))
-    || Object.entries(patchedEnv).some(([key, value]) => typeof value === "string" && !isSecretRef(value) && value !== existing.env[key]);
+    || Object.values(patchedEnv).some((value) => value !== true && !isSecretRef(value));
   const env = mergeSecrets(existing.env, patchedEnv, moved, "env", dropped);
   const body: Record<string, unknown> = {
     command: patch.command ?? existing.command,
@@ -112,6 +117,11 @@ function withoutQuery(url: string): string {
   }
 }
 
+function redactArg(arg: string, previous: string | undefined): string {
+  if (previous !== undefined && SECRET_FLAG_ARG.test(previous) && !arg.startsWith("-")) return "***";
+  return redactSecretsInText(arg);
+}
+
 export function botListing(
   name: string,
   server: StoredMcpServer,
@@ -120,7 +130,7 @@ export function botListing(
   const common = {
     name,
     enabled: server.enabled,
-    owner: extra.owner,
+    owner: extra.managedBy ? "managed" : extra.owner,
     signIn: extra.authState,
     forThisBot: extra.forThisBot,
     ...(extra.managedBy ? { managedBy: extra.managedBy } : {}),
@@ -132,7 +142,7 @@ export function botListing(
     ...common,
     transport: "stdio",
     command: redactSecretsInText(server.command),
-    args: server.args.map(redactSecretsInText),
+    args: server.args.map((arg, i) => redactArg(arg, server.args[i - 1])),
     envKeys: Object.keys(server.env),
   };
 }
