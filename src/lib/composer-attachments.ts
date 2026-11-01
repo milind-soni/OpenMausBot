@@ -647,6 +647,14 @@ export function splitAttachedImages(text: string): { display: string; images: st
   return { display, images: images.map((image) => image.path) };
 }
 
+/** A file uploaded for a message and taken off it before sending: the server keeps it only while a message uses it. */
+export function discardUnsentUpload(attachment: Attachment): void {
+  if ((attachment.kind !== "image" && attachment.kind !== "file") || !attachment.path) return;
+  const name = attachmentBasename(attachment.path);
+  if (!/^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/.test(name)) return;
+  void fetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
+}
+
 export function attachmentBasename(path: string): string {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] ?? "";

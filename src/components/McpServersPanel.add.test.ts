@@ -23,7 +23,7 @@ vi.mock("@/state/store", () => ({
 vi.mock("@/lib/app-links", () => ({ openExternalLink: vi.fn(async () => {}) }));
 vi.mock("@/lib/mcp-servers", () => ({ updateMcpServers: vi.fn() }));
 
-import { McpServersPanel } from "./McpServersPanel";
+import { McpServersPanel, SWITCH_SETTLE_MS } from "./McpServersPanel";
 
 const ID = "id-7f3a9c2e1b.access";
 const SECRET = "secret-9d8e7f6a5b4c3d2e1f";
@@ -132,14 +132,15 @@ describe("Adding an MCP server from one paste box", () => {
     expect(calls("PUT")).toEqual([]);
   });
 
-  it("leaves a server it can't reach off, says why, and turns it on from Try again", async () => {
+  it("says a saved server it can't reach is saved but off, and why, and turns it on from Try again", async () => {
     fixture.test = { ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" };
     await click("Add server");
     await type("textarea[aria-label='Server link or setup command']", "https://mcp.acme.example/mcp");
     await click("Add");
     expect(calls("POST", "/api/mcp/servers")[0]?.body).toEqual({ name: "acme", type: "http", url: "https://mcp.acme.example/mcp", headers: {} });
     expect(calls("PATCH")).toEqual([]);
-    expect(host.textContent).toContain("Couldn't connect, so it stays off. Could not reach this address. Check the URL and your network.");
+    expect(host.textContent).toContain("Saved, but off: the test failed. Could not reach this address. Check the URL and your network. Your bots can use it once it's on.");
+    expect(host.querySelector('[role="switch"][aria-label="Turn acme on"]')?.getAttribute("aria-checked")).toBe("false");
     expect(button("Fix the keys")).toBeUndefined();
 
     fixture.test = { ok: true, tools: [{ name: "search" }] };
@@ -156,7 +157,7 @@ describe("Adding an MCP server from one paste box", () => {
     await type("input[aria-label='CF-Access-Client-Secret']", "wrong-secret-value");
     await click("Add");
     expect(host.textContent).toContain(
-      "Couldn't connect, so it stays off. The server didn't accept the keys (HTTP 403). Check the values of CF-Access-Client-Id and CF-Access-Client-Secret.");
+      "Saved, but off: the test failed. The server didn't accept the keys (HTTP 403). Check the values of CF-Access-Client-Id and CF-Access-Client-Secret. Your bots can use it once it's on.");
     expect(button("Try again")).toBeUndefined();
     expect(host.innerHTML).not.toContain("wrong-secret-value");
     expect(host.innerHTML).not.toContain(ID);
@@ -528,4 +529,47 @@ describe("Adding an MCP server on a Team Cloud", () => {
       expect(fixture.sharedHeaders.mail).toEqual({ Authorization: "" });
     },
   );
+});
+
+describe("A saved server's switch", () => {
+  it("says it's off until it passes a test while that test runs", async () => {
+    let answer: (result: Record<string, unknown>) => void = () => {};
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" && path.endsWith("/test")
+      ? new Promise((resolve) => { answer = resolve; }) : previous(path, init));
+    await click("Add server");
+    await type("textarea[aria-label='Server link or setup command']", "https://mcp.acme.example/mcp");
+    await click("Add");
+    expect(host.querySelector("[data-mcp-testing]")?.textContent?.trim()).toBe("Off until it passes a test: testing it now.");
+    await act(async () => answer({ ok: true, tools: [{ name: "search" }] }));
+    await settle();
+    expect(host.querySelector("[data-mcp-testing]")).toBeNull();
+    expect(host.textContent).toContain("Connected: 1 tool");
+  });
+
+  it("keeps a server a passing test just switched on, on, when a click lands right after", async () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      await click("Add server");
+      await type("textarea[aria-label='Server link or setup command']", "https://mcp.acme.example/mcp");
+      await click("Add");
+      expect(calls("PATCH", "/api/mcp/servers/acme")).toEqual([{ url: "/api/mcp/servers/acme", body: { enabled: true } }]);
+      // The person reached for the Off they saw: the click lands a moment after the test switched it on.
+      now.mockReturnValue(1_000_900);
+      await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Turn acme off"]')!.click());
+      await settle();
+      expect(calls("PATCH", "/api/mcp/servers/acme"), "never switched straight back off").toHaveLength(1);
+      expect(host.querySelector('[role="switch"][aria-label="Turn acme off"]')?.getAttribute("aria-checked")).toBe("true");
+      expect(host.textContent).toContain("acme is on: it passed its test a moment ago.");
+      // Later, the same click switches it off.
+      now.mockReturnValue(1_000_000 + SWITCH_SETTLE_MS + 1);
+      await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Turn acme off"]')!.click());
+      await settle();
+      expect(calls("PATCH", "/api/mcp/servers/acme").at(-1)).toEqual({ url: "/api/mcp/servers/acme", body: { enabled: false } });
+      expect(host.querySelector('[role="switch"][aria-label="Turn acme on"]')?.getAttribute("aria-checked")).toBe("false");
+    } finally {
+      now.mockRestore();
+    }
+  });
 });

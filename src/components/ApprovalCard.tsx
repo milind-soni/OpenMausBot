@@ -13,7 +13,9 @@ import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/p
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import type { SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { yourComputerAsk } from "@/lib/your-computer";
+import { computerAskWords } from "@/lib/computer-ask";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
 
@@ -215,6 +217,8 @@ function AppliedChangeLine({
   // Kept until the card's own patch arrives, so the Share button cannot come back in between.
   const [sharedNow, setSharedNow] = useState<{ requestId: string; shared: SkillShareRecord }>();
   const config = useContext(StoreContext)?.state.config ?? null;
+  const reviewsTeamMemory = useOwnerOrAdmin() !== false;
+  const canUndo = summary.canUndo && (!card.teamMemoryRequest || reviewsTeamMemory);
   const undone = card.undone === true;
   const cancels = summary.cancels === true;
   const skill = card.skillRequest;
@@ -261,7 +265,7 @@ function AppliedChangeLine({
           )}
           {undone && !cancels && <span> · {t("approval.applied.undone")}</span>}
         </span>
-        {!undone && summary.canUndo && threadId && (
+        {!undone && canUndo && threadId && (
           <button
             type="button"
             onClick={undo}
@@ -453,6 +457,17 @@ export function ApprovalCard({
         })
     : undefined;
 
+  const turnOn = computerAskWords(card, bot?.name ?? t("approval.someone"));
+  if (turnOn) {
+    const state = card.computerAsk?.state;
+    const waiting = state === "asking" || state === "failed";
+    return (
+      <div data-computer-ask={state} className="w-full">
+        <CompactApprovalRow header={turnOn.line} summary={waiting ? turnOn.reason : undefined} detail="" showDetailInline={false} outcome={turnOn.outcome}
+          allowed={state === "on" || state === "turning-on"} byVoice={byVoice} waiting={waiting} answeredBelow={waiting && !card.dismissed} />
+      </div>
+    );
+  }
   if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !isTeamSetup && !card.modelRequest) {
     const waiting = !settled && !expired;
     const ask = yourComputerAsk(card, bot?.name ?? t("approval.someone"));

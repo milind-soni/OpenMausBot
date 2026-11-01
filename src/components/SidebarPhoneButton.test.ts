@@ -112,7 +112,7 @@ describe("sidebar phone status", () => {
 });
 
 describe("SidebarPhoneStatusButton", () => {
-  const render = (density: "comfortable" | "compact" | "icons", status: SidebarPhoneStatus) =>
+  const render = (density: "comfortable" | "icons", status: SidebarPhoneStatus) =>
     renderToStaticMarkup(createElement(SidebarPhoneStatusButton, {
       density,
       status,
@@ -155,18 +155,5 @@ describe("SidebarPhoneStatusButton", () => {
     expect(unpaired).toContain("data-phone-plus");
     expect(stale).not.toContain("data-phone-plus");
     expect(stale).not.toContain("text-success");
-  });
-
-  it("uses the same fixed-size control in the compact text sidebar", () => {
-    const markup = render("compact", {
-      kind: "stale",
-      label: "Device paired, not active recently",
-      pairedCount: 1,
-      connectedCount: 0,
-    });
-
-    expect(markup).toContain('data-sidebar-density="compact"');
-    expect(markup).toContain("size-[46px]");
-    expect(markup).toContain("shrink-0");
   });
 });

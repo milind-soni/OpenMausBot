@@ -6,7 +6,7 @@ import type { LocaleKey } from "@/locales";
 
 export const NEAR_LIMIT_PERCENT = 80;
 export const CARD_METERS = 2;
-const TEAM_TIERS: readonly string[] = ["team", "business"];
+export const TEAM_TIERS: readonly string[] = ["team", "business"];
 
 export type MeterBand = "ok" | "near" | "full";
 

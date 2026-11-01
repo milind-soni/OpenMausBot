@@ -11,6 +11,8 @@ import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { MistralDriver } from "./mistral.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -316,12 +318,48 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       const completed = events.find((event) => event.type === "turn.completed") as any;
       expect(completed.ok).toBe(false);
       expect(completed.stopReason).toBe("tool_error");
-      expect(events.some((event) => event.type === "runtime.error" && /One or more tool operations failed/.test((event as any).message ?? ""))).toBe(true);
+      // It says which call failed, so a routine's log and the person read the cause.
+      expect(events.filter((event) => event.type === "runtime.error").map((event) => (event as any).message))
+        .toEqual(["Stopped because the tool call “fx_write” failed. The bot's reply isn't proof the work was done; the failed step shows the error."]);
       expect(events.some((event) => event.type === "cap.exhausted")).toBe(false);
     } finally {
       await instance.dispose();
     }
   }, 20_000);
+
+  it("names a searched server's tool that failed by its own name, not the call that reached it", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300), callResult: () => ({ isError: true, content: [{ type: "text", text: "boom" }] }) });
+    const call = { name: "payments_list", arguments: { company_id: "biz_1" } };
+    const callBody = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "whop_call_tool", arguments: JSON.stringify(call) } }] } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const finalBody = 'data: {"choices":[{"index":0,"delta":{"content":"Listed the payments."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    let sent = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      return new Response(++sent === 1 ? callBody : finalBody, { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "searched", displayName: "Synthetic", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "synthetic" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "searched", text: "List the payments.", approvalMode: "full",
+        integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } },
+      });
+      await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 15_000 });
+      expect(remote.calls).toEqual([call]);
+      expect(events.filter((event) => event.type === "runtime.error").map((event) => (event as any).message))
+        .toEqual(["Stopped because the tool call “whop_payments_list” failed. The bot's reply isn't proof the work was done; the failed step shows the error."]);
+    } finally {
+      await instance.dispose();
+      await remote.close();
+    }
+  }, 30_000);
 
   describe("corrective rounds", () => {
     const toolCall = (id: string, name: string, args: unknown = {}) =>

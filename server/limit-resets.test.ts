@@ -10,6 +10,8 @@ import { parseClaudeUsage, parseCodexUsage, type PlanProviderRow, type PlanUsage
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
+/** Past this after its time, a hold is forgotten. */
+const REFUSAL_GRACE_FOR_TEST = 10 * 60_000 + 1;
 const iso = (at: number) => new Date(at).toISOString();
 
 function row(id: string, driver: "claude" | "codex", windows: PlanWindows): PlanProviderRow {
@@ -269,6 +271,40 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.noteLimit("claude", undefined);
     now = NOW + UNNAMED_LIMIT_MS + 1;
     expect(instance.blockedUntil("claude"), "the guess runs out on its own").toBeNull();
+  });
+
+  it("keeps a refusal's hold through a restart, so a new conversation does not go to the limited engine first", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-limit-holds-"));
+    try {
+      const file = join(dir, "limit-holds.json");
+      let now = NOW;
+      const boot = () => new LimitResetClock({ accounts: () => accounts, now: () => now, file });
+      const first = boot();
+      first.noteRuntimeEvent("claude", started("t1"));
+      first.noteRuntimeEvent(undefined, { ...refused("t1", NOW + 50 * HOUR), limit: "engine" } as RuntimeEvent);
+      first.noteLimit("codex", undefined);
+      now = NOW + 10 * 60_000;
+      const restarted = boot();
+      expect(restarted.blockedUntil("claude"), "the engine is still held after the restart").toBe(NOW + 50 * HOUR);
+      expect(restarted.resetAt("claude")).toBe(NOW + 50 * HOUR);
+      expect(restarted.blockedUntil("codex"), "a hold that named no reset keeps its re-check time").toBe(NOW + UNNAMED_LIMIT_MS);
+      expect(restarted.resetAt("codex"), "and stays a guess").toBeNull();
+      restarted.noteRuntimeEvent("claude", started("t2"));
+      restarted.noteRuntimeEvent(undefined, completed("t2", true));
+      expect(boot().blockedUntil("claude"), "a turn that worked ends it for good").toBeNull();
+      now = NOW + UNNAMED_LIMIT_MS + REFUSAL_GRACE_FOR_TEST;
+      expect(boot().blockedUntil("codex")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("holds the engine until it is checked again when its refusal names a reset that already passed", () => {
+    const { instance } = clock();
+    instance.noteRuntimeEvent("claude", started("t1"));
+    instance.noteRuntimeEvent(undefined, { ...refused("t1", NOW - 5 * 60_000), limit: "engine" } as RuntimeEvent);
+    expect(instance.blockedUntil("claude")).toBe(NOW + UNNAMED_LIMIT_MS);
+    expect(instance.resetAt("claude"), "a past time is no reset time").toBeNull();
   });
 
   it("never holds the engine for one model's own limit", () => {

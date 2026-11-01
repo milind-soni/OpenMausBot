@@ -660,6 +660,8 @@ describe("agents-proxy MCP surface", () => {
       "trigger",
       "delete_trigger",
       "wait_until",
+      "list_waits",
+      "cancel_wait",
       "propose_profile",
       "propose_model",
       "propose_team_memory",
@@ -673,8 +675,8 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("consult true asks a question");
     expect(coordinate.description).toContain('reply "none" is a one-way notice');
     expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
-    expect(coordinate.inputSchema.properties.thread.enum).toEqual(["standing", "new"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
+    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new: a new thread on the teammate") });
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
     const status = tool("assignment_status");
@@ -748,7 +750,7 @@ describe("agents-proxy MCP surface", () => {
       "list_shared_computers",
       "assignment_status", "list_bots", "list_rooms", "list_threads",
       "list_team_setup",
-      "session_search", "trigger_info", "skills_list",
+      "session_search", "trigger_info", "list_waits", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
       .map((tool: any) => tool.name)).toEqual(readNames);
@@ -2259,11 +2261,13 @@ describe("coordinate_bots arguments", () => {
     });
     await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "notice", reply: "none", doneWhen: "  ", reason: " " });
     expect(lastCoordinateBody).toEqual({ botIds: ["bot-helper"], message: "notice", reply: "none" });
+    await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "add a chart", thread: "8d3a9fd7-f6bb-4e7b-9e36-153c6e520728" });
+    expect(lastCoordinateBody).toEqual({ botIds: ["bot-helper"], message: "add a chart", thread: "8d3a9fd7-f6bb-4e7b-9e36-153c6e520728" });
   });
 
   it("refuses a thread, reply or consult value outside the contract before contacting the server", async () => {
     for (const args of [
-      { bot_ids: ["bot-helper"], message: "m", thread: "fresh" },
+      { bot_ids: ["bot-helper"], message: "m", thread: "a fresh one" },
       { bot_ids: ["bot-helper"], message: "m", reply: "poll" },
       { bot_ids: ["bot-helper"], message: "m", consult: "yes" },
       { bot_ids: ["bot-helper"], message: "m", done_when: ["x"] },
@@ -2271,7 +2275,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2297,7 +2301,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");

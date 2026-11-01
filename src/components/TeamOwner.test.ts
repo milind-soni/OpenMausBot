@@ -25,7 +25,7 @@ const withStore = (state: AppState, child: ReturnType<typeof createElement>) =>
   createElement(StoreContext.Provider, { value: { state, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn() } as never }, child);
 const row = (candidate: Bot, selected = false) => {
   const state = { ...initialState, bots: [candidate], selectedId: selected ? candidate.id : null, activeView: "chat" } as AppState;
-  return renderToStaticMarkup(createElement(BotListItem, botRowProps(state, vi.fn(), candidate, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() })));
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(state, vi.fn(), candidate, { density: "comfortable", query: "", onMenu: vi.fn() })));
 };
 
 afterEach(() => setTeamPeople(null));

@@ -103,6 +103,7 @@ export function QuestionCard({
   const [failed, setFailed] = useState(false);
 
   if (!card?.requestId || !questions.length) return null;
+  if (decidedByBot(card)) return <DecidedQuestion threadId={threadId} asker={asker} card={card} questions={questions} />;
   if (card.answered || card.expired || card.stopped) return <SettledQuestion card={card} questions={questions} />;
 
   const currentIndex = Math.min(active, questions.length - 1);
@@ -221,6 +222,49 @@ export function QuestionCard({
       )}
       {failed && <AskError>{t("ask.error")}</AskError>}
     </AskCard>
+  );
+}
+
+/** At Full access a bot decides a teammate's question instead of the person: it blocks nothing, and the person may still
+ * give their own answer. */
+export const decidedByBot = (card: NonNullable<Message["card"]>): boolean =>
+  card.answeredBy?.kind === "bot" && card.answered === "answer" && !card.dismissed && !card.expired && !card.stopped;
+
+function DecidedQuestion({ threadId, asker, card, questions }: { threadId: string; asker?: Asker; card: NonNullable<Message["card"]>; questions: readonly AskQuestion[] }) {
+  const { dispatch } = useStore();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "failed">("idle");
+  const name = card.answeredBy?.kind === "bot" ? card.answeredBy.name : "";
+  const picked = card.answeredText;
+  const question = questions[0]!.question;
+  const send = (text: string) => {
+    if (!card.requestId) return;
+    setState("sending");
+    returnFocusToComposer();
+    dispatch({ type: "decideRequest", threadId, requestId: card.requestId, behavior: "answer", message: text, onError: () => setState("failed") });
+  };
+  return (
+    <div className="w-full max-w-[560px]">
+      <AskSettledLine
+        ariaLabel={t("question.aria.card")}
+        action={!open ? (
+          <button type="button" onClick={() => setOpen(true)} className={ASK_QUIET_BUTTON}>{t(picked === undefined ? "question.decided.answer" : "question.decided.change")}</button>
+        ) : undefined}
+      >
+        {picked === undefined ? t("question.decided.deciding", { name })
+          : picked ? <><span>{t("question.decided.picked", { name })}</span> <span className="text-ink-secondary">{picked}</span></>
+            : t("question.decided.own", { name })}
+      </AskSettledLine>
+      {open && (
+        <div className="mt-2">
+          <p dir="auto" className="mb-2 text-[13px] leading-[18px] text-ink-secondary">{question}</p>
+          <AskReply label={question} placeholder={t("question.answerPlaceholder")} color={asker?.color} value={draft} onChange={setDraft}
+            onSend={send} sending={state === "sending"} maxLength={MAX_CUSTOM_ANSWER} />
+          {state === "failed" && <AskError>{t("ask.error")}</AskError>}
+        </div>
+      )}
+    </div>
   );
 }
 

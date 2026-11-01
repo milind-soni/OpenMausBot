@@ -1,3 +1,6 @@
+/** Remove from list's answer: done (`removed`), refused by the Admin now, the Cloud no longer theirs (`gone`), an Admin
+ * without it (`unsupported`), or no answer (`failed`). */
+export type CloudRemoveOutcome = "removed" | "refused" | "gone" | "unsupported" | "failed";
 export interface CloudAccountState {
   status: "signed-out" | "connecting" | "connected" | "reauth-required" | "unavailable";
   message?: string;
@@ -44,6 +47,8 @@ export interface CloudAccountState {
   offer?: import("./cloud-home.mjs").CloudOffer;
   /** Connected with an active plan: its allowances and this month's use of them, and the bigger plans the app can move to (display only). */
   usage?: import("./cloud-home.mjs").CloudUsage;
+  /** Connected beside `usage`: the Cloud is short on room (display only; its plan moves through the usual upgrade). */
+  room?: import("./cloud-home.mjs").CloudRoom;
   /** A checkout this app opened (or a sign-in it started on the way to
    * one: `signIn`) in the last 24 hours: the plan, and when (Reopen checkout
    * starts the 30-minute watch again). `link`: main keeps its page, so Reopen
@@ -184,6 +189,8 @@ export interface CloudPlanSnapshot {
   home?: true;
   /** Verified, with an active plan: its allowances and their use this month (the usage meter). */
   usage?: import("./cloud-home.mjs").CloudUsage;
+  /** Verified, beside `usage`: this Cloud is short on room, and the plan that fixes it or a tip (the room card). */
+  room?: import("./cloud-home.mjs").CloudRoom;
   /** Verified, while this account pays for a plan that runs: what Cancel and Keep act on. */
   renewal?: import("./cloud-list.mjs").CloudRenewal;
 }
@@ -200,6 +207,9 @@ export interface CloudPlanBridge {
   /** Cancel trial / Cancel plan and Keep my plan on the Cloud's own page (only from the person's click). Absent on an older app. */
   cancel?(survey: CloudCancelSurvey | null): Promise<CloudRenewalResult>;
   keep?(): Promise<CloudRenewalResult>;
+  /** The room card's Not now, and Restart now after its upgrade (only from the person's click). Absent on an older app. */
+  roomNotNow?(id: string): Promise<boolean>;
+  restartNow?(): Promise<"restarting" | "current" | "failed">;
 }
 
 export declare const CLOUD_ORIGIN: string;
@@ -262,6 +272,10 @@ export interface CloudAccountClient {
   cancelPlan(survey: unknown): Promise<CloudRenewalResult>;
   /** POST /api/cloud/desktop/clouds/<the session's own Cloud>/keep. */
   keepPlan(): Promise<CloudRenewalResult>;
+  /** POST /api/cloud/desktop/room: Not now on the room card for the session's own Cloud; false when it couldn't be said. */
+  roomNotNow(id: string): Promise<boolean>;
+  /** POST /api/cloud/desktop/resize-now: the bigger size after an upgrade goes at once. */
+  restartNow(): Promise<"restarting" | "current" | "failed">;
   homeTarget(): { origin: string } | null;
   /** The Admin's last word on a Cloud whose plan sleeps; null for any other. */
   power(): import("./cloud-power.mjs").CloudPower | null;
@@ -274,11 +288,14 @@ export interface CloudAccountClient {
   /** `origin` is a Cloud the person owns (My Cloud or another of theirs), by the verified session only. */
   isOwnCloud(origin: string | null | undefined): boolean;
   /** Buys another Cloud (POST /api/cloud/desktop/clouds): its checkout opens in the browser. */
-  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<CloudAddResult>;
+  /** `source`: where the checkout started (CHECKOUT_SOURCES), for the Admin's funnel. */
+  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null; source?: string | null }): Promise<CloudAddResult>;
   /** A new organization on the Team plan this account pays for (POST /api/cloud/desktop/organizations): no checkout. */
   addOrganization(input: { name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<OrganizationAddResult>;
   /** A Cloud's colour on the Admin (PATCH /api/cloud/desktop/clouds/:id), for its owner or its team's Super admin and Admins. */
   setCloudColor(cloudId: string, color: import("./cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "saved" | "refused" | "unsupported" | "failed" }>;
+  /** Remove from list: one of the person's own Clouds the session says is `removable` leaves their list on the Admin. */
+  hideCloud(cloudId: string): Promise<{ outcome: CloudRemoveOutcome }>;
   /** That checkout's page again (never a new one); false when none is kept. */
   reopenAdd(): Promise<boolean>;
   /** Main only (the clipboard): that checkout's page, or null. */

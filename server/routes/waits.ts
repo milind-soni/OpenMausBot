@@ -24,6 +24,7 @@ export const WAIT_MESSAGES = {
   self: "You cannot wait for yourself to finish. Tell the person yourself when you are done.",
   noWait: "None of your waits in this chat has that id. Use list_waits.",
   none: "You are not waiting for anything in this chat.",
+  noneToCancel: "You are not waiting for anything in this chat, so there is nothing to cancel.",
 } as const;
 
 export interface WaitRequest {
@@ -160,6 +161,8 @@ export interface WaitRouteContext {
   /** A Cloud guest's turn: its follow-up would run later as the owner's, so a guest's wait only tells. */
   guest: () => boolean;
   peer: (nameOrId: string) => { id: string; name: string } | "self" | null;
+  /** Why no bot here has that name: where it lives among the person's other places, or that bots work as one place. */
+  elsewhere?: (name: string) => { where: string } | { hint: string } | null;
 }
 
 /** `sleeps`: the home is a personal My Cloud, whose plan sleeps when idle; a Team Cloud never sleeps. */
@@ -180,6 +183,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     const body = await ctx.readBody();
 
     if (ctx.path === CANCEL) {
+      if (!here().length) return void json(res, 404, { error: WAIT_MESSAGES.noneToCancel });
       const id = isRecord(body) ? body.id : undefined;
       if (typeof id !== "string" || !id) return void json(res, 400, { error: "id: the wait id from list_waits." });
       const stopped = here().some((wait) => wait.id === id) ? deps.waits.cancel(id, ctx.botId) : null;
@@ -200,7 +204,10 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     if (request.kind === "bot_idle") {
       const peer = ctx.peer(request.bot!);
       if (peer === "self") return void json(res, 400, { error: WAIT_MESSAGES.self });
-      if (!peer) return void json(res, 400, { error: WAIT_MESSAGES.noPeer });
+      if (!peer) {
+        const away = ctx.elsewhere?.(request.bot!) ?? null;
+        return void json(res, 400, { error: !away ? WAIT_MESSAGES.noPeer : "where" in away ? away.where : `${WAIT_MESSAGES.noPeer} ${away.hint}` });
+      }
       condition = { kind: "bot_idle", botId: peer.id, botName: peer.name };
     } else if (request.kind === "url_contains" || request.kind === "url_missing") {
       condition = { kind: request.kind, url: request.url!, text: request.text! };

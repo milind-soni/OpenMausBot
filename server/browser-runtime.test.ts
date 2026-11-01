@@ -255,6 +255,12 @@ function daemonSpec(): { spec: BrowserSpawnSpec; busy: string; calls: () => stri
 }
 
 describe("server-owned browser MCP runtime", () => {
+  it.runIf(process.platform === "linux")("starts a bot's browser engine first in line when memory runs out, before the server", async () => {
+    const value = runtime();
+    const listed = await value.agentRpc("scored", spec(), "tools/list", {}) as { pid: number };
+    expect(readFileSync(`/proc/${listed.pid}/oom_score_adj`, "utf8").trim()).toBe("1000");
+  });
+
   it("never lets agent_browser_read fetch an address itself, around the browser and its egress gate", async () => {
     const value = runtime();
     const daemon = spec();

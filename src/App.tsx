@@ -29,6 +29,7 @@ import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { LiveConnectionStrip } from "@/components/LiveConnectionStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
@@ -38,8 +39,10 @@ import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { PlacesRail } from "@/components/PlacesRail";
 import { CloudHowTo } from "@/components/CloudHowTo";
-import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip, windowFramed } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
+import { WindowFrameBar } from "@/components/WindowFrameBar";
+import { cn } from "@/lib/cn";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
 import { CloudIntent } from "@/components/CloudIntent";
@@ -64,6 +67,8 @@ import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
 import { useAiSwitchKeeper } from "@/lib/ai-switch";
 import { useChiefStepOpen } from "@/lib/default-bot";
+import { SESSION_ENDED_REASON, useSessionEnded } from "@/lib/session-ended";
+import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
@@ -299,13 +304,19 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     });
   }, [dispatch]);
 
+  const framed = windowFramed(capabilities);
+  const strips = <>
+    <UpdateBanner sidebarIndicator={framed || (!calendarFocus && (sidebarInline || drawerOpen))} />
+    <CloudAsleepStrip />
+    <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
+    <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
+    <HomeLine />
+    <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
+  </>;
   return (
-    <div className="flex h-full flex-col">
-      <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
-      <CloudAsleepStrip />
-      <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
-      <HomeLine />
-      <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
+    <div className={cn("flex h-full flex-col", framed && "bg-frame")}>
+      <WindowFrameBar />
+      {!framed && strips}
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"
@@ -334,6 +345,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           menuButtonRef.current?.focus();
         }}
       />}
+      {/* A framed window shows the chat or page in a rounded card, on the frame beside the sidebar: its top corners and
+          its bottom-left corner are round, and it runs to the window's right and bottom edges. */}
+      <div data-window-card={framed ? "" : undefined}
+        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app ring-1 ring-ink/[0.06]" : "contents"}>
+      {framed && strips}
+      <div className={framed ? "relative flex min-h-0 flex-1" : "contents"}>
       {state.activeView === "team-map" ? (
         <TeamMapPage />
       ) : state.activeView === "files" ? (
@@ -401,6 +418,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {inboxShown && <InboxPanel />}
       {notificationFeed && !calendarFocus && state.notificationsOpen && <NotificationsPanel />}
       {notificationFeed && !calendarFocus && <NotificationRail />}
+      </div>
+      </div>
       {state.appSettingsOpen && <SettingsModal />}
       <CloudAddDialog />
       <CloudHowTo />
@@ -454,5 +473,7 @@ function Application() {
 }
 
 export default function App() {
+  const ended = useSessionEnded();
+  if (ended) return <PairPage initialCode={null} reason={SESSION_ENDED_REASON} />;
   return <WorkspaceBackupRecovery><Application /></WorkspaceBackupRecovery>;
 }

@@ -367,8 +367,10 @@ export function accountDot({ automationsNeedYou, update, move }: { automationsNe
 }
 
 /** `besideRail`: the window's rail of places stands beside the page and switches places, so Switch to… isn't offered twice. */
-export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" | "cloudHome" | "onLine" | "openMenu" | "switchable">, { owner, onCloudSettings, besideRail = false }: {
+export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" | "cloudHome" | "onLine" | "openMenu" | "switchable">, { owner, name, onCloudSettings, besideRail = false }: {
   owner: string | null;
+  /** A team's name on a team's Cloud. */
+  name?: string;
   onCloudSettings: () => void;
   besideRail?: boolean;
 }): SidebarMenuItem[] {
@@ -376,7 +378,7 @@ export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" 
   if (!place.switchable) {
     if (!place.cloudHome && !place.current?.home) return [];
     const subtitle = [place.onLine, owner ? t("sidebar.cloudOwner", { email: owner }) : ""].filter(Boolean).join(" · ");
-    return [{ key: "place", label: t("cloudSetup.myCloud"), ...(subtitle ? { subtitle } : {}), icon: <Cloud size={16} />, trailing: here, onSelect: onCloudSettings }];
+    return [{ key: "place", label: name || t("cloudSetup.myCloud"), ...(subtitle ? { subtitle } : {}), icon: <Cloud size={16} />, trailing: here, onSelect: onCloudSettings }];
   }
   const current = place.current;
   const icon = cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} />
@@ -604,7 +606,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         onFiles: filesReady ? () => dispatch({ type: "showFiles" }) : undefined,
         archived: account.archived,
       }),
-      places: placeMenuItems(account.place, { owner: account.owner, besideRail, onCloudSettings: openCloudAccount }),
+      places: placeMenuItems(account.place, { owner: account.owner, name: state.config?.team?.name, besideRail, onCloudSettings: openCloudAccount }),
     } } : {}),
     onUsage: () => dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
     onSettings: () => dispatch({ type: "toggleAppSettings" }),
@@ -672,7 +674,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
-              <AccountMoveStatus kind={move.kind} />
+              <AccountMoveStatus kind={move.kind} place={move.place} />
             </span>
             {noteworthy && (
               <span

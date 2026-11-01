@@ -25,7 +25,7 @@ export interface RoutineFailureFacts {
   limitResetsAt?: number;
   /** A usage limit refused it (the runtime error's `limit`). */
   limit?: "engine" | "model" | "credits";
-  /** A backup engine takes over from one whose usage limit refused the run. */
+  /** A backup engine takes over from one whose usage limit refused the run, or that is signed out. */
   backupReady?: boolean;
 }
 
@@ -61,7 +61,7 @@ const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count"]);
 const OWNER_CAUSES = new Set<RoutineOwnerCause>(["signed_out", "credits", "usage_limit", "setup"]);
 
 const OWNER_ACTION: Record<Exclude<RoutineOwnerCause, "setup">, string> = {
-  signed_out: "This bot's AI is signed out. Sign in again in Settings → Model providers.",
+  signed_out: "This bot's AI is signed out. Sign in again in Settings → AI.",
   credits: "This bot's AI account is out of credit. Add credit with the provider, or choose another AI for this bot.",
   usage_limit: "This bot's AI reached its usage limit. Its routines work again once it resets, or choose another AI for this bot now.",
 };
@@ -170,6 +170,11 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   if (verdict.kind === "final") return { queued: false, error: again };
   if (verdict.cause === "usage_limit" && facts.backupReady && requeueOnce(run, "usage_limit", failure, now, now + RETRY_MS)) {
     run.attention = "Starting again on the backup AI: this bot's AI reached its usage limit";
+    return { queued: true };
+  }
+  // A signed-out AI's run starts again on the backup the person chose; its start there says once that it needs signing in.
+  if (verdict.cause === "signed_out" && facts.backupReady && requeueOnce(run, "failed", failure, now, now + RETRY_MS)) {
+    run.attention = "Starting again on the backup AI: this bot's AI is signed out";
     return { queued: true };
   }
   const first = firstNotice(notices, run.botId, verdict.cause, now);

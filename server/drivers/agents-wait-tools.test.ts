@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { ToolCallContext } from "./agents-call.ts";
-import { availableTools, callableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
+import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import type { Json } from "./agents-client.ts";
 import { agentsMcp } from "./agents-mcp.ts";
 import { callWaitTool, WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
@@ -65,37 +65,24 @@ describe("wait tools", () => {
 const waitNames = (env: Record<string, string>) =>
   availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout", OMB_CHIEF_OF_STAFF: "1", ...env })).map((tool) => tool.name).filter((name) => WAIT_TOOL_NAMES.has(name));
 
-describe("which wait tools a turn is listed", () => {
-  it("lists wait_until alone while the bot has no wait, and list_waits and cancel_wait too once it has one", () => {
-    expect(waitNames({})).toEqual(["wait_until"]);
-    expect(waitNames({ OMB_ACTIVE_WAITS: "1" })).toEqual(["wait_until", "list_waits", "cancel_wait"]);
-    const all = availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout", OMB_ACTIVE_WAITS: "1" })).map((tool) => tool.name);
-    expect(availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout" })).map((tool) => tool.name))
-      .toEqual(all.filter((name) => name !== "list_waits" && name !== "cancel_wait"));
+describe("which wait tools a conversation is listed", () => {
+  // The list is the same on every turn of a chat, so the provider's cached prompt carries over whether a wait is open or not.
+  it("lists a direct chat all three, with or without a wait in it", () => {
+    expect(waitNames({})).toEqual(["wait_until", "list_waits", "cancel_wait"]);
   });
 
-  it("marks list_waits read-only when it is listed, and nothing else of the three", () => {
-    const tools = availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout", OMB_ACTIVE_WAITS: "1" })).filter((tool) => WAIT_TOOL_NAMES.has(tool.name));
+  it("marks list_waits read-only, and nothing else of the three", () => {
+    const tools = availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout" })).filter((tool) => WAIT_TOOL_NAMES.has(tool.name));
     expect(tools.map((tool) => [tool.name, Boolean((tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint)]))
       .toEqual([["wait_until", false], ["list_waits", true], ["cancel_wait", false]]);
   });
 
-  // OMB_ACTIVE_WAITS counts the chat's own waits (WaitManager.count), and no wait is made in a room, so a room's turn
-  // is never listed list_waits in practice; the catalog would list it alone.
-  it("lists a room's turn list_waits alone, and only with OMB_ACTIVE_WAITS", () => {
+  it("lists a room none of them: a room holds no wait", () => {
     expect(waitNames({ OMB_ROOM: "1" })).toEqual([]);
-    expect(waitNames({ OMB_ROOM: "1", OMB_ACTIVE_WAITS: "1" })).toEqual(["list_waits"]);
-  });
-
-  it("lets a turn call list_waits and cancel_wait without a wait, but never what a room refuses", () => {
-    const callable = (env: Record<string, string>) => callableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout", ...env }))
-      .map((tool) => tool.name).filter((name) => WAIT_TOOL_NAMES.has(name));
-    expect(callable({})).toEqual(["wait_until", "list_waits", "cancel_wait"]);
-    expect(callable({ OMB_ROOM: "1" })).toEqual(["list_waits"]);
   });
 });
 
-describe("a wait tool the turn is not listed", () => {
+describe("the wait tools in a chat with no wait", () => {
   let server: Server;
   let url = "";
   const reached: string[] = [];
@@ -104,7 +91,7 @@ describe("a wait tool the turn is not listed", () => {
     server = createServer((req, res) => {
       if (req.url?.startsWith("/api/internal/waits")) reached.push(`${req.method} ${req.url}`);
       const [status, body] = req.url === "/api/internal/waits/cancel"
-        ? [404, { error: "None of your waits in this chat has that id. Use list_waits." }]
+        ? [404, { error: "You are not waiting for anything in this chat, so there is nothing to cancel." }]
         : [200, { text: "You are not waiting for anything in this chat." }];
       req.resume();
       req.on("end", () => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); });
@@ -123,33 +110,29 @@ describe("a wait tool the turn is not listed", () => {
     return reply.error ? { error: reply.error.message } : { text: reply.result!.content![0]!.text, isError: reply.result!.isError };
   };
 
-  it("still answers in the route's words when called directly, from a list read before or a wait made this turn", async () => {
+  it("lists them, and they answer plainly that there is nothing to list or cancel", async () => {
     const listed = (await send({}, "tools/list")).result!.tools!.map((tool) => tool.name);
-    expect(listed).toContain("wait_until");
-    expect(listed).not.toContain("list_waits");
-    expect(listed).not.toContain("cancel_wait");
+    expect(listed).toEqual(expect.arrayContaining(["wait_until", "list_waits", "cancel_wait"]));
     reached.length = 0;
     expect(await answer({}, "list_waits")).toEqual({ text: "You are not waiting for anything in this chat.", isError: false });
-    expect(await answer({}, "cancel_wait", { id: "w1" })).toEqual({ text: "None of your waits in this chat has that id. Use list_waits.", isError: true });
+    expect(await answer({}, "cancel_wait", { id: "w1" })).toEqual({ text: "You are not waiting for anything in this chat, so there is nothing to cancel.", isError: true });
     expect(reached).toEqual(["GET /api/internal/waits", "POST /api/internal/waits/cancel"]);
   });
 
-  it("runs through use_tool on a bridged turn, which find_tool offers only once the bot has a wait", async () => {
+  it("runs through use_tool on a bridged turn, whose find_tool offers them with or without a wait", async () => {
     const bridged = { OMB_AGENTS_TOOL_BRIDGE: "1" };
-    const found = async (env: Record<string, string>) =>
-      (JSON.parse((await answer({ ...bridged, ...env }, "find_tool", { query: "cancel_wait" })).text!) as { matches: Array<{ name: string }> })
-        .matches.map((match) => match.name);
-    expect(await found({})).not.toContain("cancel_wait");
-    expect(await found({ OMB_ACTIVE_WAITS: "1" })).toContain("cancel_wait");
+    const found = (JSON.parse((await answer(bridged, "find_tool", { query: "cancel_wait" })).text!) as { matches: Array<{ name: string }> })
+      .matches.map((match) => match.name);
+    expect(found).toContain("cancel_wait");
     expect(await answer(bridged, "use_tool", { name: "cancel_wait", arguments: { id: "w1" } }))
-      .toEqual({ text: "None of your waits in this chat has that id. Use list_waits.", isError: true });
+      .toEqual({ text: "You are not waiting for anything in this chat, so there is nothing to cancel.", isError: true });
     expect(await answer(bridged, "use_tool", { name: "list_waits" })).toEqual({ text: "You are not waiting for anything in this chat.", isError: false });
   });
 
-  it("refuses cancel_wait in a room as a tool the room is not given, and still answers list_waits there", async () => {
+  it("refuses the wait tools in a room as tools the room is not given", async () => {
     reached.length = 0;
     expect(await answer({ OMB_ROOM: "1" }, "cancel_wait", { id: "w1" })).toEqual({ error: "Unknown tool: cancel_wait" });
-    expect(await answer({ OMB_ROOM: "1" }, "list_waits")).toEqual({ text: "You are not waiting for anything in this chat.", isError: false });
-    expect(reached).toEqual(["GET /api/internal/waits"]);
+    expect(await answer({ OMB_ROOM: "1" }, "list_waits")).toEqual({ error: "Unknown tool: list_waits" });
+    expect(reached).toEqual([]);
   });
 });
