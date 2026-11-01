@@ -35,6 +35,8 @@ export interface EnvironmentDescriptor {
     computerAsks?: true;
     /** A lent computer may say it takes run_command's timeout_seconds; only then does this server send it. */
     commandTimeouts?: true;
+    /** A lent computer may say it runs a command for up to 900 seconds; only then does this server ask it for more than 240. */
+    longCommands?: true;
     /** A lent computer may say it takes edit_file, append_file and delete_file; only then does this server send them. */
     fileEdits?: true;
     /** A person's own OMB Cloud home. */
@@ -141,7 +143,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       remoteSessions: true,
       // Never advertise a protocol this server would refuse.
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
-      ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, fileEdits: true as const } : {}),
+      ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, longCommands: true as const, fileEdits: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const, computerAsks: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),

@@ -64,9 +64,9 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
-const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
+const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -158,10 +158,12 @@ const bridge = {
     },
   },
   // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
-  // covers the window; the skin of the page beside it comes from main. The page beside it, from whichever server,
-  // offers the button that hides and shows it, and learns only whether there is one to hide, never its places.
+  // covers the window; the skin of the page beside it comes from main, and whether that page draws the window's frame.
+  // The page beside it, from whichever server, offers the button that hides and shows it, and learns only whether there
+  // is one to hide, never its places; it says when it draws the frame, so main puts the traffic lights in its top bar.
   rail: {
     state: () => ipcRenderer.invoke("rail:offer").then(railState),
+    drawsFrame: (drawn) => ipcRenderer.invoke("rail:draws-frame", drawn !== false),
     setHidden: (hidden) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("rail:hide", hidden === true).then(railState) : Promise.reject(new Error("Choose to hide or show your computers.")),
     onState: (cb) => {
@@ -176,7 +178,19 @@ const bridge = {
         ipcRenderer.on("rail:skin", handler);
         return () => ipcRenderer.removeListener("rail:skin", handler);
       },
+      onFramed: (cb) => {
+        const handler = (_event, framed) => cb(framed === true);
+        ipcRenderer.on("rail:framed", handler);
+        return () => ipcRenderer.removeListener("rail:framed", handler);
+      },
     } : {}),
+  },
+  // The window's own frame, this desktop's choice for every page of its window; a server's page changes it only from the
+  // person's click.
+  windowFrame: {
+    state: () => ipcRenderer.invoke("window-frame:state"),
+    set: (on) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("window-frame:set", on === true) : Promise.reject(new Error("Choose to turn the window frame on or off.")),
   },
   // Buying another Cloud from the rail's ＋, on this app's page or a hosted Cloud's: plain words in, what the sheet says
   // out; the account, the token and the checkout page stay in main. Only from the person's click where it opens anything.

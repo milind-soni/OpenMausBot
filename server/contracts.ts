@@ -199,6 +199,9 @@ export interface SendTurnInput {
   mcpFromUserConfig?: boolean;
   /** Claude Code loads the person's own `~/.claude/skills` from this folder's `.claude/skills` (`--add-dir`). */
   userSkillsDir?: string;
+  /** The bot's own Claude Code settings: `.claude/settings.json` in its working folder, else in its own folder. A Claude
+   * turn in any other folder takes their hooks, plugins, permission rules and env. */
+  botSettingsFile?: string;
   /** Per-call ceiling (ms) for this turn's MCP tools; absent is the driver's default (10 min). */
   mcpCallTimeoutMs?: number;
   /** Times an API-model turn that answers after a failed tool call is sent back to re-run it (`loopGuard.correctiveRounds`); never after a denial. */
@@ -367,6 +370,9 @@ export interface EngineInstall {
   signInCommand?: string;
   /** `command` needs npm on PATH, so the UI can say so when Node is absent. */
   needsNode?: boolean;
+  /** The vendor's npm package, for an engine whose `command` is its own installer script: Settings installs it on the
+   * server when npm is there, while a terminal keeps the vendor's command. */
+  npmPackage?: string;
   /** The app downloads and verifies a pinned provider runtime itself. */
   managed?: {
     label: string;

@@ -13,6 +13,7 @@ import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
+import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
 import { claudeModelExtras } from "./claude-model-extras.ts";
@@ -1203,16 +1204,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const cwd = turn.cwd ?? homedir();
       // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const toolSearch = claudeToolSearchSetting(cwd, env);
-      const settings: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch } };
+      const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch } };
       // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
-      if (isolated) settings.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
-      if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
-      if (turn.guestConfined) settings.permissions = GUEST_CLAUDE_PERMISSIONS;
+      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
+      if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
+      if (turn.guestConfined) own.permissions = GUEST_CLAUDE_PERMISSIONS;
+      // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
+      env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
+      // Never for a guest: --restricted leaves project settings out, and a hook is a command.
+      const botSettings = turn.guestConfined ? {} : botSettingsFor(turn.botSettingsFile, cwd, env);
+      const settings = withBotSettings(botSettings, own);
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length
         ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
       if (authSettingsPath) args.push("--settings", authSettingsPath);
-      // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
-      env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
       const commandCwd = permissionLaunchCwd(cwd);
       const privateFileFlags = new Set(["--mcp-config", "--settings"]);
       const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
@@ -1226,6 +1230,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
         hooks: Boolean(hooks),
         toolSearch,
+        botSettings: createHash("sha256").update(JSON.stringify(botSettings)).digest("hex"),
         // Rotating an account's key/helper must not reuse the old process.
         auth: createHash("sha256").update(JSON.stringify({
           settings: authSettings,

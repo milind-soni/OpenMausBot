@@ -358,20 +358,21 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
 
 const PRELOAD = readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
 function preload(origin, { home = false, activation = false } = {}) {
-  let bridge; const invoked = [], synced = [];
+  let bridge; const invoked = [], synced = [], listeners = new Map();
   vm.runInNewContext(PRELOAD, {
     process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`, "--omb-company-desktop=1"] },
     location: { origin }, navigator: { userActivation: { isActive: activation } }, TextEncoder, localStorage: { getItem: () => null },
     queueMicrotask,
     require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
-      ipcRenderer: { on() {}, removeListener() {}, send() {}, sendSync: (channel) => { synced.push(channel); return channel === "home:page" ? home : null; },
+      ipcRenderer: { on: (channel, listener) => listeners.set(channel, listener), removeListener() {}, send() {}, sendSync: (channel) => { synced.push(channel); return channel === "home:page" ? home : null; },
         invoke: (...args) => { invoked.push(args); return Promise.resolve(); } } }),
   });
-  return { bridge, invoked, synced };
+  const tell = (channel, ...args) => listeners.get(channel)?.({}, ...args);
+  return { bridge, invoked, synced, tell };
 }
 
-test("My Cloud's own page, once it is home, gets this app's chat links, Settings key, diagnostics and its session renewal; any other server's page doesn't", async () => {
-  const keys = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder"];
+test("My Cloud's own page, once it is home, gets this app's chat links, diagnostics and its session renewal; any other server's page doesn't", async () => {
+  const keys = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder"];
   const home = preload(CLOUD, { home: true });
   for (const key of keys) assert.ok(home.bridge[key], key);
   assert.ok(home.synced.includes("home:page"));
@@ -386,6 +387,12 @@ test("My Cloud's own page, once it is home, gets this app's chat links, Settings
   assert.deepEqual([...home.invoked, ...clicked.invoked].map(([channel]) => channel), ["home:repair", "home:sign-in", "home:sign-in"]);
   const other = preload("https://bots.example.test", { home: false });
   for (const key of keys) assert.equal(other.bridge[key], undefined, key);
+  for (const page of [home, other]) {
+    const opened = [];
+    page.bridge.onOpenAppSettings(section => opened.push(section ?? "settings"));
+    page.tell("app:open-settings");
+    assert.deepEqual(opened, ["settings"], "the app menu's Settings reaches every server's page");
+  }
   const local = preload(LOCAL);
   for (const key of keys) assert.ok(local.bridge[key], key);
   assert.equal(local.synced.includes("home:page"), false, "this computer's page never needs to ask");
