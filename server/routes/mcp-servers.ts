@@ -6,7 +6,7 @@ import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
 import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
 import { probeMcpServer, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
-import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
+import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import { postizKeyHeaders } from "../postiz/connection.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
@@ -15,8 +15,22 @@ import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sessionMember } from "./team-phone.ts";
 
+type ListedMcpServer = { name: string; enabled: boolean; bot?: string; offFor?: readonly string[] };
+
+// Security: built field by field, never spread. The settings list carries commands, arguments and addresses that can
+// hold secrets, so it stays closed to phones and this is what they get instead.
+function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mcpServers?: readonly string[] | null }) {
+  return listed.filter((server) => mcpServerServes(server, bot.id)).map((server) => ({
+    name: server.name,
+    enabled: server.enabled,
+    on: server.enabled && (!bot.mcpServers || bot.mcpServers.includes(server.name)),
+    ...(server.offFor?.includes(bot.id) ? { offFor: true as const } : {}),
+  }));
+}
+
 export interface McpServerRouteDeps {
   cfg: Pick<AppConfig, "mcpServers" | "postiz">;
+  bot(id: string): { id: string; mcpServers?: readonly string[] | null } | null;
   sessions: Pick<SessionRegistry, "isLive">;
   mcpOAuth: McpOAuthManager;
   teamConnections: Pick<TeamConnectionsHost, "personMcp" | "people">;
@@ -24,7 +38,7 @@ export interface McpServerRouteDeps {
   fallbackPublicUrl: string | null;
   mcpConfigBusy: BusyFlag;
   /** Secrets as booleans, sign-in state attached. */
-  mcpServerResponse(): Record<string, unknown>;
+  mcpServerResponse(): { servers: readonly ListedMcpServer[] };
   mcpPolicyRefusal(name: string, server: object): string | undefined;
   persistMcpServers(next: Record<string, unknown>): void;
   savedCustomDomain(): string | null;
@@ -87,6 +101,13 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, withServerDetails(mcpServerResponse()));
+    }
+
+    const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
+    if (method === "GET" && ofBot) {
+      const bot = deps.bot(ofBot[1]!);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { servers: botMcpServers(mcpServerResponse().servers, bot) });
     }
 
     const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);
