@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { citationAttachment, createCitationTextSelector } from "../../src/lib/citations.ts";
+import { composeMessage } from "../../src/lib/composer-attachments.ts";
 import "../server-line-packs.ts";
 import type { DevsReportPayload } from "../devs-report.ts";
 import type { ReportStatusAnswer, ReportStatusQuestion, SendOutcome } from "../devs-report-send.ts";
@@ -197,6 +199,39 @@ describe("a message that tags @devs", () => {
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
     expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
+  it("sends a quote as the person read it: their own words first, the quote as written and redacted, never its encoded copy", async () => {
+    const fx = fixture();
+    const token = `ghp_${"t".repeat(36)}`;
+    const said = fx.bot("scout-main", "The relay failed.\nI only send a report when your message tags @devs.");
+    const quote = citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, said.text!.length)!, `@devs help me send on it, my token is ${token}`);
+    fx.person("scout-main", composeMessage("", [quote]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    const { description } = fx.sent[0]!;
+    const [words, rest] = description.split("\n\nWhat they wrote: ");
+    expect(words).toBe(`help me send on it, my token is «redacted ${token.length} chars»`);
+    expect(rest).toMatch(/^> Quoted message:\n> The relay failed\.\n> I only send a report when your message tags @devs\.\n/);
+    expect(JSON.stringify(fx.sent[0])).not.toContain("omb-citation");
+    expect(JSON.stringify(fx.sent[0])).not.toContain(token);
+    expect(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8")).not.toContain("omb-citation");
+    fx.stop();
+  });
+
+  it("drops a marker it cannot read too, so nothing encoded slips past redaction", async () => {
+    const fx = fixture();
+    const token = `ghp_${"t".repeat(36)}`;
+    fx.person("scout-main", `<!--omb-citation-v1:${Buffer.from(JSON.stringify({ comment: token })).toString("base64url")}-->\n@devs it broke`);
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    expect(fx.sent[0]!.description.split("\n")[0]).toBe("it broke");
+    expect(JSON.stringify(fx.sent[0])).not.toContain("omb-citation");
+    expect(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8")).not.toContain("omb-citation");
     fx.stop();
   });
 });
