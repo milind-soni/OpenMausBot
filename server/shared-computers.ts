@@ -18,6 +18,8 @@ export const sharedComputerRegistration = z.object({
   /** It takes and honours run_command's timeout_seconds; sent only to a server that advertises commandTimeouts. Older
    * desktops refuse a job with a field they do not know, and stop every command at 30 seconds. */
   commandTimeouts: z.literal(true).optional(),
+  /** It runs a command for up to 900 seconds, not 240; sent only to a server that advertises longCommands. */
+  longCommands: z.literal(true).optional(),
   /** It takes edit_file, append_file and delete_file; sent only to a server that advertises fileEdits. */
   fileEdits: z.literal(true).optional(),
 }).strict();
@@ -28,12 +30,13 @@ export const sharedComputerOperation = z.object({
   content: z.string().max(350_000).optional(), encoding: z.enum(["utf8", "base64"]).optional(),
   old_text: z.string().min(1).max(350_000).optional(), new_text: z.string().max(350_000).optional(),
   expected_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  command: z.string().max(8000).optional(), timeout_seconds: z.number().int().min(1).max(240).optional(), tool_name: z.string().max(100).optional(),
+  command: z.string().max(8000).optional(), timeout_seconds: z.number().int().min(1).max(900).optional(), tool_name: z.string().max(100).optional(),
   arguments: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 type Registration = z.infer<typeof sharedComputerRegistration>;
 type Operation = z.infer<typeof sharedComputerOperation>;
 const COMMAND_SECONDS = 120;
+const OLD_MAX_COMMAND_SECONDS = 240;
 /** A command's deadline is its own limit on the desktop plus time for the result to come back. */
 const jobDeadlineMs = (registration: Registration, operation: Operation) =>
   operation.action === "run_command" && registration.commandTimeouts ? (operation.timeout_seconds ?? COMMAND_SECONDS) * 1000 + 15_000 : 45_000;
@@ -322,6 +325,9 @@ export class SharedComputers {
     const entry = lent()!;
     const refusal = sharedComputerScopeRefusal(entry.registration, operation, this.askTool);
     if (refusal) throw failure(refusal, 403);
+    if (operation.action === "run_command" && entry.registration.commandTimeouts && !entry.registration.longCommands && (operation.timeout_seconds ?? 0) > OLD_MAX_COMMAND_SECONDS) {
+      throw failure(`${entry.registration.name} runs an older OpenMausBot that stops a command after at most ${OLD_MAX_COMMAND_SECONDS} seconds. Give timeout_seconds of ${OLD_MAX_COMMAND_SECONDS} or less, or run longer jobs in the background with output to a file.`, 400);
+    }
     if (entry.jobs.size >= 1) throw failure("This shared computer is busy. Wait for its current action to finish.");
     if (!active()) throw failure("The requesting turn ended", 401);
     const { timeout_seconds: _timeout, ...withoutTimeout } = operation;

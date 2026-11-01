@@ -270,7 +270,7 @@ let desktopDataDirLease = null;
 let runningDataDir = null;
 let localSwitchInFlight = false;
 let managedDesktop = null;
-let cloudAccount = null, updatesConsent = null, desktopPrefs = null, ownHome = null, twoPlaces = null;
+let cloudAccount = null, updatesConsent = null, desktopPrefs = null, ownHome = null, twoPlaces = null, windowFrameMade = null;
 let cloudAccountStarted = Promise.resolve();
 let cloudAccountRestoring = false;
 let cloudSignInRestored = false;
@@ -2026,7 +2026,7 @@ function createWindow({ deferNavigation = false } = {}) {
     icon: APP_ICON,
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     autoHideMenuBar: process.platform !== "darwin",
-    ...windowChromeOptions(process.platform),
+    ...windowChromeOptions(process.platform, windowFrameMade = desktopPrefs?.windowFrame() !== false),
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
@@ -2804,7 +2804,7 @@ ipcMain.handle("desktop:capabilities", async (event) =>
     platform: process.platform,
     env: process.env,
     packaged: app.isPackaged,
-    localConnection: await cuaReady,
+    localConnection: await cuaReady, frame: windowFrameNow(),
   }),
 );
 
@@ -2857,11 +2857,14 @@ ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mo
   return trustedApprovalMode.request(serverProc, botId, mode, options);
 }));
 
+// Electron fixes a Windows window's title bar when the window is made; on macOS the choice applies at once.
+const windowFrameNow = () => (process.platform === "win32" ? windowFrameMade : null) ?? desktopPrefs?.windowFrame() !== false;
 async function broadcastDesktopCapabilities() {
   const localConnection = await cuaReady;
   const build = (remote) =>
-    desktopCapabilities({ remote, platform: process.platform, env: process.env, packaged: app.isPackaged, localConnection });
+    desktopCapabilities({ remote, platform: process.platform, env: process.env, packaged: app.isPackaged, localConnection, frame: windowFrameNow() });
   const local = build(false);
+  chromeRail.send("desktop:capabilities-changed", local);
   let redacted = null;
   for (const window of appWindows()) {
     if (window.isDestroyed()) continue;
@@ -3027,6 +3030,7 @@ app.whenReady().then(async () => {
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
   desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
   updatesConsent = registerDesktopPrefs({ ipcMain, cloudAccount: () => cloudAccount, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
+    frame: { made: () => windowFrameMade, restarts: process.platform === "win32", changed: () => void broadcastDesktopCapabilities() },
     languageChanged: (language, sender) => {
       for (const win of appWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
       chromeRail.send("desktop-language:changed", language);

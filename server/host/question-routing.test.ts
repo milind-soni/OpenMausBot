@@ -10,7 +10,7 @@ const FUCHS = bot("fuchs", "Fuchs", { chiefOfStaff: true });
 const DACHS = bot("dachs", "Dachs");
 const OTTER = bot("otter", "Otter");
 
-function world(options: { live?: string[]; privateTo?: string } = {}) {
+function world(options: { live?: string[]; privateTo?: string; steers?: boolean } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const rows = (threadId: string) => threads.get(threadId) ?? [];
@@ -43,6 +43,7 @@ function world(options: { live?: string[]; privateTo?: string } = {}) {
   const answeredNodes: Array<{ id: string; text: string; by: Answerer }> = [];
   const answeredLive: Array<{ threadId: string; requestId: string; text: string }> = [];
   const settled: string[] = [];
+  const steered: Array<{ threadId: string; text: string }> = [];
   const deps: QuestionRoutingDeps = {
     store: store as unknown as QuestionRoutingDeps["store"],
     active: () => [...nodes.values()],
@@ -59,8 +60,9 @@ function world(options: { live?: string[]; privateTo?: string } = {}) {
     answerLive: async (threadId, requestId, text) => { answeredLive.push({ threadId, requestId, text }); return true; },
     settleSignIns: (parked) => { settled.push(parked.id); },
     keptPrivate: (child, requester) => child.threadId === options.privateTo && requester.threadId !== options.privateTo,
+    steer: async (threadId, text) => { if (options.steers === false) return false; steered.push({ threadId, text }); return true; },
   };
-  return { routing: createQuestionRouting(deps), store, rows, node, nodes, answeredNodes, answeredLive, settled };
+  return { routing: createQuestionRouting(deps), store, rows, node, nodes, answeredNodes, answeredLive, settled, steered };
 }
 
 describe("at Full access a question asked with an ask tool", () => {
@@ -114,12 +116,47 @@ describe("an answer passed on by another bot", () => {
     expect(w.answeredNodes.map((one) => one.text)).toEqual(["Excel"]);
   });
 
-  it("never takes new work for an answer: same conversation, same sender, a question still open", async () => {
+  it("takes the requester's message to the thread its earlier work waits in as the answer, in a later turn and unnamed", async () => {
     const w = world();
-    parked(w);
-    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root" } as HandoffView, target: DACHS, message: "Neue Aufgabe: prüf das Logo" })).toBeUndefined();
+    const node = parked(w);
+    const receipt = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root-2" } as HandoffView, target: DACHS, message: "Kurz und freundlich", threadId: "work" });
+    expect(receipt).toMatchObject({ outcome: "injected", threadId: "work", requestId: node.id });
+    expect(w.answeredNodes).toEqual([{ id: node.id, text: "Kurz und freundlich", by: { kind: "bot", botId: "fuchs" } }]);
+    expect(w.rows("work")[0]!.card).toMatchObject({ answered: "answer", answeredText: "Kurz und freundlich", answeredBy: { kind: "bot", name: "Fuchs" } });
+  });
+
+  it("takes nothing for an answer sent to another thread, by a bot that did not hand the work on, in the turn that handed it out, or once its requester ended", async () => {
+    const send = async (w: ReturnType<typeof world>, over: { sender?: BotRecord; threadId?: string; sentThisTurn?: ReadonlySet<string> }) =>
+      w.routing.relay({ sender: over.sender ?? FUCHS, senderThreadId: "inbox", target: DACHS, message: "Neue Aufgabe: prüf das Logo",
+        ...(over.threadId !== undefined ? { threadId: over.threadId } : {}), ...(over.sentThisTurn ? { sentThisTurn: over.sentThisTurn } : {}) });
+    const w = world();
+    const node = parked(w);
+    expect(await send(w, {})).toBeUndefined();
+    expect(await send(w, { threadId: "other-work" })).toBeUndefined();
+    expect(await send(w, { sender: OTTER, threadId: "work" })).toBeUndefined();
+    expect(await send(w, { threadId: "work", sentThisTurn: new Set([node.id]) })).toBeUndefined();
+    w.nodes.set("root", { ...w.nodes.get("root")!, status: "cancelled" });
+    expect(await send(w, { threadId: "work" })).toBeUndefined();
     expect(w.answeredNodes).toEqual([]);
     expect(w.rows("work")[0]!.card!.answered).toBeUndefined();
+  });
+
+  it("does not take the requester's later message for a sign-in only the person can do", async () => {
+    const w = world();
+    w.store.appendMessage("work", { role: "bot", kind: "signin", text: "Sign in", signIn: { url: "https://notion.so", site: "notion.so", place: "browser" } });
+    w.node({ question: "Waiting on the person: sign in to notion.so", cards: ["m1"] });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Prüf auch die Unterseiten", threadId: "work" })).toBeUndefined();
+    expect(w.answeredNodes).toEqual([]);
+    expect(w.settled).toEqual([]);
+  });
+
+  it("answers the question card the turn of the requester's earlier work waits on, from a later turn, unnamed", async () => {
+    const w = world({ live: ["req-1"] });
+    w.node({ id: "as_live", status: "running" });
+    w.store.appendMessage("work", { role: "bot", kind: "options", text: "Soll ich?", card: { title: "Your bot has a question", subtitle: "Soll ich?", options: ["Ja", "Nein"], requestId: "req-1", requestType: "question" } });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Ja", threadId: "work" })).toMatchObject({ outcome: "injected", requestId: "as_live" });
+    expect(w.answeredLive).toEqual([{ threadId: "work", requestId: "req-1", text: "@Fuchs answered: Ja" }]);
+    expect(w.steered).toEqual([]);
   });
 
   it("refuses an answer to work that no longer asks, saying how to send it as work instead", async () => {
@@ -150,5 +187,36 @@ describe("an answer passed on by another bot", () => {
     const node = connect.node({ question: "Waiting on the person: connect Notion", cards: ["m1"] });
     expect(await connect.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "verbunden", answers: node.id })).toMatchObject({ outcome: "failed" });
     expect(connect.answeredNodes).toEqual([]);
+  });
+});
+
+describe("a message to the thread where work the sender handed on is running", () => {
+  it("goes to that running turn, framed as its requester's, and shows in both conversations; no new work", async () => {
+    const w = world();
+    const node = w.node({ status: "running" });
+    const receipt = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Nimm auch die Steuerspalte mit", threadId: "work" });
+    expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "work", requestId: node.id });
+    expect(w.steered).toHaveLength(1);
+    expect(w.steered[0]!.threadId).toBe("work");
+    expect(w.steered[0]!.text).toContain(`[OpenMausBot assignment ${node.id}: @Fuchs adds this while you work on it]`);
+    expect(w.steered[0]!.text).toContain(JSON.stringify("Nimm auch die Steuerspalte mit"));
+    expect(w.rows("work")).toEqual([expect.objectContaining({ role: "user", text: "Nimm auch die Steuerspalte mit", peerAsk: { botId: "fuchs", name: "Fuchs" }, aside: true, steered: true })]);
+    expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Sent to Dachs" }), threadRef: { botId: "dachs", threadId: "work", title: "Fix" } })]);
+    expect(w.answeredNodes).toEqual([]);
+  });
+
+  it("is left to become new work when the engine cannot take it now, or the work there is someone else's or handed out this turn", async () => {
+    const send = (w: ReturnType<typeof world>, sender: BotRecord, sentThisTurn?: ReadonlySet<string>) =>
+      w.routing.relay({ sender, senderThreadId: "inbox", target: DACHS, message: "Nimm auch die Steuerspalte mit", threadId: "work", ...(sentThisTurn ? { sentThisTurn } : {}) });
+    const refusing = world({ steers: false });
+    refusing.node({ status: "running" });
+    expect(await send(refusing, FUCHS)).toBeUndefined();
+    expect(refusing.rows("work")).toEqual([]);
+    expect(refusing.rows("inbox")).toEqual([]);
+    const w = world();
+    const node = w.node({ status: "running" });
+    expect(await send(w, OTTER)).toBeUndefined();
+    expect(await send(w, FUCHS, new Set([node.id]))).toBeUndefined();
+    expect(w.steered).toEqual([]);
   });
 });

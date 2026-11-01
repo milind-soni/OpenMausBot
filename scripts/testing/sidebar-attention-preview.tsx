@@ -9,7 +9,7 @@ import { applySkin, readSkin } from "../../src/lib/skins";
 import "../../src/styles.css";
 
 const density = new URLSearchParams(window.location.search).get("density");
-if (density === "compact" || density === "comfortable" || density === "icons") {
+if (density === "comfortable" || density === "icons") {
   saveSidebarDensity(density);
 }
 

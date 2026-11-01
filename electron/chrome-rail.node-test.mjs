@@ -33,11 +33,11 @@ function viewMaker() {
   return { made, createView };
 }
 
-function world({ wanted = true, hidden = false } = {}) {
+function world({ wanted = true, hidden = false, frame = true } = {}) {
   const { win, page, children } = appWindow();
   const { made, createView } = viewMaker();
   const state = { wanted, hidden, changes: 0 };
-  const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; } };
+  const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; }, windowFrame: () => frame };
   const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
     wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; } });
   const handlers = new Map();
@@ -201,6 +201,21 @@ test("the traffic lights sit in the frame's top bar beside a page that draws it,
   }
 });
 
+test("a page with the frame turned off says it draws none: the traffic lights go back at once, and the window opens that way next time", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const w = world();
+  w.rail.attach(w.win);
+  w.ask("rail:draws-frame", true);
+  w.ask("rail:draws-frame", false);
+  assert.deepEqual([w.rail.framed(), w.win.lights], [false, [TRAFFIC_LIGHTS.unframed]], "no grace to wait out: the page said so");
+  w.ask("rail:draws-frame", true);
+  assert.deepEqual([w.rail.framed(), w.win.lights.at(-1)], [true, TRAFFIC_LIGHTS.framed], "and back in the bar when it is turned on again");
+  const off = world({ frame: false });
+  off.rail.attach(off.win);
+  t.mock.timers.tick(RAIL_OFFER_GRACE_MS);
+  assert.deepEqual([off.rail.framed(), off.win.lights], [false, []], "a window made with the frame off opened its lights where they stay (windowChromeOptions)");
+});
+
 test("a page that stops responding, crashes or gives way to an error page gets the rail back", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const w = world({ hidden: true });
@@ -303,7 +318,8 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   remote.navigator.userActivation.isActive = true;
   assert.deepEqual(plain(await remote.bridge.rail.setHidden(true)), { available: true, hidden: true });
   await remote.bridge.rail.drawsFrame();
-  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame"]]);
+  await remote.bridge.rail.drawsFrame(false);
+  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame", true], ["rail:draws-frame", false]]);
   const heard = [];
   const stop = remote.bridge.rail.onState((state) => heard.push(state));
   remote.hear("rail:state", { available: true, hidden: false, places: ["home"] });

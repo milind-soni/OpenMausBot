@@ -149,7 +149,7 @@ jobs:
     name: macOS arm64 + x64 (sign, notarize, staple)
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -183,7 +183,7 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
 
       - name: Package both architectures
-        # macos-14 runners have 7 GB, so Node's default heap stops near 2 GB; the server typecheck now needs a little more.
+        # macos-15 runners have 7 GB, so Node's default heap stops near 2 GB; the server typecheck now needs a little more.
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm package:mac
