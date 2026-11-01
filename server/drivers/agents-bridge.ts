@@ -65,7 +65,7 @@ function record(value: unknown): value is Json {
 
 /** The agents server's prefix on its tools, per engine: Claude `mcp__agents__`, ACP `agents__`, the chat
  * runtime and Pi `agents_`, Codex none. */
-const SERVER_PREFIXES = ["", "mcp__agents__", "agents__", "agents_"] as const;
+export const SERVER_PREFIXES = ["", "mcp__agents__", "agents__", "agents_"] as const;
 
 /** Security: a tool the host classifies as outbound under any engine's spelling is always listed and never
  * run through use_tool. Derived from the classifier, so a new outbound tool cannot be hidden by omission. */

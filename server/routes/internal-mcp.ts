@@ -2,6 +2,7 @@ import { relative } from "node:path";
 
 import type { WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
+import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botListing, botMayChange, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
@@ -15,8 +16,6 @@ const PATH = "/api/internal/mcp-servers";
 const ACTIONS = ["list", "add", "update", "enable", "disable", "test", "sign_in", "sign_out", "remove"] as const;
 type McpAction = (typeof ACTIONS)[number];
 const MAX_TOOL_NAMES = 100;
-/** The tool's row under each engine's spelling: Claude `mcp__agents__`, ACP `agents__`, the chat runtime `agents_`, Codex none. */
-const MCP_SERVER_TOOL = /^(?:mcp__agents__|agents__|agents_)?mcp_server$/;
 
 const OWNER_ONLY = "MCP servers are managed by the owner.";
 const ASK_ADMIN = "Ask a workspace admin to add it.";
@@ -55,11 +54,13 @@ export interface InternalMcpDeps {
   ownCwd(): string;
   /** A change applied with no card, for the decision log. */
   decide(summary: string, applied: Applied): void;
-  activity(label: string): void;
+  activity(label: string, call: McpCall): void;
   language(): string | undefined;
 }
 
 type Outcome = { status: number; text: string; dropped?: string[] } | { status: number; error: string };
+/** Which call a line is about, to find that call's own row. */
+export type McpCall = { action: McpAction; name?: string };
 
 export function createInternalMcpRoutes(deps: InternalMcpDeps): RouteHandler {
   return async ({ res, path, method, json }) => {
@@ -78,8 +79,14 @@ export function createInternalMcpRoutes(deps: InternalMcpDeps): RouteHandler {
   };
 }
 
-/** The line goes on the bot's own open mcp_server row (in a room, the speaking bot's; elsewhere, this turn's), so the chat
- * shows one row; a row is added only when there is none to carry it. */
+const isMcpServerTool = (name: string) => SERVER_PREFIXES.some((prefix) => name === `${prefix}mcp_server`);
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** `"key": "value"` in a call's JSON input preview, however it is spaced. */
+const field = (key: string, value: string) => new RegExp(`"${key}"\\s*:\\s*${literal(JSON.stringify(value))}`);
+
+/** The line goes on this call's own open mcp_server row in this turn (in a room, the speaking bot's), so the chat shows one
+ * row. Engines start every tool block of a response before running any, so the row is the one whose input names this
+ * call's action and server; the newest open row only when none does. With no turn to match, a row is added. */
 export function showMcpActivity(
   store: {
     messagesFor(threadId: string): readonly Message[];
@@ -87,13 +94,24 @@ export function showMcpActivity(
     appendMessage(threadId: string, message: Omit<Message, "id" | "at">): unknown;
   },
   at: { threadId: string; turnId?: string; from?: { botId: string; name: string; color: string } },
+  call: McpCall,
   label: string,
 ): void {
-  const row = store.messagesFor(at.threadId).findLast((message) => message.kind === "activity" && message.tool !== undefined
-    && message.tool.ok === undefined && !message.tool.label && MCP_SERVER_TOOL.test(message.tool.name)
-    && (at.turnId === undefined || message.turnId === at.turnId) && (!at.from || message.from?.botId === at.from.botId));
+  const open = at.turnId === undefined ? [] : store.messagesFor(at.threadId).filter((message) => message.kind === "activity"
+    && message.turnId === at.turnId && message.tool !== undefined && message.tool.ok === undefined && !message.tool.label
+    && isMcpServerTool(message.tool.name) && (!at.from || message.from?.botId === at.from.botId));
+  const names = (message: Message) => {
+    const input = message.tool?.input ?? "";
+    return field("action", call.action).test(input) && (call.name === undefined || field("name", call.name).test(input));
+  };
+  const row = open.find(names) ?? open.at(-1);
   if (row?.tool) store.patchMessage(at.threadId, row.id, { tool: { ...row.tool, label } });
-  else store.appendMessage(at.threadId, { role: "bot", kind: "activity", tool: { name: "mcp_server", label, ok: true }, ...(at.from ? { from: at.from } : {}) });
+  else {
+    store.appendMessage(at.threadId, {
+      role: "bot", kind: "activity", tool: { name: "mcp_server", label, ok: true },
+      ...(at.turnId ? { turnId: at.turnId } : {}), ...(at.from ? { from: at.from } : {}),
+    });
+  }
 }
 
 async function act(deps: InternalMcpDeps, body: unknown, signal: AbortSignal): Promise<Outcome> {
@@ -147,7 +165,7 @@ function list(deps: InternalMcpDeps): Outcome {
       managedBy: deps.managedBy(name, server),
     })];
   });
-  say(deps, ["server.mcp.listed"]);
+  say(deps, { action: "list" }, ["server.mcp.listed"]);
   return { status: 200, text: `MCP servers you can see (${rows.length}):\n${JSON.stringify(rows)}` };
 }
 
@@ -165,7 +183,7 @@ async function add(deps: InternalMcpDeps, name: string, fields: Record<string, u
   const where = folderText(deps, server, added.moved ?? []);
 
   if (!deps.fullAccess()) {
-    say(deps, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
+    say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
     const local = isRemoteMcpServer(server) ? "" : " Turning on a local command runs that command on their computer.";
     return { status: 201, text: `Saved MCP server ${name} switched off. It stays off until the person turns it on in Settings → MCP servers.${local}${where}` };
   }
@@ -177,7 +195,7 @@ async function add(deps: InternalMcpDeps, name: string, fields: Record<string, u
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
   deps.decide(`Added MCP server ${name} and turned it on`, "full-access");
-  say(deps, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line);
+  say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line);
   return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where} ${NEXT_TURN}` };
 }
 
@@ -196,7 +214,7 @@ async function update(deps: InternalMcpDeps, name: string, existing: StoredMcpSe
   if (!parsed.ok) return { status: 400, error: parsed.error };
   let server = parsed.server;
   let moved: Array<{ from: string; to: string }> = [];
-  if (!isRemoteMcpServer(server)) {
+  if (!isRemoteMcpServer(server) && !isRemoteMcpServer(existing) && !sameRun(server, existing)) {
     const kept = deps.botKeep(server);
     if (!kept.ok) return { status: kept.status, error: kept.error };
     ({ server, moved } = kept);
@@ -211,11 +229,11 @@ async function update(deps: InternalMcpDeps, name: string, existing: StoredMcpSe
   const where = folderText(deps, server, moved);
   const changed: Line[] = [["server.mcp.changed", { name }], ...(dropped.length ? [["server.mcp.keysCleared"] as Line] : [])];
   if (!server.enabled) {
-    say(deps, ...changed);
+    say(deps, { action: "update", name }, ...changed);
     return { status: 200, text: `Changed MCP server ${name}. It is off.${cleared}${where}`, dropped };
   }
   const outcome = await probe(deps, name, server, signal);
-  say(deps, ...changed, outcome.line);
+  say(deps, { action: "update", name }, ...changed, outcome.line);
   return { status: 200, text: `Changed MCP server ${name}.${cleared}${where} ${outcome.text} ${NEXT_TURN}`, dropped };
 }
 
@@ -225,7 +243,7 @@ async function enable(deps: InternalMcpDeps, name: string, server: StoredMcpServ
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
   deps.decide(`Turned on MCP server ${name}`, "full-access");
-  say(deps, ["server.mcp.turnedOn", { name }], outcome.line);
+  say(deps, { action: "enable", name }, ["server.mcp.turnedOn", { name }], outcome.line);
   return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)} ${NEXT_TURN}` };
 }
 
@@ -233,7 +251,7 @@ function disable(deps: InternalMcpDeps, name: string): Outcome {
   const off = deps.config.setEnabled(name, false);
   if ("error" in off) return refused(off);
   deps.decide(`Turned off MCP server ${name}`, deps.fullAccess() ? "full-access" : "level");
-  say(deps, ["server.mcp.turnedOff", { name }]);
+  say(deps, { action: "disable", name }, ["server.mcp.turnedOff", { name }]);
   return { status: 200, text: `Turned off MCP server ${name}. Its tools leave on your next turn.` };
 }
 
@@ -241,7 +259,7 @@ async function signOut(deps: InternalMcpDeps, name: string, server: StoredMcpSer
   if (!isRemoteMcpServer(server)) return { status: 400, error: `${name} runs a command, so it has no sign-in.` };
   await deps.signOut(name, server.url);
   deps.decide(`Signed out of MCP server ${name}`, deps.fullAccess() ? "full-access" : "level");
-  say(deps, ["server.mcp.signedOut", { name }]);
+  say(deps, { action: "sign_out", name }, ["server.mcp.signedOut", { name }]);
   return { status: 200, text: `Signed out of MCP server ${name}. It stays ${server.enabled ? "on" : "off"}; call mcp_server with action sign_in to sign in again.` };
 }
 
@@ -251,7 +269,7 @@ function remove(deps: InternalMcpDeps, name: string, server: StoredMcpServer): O
   const gone = deps.config.remove(name);
   if ("error" in gone) return refused(gone);
   deps.decide(`Removed MCP server ${name}`, "full-access");
-  say(deps, ["server.mcp.removed", { name }]);
+  say(deps, { action: "remove", name }, ["server.mcp.removed", { name }]);
   return { status: 200, text: `Removed MCP server ${name}, its saved keys and its sign-in. Its tools leave on your next turn.` };
 }
 
@@ -260,7 +278,7 @@ async function test(deps: InternalMcpDeps, name: string, server: StoredMcpServer
     return { status: 403, error: `${name} is off, and testing it would start it. Ask the person to turn it on first.` };
   }
   const outcome = await probe(deps, name, server, signal);
-  say(deps, ["server.mcp.tested", { name }], outcome.line);
+  say(deps, { action: "test", name }, ["server.mcp.tested", { name }], outcome.line);
   return { status: 200, text: `MCP server ${name}: ${outcome.text}` };
 }
 
@@ -298,6 +316,12 @@ function refused(result: McpConfigRefusal): { status: number; error: string } {
   return { status: result.status, error: result.error === MCP_CONFIG_BUSY ? `${result.error} Try again in a moment.` : result.error };
 }
 
+/** Same command, arguments and environment: nothing a bot's folder rules judge has changed. */
+function sameRun(a: StoredStdioMcpServer, b: StoredStdioMcpServer): boolean {
+  const env = (server: StoredStdioMcpServer) => JSON.stringify(Object.entries(server.env).sort(([x], [y]) => x.localeCompare(y)));
+  return a.command === b.command && a.args.length === b.args.length && a.args.every((arg, i) => arg === b.args[i]) && env(a) === env(b);
+}
+
 function joinBotList(deps: InternalMcpDeps, name: string): void {
   if (deps.sender.mcpServers && !deps.sender.mcpServers.includes(name)) deps.addToBotList(name);
 }
@@ -329,7 +353,7 @@ function trimmedRefs(body: Record<string, unknown>): Record<string, unknown> {
 
 type Line = [ServerLineKey, Readonly<Record<string, string>>?];
 
-function say(deps: InternalMcpDeps, ...lines: Line[]): void {
+function say(deps: InternalMcpDeps, call: McpCall, ...lines: Line[]): void {
   const language = deps.language();
-  deps.activity(lines.map(([key, params]) => serverLine(language, key, params)).join(" · "));
+  deps.activity(lines.map(([key, params]) => serverLine(language, key, params)).join(" · "), call);
 }

@@ -14557,8 +14557,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         botKeep: (server) => mcpServersHost.botKeep(server, internalSender.id),
         ownCwd: () => (existsSync(workspaceDir(internalSender.id)) ? workspaceDir(internalSender.id) : DATA_DIR),
         decide: (summary, applied) => appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: internalSender.id, botName: internalSender.name, tool: "mcp_server", summary, decision: "auto-approved", source: applied }),
-        activity: (label) => showMcpActivity(store, { threadId: internalCapability.threadId, ...(store.groupByThread(internalCapability.threadId)
-          ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : { turnId: liveTurnByThread.get(internalCapability.threadId) }) }, label),
+        activity: (label, call) => showMcpActivity(store, { threadId: internalCapability.threadId, turnId: liveTurnByThread.get(internalCapability.threadId),
+          ...(store.groupByThread(internalCapability.threadId) ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }, call, label),
         language: () => threadLanguage(internalCapability.threadId),
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;

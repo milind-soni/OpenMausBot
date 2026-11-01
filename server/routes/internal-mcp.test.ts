@@ -428,6 +428,19 @@ describe("internal mcp_server route, Full access", () => {
     expect(body.text).toContain("copied to");
   });
 
+  it("an update that leaves the command alone skips the folder rules, so a shared server across bots' folders still changes", async () => {
+    probeWith({ ok: true, tools: [] });
+    const boxed = fixture({ boxed: true });
+    const across = { command: "python3", args: [join(boxed.dataDir, "workspaces", BOT, "a.py"), join(boxed.dataDir, "workspaces", "scout", "b.py")], env: {}, enabled: true };
+    boxed.cfg.mcpServers = { shared: across };
+    const { status } = await boxed.post({ action: "update", name: "shared", resultBudget: 5000, args: across.args });
+    expect(status).toBe(200);
+    expect(boxed.stored("shared")).toMatchObject({ args: across.args, resultBudget: 5000 });
+    expect(boxed.stored("shared")).not.toHaveProperty("bot");
+    const moved = await boxed.post({ action: "update", name: "shared", args: [across.args[1]!] });
+    expect(moved.status).toBe(400);
+  });
+
   it("update swaps a resupplied secretRef, padded or not, and keeps it when the destination moves", async () => {
     probeWith({ ok: true, tools: [] });
     const { post, ref, stored } = fixture({ servers: { notes } });
@@ -510,28 +523,58 @@ describe("the activity line", () => {
 
   it("one mcp_server call leaves exactly one visible row, carrying the label, with the tool's own name kept", () => {
     const thread = store([row()]);
-    showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1" }, "Added MCP server linear · Turned on · Test: needs sign-in");
+    showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1" }, { action: "add", name: "linear" }, "Added MCP server linear · Turned on · Test: needs sign-in");
     expect(thread.messages).toHaveLength(1);
     expect(thread.messages[0]!.tool).toEqual({ name: "mcp__agents__mcp_server", input: "{}", itemId: "i1", label: "Added MCP server linear · Turned on · Test: needs sign-in" });
   });
 
-  it("in a room, labels the speaking bot's own open row and never another bot's", () => {
+  it("in a room, labels the speaking bot's own open row of this turn and never another bot's", () => {
     const kiwi = { botId: BOT, name: "Kiwi", color: "green" };
-    const scoutRow = row({ id: "m1", from: { botId: "scout", name: "Scout", color: "blue" } });
-    const kiwiRow = row({ id: "m2", turnId: "turn-9", from: kiwi });
-    const thread = store([kiwiRow, scoutRow]);
-    showMcpActivity(thread, { threadId: THREAD, from: kiwi }, "Turned off MCP server linear");
+    const thread = store([row({ id: "m1", from: { botId: "scout", name: "Scout", color: "blue" } }), row({ id: "m2", from: kiwi })]);
+    showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1", from: kiwi }, { action: "disable", name: "linear" }, "Turned off MCP server linear");
     expect(thread.messages).toHaveLength(2);
     expect(thread.messages.find((m) => m.id === "m2")?.tool?.label).toBe("Turned off MCP server linear");
     expect(thread.messages.find((m) => m.id === "m1")?.tool?.label).toBeUndefined();
   });
 
-  it("adds a row only when the turn has no open mcp_server row to carry it", () => {
+  it("two calls started together each label their own row, and no row is added", () => {
+    const input = (action: string, name: string) => JSON.stringify({ action, name }, null, 2);
+    const thread = store([
+      row({ id: "a", tool: { name: "mcp__agents__mcp_server", input: input("add", "linear"), itemId: "a" } }),
+      row({ id: "b", tool: { name: "mcp__agents__mcp_server", input: input("add", "github"), itemId: "b" } }),
+    ]);
+    showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1" }, { action: "add", name: "linear" }, "Added MCP server linear");
+    thread.messages[0] = { ...thread.messages[0]!, tool: { ...thread.messages[0]!.tool!, ok: true } };
+    showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1" }, { action: "add", name: "github" }, "Added MCP server github");
+    expect(thread.messages.map((m) => [m.id, m.tool?.label])).toEqual([["a", "Added MCP server linear"], ["b", "Added MCP server github"]]);
+  });
+
+  it("finds its row by name on a bridged turn and falls back to the newest open row when no input names it", () => {
+    const bridged = store([
+      row({ id: "a", tool: { name: "mcp_server", input: JSON.stringify({ name: "mcp_server", arguments: { action: "remove", name: "docs" } }, null, 2) } }),
+      row({ id: "b", tool: { name: "agents__mcp_server", input: "{}" } }),
+    ]);
+    showMcpActivity(bridged, { threadId: THREAD, turnId: "turn-1" }, { action: "remove", name: "docs" }, "Removed MCP server docs");
+    expect(bridged.messages.find((m) => m.id === "a")?.tool?.label).toBe("Removed MCP server docs");
+    showMcpActivity(bridged, { threadId: THREAD, turnId: "turn-1" }, { action: "test", name: "other" }, "Tested MCP server other");
+    expect(bridged.messages.find((m) => m.id === "b")?.tool?.label).toBe("Tested MCP server other");
+    expect(bridged.messages).toHaveLength(2);
+  });
+
+  it("adds a row, in this turn, only when the turn has no open mcp_server row to carry it", () => {
     for (const messages of [[], [row({ tool: { name: "mcp__agents__mcp_server", ok: true } })], [row({ turnId: "turn-0" })], [row({ tool: { name: "Bash" } })]]) {
       const thread = store([...messages]);
-      showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1" }, "Removed MCP server linear");
+      showMcpActivity(thread, { threadId: THREAD, turnId: "turn-1" }, { action: "remove", name: "linear" }, "Removed MCP server linear");
       expect(thread.messages, JSON.stringify(messages)).toHaveLength(messages.length + 1);
-      expect(thread.messages.at(-1)?.tool).toEqual({ name: "mcp_server", label: "Removed MCP server linear", ok: true });
+      expect(thread.messages.at(-1)).toMatchObject({ turnId: "turn-1", tool: { name: "mcp_server", label: "Removed MCP server linear", ok: true } });
     }
+  });
+
+  it("with no live turn, never labels a row an earlier turn left open", () => {
+    const thread = store([row()]);
+    showMcpActivity(thread, { threadId: THREAD }, { action: "remove", name: "linear" }, "Removed MCP server linear");
+    expect(thread.messages[0]!.tool?.label).toBeUndefined();
+    expect(thread.messages).toHaveLength(2);
+    expect(thread.messages[1]).not.toHaveProperty("turnId");
   });
 });
