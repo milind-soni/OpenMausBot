@@ -3177,6 +3177,7 @@
   "planUsage.subtitle": "Quota restante su ogni fornitore a cui hai effettuato l'accesso. Finestre di 5 ore e settimanali, quando il piano le prevede.",
   "planUsage.fiveHour": "5 ore",
   "planUsage.weekly": "Settimanale",
+  "planUsage.monthly": "Mensile",
   "planUsage.left": "{remaining}% rimasto",
   "planUsage.used": "{used}% usato",
   "planUsage.byModel": "Per modello",

@@ -2687,6 +2687,7 @@
   "planUsage.subtitle": "Oturum açılmış her sağlayıcıdaki kalan hak. Planda mevcut olduğunda 5 saatlik ve haftalık pencereler.",
   "planUsage.fiveHour": "5 saatlik",
   "planUsage.weekly": "Haftalık",
+  "planUsage.monthly": "Aylık",
   "planUsage.left": "%{remaining} kaldı",
   "planUsage.used": "%{used} kullanıldı",
   "planUsage.byModel": "Modele göre",

@@ -3219,6 +3219,7 @@
   "planUsage.subtitle": "Pozostały limit u każdego zalogowanego dostawcy. Okna 5-godzinne i tygodniowe, jeśli plan je ma.",
   "planUsage.fiveHour": "5-godzinne",
   "planUsage.weekly": "Tygodniowe",
+  "planUsage.monthly": "Miesięcznie",
   "planUsage.left": "Pozostało: {remaining}%",
   "planUsage.used": "Wykorzystano: {used}%",
   "planUsage.byModel": "Według modelu",

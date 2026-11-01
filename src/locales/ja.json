@@ -3319,6 +3319,7 @@
   "planUsage.subtitle": "サインイン済みプロバイダーごとの残り利用枠です。プランに応じて、5 時間枠と週間枠を表示します。",
   "planUsage.fiveHour": "5 時間",
   "planUsage.weekly": "週間",
+  "planUsage.monthly": "月間",
   "planUsage.left": "残り {remaining}%",
   "planUsage.used": "{used}% 使用済み",
   "planUsage.byModel": "モデル別",

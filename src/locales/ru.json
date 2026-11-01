@@ -3290,6 +3290,7 @@
   "planUsage.subtitle": "Оставшийся лимит на каждом подключённом провайдере: 5-часовые и недельные окна, если они есть у этого плана.",
   "planUsage.fiveHour": "5-часовой",
   "planUsage.weekly": "Недельный",
+  "planUsage.monthly": "Месяц",
   "planUsage.left": "Осталось {remaining}%",
   "planUsage.used": "Использовано {used}%",
   "planUsage.byModel": "По моделям",

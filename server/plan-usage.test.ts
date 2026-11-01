@@ -9,12 +9,14 @@ import {
   loadPlanUsage,
   parseClaudeUsage,
   parseCodexUsage,
+  parseCopilotUsage,
   parseGrokUsage,
   planAccountsFromInstances,
   type PlanAccount,
   type PlanFetch,
   type PlanResponse,
 } from "./plan-usage.ts";
+import { copilotUserUrl, ghTokenEnv } from "./github-token.ts";
 
 const SECRET = "plan-usage-fixture-secret";
 const NOW = 1_800_000_000_000;
@@ -34,7 +36,7 @@ function jsonResponse(body: unknown, status = 200): PlanResponse {
 function account(driver: PlanAccount["driver"], extras: Partial<PlanAccount> = {}): PlanAccount {
   return {
     id: driver,
-    name: driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : "Grok",
+    name: { claude: "Claude", codex: "Codex", grok: "Grok", copilot: "GitHub Copilot" }[driver],
     driver,
     environment: {},
     ...extras,
@@ -183,6 +185,177 @@ describe("plan usage parsers", () => {
       { name: "Grok Chat", windows: [expect.objectContaining({ label: "Weekly", usedPercent: 2, remainingPercent: 98 })] },
     ]);
     expect(JSON.stringify(parsed)).not.toContain(SECRET);
+  });
+});
+
+const COPILOT_USER = {
+  login: "octocat",
+  copilot_plan: "individual",
+  quota_reset_date: "2026-11-01",
+  quota_reset_date_utc: "2026-11-01T00:00:00.000Z",
+  quota_snapshots: {
+    chat: { unlimited: true, percent_remaining: 100, entitlement: 0, remaining: 0, quota_reset_at: 0 },
+    completions: { unlimited: true, percent_remaining: 100, entitlement: 0, remaining: 0, quota_reset_at: 0 },
+    premium_interactions: { unlimited: false, has_quota: true, percent_remaining: 92, entitlement: 1500, remaining: 1380, quota_reset_at: 0 },
+  },
+};
+
+describe("Copilot plan usage", () => {
+  it("reports premium requests as the monthly window, resetting on the plan's reset date", () => {
+    expect(parseCopilotUsage(COPILOT_USER)).toEqual({
+      plan: "individual",
+      fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null },
+      weekly: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null },
+      extra: [{ label: "Monthly", kind: "monthly", remainingPercent: 92, usedPercent: 8, resetsAt: "2026-11-01T00:00:00.000Z" }],
+      models: [],
+    });
+  });
+
+  it("keeps a limited chat allowance after premium requests and works from counts without a percent", () => {
+    const parsed = parseCopilotUsage({
+      quota_reset_date_utc: "2026-11-01T00:00:00.000Z",
+      quota_snapshots: {
+        chat: { unlimited: false, entitlement: 50, remaining: 40 },
+        premium_interactions: { unlimited: false, entitlement: 50, quota_remaining: 0 },
+        completions: { unlimited: false, has_quota: false, percent_remaining: 0 },
+      },
+    });
+    expect(parsed.extra).toEqual([
+      expect.objectContaining({ label: "Monthly", usedPercent: 100, remainingPercent: 0 }),
+      expect.objectContaining({ label: "Chat", usedPercent: 20, remainingPercent: 80 }),
+    ]);
+  });
+
+  it("keeps an exhausted premium allowance that GitHub marks as having no quota", () => {
+    const parsed = parseCopilotUsage({ quota_snapshots: { premium_interactions: { has_quota: false, percent_remaining: 0, entitlement: 300 } } });
+    expect(parsed.extra).toEqual([expect.objectContaining({ kind: "monthly", usedPercent: 100 })]);
+  });
+
+  it("reads Copilot from the GitHub host the engine signs in to", async () => {
+    expect(copilotUserUrl()).toBe("https://api.github.com/copilot_internal/user");
+    expect(copilotUserUrl("acme.ghe.com")).toBe("https://api.acme.ghe.com/copilot_internal/user");
+    expect(copilotUserUrl("github.acme.internal")).toBe("https://github.acme.internal/api/v3/copilot_internal/user");
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+    const readGitHubToken = vi.fn((_env: NodeJS.ProcessEnv, _host: string) => "gh-cli-fixture-token");
+    await fetchPlanUsage([account("copilot", { environment: { GH_HOST: "acme.ghe.com" } })], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ env: {}, readText: () => null, readGitHubToken }),
+    });
+    expect(readGitHubToken.mock.calls[0]?.[1]).toBe("acme.ghe.com");
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.acme.ghe.com/copilot_internal/user");
+  });
+
+  it("says GitHub could not be reached when it is rate limiting, rather than asking to sign in", async () => {
+    const credentials = { read: () => ({ token: SECRET, accountId: null, expired: false }) };
+    const limited = await fetchPlanUsage([account("copilot")], {
+      fetch: async () => jsonResponse({ message: "API rate limit exceeded for user ID 1." }, 403), now: () => NOW, credentials,
+    });
+    expect(limited.providers[0]).toMatchObject({ ok: false, error: "Could not reach GitHub Copilot", reason: "failed" });
+    const tooMany = await fetchPlanUsage([account("copilot")], { fetch: async () => jsonResponse("", 429), now: () => NOW, credentials });
+    expect(tooMany.providers[0]).toMatchObject({ reason: "failed" });
+  });
+
+  it("asks GitHub with the engine's token and keeps it out of the report", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+    const readGitHubToken = vi.fn(() => "gh-cli-fixture-token");
+    const report = await fetchPlanUsage([account("copilot", { environment: { GH_TOKEN: SECRET } })], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ env: { GH_TOKEN: "server-wide-token" }, readText: () => null, readGitHubToken }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.github.com/copilot_internal/user");
+    expect(fetchImpl.mock.calls[0]?.[1].headers).toMatchObject({ Authorization: `Bearer ${SECRET}`, "User-Agent": "OpenMausBot" });
+    expect(readGitHubToken).not.toHaveBeenCalled();
+    expect(report.providers[0]).toMatchObject({ driver: "copilot", ok: true, plan: "individual", extra: [{ label: "Monthly", usedPercent: 8 }] });
+    expect(JSON.stringify(report)).not.toContain(SECRET);
+  });
+
+  it("uses a server-wide COPILOT_GITHUB_TOKEN only when engines are not boxed, as the box passes just the engine's own", async () => {
+    const read = async (boxed: boolean, environment: Record<string, string> = {}) => {
+      const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+      await fetchPlanUsage([account("copilot", { environment })], {
+        fetch: fetchImpl,
+        now: () => NOW,
+        credentials: fileCredentialReader({ env: { COPILOT_GITHUB_TOKEN: "server-wide-token" }, readText: () => null, readGitHubToken: () => SECRET, enginesBoxed: () => boxed }),
+      });
+      return fetchImpl.mock.calls[0]?.[1].headers.Authorization;
+    };
+    expect(await read(false)).toBe("Bearer server-wide-token");
+    expect(await read(true)).toBe(`Bearer ${SECRET}`);
+    expect(await read(true, { COPILOT_GITHUB_TOKEN: "engine-token" })).toBe("Bearer engine-token");
+  });
+
+  it("asks the host a boxed engine signs in to, which only the engine's own GH_HOST reaches", async () => {
+    const host = async (boxed: boolean, environment: Record<string, string> = {}) => {
+      const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+      await fetchPlanUsage([account("copilot", { environment })], {
+        fetch: fetchImpl,
+        now: () => NOW,
+        credentials: fileCredentialReader({ env: { GH_HOST: "server.ghe.com" }, readText: () => null, readGitHubToken: () => SECRET, enginesBoxed: () => boxed }),
+      });
+      return fetchImpl.mock.calls[0]?.[0];
+    };
+    expect(await host(false)).toBe("https://api.server.ghe.com/copilot_internal/user");
+    expect(await host(true)).toBe("https://api.github.com/copilot_internal/user");
+    expect(await host(true, { GH_HOST: "acme.ghe.com" })).toBe("https://api.acme.ghe.com/copilot_internal/user");
+  });
+
+  it("reads GH_HOST and COPILOT_GITHUB_TOKEN whatever their casing, as Windows environments do", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+    await fetchPlanUsage([account("copilot")], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ env: { gh_host: "acme.ghe.com", copilot_github_token: "server-token" }, readText: () => null, readGitHubToken: () => SECRET, enginesBoxed: () => false }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.acme.ghe.com/copilot_internal/user");
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe("Bearer server-token");
+  });
+
+  it("reads an engine token whatever its casing, as Windows environments do", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+    await fetchPlanUsage([account("copilot", { environment: { gh_token: SECRET } })], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ env: {}, readText: () => null, readGitHubToken: () => "gh-cli-fixture-token" }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${SECRET}`);
+  });
+
+  it("keeps the server's GitHub tokens away from gh, so it answers with its stored login", () => {
+    const env = ghTokenEnv({ Path: "/old", GH_TOKEN: SECRET, github_token: SECRET, GH_ENTERPRISE_TOKEN: SECRET, GITHUB_ENTERPRISE_TOKEN: SECRET, GH_CONFIG_DIR: "/cfg" }, "/augmented");
+    expect(env).toEqual({ PATH: "/augmented", GH_CONFIG_DIR: "/cfg" });
+  });
+
+  it("ignores a server-wide GitHub token and falls back to the GitHub CLI login", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse(COPILOT_USER));
+    const report = await fetchPlanUsage([account("copilot")], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ env: { GITHUB_TOKEN: "server-wide-token" }, readText: () => null, readGitHubToken: async () => `${SECRET}
+` }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${SECRET}`);
+    expect(JSON.stringify(report)).not.toContain(SECRET);
+  });
+
+  it("asks to sign in without a token or when GitHub refuses it, and says when the account has no Copilot", async () => {
+    const signedOut = await fetchPlanUsage([account("copilot")], {
+      fetch: vi.fn<PlanFetch>(),
+      now: () => NOW,
+      credentials: fileCredentialReader({ env: {}, readText: () => null, readGitHubToken: () => { throw new Error("gh missing"); } }),
+    });
+    expect(signedOut.providers[0]).toMatchObject({ ok: false, error: "Sign in again in GitHub Copilot", reason: "signedOut" });
+    const credentials = { read: () => ({ token: SECRET, accountId: null, expired: false }) };
+    const refused = await fetchPlanUsage([account("copilot")], { fetch: async () => jsonResponse(SECRET, 401), now: () => NOW, credentials });
+    expect(refused.providers[0]).toMatchObject({ ok: false, error: "Sign in again in GitHub Copilot", reason: "signedOut" });
+    const none = await fetchPlanUsage([account("copilot")], { fetch: async () => jsonResponse({ message: "Not Found" }, 404), now: () => NOW, credentials });
+    expect(none.providers[0]).toMatchObject({ ok: false, error: "This GitHub account has no Copilot plan", reason: "noPlan" });
+    const empty = await fetchPlanUsage([account("copilot")], { fetch: async () => jsonResponse({}), now: () => NOW, credentials });
+    expect(empty.providers[0]).toMatchObject({ ok: false, error: "GitHub Copilot returned an unexpected usage response", reason: "failed" });
+    const down = await fetchPlanUsage([account("copilot")], { fetch: async () => jsonResponse("", 502), now: () => NOW, credentials });
+    expect(down.providers[0]).toMatchObject({ ok: false, error: "Could not reach GitHub Copilot", reason: "failed" });
+    expect(JSON.stringify([refused, none, down])).not.toContain(SECRET);
   });
 });
 
@@ -404,17 +577,19 @@ describe("plan usage fetcher", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("lists configured Claude, Codex, and Grok accounts and skips other engines", () => {
+  it("lists configured Claude, Codex, Grok, and Copilot accounts and skips other engines", () => {
     expect(planAccountsFromInstances({
       claude: { driver: "claudeAgent", displayName: "  Personal Claude  ", config: { configDir: "/tmp/claude" } },
       codex: { driver: "codex" },
       grok: { driver: "grokAgent", environment: { GROK_HOME: "/tmp/grok" } },
+      githubCopilot: { driver: "copilotAgent", displayName: "GitHub Copilot" },
       cursor: { driver: "cursorAgent", displayName: "Cursor" },
       api: { driver: "grok", displayName: "Grok API" },
     })).toEqual([
       { id: "claude", name: "Personal Claude", driver: "claude", environment: {}, configDir: "/tmp/claude" },
       { id: "codex", name: "Codex", driver: "codex", environment: {} },
       { id: "grok", name: "Grok", driver: "grok", environment: { GROK_HOME: "/tmp/grok" } },
+      { id: "githubCopilot", name: "GitHub Copilot", driver: "copilot", environment: {} },
     ]);
   });
 });
