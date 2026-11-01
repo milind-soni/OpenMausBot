@@ -50,6 +50,8 @@ describe("tool directory configuration", () => {
     expect(searched.args![0]).toContain("mcp-remote-proxy");
     expect(JSON.parse(searched.env!.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop", toolScope: scope });
     expect(JSON.parse(mcpStdioServer(remote, { directory: { name: "whop" } })!.env!.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop" });
+    expect(JSON.parse(mcpStdioServer(remote, { directory: { name: "whop", search: true } })!.env!.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop", search: true });
+    expect(JSON.parse(mcpStdioServer(remote, { directory: { name: "whop", search: false } })!.env!.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop" });
     expect(mcpStdioServer(server, { directory: { name: "notes" } })).toBe(server);
   });
 

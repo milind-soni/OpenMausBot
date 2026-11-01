@@ -89,14 +89,15 @@ try { spec = remoteMcpSpec(JSON.parse(settings.OMB_REMOTE_MCP_SERVER ?? "")); } 
 if (!spec) fail("invalid remote MCP configuration");
 
 /** A selection that cannot be read must never widen to all tools. */
-function directorySettings(raw: string | undefined): { server: string; scope: ToolScope | undefined } | undefined {
+function directorySettings(raw: string | undefined): { server: string; scope: ToolScope | undefined; search: boolean } | undefined {
   if (raw === undefined) return undefined;
   try {
     const value: unknown = JSON.parse(raw);
     if (isRecord(value) && typeof value.name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(value.name)
-      && Object.keys(value).every((key) => key === "name" || key === "toolScope")) {
+      && (value.search === undefined || value.search === true)
+      && Object.keys(value).every((key) => key === "name" || key === "toolScope" || key === "search")) {
       const parsed = parseToolScope(value.toolScope);
-      if (parsed.ok) return { server: value.name, scope: parsed.scope };
+      if (parsed.ok) return { server: value.name, scope: parsed.scope, search: value.search === true };
     }
   } catch {}
   return fail("invalid tool directory configuration");
@@ -159,7 +160,7 @@ let catalog: Catalog | undefined;
 let loading: Promise<Catalog> | undefined;
 let generation = 0;
 /** Once searched, always searched: the engine was handed call_tool, and a tool it found must stay reachable. */
-let searching = false;
+let searching = directory?.search === true;
 const context: DirectoryContext = { server: directory?.server ?? "" };
 
 const closed = new AbortController();

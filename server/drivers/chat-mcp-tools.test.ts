@@ -580,6 +580,44 @@ describe("Chat MCP tool directory", () => {
     } finally { await remote.close(); }
   });
 
+  it("puts a URL server behind search when the servers before it used up the shared budget", async () => {
+    const remotes = await Promise.all([0, 1, 2, 3].map(() => startFakeHttpMcp({ tools: whopLikeCatalog(35) })));
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const custom = Object.fromEntries(remotes.map((remote, index) => [`shop${index}`, { type: "http" as const, url: remote.url, headers: {} }]));
+      const session = await mountChatTools({ custom }, controller.signal);
+      sessions.push(session);
+      const names = session.definitions.map((tool) => tool.function.name);
+      expect(names.slice(-3)).toEqual(["shop3_search_tools", "shop3_describe_tool", "shop3_call_tool"]);
+      expect(names).toHaveLength(35 * 3 + 3);
+      expect(names.slice(0, 35 * 3).map((name) => name.slice(0, 6))).toEqual(["shop0_", "shop1_", "shop2_"].flatMap((prefix) => Array(35).fill(prefix)));
+      expect(session.skipped).toEqual([]);
+      await expect(session.execute("shop3_call_tool", { name: "payments_list", arguments: { company_id: "biz_1" } }, controller.signal)).resolves.toMatchObject({ ok: true });
+      expect(remotes[3]!.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      const alone = await mountChatTools({ custom: { shop3: custom.shop3! } }, controller.signal);
+      sessions.push(alone);
+      const grant = alone.view("shop3_payments_list", { company_id: "biz_1" }).grant;
+      expect(grant).toBeDefined();
+      expect(session.view("shop3_call_tool", { name: "payments_list", arguments: { company_id: "biz_1" } }).grant).toBe(grant);
+    } finally { await Promise.all(remotes.map((remote) => remote.close())); }
+  });
+
+  it("skips a URL server that would not fit even behind its three search tools", async () => {
+    // 125 of the 127 MCP slots (one is ask_user's): two left, one short of the directory.
+    const remotes = await Promise.all([40, 40, 40, 5, 35, 300].map((count) => startFakeHttpMcp({ tools: whopLikeCatalog(count) })));
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const custom = Object.fromEntries(remotes.map((remote, index) => [`shop${index}`, { type: "http" as const, url: remote.url, headers: {} }]));
+      const session = await mountChatTools({ custom }, controller.signal);
+      sessions.push(session);
+      expect(session.definitions).toHaveLength(125);
+      expect(session.definitions.some((tool) => /^shop[45]_/.test(tool.function.name))).toBe(false);
+      const reason = "MCP tool count exceeds the 128-tool limit";
+      expect(session.skipped).toEqual([{ server: "shop4", reason }, { server: "shop5", reason }]);
+      expect([remotes[4]!.toolsLists, remotes[5]!.toolsLists]).toEqual([1, 1]);
+    } finally { await Promise.all(remotes.map((remote) => remote.close())); }
+  });
+
   it("mounts a small URL server's own tools, unchanged", async () => {
     const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(5) });
     const controller = new AbortController(); controllers.push(controller);
