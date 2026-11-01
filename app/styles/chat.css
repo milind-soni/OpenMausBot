@@ -26,6 +26,9 @@
 .conversation { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-2) 0 var(--space-4); }
 .chat-day { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-4) 0; color: var(--text-3); font-size: var(--text-xs); font-weight: var(--weight-medium); }
 .chat-day::before, .chat-day::after { content: ""; flex: 1; height: 1px; background: var(--border-1); }
+/* A new day that starts with the first unread message: one row, the day on the left of a red line ending in "New". */
+.chat-day.is-unread::after { order: 1; background: rgba(242, 113, 107, 0.45); }
+.chat-day.is-unread > b { order: 2; color: var(--red); font-weight: var(--weight-semibold); }
 .conversation-message { position: relative; display: flex; gap: var(--space-3); min-width: 0; margin-top: var(--space-1); padding: 6px var(--space-2); border-radius: var(--radius-md); transition: background var(--duration-fast); animation: o-message var(--duration-slow) var(--ease-out) both; }
 /* Follow-ups from the same person within a few minutes: no avatar or name, the time sits in the gutter on hover. */
 .conversation-message.is-grouped { margin-top: 0; padding-top: 1px; padding-bottom: 1px; }
@@ -79,7 +82,13 @@
 .message-file.image-attachment span { padding: var(--space-1); }
 .local-attachment { display: flex; align-items: center; gap: var(--space-2); max-width: 100%; }
 .local-attachment .message-file { min-width: 0; max-width: 100%; }
-.local-attachment .image-attachment { width: min(100%, 320px); }
+.local-attachment .image-attachment { width: min(100%, 320px); cursor: zoom-in; }
+/* Image attachments open in a lightbox (chat-view.tsx). */
+@media (min-width: 761px) { .chat-lightbox { width: min(1100px, calc(100vw - 32px)); max-width: none; } }
+.chat-lightbox .dialog-heading { gap: var(--space-1); }
+.chat-lightbox .dialog-heading h2 { flex: 1; }
+.chat-lightbox-image { display: grid; place-items: center; padding: 0 var(--space-3) var(--space-3); }
+.chat-lightbox-image img { display: block; max-width: 100%; max-height: calc(min(86dvh, 860px) - 64px); object-fit: contain; border-radius: var(--radius-sm); }
 /* Above the composer: "New messages" when something arrived below, a plain arrow when far up the history. */
 .new-messages { position: absolute; left: 50%; bottom: calc(100% + var(--space-3)); z-index: 3; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-full); background: var(--accent); color: #fff; font-size: var(--text-sm); font-weight: var(--weight-medium); box-shadow: var(--shadow-md); transform: translateX(-50%); animation: chat-pill-in var(--duration-slow) var(--ease-out); }
 .new-messages.is-icon { width: 32px; height: 32px; justify-content: center; padding: 0; border: 1px solid var(--border-3); background: var(--surface-4); color: var(--text-1); }
@@ -203,8 +212,10 @@
   .send-message { width: 36px; height: 36px; flex-basis: 36px; }
 }
 @media (pointer: coarse) {
-  .chat-tabs > button { position: relative; height: 36px; }
-  .chat-tabs > button::after { content: ""; position: absolute; inset: -4px 0; }
+  /* 44px tall to press; the pill itself stays 32px, drawn behind the label. */
+  .chat-tabs > button, .chat-tabs > button[aria-selected="true"] { position: relative; z-index: 0; height: 44px; background: none; }
+  .chat-tabs > button::before { content: ""; position: absolute; inset: 6px 0; z-index: -1; border-radius: var(--radius-sm); transition: background var(--duration-fast); }
+  .chat-tabs > button[aria-selected="true"]::before { background: var(--surface-4); }
   .chat-profile-avatar, .chat-profile-name { position: relative; }
   /* Avatars and icons are all 44px targets here, so they sit edge to edge: one even rhythm, no overlapping hit areas. */
   .chat-utilities, .chat-members { gap: 0; }

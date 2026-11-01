@@ -1,9 +1,9 @@
 "use client";
 import { errorText } from "@/lib/error-text";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Excalidraw, CaptureUpdateAction, MainMenu, reconcileElements, restoreElements } from "@excalidraw/excalidraw";
+import { Excalidraw, CaptureUpdateAction, MainMenu, newElementWith, reconcileElements, restoreElements } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI, BinaryFileData, BinaryFiles, AppState } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
@@ -14,6 +14,8 @@ import { useWorkspace } from "./workspace-context";
 import { ContentSkeleton } from "./content-skeleton";
 import { useWorkspaceOnline } from "./workspace-connection";
 import { UserAvatar, avatarTone, memberName } from "./user-avatar";
+import { Dialog } from "./dialog";
+import { Trash2 } from "lucide-react";
 
 function imageBlob(file: BinaryFileData) {
   const separator = file.dataURL.indexOf(",");
@@ -41,6 +43,7 @@ export default function DrawingCanvas({ sessionToken, user, canvasId, readOnly =
   const [notice, setNotice] = useState("");
   const [unavailableFiles, setUnavailableFiles] = useState<string[]>([]);
   const [clock, setClock] = useState(Date.now());
+  const [resetting, setResetting] = useState(false);
   const remote = useRef(false);
   const ready = useRef(false);
   const knownVersions = useRef(new Map<string, string>());
@@ -109,6 +112,20 @@ export default function DrawingCanvas({ sessionToken, user, canvasId, readOnly =
     // `hereKey` captures every field of `here` the scene uses.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvas, hereKey, members]);
+  // Help without Excalidraw's links (draw.css hides them): take them out of the tab order and focus the dialog itself,
+  // which Excalidraw would otherwise try to do through the (hidden) second link, leaving Escape with nowhere to go.
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const help = document.querySelector<HTMLElement>(".excalidraw-modal-container .HelpDialog");
+      if (!help || help.dataset.originReady) return;
+      help.dataset.originReady = "true";
+      help.querySelectorAll<HTMLElement>(".HelpDialog__header a").forEach(link => link.setAttribute("tabindex", "-1"));
+      const content = help.closest(".Modal")?.querySelector<HTMLElement>(".Modal__content");
+      if (content && !content.contains(document.activeElement)) content.focus({ preventScroll: true });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (!canvas || !storedFiles) return;
     for (const file of storedFiles) {
@@ -134,12 +151,27 @@ export default function DrawingCanvas({ sessionToken, user, canvasId, readOnly =
       void (async () => { try { const blob = imageBlob(file); const url = await uploadUrl(args); const response = await fetch(url, { method: "POST", headers: { "Content-Type": file.mimeType }, body: blob }); if (!response.ok) throw new Error("Image upload failed"); const { storageId } = await response.json() as { storageId: Id<"_storage"> }; await saveFile({ ...args, fileId: file.id, storageId, mimeType: file.mimeType }); } catch (error) { knownFiles.current.delete(file.id); setNotice(errorText(error, "Image upload failed")); } })();
     }
   };
+  const canEdit = !readOnly && workspace.role !== "viewer";
+  // Excalidraw's own "clear canvas": every element deleted (a new version each, so the deletion syncs to everyone).
+  const resetCanvas = () => {
+    if (!canvas) return;
+    const elements = canvas.getSceneElementsIncludingDeleted().map(element => element.isDeleted ? element : newElementWith(element, { isDeleted: true }));
+    canvas.updateScene({ elements, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+  };
   if (scene === undefined) return <ContentSkeleton kind="canvas" label="Loading drawing" />;
   const presenceAvatars = here.length ? <div className="draw-presence" aria-label={`Also here: ${here.map(member => memberName(member.person)).join(", ")}`}>
     {here.slice(0, 4).map(member => <span key={member.userId} title={memberName(member.person)}><UserAvatar user={member.person} size="small" /></span>)}
     {here.length > 4 && <span className="draw-presence-more">+{here.length - 4}</span>}
   </div> : null;
-  return <div className="drawing-canvas">
+  // Ctrl/Cmd+Delete is Excalidraw's "clear canvas" shortcut, with its own confirm: ask in Origin's instead.
+  const onKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (!(event.ctrlKey || event.metaKey) || !["Delete", "Backspace"].includes(event.key) || target.closest("input, textarea, [contenteditable]")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (canEdit) setResetting(true);
+  };
+  return <div className="drawing-canvas" onKeyDownCapture={onKeyDownCapture}>
     {(notice || unavailableFiles.length > 0) && <div className="drawing-status error" role="alert">{notice || "A drawing image could not be loaded"}</div>}
     {/* Phones: Excalidraw's top row is the toolbar, so the avatars sit in the middle of its bottom bar. */}
     {presenceAvatars && <div className="draw-presence-floating">{presenceAvatars}</div>}
@@ -147,18 +179,28 @@ export default function DrawingCanvas({ sessionToken, user, canvasId, readOnly =
       initialData={{ elements: scene.map(data => JSON.parse(data)), appState: { viewBackgroundColor: "#ffffff", currentItemStrokeColor: "#1e1e1e" }, scrollToContent: true }}
       onChange={onChange}
       onPointerUpdate={({ pointer, button }) => { currentPointer.current = { x: pointer.x, y: pointer.y, button }; if (Date.now() - lastPointer.current < 200) return; lastPointer.current = Date.now(); void setPresence({ ...args, ...currentPointer.current }).catch(() => {}); }}
-      UIOptions={{ canvasActions: { loadScene: true, export: { saveFileToDisk: true }, saveToActiveFile: true, toggleTheme: false, changeViewBackgroundColor: false } }}
+      UIOptions={{ canvasActions: { loadScene: false, export: false, saveToActiveFile: false, clearCanvas: false, toggleTheme: false, changeViewBackgroundColor: false } }}
       renderTopRightUI={isMobile => isMobile ? null : presenceAvatars}>
-      {/* Excalidraw's menu without its own links (GitHub, X, Discord). */}
+      {/* Excalidraw's menu without its links and socials, and without Open (it would replace the canvas for everyone) or
+          Save to file (nothing here opens one). Help keeps only the shortcuts and the library is hidden (draw.css). */}
       <MainMenu>
-        <MainMenu.DefaultItems.LoadScene />
-        <MainMenu.DefaultItems.SaveToActiveFile />
-        <MainMenu.DefaultItems.Export />
         <MainMenu.DefaultItems.SaveAsImage />
         <MainMenu.DefaultItems.SearchMenu />
         <MainMenu.DefaultItems.Help />
-        <MainMenu.DefaultItems.ClearCanvas />
+        {canEdit && <>
+          <MainMenu.Separator />
+          <MainMenu.Item icon={<Trash2 size={16} strokeWidth={1.75} />} onSelect={() => setResetting(true)}>Reset the canvas</MainMenu.Item>
+        </>}
       </MainMenu>
     </Excalidraw>
+    {resetting && <Dialog title="Reset the canvas" className="confirm-dialog" onClose={() => setResetting(false)}>
+      <div className="dialog-body">
+        <p className="confirm-text">Clears the drawing for everyone.</p>
+        <div className="dialog-actions">
+          <button type="button" className="ghost-button compact" onClick={() => setResetting(false)}>Cancel</button>
+          <button type="button" className="primary-button danger compact" autoFocus onClick={() => { setResetting(false); resetCanvas(); }}>Reset</button>
+        </div>
+      </div>
+    </Dialog>}
   </div>;
 }

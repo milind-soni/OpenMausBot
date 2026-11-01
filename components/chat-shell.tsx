@@ -7,11 +7,11 @@ import { useQuery } from "convex/react";
 import {
   Loader2,
   MessageCircle,
-  MessageSquarePlus,
   Pencil,
   Pin,
   Search,
   UserRound,
+  Users,
   X,
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
@@ -140,9 +140,11 @@ export function ChatView(props: Props) {
       setOpening(null);
     }
   };
-  // Wide screens show the list and a conversation side by side: the latest one is open until another is chosen.
+  // Wide screens show the list and a conversation side by side: the first time the list arrives, the latest
+  // conversation opens and stays open. A new message elsewhere only reorders the list; it never takes over the thread.
   const latest = conversations?.[0];
-  const selected = chosen ?? (section === "dm" && !narrow && latest ? { id: latest.id, userId: latest.otherUserId, unread: latest.unread } : null);
+  if (!chosen && section === "dm" && !narrow && latest) setSelected({ id: latest.id, userId: latest.otherUserId, unread: latest.unread });
+  const selected = chosen;
   const peers =
     members?.filter(
       (member) => member.userId && member.userId !== props.user._id,
@@ -228,7 +230,7 @@ export function ChatView(props: Props) {
               onClick={() => setPeopleOpen(true)}
             >
               {peers.length > 3 && <span>+{peers.length - 3}</span>}
-              <MessageSquarePlus size={17} />
+              <Users size={17} />
             </button>}
           </div>
           {(section === "chat" || selected) && <>
