@@ -266,6 +266,16 @@ describe("GitHub Copilot ACP driver", () => {
     expect(readFileSync(answer, "utf8")).toBe("reject");
   });
 
+  it("runs Auto when the session leaves the model currentValue unset, then still confirms an explicit model", async () => {
+    const { instance, recorder } = await create({ FAKE_ACP_OMIT_MODEL_VALUE: "auto" });
+    for (const model of ["auto", "claude-haiku-4.5"]) {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "copilot-auto", text: `on ${model}`, model, approvalMode: "ask" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    }
+    expect(prompts().map((entry) => entry.model)).toEqual(["auto", "claude-haiku-4.5"]);
+    expect(recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+  });
+
   it("switches models between turns of one conversation", async () => {
     const { instance, recorder } = await create();
     for (const model of ["gpt-5.6-luna", "claude-haiku-4.5"]) {

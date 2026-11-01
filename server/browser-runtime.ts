@@ -6,6 +6,7 @@ import { PageSizes, type PageSize } from "./browser-page-size.ts";
 import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-hold.ts";
 import type { BrowserSteps, StepCall, StepContext } from "./browser-steps.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
+import { launchSettingsKey } from "./browser-launch-key.ts";
 
 export interface BrowserSpawnSpec {
   command: string;
@@ -54,6 +55,7 @@ const LANE_BUSY = "Your previous browser call is still running; wait for it to f
 export const BROWSER_CALL_DEFAULTS = { requestTimeoutMs: 120_000, laneWaitMs: 30_000, callBudgetMs: HARNESS_CALL_BUDGET_MS, followUpReserveMs: 15_000 } as const;
 const RESTART_COST = "a restart closes every tab and loses page state such as form input";
 const LATE = Symbol("late");
+
 const PAGE_ACTIONS: ReadonlySet<string> = new Set([
   "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press",
   "agent_browser_check", "agent_browser_uncheck", "agent_browser_select", BROWSER_UPLOAD_TOOL, BROWSER_HOVER_TOOL,
@@ -667,7 +669,7 @@ export class BrowserRuntime {
   }
 
   private connect(session: string, spec: BrowserSpawnSpec): ClientEntry {
-    const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
+    const key = launchSettingsKey(spec);
     const existing = this.clients.get(session);
     if (existing && existing.key !== key) throw new Error("Browser launch settings changed. Close the browser before reconnecting.");
     if (existing) return existing;

@@ -13,7 +13,8 @@ import { InboxSender } from "../InboxLine";
 import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel } from "../PendingApproval";
 import { QuestionCard } from "../QuestionCard";
 import { threadUpdatedLabel } from "../SidebarThreadRow";
-import { askOf, closeResponse, subjectOf } from "./inbox-view";
+import { askOf, closeResponse, subjectOf, textOf } from "./inbox-view";
+import { accessRequestWords } from "../bot-access/access-card";
 import { useInboxActions } from "./use-inbox-actions";
 
 /** The line as the chat shows it, so an ask answers here with the very card it asks with in the chat. */
@@ -69,7 +70,7 @@ export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRo
         </div>
       </header>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {!ask && <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-ink">{row.text}</p>}
+        {!ask && <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-ink">{textOf(row)}</p>}
         {row.answers?.map((given) => (
           <p key={given.at} className="rounded-xl bg-ink/[0.045] px-3 py-2 text-[13px] text-ink-secondary">
             <span className="block text-[11px] font-medium text-ink-tertiary">{t(given.by === "assistant" ? "inbox.assistantAnswered" : "inbox.youReplied")}</span>
@@ -78,7 +79,7 @@ export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRo
         ))}
         {row.tab === "done" && (
           <>
-            {row.kind === "ask" && <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-ink">{row.card?.subtitle ?? row.text}</p>}
+            {row.kind === "ask" && <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-ink">{accessRequestWords(row.card)?.question ?? row.card?.subtitle ?? row.text}</p>}
             <p className="flex items-center gap-1.5 text-[13px] text-ink-secondary"><Check size={14} aria-hidden="true" />{settledLabel(row)}</p>
           </>
         )}

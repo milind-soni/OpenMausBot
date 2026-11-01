@@ -43,6 +43,7 @@ const { CitationBadge } = await import("./CitationUI");
 const { CloudIntent } = await import("./CloudIntent");
 const { GuidedTour } = await import("./onboarding/GuidedTour");
 const { setSendKey } = await import("@/lib/send-key");
+const { setFollowUpDefault } = await import("@/lib/follow-up");
 const { setPendingIntent } = await import("@/lib/cloud-intent");
 const { setLocale } = await import("@/lib/i18n");
 const { api } = await import("@/state/store");
@@ -105,6 +106,7 @@ beforeEach(() => {
   fixture.config = undefined;
   fixture.tourOpen = false;
   setSendKey("enter");
+  setFollowUpDefault("steer");
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })));
   host = document.createElement("div");
   document.body.append(host);
@@ -251,5 +253,101 @@ describe("the send key in hints", () => {
     setSendKey("mod-enter");
     render(createElement(CloudIntent));
     expect(host.querySelector('button[aria-label="Start setting it up"]')?.getAttribute("title")).toBe("Start setting it up (Ctrl+Enter)");
+  });
+});
+
+describe("a message sent while a one-to-one bot works", () => {
+  const steers = { instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo;
+  const cannotSteer = { ...steers, capabilities: { queueing: false } } as unknown as InstanceInfo;
+  const working = { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] };
+  const followUps = () => sends().map((action) => action.followUp);
+  const sendButton = () => host.querySelector<HTMLButtonElement>("[data-composer-follow-up] > button")!;
+  const chooser = () => host.querySelector<HTMLButtonElement>('button[aria-label="Choose how to send this message"]');
+  const openChoices = () => {
+    flushSync(() => chooser()!.click());
+    return [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitem"]')];
+  };
+
+  it("steers on Enter and queues with Ctrl/⌘, by key or by click", () => {
+    fixture.instances = [steers];
+    render(createElement(Composer, { bot: working }));
+    for (const [init, followUp] of [[{}, "steer"], [{ ctrlKey: true }, "queue"], [{ metaKey: true }, "queue"]] as const) {
+      type(textarea(), "words");
+      expect(press(textarea(), init).defaultPrevented).toBe(true);
+      expect(sends().at(-1), JSON.stringify(init)).toMatchObject({ type: "send", text: "words", followUp });
+    }
+    type(textarea(), "clicked");
+    expect(sendButton().getAttribute("title")).toBe("Send into the running turn · Ctrl+Enter: Queue");
+    flushSync(() => sendButton().click());
+    type(textarea(), "ctrl-clicked");
+    flushSync(() => sendButton().dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })));
+    expect(sends().slice(-2).map((action) => [action.text, action.followUp])).toEqual([["clicked", "steer"], ["ctrl-clicked", "queue"]]);
+  });
+
+  it("follows the setting: Enter queues and Ctrl/⌘ steers once the person picks queue", () => {
+    fixture.instances = [steers];
+    setFollowUpDefault("queue");
+    render(createElement(Composer, { bot: working }));
+    expect(textarea().placeholder).toBe("Pepper is working. Sends when this turn finishes");
+    type(textarea(), "later");
+    press(textarea());
+    type(textarea(), "now");
+    press(textarea(), { ctrlKey: true });
+    expect(followUps()).toEqual(["queue", "steer"]);
+  });
+
+  it("needs Shift too when Ctrl/⌘+Enter is the send key", () => {
+    fixture.instances = [steers];
+    setSendKey("mod-enter");
+    render(createElement(Composer, { bot: working }));
+    type(textarea(), "one");
+    expect(press(textarea()).defaultPrevented).toBe(false);
+    press(textarea(), { ctrlKey: true });
+    type(textarea(), "two");
+    press(textarea(), { ctrlKey: true, shiftKey: true });
+    expect(followUps()).toEqual(["steer", "queue"]);
+  });
+
+  it("offers steer, queue and restart beside Send, each saying what it does", () => {
+    fixture.instances = [steers];
+    render(createElement(Composer, { bot: working }));
+    expect(chooser()).toBeNull();
+    type(textarea(), "start again with this");
+    const choices = openChoices();
+    expect(choices.map((choice) => choice.textContent)).toEqual([
+      "Steer nowInterrupt what Pepper is doingEnter",
+      "QueueRun after the current turnCtrl+Enter",
+      "Restart turnStart the turn over with this message",
+    ]);
+    flushSync(() => choices[2]!.click());
+    expect(sends().at(-1)).toMatchObject({ type: "send", text: "start again with this", followUp: "restart" });
+  });
+
+  it("always queues for a bot whose turn cannot be steered, and still offers restart", () => {
+    fixture.instances = [cannotSteer];
+    render(createElement(Composer, { bot: working }));
+    type(textarea(), "a");
+    press(textarea());
+    type(textarea(), "b");
+    press(textarea(), { ctrlKey: true });
+    expect(followUps()).toEqual(["queue", "queue"]);
+    type(textarea(), "c");
+    expect(openChoices().map((choice) => choice.textContent)).toEqual([
+      "QueueRun after the current turnEnter",
+      "Restart turnStart the turn over with this message",
+    ]);
+  });
+
+  it("leaves an idle bot and a room's queue as they were", () => {
+    fixture.instances = [steers];
+    render(createElement(Composer, { bot }));
+    type(textarea(), "idle");
+    press(textarea(), { ctrlKey: true });
+    expect(chooser()).toBeNull();
+    render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [bot] }));
+    type(textarea(), "room");
+    press(textarea(), { ctrlKey: true });
+    expect(chooser()).toBeNull();
+    expect(sends().map((action) => [action.type, "followUp" in action])).toEqual([["send", false], ["sendGroup", false]]);
   });
 });

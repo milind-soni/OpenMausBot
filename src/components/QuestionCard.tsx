@@ -28,6 +28,7 @@ import {
 } from "./AskCard";
 import { ExpandableText } from "./ExpandableText";
 import { useInboxOrigin } from "./InboxLine";
+import { accessRequestWords, cardAnswerFor } from "./bot-access/access-card";
 
 export { isQuestionCard } from "@/lib/question-card";
 
@@ -43,7 +44,8 @@ const TITLE_MAX = 160;
 export function cardQuestions(card: NonNullable<Message["card"]>): AskQuestion[] {
   if (card.questionRequest?.questions.length) return card.questionRequest.questions;
   if (!card.subtitle && !card.title) return [];
-  return [{ question: card.subtitle || card.title, options: card.options.map((label) => ({ label })), ...(card.fixedOptions && card.options.length ? { custom: false as const } : {}) }];
+  const words = accessRequestWords(card);
+  return [{ question: words?.question ?? (card.subtitle || card.title), options: (words?.options ?? card.options).map((label) => ({ label })), ...(card.fixedOptions && card.options.length ? { custom: false as const } : {}) }];
 }
 
 export function answersInOneTap(questions: readonly AskQuestion[]): boolean {
@@ -124,7 +126,7 @@ export function QuestionCard({
     if (sending || !card?.requestId) return;
     const answers = questions.map((_, index) => answersOf(final[index] ?? EMPTY));
     if (answers.some((entry) => !entry.length)) return;
-    const message = card.questionRequest ? formatQuestionAnswers(questions, answers) : answers[0]![0]!;
+    const message = card.questionRequest ? formatQuestionAnswers(questions, answers) : cardAnswerFor(card, answers[0]![0]!);
     if (!message) return;
     setFailed(false);
     setSent({ answer: message, ...(label ? { label } : {}) });

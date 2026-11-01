@@ -19,6 +19,7 @@ import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
+import { alternateSendLabel, parseFollowUpDefault, setFollowUpDefault, useFollowUpDefault } from "@/lib/follow-up";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { Select } from "./Select";
 
@@ -215,6 +216,24 @@ export function SendKeyRow({ simple = false }: { simple?: boolean }) {
         {SEND_KEYS.map((mode) => (
           <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
         ))}
+      </Select>
+    </SettingRow>
+  );
+}
+
+/** What Enter does with a message sent while a bot works. A setting, not a smart default: both are right, for different people. */
+export function FollowUpRow({ simple = false }: { simple?: boolean }) {
+  const followUp = useFollowUpDefault();
+  const key = alternateSendLabel(useSendKey());
+  return (
+    <SettingRow title={t("settings.followUp.title")} subtitle={t(simple ? "settings.simple.followUp" : "settings.followUp.subtitle", { key })}>
+      <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
+        value={followUp}
+        aria-label={t("settings.followUp.title")}
+        onChange={(event) => setFollowUpDefault(parseFollowUpDefault(event.target.value))}
+      >
+        <option value="steer">{t("settings.followUp.steer")}</option>
+        <option value="queue">{t("settings.followUp.queue")}</option>
       </Select>
     </SettingRow>
   );

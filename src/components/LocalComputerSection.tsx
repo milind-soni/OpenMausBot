@@ -409,7 +409,7 @@ export function CloudComputersCard({
                 : t("vm.cloud.foundMany", { count: instances.length })}
       </p>
 
-      <div
+      {!(configured === false && !loading && !unavailableReason) && <div
         aria-busy={loading || pending !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
@@ -493,7 +493,7 @@ export function CloudComputersCard({
             </div>
           );
         })}
-      </div>
+      </div>}
     </Card>
   );
 }

@@ -7,8 +7,8 @@ and a level for each person added. Admins and the bot's owner always edit. The c
 ## Driving it
 
 ```sh
-pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.test.ts \
-  server/bot-visibility.test.ts src/components/bot-access/ShareBotDialog.dom.test.ts src/state/team-chats.test.ts
+pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.test.ts server/host/access-requests.test.ts \
+  server/bot-visibility.test.ts src/components/bot-access src/state/team-chats.test.ts src/components/SettingsModal.groups.test.ts
 ```
 
 - `server/cloud-team-bot-access.e2e.test.ts` starts a real Team Cloud (`OMB_CLOUD_ROLE=team`) with the Owner (Olive),
@@ -23,10 +23,19 @@ pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.
   visibility; Eve gets 404. A message another app relays (the guarded route's `onBehalfOf`) goes through only for
   someone who can chat. Bob's live stream gets his new level with no sharing in it, then ends when he is removed; the
   owner always edits, keeps editing after handing the bot on, and each person's own MausBot stays theirs. Bots made
-  before levels keep exactly what their visibility gave.
+  before levels keep exactly what their visibility gave. Asking to chat: someone who can't see the bot gets 404 and its
+  owner 409; Bob's ask puts one card in Dan's inbox (the owner's, not an admin's), asking again adds none, Bob can't
+  answer it, Not now leaves him at Can view, a new ask and Allow give him Can chat, a conversation of his own and a
+  line in his inbox; and an Allow from someone who can no longer edit the bot is refused.
 - `server/bot-access.test.ts` covers the level rules: the mapping from visibility and back, a member's level (owner,
   damaged sharing, `@domain` entries), each copy of a bot, what each route needs, each level's bot fields, a card that
   changes the bot, a relayed message, and who may be added.
+- `server/host/access-requests.test.ts`: the admins decide when the owner is gone, one admin's Allow settles every
+  copy, the owner alone decides while on the team, Not now gives nothing.
+- `src/components/bot-access/AccessOverview.dom.test.ts`: Settings → Bot access lists each team bot (no one's own
+  MausBot) by each User, the owner, levels below everyone's disabled, a cell or row applied at once with Undo; "Ask Cara
+  to chat" asks and says so, "Ask an admin to chat" when nobody on the team owns the bot.
+  `src/components/SettingsModal.groups.test.ts` shows the page to a team's admins only.
 - `src/components/bot-access/ShareBotDialog.dom.test.ts` drives the dialog: the owner first, each level, a change sent
   at once with Undo putting it back, adding a teammate, removing one, opening the bot to everyone, the read-only view
   of someone who can't edit, and no button off a team.
@@ -57,6 +66,12 @@ checkout of the code before levels.
 | Can chat | ![](evidence/team-bot-access/member-chat-cara.png) |
 | Can edit: the Share dialog | ![](evidence/team-bot-access/member-edit-dan-share.png) |
 | No access: not in the list | ![](evidence/team-bot-access/member-none-eve.png) |
+| Bot access in Settings (Simple) | ![](evidence/team-bot-access/overview-admin.png) |
+| Bot access in Settings (Advanced) | ![](evidence/team-bot-access/overview-admin-advanced-dark.png) |
+| Can view: ask the owner | ![](evidence/team-bot-access/ask-bob.png) |
+| Asked | ![](evidence/team-bot-access/ask-bob-asked.png) |
+| The card in the owner's inbox | ![](evidence/team-bot-access/ask-card-ada-inbox.png) |
+| After Allow | ![](evidence/team-bot-access/ask-allowed-bob.png) |
 
 ## Not proven here
 

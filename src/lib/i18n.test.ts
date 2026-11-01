@@ -80,7 +80,7 @@ describe("t", () => {
   it("localizes Simple settings AI disclosure labels in Italian", () => {
     setLocale("it");
     expect(t("settings.simple.ai.more", { count: 20 })).toBe("Altri provider AI (20)");
-    expect(t("settings.simple.ai.keys")).toBe("Chiavi API e connessioni");
+    expect(t("settings.simple.ai.yours")).toBe("La tua AI");
     expect(t("settings.simple.ai.setUp")).toBe("Configura");
     setLocale("en");
   });

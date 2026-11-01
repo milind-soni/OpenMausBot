@@ -60,3 +60,10 @@ export function sameAccess(a: BotAccess, b: BotAccess): boolean {
   const left = Object.entries(a.people), right = b.people;
   return a.everyone === b.everyone && left.length === Object.keys(right).length && left.every(([entry, level]) => right[entry] === level);
 }
+
+export interface AccessRequestCardField {
+  /** Someone who can view a team bot asks the person this card is in front of to let them chat with it. */
+  accessRequest?: { botId: string; botName: string; email: string; name: string };
+}
+
+export const ACCESS_REQUEST_OPTIONS = ["Allow", "Not now"] as const;
