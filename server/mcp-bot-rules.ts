@@ -83,9 +83,9 @@ export function mergeBotUpdate(existing: StoredMcpServer, patch: Record<string, 
       const scopes = sent?.scopes ?? saved?.scopes;
       let clientSecret: unknown = sent?.clientSecret;
       if (clientSecret === undefined || clientSecret === true) {
-        const keep = saved?.clientSecret !== undefined && saved.clientId === clientId;
-        clientSecret = keep && !moved ? true : undefined;
-        if (keep && moved) dropped.push("oauth client secret");
+        const keep = saved?.clientId === clientId && !moved;
+        clientSecret = keep && saved?.clientSecret !== undefined ? true : undefined;
+        if (!keep && saved?.clientSecret !== undefined) dropped.push("oauth client secret");
       }
       body.oauth = { clientId, ...(scopes ? { scopes } : {}), ...(clientSecret !== undefined ? { clientSecret } : {}) };
     }

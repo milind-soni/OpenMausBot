@@ -105,6 +105,12 @@ describe("mergeBotUpdate", () => {
     expect(body.oauth).toEqual({ clientId: "cid" });
   });
 
+  it("names the saved oauth client secret as dropped when a new client id replaces it", () => {
+    const { body, dropped } = mergeBotUpdate(remote(), { oauth: { clientId: "other-cid" } });
+    expect(body.oauth).toEqual({ clientId: "other-cid" });
+    expect(dropped).toEqual(["oauth client secret"]);
+  });
+
   it("keeps saved headers, oauth secret and sign-in when the url is unchanged", () => {
     const { body, dropped } = mergeBotUpdate(remote(), { url: "https://mcp.example.com/mcp", resultBudget: 100 });
     expect(body.headers).toEqual({ Authorization: true });
