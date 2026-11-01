@@ -98,14 +98,14 @@ describe("who may", () => {
       expect(listUnread(host, id)).toEqual({ ok: false, error: "Only MausBot reads notifications in chat." });
       expect(markRead(host, id, ["a"])).toMatchObject({ ok: false });
     }
-    expect(listUnread(host, "ada")).toMatchObject({ ok: false, error: expect.stringContaining("On a team") });
+    expect(listUnread(host, "ada")).toMatchObject({ ok: false, error: expect.stringContaining("read in the app") });
     expect(markRead(host, "ada", ["a"])).toMatchObject({ ok: false });
     expect(rows[0]!.read).toBe(false);
   });
 
-  it("refuses on any team server, even for a MausBot with no person", () => {
+  it("refuses on any shared workspace, even for a MausBot with no person", () => {
     const { host, rows } = setup([entry("a", "done")], [MAUS], true);
-    expect(listUnread(host, "maus")).toMatchObject({ ok: false, error: expect.stringContaining("On a team") });
+    expect(listUnread(host, "maus")).toMatchObject({ ok: false, error: expect.stringContaining("read in the app") });
     expect(markRead(host, "maus", ["a"])).toMatchObject({ ok: false });
     expect(rows[0]!.read).toBe(false);
   });
