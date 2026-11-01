@@ -4532,5 +4532,21 @@
   "botAccess.yours.chat": "你可以和 {bot} 聊天，也可以和它開始自己的對話。能編輯它的人決定誰有存取權。",
   "botAccess.yours.other": "能編輯 {bot} 的人決定誰有存取權。",
   "botAccess.viewOnly": "你可以檢視 {bot}，但不能和它聊天。",
-  "botAccess.viewOnlyRoom": "你只能檢視 {bot}，所以可以閱讀這個聊天室，但不能在裡面發言。"
+  "botAccess.viewOnlyRoom": "你只能檢視 {bot}，所以可以閱讀這個聊天室，但不能在裡面發言。",
+  "botAccess.ask": "請 {name} 允許你聊天",
+  "botAccess.askAdmins": "請管理員允許你聊天",
+  "botAccess.asked": "已請求 {name}",
+  "botAccess.theAdmins": "管理員",
+  "botAccess.request.question": "{name} 請求和 {bot} 聊天。允許後，對方可以和它聊天並開始自己的對話。",
+  "botAccess.request.allow": "允許",
+  "botAccess.request.notNow": "暫不",
+  "settings.section.botAccess": "機器人存取權",
+  "botAccess.overview.intro": "{team} 裡誰可以檢視、和哪個機器人聊天以及編輯它。變更立即生效。",
+  "botAccess.overview.noBots": "還沒有團隊機器人。",
+  "botAccess.overview.noPeople": "團隊裡除了管理員還沒有其他人。",
+  "botAccess.overview.bot": "機器人",
+  "botAccess.overview.setForEveryone": "為所有人設定：{bot}",
+  "botAccess.overview.cell": "{name} 能對 {bot} 做什麼",
+  "botAccess.overview.toastEveryone": "{bot}：{team} 的所有人 · {level}",
+  "botAccess.overview.toastPerson": "{bot}：{name} · {level}"
 }

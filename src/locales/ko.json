@@ -7070,5 +7070,21 @@
   "settings.windowFrame.title": "창 프레임",
   "settings.windowFrame.subtitle": "위쪽에 지금 있는 곳을 알려 주는 얇은 막대가 생기고, 채팅은 모서리가 둥근 카드 안에 보여요. 끄면 창이 예전 모습으로 돌아가요.",
   "settings.windowFrame.restart": "{app}을(를) 다시 시작하면 적용돼요.",
-  "settings.windowFrame.restartNow": "지금 다시 시작"
+  "settings.windowFrame.restartNow": "지금 다시 시작",
+  "botAccess.ask": "{name}님에게 대화 허락 요청",
+  "botAccess.askAdmins": "관리자에게 대화 허락 요청",
+  "botAccess.asked": "{name}님에게 요청함",
+  "botAccess.theAdmins": "관리자",
+  "botAccess.request.question": "{name}님이 {bot}와 대화하길 원해요. 허용하면 대화하고 자신의 대화를 시작할 수 있어요.",
+  "botAccess.request.allow": "허용",
+  "botAccess.request.notNow": "나중에",
+  "settings.section.botAccess": "봇 접근 권한",
+  "botAccess.overview.intro": "{team}에서 누가 각 봇을 보고, 대화하고, 편집할 수 있는지예요. 변경 사항은 바로 적용돼요.",
+  "botAccess.overview.noBots": "아직 팀 봇이 없어요.",
+  "botAccess.overview.noPeople": "아직 팀에 관리자 말고는 아무도 없어요.",
+  "botAccess.overview.bot": "봇",
+  "botAccess.overview.setForEveryone": "모두에게 설정: {bot}",
+  "botAccess.overview.cell": "{name}님이 {bot}로 할 수 있는 일",
+  "botAccess.overview.toastEveryone": "{bot}: {team}의 모든 사람 · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

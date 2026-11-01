@@ -3144,5 +3144,21 @@
   "botAccess.yours.chat": "Ви можете спілкуватися з {bot} і починати з ним власні розмови. Хто має доступ, вирішують ті, хто може його редагувати.",
   "botAccess.yours.other": "Хто має доступ, вирішують ті, хто може редагувати {bot}.",
   "botAccess.viewOnly": "Ви можете переглядати {bot}, але не спілкуватися з ним.",
-  "botAccess.viewOnlyRoom": "Ви можете лише переглядати {bot}, тож можете читати цю кімнату, але не писати в ній."
+  "botAccess.viewOnlyRoom": "Ви можете лише переглядати {bot}, тож можете читати цю кімнату, але не писати в ній.",
+  "botAccess.ask": "Попросити {name} дозволити спілкування",
+  "botAccess.askAdmins": "Попросити адміністратора дозволити спілкування",
+  "botAccess.asked": "Запит надіслано: {name}",
+  "botAccess.theAdmins": "адміністраторам",
+  "botAccess.request.question": "{name} просить дозволу спілкуватися з {bot}. «Дозволити» дає змогу спілкуватися з ним і починати власні розмови.",
+  "botAccess.request.allow": "Дозволити",
+  "botAccess.request.notNow": "Не зараз",
+  "settings.section.botAccess": "Доступ до ботів",
+  "botAccess.overview.intro": "Хто в {team} може переглядати, спілкуватися з кожним ботом і редагувати його. Зміни діють одразу.",
+  "botAccess.overview.noBots": "Ботів команди ще немає.",
+  "botAccess.overview.noPeople": "У команді поки що лише адміністратори.",
+  "botAccess.overview.bot": "Бот",
+  "botAccess.overview.setForEveryone": "Задати для всіх: {bot}",
+  "botAccess.overview.cell": "Що {name} може робити з {bot}",
+  "botAccess.overview.toastEveryone": "{bot}: усі в {team} · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

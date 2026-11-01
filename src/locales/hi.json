@@ -2701,5 +2701,21 @@
   "botAccess.yours.chat": "आप {bot} से चैट कर सकते हैं और इसके साथ अपनी बातचीत शुरू कर सकते हैं। जो इसे बदल सकते हैं, वही तय करते हैं कि ऐक्सेस किसके पास है।",
   "botAccess.yours.other": "जो {bot} को बदल सकते हैं, वही तय करते हैं कि ऐक्सेस किसके पास है।",
   "botAccess.viewOnly": "आप {bot} को देख सकते हैं, उससे चैट नहीं कर सकते।",
-  "botAccess.viewOnlyRoom": "आप {bot} को सिर्फ़ देख सकते हैं, इसलिए यह रूम पढ़ सकते हैं पर इसमें लिख नहीं सकते।"
+  "botAccess.viewOnlyRoom": "आप {bot} को सिर्फ़ देख सकते हैं, इसलिए यह रूम पढ़ सकते हैं पर इसमें लिख नहीं सकते।",
+  "botAccess.ask": "{name} से चैट की अनुमति माँगें",
+  "botAccess.askAdmins": "किसी एडमिन से चैट की अनुमति माँगें",
+  "botAccess.asked": "{name} से पूछ लिया",
+  "botAccess.theAdmins": "एडमिन",
+  "botAccess.request.question": "{name} {bot} से चैट करना चाहते हैं। अनुमति देने से वे इससे चैट कर सकेंगे और अपनी बातचीत शुरू कर सकेंगे।",
+  "botAccess.request.allow": "अनुमति दें",
+  "botAccess.request.notNow": "अभी नहीं",
+  "settings.section.botAccess": "बॉट ऐक्सेस",
+  "botAccess.overview.intro": "{team} में कौन हर बॉट को देख, उससे चैट और उसे बदल सकता है। बदलाव तुरंत लागू होते हैं।",
+  "botAccess.overview.noBots": "अभी कोई टीम बॉट नहीं है।",
+  "botAccess.overview.noPeople": "अभी टीम में एडमिन के अलावा कोई नहीं है।",
+  "botAccess.overview.bot": "बॉट",
+  "botAccess.overview.setForEveryone": "सबके लिए तय करें: {bot}",
+  "botAccess.overview.cell": "{name} {bot} के साथ क्या कर सकते हैं",
+  "botAccess.overview.toastEveryone": "{bot}: {team} में सभी · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

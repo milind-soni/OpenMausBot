@@ -6470,5 +6470,21 @@
   "botAccess.yours.chat": "Możesz rozmawiać z {bot} i zaczynać z nim własne rozmowy. O dostępie decydują osoby, które mogą go edytować.",
   "botAccess.yours.other": "O dostępie decydują osoby, które mogą edytować {bot}.",
   "botAccess.viewOnly": "Możesz wyświetlać {bot}, ale nie rozmawiać z nim.",
-  "botAccess.viewOnlyRoom": "Możesz tylko wyświetlać {bot}, więc możesz czytać ten pokój, ale nie pisać w nim."
+  "botAccess.viewOnlyRoom": "Możesz tylko wyświetlać {bot}, więc możesz czytać ten pokój, ale nie pisać w nim.",
+  "botAccess.ask": "Poproś {name} o możliwość rozmowy",
+  "botAccess.askAdmins": "Poproś administratora o możliwość rozmowy",
+  "botAccess.asked": "Poproszono: {name}",
+  "botAccess.theAdmins": "administratorów",
+  "botAccess.request.question": "{name} prosi o możliwość rozmowy z {bot}. Zezwól, aby mógł z nim rozmawiać i zaczynać własne rozmowy.",
+  "botAccess.request.allow": "Zezwól",
+  "botAccess.request.notNow": "Nie teraz",
+  "settings.section.botAccess": "Dostęp do botów",
+  "botAccess.overview.intro": "Kto w {team} może wyświetlać, rozmawiać z każdym botem i go edytować. Zmiany działają od razu.",
+  "botAccess.overview.noBots": "Nie ma jeszcze botów zespołu.",
+  "botAccess.overview.noPeople": "W zespole są na razie tylko administratorzy.",
+  "botAccess.overview.bot": "Bot",
+  "botAccess.overview.setForEveryone": "Ustaw dla wszystkich: {bot}",
+  "botAccess.overview.cell": "Co {name} może robić z {bot}",
+  "botAccess.overview.toastEveryone": "{bot}: wszyscy w {team} · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

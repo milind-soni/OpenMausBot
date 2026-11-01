@@ -136,6 +136,8 @@ export interface BotMessageRouteDeps {
   typedCardAnswer?(auth: RequestAuth, threadId: string, text: string, target: Message | undefined, line: { sendId?: string; sender?: ResolvedSender }): Promise<{ status: number; message?: Message; error?: string } | null>;
   /** On a Team Cloud: why the person a relayed message names may not chat with this bot; null when they may. */
   relayRefusal?(bot: BotRecord, email: string | undefined): string | null;
+  /** The answer to someone's ask to chat with a team bot; null for any other card. */
+  resolveAccessRequest?(threadId: string, requestId: string, behavior: string, message: unknown): { status: number; body: unknown } | null;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -529,6 +531,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (refusal) return json(res, 403, { error: refusal });
       }
       return await answeringCardAs(auth, bot.threadId, String(body.requestId), async () => {
+        const access = deps.resolveAccessRequest?.(bot.threadId, String(body.requestId), behavior, body.message);
+        if (access) return json(res, access.status, access.body);
         if (resolveAndSendTrust(res, bot.threadId, String(body.requestId), behavior)) return;
         if (await resolveAndSendTeamSetup(res, {
           botId: bot.id, threadId: bot.threadId, requestId: String(body.requestId), behavior,
@@ -598,6 +602,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (refusal) return json(res, 403, { error: refusal });
       }
       return await answeringCardAs(auth, threadId, requestId, async () => {
+        const access = deps.resolveAccessRequest?.(threadId, requestId, behavior, body.message);
+        if (access) return json(res, access.status, access.body);
         if (resolveAndSendTrust(res, threadId, requestId, behavior)) return;
         const skillCard = store.messagesFor(threadId).find(
           (message) => message.card?.requestId === requestId && message.card.skillRequest,

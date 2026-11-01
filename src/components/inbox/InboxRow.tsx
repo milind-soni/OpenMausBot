@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { InboxSender } from "../InboxLine";
 import { threadUpdatedLabel } from "../SidebarThreadRow";
-import { quickActions, subjectOf, type QuickAction } from "./inbox-view";
+import { quickActions, subjectOf, textOf, type QuickAction } from "./inbox-view";
 
 const ACTION_LOOK: Record<QuickAction, { Icon: LucideIcon; label: LocaleKey }> = {
   allow: { Icon: Check, label: "approval.action.allowOnce" },
@@ -41,7 +41,7 @@ export function InboxRowItem({ row, now, onOpen, onAction, inCard = false }: {
         <span className={cn("shrink-0 truncate", inCard ? "w-[7.5rem]" : "w-[5.5rem] sm:w-[6.5rem]")}>{row.from.name}</span>
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
           <span className="max-w-[45%] shrink-0 truncate">{subject}</span>
-          <span className="min-w-0 truncate font-normal text-ink-tertiary">{row.text}</span>
+          <span className="min-w-0 truncate font-normal text-ink-tertiary">{textOf(row)}</span>
         </span>
         <span className="shrink-0 text-[11px] font-normal tabular-nums text-ink-tertiary group-focus-within:invisible group-hover:invisible">{threadUpdatedLabel(row.at, now)}</span>
       </button>
