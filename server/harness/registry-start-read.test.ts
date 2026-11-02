@@ -9,7 +9,7 @@ import type { InstanceConfigMap } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver, type FakeDriverOptions } from "../testing/fake-driver.ts";
 import { snapshotFrom, STATUS_SAVE_DELAY_MS } from "./engine-status-file.ts";
-import { ENGINE_STATUS_FRESH_MS, enginesByUse, ProviderRegistry, SNAPSHOT_DEADLINE_MS, START_READ_STEP_MS } from "./registry.ts";
+import { enginesByUse, ProviderRegistry, SNAPSHOT_DEADLINE_MS, START_READ_STEP_MS } from "./registry.ts";
 
 const AVAILABLE = { state: "available", version: "0.0.0-fake" } as const;
 const GONE = { state: "unavailable", reason: "`fake` CLI not found" } as const;
@@ -24,8 +24,6 @@ const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 /** The recorded status is written a second after the last probe lands. */
 const saved = async () => { await vi.advanceTimersByTimeAsync(STATUS_SAVE_DELAY_MS); };
 const timersForTheFile = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-/** A start long enough after the last run that its statuses are probed again. */
-const later = () => Date.now() + ENGINE_STATUS_FRESH_MS;
 
 async function engines(options: Record<string, FakeDriverOptions>, registryOptions: ConstructorParameters<typeof ProviderRegistry>[1] = {}, configs?: InstanceConfigMap) {
   const fakes = Object.entries(options).map(([kind, opts]) => {
@@ -125,14 +123,13 @@ describe("the start-up read", () => {
     await lastRun.registry.describe();
     expect(existsSync(file)).toBe(false);
     await saved();
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ v: 1, engines: [{ instanceId: "fake", driverKind: "fake", cli: "fake-cli", snapshot: AVAILABLE,
-      checkedAt: expect.any(Number), settings: expect.stringMatching(/^[0-9a-f]{16}$/) }] });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ v: 1, engines: [{ instanceId: "fake", driverKind: "fake", cli: "fake-cli", snapshot: AVAILABLE }] });
     if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
 
     const probe = gate();
     Object.assign(options, { holdSnapshot: probe.promise, answer: GONE });
     const { registry, probes } = await engines({ fake: options }, { statusFile: file });
-    const read = registry.readAtStart([], () => {}, later());
+    const read = registry.readAtStart();
     const [listed] = await registry.describe({ known: true });
     expect(listed.snapshot).toEqual(AVAILABLE);
     expect(registry.knownSnapshot("fake")).toEqual(AVAILABLE);
@@ -166,7 +163,7 @@ describe("the start-up read", () => {
     const probe = gate();
     Object.assign(options, { holdSnapshot: probe.promise, answer: GONE });
     const { registry, probes } = await engines({ fake: options }, { statusFile: file });
-    const read = registry.readAtStart(["fake"], () => {}, later());
+    const read = registry.readAtStart(["fake"]);
     expect(probes()).toEqual({ fake: 1 });
     const warm = gate();
     options.holdSnapshot = warm.promise;
@@ -188,43 +185,7 @@ describe("the start-up read", () => {
     await (await engines({ fake: {} }, { statusFile: file })).registry.describe();
     await saved();
     const { registry } = await engines({ fake: {} }, { statusFile: file });
-    expect((await registry.readAtStart([], () => {}, later())).changed).toBe(false);
-  });
-
-  it("takes an engine the last run found ready within the fresh window as read, and probes one it found unavailable or set up otherwise", async () => {
-    const file = statusFile();
-    const options: Record<string, FakeDriverOptions> = { ready: {}, gone: { answer: GONE }, rekeyed: {} };
-    timersForTheFile();
-    await (await engines(options, { statusFile: file })).registry.describe();
-    await saved();
-    const checkedAt = JSON.parse(readFileSync(file, "utf8")).engines[0].checkedAt as number;
-
-    const { registry, probes } = await engines(options, { statusFile: file },
-      { ready: { driver: "ready" }, gone: { driver: "gone" }, rekeyed: { driver: "rekeyed", environment: { FAKE_KEY: "other" } } });
-    const { changed } = await registry.readAtStart(["ready"], () => {}, checkedAt + ENGINE_STATUS_FRESH_MS - 1);
-    expect(probes()).toEqual({ ready: 0, gone: 1, rekeyed: 1 });
-    expect(changed).toBe(false);
-    expect(registry.lastSnapshot("ready")).toEqual(AVAILABLE);
-    expect(registry.provisional()).toBe(false);
-    await saved();
-    expect(JSON.parse(readFileSync(file, "utf8")).engines[0].checkedAt).toBe(checkedAt);
-    // The server's own reads answer from it (a later catalog's new-bot default must not probe every CLI)...
-    expect((await registry.describe()).find((engine) => engine.instanceId === "ready")?.snapshot).toEqual(AVAILABLE);
-    expect(probes().ready).toBe(0);
-    // ...and the list a person asks for probes it.
-    await registry.describe({ known: true });
-    expect(probes().ready).toBe(1);
-
-    const again = await engines(options, { statusFile: file },
-      { ready: { driver: "ready" }, gone: { driver: "gone" }, rekeyed: { driver: "rekeyed", environment: { FAKE_KEY: "other" } } });
-    await again.registry.readAtStart([], () => {}, checkedAt + ENGINE_STATUS_FRESH_MS - 1);
-    again.registry.forgetSnapshots();
-    await again.registry.describe();
-    expect(again.probes().ready).toBe(1);
-
-    const stale = await engines(options, { statusFile: file });
-    await stale.registry.readAtStart([], () => {}, checkedAt + ENGINE_STATUS_FRESH_MS);
-    expect(stale.probes()).toEqual({ ready: 1, gone: 1, rekeyed: 1 });
+    expect((await registry.readAtStart()).changed).toBe(false);
   });
 
   it("keeps no seed for an engine whose driver or CLI changed, or once the engines must be probed again", async () => {

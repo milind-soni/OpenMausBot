@@ -11,6 +11,8 @@ const SAFE_INSTANCE_ID = /^[\w.-]+$/;
 /** A list this server's build read this recently is used as it is at start; an older one, or one an earlier build read,
  * is read again in the background. A sleeping Cloud wakes many times an hour, and each read can start the engine's CLI. */
 export const STARTUP_MODEL_CACHE_FRESH_MS = 6 * 60 * 60_000;
+/** Engines opened since this server started: opening one again means its key or settings just changed. */
+const openedThisRun = new Set<string>();
 
 export function startupModelCachePath(instanceId: string): string | null {
   if (!SAFE_INSTANCE_ID.test(instanceId)) return null;
@@ -126,6 +128,8 @@ export function openStartupModelCatalog(input: {
   refresh: () => Promise<void>;
   now?: number;
 }): Promise<null> | DeferredStartupModelRefresh {
+  const reopened = openedThisRun.has(input.instanceId);
+  openedThisRun.add(input.instanceId);
   const entry = readStartupModelCacheEntry(input.instanceId);
   const cached = entry?.catalog ?? null;
   if (cached) input.use(cached);
@@ -142,7 +146,7 @@ export function openStartupModelCatalog(input: {
     });
   }
   const age = (input.now ?? Date.now()) - (entry?.checkedAt ?? -Infinity);
-  if (cached && entry?.build === buildStamp() && age >= 0 && age < STARTUP_MODEL_CACHE_FRESH_MS) return Promise.resolve(null);
+  if (cached && !reopened && entry?.build === buildStamp() && age >= 0 && age < STARTUP_MODEL_CACHE_FRESH_MS) return Promise.resolve(null);
   // A saved list stands in while the refresh waits; with none the engine would offer no model at all until it runs.
   const startAfter = cached ? afterFirstEngineRead() : Promise.resolve();
   return { pending: startAfter.then(() => input.refresh()).then(persist, () => undefined) };
