@@ -24,7 +24,7 @@ function json(res: ServerResponse, status: number, body: JsonValue): void {
   res.end(JSON.stringify(body));
 }
 
-async function readRawBody(req: IncomingMessage): Promise<string> {
+async function readRawBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   try {
@@ -41,7 +41,7 @@ async function readRawBody(req: IncomingMessage): Promise<string> {
     if (parsed.success && parsed.data.status === 413) throw error;
     throw Object.assign(new Error("Could not read webhook body"), { status: 400 });
   }
-  return Buffer.concat(chunks, bytes).toString("utf8");
+  return Buffer.concat(chunks, bytes);
 }
 
 function parsePayload(raw: string, contentType: string): JsonValue {
@@ -103,44 +103,54 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
     if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
 
+    const github = match[2] === "github";
+    const metadata = {
+      contentType: header(req, "content-type"),
+      eventName: github ? header(req, "x-github-event")?.trim() : eventName(req),
+      deliveryId: github ? header(req, "x-github-delivery")?.trim() : deliveryId(req),
+    };
+    let authenticated = false;
     let release: (() => void) | undefined;
     try {
       release = claimRequest?.();
       let secret = "";
-      try {
-        secret = (match[2] ? decodeURIComponent(match[2]) : "") || bearerSecret(req);
-      } catch {
+      let raw: Buffer | undefined;
+      let secretUnavailable = false;
+      if (github) {
+        const signature = header(req, "x-hub-signature-256");
+        if (metadata.deliveryId && metadata.eventName && signature && /^sha256=[a-f0-9]{64}$/.test(signature)) {
+          raw = await readRawBody(req);
+          const verified = manager.githubSecret(match[1], signature, raw);
+          if (verified && "secret" in verified) secret = verified.secret;
+          secretUnavailable = Boolean(verified && "unavailable" in verified);
+        }
+      } else {
+        try {
+          secret = (match[2] ? decodeURIComponent(match[2]) : "") || bearerSecret(req);
+        } catch {
+        }
       }
-      // Reject bad capability URLs before buffering or parsing attacker input.
       if (!manager.authorize(match[1], secret)) {
-        manager.recordUnauthorized(match[1], {
-          contentType: header(req, "content-type"),
-          eventName: eventName(req),
-          deliveryId: deliveryId(req),
-        });
+        if (!github || secretUnavailable) manager.recordUnauthorized(match[1], metadata, secretUnavailable);
         return json(res, 401, { error: "Invalid webhook URL or secret" });
       }
-      const raw = await readRawBody(req);
+      authenticated = true;
+      raw ??= await readRawBody(req);
       const contentType = header(req, "content-type")?.split(";")[0]?.trim().toLowerCase() ?? "text/plain";
-      const payload = parsePayload(raw, contentType);
+      const payload = parsePayload(raw.toString("utf8"), contentType);
       const result = await manager.receive(match[1], secret, {
+        ...metadata,
         payload,
         contentType,
-        eventName: eventName(req),
         userAgent: header(req, "user-agent"),
-        deliveryId: deliveryId(req),
       });
       return json(res, 202, { accepted: true, ...result });
     } catch (error) {
       const parsedError = statusErrorSchema.safeParse(error);
       const status = parsedError.success ? parsedError.data.status ?? 500 : 500;
       const message = error instanceof Error ? error.message : String(error);
-      if (status === 400 || status === 413) {
-        manager.recordRejected(match[1], status, message, {
-          contentType: header(req, "content-type"),
-          eventName: eventName(req),
-          deliveryId: deliveryId(req),
-        });
+      if (authenticated && (status === 400 || status === 413)) {
+        manager.recordRejected(match[1], status, message, metadata);
       }
       return json(res, status, { error: message });
     } finally {

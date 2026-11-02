@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -563,6 +563,17 @@ export class WebhookManager {
     return Boolean(trigger && secretMatches(secret, trigger.secretHash));
   }
 
+  /** The kept secret leaves this method only after GitHub's signature authenticates the raw request bytes. */
+  githubSecret(endpointId: string, signature: string | undefined, raw: Buffer): { secret: string } | { unavailable: true } | null {
+    if (!signature || !/^sha256=[a-f0-9]{64}$/.test(signature)) return null;
+    const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
+    if (!trigger) return null;
+    const secret = this.unseal(trigger);
+    if (!secret) return { unavailable: true };
+    const expected = createHmac("sha256", secret).update(raw).digest();
+    return timingSafeEqual(Buffer.from(signature.slice(7), "hex"), expected) ? { secret } : null;
+  }
+
   receive(endpointId: string, secret: string, event: WebhookEvent): WebhookReceiveResult | Promise<WebhookReceiveResult> {
     const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
     if (!trigger || !secretMatches(secret, trigger.secretHash)) fail(401, "Invalid webhook URL or secret");
@@ -715,10 +726,11 @@ export class WebhookManager {
   }
 
   /** Anyone who reaches the receiver can send a wrong secret: one rolling record per burst, saved with the next real change. */
-  recordUnauthorized(endpointId: string, event: Partial<WebhookEvent> = {}): WebhookAttempt | null {
+  recordUnauthorized(endpointId: string, event: Partial<WebhookEvent> = {}, secretUnavailable = false): WebhookAttempt | null {
     const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
     if (!trigger) return null;
-    const details = (count: number) => ({ outcome: "rejected" as const, statusCode: 401, reason: count > 1 ? `${UNAUTHORIZED_REASON} (${count} requests)` : UNAUTHORIZED_REASON, deliveryId: event.deliveryId });
+    const reason = secretUnavailable ? "Replace this automation's address and update GitHub's Secret; the saved secret cannot be recovered." : UNAUTHORIZED_REASON;
+    const details = (count: number) => ({ outcome: "rejected" as const, statusCode: 401, reason: count > 1 ? `${reason} (${count} requests)` : reason, deliveryId: event.deliveryId });
     const at = this.attempts.findLastIndex((attempt) => attempt.webhookId === trigger.id);
     const burst = at === -1 ? undefined : this.attempts[at]!;
     if (!burst || burst.outcome !== "rejected" || burst.statusCode !== 401 || this.now() - burst.receivedAt > UNAUTHORIZED_BURST_MS) {
