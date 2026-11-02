@@ -2922,6 +2922,7 @@
   "model.available": "{count} available",
   "model.noProviders": "No model providers are available.",
   "model.noMatch": "Nothing matches “{query}”",
+  "model.typedByHand": "{id} · typed by hand",
   "model.section.default": "Default model",
   "model.section.starting": "Starting model for the new bot and its threads.",
   "model.section.threads": "For groups and every thread that uses the bot's model. A thread keeps its own model only when you pick one in it.",
