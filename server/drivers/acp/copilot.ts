@@ -5,14 +5,15 @@
 // Auto (the stored id stays `auto`; the picker may show Copilot Fusion and an autoTier instead). Its own
 // `allow_all` option stays at its `off` default: the ACP broker answers every permission request.
 import { createHash } from "node:crypto";
-import { readFile, realpath, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { AcpDiscoveryRpcError, discoverAcpModels, DISCOVERY_CLIENT_NAME, type AcpDiscoveryOptions } from "./custom-model-catalog.ts";
 import { offeredModels } from "./config-options.ts";
+import { writeFileAtomicIfChanged } from "../../atomic.ts";
 
 const AUTO = "auto";
 const MODELS: ModelCatalog = { default: AUTO, options: [{ id: AUTO, label: "Auto" }] };
@@ -215,6 +216,7 @@ const SUPPORT: AcpSupport = {
     return offered.includes(AUTO) ? AUTO : null;
   },
   restartOnMcpChange: true,
+  mcpServersFromLaunch: true,
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: (env, config) => copilotSignedIn(env, config),
@@ -223,4 +225,39 @@ const SUPPORT: AcpSupport = {
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
-export const CopilotAgentDriver = createAcpDriver(SUPPORT);
+export const CopilotAgentDriver = {
+  ...createAcpDriver(SUPPORT),
+  async create(input: Parameters<ReturnType<typeof createAcpDriver>["create"]>[0]) {
+    // Copilot CLI 1.0.105 rejects stdio servers from ACP clients; --additional-mcp-config accepts them from its launcher.
+    const directory = await mkdtemp(join(tmpdir(), "omb-copilot-mcp-"));
+    const cleanup = () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      const instance = await createAcpDriver({
+        ...SUPPORT,
+        applyTurnEnv(env, { threadId, mcpServers }) {
+          const path = join(directory, `${createHash("sha256").update(threadId).digest("hex")}.json`);
+          const servers = Object.fromEntries(mcpServers.map((server) => [server.name, "command" in server
+            ? { type: "local", command: server.command, args: server.args,
+              env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])), tools: ["*"] }
+            : { type: server.type, url: server.url,
+              headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])), tools: ["*"] }]));
+          writeFileAtomicIfChanged(path, JSON.stringify({ mcpServers: servers }), { mode: 0o600, durable: false });
+          env.OMB_COPILOT_MCP_CONFIG = path;
+        },
+        resolveCommand(env, config) {
+          const path = env.OMB_COPILOT_MCP_CONFIG;
+          if (!path) throw new Error("GitHub Copilot's tool configuration was not prepared.");
+          return Promise.resolve({ command: config.cli, args: ["--additional-mcp-config", `@${path}`] });
+        },
+      }).create(input);
+      const dispose = instance.dispose;
+      instance.dispose = async () => {
+        try { await dispose(); } finally { await cleanup(); }
+      };
+      return instance;
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
+  },
+};
