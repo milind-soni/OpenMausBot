@@ -6573,5 +6573,21 @@
   "botAccess.yours.chat": "{bot} とチャットし、自分の会話を始められます。アクセスできる人は、編集できる人が決めます。",
   "botAccess.yours.other": "アクセスできる人は、{bot} を編集できる人が決めます。",
   "botAccess.viewOnly": "{bot} は閲覧のみで、チャットはできません。",
-  "botAccess.viewOnlyRoom": "{bot} は閲覧のみのため、このルームは読めますが書き込めません。"
+  "botAccess.viewOnlyRoom": "{bot} は閲覧のみのため、このルームは読めますが書き込めません。",
+  "botAccess.ask": "{name} にチャットの許可を頼む",
+  "botAccess.askAdmins": "管理者にチャットの許可を頼む",
+  "botAccess.asked": "{name} に依頼しました",
+  "botAccess.theAdmins": "管理者",
+  "botAccess.request.question": "{name} が {bot} とのチャットを希望しています。許可すると、チャットや自分の会話の開始ができるようになります。",
+  "botAccess.request.allow": "許可",
+  "botAccess.request.notNow": "今はしない",
+  "settings.section.botAccess": "ボットへのアクセス",
+  "botAccess.overview.intro": "{team} の誰が各ボットを閲覧・チャット・編集できるか。変更はすぐに反映されます。",
+  "botAccess.overview.noBots": "チームのボットはまだありません。",
+  "botAccess.overview.noPeople": "チームにはまだ管理者しかいません。",
+  "botAccess.overview.bot": "ボット",
+  "botAccess.overview.setForEveryone": "全員に設定: {bot}",
+  "botAccess.overview.cell": "{name} が {bot} でできること",
+  "botAccess.overview.toastEveryone": "{bot}: {team} の全員 · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

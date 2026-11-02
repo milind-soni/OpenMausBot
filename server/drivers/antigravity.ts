@@ -141,7 +141,10 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, config, turn }) => {
+  configureSession: async ({ request, sessionId, config, turn, configOptions }) => {
+    if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
+      return;
+    }
     const wanted = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
     const result = await request("session/set_config_option", {
       sessionId,

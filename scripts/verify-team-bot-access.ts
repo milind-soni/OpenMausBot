@@ -19,6 +19,9 @@ const only = onlyAt === -1 ? null : new Set((process.argv[onlyAt + 1] ?? "").spl
 const CHROME = process.env.OMB_CDP_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const [WIDTH, HEIGHT] = [1280, 800];
 const SUBJECT = /^\/api\/(?:bots|threads|groups|routines)\//;
+/** The app's time-limited offer opens over the sidebar; its own Not now closes it. */
+const DISMISS_OFFER = `(() => { const button = [...document.querySelectorAll('[data-notice="boat-offer"] button')].find((entry) => entry.textContent.trim() === "Not now");
+  button?.click(); return Boolean(button); })()`;
 
 const PEOPLE = {
   olive: { email: "olive@acme.test", role: "owner" as const },
@@ -85,6 +88,7 @@ async function openChrome(profile: string) {
     },
     async shoot(file: string) {
       await delay(700);
+      if (await evaluate(DISMISS_OFFER)) await delay(500);
       const { data } = await send("Page.captureScreenshot", { format: "png" });
       writeFileSync(file, Buffer.from(data, "base64"));
       console.log(file);
@@ -188,6 +192,38 @@ try {
     } },
     { name: "member-none-eve", who: "eve", query: "mode=simple", act: async () => {
       await page.until(`!document.querySelector(${JSON.stringify(row)})`, "a sidebar without Payroll");
+    } },
+    { name: "overview-admin", who: "ada", query: "mode=simple", act: async () => {
+      await page.click("[data-sidebar-account]", "the account menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.trim() === "Settings"); item?.click(); return Boolean(item); })()`, "Settings in the menu");
+      await page.until("Boolean(document.querySelector('[data-access-overview]'))", "Bot access");
+      await page.evaluate("document.querySelector('[data-settings-block=\"botAccess\"]').scrollIntoView({ block: 'start' }); true");
+    } },
+    { name: "overview-admin-advanced-dark", who: "ada", query: "mode=advanced&skin=midnight", act: async () => {
+      await page.until(`(() => { const trigger = [...document.querySelectorAll('button')].find((entry) => entry.textContent.includes("ada@acme.test")); trigger?.click(); return Boolean(trigger); })()`, "the account menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.trim() === "Settings"); item?.click(); return Boolean(item); })()`, "Settings in the menu");
+      await page.click("[data-settings-section='botAccess']", "Bot access in the rail");
+      await page.until("Boolean(document.querySelector('[data-access-overview]'))", "Bot access");
+    } },
+    { name: "ask-bob", who: "bob", query: "mode=simple", act: async () => {
+      await openPayroll();
+      await page.until("Boolean(document.querySelector('[data-ask-to-chat]'))", "Ask to chat");
+    } },
+    { name: "ask-bob-asked", who: "bob", query: "mode=simple", act: async () => {
+      await openPayroll();
+      await page.click("[data-ask-to-chat]", "Ask to chat");
+      await page.until("Boolean(document.querySelector('[data-ask-to-chat=asked]'))", "Asked");
+    } },
+    { name: "ask-card-ada-inbox", who: "ada", query: "mode=simple", act: async () => {
+      await page.click('[data-sidebar-people] [data-person="ada@acme.test"]', "Ada's own row");
+      await page.until("Boolean([...document.querySelectorAll('[data-inbox-choice], button')].find((entry) => entry.textContent.trim() === 'Allow'))", "the Allow button");
+    }, after: async () => {
+      await page.evaluate("[...document.querySelectorAll('[data-inbox-choice], button')].find((entry) => entry.textContent.trim() === 'Allow').click(); true");
+      await page.until("![...document.querySelectorAll('[data-inbox-choice], button')].some((entry) => entry.textContent.trim() === 'Allow' && !entry.disabled)", "the ask answered");
+    } },
+    { name: "ask-allowed-bob", who: "bob", query: "mode=simple", act: async () => {
+      await openPayroll();
+      await page.until("!document.querySelector('[data-testid=view-only-composer]') && Boolean(document.querySelector('textarea'))", "Bob's composer");
     } },
   ];
   let serving: Who | null = null;

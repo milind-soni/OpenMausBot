@@ -102,12 +102,12 @@ export interface AcpSupport {
   modelVariants?: boolean;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
-  /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a
-   *  support ask the binary it will spawn, not whatever is on PATH. */
+  /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a support ask the binary
+   *  it will spawn, not whatever is on PATH; `fresh` is the person's Refresh, which may bypass the CLI's own cache. */
   resolveModels?(
     environment: Record<string, string | undefined>,
     config: AcpConfig,
-    instanceId: string,
+    instanceId: string, fresh?: boolean,
   ): ModelCatalog | Promise<ModelCatalog>;
   /** Some managed agents are not probed at app startup; their Refresh is the only lookup. */
   resolveModelsOnCreate?: boolean;
@@ -341,10 +341,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       let models = support.resolveModels && support.resolveModelsOnCreate === false
         ? readStartupModelCache(instanceId) ?? support.models : support.models;
       let accountModels: ReadonlySet<string> | null = null;
-      const refreshModels = async () => {
+      const refreshModels = async (fresh = false) => {
         if (!support.resolveModels) return;
         try {
-          const resolved = await support.resolveModels(childEnv(), config, instanceId);
+          const resolved = await support.resolveModels(childEnv(), config, instanceId, fresh);
           if (resolved.options.length) {
             models = resolved;
             accountModels = new Set(resolved.options.map((option) => option.id));
@@ -1687,7 +1687,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         get models() {
           return models;
         },
-        refreshModels: support.resolveModels ? refreshModels : undefined,
+        refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
         ...(deviceSignIn ? {
           startAuthentication: () => deviceSignIn.start(),

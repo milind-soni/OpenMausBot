@@ -191,6 +191,82 @@ posixOnly("mid-turn steering e2e", () => {
     40_000,
   );
 
+  it("a message sent with followUp: queue during a Claude turn waits for it instead of steering, then runs as its own turn", async () => {
+    rmSync(steerFinishGate, { force: true });
+    let queued: Awaited<ReturnType<typeof api>>;
+    const created = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+      queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "a new task for later", followUp: "queue" });
+      expect((await getBot(created.id)).busy).toBe(true);
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
+    expect(queued.status).toBe(202);
+    expect(queued.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
+    expect(queued.body.steered).toBeUndefined();
+
+    await waitFor(async () => {
+      const bot = await getBot(created.id);
+      return !bot.busy && bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: a new task for later"));
+    }, "the queued message to run after the first turn");
+    const bot = await getBot(created.id);
+    expect(bot.messages.find((m: any) => m.role === "user" && m.text === "a new task for later").steered).toBeUndefined();
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("steered: a new task for later"))).toBe(false);
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: first"))).toBe(true);
+    expect(bot.messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text)).toEqual(["first", "a new task for later"]);
+  }, 40_000);
+
+  it("a message sent with followUp: restart during a Claude turn stops that turn and runs as the next one, never steered", async () => {
+    rmSync(steerFinishGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+      const restarted = await api("POST", `/api/bots/${created.id}/messages`, { text: "start over with this", followUp: "restart" });
+      expect(restarted.status).toBe(202);
+      expect(restarted.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.role === "user" && m.text === "start over with this"),
+        "the restarted turn to begin with the message");
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: start over with this")),
+      "the restarted turn's reply");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the restarted turn to settle");
+    const bot = await getBot(created.id);
+    expect(bot.messages.find((m: any) => m.role === "user" && m.text === "start over with this").steered).toBeUndefined();
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: first"))).toBe(false);
+    expect(bot.messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text)).toEqual(["first", "start over with this"]);
+  }, 40_000);
+
+  it("a message sent with followUp: restart to an engine that cannot steer stops the turn and runs next", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "acp", model: "fake-model" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true, "the hung turn to start");
+    const restarted = await api("POST", `/api/bots/${created.id}/messages`, { text: "second", followUp: "restart" });
+    expect(restarted.body).toMatchObject({ ok: true, queued: true });
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.text === "second"), "the message to begin its own turn");
+    await api("POST", `/api/bots/${created.id}/interrupt`);
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the restarted turn to settle");
+  }, 30_000);
+
+  it("refuses a followUp that is not steer, queue or restart, and one on a message that is not typed", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    for (const followUp of ["later", true]) {
+      const refused = await api("POST", `/api/bots/${created.id}/messages`, { text: "hi", followUp });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toBe("followUp must be steer, queue or restart");
+    }
+    const pressed = await api("POST", `/api/bots/${created.id}/messages`, { text: "hi", followUp: "queue", widgetAction: { messageId: "m", action: "a" } });
+    expect(pressed.status).toBe(400);
+    expect(pressed.body.error).toBe("only a typed message can choose how it meets the running turn");
+  });
+
   it("a typed stop during a Claude turn ends it like Stop, and a longer message that starts with stop is still steered", async () => {
     rmSync(steerFinishGate, { force: true });
     try {

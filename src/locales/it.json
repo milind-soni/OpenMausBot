@@ -6347,5 +6347,21 @@
   "botAccess.yours.chat": "Puoi chattare con {bot} e iniziare le tue conversazioni con lui. Chi può modificarlo sceglie chi ha accesso.",
   "botAccess.yours.other": "Chi può modificare {bot} sceglie chi ha accesso.",
   "botAccess.viewOnly": "Puoi vedere {bot}, ma non chattare con lui.",
-  "botAccess.viewOnlyRoom": "Puoi solo vedere {bot}, quindi puoi leggere questa stanza ma non scriverci."
+  "botAccess.viewOnlyRoom": "Puoi solo vedere {bot}, quindi puoi leggere questa stanza ma non scriverci.",
+  "botAccess.ask": "Chiedi a {name} di poter chattare",
+  "botAccess.askAdmins": "Chiedi a un amministratore di poter chattare",
+  "botAccess.asked": "Chiesto a {name}",
+  "botAccess.theAdmins": "gli amministratori",
+  "botAccess.request.question": "{name} chiede di chattare con {bot}. Consenti gli permette di chattare e iniziare le proprie conversazioni.",
+  "botAccess.request.allow": "Consenti",
+  "botAccess.request.notNow": "Non ora",
+  "settings.section.botAccess": "Accesso ai bot",
+  "botAccess.overview.intro": "Chi in {team} può vedere, chattare con e modificare ogni bot. Le modifiche valgono subito.",
+  "botAccess.overview.noBots": "Non ci sono ancora bot del team.",
+  "botAccess.overview.noPeople": "Nel team ci sono ancora solo gli amministratori.",
+  "botAccess.overview.bot": "Bot",
+  "botAccess.overview.setForEveryone": "Imposta per tutti: {bot}",
+  "botAccess.overview.cell": "Cosa può fare {name} con {bot}",
+  "botAccess.overview.toastEveryone": "{bot}: tutti in {team} · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

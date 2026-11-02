@@ -34,6 +34,8 @@ export interface RailPlace {
   ended?: true;
   /** Its owner may take this Cloud off their list (it ended, or was never paid for): its menu offers Remove from list. */
   removable?: true;
+  /** A server connected by hand: Remove from list forgets it on this computer (this app signs out of it there). */
+  forget?: true;
   /** A server of the person's own, theirs alone by its own word, that this computer's bots may move to: its menu offers
    * Make … my home. */
   makeHome?: true;

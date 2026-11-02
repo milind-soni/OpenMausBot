@@ -312,3 +312,62 @@ describe("bots set up before levels", () => {
     expect((await botOf("dan", board.id))).toMatchObject({ yourAccess: "chat" });
   });
 });
+
+describe("asking to chat", () => {
+  type Row = { id: string; kind: string; tab: string; text: string; card?: { requestId?: string; accessRequest?: { botId: string; email: string }; answered?: string; answeredText?: string } };
+  const inbox = async (who: string) => (await as(who, "GET", "/api/inbox")).body as { threadId: string; rows: Row[] };
+  const asks = async (who: string, botId: string) => (await inbox(who)).rows.filter((row) => row.card?.accessRequest?.botId === botId);
+  const answer = async (who: string, row: Row, message: string) => {
+    const { threadId } = await inbox(who);
+    return as(who, "POST", `/api/threads/${threadId}/respond`, { requestId: row.card!.requestId, behavior: "answer", message });
+  };
+
+  it("puts one Allow / Not now card in the owner's inbox; Not now changes nothing, Allow lets them chat at once and tells them", async () => {
+    const made = await as("ada", "POST", "/api/bots", { name: "Ledger", reportsTo: DAN.email });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const ledger = made.body.bot as Bot;
+    expect((await share("ada", ledger.id, { everyone: "none", people: { [BOB.email]: "view" } })).status).toBe(200);
+    expect((await as("cara", "POST", `/api/bots/${ledger.id}/access-request`)).status, "someone who can't see it").toBe(404);
+    expect((await as("dan", "POST", `/api/bots/${ledger.id}/access-request`)).status, "its owner edits it already").toBe(409);
+
+    const asked = await as("bob", "POST", `/api/bots/${ledger.id}/access-request`);
+    expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+    expect(asked.body.asked).toEqual([{ email: DAN.email, name: "Dan" }]);
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).body.asked, "asking again sends nothing new").toEqual([{ email: DAN.email, name: "Dan" }]);
+    const [card] = await asks("dan", ledger.id);
+    expect(await asks("dan", ledger.id)).toHaveLength(1);
+    expect(card).toMatchObject({ kind: "ask", tab: "needs-you", card: { accessRequest: { botId: ledger.id, email: BOB.email } } });
+    expect(await asks("ada", ledger.id), "the owner decides, not every admin").toEqual([]);
+    const danInbox = (await inbox("dan")).threadId;
+    expect((await as("bob", "POST", `/api/threads/${danInbox}/respond`, { requestId: card!.card!.requestId, behavior: "answer", message: "Allow" })).status, "the asker can't answer it").toBe(404);
+
+    expect((await answer("dan", card!, "Not now")).status).toBe(200);
+    expect((await botOf("bob", ledger.id))).toMatchObject({ yourAccess: "view" });
+    expect((await asks("dan", ledger.id))[0]).toMatchObject({ tab: "done", card: { answeredText: "Not now" } });
+
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).status, "a new ask after Not now").toBe(201);
+    const again = (await asks("dan", ledger.id)).find((row) => !row.card?.answered)!;
+    const allowed = await answer("dan", again, "Allow");
+    expect(allowed.status, JSON.stringify(allowed.body)).toBe(200);
+    expect(allowed.body).toMatchObject({ outcome: "allowed" });
+    expect((await botOf("bob", ledger.id))).toMatchObject({ yourAccess: "chat" });
+    expect((await botOf("dan", ledger.id))?.access?.people).toEqual({ [BOB.email]: "chat" });
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/tasks`, { title: "Now mine" })).status).toBe(201);
+    expect((await inbox("bob")).rows.some((row) => row.kind === "notice" && row.text === "Dan let you chat with Ledger.")).toBe(true);
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).status).toBe(409);
+  });
+
+  it("lets only someone who can edit the bot allow it", async () => {
+    const made = await as("ada", "POST", "/api/bots", { name: "Atlas", reportsTo: CARA.email });
+    const atlas = made.body.bot as Bot;
+    expect((await share("ada", atlas.id, { everyone: "none", people: { [EVE.email]: "view" } })).status).toBe(200);
+    expect((await as("eve", "POST", `/api/bots/${atlas.id}/access-request`)).status).toBe(201);
+    const [card] = await asks("cara", atlas.id);
+    // Cara stops owning it before she answers: her Allow no longer lets anyone in.
+    expect((await as("ada", "PUT", `/api/bots/${atlas.id}/reports-to`, { email: null })).status).toBe(200);
+    expect((await as("ada", "PUT", `/api/bots/${atlas.id}/access`, { everyone: "none", people: { [EVE.email]: "view" } })).status).toBe(200);
+    const refused = await answer("cara", card!, "Allow");
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect((await botOf("eve", atlas.id))).toMatchObject({ yourAccess: "view" });
+  });
+});
