@@ -385,12 +385,13 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   bot frame, withdraws a bot that stops being shown (`bot.deleted`, and their stream ends to start fresh) and sends one
   that becomes shown whole.
 - **The app.** The bot's Share button (the bot panel in Simple, the settings header in Advanced) opens the Share
-  dialog on a team; the conversation's copy and download sit at its foot. Someone who can only view a bot sees "You
+  dialog on a team; the conversation's copy and download sit under the ⋯ of its header. Someone who can only view a bot sees "You
   can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens its main chat
   rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
-- **Bot access** (Settings, for a team's admins): every team bot down the side (each person's own MausBot stays out),
-  each User across, and what everyone in the team gets; each cell is that person's level (the owner's says Owner), and
-  the Everyone column sets it for everyone. The same sharing as the Share dialog, applied at once with Undo.
+- **Bot access** (its own Settings page, for a team's admins): one row per team bot (each person's own MausBot stays
+  out) with its owner, what everyone gets and the faces of those with their own access; a row opens that bot's Share
+  dialog. By person lists each User, and opening one shows their bots with the same level menus and Remove. The same
+  sharing as the Share dialog, applied at once with Undo.
 - **Asking to chat.** Beside "You can view Payroll" sits "Ask Ada to chat" (Ada owns it; "Ask an admin to chat" when
   nobody on the team does). `POST /api/bots/<id>/access-request` (anyone who can view the bot; someone who can chat
   already gets 409) puts an Allow / Not now card in the owner's inbox, or each admin's when the owner is gone
