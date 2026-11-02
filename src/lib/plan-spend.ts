@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { activeLocale, t } from "./i18n";
 
 export interface PlanSpend {
   usedMinor: number;
@@ -10,7 +10,7 @@ export interface PlanSpend {
 function money(minor: number, currency: string, exponent: number): string {
   const amount = minor / 10 ** exponent;
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: exponent, maximumFractionDigits: exponent }).format(amount);
+    return new Intl.NumberFormat(activeLocale(), { style: "currency", currency, minimumFractionDigits: exponent, maximumFractionDigits: exponent }).format(amount);
   } catch {
     return `${amount.toFixed(Math.min(exponent, 100))} ${currency}`;
   }
