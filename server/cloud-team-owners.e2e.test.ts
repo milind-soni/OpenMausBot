@@ -2,7 +2,7 @@
 // Claude CLI asking real question and approval cards through the permission socket, and each person's Needs you,
 // notifications, Chief of Staff and inbox. It proves the routing and the audience rule, not a model's judgement.
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";

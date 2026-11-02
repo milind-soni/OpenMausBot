@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, departmentOwner, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, departmentOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import type { NeedsYouItem } from "../../shared/today";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
