@@ -16,6 +16,9 @@ import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
+import { startChatGptTokenBridge } from "./chatgpt-plan-token-bridge.ts";
+import { chatgptPlanCodexArgs, managedCodexArgs, decodeManagedCodex, createDynamicPlanSupport } from "./codex-provider-config.ts";
+export { chatgptPlanCodexArgs, managedCodexArgs } from "./codex-provider-config.ts";
 import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tomlInlineTable, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
@@ -83,51 +86,6 @@ function decodeConfig(raw: unknown): CodexConfig {
     ...(o.authMode === "chatgpt-plan" ? { authMode: "chatgpt-plan" as const } : {}),
     ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
   };
-}
-
-/** The token-sharing Responses bridge carries no hosted tool_search (Codex 0.159.0 sends none), so
- * a plan turn's MCP tools load up front. */
-export function chatgptPlanCodexArgs(): string[] {
-  return [
-    "-c", 'model_provider="openai_chatgpt_plan"',
-    "-c", 'model_providers.openai_chatgpt_plan.name="ChatGPT plan"',
-    "-c", 'model_providers.openai_chatgpt_plan.base_url="https://api.openai.com/v1"',
-    "-c", 'model_providers.openai_chatgpt_plan.env_key="OPENMAUSBOT_CHATGPT_TOKEN"',
-    "-c", 'model_providers.openai_chatgpt_plan.wire_api="responses"',
-    "-c", "model_providers.openai_chatgpt_plan.requires_openai_auth=false",
-    "-c", "model_providers.openai_chatgpt_plan.supports_websockets=false",
-    "-c", 'cli_auth_credentials_store="ephemeral"',
-    "-c", "features.tool_search=false",
-    "-c", "shell_environment_policy.ignore_default_excludes=false",
-    // OPENMAUSBOT_CHATGPT_TOKEN is excluded via extendShellExclusions: a `-c exclude` here would replace the lower layers' list.
-  ];
-}
-
-function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
-  const value = raw as { url?: unknown; models?: unknown };
-  if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
-    throw new Error("Invalid Company Codex configuration.");
-  }
-  const url = new URL(value.url);
-  // Plain HTTP leaks the Company API key; allow it only on loopback.
-  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
-  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) throw new Error("Invalid Company Codex endpoint.");
-  return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
-}
-
-export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): string[] {
-  // Credential stays in the instance environment, never argv or config.toml.
-  // https://learn.chatgpt.com/docs/config-file/config-reference
-  return [
-    "-c", 'model_provider="openmaus_company"',
-    "-c", 'model_providers.openmaus_company.name="Company"',
-    "-c", `model_providers.openmaus_company.base_url=${JSON.stringify(config.url)}`,
-    "-c", 'model_providers.openmaus_company.env_key="OPENMAUSBOT_COMPANY_API_KEY"',
-    "-c", 'model_providers.openmaus_company.wire_api="responses"',
-    "-c", "model_providers.openmaus_company.requires_openai_auth=false",
-    "-c", 'cli_auth_credentials_store="ephemeral"',
-    "-c", "shell_environment_policy.ignore_default_excludes=false",
-  ];
 }
 
 const PRIVATE_ENV_FAMILIES = ["OMB_GATE_CONFIG_", "OMB_REMOTE_MCP_CONFIG_"];
@@ -489,11 +447,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       delete env.OPENAI_API_KEY;
       stripWorkspaceCredentialEnv(env);
       delete env.OPENMAUSBOT_CHATGPT_TOKEN;
+      delete env.OMB_CODEX_AUTH_SOCKET;
+      delete env.OMB_CODEX_AUTH_SECRET;
       if (plan) env.CODEX_HOME = join(planDirectory, "codex");
       return env;
     };
     const catalogEnv = childEnv();
     const planAuth = plan ? new ChatGptPlanAuthController({ directory: planDirectory }) : null;
+    const dynamicPlanSupport = plan && !planUnavailable ? createDynamicPlanSupport(config.cli, catalogEnv, execCli) : async () => false;
     let planGeneration = 0;
     let planSigningOut = false;
     let disposed = false;
@@ -648,6 +609,18 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
         return { turnId };
       }
+      const dynamicPlan = !!planAuth && await dynamicPlanSupport();
+      assertPlanCurrent();
+      const authBridge = dynamicPlan && planAuth ? await startChatGptTokenBridge(async () => {
+        assertPlanCurrent();
+        if (stopRequested) throw new Error("This task has ended.");
+        const token = await planAuth.accessToken();
+        assertPlanCurrent();
+        if (stopRequested) throw new Error("This task has ended.");
+        return token;
+      }) : null;
+      try { assertPlanCurrent(); } catch (error) { authBridge?.close(); throw error; }
+      if (active.has(threadId)) { authBridge?.close(); throw new Error("a turn is already running on this thread"); }
       const retryScale = Number(process.env.FAKE_CODEX_RETRY_SCALE ?? "1");
       let announced = false;
       const waitForLaunchSlot = async (attempt: number) => {
@@ -659,6 +632,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const slot = await codexLaunchSlot(stopSignal.signal);
         if (slot && !stopRequested) return slot;
         slot?.();
+        authBridge?.close();
         if (active.get(threadId) === waiting) {
           active.delete(threadId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
@@ -668,10 +642,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
         const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
-        if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
-        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+        if (planToken && !authBridge) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
+        if (authBridge) Object.assign(env, authBridge.env, { ELECTRON_RUN_AS_NODE: "1" });
+        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs(!!authBridge) : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
           // Native shell snapshots can restore variables the shell policy removed.
-          ...(turn.toolScope === undefined ? [] : ["-c", "features.shell_snapshot=false"]),
+          ...(turn.toolScope === undefined && !authBridge ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
           ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : [])];
         const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
@@ -897,6 +872,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const settle = async (ok: boolean, stopReason: string | null) => {
         if (state.settled) return;
         state.settled = true;
+        authBridge?.close();
         for (const finish of Array.from(asks.values())) finish("deny", "OpenMausBot: the turn ended", "system");
         for (const p of rpcPending.values()) p.reject(new Error("turn settled"));
         rpcPending.clear();
@@ -1442,9 +1418,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               : "Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.",
           );
         }
-        if (privateEnv.length) {
+        if (privateEnv.length || authBridge) {
           const snapshot = (effectiveConfig as { features?: { shell_snapshot?: unknown } } | null)?.features?.shell_snapshot;
-          if (provenPrivateEnv ? snapshot !== false : snapshot === true) {
+          if (provenPrivateEnv || authBridge ? snapshot !== false : snapshot === true) {
             throw new Error("Codex could not disable inherited shell snapshots. No prompt was sent.");
           }
         }
@@ -1454,7 +1430,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             throw new Error("Codex could not confirm its shell environment policy. No prompt was sent.");
           }
           selectionConfig.config = { ...selectionConfig.config,
-            ...extendShellExclusions((rawPolicy ?? {}) as Record<string, unknown>, [...(plan ? ["OPENMAUSBOT_CHATGPT_TOKEN"] : []), ...privateEnv]) };
+            ...extendShellExclusions((rawPolicy ?? {}) as Record<string, unknown>, [...(plan ? ["OPENMAUSBOT_CHATGPT_TOKEN"] : []), ...(authBridge ? ["OMB_CODEX_AUTH_SOCKET", "OMB_CODEX_AUTH_SECRET", "ELECTRON_RUN_AS_NODE"] : []), ...privateEnv]) };
         }
         if (turn.toolScope !== undefined) {
           const catalog = (effectiveConfig as { mcp_servers?: unknown } | null)?.mcp_servers;
@@ -1640,7 +1616,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
     };
 
-    void launchAttempt(0).catch(() => {});
+    void launchAttempt(0).catch((error: unknown) => {
+      authBridge?.close();
+      if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
+      emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });
+      emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "launch_error", cost: null });
+    });
     return { turnId };
   };
 
@@ -1653,8 +1634,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
     if (!("version" in probe)) return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
     const { version } = probe;
-    if (planAuth) return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
-      ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}) };
+    if (planAuth) {
+      const warning = planWarning ?? (!(await dynamicPlanSupport()) ? "Update Codex to 0.165.0 or newer to renew ChatGPT credentials during a running task." : undefined);
+      return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
+        ...(warning ? { warning: { title: "Check ChatGPT connection", message: warning } } : {}) };
+    }
     if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     const previousCliVersion = modelsCliVersion;
     modelsCliVersion = version;
@@ -1683,13 +1667,27 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     if (planUnavailable) throw new Error(planUnavailable);
     const env = childEnv();
     let providerArgs: string[] = [];
+    let authBridge: Awaited<ReturnType<typeof startChatGptTokenBridge>> | null = null;
     if (planAuth) {
       if (planSigningOut) throw new Error("This ChatGPT account is being disconnected.");
+      const generation = planGeneration;
       if (!models.options.length) await refreshModels();
-      env.OPENMAUSBOT_CHATGPT_TOKEN = await planAuth.accessToken();
-      if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
+      const token = await planAuth.accessToken();
+      if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
-      providerArgs = chatgptPlanCodexArgs();
+      const dynamic = await dynamicPlanSupport();
+      if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
+      if (dynamic) {
+        authBridge = await startChatGptTokenBridge(async () => {
+          if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
+          const value = await planAuth.accessToken();
+          if (planSigningOut || disposed || generation !== planGeneration) throw new Error("This ChatGPT account changed.");
+          return value;
+        });
+        if (planSigningOut || disposed || generation !== planGeneration) { authBridge.close(); throw new Error("This ChatGPT account changed."); }
+        Object.assign(env, authBridge.env, { ELECTRON_RUN_AS_NODE: "1" });
+      } else env.OPENMAUSBOT_CHATGPT_TOKEN = token;
+      providerArgs = chatgptPlanCodexArgs(!!authBridge);
     } else if (config.managed) {
       if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
@@ -1697,8 +1695,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       providerArgs = managedCodexArgs(config.managed);
     }
     const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback);
-    if (!route) throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");
-    return runCodexBackgroundRoute(route, (id) => {
+    if (!route) { authBridge?.close(); throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex."); }
+    try { return await runCodexBackgroundRoute(route, (id) => {
       const selection = planAuth || config.managed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
       return runCodexOneShot({
         spawn: spawnCli, kill: killCliTree, cli: config.cli, env, prompt, options,
@@ -1707,7 +1705,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
         describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
       });
-    }, options);
+    }, options); } finally { authBridge?.close(); }
   };
 
   return {
@@ -1726,6 +1724,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     startAuthentication: async () => {
       if (planUnavailable) throw new Error(planUnavailable);
       if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
+      // A new login may replace the account before its status is polled.
+      if (planAuth) planGeneration++;
       return (planAuth ?? authentication).start();
     },
     getAuthentication: async (flowId) => {
