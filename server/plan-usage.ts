@@ -61,6 +61,8 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
+  /** Signed in through OpenMausBot (ChatGPT plan), not a CLI login on disk, so it has no usage reading. */
+  noUsage?: true;
 }
 
 export interface PlanCredential {
@@ -144,6 +146,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       driver,
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
+      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
+      ...(config?.authMode === "chatgpt-plan" ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -247,7 +251,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
 
 export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDeps): Promise<PlanUsageReport> {
   const now = deps.now?.() ?? Date.now();
-  const providers = await Promise.all(accounts.map((account) => fetchProvider(account, deps)));
+  const providers = await Promise.all(accounts.filter((account) => !account.noUsage).map((account) => fetchProvider(account, deps)));
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
