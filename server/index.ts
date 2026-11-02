@@ -12269,7 +12269,8 @@ ROUTES.push(createThreadRoutes({
   botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, memberDefaultBot: CLOUD_TEAM ? (email) => ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name }) : undefined,
   uploads: uploadsFor(createUploadOwners(DATA_DIR), Boolean(CLOUD_TEAM)),
   attachmentInUse: (name) => threadsReferencing(name).length > 0 || store.bots.some((bot) => bot.avatarUrl === `/api/attachments/${name}`),
-  keptAttachments: CLOUD_TEAM ? undefined : () => routines && calendarCalls && keptAttachmentNames([...store.bots.map((bot) => bot.avatarUrl), cfg.profile?.avatarUrl], [workspaceBannerStore.current()?.name, ...[...routines.listRoutines(), ...routines.listRuns(), ...calendarCalls.list()].flatMap((owner) => owner.attachments?.map((file) => file.path) ?? [])]),
+  keptAttachments: CLOUD_TEAM ? undefined : () => routines && calendarCalls && keptAttachmentNames([...store.bots.map((bot) => bot.avatarUrl), cfg.profile?.avatarUrl], [workspaceBannerStore.current()?.name, ...[...routines.listRoutines(), ...routines.listRuns(), ...calendarCalls.list()].flatMap((owner) => owner.attachments?.map((file) => file.path) ?? []),
+    ...[...turnAttachmentsByTurn.values()].flat().map((file) => file.path)]),
 })); offerAttachmentClear(!CLOUD_TEAM);
 ROUTES.push(createBotCreateRoutes({
   store, cfg, presetStore, orgInstallStatuses,
