@@ -1,7 +1,7 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
 import { visibleInBox } from "./plan.ts";
@@ -9,6 +9,13 @@ import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
+
+vi.mock("./pin.ts", async (original) => ({
+  ...await original<typeof import("./pin.ts")>(),
+  pinnedBindArgs: (mount: { kind: string; source: string; target: string; optional?: boolean }) => [
+    mount.kind === "ro" ? (mount.optional ? "--ro-bind-try" : "--ro-bind") : (mount.optional ? "--bind-try" : "--bind"), mount.source, mount.target,
+  ],
+}));
 
 const bridge = { socat: "/usr/bin/socat", bridgeScript: "/app/dist-server/bot-box/box-bridge.js", node: "/usr/local/bin/node" };
 
@@ -107,7 +114,8 @@ describe("BotBox", () => {
     for (const box of boxes.splice(0)) await box.stop();
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
-  const temp = () => { const dir = mkdtempSync(join(tmpdir(), "omb-box-")); dirs.push(dir); return dir; };
+  // Real paths: the box binds physical sources, and macOS keeps its temp folder behind /var -> /private/var.
+  const temp = () => { const dir = realpathSync(mkdtempSync(join(tmpdir(), "omb-box-"))); dirs.push(dir); return dir; };
 
   it("off: wraps nothing and reports why", async () => {
     const box = new BotBox();
@@ -182,15 +190,17 @@ describe("the box a bot's Chrome runs in", () => {
     await box.start({ dataDir, home, port: 8799, denyEnv: new Set(), env: {}, log: () => {}, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
     const uploads = join(dataDir, "browser-uploads");
     const browser = box.browserBox(9, [uploads])!;
+    // The plan names physical paths, and macOS links its temp folder through /private.
+    const realData = realpathSync(dataDir), realUploads = join(realData, "browser-uploads");
     expect(browser.bwrap).toBe("/usr/bin/bwrap");
     const bind = (target: string) => browser.options.some((arg, i) => arg === "--bind" && browser.options[i + 2] === target);
     expect(bind(home), "HOME is not the browser's").toBe(false);
-    expect(browser.options.join(" ")).not.toContain(`--tmpfs ${dataDir}`);
+    expect(browser.options.join(" ")).toContain(`--tmpfs ${realData}`);
     expect(browser.options.join(" "), "the engines are the turns' only").not.toContain(join(dataDir, "tools"));
     expect(browser.options).not.toContain("--unshare-net");
     expect(browser.options).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid", "--die-with-parent"]));
-    expect(browser.options.join(" ")).toContain(`${uploads} ${uploads}`);
-    expect(browser.options.slice(browser.options.indexOf(uploads) - 1)[0]).toMatch(/^--ro-bind/u);
+    expect(browser.options.join(" ")).toContain(`${realUploads} ${realUploads}`);
+    expect(browser.options.slice(browser.options.indexOf(realUploads) - 1)[0]).toMatch(/^--ro-bind/u);
     if (browser.seccomp) expect(browser.options.join(" ")).toContain("--seccomp 9");
   });
 });
@@ -205,7 +215,7 @@ describe("spawnCli goes through the box", () => {
 
   it.skipIf(process.platform === "win32")("a bot spawn runs under the box's command; other spawns and box: false do not", async () => {
     const { botBox } = await import("./box.ts");
-    const dir = mkdtempSync(join(tmpdir(), "omb-spawn-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "omb-spawn-")));
     dirs.push(dir);
     // A stand-in for bwrap: records its argv, then runs what follows `--`.
     const fakeBwrap = join(dir, "fake-bwrap.sh"), record = join(dir, "argv.txt");

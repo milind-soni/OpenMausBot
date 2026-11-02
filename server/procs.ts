@@ -9,11 +9,12 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { closeSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
+import { closeMountFds } from "./bot-box/pin.ts";
 import { engineMemory } from "./engine-memory.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
@@ -201,7 +202,7 @@ export function spawnCli(
   try {
     child = owner === "bot" || botWork ? spawnBotWork(start) : start();
   } finally {
-    for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
+    closeMountFds(boxed?.extraFds ?? []);
   }
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);

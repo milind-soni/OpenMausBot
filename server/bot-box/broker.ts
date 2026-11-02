@@ -52,8 +52,8 @@ export interface CredentialBroker {
   mintForProcess(input: { botId?: string | null; threadId?: string | null; grants: Record<string, BrokerGrant>; ttlMs?: number }): BrokerToken;
   /** A token bound to a conversation: it slides on each turn of that conversation and ends with revokeThread or at TTL. */
   mintForThread(input: { botId?: string | null; threadId: string; grants: Record<string, BrokerGrant>; ttlMs?: number }): BrokerToken;
-  /** Extends every thread-bound token of the conversation (a turn started). */
-  touchThread(threadId: string): void;
+  /** Extends only the current, unexpired thread-bound token of the conversation. */
+  touchThread(threadId: string, token: string): void;
   revoke(token: string): void;
   revokeThread(threadId: string): void;
   /** Why a token is refused for `grant`, or the grant. */
@@ -148,9 +148,10 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
         socketPath: options.socketPath,
         mintForProcess: (input) => { const minted = mint("process", input); stats.tokens = tokens.size; return minted; },
         mintForThread: (input) => { const minted = mint("thread", input); stats.tokens = tokens.size; return minted; },
-        touchThread(threadId) {
+        touchThread(threadId, token) {
           const at = now();
-          for (const stored of tokens.values()) if (stored.bound === "thread" && stored.threadId === threadId) stored.expiresAt = Math.max(stored.expiresAt, at + BROKER_THREAD_TTL_MS);
+          const stored = tokens.get(hashToken(token).toString("hex"));
+          if (stored && stored.bound === "thread" && stored.threadId === threadId && stored.expiresAt > at) stored.expiresAt = Math.max(stored.expiresAt, at + BROKER_THREAD_TTL_MS);
         },
         revoke(token) { tokens.delete(hashToken(token).toString("hex")); stats.tokens = tokens.size; },
         revokeThread(threadId) {

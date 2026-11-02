@@ -1,5 +1,4 @@
-// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it. Pure, so
-// tests can check the list itself (and that removing a line opens exactly the hole it guards).
+// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it.
 //
 // What the box sees:
 //   - the image's code read-only: /usr (with /bin, /lib, /lib64 and /sbin as the links a merged-/usr Debian has), /etc,
@@ -16,7 +15,10 @@
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
 //     routes of this server). Nothing else on the server's loopback is reachable.
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+import { closeMountFds, pinnedBindArgs } from "./pin.ts";
 
 export type BoxNet = "isolated" | "shared";
 
@@ -66,8 +68,8 @@ export interface BoxRequest {
   net?: BoxNet;
   /** The bot whose own folder (workspaces/<bot>) is put back; derived from a task-workspace cwd when absent. */
   botId?: string;
-  /** A Team Cloud audience's engine home, bound read-write in place of the server's HOME, none of which the box then has. */
-  home?: string;
+  /** A Team Cloud audience's engine home instead of the server's HOME; false gives a browser neither home. */
+  home?: string | false;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
 }
@@ -86,15 +88,31 @@ export const IN_BOX_SOCKET_DIR = "/run/omb";
 export const BOX_HOSTNAME = "omb-box";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+export function physicalPath(path: string): string {
+  const full = resolve(path);
+  try { return realpathSync(full); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const parent = dirname(full);
+    return parent === full ? full : join(physicalPath(parent), basename(full));
+  }
+}
+
+function optionalSource(path: string): string | null {
+  try { return physicalPath(path); } catch (error) {
+    if (["EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
+    throw error;
+  }
+}
+
 /** `child` is `parent` or below it. */
 export function under(child: string, parent: string): boolean {
   const rel = relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 /** The bot and conversation of a task workspace (`<data>/task-workspaces/<bot>/<thread>`), or null. */
 export function taskWorkspaceIds(cwd: string, dataDir: string): { botId: string; threadId: string } | null {
-  const rel = relative(join(dataDir, "task-workspaces"), cwd).split(sep);
+  const rel = relative(join(physicalPath(dataDir), "task-workspaces"), physicalPath(cwd)).split(sep);
   if (rel.length < 2 || !ID.test(rel[0]!) || !ID.test(rel[1]!) || rel[0] === ".." ) return null;
   return { botId: rel[0]!, threadId: rel[1]! };
 }
@@ -117,7 +135,7 @@ const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
 
 export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
-  const dataDir = resolve(setup.dataDir), home = resolve(setup.home);
+  const dataDir = physicalPath(setup.dataDir), home = resolve(setup.home);
   const net: BoxNet = mutate.has("share-net") ? "shared" : request.net ?? "isolated";
   const mounts: Mount[] = [
     { kind: "ro", source: "/usr", target: "/usr" },
@@ -129,10 +147,13 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     { kind: "ro", source: "/opt", target: "/opt", optional: true },
     { kind: "ro", source: "/var/lib", target: "/var/lib", optional: true },
   ];
+  if (process.platform !== "win32") {
+    for (const mount of mounts) if ("source" in mount) mount.source = physicalPath(mount.source);
+  }
   for (const root of setup.codeRoots) {
     const code = resolve(root);
     if (["/usr", "/etc", "/opt", "/var/lib"].some((base) => under(code, base))) continue;
-    mounts.push({ kind: "ro", source: code, target: code });
+    mounts.push({ kind: "ro", source: physicalPath(code), target: code });
   }
   mounts.push({ kind: "proc", target: "/proc" }, { kind: "dev", target: "/dev" });
   if (mutate.has("tmp-shared")) mounts.push({ kind: "bind", source: "/tmp", target: "/tmp" });
@@ -140,29 +161,55 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   mounts.push({ kind: "tmpfs", target: "/var/tmp" }, { kind: "tmpfs", target: "/run" });
 
   const writable: string[] = [];
-  const rw = (path: string) => {
-    mounts.push({ kind: "bind", source: path, target: path });
+  const rw = (path: string, source = physicalPath(path)) => {
+    mounts.push({ kind: "bind", source, target: path });
     if (!writable.includes(path)) writable.push(path);
   };
-  // HOME first; the data folder is replaced by an empty one right after, so the lines below put back only what is named.
-  // An engine home lives in the data folder, so it goes back after that.
   const ownHome = request.home ? resolve(request.home) : null;
-  if (!ownHome) rw(home);
-  const dataInsideHome = under(dataDir, home);
+  const allowedHome = request.home === false ? null : ownHome ?? home;
+  const realHome = allowedHome ? physicalPath(allowedHome) : null;
+  if (realHome === dataDir) throw new Error("The bot box requires HOME to differ from the data directory.");
+  const homeInsideData = realHome !== null && under(realHome, dataDir);
+  if (allowedHome && !homeInsideData) rw(allowedHome, realHome!);
   if (!mutate.has("bind-data")) {
-    if (dataInsideHome) mounts.push({ kind: "tmpfs", target: dataDir });
+    const dataViews = new Set([dataDir]);
+    for (const mount of mounts) {
+      if (mount.kind !== "bind" && mount.kind !== "ro") continue;
+      const source = mount.source;
+      if (under(dataDir, source)) dataViews.add(join(mount.target, relative(source, dataDir)));
+    }
+    for (const target of dataViews) mounts.push({ kind: "tmpfs", target });
   } else {
     rw(dataDir);
   }
-  if (ownHome) rw(ownHome);
-  const dataHidden = !mutate.has("bind-data");
-  /** A path is already readable and writable through an earlier line (and not hidden by the data folder's tmpfs). */
-  const covered = (path: string) => (ownHome !== null && under(path, ownHome)) || (writable.some((root) => under(path, root)) && !(dataHidden && under(path, dataDir)));
+  if (allowedHome && homeInsideData) rw(allowedHome, realHome!);
+  const covered = (path: string) => mountAccess(mounts, path) === "rw";
 
-  const cwd = request.cwd ? resolve(request.cwd) : null;
+  const approvedPath = (path: string) => {
+    const full = resolve(path);
+    if (under(full, resolve(setup.dataDir))) return join(dataDir, relative(resolve(setup.dataDir), full));
+    if (allowedHome && realHome && under(full, allowedHome)) return join(realHome, relative(allowedHome, full));
+    return full;
+  };
+  const safeWritable = (path: string) => {
+    const source = physicalPath(path);
+    if (under(dataDir, source)) return null;
+    if (!under(source, dataDir) || under(source, approvedPath(path))) return source;
+    return mounts.some((mount) => {
+      if (mount.kind !== "bind") return false;
+      const allowed = mount.source;
+      return under(allowed, dataDir) && under(source, allowed);
+    }) ? source : null;
+  };
+
+  const cwd = request.cwd ? physicalPath(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
   const botId = request.botId ?? ids?.botId ?? null;
-  if (cwd && !covered(cwd)) rw(cwd);
+  if (cwd && !covered(cwd)) {
+    const source = safeWritable(request.cwd!);
+    if (!source) throw new Error("The bot box refuses a working folder that aliases protected bot box data.");
+    rw(cwd, source);
+  }
   if (botId && ID.test(botId)) {
     const own = join(dataDir, "workspaces", botId);
     if (!covered(own)) rw(own);
@@ -174,27 +221,56 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
     // A temp folder stays the box's own private one; anything else the engine writes is put back.
-    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
+    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) {
+      const source = safeWritable(value);
+      if (source) rw(resolve(value), source);
+    }
   }
-  for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
+  for (const path of request.rw ?? []) if (!covered(resolve(path))) {
+    const source = safeWritable(path);
+    if (source) rw(resolve(path), source);
+  }
   if (ownHome) {
     for (const file of request.shared ?? []) {
-      if (under(resolve(file.target), ownHome)) mounts.push({ kind: "bind", source: resolve(file.source), target: resolve(file.target), optional: true });
+      if (!under(resolve(file.target), ownHome)) continue;
+      const source = optionalSource(file.source);
+      if (source) mounts.push({ kind: "bind", source, target: resolve(file.target), optional: true });
     }
   }
   // After every read-write line, so none of them can make an engine another conversation also runs writable.
   for (const root of setup.engineRoots) {
     const engines = resolve(root);
-    mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
+    const source = optionalSource(engines);
+    if (source) mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source, target: engines, optional: true });
   }
-  const readOnly = new Set<string>();
-  for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
-    const full = resolve(path);
-    // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
-    if (covered(full) || readOnly.has(full)) continue;
-    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
-    readOnly.add(full);
-    mounts.push({ kind: "ro", source: full, target: full, optional: true });
+  const explicitReadOnly = new Set(request.ro ?? []);
+  const ownSoul = botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [];
+  for (const path of [...explicitReadOnly, ...argvPaths(request.args), ...ownSoul]) {
+    const source = optionalSource(path);
+    if (!source) continue;
+    if (under(dataDir, source) || (under(source, dataDir) && !under(source, approvedPath(path)))) continue;
+    const targets = new Set([source, resolve(path)]);
+    if (explicitReadOnly.has(path)) for (const mount of mounts) {
+      if (mount.kind === "bind" && under(source, mount.source)) targets.add(join(mount.target, relative(mount.source, source)));
+    }
+    for (const target of targets) {
+      if (mountAccess(mounts, target) !== "none") {
+        if (!explicitReadOnly.has(path)) continue;
+        const covering = mounts.findLast((mount) => mount.kind !== "symlink" && under(target, mount.target));
+        if (covering && "source" in covering) {
+          if (physicalPath(join(covering.source, relative(covering.target, target))) !== source) {
+            throw new Error("The bot box refuses a read-only alias that names a different source.");
+          }
+          const physicalTarget = under(source, covering.source) ? join(covering.target, relative(covering.source, source)) : source;
+          if (physicalTarget !== target) {
+            targets.add(physicalTarget);
+            continue;
+          }
+        }
+      }
+      mounts.push({ kind: "ro", source, target, optional: true });
+      for (let i = writable.length - 1; i >= 0; i--) if (under(writable[i]!, target)) writable.splice(i, 1);
+    }
   }
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
@@ -203,19 +279,36 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   if (net === "isolated") {
     options.push("--unshare-net");
     mounts.push({ kind: "dir", target: IN_BOX_SOCKET_DIR });
-    for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: bridge.socket, target: join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
+    for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: physicalPath(bridge.socket), target: join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
   }
   if (cwd) options.push("--chdir", cwd);
   return { mounts, options, net, writable, botId };
 }
 
-/** bubblewrap's argv for the plan (the command follows `--`). */
-export function bwrapArgs(plan: BoxPlan): string[] {
+/** Pin each validated source and hand `fds` to the child after stdio; close them after spawn. */
+export function bwrapArgs(plan: BoxPlan, fds: number[]): string[] {
+  const firstFd = fds.length;
+  const sources = new Map<string, number>();
+  try {
+    return mountArgs(plan, (mount) => pinnedBindArgs(mount, fds, sources));
+  } catch (error) {
+    closeMountFds(fds.splice(firstFd));
+    throw error;
+  }
+}
+
+/** Describe the plan without opening sources. These options are not safe to launch. */
+export function describeBoxArgs(plan: BoxPlan): string[] {
+  return mountArgs(plan, (mount) => [mount.kind === "ro"
+    ? (mount.optional ? "--ro-bind-try" : "--ro-bind")
+    : (mount.optional ? "--bind-try" : "--bind"), mount.source, mount.target]);
+}
+
+function mountArgs(plan: BoxPlan, bind: (mount: Extract<Mount, { source: string }>) => string[]): string[] {
   const args: string[] = [];
   for (const mount of plan.mounts) {
     switch (mount.kind) {
-      case "ro": args.push(mount.optional ? "--ro-bind-try" : "--ro-bind", mount.source, mount.target); break;
-      case "bind": args.push(mount.optional ? "--bind-try" : "--bind", mount.source, mount.target); break;
+      case "ro": case "bind": args.push(...bind(mount)); break;
       case "tmpfs": args.push("--tmpfs", mount.target); break;
       case "proc": args.push("--proc", mount.target); break;
       case "dev": args.push("--dev", mount.target); break;
@@ -223,15 +316,18 @@ export function bwrapArgs(plan: BoxPlan): string[] {
       case "symlink": args.push("--symlink", mount.target, mount.link); break;
     }
   }
-  args.push(...plan.options);
-  return args;
+  return [...args, ...plan.options];
 }
 
 /** Whether `path` is visible inside the box, by the plan alone: the last line that covers it decides. */
 export function visibleInBox(plan: BoxPlan, path: string): "rw" | "ro" | "none" {
+  return mountAccess(plan.mounts, path);
+}
+
+function mountAccess(mounts: readonly Mount[], path: string): "rw" | "ro" | "none" {
   const full = resolve(path);
   let verdict: "rw" | "ro" | "none" = "none";
-  for (const mount of plan.mounts) {
+  for (const mount of mounts) {
     if (mount.kind === "symlink") continue;
     if (!under(full, mount.target)) continue;
     if (mount.kind === "bind") verdict = "rw";

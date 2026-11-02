@@ -48,6 +48,8 @@ describe("sharedProjectFolder", () => {
   it("never shares the data folder, a private workspace in it, a missing folder or no folder", () => {
     expect(sharedProjectFolder(data, data)).toBeUndefined();
     expect(sharedProjectFolder(join(data, "task-workspaces", "bot", "thread"), data)).toBeUndefined();
+    mkdirSync(join(data, "..x"));
+    expect(sharedProjectFolder(join(data, "..x"), data)).toBeUndefined();
     expect(sharedProjectFolder(join(dir, "gone"), data)).toBeUndefined();
     expect(sharedProjectFolder(null, data)).toBeUndefined();
     expect(sharedProjectFolder(undefined, data)).toBeUndefined();

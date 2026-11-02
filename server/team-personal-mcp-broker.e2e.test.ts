@@ -69,7 +69,7 @@ describe.skipIf(process.platform === "win32")("a member's own MCP server and the
       socket.on("error", () => upstream.destroy());
     });
     await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
-    broker = { port: (bridge.address() as AddressInfo).port, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
+    broker = { port: (bridge.address() as AddressInfo).port, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revoke: credentials.revoke, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
     expect(BOX_BROKER_PORT).toBe(18080);
 
     // Ada's own turn in her private chat, as the server mounts it for a boxed engine.

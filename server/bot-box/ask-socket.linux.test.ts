@@ -12,6 +12,7 @@ import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { defaultCodeRoots } from "./box.ts";
 import { detectBox } from "./detect.ts";
 import { bwrapArgs, planBox } from "./plan.ts";
+import { closeMountFds } from "./pin.ts";
 
 const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });
 const available = detection.box === "bwrap" && detection.tools !== null;
@@ -23,13 +24,17 @@ const env = { PATH: "/usr/bin:/bin", HOME: home };
 
 /** One ask_user call through the helper in a box that puts back `rw`; the helper's MCP result. */
 function askInBox(socket: string, rw: string[]): Promise<{ content: Array<{ text: string }>; isError?: boolean }> {
-  const plan = planBox({ dataDir, home, codeRoots: defaultCodeRoots(), engineRoots: [], bridges: [] }, { command: process.execPath, args: [], cwd, env, rw });
-  const child = spawn(detection.tools!.bwrap, [...bwrapArgs(plan), "--", process.execPath, SPAWNED_PROXIES.permission, socket], { env, stdio: ["pipe", "pipe", "inherit"] });
+  const plan = planBox({ dataDir, home, codeRoots: defaultCodeRoots(), engineRoots: [], bridges: [] }, { command: process.execPath, args: [], cwd, env, rw, ro: defaultCodeRoots() });
+  const fds: number[] = [];
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(detection.tools!.bwrap, [...bwrapArgs(plan, fds), "--", process.execPath, SPAWNED_PROXIES.permission, socket], { env, stdio: ["pipe", "pipe", "inherit", ...fds] });
+  } finally { closeMountFds(fds); }
   return new Promise((resolve, reject) => {
     let out = "";
     const timer = setTimeout(() => { child.kill(); reject(new Error(`no answer from the helper in the box: ${out}`)); }, 20_000);
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    child.stdout!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => {
       out += chunk;
       const reply = out.split("\n").map((line) => { try { return JSON.parse(line); } catch { return null; } }).find((msg) => msg?.id === 1);
       if (!reply) return;
@@ -37,13 +42,14 @@ function askInBox(socket: string, rw: string[]): Promise<{ content: Array<{ text
       child.kill();
       resolve(reply.result);
     });
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "ask_user", arguments: { question: "Which account?" } } }) + "\n");
+    child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "ask_user", arguments: { question: "Which account?" } } }) + "\n");
   });
 }
 
 describe.skipIf(!available)(`a bot's question from inside a real box (${available ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {
   it("reaches the broker through the socket put back in the box, and says what to do instead without it", async () => {
     mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(dataDir, "workspaces", "bot-a"), { recursive: true });
     const asked: string[] = [];
     const broker = await createPermissionBroker({
       socketPaths: [join(dataDir, "perm-test.sock")],

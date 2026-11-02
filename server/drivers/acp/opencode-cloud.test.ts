@@ -19,6 +19,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(HERE, "..", "..", "testing", "fake-acp-cli.ts");
 const FAKE_MCP = join(HERE, "..", "..", "testing", "fake-mcp-server.ts");
 
+vi.mock("../../bot-box/pin.ts", async (original) => ({
+  ...await original<typeof import("../../bot-box/pin.ts")>(),
+  pinnedBindArgs: () => [],
+}));
+
 const fixtures: Array<{ scratch: string; instance: ProviderInstance; recorder: EventRecorder }> = [];
 afterEach(async () => {
   vi.restoreAllMocks();
