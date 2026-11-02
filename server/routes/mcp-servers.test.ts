@@ -14,6 +14,7 @@ import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
 import { listMcpServers } from "../mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { createMcpConfig } from "../host/mcp-config.ts";
 import { forgetToolBudgets, noteToolBudget } from "../tool-budgets.ts";
 import { createMcpServerRoutes } from "./mcp-servers.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -31,22 +32,31 @@ async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]
   const cfg: Pick<AppConfig, "mcpServers"> = { mcpServers: {} };
   const changes: string[] = [];
   let busy = false;
-  const route = createMcpServerRoutes({
-    cfg,
-    bot: (id) => options.bots?.find((bot) => bot.id === id) ?? null,
-    sessions: { isLive: () => true },
-    mcpOAuth: new McpOAuthManager({ file: join(DATA_DIR, "mcp-route-oauth.json") }),
-    teamConnections: { personMcp: () => ["private"], people: {} as TeamConnectionsHost["people"] },
+  const mcpOAuth = new McpOAuthManager({ file: join(DATA_DIR, "mcp-route-oauth.json") });
+  const teamConnections = { personMcp: () => ["private"], people: {} as TeamConnectionsHost["people"] };
+  const mcpServerResponse = () => ({ servers: listMcpServers(cfg.mcpServers).map((server) => ({ ...server, ...options.listed?.[server.name] })) });
+  const sessions = { isLive: () => true };
+  const config = createMcpConfig({
+    cfg, sessions, mcpOAuth, teamConnections,
     cloudHome: null,
     fallbackPublicUrl: null,
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
-    mcpServerResponse: () => ({ servers: listMcpServers(cfg.mcpServers).map((server) => ({ ...server, ...options.listed?.[server.name] })) }),
+    mcpServerResponse,
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
     connectionsChanged: (change) => { changes.push(change); },
+    changed: () => {},
     ...(options.botsPath ? { botsPath: options.botsPath } : {}),
     ...(options.probeAs ? { probeAs: options.probeAs } : {}),
+  });
+  const route = createMcpServerRoutes({
+    cfg, bot: (id) => options.bots?.find((bot) => bot.id === id) ?? null, sessions, mcpOAuth, teamConnections,
+    cloudHome: null,
+    fallbackPublicUrl: null,
+    mcpServerResponse,
+    savedCustomDomain: () => null,
+    config,
   });
   const active = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");

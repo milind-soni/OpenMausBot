@@ -206,7 +206,7 @@ it("only the team's own servers: an admin still adds one, a bot can't, and a tur
   expect(engineSaw().mcpConfig?.mcpServers?.orders).toBeDefined();
   const thread = await team.as(owner, "POST", `/api/bots/${botId}/tasks`, { title: "adds a server" });
   const capability = await team.capability(botId, thread.body.task.threadId);
-  const byBot = await fetch(`${team.base}/api/internal/mcp-servers`, { method: "POST", headers: { authorization: `Bearer ${capability}`, "content-type": "application/json" }, body: JSON.stringify({ name: "mine", type: "http", url: gateway.url }) });
+  const byBot = await fetch(`${team.base}/api/internal/mcp-servers`, { method: "POST", headers: { authorization: `Bearer ${capability}`, "content-type": "application/json" }, body: JSON.stringify({ action: "add", name: "mine", type: "http", url: gateway.url }) });
   expect([byBot.status, (await byBot.json() as { error?: string }).error]).toEqual([403, "Acme uses only the MCP servers its admins add. Ask a team admin."]);
   await rules(null);
 }, hostTimeout(90_000));

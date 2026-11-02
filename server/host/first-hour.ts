@@ -395,7 +395,7 @@ export function createFirstHour(deps: FirstHourDeps) {
     const apps = LOOK_APPS.filter((app) => connected?.[app] === true);
     if (!apps.length || !state || state.firstAppAt) return;
     const place = home();
-    const askedByTask = place ? deps.store.messagesFor(place.threadId).some((message) => message.connector && message.connector.resumeKey !== state?.offerKey && apps.includes(message.connector.slug as LookApp)) : false;
+    const askedByTask = place ? deps.store.messagesFor(place.threadId).some((message) => message.connector && message.connector.source !== "mcp" && message.connector.resumeKey !== state?.offerKey && apps.includes(message.connector.slug as LookApp)) : false;
     appsIn(apps, !askedByTask);
   }
 

@@ -20,6 +20,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
+import { listenLiveFrames } from "@/lib/live-events";
 import { api, useStore } from "@/state/store";
 
 import { McpAppsSwitch } from "./McpAppsSwitch";
@@ -161,6 +162,24 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     void load();
     return () => { mounted.current = false; loadGeneration.current += 1; };
   }, [load, refreshKey]);
+
+  const busyNow = useRef<string | null>(null);
+  busyNow.current = busy;
+  useEffect(() => {
+    const refresh = () => {
+      if (busyNow.current !== null) return;
+      const generation = loadGeneration.current;
+      void api("/api/mcp/servers").then((result) => {
+        if (!mounted.current || busyNow.current !== null || generation !== loadGeneration.current) return;
+        setServers(result.servers ?? []);
+        updateMcpServers(result.servers ?? []);
+      }).catch(() => {});
+    };
+    return listenLiveFrames({
+      onFrame: (frame) => { if (frame.kind === "mcp.changed") refresh(); },
+      onMissedFrames: refresh,
+    });
+  }, []);
 
   const closeEditor = () => { setEditing(null); setFixingKeys(false); };
   const openEditor = (name: string | "new", keys = false) => {

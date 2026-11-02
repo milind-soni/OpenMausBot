@@ -80,7 +80,7 @@ const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"):
 export function savedSecretText(label: string, saved: SavedSecret | null): string {
   if (!saved) return `The person saved ${label}, but it expired or OpenMausBot restarted before you used it. Ask again with request_credential if you still need it.`;
   if ("ref" in saved) {
-    return `The person saved ${label} as ${saved.ref}. Put it in an add_mcp_server env, header or oauth.clientSecret value, alone or inside text such as "Bearer ${saved.ref}": OpenMausBot swaps in the value. It works once, only for you in this conversation, for an hour, and you never see the value.`;
+    return `The person saved ${label} as ${saved.ref}. Put it in an mcp_server env, header or oauth.clientSecret value, alone or inside text such as "Bearer ${saved.ref}": OpenMausBot swaps in the value. It works once, only for you in this conversation, for an hour, and you never see the value.`;
   }
   return `The person saved ${label} to the file ${saved.file}. Read it only inside a command, such as TOKEN="$(cat '${saved.file}')"; never print, echo, log or copy it anywhere else. It is deleted after 24 hours.`;
 }
@@ -107,7 +107,7 @@ function customRequest(body: Record<string, unknown>): { label: string; reason: 
   if (!label) return { error: "request_credential needs credential_id for a key OpenMausBot keeps, or label for any other secret." };
   if (!reason) return { error: "request_credential needs reason: one short line on what the secret is for and where the person finds it." };
   if (!SECRET_DELIVERIES.includes(body.delivery as SecretDelivery)) {
-    return { error: "request_credential needs delivery: ref for OpenMausBot's own tools such as add_mcp_server, or file for your own commands." };
+    return { error: "request_credential needs delivery: ref for OpenMausBot's own tools such as mcp_server, or file for your own commands." };
   }
   return { label, reason, placeholder: text(body.placeholder, CUSTOM_SECRET_LABEL_MAX), delivery: body.delivery as SecretDelivery };
 }
@@ -195,11 +195,11 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return { status: 200, body: currentSecretState(botId, threadId, message.id) ?? { provided: true, resumed: false } };
   }
 
-  /** add_mcp_server's fields with every secretRef swapped for its value: only in env, headers and oauth.clientSecret. */
+  /** mcp_server's fields with every secretRef swapped for its value: only in env, headers and oauth.clientSecret. */
   function redeemMcpServer<T>(body: T, botId: string, threadId: string) {
     return vault.redeem(body, { botId, threadId }, (path) =>
       (path.length === 2 && (path[0] === "env" || path[0] === "headers")) || (path.length === 2 && path[0] === "oauth" && path[1] === "clientSecret"),
-    "add_mcp_server's env, headers and oauth.clientSecret");
+    "mcp_server's env, headers and oauth.clientSecret");
   }
 
   function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKey: string): string {

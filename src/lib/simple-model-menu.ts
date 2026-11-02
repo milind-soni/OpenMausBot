@@ -19,6 +19,7 @@ export interface MenuModelRow {
   label: string;
   route?: string;
   current: boolean;
+  blocked: boolean;
 }
 
 export type MenuGroupBody =
@@ -51,6 +52,8 @@ export interface MenuCurrent {
   meta?: string;
   warning: boolean;
   pending: boolean;
+  /** The organization turned the selected model off: nothing to set up, only another model to pick. */
+  blocked?: boolean;
 }
 
 export interface SimpleMenu {
@@ -126,6 +129,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const row = { instance: active, label: modelName(active, selection.model), title: active ? `${active.displayName} · ${name}` : name, warning: false, pending: false };
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
+  if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
   if (active.policy) return { ...row, meta: t("policy.managedBy", { organization: active.policy.organizationName }), warning: true };
   if (needsCli(active)) return { ...row, meta: t("model.setupRequired"), warning: true };
   if (needsSignIn(active) && !isCustomOnly(active) && !option?.custom) return { ...row, meta: t("model.signInRequired"), warning: true };
@@ -162,6 +166,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
       label: shortModelLabel(option.label, provider),
       ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
       current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
+      blocked: option.orgBlocked === true,
     });
     const mixed = own.length > 0 && own.length < all.length;
     if (query) {

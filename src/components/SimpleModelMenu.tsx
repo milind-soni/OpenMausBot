@@ -51,13 +51,16 @@ function RowLines({ label, children }: { label: ReactNode; children?: ReactNode 
 
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
+  const reason = row.blocked ? t("model.orgBlocked") : undefined;
   return (
     <button
       type="button"
       data-menu-row
+      data-org-blocked={row.blocked || undefined}
+      disabled={row.blocked}
       aria-pressed={row.current}
-      aria-label={[option.label, option.provider].filter(Boolean).join(" · ")}
-      title={[option.label, option.provider, modelBlurb(option)].filter(Boolean).join(" · ")}
+      aria-label={[option.label, option.provider, reason].filter(Boolean).join(" · ")}
+      title={[option.label, option.provider, reason ?? modelBlurb(option)].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={SIMPLE_MENU_ROW}
@@ -65,6 +68,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       <Gutter />
       <RowLines label={row.label}>
         {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
+        {reason && <span data-simple-org-blocked className={SIMPLE_MENU_META}>{reason}</span>}
       </RowLines>
       {row.current && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
     </button>
@@ -228,7 +232,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
               aria-pressed="true"
               title={current.title}
               onClick={(event) => {
-                const setUp = current.warning && current.instance && !current.instance.policy ? current.instance : undefined;
+                const setUp = current.warning && current.instance && !current.instance.policy && !current.blocked ? current.instance : undefined;
                 if (setUp) props.onSetUp(setUp, event.detail === 0);
                 else props.onPickCurrent();
               }}
