@@ -251,6 +251,13 @@ describe("a bot's conversations in its panel", () => {
     expect(host.textContent).toContain("Nothing matches “deck”");
   });
 
+  it("keeps the open conversation listed when it is archived and the only one left", () => {
+    const two = [task("who", "Who am I?", 2, { archivedAt: now - 1000 }), task("deck", "Summarise the board deck", 4, { archivedAt: now - 2000 })];
+    render(research({ tasks: two }));
+    expect(listed()).toEqual(["who"]);
+    expect(host.querySelector("[data-conversations-archived]")!.textContent).toBe("Archived (1)");
+  });
+
   it("lists archived conversations under Archived (N), where they can be unarchived", () => {
     render(research({ tasks: tasks.map((task) => task.threadId === "launch" || task.threadId === "deck" ? { ...task, archivedAt: now - 1000 } : task) }));
     expect(listed()).toEqual(["hiring", "who", "pricing"]);

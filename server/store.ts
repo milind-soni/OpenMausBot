@@ -1051,10 +1051,7 @@ export class Store {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
       if (patch.pinned) task.pinned = true;
       else if (patch.pinned === false) delete task.pinned;
-      if (patch.turnTimeoutMinutes === null) delete task.turnTimeoutMinutes;
-      else if (patch.turnTimeoutMinutes !== undefined) task.turnTimeoutMinutes = patch.turnTimeoutMinutes;
-      if (patch.archivedAt === null) delete task.archivedAt;
-      else if (patch.archivedAt !== undefined) task.archivedAt = patch.archivedAt;
+      for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
     });
     this.emit({ type: "group", groupId });
     return task;

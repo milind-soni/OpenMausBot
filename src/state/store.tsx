@@ -2883,29 +2883,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "renameGroupTask":
-          api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ title: action.title }),
-          }).catch(showSavedState({ groupId: action.groupId }));
-          break;
         case "pinGroupTask":
-          api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ pinned: action.pinned, title: action.title }),
-          }).catch(showSavedState({ groupId: action.groupId }));
-          break;
         case "archiveGroupTask":
-          api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ archivedAt: action.archivedAt }),
-          }).catch(showSavedState({ groupId: action.groupId }));
+        case "setConversationTurnLimit": {
+          const body = action.type === "renameGroupTask" ? { title: action.title }
+            : action.type === "pinGroupTask" ? { pinned: action.pinned, title: action.title }
+            : action.type === "archiveGroupTask" ? { archivedAt: action.archivedAt } : { turnTimeoutMinutes: action.minutes };
+          const path = action.type === "setConversationTurnLimit" && action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`;
+          api(path, { method: "PATCH", body: JSON.stringify(body) }).catch(showSavedState({ groupId: action.groupId }));
           break;
-        case "setConversationTurnLimit":
-          api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ turnTimeoutMinutes: action.minutes }),
-          }).catch(showSavedState({ groupId: action.groupId }));
-          break;
+        }
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })
             .then(roomAnswer(action.groupId, false))
