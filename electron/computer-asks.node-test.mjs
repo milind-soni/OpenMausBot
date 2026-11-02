@@ -2,7 +2,7 @@
 // needs it: the app's own prompt comes up once per ask, and Turn on, there or on the card, does here what it takes.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -59,13 +59,13 @@ function session() {
   return { state: () => state, isOwnCloud: origin => state.machine?.origin === origin || state.clouds.some(cloud => ownCloud(cloud) && cloud.origin === origin) };
 }
 
-async function computer(t, { homes, places = [myCloud], screen = () => READY, prompt = async () => null, startScreen = async () => READY, confirmTerminal = async () => false }) {
+async function computer(t, { homes, places = [myCloud], screen = () => READY, prompt = async () => null, startScreen = async () => READY, confirmTerminal = async () => false, file }) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-computer-asks-")));
   t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const account = session();
   const target = createLendingTarget({ account: () => account, environments: () => places });
   const sharing = createComputerSharing({
-    file: path.join(dir, "profile", "computer-sharing.json"), environments: () => places, enabled: async () => false, home: path.join(dir, "home"),
+    file: file ?? path.join(dir, "profile", "computer-sharing.json"), environments: () => places, enabled: async () => false, home: path.join(dir, "home"),
     fetch: (url, init) => homes[new URL(url).origin].fetch(url, init),
     cloud: target.cloud, myCloud: target.environment, ownClouds: target.places, screen, prompt, startScreen, confirmTerminal,
     hostControl: async () => ({ renew: async () => {}, release: async () => {} }),
@@ -94,6 +94,23 @@ test("paused, this computer still tells its own Cloud so, and the card's Turn on
   assert.equal(homes[HOME].connects[1].computer, true);
   await delay(150);
   assert.equal(prompts.length, 1, "one prompt per ask");
+});
+
+test("a Resume save that fails answers the ask failed at once, still paused", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-computer-asks-blocked-")));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
+  const file = path.join(dir, "computer-sharing.json");
+  const sharing = await computer(t, { homes, file });
+  sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "lending to start");
+  sharing.pause();
+  await until(() => homes[HOME].polls.some(poll => poll.paused === true), "My Cloud to hear that this computer is paused");
+  await mkdir(`${file}.tmp`);
+  homes[HOME].say([ask({ state: "turning-on", turnOn: 1 })]);
+  await until(() => homes[HOME].polls.some(poll => poll.answers.some(answer => answer.outcome === "failed")), "the failure to reach the Cloud at once");
+  assert.deepEqual(homes[HOME].polls.find(poll => poll.answers.length).answers, [{ id: "ask-1", outcome: "failed", reason: "paused" }]);
+  assert.equal(sharing.paused(), true);
 });
 
 test("screen control isn't running: Turn on starts it, and a start that fails tells the Cloud why", async t => {
