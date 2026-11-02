@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
 
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { releaseHighlights } from "@/lib/release-highlights";
@@ -8,6 +8,7 @@ import { RELEASES_URL, appVersion, openExternalLink } from "@/lib/app-links";
 import { productName } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 
 export function updateIndicatorShown(state: UpdaterState | null): boolean {
   return Boolean(state && ["downloading", "preparing", "downloaded", "installing"].includes(state.status));
@@ -25,19 +26,40 @@ export function updateIndicatorLabel(state: UpdaterState): string {
     : t("update.button.downloading", { percent: Math.round(state.percent) });
 }
 
-export function UpdateIndicator({ className }: { className?: string }) {
+/** `bar`: in the window frame's top bar, a download arrow in that bar's button look (the class given). In a framed
+ * window that arrow is the only one, so the sidebar's round buttons draw nothing. */
+export function UpdateIndicator({ className, bar }: { className?: string; bar?: string }) {
   const state = useUpdaterState();
+  const framed = windowFramed(useDesktopCapabilities().capabilities);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const settled = !state || state.status === "idle" || state.status === "checking" || state.status === "handed-off";
   useEffect(() => {
     if (settled) setOpen(false);
   }, [settled]);
+  if (framed && bar === undefined) return null;
   if (!state || !updateIndicatorShown(state)) {
     return open && !settled ? <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} /> : null;
   }
   const label = updateIndicatorLabel(state);
   const ready = state.status === "downloaded";
+  if (bar !== undefined) return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-update-indicator={state.status}
+        aria-label={label}
+        aria-haspopup="dialog"
+        title={label}
+        onClick={() => setOpen(true)}
+        className={cn(bar, "text-accent hover:text-accent", className)}
+      >
+        <ArrowDownToLine size={15} strokeWidth={2} aria-hidden className={cn(!ready && "animate-pulse motion-reduce:animate-none")} />
+      </button>
+      {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
+    </>
+  );
   return (
     <div
       className={cn("flex size-[46px] shrink-0 items-center justify-center", className)}

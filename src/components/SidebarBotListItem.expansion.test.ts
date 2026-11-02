@@ -48,7 +48,7 @@ const bot: Bot = {
 function render(candidate = bot, query = "") {
   fixture.cursor = 0; fixture.effects = []; fixture.capturing = true;
   let row;
-  try { row = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type(botRowProps({ ...initialState, ...fixture.state }, vi.fn(), candidate, { query, density: "comfortable", quiet: false, onMenu: vi.fn() })); }
+  try { row = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type(botRowProps({ ...initialState, ...fixture.state }, vi.fn(), candidate, { query, density: "comfortable", onMenu: vi.fn() })); }
   finally { fixture.capturing = false; }
   return renderToStaticMarkup(row);
 }

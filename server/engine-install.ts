@@ -54,6 +54,7 @@ export function applyStandaloneSpawnEnv(release: StandaloneRelease, env: Record<
 }
 
 export function npmPackageOf(install: EngineInstall | undefined): string | null {
+  if (install?.npmPackage) return install.npmPackage;
   const line = install?.command?.linux ?? install?.command?.darwin ?? install?.command?.win32;
   const match = line ? /^npm install -g ((?:@[\w.-]+\/)?[\w.-]+)$/.exec(line.trim()) : null;
   return match ? match[1]! : null;

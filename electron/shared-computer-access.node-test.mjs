@@ -103,7 +103,55 @@ test("selected folders are read-only; writes require an explicit grant and fresh
   assert.equal(await readFile(path.join(dir, "note.txt"), "utf8"), "ok");
   await run({ action: "write_file", path: "new.txt", content: "new" });
   assert.equal(await readFile(path.join(dir, "new.txt"), "utf8"), "new");
-  await assert.rejects(run({ action: "delete_file", path: "note.txt" }), /Unsupported/);
+});
+
+test("a passage is edited, lines appended and a file deleted only where writes are lent, guarded like an overwrite", async t => {
+  const { dir, folder, run } = await fixture(t);
+  await writeFile(path.join(dir, "rules.md"), "keep\nWhere: Mac\nkeep\n");
+  await writeFile(path.join(dir, "old.tmp"), "");
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "Where: Mac", new_text: "Where: Cloud" }), /read-only/);
+  await assert.rejects(run({ action: "append_file", path: "log.txt", content: "x" }), /read-only/);
+  await assert.rejects(run({ action: "delete_file", path: "old.tmp", expected_sha256: "0".repeat(64) }), /read-only/);
+  folder.write = true;
+
+  const edited = payload(await run({ action: "edit_file", path: "rules.md", old_text: "Where: Mac", new_text: "Where: Cloud" }));
+  assert.equal(await readFile(path.join(dir, "rules.md"), "utf8"), "keep\nWhere: Cloud\nkeep\n");
+  assert.equal(edited.sha256, payload(await run({ action: "read_file", path: "rules.md" })).sha256);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "keep", new_text: "x" }), /more than once/);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "absent", new_text: "x" }), /not found/);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "Where", new_text: "x", expected_sha256: "0".repeat(64) }), /File changed/);
+  await assert.rejects(run({ action: "edit_file", path: "missing.md", old_text: "a", new_text: "b" }), /ENOENT/);
+  await writeFile(path.join(dir, "picture.bin"), Buffer.from([0xff, 0xfe, 0x00]));
+  await assert.rejects(run({ action: "edit_file", path: "picture.bin", old_text: "a", new_text: "b" }), /text files only/);
+
+  await run({ action: "append_file", path: "data/log.jsonl", content: "one\n" });
+  const appended = payload(await run({ action: "append_file", path: "data/log.jsonl", content: "two\n" }));
+  assert.equal(await readFile(path.join(dir, "data", "log.jsonl"), "utf8"), "one\ntwo\n");
+  assert.equal(appended.sha256, payload(await run({ action: "read_file", path: "data/log.jsonl" })).sha256);
+  await assert.rejects(run({ action: "append_file", path: "data/log.jsonl", content: "x".repeat(256 * 1024 + 1) }), /256 KiB/);
+  await assert.rejects(run({ action: "edit_file", path: "rules.md", old_text: "Where", new_text: "x".repeat(256 * 1024 + 1) }), /256 KiB/);
+
+  await assert.rejects(run({ action: "delete_file", path: "old.tmp" }), /expected_sha256/);
+  await assert.rejects(run({ action: "delete_file", path: "old.tmp", expected_sha256: "0".repeat(64) }), /File changed since it was read/);
+  await mkdir(path.join(dir, "folder"));
+  const seenFolder = { action: "delete_file", path: "folder", expected_sha256: "0".repeat(64) };
+  await assert.rejects(run(seenFolder));
+  assert.ok((await stat(path.join(dir, "folder"))).isDirectory(), "a folder is never deleted");
+  const seen = payload(await run({ action: "read_file", path: "old.tmp" }));
+  assert.deepEqual(payload(await run({ action: "delete_file", path: "old.tmp", expected_sha256: seen.sha256 })), { deleted: true });
+  await assert.rejects(stat(path.join(dir, "old.tmp")), { code: "ENOENT" });
+
+  if (process.platform !== "win32") {
+    const outside = path.join(await realpath(await mkdtemp(path.join(tmpdir(), "omb-outside-"))), "secret.txt");
+    t.after(() => rm(path.dirname(outside), { recursive: true, force: true }));
+    await writeFile(outside, "kept");
+    await symlink(outside, path.join(dir, "pointer.txt"));
+    await assert.rejects(run({ action: "delete_file", path: "pointer.txt", expected_sha256: "0".repeat(64) }));
+    await assert.rejects(run({ action: "append_file", path: "pointer.txt", content: "x" }));
+    assert.equal(await readFile(outside, "utf8"), "kept", "a link is never followed out of the folder");
+  }
+  await assert.rejects(run({ action: "append_file", path: ".git/config", content: "x" }), /inside \.git/);
+  await assert.rejects(run({ action: "delete_file", path: ".git/HEAD", expected_sha256: "0".repeat(64) }), /inside \.git/);
 });
 
 test("a new file's missing folders are made inside the shared folder, never in a read-only, protected or linked one", async t => {
@@ -251,13 +299,38 @@ test("a command runs up to the time the call asks for, and a time out of range i
   const run = operation => executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", ...operation }, new AbortController().signal);
   const command = process.platform === "win32" ? "Start-Sleep -Seconds 5" : "sleep 5";
   const started = Date.now();
-  await assert.rejects(run({ command, timeout_seconds: 1 }), /timed out after 1 second/);
+  assert.match(payload(await run({ command, timeout_seconds: 1 })).stopped, /1-second limit/);
   assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
-  for (const timeout_seconds of [0, 241, 1.5, "60"]) {
-    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 240/);
+  for (const timeout_seconds of [0, 901, 1.5, "60"]) {
+    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 900/);
   }
   assert.equal(payload(await run({ command: "echo fixture-default" })).exitCode, 0);
+  assert.equal(payload(await run({ command: "echo fixture-long", timeout_seconds: 900 })).exitCode, 0);
   void dir;
+});
+
+test("a command stopped at its time limit returns what it printed and says it was stopped", async t => {
+  const { grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const command = process.platform === "win32"
+    ? "Write-Output first-line; [Console]::Error.WriteLine('second-line'); Start-Sleep -Seconds 20"
+    : "echo first-line; echo second-line >&2; sleep 20";
+  const stopped = await executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", command, timeout_seconds: 2 }, new AbortController().signal);
+  assert.equal(stopped.isError, true);
+  const result = payload(stopped);
+  assert.equal(result.exitCode, null);
+  assert.match(result.output, /first-line[\s\S]*second-line/);
+  assert.match(result.stopped, /Stopped at its 2-second limit/);
+});
+
+test("a command stopped for too much output returns the output it kept", { skip: process.platform === "win32" }, async t => {
+  const { grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const stopped = await executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", command: "echo first-line; head -c 300000 /dev/zero | tr '\\0' a; sleep 20", timeout_seconds: 30 }, new AbortController().signal);
+  assert.equal(stopped.isError, true);
+  const result = payload(stopped);
+  assert.match(result.output, /^first-line/);
+  assert.match(result.stopped, /Stopped after 256 KB of output/);
 });
 
 /** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */
@@ -387,6 +460,25 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   assert.equal(next.content[0].text, "2"); assert.equal(next.content[1].type, "image");
   cua.close();
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
+});
+
+test("the lent screen's driver gets Windows' own folders, and never this app's keys", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-env-fixture.mjs");
+  await writeFile(script, `import readline from 'node:readline';
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const env={ LOCALAPPDATA: process.env.LOCALAPPDATA ?? null, APPDATA: process.env.APPDATA ?? null, OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null };
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'list_apps'}]}:{content:[{type:'text',text:JSON.stringify(env)}]};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  for (const [key, value] of [["LOCALAPPDATA", "C:\\Users\\you\\AppData\\Local"], ["APPDATA", "C:\\Users\\you\\AppData\\Roaming"], ["OPENAI_API_KEY", "sk-not-for-the-driver"]]) {
+    const before = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; });
+  }
+  const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] });
+  t.after(() => cua.close());
+  const seen = JSON.parse((await cua.call({ action: "computer_call", tool_name: "list_apps" }, new AbortController().signal)).content[0].text);
+  assert.deepEqual(seen, { LOCALAPPDATA: "C:\\Users\\you\\AppData\\Local", APPDATA: "C:\\Users\\you\\AppData\\Roaming", OPENAI_API_KEY: null });
 });
 
 test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {

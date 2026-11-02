@@ -40,6 +40,9 @@ describe("the move's words on the account", () => {
     expect(accountMoveWords("sending")).toBe("Moving to My Cloud…");
     expect(accountMoveWords("done")).toBeNull();
     expect(accountMoveWords(null)).toBeNull();
+    expect(accountMoveWords("failed", "Garage server")).toBe("Garage server move needs you");
+    expect(accountMoveWords("sending", "Garage server")).toBe("Moving to Garage server…");
+    expect(markup(AccountMoveStatus({ kind: "sending", place: "Garage server" }))).toContain("Moving to Garage server…");
   });
 
   it("is a button that opens the account menu by the account, and plain words inside a trigger", () => {
@@ -108,6 +111,12 @@ describe("the move's row in the account menu", () => {
     expect(onOpen).not.toHaveBeenCalled();
     // Main gave no reason: the tooltip still says what happened.
     expect(rows(line({ phase: "finishing", failing: { error: null } }))[0]!.title).toBe("Your bots couldn't move to My Cloud yet.");
+  });
+
+  it("to a server of the person's own: the same rows, named for it", () => {
+    const place = "Garage server";
+    expect(rows(line({ phase: "copy", failing: { error: null }, place }))[0]).toMatchObject({ label: "Try Garage server move again", title: "Your bots couldn't move to Garage server yet." });
+    expect(rows(line({ phase: "copy", place }))[0]).toMatchObject({ label: "Moving to Garage server…", title: "Moving your bots to Garage server…" });
   });
 
   it("failing: the same one row, disabled with a spinner, while Try again runs, and main's words when it did not answer", () => {

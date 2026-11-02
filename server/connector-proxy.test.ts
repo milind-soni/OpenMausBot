@@ -550,4 +550,44 @@ describe("connected-app tools by name", () => {
     expect(calls.at(-1).params).toEqual({ name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { user_id: "me", query: "from:ada", max_results: 10, include_payload: false, verbose: false } }] } });
     expect(reply).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: JSON.stringify({ messages: [{ messageId: "m1", subject: "Q3" }] }) }] } });
   });
+  it("fits a call's arguments to the schema its tool listed, and on a refusal says how to call again and which apps are connected", async () => {
+    const SEARCH = { type: "object", properties: { queries: { type: "array", items: { type: "object", properties: { use_case: { type: "string" } }, required: ["use_case"] } } }, required: ["queries"] };
+    const WORKBENCH = { type: "object", properties: { code_to_execute: { type: "string" } }, required: ["code_to_execute"] };
+    const calls: any[] = [];
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        calls.push(rpc);
+        response.writeHead(200, { "content-type": "application/json" });
+        if (rpc.method === "tools/list") {
+          return response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [
+            { name: "COMPOSIO_SEARCH_TOOLS", inputSchema: SEARCH }, { name: "COMPOSIO_REMOTE_WORKBENCH", inputSchema: WORKBENCH }] } }));
+        }
+        if (rpc.params.name === "COMPOSIO_SEARCH_TOOLS") {
+          return response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results: [{ tool_slug: "GEMINI_GENERATE_IMAGE" }] } }) }] } }));
+        }
+        // What Composio answers a call whose arguments do not fit, as a Team trial's bot got it.
+        const refusal = { successful: false, data: {}, error: 'Invalid request for COMPOSIO_REMOTE_WORKBENCH: Validation error: Required at "code_to_execute"', log_id: "log_1" };
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }], isError: true } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_SERVICE_SLUGS: JSON.stringify(["gemini", "gmail"]) });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })}\n`);
+    await nextJson(lines);
+
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "COMPOSIO_SEARCH_TOOLS", arguments: { job: "generate an image" } } })}\n`);
+    const searched = await nextJson(lines);
+    expect(calls.at(-1).params.arguments).toEqual({ queries: [{ use_case: "generate an image" }] });
+    expect(searched.result.content[0].text).toContain("GEMINI_GENERATE_IMAGE");
+    expect(searched.result.content[1].text).toBe('OpenMausBot note: COMPOSIO_SEARCH_TOOLS\'s arguments were read with job as queries, queries as [{"use_case": …}]. Send them in that shape next time.');
+
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "COMPOSIO_REMOTE_WORKBENCH", arguments: { script: "print(1)", note: "x" } } })}\n`);
+    const refused = await nextJson(lines);
+    expect(calls.at(-1).params.arguments).toEqual({ script: "print(1)", note: "x" });
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[1].text).toContain('Call it again with the arguments its schema names, for example {"code_to_execute":"…"} with your own values.');
+    expect(refused.result.content[1].text).toContain("it says nothing about which apps or tools exist, so do not tell the person a tool is missing. Connected apps you can use: gemini, gmail.");
+  });
 });

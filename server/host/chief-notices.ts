@@ -1,5 +1,6 @@
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
+import { memoryStopped } from "../engine-memory.ts";
 import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, type Escalation, type EscalationKind } from "../escalations.ts";
 import {
   AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
@@ -32,11 +33,18 @@ export interface ChiefNoticeDeps {
   threadQueued?(botId: string, threadId: string): boolean;
   /** Runs OpenMausBot's automatic retry after the failed turn's own handling is done; the host's next tick by default. */
   schedule?(run: () => void): void;
+  /** Starts this thread's request again where it stopped: a continuation of the request the harness recorded, never a line
+   * of the person's. Absent: a run stopped for memory with no Chief to retry it is only reported. */
+  continueRequest?(botId: string, threadId: string, text: string): Promise<unknown>;
+  /** Runs a retry after a run stopped for memory, MEMORY_RETRY_MS later by default, so the machine settles first. */
+  later?(run: () => void, ms: number): void;
   /** Security invariant: a read-and-draft run's prompt and reply carry mail and invite text, so its failures and
    * questions never reach a Chief as a notice. */
   quietThread?(botId: string, threadId: string): boolean;
   /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
   privateThread?(threadId: string): boolean;
+  /** The language a line about this conversation is written in for its person (server/server-lines.ts). */
+  threadLanguage?(threadId: string): string | undefined;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
    * is theirs alone), into a notices chat of that person's own. */
   routing?: {
@@ -47,11 +55,39 @@ export interface ChiefNoticeDeps {
   };
 }
 
+/** How long a run stopped for memory waits before it starts again; the memory gate then holds it until there is room. */
+export const MEMORY_RETRY_MS = 30_000;
+export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
+  + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
+
 export function createChiefNotices(deps: ChiefNoticeDeps) {
   const { store } = deps;
   const incidentLedger = new IncidentLedger();
   const escalationLedger = new EscalationLedger();
   const schedule = deps.schedule ?? ((run: () => void) => { setTimeout(run, 0).unref?.(); });
+  const later = deps.later ?? ((run: () => void, ms: number) => { setTimeout(run, ms).unref?.(); });
+  /** Each thread's last request a run stopped for memory was started again for: once a request. */
+  const roomRetries = new Map<string, string>();
+
+  /** A run stopped for memory that no Chief retries starts once more by itself; the person hears only if that one fails too,
+   * or can't start. Never a run whose thread someone wrote in since, or that is running or queued again. */
+  function retryForRoom(bot: BotRecord, threadId: string, report: (retry?: IncidentRetry) => void): boolean {
+    const continueRequest = deps.continueRequest;
+    if (!continueRequest) return false;
+    const asked = store.activePath(threadId).findLast((line) => line.role === "user")?.id ?? "";
+    if (roomRetries.get(threadId) === asked) { report({ retried: true }); return true; }
+    roomRetries.set(threadId, asked);
+    if (roomRetries.size > 500) roomRetries.delete(roomRetries.keys().next().value!);
+    const failedAt = Date.now();
+    later(() => {
+      if (!store.bot(bot.id) || !store.taskByThread(bot.id, threadId)) return;
+      if (store.activePath(threadId).some((line) => line.role === "user" && line.at > failedAt)) return;
+      if (deps.threadBusy(bot.id, threadId) || deps.threadQueued?.(bot.id, threadId)) return;
+      continueRequest(bot.id, threadId, MEMORY_RETRY_TEXT)
+        .catch((error) => report({ notRetried: `its retry could not start (${error instanceof Error ? error.message : String(error)})` }));
+    }, MEMORY_RETRY_MS);
+    return true;
+  }
 
   /** Why a teammate's stopped thread cannot be retried now, in words a Chief can act on, or null. */
   function retryRefusal(botId: string, threadId: string): string | null {
@@ -173,10 +209,12 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const chief = chiefForBot(store.bots, bot);
     const report = (retry?: IncidentRetry): void => void deliver({
       chief, title: INCIDENTS_THREAD_TITLE, bot, threadId,
-      chip: incidentChip(incident), text: incidentText(incident, count, retry),
+      chip: incidentChip(incident, deps.threadLanguage?.(threadId)), text: incidentText(incident, count, retry),
       alreadyNotified: input.notified === true || input.kind === "could-not-start" || input.kind === "routine-failed",
     });
-    if (!chief || group || !reachesChief(chief, bot, threadId)) return report();
+    const chiefRetries = Boolean(chief && !group && reachesChief(chief, bot, threadId));
+    if (input.kind === "failed" && !group && !chiefRetries && memoryStopped(input.detail) && retryForRoom(bot, threadId, report)) return;
+    if (!chief || !chiefRetries) return report();
     const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";
     if (answered.startsWith(AUTO_RETRY_LEAD)) return report({ retried: true });
     if (input.kind !== "failed" || answered.startsWith(RETRY_LEAD) || !count.mayRetry || !retriesTeammateThread(input.detail, input.facts)) return report();

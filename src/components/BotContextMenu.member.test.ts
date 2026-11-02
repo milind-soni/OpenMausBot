@@ -55,7 +55,7 @@ describe("a team bot's actions for a session without the admin scope", () => {
   it("keeps every action for an admin", () => {
     fixture.admin = true;
     const html = render(scout);
-    for (const offered of [">Archive</button>", ">Delete</button>", "Duplicate"]) expect(html).toContain(offered);
+    for (const offered of [">Archive</button>", ">Delete</button>", "Duplicate", "Move to department"]) expect(html).toContain(offered);
     expect(html).toContain("Choose Claude or an ACP model provider first");
   });
 });

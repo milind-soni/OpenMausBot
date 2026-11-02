@@ -142,6 +142,7 @@ describe("redactSecretsInText", () => {
       [`gh token ${"gh" + "p_"}${alpha}`, /ghp_/],
       [`fine-grained ${"github_" + "pat_"}11ABCDEFG0${alpha}`, /github_pat_/],
       [`slack ${"xox" + "b-"}${"123456789012"}-${"1234567890123"}-${alpha.slice(0, 24)}`, /xoxb-/],
+      [`slack app ${"xa" + "pp-"}1-A0123456789-${"1234567890123"}-${alpha.slice(0, 24)}`, /xapp-|A0123456789/],
       [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
       [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
       [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
@@ -149,6 +150,11 @@ describe("redactSecretsInText", () => {
       [`groq ${"gsk_"}${alpha}ABCD`, /gsk_/],
       [`meta ${"LLM|"}607358788850350|${alpha}`, /LLM\|6073/],
       [`huggingface ${"hf_"}${alpha}`, /hf_/],
+      [`gitlab ${"glp" + "at-"}${alpha.slice(0, 20)}`, /glpat-[a-z]/],
+      [`gitlab routable ${"glp" + "at-"}${alpha.slice(0, 27)}.01.0r03gxo7a`, /glpat-[a-z]|r03gxo7a/],
+      [`gitlab deploy ${"gld" + "t-"}${alpha.slice(0, 20)}`, /gldt-[a-z]/],
+      [`gitlab runner ${"glr" + "t-"}${alpha.slice(0, 20)}`, /glrt-[a-z]/],
+      [`gitlab registered runner ${"glr" + "tr-"}${alpha.slice(0, 20)}`, /glrtr-[a-z]/],
       [`stripe ${"sk_" + "live_"}${alpha}`, /sk_live_[a-z]/],
       [`stripe test ${"sk_" + "test_"}${alpha}`, /sk_test_[a-z]/],
       [`stripe restricted ${"rk_" + "live_"}${alpha}`, /rk_live_[a-z]/],
@@ -188,6 +194,18 @@ describe("redactSecretsInText", () => {
     expect(out).not.toContain("b3BlbnNzaC1r");
     expect(out).toMatch(/BEGIN OPENSSH PRIVATE KEY[\s\S]*«redacted \d+ chars»[\s\S]*END OPENSSH PRIVATE KEY/);
     expect(redactSecretsInText('curl -H "Authorization: Bearer abc.def-ghi_jkl123456789"')).toBe('curl -H "Authorization: Bearer «redacted 24 chars»"');
+  });
+
+  it("masks Basic credentials in an Authorization header", () => {
+    // dXNlcjpodW50ZXIy is base64 for user:hunter2.
+    expect(redactSecretsInText('curl -H "Authorization: Basic dXNlcjpodW50ZXIy" https://api.example.com')).toBe(
+      'curl -H "Authorization: Basic «redacted 16 chars»" https://api.example.com',
+    );
+    expect(redactSecretsInText("Proxy-Authorization: basic YWxhZGRpbjpvcGVuc2VzYW1l")).toBe("Proxy-Authorization: basic «redacted 24 chars»");
+    expect(redactSecretsInText('{"Authorization":"Basic YTpi"}')).toBe('{"Authorization":"Basic «redacted 4 chars»"}');
+    for (const s of ["Basic configuration is covered below", "Authorization: Basic YOUR_CREDENTIALS", "Authorization: Basic <base64>"]) {
+      expect(redactSecretsInText(s), s).toBe(s);
+    }
   });
 
   it("is byte-for-byte idempotent for PEM blocks", () => {
@@ -273,11 +291,11 @@ describe("holdsCredential", () => {
   it("knows a provider key or a private key block, never a name, a placeholder or code that reads one", () => {
     for (const text of [
       '{"apiKey": "sk-ant-api03-0123456789abcdefABCD"}', "GITHUB_TOKEN=ghp_0123456789abcdefghij0123", "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n",
-      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
+      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `git clone https://oauth2:${"glp" + "at-"}0123456789abcdefABCD@gitlab.example.com/x.git`, `runner token ${"glr" + "tr-"}0123456789abcdefABCD`, `SLACK_APP_TOKEN: ${"xa" + "pp-"}1-A0123456789-1234567890123-abcdef0123456789`, `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
     ]) expect(holdsCredential(text), text).toBe(true);
     for (const text of [
       "token = os.environ['GITHUB_TOKEN']", "API_KEY=your-key-here", "Authorization: Bearer YOUR_TOKEN_HERE", "Keep credentials out of the repo.",
-      "-----BEGIN PUBLIC KEY-----",
+      "-----BEGIN PUBLIC KEY-----", "GITLAB_TOKEN=glpat-your-token-here",
     ]) expect(holdsCredential(text), text).toBe(false);
   });
 });

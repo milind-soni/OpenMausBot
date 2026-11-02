@@ -212,7 +212,6 @@ type ThreadRowProps = {
   task: ThreadRowTask;
   ownerId: string;
   current: boolean;
-  compact?: boolean;
   folders?: BotProject[];
   activityLabel?: string;
   now?: number;
@@ -244,7 +243,7 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview }: ThreadRowProps) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
@@ -324,7 +323,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
         onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}
         onKeyDown={(event) => { if (opensRowMenuFromKey(event.key, event.shiftKey, selectMode)) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", panel && "rounded-[10px] py-2 pl-3 text-[14px]", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", panel && "rounded-[10px] py-2 pl-3 text-[14px]", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
         {selectMode && <span aria-hidden="true" title={tickable ? undefined : t("task.bulk.running")}
           className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border", checked ? "border-accent bg-accent text-white" : "border-ink-tertiary", !tickable && "opacity-50")}>
           {checked && <Check size={10} strokeWidth={3} />}

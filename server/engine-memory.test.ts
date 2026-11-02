@@ -3,10 +3,10 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
 import {
-  BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopText, memoryWaitText, processGroupBytes, readHostMemory, withEngineMemory,
-  type HostMemory,
+  BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
+  withEngineMemory, type HostMemory,
 } from "./engine-memory.ts";
-import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
+import { OOM_SCORE, protectSupervisor, spawnBotWork, spawnWithOomScore } from "./oom-score.ts";
 
 const MB = 1024 * 1024, GB = 1024 * MB;
 
@@ -54,13 +54,25 @@ describe("reading the host", () => {
     const writes: string[] = [];
     let own = "-800";
     const file = { read: () => `${own}\n`, write: (_path: string, data: string) => { writes.push(data); own = data; } };
-    const spawned = spawnWithOomScore(OOM_SCORE.engine, () => own, file);
+    const spawned = spawnWithOomScore(OOM_SCORE.bot, () => own, file);
     expect(process.platform === "linux" ? [spawned, writes, own] : [spawned, writes]).toEqual(process.platform === "linux" ? ["1000", ["1000", "-800"], "-800"] : ["-800", []]);
     writes.length = 0;
-    expect(() => spawnWithOomScore(OOM_SCORE.engine, () => { throw new Error("ENOENT"); }, file)).toThrow("ENOENT");
+    expect(() => spawnWithOomScore(OOM_SCORE.bot, () => { throw new Error("ENOENT"); }, file)).toThrow("ENOENT");
     if (process.platform === "linux") expect([writes, own]).toEqual([["1000", "-800"], "-800"]);
     // A score that can't be read or set: the process starts as before.
-    expect(spawnWithOomScore(OOM_SCORE.engine, () => "started", { read: () => { throw new Error("EACCES"); }, write: () => { throw new Error("no"); } })).toBe("started");
+    expect(spawnWithOomScore(OOM_SCORE.bot, () => "started", { read: () => { throw new Error("EACCES"); }, write: () => { throw new Error("no"); } })).toBe("started");
+    // A bot's browser, helper engine or tool starts where its engine does: first in line when memory runs out.
+    writes.length = 0;
+    expect(spawnBotWork(() => own, file)).toBe(process.platform === "linux" ? "1000" : "-800");
+  });
+
+  it("keeps the supervisor from ever being picked when memory runs out, where root can say so", () => {
+    let own = "0";
+    const file = { read: () => `${own}\n`, write: (_path: string, data: string) => { own = data; } };
+    expect([protectSupervisor(file), own]).toEqual(process.platform === "linux" ? [true, "-1000"] : [false, "0"]);
+    // Not root: the kernel refuses a lower score, and the supervisor starts as before.
+    expect(protectSupervisor({ read: () => "0\n", write: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); } })).toBe(false);
+    expect([OOM_SCORE.supervisor, OOM_SCORE.edge, OOM_SCORE.server, OOM_SCORE.bot]).toEqual([-1000, -900, -800, 1000]);
   });
 });
 
@@ -213,8 +225,10 @@ describe("running short", () => {
     h.memory.tick();
     await settle();
     expect(h.signals).toEqual(["SIGKILL -1004"]);
-    expect(h.memory.stopText("e")).toBe(memoryStopText(5));
-    expect(memoryStopText(5)).toBe("This Cloud ran out of memory while 5 tasks ran at once, so this one was stopped. It was not a problem with the AI provider. New tasks now wait until there is memory for them.");
+    expect(h.memory.stopText("e")).toBe(memoryStopText(false));
+    expect(memoryStopText(false)).toBe("Ran out of room, so I stopped this task to keep everything else running.");
+    expect(memoryStopText(true)).toBe("Ran out of room, so I closed the browser to keep everything else running.");
+    expect([memoryStopped(`${memoryStopText(true)} (opencodeGo exited null)`), memoryStopped(memoryStopText(false)), memoryStopped("the run ended without a result")]).toEqual([true, true, false]);
     // Within the cooldown, the next tick stops nothing more.
     h.memory.tick();
     await settle();
@@ -263,7 +277,7 @@ describe("running short", () => {
     h.memory.turnStarted("b"); h.spawn("b");
     h.oomKill();
     a.exit("SIGKILL");
-    expect(h.memory.stopText("a")).toBe(memoryStopText(2));
+    expect(h.memory.stopText("a")).toBe(memoryStopText(false));
     // A kill without the kernel's count moving (someone's kill -9) is not memory.
     const c = (h.memory.turnStarted("c"), h.spawn("c"));
     c.exit("SIGKILL");
@@ -273,9 +287,9 @@ describe("running short", () => {
 
 describe("bots' browsers", () => {
   /** Threads whose bot may browse and whose browser is not running yet, and the threads whose browser was told to close. */
-  function browsers(h: ReturnType<typeof host>, starting: Iterable<string>) {
-    const pending = new Set(starting), closed: string[] = [];
-    h.memory.useBrowsers({ starts: (threadId) => pending.has(threadId), stopped: (threadId) => closed.push(threadId) });
+  function browsers(h: ReturnType<typeof host>, starting: Iterable<string>, open: Iterable<string> = []) {
+    const pending = new Set(starting), running = new Set(open), closed: string[] = [];
+    h.memory.useBrowsers({ starts: (threadId) => pending.has(threadId), running: (threadId) => running.has(threadId), stopped: (threadId) => closed.push(threadId) });
     return { pending, closed };
   }
 
@@ -338,14 +352,19 @@ describe("bots' browsers", () => {
     expect(closed).toEqual(["c"]);
   });
 
-  it("closes the browser of a turn the kernel's OOM killer stopped", () => {
+  it("closes the browser of a turn the kernel's OOM killer stopped, and its turn says so in one line", () => {
     const h = host();
-    const { closed } = browsers(h, []);
+    const { closed } = browsers(h, [], ["a"]);
     h.memory.turnStarted("a"); const a = h.spawn("a");
-    h.memory.turnStarted("b"); h.spawn("b");
+    h.memory.turnStarted("b"); const b = h.spawn("b");
     h.oomKill();
     a.exit("SIGKILL");
     expect(closed).toEqual(["a"]);
+    expect(h.memory.stopText("a")).toBe("Ran out of room, so I closed the browser to keep everything else running.");
+    // A turn whose bot had no browser open: only the task was stopped.
+    h.oomKill();
+    b.exit("SIGKILL");
+    expect(h.memory.stopText("b")).toBe(memoryStopText(false));
   });
 });
 
@@ -418,13 +437,13 @@ describe("an engine's adapter on a Cloud home", () => {
     fake.emit({ threadId: "b", turnId: "tb", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
     await settle();
     expect(seen.map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([
-      `${memoryStopText(2)} (opencodeGo exited null before the prompt result)`, "turn.completed"]);
+      `${memoryStopText(false)} (opencodeGo exited null before the prompt result)`, "turn.completed"]);
     expect(h.memory.stopText("b")).toBeNull();
     // An engine that ends its turn without an error of its own: the reason comes first.
     h.oomKill();
     h.children.get(1000)!.exit("SIGKILL");
     fake.emit({ threadId: "a", turnId: "ta", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
-    expect(seen.slice(2).map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([memoryStopText(1), "turn.completed"]);
+    expect(seen.slice(2).map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([memoryStopText(false), "turn.completed"]);
   });
 
   it("leaves engines that start no process of their own, and every engine where the gate is off, as they are", () => {
@@ -491,7 +510,8 @@ describe("engines that run several threads' sessions", () => {
     h.memory.tick();
     await settle();
     expect(h.signals).toEqual([`SIGKILL -${shared.pid}`]);
-    expect([h.memory.stopText("s1"), h.memory.stopText("s2"), h.memory.stopText("x")]).toEqual([memoryStopText(3), memoryStopText(3), null]);
+    expect([h.memory.stopText("s1"), h.memory.stopText("s2"), h.memory.stopText("x")]).toEqual([memoryStopText(false), memoryStopText(false), null]);
+    expect(h.memory.stallCause("s2", "x")).toBe(memoryStallText("x", 3));
 
     const g = host();
     for (const thread of ["s1", "s2"]) g.memory.turnStarted(thread);
@@ -531,4 +551,76 @@ describe("engines that run several threads' sessions", () => {
 
 it("words a stall the same way the Cloud's health report classifies it", () => {
   expect(memoryStallText("no activity for 20 minutes — the turn was stopped", 1)).toMatch(/ran out of memory while 1 task ran at once/);
+});
+
+describe("the day's memory pressure, for the Admin", () => {
+  it("counts the tasks that waited and how long, the turns stopped, the kernel's kills and the stalled minutes, over the last day", async () => {
+    const h = host({ available: 1.2 * GB, tickMs: 60_000 });
+    h.memory.turnStarted("a"); h.spawn("a");
+    expect(h.memory.dayPressure()).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+    // "b" waits three minutes for memory; a wait still going counts its time so far.
+    const stop = new AbortController();
+    const b = h.memory.admit("b", stop.signal, () => {});
+    await settle();
+    h.advance(3 * 60_000);
+    expect(h.memory.dayPressure()).toMatchObject({ waits: 1, waitMs: 3 * 60_000 });
+    h.memory.turnEnded("a");
+    h.children.get(1000)!.exit();
+    expect(await b).toBe(true);
+    expect(h.memory.dayPressure()).toMatchObject({ waits: 1, waitMs: 3 * 60_000 });
+    // The machine stalls on memory for two minutes, and the kernel stops a turn's engine.
+    h.state.available = 3.4 * GB;
+    h.memory.turnStarted("b"); const engine = h.spawn("b");
+    h.memory.turnStarted("c"); h.spawn("c");
+    h.state.fullStall10 = 45;
+    h.memory.tick(); h.memory.tick();
+    h.advance(60_000);
+    h.memory.tick();
+    h.state.fullStall10 = 0;
+    h.oomKill();
+    engine.exit("SIGKILL");
+    expect(h.memory.dayPressure()).toEqual({ waits: 1, waitMs: 3 * 60_000, stopped: 1, killed: 1, stallMinutes: 2 });
+    // A day on, none of it counts.
+    h.advance(24 * 60 * 60_000);
+    expect(h.memory.dayPressure()).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+  });
+
+  it("reads the pressure from the kernel's own files: memory left, the OOM kill count and the memory stall", async () => {
+    const proc = { kills: 7, stall: "0.00", available: 2_400_000 };
+    const files = (path: string) => {
+      if (path === "/proc/meminfo") return `MemTotal:        4022248 kB\nMemAvailable:    ${proc.available} kB\nSwapFree:              0 kB\n`;
+      if (path === "/proc/vmstat") return `oom_kill ${proc.kills}\n`;
+      if (path === "/proc/pressure/memory") return `some avg10=10.00 avg60=1.00 avg300=0.10 total=1\nfull avg10=${proc.stall} avg60=0.00 avg300=0.00 total=1\n`;
+      throw new Error("ENOENT");
+    };
+    let clock = 1_800_000_000_000;
+    const memory = new EngineMemory({ enabled: true, tickMs: 60_000, read: () => readHostMemory(files), groups: () => new Map(), now: () => clock, signal: () => {}, log: () => {} });
+    const engine = new FakeChild(4242);
+    memory.within("t", () => memory.track(engine as unknown as ChildProcess));
+    memory.turnStarted("t");
+    // The machine stalls on memory, then the kernel stops two processes (a bot's browser, say): counted, nothing else stopped.
+    proc.stall = "38.50";
+    memory.tick();
+    clock += 60_000;
+    proc.kills = 9; proc.stall = "0.00";
+    memory.tick();
+    expect(memory.dayPressure()).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 2, stallMinutes: 1 });
+    expect(memory.stopText("t")).toBeNull();
+    // The kernel then stops the turn's own engine: one plain line for it, and the server goes on.
+    proc.kills = 10;
+    engine.exit("SIGKILL");
+    expect(memory.stopText("t")).toBe(memoryStopText(false));
+    expect(memory.dayPressure()).toMatchObject({ stopped: 1, killed: 3 });
+    memory.turnEnded("t");
+    expect(await memory.admit("next", new AbortController().signal, () => {})).toBe(true);
+  });
+
+  it("keeps a minute's counts once and forgets them after a day", () => {
+    const ledger = new PressureLedger(), start = 1_800_000_000_000;
+    ledger.note(start, "waits"); ledger.note(start + 10_000, "waits"); ledger.note(start, "waitMs", 90_000);
+    ledger.note(start, "stalled"); ledger.note(start + 20_000, "stalled");
+    ledger.note(start, "killed", 3); ledger.note(start, "stopped");
+    expect(ledger.read(start + 60_000, [start])).toEqual({ waits: 2, waitMs: 150_000, stopped: 1, killed: 3, stallMinutes: 1 });
+    expect(ledger.read(start + 24 * 60 * 60_000 + 60_000)).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+  });
 });

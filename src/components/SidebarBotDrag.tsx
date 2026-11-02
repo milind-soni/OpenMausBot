@@ -5,7 +5,7 @@ import { nextRename } from "@/lib/rename";
 import { BOTS_SECTION_ID, userSectionName } from "@/lib/sidebar-layout";
 import { BOT_ROW_DRAG_TYPE, botDropPlace, botListOf, planBotDrop, sameBotDrop, stepBot, unusedName, type BotDrop, type BotDropPlace, type BotMove } from "@/lib/sidebar-bot-drop";
 import type { Action, Bot } from "@/state/store";
-import { moveBotsToSection, renameDepartment, saveBotOrder } from "./bot-sections";
+import { moveBotsToSection, renameDepartment, saveBotOrder, useMayMoveBots } from "./bot-sections";
 
 /** The department being named, before it exists. The server trims names and never keeps a control character. */
 export const NEW_DEPARTMENT = "\u0000new";
@@ -48,6 +48,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   const [dragging, setDragging] = useState<string | null>(null);
   const [drop, setDrop] = useState<BotDrop | null>(null);
   const [naming, setNaming] = useState<Naming | null>(null);
+  const mayMove = useMayMoveBots();
   const latest = useRef<Arranged>({ enabled: false, lists: new Map(), bots: [], taken: [] });
   const moving = useRef<{ botId: string | null; drop: BotDrop | null }>({ botId: null, drop: null });
   const controller = useRef<BotRowDrag | null>(null);
@@ -78,7 +79,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   const finish = (target: BotDrop | null) => {
     const botId = moving.current.botId;
     end();
-    const move = botId && target ? planBotDrop(latest.current.lists, botId, target) : null;
+    const move = botId && target && latest.current.enabled ? planBotDrop(latest.current.lists, botId, target) : null;
     if (botId && move) apply(botId, move, false);
   };
   const rowDrop = (event: DragEvent<HTMLElement>, botId: string): BotDrop => {
@@ -138,10 +139,11 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
     arrange({ enabled, main, sectioned, departments, bots, taken }: {
       enabled: boolean; main: Bot[]; sectioned: Bot[]; departments: string[]; bots: Bot[]; taken: string[];
     }) {
+      const movable = enabled && mayMove;
       const lists = new Map<string, string[]>([["", main.map((bot) => bot.id)]]);
       for (const name of departments) if (name !== NEW_DEPARTMENT) lists.set(name, sectioned.filter((bot) => bot.section === name).map((bot) => bot.id));
-      latest.current = { enabled, lists, bots, taken };
-      const active = enabled && dragging !== null && botListOf(lists, dragging) !== undefined ? dragging : null;
+      latest.current = { enabled: movable, lists, bots, taken };
+      const active = movable && dragging !== null && botListOf(lists, dragging) !== undefined ? dragging : null;
       const shown = active ? drop : null;
       const mainIds = lists.get("")!.filter((id) => id !== active);
       const listFor = (sectionId: string) => (sectionId === BOTS_SECTION_ID ? "" : userSectionName(sectionId));
@@ -156,7 +158,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       };
       return {
         row: (botId: string): { botDrag?: BotRowDrag; botDrop?: BotDropPlace | null; botDragging?: boolean } => {
-          if (!enabled || botListOf(lists, botId) === undefined) return {};
+          if (!movable || botListOf(lists, botId) === undefined) return {};
           const place = shown?.kind === "row" && shown.botId === botId ? shown.place
             : shown?.kind === "end" && shown.list === "" && botId === mainIds.at(-1) ? "after" : null;
           return { botDrag: controller.current!, botDrop: place, botDragging: active === botId };

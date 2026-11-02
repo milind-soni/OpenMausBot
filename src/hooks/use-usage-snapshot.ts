@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { preloadConnectedApps } from "@/components/PluginsPanel";
+import { preloadConnectedApps } from "@/lib/connected-apps";
 import { localDesktopPage } from "@/components/onboarding/WelcomeGate";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { sendDailySnapshot, SNAPSHOT_CHECK_MS, snapshotReady, type UsageSources } from "@/lib/usage-snapshot";

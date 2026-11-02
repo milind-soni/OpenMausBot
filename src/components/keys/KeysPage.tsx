@@ -4,6 +4,7 @@ import { useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { scrollParent, scrollWithin } from "@/lib/scroll-within";
 import { t } from "@/lib/i18n";
+import { BoatOfferPanel } from "../BoatOffer";
 import { LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
@@ -22,6 +23,7 @@ const PANELS: Partial<Record<KeyId, () => ReactNode>> = {
 const EXTRAS: Partial<Record<KeyId, () => ReactNode>> = {
   anthropic: () => <AnthropicEveryClaudeBot />,
   openaiCompat: () => <><OpenAiCompatUrl /><OtherOpenAiCompatServers /></>,
+  box: () => <BoatOfferPanel />,
 };
 
 function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): boolean {

@@ -18,11 +18,16 @@ is never saved as written. **Edit details** shows the whole form:
 
 **Add** saves the server, connects to it (it starts the command or reaches the
 address, completes the MCP handshake and lists the tools) and turns it on when
-it answers: *Connected: 12 tools*. One that doesn't answer stays off with the
-reason. When it refused the keys (HTTP 401 or 403), the line names the headers
+it answers: *Connected: 12 tools*. While that test runs, the row says it's off
+until it passes. One that doesn't answer stays off and says so plainly: *Saved,
+but off: the test failed*, with the reason, and that bots can use it once it's
+on. When it refused the keys (HTTP 401 or 403), the line names the headers
 to check and **Fix the keys** asks for just their values, then tests again; when
 it couldn't be reached or timed out, **Try again** tests again. One that wants
-you to sign in opens its sign-in page.
+you to sign in opens its sign-in page. A click on a server's switch in the
+moment after a passing test turned it on keeps it on (*it passed its test a
+moment ago*): it was aimed at the Off you saw, never at switching it straight
+back off.
 Compatible bots get it on their next task; no app restart is needed. On a
 Team Cloud everyone on the team can use a server an Admin adds; **Only for
 me**, offered for a server with one key, keeps that key as the Admin's own.
@@ -286,9 +291,19 @@ Known limits:
   Codex lets a server's read-only tools run without asking, but here every
   tool runs through the one tool that runs them all, which cannot carry each
   tool's own read-only hint. Each Whop call shows a card, naming the tool.
-- **Command servers are not searched yet.** Only URL servers are. A command
-  server with hundreds of tools is still listed whole, and API-model bots
-  refuse more than 128 tools in one turn.
+- **Command servers are searched only on API models.** On other engines a
+  command server with hundreds of tools is still listed whole.
+
+API-model bots take at most 128 tools in one turn, and every server of the
+turn shares them with the built-in tools. When a bot's servers offer more,
+the turn lists as many whole servers as fit, in the order they are set up
+after the built-ins, and reaches the rest through one tool search of three
+tools (`mcp_search_tools`, `mcp_describe_tool`, `mcp_call_tool`) that count
+toward the 128. No server is left out for the limit; the chat says in one
+line which servers were reached through the search. The bot's MCP servers
+card in Access shows the last turn's count against the limit and those
+servers, and a server's **Test** says when it alone has more tools than the
+limit, or half of it or more.
 
 ### Which engines reach which servers
 
@@ -300,7 +315,8 @@ Known limits:
 
 Every engine except Claude Code reaches URL servers through OpenMausBot's own
 connector, the same one **Test** uses, so a server that passes Test works in
-chat too. Some servers refuse any handshake field they do not know, and the
+chat too. On a Cloud whose bots run in their box, bots reach a URL server
+through the box's credential broker, and so does Test (docs/bot-box.md). Some servers refuse any handshake field they do not know, and the
 engines' own MCP clients add such fields: a bot connecting by itself got "Tool
 not found" for every tool of a server that passed Test. Claude Code still
 connects by itself, since its handshake has only fields the MCP spec defines.
@@ -463,7 +479,10 @@ servers gets the enabled tools on its next task.
 - **Testing is bounded.** A command is stopped after the handshake (or eight
   seconds), its output is capped, and its stderr is never sent to the UI. It
   inherits none of OpenMausBot's workspace or provider credentials; only the
-  environment variables configured for that MCP server are added. A test
+  environment variables configured for that MCP server are added. Where bots
+  are boxed, a command server is tested in the box, as a bot's turn starts
+  it, and its configured variables pass the box's allow-list there, in the
+  test and in an API-model bot's turn alike. A test
   reads at most 32 MB (Whop's tool list alone is 1.2 MB), and a URL test
   reports only the HTTP status of a refusal.
 - **Addresses are checked.** A URL server needs a full `http://` or

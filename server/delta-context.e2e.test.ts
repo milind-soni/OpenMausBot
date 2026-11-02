@@ -9,6 +9,7 @@ import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
+import { UNSEEN_END } from "./delta-context.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -262,6 +263,9 @@ it("offers a message steered into a running turn to the next turn once, marked a
   const next = f.prompt(f.turns().at(-1));
   expect(count(next, "STEERED_MID_TURN")).toBe(1);
   expect(next).toMatch(/User \(sent while an earlier turn was running; you may already have it\): STEERED_MID_TURN/);
+  // The block ends before the person's new message, so it never reads as one more line of it.
+  expect(next.indexOf("also cover costs")).toBeLessThan(next.indexOf(UNSEEN_END));
+  expect(next.slice(next.indexOf(UNSEEN_END))).toContain("Is it done?");
 
   f.plan[f.chief.id] = { reply: "Nothing new" };
   await f.send("Anything else?");

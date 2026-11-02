@@ -27,7 +27,7 @@ import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./Accou
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
-import { PhoneAppDialog } from "./PhoneAppDialog";
+import { PhoneAppDialog } from "./lazy-screens";
 import { CloudTile } from "./cloud-buy/parts";
 import { usageBridge } from "./CloudUsageMeter";
 import { useCloudPlanSnapshot } from "./CloudTrialNotice";
@@ -674,7 +674,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
-              <AccountMoveStatus kind={move.kind} />
+              <AccountMoveStatus kind={move.kind} place={move.place} />
             </span>
             {noteworthy && (
               <span
@@ -692,15 +692,15 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <PhoneAppDialog
-        open={phoneAppOpen}
+      {phoneAppOpen && <PhoneAppDialog
+        open
         onClose={() => setPhoneAppOpen(false)}
         connect={destinations.map((destination) => ({
           key: destination.id,
           subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
           onSelect: () => connectTo(destination),
         }))}
-      />
+      />}
     </>
   );
 }

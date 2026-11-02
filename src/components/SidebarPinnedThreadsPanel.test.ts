@@ -34,7 +34,6 @@ function renderPanel(
   function Capture() {
     tree = SidebarPinnedThreadsPanel({
       entries,
-      density: "comfortable",
       now: 1,
       onJump,
       collapsed: options.collapsed ?? false,
@@ -91,7 +90,7 @@ describe("pinned threads panel", () => {
 
   it("disables collapse when search prevents layout changes", () => {
     const markup = renderToStaticMarkup(createElement(SidebarPinnedThreadsPanel, {
-      entries: [entry], density: "comfortable", now: 1, onUnpin: vi.fn(), onJump: vi.fn(), collapsed: false,
+      entries: [entry], now: 1, onUnpin: vi.fn(), onJump: vi.fn(), collapsed: false,
     }));
     expect(markup).toMatch(/<button[^>]+disabled=""[^>]+aria-expanded="true"/);
     expect(markup).toContain("Quarterly plan");

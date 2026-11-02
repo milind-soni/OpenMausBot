@@ -151,9 +151,9 @@ describe("turnNowPhrases: what the status line says is happening now", () => {
   });
 
   it("names the command, the search and the page the server read from the call, with the whole command for the hover", () => {
-    const command = turnNowPhrases({ activity: "command", itemId: "c", target: "scrape.py", detail: "cd ~/biber && python3 scrape.py --pages 40" });
-    expect(command).toEqual({ phase: "step:command:scrape.py", phrases: ["Running scrape.py"], hover: "cd ~/biber && python3 scrape.py --pages 40" });
-    expect(turnNowPhrases({ activity: "web", target: "Biber Dammbau" })?.phrases).toEqual(["Searching the web for “Biber Dammbau”"]);
+    const command = turnNowPhrases({ activity: "command", itemId: "c", target: "scrape.py", detail: "cd ~/acme && python3 scrape.py --pages 40" });
+    expect(command).toEqual({ phase: "step:command:scrape.py", phrases: ["Running scrape.py"], hover: "cd ~/acme && python3 scrape.py --pages 40" });
+    expect(turnNowPhrases({ activity: "web", target: "Acme construction leads" })?.phrases).toEqual(["Searching the web for “Acme construction leads”"]);
     expect(turnNowPhrases({ activity: "fetch", target: "linkedin.com" })?.phrases).toEqual(["Reading linkedin.com"]);
   });
 

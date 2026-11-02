@@ -16,7 +16,7 @@ import { readSessionState } from "@/lib/session";
 export type TeamChats = { teamId: string; member: boolean; opened?: readonly string[] };
 
 type TaskLike = { threadId: string; createdAt?: number; updatedAt?: number; private?: unknown; inbox?: unknown; routineRunId?: unknown; openedBy?: unknown; archivedAt?: unknown; closedBy?: unknown };
-type BotLike = { id: string; tasks?: TaskLike[] };
+type BotLike = { id: string; tasks?: TaskLike[]; yourAccess?: string };
 
 let current: TeamChats | null = null;
 export function setTeamChats(next: TeamChats | null) {
@@ -47,12 +47,14 @@ export function ownChatOf(bot: BotLike, team: TeamChats): string | null {
 
 const making = new Set<string>();
 /** On a team: opens the person's own conversation with `bot` through `open`, or makes it and opens it. False anywhere
- * else, so the caller opens the bot as it always has. */
+ * else, and for a bot this person can only view and has no conversation of their own with, so the caller opens the bot
+ * as it always has: its main chat. */
 export function openOwnTeamChat(dispatch: (action: Action) => void, bot: BotLike, open: (threadId: string) => void): boolean {
   const team = current;
   if (!team) return false;
   const own = ownChatOf(bot, team);
   if (own) { open(own); return true; }
+  if (bot.yourAccess === "view") return false;
   if (making.has(bot.id)) return true;
   making.add(bot.id);
   void api<{ bot?: Bot; task?: { threadId?: string } }>(`/api/bots/${bot.id}/tasks`, { method: "POST", body: "{}" })

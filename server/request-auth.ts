@@ -309,6 +309,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/search$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // an app row's document is transcript data, read under the transcript's rules
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/export$/ },
@@ -349,6 +350,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/browser\/upload$/ },
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:resume|dismiss)$/ },
+  // A member signs in to their own MCP server from its card; the handler keeps an app's card and a shared server's an admin's.
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/authorize$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/always-allow$/ }, // must match a pending card
   // an app reaches only its own MCP server, under the bot's rules; its context is bounded text
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/(?:rpc|context)$/ },
@@ -412,6 +415,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // a teammate's picture: the handler serves it to the team's own members only
   { methods: ["GET"], path: /^\/api\/team\/people\/p_[\w-]{22}\/picture$/ },
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
+  // a Team Cloud bot's sharing: the handler lets only someone who can edit the bot change it
+  { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/access$/ },
+  // asking to chat with a team bot one can view: the handler puts a card in the inbox of whoever can let them in
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/access-request$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
@@ -459,6 +466,22 @@ export function adminOnlyBotSetting(fields: Record<string, unknown>): string | n
 
 export function botProfileSettings(fields: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(fields).filter(([key]) => BOT_PROFILE_SETTINGS.has(key)));
+}
+
+/** What a Team Cloud member who can edit a bot may change: its profile and model (as a bot they bring in), and which of
+ * the team's connected apps and MCP servers it uses. Never what it may do on its computer, where it runs, its department
+ * or whom it answers to or directs: those stay an admin's. */
+const EDITOR_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set([
+  ...BOT_PROFILE_SETTINGS, "threadId", "composio", "connectorTools", "connectorScopes", "mcpServers",
+]);
+/** A member who can only view a bot marks it read, nothing else. */
+const VIEWER_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set(["unread"]);
+
+export function memberBotPatchViolation(body: unknown, level: "view" | "chat" | "edit", ownMausBot = false, teamMember = false): string | null {
+  if (level === "chat") return clientBotPatchViolation(body, ownMausBot, teamMember);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
+  const allowed = level === "edit" ? EDITOR_BOT_PATCH_FIELDS : VIEWER_BOT_PATCH_FIELDS;
+  return Object.keys(body).find((key) => !allowed.has(key)) ?? null;
 }
 
 /** Same for a room: name and reading state, never its folder or who answers. */

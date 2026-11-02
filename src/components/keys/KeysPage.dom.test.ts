@@ -28,6 +28,10 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/live-call-media", () => ({ dismissLiveNotice: vi.fn() }));
 
 const { KeysPage } = await import("./KeysPage");
+const { track } = await import("@/lib/analytics");
+const { BOAT_OFFER, boatClaimMailto } = await import("@/lib/boat-offer");
+const { BOAT_OFFER_NOTICE } = await import("@/lib/notices");
+const { applyBrand, DEFAULT_BRAND } = await import("@/lib/brand");
 const { LiveKeyNeeded } = await import("../LiveKeyNeeded");
 const { openKeySettings } = await import("./key-focus");
 
@@ -167,5 +171,60 @@ describe("the keys page", () => {
     await vi.waitFor(() => expect(row("box")!.querySelector("[data-key-masked]")?.textContent).toContain("••••••••c3d4"));
     expect(row("box")!.textContent).toContain("Connected");
     expect(fx.api).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Boat's credit offer on the Boat card", () => {
+  const offer = () => row("box")!.querySelector<HTMLElement>("[data-boat-offer]");
+  const buttons = () => [...offer()!.querySelectorAll<HTMLButtonElement>("button")];
+  const openComputers = () => flushSync(() => section("computers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  afterEach(() => {
+    BOAT_OFFER.until = null;
+    applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    delete (window as unknown as { ogb?: unknown }).ogb;
+    vi.unstubAllGlobals();
+  });
+
+  it("is always on the Boat card while the offer runs: with no key, a saved key, one a Cloud plan includes, and after its popup closed", () => {
+    page(); openComputers();
+    for (const box of [{ configured: false }, { configured: true, last4: "c3d4" }, { configured: false, included: true }]) {
+      setConfig({ ...fx.config, box });
+      expect(offer(), JSON.stringify(box)).not.toBeNull();
+      expect(offer()!.closest("[hidden]")).toBeNull();
+      const words = offer()!.textContent!;
+      for (const text of ["$50 of Boat credit for you", "Boat runs the cloud computers behind MausBot.", "You claim it yourself: it isn't automatic."]) {
+        expect(words).toContain(text);
+      }
+      expect(buttons().map((button) => button.textContent)).toEqual(["Get Boat", "I bought it: claim my $50"]);
+    }
+    vi.stubGlobal("localStorage", { getItem: (key: string) => (key === BOAT_OFFER_NOTICE ? "1" : null), setItem: () => {}, removeItem: () => {} });
+    page();
+    expect(offer(), "closing the popup never takes it from Settings").not.toBeNull();
+    type(host.querySelector<HTMLInputElement>("[data-keys-search]")!, "boat");
+    expect(rowsShown()).toContain("box"); expect(offer()!.closest("[hidden]")).toBeNull();
+  });
+
+  it("Get Boat opens boat.dev and the claim drafts the email to Boat; both stay for a later visit and save nothing", async () => {
+    const openExternal = vi.fn(async () => true);
+    (window as unknown as { ogb?: unknown }).ogb = { openExternal };
+    page(); openComputers();
+    flushSync(() => buttons()[0]!.click());
+    await vi.waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://boat.dev"));
+    flushSync(() => buttons()[1]!.click());
+    await vi.waitFor(() => expect(openExternal).toHaveBeenCalledWith(boatClaimMailto()));
+    await vi.waitFor(() => expect(track).toHaveBeenCalledWith("boat_offer", { action: "claim", place: "settings" }));
+    expect(track).toHaveBeenCalledWith("boat_offer", { action: "get_boat", place: "settings" });
+    expect(offer()).not.toBeNull();
+    expect(fx.api).not.toHaveBeenCalled();
+  });
+
+  it("goes from its end date on, and on a branded build, while the Boat card stays", () => {
+    BOAT_OFFER.until = Date.now() - 1;
+    page();
+    expect(row("box")).not.toBeNull(); expect(offer()).toBeNull();
+    BOAT_OFFER.until = null;
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "brand.json" });
+    page();
+    expect(row("box")).not.toBeNull(); expect(offer()).toBeNull();
   });
 });

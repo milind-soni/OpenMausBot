@@ -165,7 +165,7 @@ describe("keeping the list live", () => {
   }
 
   it("reads the list again whenever the person's inbox task says it changed, and never off a team", async () => {
-    const task = (inboxChangedAt?: number, openAsks?: number) => [{ id: "marcos-chief", tasks: [{ threadId: "inbox", inbox: true as const, ...(inboxChangedAt ? { inboxChangedAt } : {}), ...(openAsks ? { openAsks } : {}) }] }];
+    const task = (inboxChangedAt?: number, openAsks?: number) => [{ id: "bens-chief", tasks: [{ threadId: "inbox", inbox: true as const, ...(inboxChangedAt ? { inboxChangedAt } : {}), ...(openAsks ? { openAsks } : {}) }] }];
     expect(inboxVersion([{ id: "solo", tasks: [{ threadId: "t1" }] }]), "nothing is anyone's inbox off a team").toBeNull();
     const first = inboxVersion(task(5, 2));
     expect(inboxVersion(task(6, 2))).not.toBe(first);

@@ -223,3 +223,24 @@ describe("the Simple model menu", () => {
     expect(menu([claude(), codex, many], { query: "zzz" })).toMatchObject({ groups: [], results: 0 });
   });
 });
+
+describe("a model the organization turned off", () => {
+  const blockedModels = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, orgBlocked: true as const } : option);
+  const pick = (model: string) => ({ instanceId: "claude", model });
+  const menuOn = (model: string) => simpleModelMenu({
+    instances: [claude({}, blockedModels)], listed: [claude({}, blockedModels)], selection: pick(model),
+    bot: { name: "Scout", selection: pick(model) }, query: "", expanded: new Set(["claude"]), probing: new Set(), loading: false,
+  });
+
+  it("stays listed, marked, among the others", () => {
+    const body = menuOn("sonnet-5").groups[0]!.body;
+    if (body.kind !== "models") throw new Error("expected the models");
+    expect(body.rows.filter((row) => row.blocked).map((row) => row.option.id)).toEqual(["opus-5-5"]);
+    expect(body.rows.length).toBeGreaterThan(1);
+  });
+
+  it("says so on the current row, with nothing to set up", () => {
+    expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Turned off by your organization" });
+    expect(menuOn("sonnet-5").current?.blocked).toBeUndefined();
+  });
+});

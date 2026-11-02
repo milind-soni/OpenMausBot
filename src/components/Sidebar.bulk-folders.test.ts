@@ -33,7 +33,7 @@ const bot: Bot = {
   ],
 };
 const render = () => renderToStaticMarkup(createElement(BotThreadList, {
-  ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() }), selected: true,
+  ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true,
 }));
 
 describe("selecting threads in a bot with a collapsed folder", () => {

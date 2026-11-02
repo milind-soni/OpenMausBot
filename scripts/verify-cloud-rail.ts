@@ -5,13 +5,13 @@
 // (OMB_CDP_CHROME, else the installed Google Chrome) at twice the window's size (1280x800 unless --size says) and
 // exits; without, it prints the preview's address and waits. With --shots it also checks that the sidebar's button for
 // the window's rail lands on the same spot with the rail shown and hidden, and fails if it doesn't.
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { duskPng } from "./testing/dusk-banner.ts";
+import { openHeadlessChrome } from "./testing/headless-chrome.ts";
 import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const at = process.argv.indexOf("--shots");
@@ -22,7 +22,6 @@ const sizeAt = process.argv.indexOf("--size");
 const size = /^(\d{3,4})x(\d{3,4})$/.exec(sizeAt === -1 ? "1280x800" : process.argv[sizeAt + 1] ?? "");
 if (!size) throw new Error("--size takes the window's width and height, such as 1338x870");
 const [WIDTH, HEIGHT] = [Number(size[1]), Number(size[2])];
-const CHROME = process.env.OMB_CDP_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const RAIL_AND_BUTTON = "body:has([data-places-rail]) [data-rail-toggle]";
 /** Each view: its query, what must be on screen before the picture, and the window's height. Views that name the same
  * `button` spot must have the rail's button at the same place. */
@@ -76,51 +75,20 @@ const VIEWS: Array<{ name: string; query: string; ready: string; height?: number
 ];
 const SKINS = [{ id: "daylight", look: "light" }, { id: "midnight", look: "dark" }];
 
-/** One page of a headless Chrome over the DevTools protocol: navigate, wait for a selector, photograph. */
+/** The preview in a headless Chrome: navigate, wait for a selector, photograph. */
 async function openChrome(profile: string) {
-  const chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
-    `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore" });
-  let port = "";
-  for (let i = 0; i < 100 && !port; i++) {
-    await delay(100);
-    try { port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]!.trim(); } catch {}
-  }
-  if (!port) { chrome.kill(); throw new Error("Chrome did not start"); }
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>;
-  const socket = new WebSocket(targets.find((target) => target.type === "page")!.webSocketDebuggerUrl);
-  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = fail; });
-  let next = 0;
-  const waiting = new Map<number, { done: (value: any) => void; fail: (error: Error) => void }>();
-  socket.onmessage = (event) => {
-    const message = JSON.parse(String(event.data));
-    const call = waiting.get(message.id);
-    if (!call) return;
-    waiting.delete(message.id);
-    if (message.error) call.fail(new Error(message.error.message)); else call.done(message.result);
-  };
-  const send = (method: string, params: object = {}) => new Promise<any>((done, fail) => {
-    const id = ++next;
-    waiting.set(id, { done, fail });
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-  const evaluate = async (expression: string) => (await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
+  const page = await openHeadlessChrome(profile);
   return {
     /** Photographs the page once `ready` shows, and answers where the rail's button is (null without one). */
     async shoot(url: string, ready: string, file: string, height = HEIGHT): Promise<{ left: number; top: number } | null> {
-      await send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height, deviceScaleFactor: 2, mobile: false });
-      await send("Page.navigate", { url });
-      const end = Date.now() + 60_000;
-      const condition = `Boolean(document.querySelector(${JSON.stringify(ready)}) && document.querySelector("[data-sidebar-bot-row], [data-sidebar-hero]"))`;
-      while (!(await evaluate(condition).catch(() => false))) {
-        if (Date.now() > end) throw new Error(`${url}: ${ready} never showed (${await evaluate("document.querySelector('main')?.textContent?.slice(0, 120) ?? ''")})`);
-        await delay(250);
-      }
+      await page.send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height, deviceScaleFactor: 2, mobile: false });
+      await page.send("Page.navigate", { url });
+      await page.until(`document.querySelector(${JSON.stringify(ready)}) && document.querySelector("[data-sidebar-bot-row], [data-sidebar-hero]")`);
       await delay(900);
-      const { data } = await send("Page.captureScreenshot", { format: "png" });
-      writeFileSync(file, Buffer.from(data, "base64"));
-      return await evaluate("(() => { const box = document.querySelector('[data-rail-toggle]')?.getBoundingClientRect(); return box ? { left: box.left, top: box.top } : null; })()");
+      writeFileSync(file, await page.capture());
+      return await page.evaluate("(() => { const box = document.querySelector('[data-rail-toggle]')?.getBoundingClientRect(); return box ? { left: box.left, top: box.top } : null; })()");
     },
-    close() { socket.close(); chrome.kill(); },
+    close: page.close,
   };
 }
 

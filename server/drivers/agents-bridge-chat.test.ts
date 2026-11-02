@@ -100,5 +100,5 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
   const errors = recorder.events.flatMap((event) => event.type === "runtime.error" ? [event.message] : []);
   expect(errors.join("\n")).not.toMatch(/MCP request failed|MCP session closed|execution outcome may be uncertain/);
   expect(completed).toMatchObject({ ok: false });
-  expect(errors).toEqual([expect.stringContaining("One or more tool operations failed or were denied")]);
+  expect(errors).toEqual([expect.stringMatching(/^Stopped because the tool call “[^”]+” failed\./)]);
 }, 30_000);

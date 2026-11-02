@@ -193,7 +193,7 @@ describe("the mascot and its status line through a long turn", () => {
 
 describe("what the bot is doing right now", () => {
   const search: Message = { id: "search", role: "bot", kind: "activity", at: started + 4_000, turnId: "t1",
-    tool: { name: "WebSearch", itemId: "s1", ok: true, step: { activity: "web", target: "Biber Dammbau" } } };
+    tool: { name: "WebSearch", itemId: "s1", ok: true, step: { activity: "web", target: "Acme construction leads" } } };
   const bash: Message = { id: "bash", role: "bot", kind: "activity", at: started + 6_000, turnId: "t1",
     tool: { name: "Bash", itemId: "b1", step: { activity: "command", target: "scrape.py", detail: "python3 scrape.py --pages 40" } } };
   const toggle = () => host.querySelector<HTMLButtonElement>(".turn-presence button[aria-expanded]");
@@ -210,7 +210,7 @@ describe("what the bot is doing right now", () => {
     expect(host.querySelector("[data-now-card]")).toBeNull();
 
     act(() => toggle()!.click());
-    expect(steps()).toEqual(["done: Searched the web for “Biber Dammbau”", "now: Running scrape.py"]);
+    expect(steps()).toEqual(["done: Searched the web for “Acme construction leads”", "now: Running scrape.py"]);
     const seen: Array<ReturnType<typeof useActivityFocus>> = [];
     const probe = createRoot(document.createElement("div"));
     act(() => probe.render(createElement(() => { seen.push(useActivityFocus("bot")); return null; })));
@@ -239,6 +239,6 @@ describe("what the bot is doing right now", () => {
     render(busyBot([ask, search, bash]));
     expect(statusLine()).toBe("Running scrape.py · idle, no output yet");
     act(() => toggle()!.click());
-    expect(steps()).toEqual(["done: Searched the web for “Biber Dammbau”", "now: Running scrape.py"]);
+    expect(steps()).toEqual(["done: Searched the web for “Acme construction leads”", "now: Running scrape.py"]);
   });
 });

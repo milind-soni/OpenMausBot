@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { setEmailGateDone, track } from "@/lib/analytics";
-import { brandStatus } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { chiefStepFits, myDefaultBot, setChiefStepOpen, useViewerEmail } from "@/lib/default-bot";
-import { CLOUD_PRO_UPDATE_NOTICE, dismissNotice } from "@/lib/notices";
-import { beatsFor, cloudBeatPossible, completionPatch, firstRunPatch, markWelcomeFinished, resumeBeat, showWelcome, type BeatId } from "@/lib/onboarding";
+import { beatsFor, completionPatch, firstRunPatch, markWelcomeFinished, resumeBeat, showWelcome, type BeatId } from "@/lib/onboarding";
 import { clearWelcomeDraft, readWelcomeDraft, saveWelcomeDraft } from "@/lib/welcome-draft";
 import { api, useStore } from "@/state/store";
 import { ChiefIntro } from "./ChiefIntro";
@@ -13,12 +11,6 @@ import { localDesktopPage } from "./WelcomeGate";
 
 const LEAVE_MS = 100;
 const FADE_MS = 150;
-
-/** A first run where the Cloud could have been offered settles the Cloud Pro popup with it. */
-function settlesCloudPopup(hosted: boolean): boolean {
-  const remote = !localDesktopPage() || window.ogb?.remoteClient?.active === true;
-  return cloudBeatPossible({ bridge: Boolean(window.ogb?.cloudAccount?.offer), branded: brandStatus().source === "file", hosted, remote });
-}
 
 type Config = ReturnType<typeof useStore>["state"]["config"];
 
@@ -102,13 +94,8 @@ export function WelcomeFlow({
       if (!replay && !embedded) markWelcomeFinished();
       if (keepsDraft) clearWelcomeDraft();
       onDone(botId);
-      const cloud = !replay && !embedded && settlesCloudPopup(hosted);
-      if (cloud) {
-        dismissNotice(record.current, CLOUD_PRO_UPDATE_NOTICE);
-        void window.ogb?.desktopNotices?.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {});
-      }
       try {
-        const patch = replay ? completionPatch() : firstRunPatch(record.current, new Date(), cloud ? [CLOUD_PRO_UPDATE_NOTICE] : []);
+        const patch = replay ? completionPatch() : firstRunPatch(record.current, new Date());
         const config = await api("/api/config", { method: "PUT", body: JSON.stringify(patch), signal: AbortSignal.timeout(10_000) });
         dispatch({ type: "configStatus", config });
       } catch {

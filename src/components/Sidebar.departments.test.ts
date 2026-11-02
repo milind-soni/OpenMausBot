@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, AppState, Bot, Group } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
-  values: [] as unknown[], index: 0, advanced: false, phone: false,
+  values: [] as unknown[], index: 0, advanced: false, phone: false, admin: null as boolean | null,
   state: {} as AppState, dispatch: vi.fn(), storage: new Map<string, string>(),
   requests: [] as Array<{ path: string; method: string; body: unknown }>,
 }));
@@ -33,10 +33,11 @@ vi.mock("./MenuMotion", () => ({
 }));
 vi.mock("./DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }) };
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
@@ -109,6 +110,7 @@ beforeEach(() => {
   fixture.values = [];
   fixture.advanced = false;
   fixture.phone = false;
+  fixture.admin = null;
   fixture.storage = new Map();
   fixture.requests = [];
   rowElements = [];
@@ -291,6 +293,37 @@ describe("dragging a bot", () => {
   });
 });
 
+describe("who may drag a bot: whoever the bot menu offers Move to department", () => {
+  it("gives a Team Cloud member without the admin scope no row to drag and no Alt+Up/Down, and starts no drag", () => {
+    const drawnEarlier = row("atlas").botDrag!;
+    fixture.admin = false;
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
+    expect(rows().map((props) => props.botDrag)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    carried = transfer();
+    drawnEarlier.row("atlas").onDragStart(at() as never);
+    drawnEarlier.step("atlas", 1);
+    expect(carried.types).toEqual([]);
+    expect(actions()).toEqual([]);
+  });
+
+  it("drops nothing from a drag begun before the session said they are a member", () => {
+    drag("atlas");
+    fixture.admin = false;
+    section(userSectionId("Work")).onDragOver(at() as never);
+    section(userSectionId("Work")).onDrop(at() as never);
+    expect(actions()).toEqual([]);
+    expect(fixture.requests).toEqual([]);
+  });
+
+  it("lets an admin drag", () => {
+    fixture.admin = true;
+    for (const props of rows()) expect(props.botDrag!.row(props.bot.id).draggable).toBe(true);
+    drag("atlas");
+    section(userSectionId("Work")).onDrop(at() as never);
+    expect(actions()).toEqual([{ type: "updateBot", botId: "atlas", patch: { section: "Work" } }, { type: "botsOrdered", botIds: ["dodo", "echo", "atlas"] }]);
+  });
+});
+
 describe("a department's menu in Simple", () => {
   const openMenu = (name: string) => {
     const button = { getBoundingClientRect: () => ({ right: 280, bottom: 300 }), focus: vi.fn(), isConnected: true } as unknown as HTMLButtonElement;
@@ -362,5 +395,34 @@ describe("a bot's menu in Simple", () => {
   it("offers only New department… to a bot in none, when there are no departments yet", () => {
     fixture.state = { ...fixture.state, sections: [], bots: [bot("atlas"), bot("bea")] };
     expect(open(menuProps("atlas")).map(label)).toEqual(["New department…"]);
+  });
+});
+
+describe("deleting a Chief of Staff", () => {
+  type MenuProps = Parameters<typeof BotContextMenu>[0];
+  const askToDelete = (target: Bot) => (render().find((node) => node.type === BotContextMenu)!.props as unknown as MenuProps).onDelete(target);
+  const openDialog = () => render().find((node) => node.type === ConfirmDialog && node.props.open === true);
+
+  it("offers Archive first, which keeps its chats, and archives it as an ordinary bot", async () => {
+    const chief = bot("atlas", { chiefOfStaff: true });
+    fixture.state = { ...fixture.state, bots: [chief, bot("bea")] };
+    askToDelete(chief);
+    const dialog = openDialog()!;
+    expect(dialog.props.body).toContain("Archive it instead to keep every conversation");
+    const alternative = dialog.props.alternative as { label: string; onClick: () => void };
+    expect(alternative.label).toBe("Archive instead");
+    alternative.onClick();
+    await vi.waitFor(() => expect(fixture.requests).toContainEqual({ path: "/api/bots/atlas", method: "PATCH", body: { hidden: true, chiefOfStaff: false } }));
+    expect(openDialog()).toBeUndefined();
+  });
+
+  it("offers nothing else for any other bot, or for the last bot there is", () => {
+    askToDelete(bot("bea"));
+    expect(openDialog()!.props.alternative).toBeUndefined();
+    const chief = bot("atlas", { chiefOfStaff: true });
+    fixture.values = [];
+    fixture.state = { ...fixture.state, bots: [chief] };
+    askToDelete(chief);
+    expect(openDialog()!.props.alternative).toBeUndefined();
   });
 });

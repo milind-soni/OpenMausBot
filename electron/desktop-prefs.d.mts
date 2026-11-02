@@ -2,7 +2,7 @@ export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 export declare const DESKTOP_NOTICES: readonly string[];
 export interface DesktopNoticesState {
   /** Notices this desktop has shown and someone closed, on whichever page of its window; This computer's own workspace
-   * record counts too (an earlier close of the popup, or the welcome's Cloud beat). */
+   * record counts too (an earlier close of the What's new popup). */
   seen: string[];
   /** This desktop sells MausBot Cloud: the installed app, not a branded build, not connected to another computer. */
   cloud: boolean;
@@ -11,8 +11,6 @@ export interface DesktopNoticesState {
 export interface DesktopNoticesBridge {
   state(): Promise<DesktopNoticesState>;
   seen(id: string): Promise<void>;
-  /** True the first time today the notice counts as shown on this desktop. */
-  shown(id: string): Promise<boolean>;
 }
 /** The desktop's own switch, the same on every port its page is served from. */
 export interface DesktopAnalyticsBridge {
@@ -32,7 +30,6 @@ export interface DesktopLanguageBridge {
 export interface DesktopPrefs {
   seen(): string[];
   markSeen(id: string): void;
-  shown(id: string): boolean;
   analytics(): boolean | null;
   setAnalytics(enabled: boolean): void;
   language(): string | null;
@@ -55,10 +52,19 @@ export interface DesktopPrefs {
   /** False until the person hides the window's rail of places. */
   railHidden(): boolean;
   setRailHidden(hidden: boolean): void;
+  /** True until the person turns the window's frame off. */
+  windowFrame(): boolean;
+  setWindowFrame(on: boolean): void;
+}
+/** The window's frame, this desktop's choice, as Settings reads and changes it. */
+export interface WindowFrameState {
+  on: boolean;
+  /** The choice changes this window only when the app starts again (Windows). */
+  restart: boolean;
 }
 type Files = Pick<typeof import("node:fs"), "readFileSync" | "writeFileSync" | "renameSync" | "rmSync">;
 export declare function jsonFile(file: string, files?: Files): { read(): unknown; write(value: unknown): void };
-export declare function createDesktopPrefs(options: { read(): unknown; write(value: unknown): void; now?: () => number }): DesktopPrefs;
+export declare function createDesktopPrefs(options: { read(): unknown; write(value: unknown): void }): DesktopPrefs;
 export declare function registerDesktopPrefs(options: {
   /** Used instead of making a store from read/write. */
   prefs?: DesktopPrefs;
@@ -69,6 +75,9 @@ export declare function registerDesktopPrefs(options: {
   cloudOffered(): Promise<boolean>;
   localConfig?(): unknown;
   languageChanged?(language: string, sender: unknown): void;
+  /** The window's frame: `made()`, the frame the window was made with (null before it is); `restarts`, a change waits for
+   * the app to start again; `changed()`, the pages hear it. */
+  frame?: { made(): boolean | null; restarts: boolean; changed(): void } | null;
   /** The MausBot Cloud sign-in client: with it, the product-updates question is asked and its answer kept here. */
   cloudAccount?(): import("./updates-consent.mjs").UpdatesConsentClient | null;
   now?: () => number;

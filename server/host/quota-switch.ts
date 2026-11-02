@@ -20,6 +20,8 @@ export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "co
   ): ReturnType<QuotaSwitchDeps["gate"]>;
   threadBusy(botId: string, threadId: string): boolean;
   directRequestOwners: { get(threadId: string): QuotaRequest | undefined };
+  /** Other cards the harness raises and settles itself: true when it was one. */
+  ownCards?(requestId: string, behavior: "allow" | "deny" | "answer"): boolean;
   startOrQueueDirectMessage(
     botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender,
     trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext,
@@ -46,7 +48,7 @@ export function createQuotaSwitchHost(deps: QuotaSwitchHostDeps) {
   /** Settles a card the harness raised itself (a peer approval, a use-your-computer ask or a quota-switch offer); undefined for any other card. */
   async function harnessCardOutcome(threadId: string, requestId: string, behavior: "allow" | "deny" | "answer", message: unknown): Promise<string | undefined> {
     if (!store.messagesFor(threadId).some(candidate => candidate.card?.requestId === requestId)) return undefined;
-    if (resolvePeerComms(approvalBus, requestId, behavior) || resolveYourComputerAsk(requestId, behavior)) return behavior === "allow" ? "allowed-once" : "rejected";
+    if (resolvePeerComms(approvalBus, requestId, behavior) || resolveYourComputerAsk(requestId, behavior) || deps.ownCards?.(requestId, behavior)) return behavior === "allow" ? "allowed-once" : "rejected";
     return await quotaSwitch.answer(threadId, requestId, behavior, message) ?? undefined;
   }
 

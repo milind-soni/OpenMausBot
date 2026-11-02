@@ -1,0 +1,52 @@
+# How Windows Security treats the real installer, on a fresh GitHub Windows machine. It builds the NSIS installer the
+# way the release's Windows job does, turns Defender's protection on the way a home PC has it (GitHub's image turns most
+# of it off and excludes every drive), saves the installer like a browser download (Zone.Identifier, ZoneId=3),
+# installs it silently, opens the app for two minutes and presses Start screen control. The summary and the
+# defender-check artifact say what Defender found, whether cua-driver-background.exe runs and what the app's log says
+# (scripts/defender-check-win.mjs). The run fails when Windows Security flagged the app or screen control doesn't run.
+#
+# By hand only: Run workflow in the Actions tab (`gh workflow run windows-defender-check.yml --ref <branch>`), or the
+# "defender-check" label on a pull request, which is also how it runs before this file is on main.
+name: Windows Defender check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Windows Security and the installer
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'defender-check'
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # the pull request's own commit, not its merge with main
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Clean generated output
+        shell: bash
+        run: rm -rf dist dist-server release
+      - run: pnpm package:win
+      - name: Install it like a download and watch Windows Security
+        timeout-minutes: 45
+        shell: bash
+        run: node scripts/defender-check-win.mjs --installer "$(ls release/OpenMausBot-*-setup.exe)" --out "$RUNNER_TEMP/defender-check"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: defender-check
+          path: ${{ runner.temp }}/defender-check
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,7 +1,6 @@
 // The phc_ token is a write-only public key, safe to ship in the client.
 // posthog-js loads on demand: a static import would put ~240 kB into the startup bundle.
 import type { CaptureResult, PostHog } from "posthog-js";
-import { DESKTOP_PORTS } from "../../electron/desktop-ports.mjs";
 import { appVersion } from "@/lib/app-links";
 import { readAdvancedMode } from "@/lib/interface-mode";
 
@@ -11,13 +10,6 @@ const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 const OPT_OUT_KEY = "omb-analytics-opt-out";
 // The desktop app's own page is served on whichever of its ports was free, and each port has its own storage.
 const desktopSwitch = () => globalThis.window?.ogb?.desktopAnalytics;
-
-/** False on the desktop app's own page while the app keeps no switch and the page is not on its first port, whose
- * storage may hold an opt-out saved before the app kept the switch. */
-export function analyticsChoiceKnown(): boolean {
-  const desktop = desktopSwitch();
-  return !desktop?.set || desktop.enabled() !== null || globalThis.location?.port === String(DESKTOP_PORTS[0]);
-}
 
 let client: PostHog | undefined;
 let loading: Promise<void> | undefined;
@@ -207,14 +199,6 @@ function whenReady(call: (ph: PostHog) => void) {
 
 export function track(event: string, props?: Record<string, unknown>) {
   whenReady((ph) => ph.capture(event, props));
-}
-
-// Sends a personal identifier, so it is gated on analyticsEnabled(), not on opt_out_capturing() alone. Only a counted
-// Cloud Pro popup click by someone signed in to MausBot Cloud calls it; the first-run screen asks for no email.
-export function identifyEmail(email: string) {
-  whenReady((ph) => {
-    ph.identify(email, { email });
-  });
 }
 
 const GATE_KEY = "omb-email-gate";

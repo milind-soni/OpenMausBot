@@ -25,11 +25,12 @@ import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
 import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
+import { WindowFrameRow } from "./WindowFrameRow";
 import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
-import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
+import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
 import { ThemeRow } from "./ThemeRow";
 import { AdminOnly } from "./AdminOnly";
 
@@ -39,7 +40,7 @@ export type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; ope
 
 export const SIMPLE_ADVANCED_ONLY: readonly LocaleKey[] = [
   "settings.newBotEffort.title", "newBot.defaults", "settings.roomTurns.title", "settings.mcpCalls.title", "settings.threads.title",
-  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title", "sidebar.density.title",
+  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title",
   "settings.pinnedCircles.title", "settings.universalPins.title", "settings.toolCalls.title", "settings.runCard.title", "settings.keepWarm.title",
 ];
 
@@ -63,9 +64,11 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ThemeRow simple />
             <PlaceLookRows />
             <ChromeRailRow />
+            <WindowFrameRow />
             <ColorUserBubblesRow simple />
             <LanguageRow simple />
             <SendKeyRow simple />
+            <FollowUpRow simple />
             <SettingRow title={t("settings.simple.looks.title")}>
               <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
             </SettingRow>
@@ -112,7 +115,7 @@ export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclos
       {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><AdminOnly><EnginesSettings simple more={disclose("ai-more")} /></AdminOnly></div>}
       {has("connections") && (
         <AdminOnly>
-          <SettingsDisclosureRow title={t("settings.simple.ai.keys")} block="connections" {...disclose("ai-keys")}>
+          <SettingsDisclosureRow title={t("settings.section.connections")} block="connections" {...disclose("ai-keys")}>
             {connections}
           </SettingsDisclosureRow>
         </AdminOnly>

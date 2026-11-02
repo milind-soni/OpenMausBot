@@ -1707,7 +1707,9 @@ describe("harness HTTP API", () => {
 
     try {
       const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("competing server did not exit")), 5_000);
+        // On Windows without wmic the lease reads the other server's start time through Windows PowerShell, whose first
+        // start on a CI runner takes several seconds.
+        const timer = setTimeout(() => reject(new Error("competing server did not exit")), process.platform === "win32" ? 30_000 : 5_000);
         timer.unref?.();
         contender.once("close", (code, signal) => {
           clearTimeout(timer);
@@ -1721,7 +1723,7 @@ describe("harness HTTP API", () => {
     } finally {
       await waitForExit(contender, { signal: "SIGTERM", graceMs: 1_000 });
     }
-  });
+  }, 45_000);
 
   it("serves packaged UI assets and preserves API 404s", async () => {
     const root = await fetch(`${BASE}/`);
@@ -2783,6 +2785,61 @@ describe("harness HTTP API", () => {
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.cwd).toBe(folder);
     } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const create = async (name: string, instructions: string) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name, role: "Analyst", instructions }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; error?: string } };
+      };
+      const role = `You own the weekly numbers.\n${"Check every figure against its source and say where it came from. ".repeat(80)}`.slice(0, 3999) + ".";
+      const made = await create(`Analyst ${chief.id}`, role);
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      createdId = made.body.id;
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.soul).toBe(role);
+      const longer = await create(`Longer analyst ${chief.id}`, `${role}x`);
+      expect(longer).toEqual({ status: 400, body: { error: "instructions must be at most 4000 characters; these are 4001. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to 24000 bytes." } });
+    } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("tells the Chief, and the bot in its own chat, when a bot it adds takes the person's own name", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const profile = (await api("GET", "/api/config")).body.profile as { name?: string } | undefined;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { profile: { name: "Dana Reyes" } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const response = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name: "dana reyes", role: "Ops", instructions: "Work." }),
+      });
+      const body = await response.json() as { id?: string; warning?: string };
+      expect(response.status, JSON.stringify(body)).toBe(201);
+      createdId = body.id;
+      expect(body.warning).toBe('Dana Reyes is also a person here, so "@dana reyes" reaches Dana Reyes, not this bot. Rename the bot to keep them apart.');
+      const made = ((await api("GET", "/api/bots?messages=20")).body.bots as Array<{ id: string; messages: Array<{ tool?: { name?: string } }> }>)
+        .find((bot) => bot.id === createdId)!;
+      expect(made.messages.filter((message) => message.tool?.name?.startsWith("notice: Dana Reyes is also a person here"))).toHaveLength(1);
+    } finally {
+      await api("PUT", "/api/config", { profile: { name: profile?.name ?? "" } });
       if (createdId) await api("DELETE", `/api/bots/${createdId}`);
       await api("DELETE", `/api/bots/${chief.id}`);
     }
@@ -8467,8 +8524,9 @@ describe("harness HTTP API", () => {
     expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
-  it("lets a bot file an MCP server only as a disabled row", async () => {
+  it("lets a bot below Full access file an MCP server only as a disabled row", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
     const token = await mintTestCapability(BASE, bot.id, bot.threadId);
     const secret = "bot-filed-secret-that-must-never-render";
     const headerSecret = "bot-header-secret-that-must-never-render";
@@ -8477,16 +8535,13 @@ describe("harness HTTP API", () => {
     const fileServer = (body: unknown) => fetch(`${BASE}/api/internal/mcp-servers`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ action: "add", ...(body as object) }),
     });
     try {
       const filed = await fileServer({ name: "botnotes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: secret } });
-      const filedBody = await filed.json();
+      const filedBody = await filed.json() as { text: string };
       expect(filed.status).toBe(201);
-      expect(filedBody).toEqual({
-        name: "botnotes", enabled: false, transport: "command", target: "npx",
-        envKeys: ["NOTES_TOKEN"], headerKeys: [],
-      });
+      expect(filedBody.text).toMatch(/^Saved MCP server botnotes switched off\./);
       expect(JSON.stringify(filedBody)).not.toContain(secret);
       const disk = JSON.parse(readFileSync(configFile, "utf8"));
       expect(disk.mcpServers.botnotes).toEqual({
@@ -8494,9 +8549,8 @@ describe("harness HTTP API", () => {
       });
 
       const switched = await fileServer({ name: "botother", command: "npx", enabled: true });
-      expect(switched.status).toBe(400);
-      expect(await switched.json()).toMatchObject({ error: expect.stringMatching(/on\/off switch/) });
-      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botother).toBeUndefined();
+      expect(switched.status).toBe(201);
+      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botother).toMatchObject({ command: "npx", enabled: false });
       expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botnotes.env.NOTES_TOKEN).toBe(secret);
 
       const again = await fileServer({ name: "botnotes", command: "other-command" });
@@ -8510,12 +8564,9 @@ describe("harness HTTP API", () => {
         headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret },
       });
-      const remoteBody = await remote.json();
+      const remoteBody = await remote.json() as { text: string };
       expect(remote.status).toBe(201);
-      expect(remoteBody).toEqual({
-        name: "botdocs", enabled: false, transport: "sse", target: "https://docs.example/mcp",
-        envKeys: [], headerKeys: ["Authorization"],
-      });
+      expect(remoteBody.text).toMatch(/^Saved MCP server botdocs switched off\./);
       const remoteText = JSON.stringify(remoteBody);
       expect(remoteText).not.toContain(headerSecret);
       expect(remoteText).not.toContain(oauthSecret);
@@ -8535,6 +8586,7 @@ describe("harness HTTP API", () => {
       expect(JSON.stringify(listed.body)).not.toContain(oauthSecret);
     } finally {
       await api("DELETE", "/api/mcp/servers/botnotes").catch(() => undefined);
+      await api("DELETE", "/api/mcp/servers/botother").catch(() => undefined);
       await api("DELETE", "/api/mcp/servers/botdocs").catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
     }
@@ -11878,6 +11930,34 @@ describe("harness HTTP API", () => {
       expect(claimsApps && deniesApps).toBe(false);
     } finally {
       await api("DELETE", `/api/bots/${kiwi.id}`);
+    }
+  });
+
+  it("keeps connecting an app from its card an admin's, though members reach the card's authorize for MCP sign-ins", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const requested = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "member-authorize-fixture", items: [{ slug: "gmail" }] }),
+      });
+      const [cardId] = ((await requested.json()) as { messageIds: string[] }).messageIds;
+      const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+      const paired = await fetch(`${BASE}/api/auth/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }) });
+      const memberToken = ((await paired.json()) as { token: string }).token;
+      const cardNow = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[]).find((message) => message.id === cardId).connector;
+      const untouched = await cardNow();
+      const before = connectorLinkRequests.length;
+      const asMember = await fetch(`${BASE}/api/bots/${bot.id}/connector-cards/${cardId}/authorize`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${memberToken}` }, body: JSON.stringify({ threadId: bot.threadId }),
+      });
+      expect({ status: asMember.status, body: await asMember.json() }).toEqual({ status: 403, body: { error: "forbidden: this session lacks the admin scope" } });
+      expect(connectorLinkRequests).toHaveLength(before);
+      expect(await cardNow()).toEqual(untouched);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
 

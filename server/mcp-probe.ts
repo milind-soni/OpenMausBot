@@ -31,8 +31,12 @@ const UNAUTHORIZED = /unauthori[sz]ed|forbidden|not authenticated|authentication
 export interface McpProbeOptions {
   extension?: boolean;
   observe?(info: { tools: unknown[]; uiExtension: "ok" | "refused" | "unknown" }): void;
-  /** Start a command server as this bot's AI would: in its box where turns are boxed, from its own folder. */
-  asBot?: { id: string; cwd: string };
+  /** Start a command server as a bot's turn would: in the bot box where turns are boxed, its configured environment
+   * passing the box's allow-list, from the bot's own folder when the server is one bot's (`id`). */
+  asBot?: { id?: string; cwd?: string };
+  /** Reach a URL server as a bot's turn does: at `url` with `fetch` and no headers of its own (the credential broker adds
+   * them, server/bot-box/broker-probe.ts). A sign-in is still looked for at the server's own address. */
+  via?: { url: string; fetch: typeof fetch };
 }
 
 const MAX_STDOUT_BYTES = MAX_REMOTE_MCP_BYTES;
@@ -103,7 +107,9 @@ async function probeRemoteMcpServer(
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-  const client = new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
+  const client = options.via
+    ? new RemoteMcpClient({ ...server, url: options.via.url, headers: {} }, { maxBytes: MAX_REMOTE_MCP_BYTES, fetch: options.via.fetch })
+    : new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
   try {
     await client.initialize("OpenMausBot", combined, options.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {});
     const result = await client.request("tools/list", {}, combined);
@@ -159,10 +165,10 @@ function probeStdioMcpServer(
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(server.command, server.args, {
-        cwd: options.asBot?.cwd ?? process.cwd(),
+        ...(options.asBot ? (options.asBot.cwd ? { cwd: options.asBot.cwd } : {}) : { cwd: process.cwd() }),
         env: probeEnvironment(server),
         stdio: ["pipe", "pipe", "pipe"],
-        ...(options.asBot ? { box: { botId: options.asBot.id, allowEnv: Object.keys(server.env) } } : {}),
+        ...(options.asBot ? { box: { ...(options.asBot.id ? { botId: options.asBot.id } : {}), allowEnv: Object.keys(server.env) } } : {}),
       });
     } catch {
       resolve({ ok: false, error: publicProbeError("spawn") });

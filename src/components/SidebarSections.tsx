@@ -2,8 +2,6 @@ import { useRef, useState, type DragEvent, type RefObject } from "react";
 import { FOLDER_DRAG_TYPE } from "@/lib/folder-order";
 import { t } from "@/lib/i18n";
 import {
-  SIMPLE_FIXED_SECTION_IDS,
-  keepFixedSectionSlots,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -11,16 +9,25 @@ import {
   sameSectionOrder,
   sidebarLayoutInteractive,
   sidebarSectionCollapsed,
-  simpleSidebarSections,
+  simpleOrderedSections,
   userSectionId,
   type SectionDropPlace,
 } from "@/lib/sidebar-layout";
-import { loadCollapsedSections, loadSectionOrder, saveCollapsedSections, saveSectionOrder, toggleCollapsedSection, type SidebarDensity } from "@/lib/sidebar-preferences";
+import {
+  loadCollapsedSections,
+  loadSectionOrder,
+  loadSimpleSectionOrder,
+  saveCollapsedSections,
+  saveSectionOrder,
+  saveSimpleSectionOrder,
+  toggleCollapsedSection,
+  type SidebarDensity,
+} from "@/lib/sidebar-preferences";
 
 const SECTION_DRAG_TYPE = "application/x-openmausbot-sidebar-section";
 
 /** The sidebar's sections on this device: which are collapsed, their saved order, and dragging or Alt+Up/Down a
- * heading to reorder them. Simple keeps its fixed lists first and orders only the departments after them. */
+ * heading to reorder them. Simple and Advanced each keep their own order, so a move in one leaves the other as it was. */
 export function useSidebarSections({ simple, rail, density, query, label, sidebarRef }: {
   simple: boolean;
   rail: boolean;
@@ -31,6 +38,7 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
 }) {
   const [collapsedIds, setCollapsedIds] = useState<string[]>(() => loadCollapsedSections());
   const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
+  const [simpleOrder, setSimpleOrder] = useState<string[]>(() => loadSimpleSectionOrder());
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -64,19 +72,20 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
       const replace = (ids: string[]) => [...new Set(ids.map((id) => (id === userSectionId(from) ? userSectionId(to) : id)))];
       setCollapsedIds((current) => { const next = replace(current); saveCollapsedSections(next); return next; });
       setSavedOrder((current) => { const next = replace(current); saveSectionOrder(next); return next; });
+      setSimpleOrder((current) => { const next = replace(current); saveSimpleSectionOrder(next); return next; });
       focusHeader(to);
     },
     arrange(natural: string[]) {
       const orderedIds = orderedSidebarSections(natural, savedOrder);
-      const sectionIds = simple || rail ? simpleSidebarSections(orderedIds) : orderedIds;
-      const reorderableIds = simple ? sectionIds.filter((id) => !SIMPLE_FIXED_SECTION_IDS.includes(id)) : sectionIds;
-      const reorder = (id: string, moved: string[]) => {
-        const next = simple ? simpleSidebarSections(moved) : moved;
+      const ownOrder = simple || rail;
+      const sectionIds = ownOrder ? simpleOrderedSections(orderedIds, simpleOrder) : orderedIds;
+      const reorder = (id: string, next: string[]) => {
         if (sameSectionOrder(next, sectionIds)) return;
-        const merged = mergeSectionOrder(savedOrder, simple ? keepFixedSectionSlots(orderedIds, next) : next);
-        if (interactive && !sameSectionOrder(merged, savedOrder)) {
-          setSavedOrder(merged);
-          saveSectionOrder(merged);
+        const saved = ownOrder ? simpleOrder : savedOrder;
+        const merged = mergeSectionOrder(saved, next);
+        if (interactive && !sameSectionOrder(merged, saved)) {
+          (ownOrder ? setSimpleOrder : setSavedOrder)(merged);
+          (ownOrder ? saveSimpleSectionOrder : saveSectionOrder)(merged);
         }
         const position = next.indexOf(id);
         if (position >= 0) setAnnouncement(t("sidebar.section.moved", { name: label(id), position: position + 1, count: next.length }));
@@ -84,7 +93,7 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
       return {
         sectionIds,
         header: (id: string) => ({
-          reorderable: interactive && reorderableIds.length > 1 && reorderableIds.includes(id),
+          reorderable: interactive && sectionIds.length > 1,
           dragging: draggingId === id,
           onDragStart: (event: DragEvent<HTMLElement>) => {
             event.dataTransfer.effectAllowed = "move";
