@@ -712,7 +712,8 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-const MAY_LINK_THREAD = /#|openmausbot/i;
+// A thread link is "#" directly before a title, or an app link. A heading's "## " never reaches the plugin as text.
+const MAY_LINK_THREAD = /#[^\s#]|openmausbot/i;
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered }: {

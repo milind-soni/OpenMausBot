@@ -1424,7 +1424,7 @@ describe("RoutineManager", () => {
     let failureWasPersistedBeforeCallback = false;
     h.options.onRunFailed = (run) => {
       h.failed.push(run);
-      failureWasPersistedBeforeCallback = readFileSync(routineFile, "utf8").includes('"status": "failed"');
+      failureWasPersistedBeforeCallback = JSON.parse(readFileSync(routineFile, "utf8")).runs.some((saved: RoutineRun) => saved.status === "failed");
     };
     const cut: RoutineRun[] = [];
     h.options.onRunCut = (run) => cut.push(run);
@@ -1683,7 +1683,7 @@ describe("RoutineManager", () => {
     const file = h.options.file;
     if (!file) throw new Error("test harness did not configure routine persistence");
     const stored = readFileSync(file, "utf8");
-    const malformed = stored.replace(`"sourceThreadId": "${request.threadId}"`, '"sourceThreadId": 42');
+    const malformed = stored.replace(`"sourceThreadId":"${request.threadId}"`, '"sourceThreadId":42');
     expect(malformed).not.toBe(stored);
     writeFileSync(file, malformed);
 

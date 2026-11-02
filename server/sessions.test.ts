@@ -332,6 +332,32 @@ describe("sessions", () => {
     expect(registry.isLive(email.session.id)).toBe(false);
   });
 
+  it("with recheckMs, reads membership at most that often, at once after membershipChanged(): a removal still ends access promptly", () => {
+    let allowed = true;
+    const resolve = vi.fn((_email: string) => allowed ? ["client" as const] : null);
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: resolve, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    resolve.mockClear();
+    for (let i = 0; i < 1_000; i++) expect(registry.isLive(email.session.id)).toBe(true);
+    expect(resolve.mock.calls.length).toBeLessThanOrEqual(1);
+    allowed = false;
+    registry.membershipChanged();
+    expect(registry.isLive(email.session.id)).toBe(false);
+    expect(registry.authenticate(email.token)).toBeNull();
+  });
+
+  it("with recheckMs, a sign-in list edited outside the app ends access within that time", () => {
+    let allowed = true;
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => allowed ? ["client"] : null, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    registry.recheckMembership();
+    allowed = false;
+    clock += 1_999;
+    expect(registry.isLive(email.session.id)).toBe(true);
+    clock += 1;
+    expect(registry.isLive(email.session.id)).toBe(false);
+  });
+
   it("builds one membership resolver per pass and skips snapshots with no eligible account sessions", () => {
     const resolve = vi.fn((_email: string) => ["client" as const]);
     const snapshot = vi.fn(() => resolve);
