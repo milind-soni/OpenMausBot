@@ -395,6 +395,64 @@ describe("bot-first sidebar", () => {
     expect(disabled).toContain("Move to department");
   });
 
+  it("gives the Simple bot menu New thread, View threads and Set as main thread", () => {
+    let tree: ReactNode;
+    function Capture() {
+      tree = BotContextMenu({
+        menu: { botId: bot.id, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
+      });
+      return tree;
+    }
+    const items = () => {
+      const found: ReactElement<ElementProps>[] = [];
+      const walk = (node: ReactNode) => {
+        for (const child of Children.toArray(node)) {
+          if (!isValidElement<ElementProps>(child)) continue;
+          if (child.props.role === "menuitem") found.push(child);
+          walk(child.props.children);
+        }
+      };
+      walk(tree);
+      return found;
+    };
+    const named = (label: string) => items().find((item) => Children.toArray(item.props.children).includes(label));
+    fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "idle-history" }], selectedId: bot.id };
+    renderToStaticMarkup(createElement(Capture));
+
+    named("New thread")!.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: bot.id }]]);
+
+    fixture.dispatch.mockClear();
+    named("View threads")!.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch.mock.calls).toEqual([
+      [{ type: "select", id: bot.id }],
+      [{ type: "toggleSettings", open: true, section: "history", botId: bot.id }],
+    ]);
+
+    fixture.dispatch.mockClear();
+    const setMain = named("Set as main thread")!;
+    expect(setMain.props.disabled).toBeFalsy();
+    setMain.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: "last-selected" } }]]);
+
+    // Already main: offered but off. Another bot's open thread, or a routine run, is never offered.
+    fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "last-selected" }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")!.props.disabled).toBe(true);
+    fixture.state = { ...fixture.state, selectedId: "other-bot" };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")).toBeUndefined();
+    expect(named("New thread")).toBeDefined();
+    fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "run", tasks: [...bot.tasks!, { threadId: "run", title: "Run", createdAt: 9, routineRunId: "r" }] }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")).toBeUndefined();
+    // A view-only teammate can look at the threads but not start one.
+    fixture.state = { ...fixture.state, bots: [{ ...bot, yourAccess: "view" }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("New thread")).toBeUndefined();
+    expect(named("View threads")).toBeDefined();
+  });
+
   it("Edit profile opens the panel without naming a section", () => {
     fixture.advanced = true;
     let tree: ReactNode;

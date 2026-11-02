@@ -56,6 +56,8 @@ export type BotUpdatePatch = Partial<
   keepThreadModels?: boolean;
   /** With modelSelection: the thread this client shows. Body only: Bot.threadId is the server's selection. */
   threadId?: string;
+  /** The conversation to make main ("Set as main thread"); null clears it. Body only: the bot shows it as mainThreadId. */
+  mainThreadChoice?: string | null;
 };
 
 export type BotStatePatch = Omit<

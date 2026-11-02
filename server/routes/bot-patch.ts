@@ -214,6 +214,13 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           patch.pinnedMessageId = body.pinnedMessageId;
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
       }
+      // null clears the choice; otherwise one of this bot's own conversations, never a routine run.
+      if (body.mainThreadChoice !== undefined) {
+        const chosen = typeof body.mainThreadChoice === "string" ? store.taskByThread(m[1], body.mainThreadChoice) : null;
+        if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
+        else if (chosen && !chosen.routineRunId) patch.mainThreadChoice = chosen.threadId;
+        else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
+      }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
       if (body.fallback !== undefined) {

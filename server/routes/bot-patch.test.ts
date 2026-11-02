@@ -324,3 +324,33 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(store.bot(bot.id)?.phoneApps).toBeUndefined();
   });
 });
+
+describe("PATCH /api/bots/:id mainThreadChoice", () => {
+  it("stores the conversation the person chose, clears it with null, and refuses a routine run or another bot's thread", async () => {
+    const { store, bot, patch } = fixture();
+    const chosen = store.createTask(bot.id, "Chosen", false)!;
+    const run = store.createTask(bot.id, "Run", false)!;
+    store.patchTask(bot.id, run.threadId, { routineRunId: "run-1" });
+    const other = store.createBot({ name: "Other" });
+
+    expect((await patch(bot.id, { mainThreadChoice: chosen.threadId })).status).toBe(200);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBe(chosen.threadId);
+
+    for (const refused of [run.threadId, other.threadId, "missing", 7]) {
+      expect((await patch(bot.id, { mainThreadChoice: refused })).status).toBe(400);
+    }
+    expect(store.bot(bot.id)?.mainThreadChoice).toBe(chosen.threadId);
+
+    expect((await patch(bot.id, { mainThreadChoice: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+
+  it("refuses a client session and a paired device", async () => {
+    const { store, bot, patch } = fixture();
+    const client = await patch(bot.id, { mainThreadChoice: bot.threadId }, { auth: { kind: "session", via: "bearer", scopes: ["client"], session: { id: "s-member", email: "member@example.com", label: "Front desk" } } as unknown as RequestAuth });
+    const paired = await patch(bot.id, { mainThreadChoice: bot.threadId }, { headers: { "x-openmausbot-companion": "1" } });
+    expect(client.status).toBe(403);
+    expect(paired.status).toBe(403);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+});

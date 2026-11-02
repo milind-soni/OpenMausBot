@@ -1585,12 +1585,14 @@ export function reducer(state: AppState, action: Action): AppState {
         acknowledgeLocalAuto: _localAck,
         applyToAllThreads: _allThreads,
         keepThreadModels: _keepThreadModels, threadId: _threadId,
+        mainThreadChoice,
         computer,
         connectorTools,
         connectorScopes, phoneApps, peers,
         ...rest
       } = action.patch;
       const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(peers !== undefined && { peers: peers ?? undefined }) };
+      if (typeof mainThreadChoice === "string") botPatch.mainThreadId = mainThreadChoice;
       if (computer === null) botPatch.computer = undefined;
       else if (computer !== undefined) botPatch.computer = computer;
       if (connectorTools === null) botPatch.connectorTools = undefined;
