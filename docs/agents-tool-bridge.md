@@ -16,7 +16,11 @@ The list is then 14.5 to 15.4 KB, 65 to 74% smaller. What a turn may call does
 not change: the tools behind `use_tool` are exactly the ones the turn would
 have been listed.
 
-It is off by default.
+It is off by default, except for a bot on a local model: one picked from a local
+server, or one on an OpenAI-compatible engine whose URL is on this machine or
+network. A small window cannot spare the full list, so those bots get the bridge
+without the switch. `OMB_AGENTS_TOOL_BRIDGE=0` turns that off too, and the rules
+under "Which bots and engines get it" still apply.
 
 ## Turning it on
 
