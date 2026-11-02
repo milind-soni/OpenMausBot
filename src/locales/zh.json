@@ -3583,5 +3583,6 @@
   "voice.openai.error.limit": "这一段的语音超过了 8 MiB 大小限制。",
   "voice.openai.error.cancelled": "已取消 OpenAI 语音生成。",
   "voice.openai.error.failed": "OpenAI 未能生成这一段的语音，请检查 API 访问权限和用量。",
-  "voice.openai.error.voice": "请先选择一个 OpenAI 声音，再朗读回复。"
+  "voice.openai.error.voice": "请先选择一个 OpenAI 声音，再朗读回复。",
+  "keys.purpose.openaiModelsVoice": "OpenAI 模型、朗读回复和实时通话"
 }

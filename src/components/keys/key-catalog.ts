@@ -76,7 +76,7 @@ const OPENAI_SHAPE = /^sk-(proj|svcacct|admin)-/;
 const provider = (driverKind: string, preset?: ProviderIconPreset): KeyMark => ({ driverKind, ...(preset ? { preset } : {}) });
 
 export const KEY_CATALOG: readonly KeyEntry[] = [
-  { id: "openai", section: "ai", labelKey: "keys.openai.label", purposeKey: "keys.purpose.openai", name: "OpenAI", env: ["OMB_OPENAI_API_KEY"],
+  { id: "openai", section: "ai", labelKey: "keys.openai.label", purposeKey: "keys.purpose.openaiModelsVoice", name: "OpenAI", env: ["OMB_OPENAI_API_KEY"],
     words: ["openai", "chatgpt", "gpt", "live calls"], mark: provider("openai-compat", "openai"), kind: "key",
     target: providerKey("openai", { placeholder: "sk-…", href: "https://platform.openai.com/api-keys", test: "openai", analytics: "openai", shape: OPENAI_SHAPE, noteKey: "keys.openai.note" }) },
   { id: "anthropic", section: "ai", labelKey: "keys.anthropic.label", purposeKey: "keys.purpose.anthropic", name: "Anthropic", env: ["OMB_ANTHROPIC_API_KEY"],

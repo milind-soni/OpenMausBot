@@ -7310,5 +7310,6 @@
   "voice.openai.error.limit": "OpenAI speech exceeded the 8 MiB limit for one segment.",
   "voice.openai.error.cancelled": "OpenAI speech was cancelled.",
   "voice.openai.error.failed": "OpenAI could not generate speech for this segment. Check your API access and usage.",
-  "voice.openai.error.voice": "Choose an OpenAI voice before reading replies aloud."
+  "voice.openai.error.voice": "Choose an OpenAI voice before reading replies aloud.",
+  "keys.purpose.openaiModelsVoice": "OpenAI models, reply readout and live calls"
 }
