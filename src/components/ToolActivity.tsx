@@ -1,5 +1,6 @@
 import { Check, ChevronRight, Circle, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "@/state/api";
 import type { Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -7,11 +8,15 @@ import { placeLabelKey, type Place } from "@/lib/place";
 import { nameIsCommand } from "@/lib/verify-steps";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { toolStepLabel } from "@/lib/tool-step-label";
+import type { MessageAttachmentContext } from "./AttachmentPreview";
 import { PlaceIcon } from "./PlaceIcon";
 import { WorkingDots } from "./WorkingIndicator";
 
-export function ToolActivity({ tool, place = null, live = false }: { tool: NonNullable<Message["tool"]>; place?: Place | null; live?: boolean }) {
+/** Which stored message a step is: a clipped step (its output cut short in conversation pages) loads the rest from it. */
+export function ToolActivity({ tool, place = null, live = false, source }: { tool: NonNullable<Message["tool"]>; place?: Place | null; live?: boolean; source?: MessageAttachmentContext }) {
   const [expanded, setExpanded] = useState(false);
+  const full = useFullOutput(expanded && tool.clipped ? source : undefined, tool.output);
+  const output = full.output ?? tool.output;
   const failed = tool.ok === false;
   const advanced = useAdvancedMode();
   const label = advanced ? tool.name : toolStepLabel(tool);
@@ -42,10 +47,31 @@ export function ToolActivity({ tool, place = null, live = false }: { tool: NonNu
         </div>
         <div>
           <div className="mb-1 text-[11px] font-medium">{t("toolDetail.output")}</div>
-          {tool.output ? <pre dir="ltr" className="max-h-64 overflow-auto rounded-lg bg-inset p-2.5 font-mono text-xs whitespace-pre-wrap break-words text-ink">{tool.output}</pre> : <p className="text-xs">{tool.ok === undefined ? (live ? t("toolDetail.waiting") : t("toolDetail.unverified")) : t("toolDetail.noOutput")}</p>}
+          {output ? <pre dir="ltr" className="max-h-64 overflow-auto rounded-lg bg-inset p-2.5 font-mono text-xs whitespace-pre-wrap break-words text-ink">{output}</pre> : <p className="text-xs">{tool.ok === undefined ? (live ? t("toolDetail.waiting") : t("toolDetail.unverified")) : t("toolDetail.noOutput")}</p>}
         </div>
+        {(full.state === "loading" || full.state === "failed") && <p className="text-[11px] text-ink-secondary" role="status">{t(full.state === "loading" ? "toolDetail.loadingFull" : "toolDetail.partial")}</p>}
         <p className="text-[11px] text-ink-secondary">{t("toolDetail.previewHint")}</p>
       </div>
     </details>
   );
+}
+
+type FullOutput = { state: "idle" | "loading" | "done" | "failed"; output?: string };
+
+/** The whole output of a clipped step, fetched when it is opened: kept once it arrives, asked again after a failure. */
+function useFullOutput(source: MessageAttachmentContext | undefined, preview: string | undefined): FullOutput {
+  const url = source && `/api/threads/${encodeURIComponent(source.threadId)}/messages/${encodeURIComponent(source.messageId)}/tool`;
+  const key = url && `${url}#${preview?.length ?? 0}`;
+  const [full, setFull] = useState<FullOutput & { key?: string }>({ state: "idle" });
+  const have = full.key === key && full.state === "done";
+  useEffect(() => {
+    if (!url || have) return;
+    let current = true;
+    setFull({ state: "loading", key });
+    api<{ output: string }>(url)
+      .then((body) => { if (current) setFull({ state: "done", key, output: body.output }); })
+      .catch(() => { if (current) setFull({ state: "failed", key }); });
+    return () => { current = false; };
+  }, [url, key, have]);
+  return full.key === key ? full : { state: "idle" };
 }

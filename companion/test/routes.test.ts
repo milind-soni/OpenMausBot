@@ -88,6 +88,7 @@ describe("what the app may do", () => {
     ["DELETE", "/api/groups/room-1/tasks/th_1"],
     ["GET", "/api/threads/th_1/messages"],
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
+    ["GET", "/api/threads/th_1/messages/msg_2/tool"],
     ["GET", "/api/threads/th_1/messages/msg_2/app"],
     ["POST", "/api/bots/bot_123/apps/msg_2/rpc"],
     ["POST", "/api/bots/bot_123/apps/msg_2/context"],

@@ -634,7 +634,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
 }
 
 const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { message: Message; place?: EffectivePlace }) {
-  const { bots, dispatch, liveTools } = useChatRows();
+  const { bots, dispatch, liveTools, threadId } = useChatRows();
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />; if (message.relay) return <TeammateChip message={message} />;
@@ -643,7 +643,7 @@ const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { m
     return <HandoffChip message={message} bots={bots} title={t("chat.openConversationWith", { name: comm.withName })}
       onClick={() => dispatch({ type: "select", id: comm.groupId })} />;
   }
-  return <ToolActivity tool={tool} live={liveTools.has(message.id)} place={toolPlace(tool.name, place)} />;
+  return <ToolActivity tool={tool} live={liveTools.has(message.id)} place={toolPlace(tool.name, place)} source={{ threadId, messageId: message.id }} />;
 });
 
 const MessagesList = memo(function MessagesList({
