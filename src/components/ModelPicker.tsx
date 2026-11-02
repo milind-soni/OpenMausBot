@@ -261,6 +261,7 @@ export function ModelPicker({
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
   const focusOnPlace = useRef<string | null>(null);
+  const refocusAfterPick = useRef(false);
   const typed = useRef<Typeahead | null>(null);
   const menuId = useId();
   const inside = useRef({ contains: (target: unknown) => [rootRef.current, menuRef.current].some((node) => node?.contains(target as Node)) });
@@ -306,6 +307,15 @@ export function ModelPicker({
   }, [open, placement]);
 
   const selection = bot.modelSelection;
+  // Applying a pick can redraw the picked row elsewhere and drop focus out of the open menu; bring it back
+  // (to the thinking level when there is one) so Escape and the arrow keys keep working.
+  useEffect(() => {
+    if (!refocusAfterPick.current) return;
+    refocusAfterPick.current = false;
+    const menu = menuRef.current;
+    if (!open || !menu || menu.contains(document.activeElement)) return;
+    (menu.querySelector<HTMLElement>('[data-simple-effort] [tabindex="0"]') ?? menu).focus({ preventScroll: true });
+  }, [selection, open]);
   const instances = withTypedModels(state.instances, selection, query);
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const pickerInstances = configuredModelInstances(instances, selection.instanceId);
@@ -508,6 +518,7 @@ export function ModelPicker({
     // A model with reasoning levels keeps the menu open, so its level can be set next without opening it again;
     // picking a variant row already sets that level.
     if (variant !== undefined || !offersReasoning(instance, nextSelection)) close(true);
+    else refocusAfterPick.current = true;
   };
 
   const resetVariant = contained && selection.variant !== undefined ? () => {

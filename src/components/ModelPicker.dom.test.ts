@@ -298,6 +298,12 @@ describe("picking a model that has reasoning levels", () => {
       expect(chip().getAttribute("aria-expanded")).toBe("true");
       expect(menu()!.querySelector(advanced ? 'select[aria-label="Reasoning effort"]' : "[data-effort-pill]")).not.toBeNull();
 
+      // The store applies the pick; the picked row may be redrawn elsewhere, but focus stays in the menu.
+      render(scout("claude-sonnet-5-5"));
+      await settle();
+      expect(menu()).not.toBeNull();
+      expect(menu()!.contains(focused())).toBe(true);
+
       press("Escape");
       await settle();
       expect(menu()).toBeNull();
