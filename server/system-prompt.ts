@@ -26,7 +26,7 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string; person?: s
 // at the computer, or not there) and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent", "availability", "active-routines",
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "recent", "availability", "active-routines",
   "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place"]);
 
 /** Its id is what puts it in the volatile half. */
@@ -217,7 +217,7 @@ export const JUST_DO_IT_PROMPT =
   " Just do it is on: do not stop to ask the person to confirm a step or choose between options. Use what you know, a connected app, the web, a signed-in browser, then the computer; take the sensible default for anything left, carry on, and say in one plain line what you chose. Ask them only for what only they can do: a sign-in, a payment, a secret or an account of theirs.";
 
 export const CREDENTIAL_PROMPT =
-  " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request; a 1Password service account token, for signing in with logins from a 1Password vault, is one too (credential_id onePasswordToken). Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. For any other secret (a Stripe or npm token, a webhook signing secret), give request_credential a label, reason and delivery: ref for add_mcp_server, file for your own commands. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
+  " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request; a 1Password service account token, for signing in with logins from a 1Password vault, is one too (credential_id onePasswordToken). Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. For any other secret (a Stripe or npm token, a webhook signing secret), give request_credential a label, reason and delivery: ref for mcp_server, file for your own commands. mcp_server sets up MCP servers in the chat: suggest one when a task needs a service you can't reach yet, and add, turn on or change one once the person asks or agrees. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 /** Ten minutes stays inside the 20-minute turn stall watchdog, which sees nothing while a command runs. */
 export const BASH_MAX_TIMEOUT_MS = 600_000;
 const LONG_COMMANDS_TEXT =

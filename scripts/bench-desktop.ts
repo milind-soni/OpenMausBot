@@ -5,7 +5,8 @@
 //     [--chrome PATH] [--idle-seconds 30] [--bots 150] [--threads 300] [--messages 2000] [--advanced] [--out FILE] [--keep]
 //     [--screenshots DIR]
 // bundle: the production build's first-load JavaScript and which libraries it pulls in eagerly.
-// server: fixture server spawn to /api/health, from source and as the packaged bundle with its compile cache.
+// server: fixture server spawn to /api/health, from source and as the packaged bundle with its compile cache; timer
+//   callbacks and CPU with no page open; child processes each engine-list read (a window focus) starts.
 // start: page load to the sidebar and the last chat drawn; JavaScript the page downloads.
 // idle: CPU, timer and frame callbacks, React commits and server work with nothing happening (and the rail's page).
 // stream: one long streamed reply with tool calls: commits, components rendered per commit, main-thread time per
@@ -73,7 +74,7 @@ const STREAM_ENV = {
   FAKE_CLAUDE_TOOL_CALLS: JSON.stringify(TOOL_CALLS),
 };
 
-interface Tally { cpu: { user: number; system: number }; memory: { rss: number; heapUsed: number }; fired: Record<string, number>; intervals: Record<string, number>; writes: Record<string, { bytes: number; calls: number }>; fsyncs: number; renames: number }
+interface Tally { cpu: { user: number; system: number }; memory: { rss: number; heapUsed: number }; fired: Record<string, number>; intervals: Record<string, number>; writes: Record<string, { bytes: number; calls: number }>; fsyncs: number; renames: number; spawns: number }
 interface Fixture {
   url: string; dataDir: string; pid: number; readyMs: number; logPath: string;
   api(method: string, path: string, body?: unknown): Promise<{ status: number; ms: number; bytes: number; body: any }>;
@@ -358,7 +359,7 @@ async function pageLoad(page: Page, url: string, timeoutMs = 60_000) {
 }
 
 async function benchSnapshot(page: Page) {
-  return page.evaluate<{ commits: number; commitMs: number; probeMs: number; renderedTotal: number; maxRendered: number; renders: Record<string, number>; selfMs: Record<string, number>; mounts: Record<string, number>; timerFires: Record<string, number>; sse: { frames: number; bytes: number; kinds: Record<string, { n: number; bytes: number }> }; longTasks: Array<[number, number]>; liveIntervals: string[] }>(
+  return page.evaluate<{ commits: number; commitMs: number; probeMs: number; renderedTotal: number; maxRendered: number; renders: Record<string, number>; selfMs: Record<string, number>; mounts: Record<string, number>; why: Record<string, Record<string, number>>; timerFires: Record<string, number>; sse: { frames: number; bytes: number; kinds: Record<string, { n: number; bytes: number }> }; longTasks: Array<[number, number]>; liveIntervals: string[] }>(
     "(() => { const b = window.__bench; return { ...b, liveIntervals: [...b.liveIntervals.values()], reset: undefined }; })()");
 }
 
@@ -475,7 +476,7 @@ async function streamTurn(chrome: Chrome, page: Page, fixture: Fixture, botId: s
     reactCommits: snapshot.commits, commitsPerSec: round(snapshot.commits / seconds),
     renderMsTotal: Math.round(snapshot.commitMs),
     componentsRenderedPerCommit: round(snapshot.renderedTotal / Math.max(1, snapshot.commits)), maxComponentsInOneCommit: snapshot.maxRendered,
-    topRendered: Object.fromEntries(top.map(([name, count]) => [name, { renders: count, perCommit: round(count / Math.max(1, snapshot.commits), 2), selfMs: Math.round(snapshot.selfMs[name] ?? 0) }])),
+    topRendered: Object.fromEntries(top.map(([name, count]) => [name, { renders: count, perCommit: round(count / Math.max(1, snapshot.commits), 2), selfMs: Math.round(snapshot.selfMs[name] ?? 0), why: snapshot.why[name] }])),
     groups: componentGroups(snapshot.renders, snapshot.selfMs),
     mounts: Object.values(snapshot.mounts).reduce((sum, n) => sum + n, 0),
     animationsMidTurn,
@@ -525,6 +526,24 @@ async function main() {
       await fixture.close();
     }
     const server: Record<string, unknown> = { sourceReadyMs: source, sourceRssMbAt3s: sourceRss };
+    {
+      log(`server alone: idle ${IDLE_MS / 1000}s, then engine-list reads`);
+      const fixture = await startFixture();
+      await sleep(10_000);
+      const before = await fixture.tally();
+      await sleep(IDLE_MS);
+      const idle = tallyDelta(before, await fixture.tally());
+      Object.assign(server, { idleTimerCallbacksPerSec: round(idle.timerCallbacks / (IDLE_MS / 1000), 2), idleCpuPct: round(idle.cpuMs / IDLE_MS * 100, 2), idleTimers: idle.fired });
+      const spawns: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        const at = (await fixture.tally()).spawns;
+        await fixture.api("GET", "/api/instances");
+        spawns.push((await fixture.tally()).spawns - at);
+        await sleep(4_000);
+      }
+      server.instancesSpawnsPerRead = spawns;
+      await fixture.close();
+    }
     try {
       const entry = await bundleServer();
       const cache = join(work, "compile-cache");

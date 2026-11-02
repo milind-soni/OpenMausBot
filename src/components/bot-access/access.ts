@@ -1,4 +1,4 @@
-import { accessFromVisibility, atLeast, GRANTED_LEVELS, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../../shared/bot-access";
+import { accessFromVisibility, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../../shared/bot-access";
 import { api, type Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { TeamPeople, TeamPerson } from "@/state/team-people";
@@ -12,6 +12,14 @@ const LEVEL_KEYS = {
 
 export const levelLabel = (level: BotAccessLevel): string => t(LEVEL_KEYS[level]);
 
+const HINT_KEYS = {
+  view: "botAccess.levelHint.view",
+  chat: "botAccess.levelHint.chat",
+  edit: "botAccess.levelHint.edit",
+} as const;
+
+export const levelHint = (level: GrantedLevel): string => t(HINT_KEYS[level]);
+
 /** The sharing this copy of the bot carries; an admin's copy from an older server carries only its visibility. */
 export function accessOfBot(bot: Pick<Bot, "access" | "visibility">): BotAccess {
   return bot.access ?? accessFromVisibility(bot.visibility);
@@ -20,10 +28,8 @@ export function accessOfBot(bot: Pick<Bot, "access" | "visibility">): BotAccess 
 /** Whether this person may change the bot's sharing; off a team nobody shares a bot. */
 export const canShare = (bot: Pick<Bot, "yourAccess">): boolean => bot.yourAccess === "edit";
 
-/** The level a person gets when added: chat, or edit when everyone can already chat; none to give when everyone edits. */
-export function levelWhenAdded(everyone: BotAccessLevel): GrantedLevel | null {
-  return GRANTED_LEVELS.find((level) => atLeast(level, "chat") && !atLeast(everyone, level)) ?? null;
-}
+/** The level a person gets when added; there is none to give when everyone already edits. */
+export const levelWhenAdded = (everyone: BotAccessLevel): GrantedLevel | null => (everyone === "edit" ? null : "chat");
 
 /** Admins and the owner can always edit, so they are never added; everyone else on the team not yet added can be. */
 export function addablePeople(team: Pick<TeamPeople, "people">, access: BotAccess, owner: string | null, query: string): TeamPerson[] {
@@ -39,6 +45,14 @@ export function withPerson(access: BotAccess, email: string, level: GrantedLevel
   if (level) people[email] = level;
   else delete people[email];
   return { everyone: access.everyone, people };
+}
+
+export const personOf = (entry: string, team: Pick<TeamPeople, "people"> | null): TeamPerson | null => team?.people.find((person) => person.email === entry) ?? null;
+export const nameOf = (entry: string, team: Pick<TeamPeople, "people"> | null): string => personOf(entry, team)?.name ?? entry;
+
+export async function saveOwner(botId: string, email: string): Promise<Bot> {
+  const answer = await api<{ bot: Bot }>(`/api/bots/${botId}/reports-to`, { method: "PUT", body: JSON.stringify({ email }) });
+  return answer.bot;
 }
 
 export async function saveAccess(botId: string, access: BotAccess): Promise<Bot> {
