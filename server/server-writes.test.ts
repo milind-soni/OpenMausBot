@@ -23,7 +23,8 @@ const bots = () => readFileSync(join(DATA_DIR, "bots.json"), "utf8");
 
 describe("bots.json saves", () => {
   beforeEach(() => {
-    rmSync(DATA_DIR, { recursive: true, force: true });
+    // Windows holds a just-closed file for a moment, so the first attempt can answer EPERM.
+    rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     vi.mocked(fs.renameSync).mockClear();
   });
 

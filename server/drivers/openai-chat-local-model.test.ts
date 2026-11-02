@@ -19,6 +19,8 @@ type Script = (body: ChatRequest, response: ServerResponse, round: number) => vo
 const MCP_SCRIPT = `
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+
+process.env.OMB_TEST_FIXTURE_MODELS = "";
 const [effects] = process.argv.slice(2);
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
 const schema = { type: "object", properties: { name: { type: "string" } }, required: ["name"], additionalProperties: false };

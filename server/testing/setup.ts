@@ -14,6 +14,8 @@ process.env.USERPROFILE = home;
 delete process.env.OMB_DATA_DIR;
 // Do not let a developer's Hermes global config path leak into per-test homes.
 delete process.env.HERMES_HOME;
+// A test's fake model on loopback is not a local model: no repeat guard, extra rounds or Ollama probe. Tests of those opt in.
+process.env.OMB_TEST_FIXTURE_MODELS = "1";
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
 

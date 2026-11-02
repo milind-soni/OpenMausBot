@@ -29,6 +29,9 @@ export function onThisNetwork(url: string): boolean {
   try { host = new URL(url).hostname.replace(/^\[|\]$/g, ""); } catch { return false; }
   return isLoopback(host) || host.endsWith(".local") || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) || /^f[cd][0-9a-f]{2}:/i.test(host);
 }
+/** A model running on this network. A test's fixture speaks the same API from loopback without being one. */
+const runsLocalModel = (url: string): boolean => onThisNetwork(url) && process.env.OMB_TEST_FIXTURE_MODELS !== "1";
+
 const DEFAULT_MODELS: ModelCatalog = {
   default: "meta-llama/llama-3.3-70b-instruct",
   options: [
@@ -276,7 +279,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       fetchModels(),
     ]) : null;
 
-    const origin = onThisNetwork(config.url) ? config.url.replace(/\/v1$/, "") : null;
+    const origin = runsLocalModel(config.url) ? config.url.replace(/\/v1$/, "") : null;
     const servedModel = origin ? async (model: string) => {
       if (!await isOllama(origin)) return model;
       const served = await serveWithWindow(origin, model);
@@ -309,7 +312,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
-      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs(), localModel: true } : {}),
+      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs() } : {}),
+      ...(runsLocalModel(config.url) ? { localModel: true } : {}),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,
