@@ -1,15 +1,31 @@
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
 import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import type { json } from "../harness/http.ts";
 import { sessionMember } from "./team-phone.ts";
 
-export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "mcpServerResponse" | "savedCustomDomain" | "appCatalog"> {
+type ListedMcpServer = { name: string; enabled: boolean; bot?: string; offFor?: readonly string[] };
+
+// Security: built field by field, never spread. The settings list carries commands, arguments and addresses that can
+// hold secrets, so it stays closed to phones and this is what they get instead.
+function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mcpServers?: readonly string[] | null }) {
+  return listed.filter((server) => mcpServerServes(server, bot.id)).map((server) => ({
+    name: server.name,
+    enabled: server.enabled,
+    on: server.enabled && (!bot.mcpServers || bot.mcpServers.includes(server.name)),
+    ...(server.offFor?.includes(bot.id) ? { offFor: true as const } : {}),
+  }));
+}
+
+export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "savedCustomDomain" | "appCatalog"> {
   config: McpConfig;
+  bot(id: string): { id: string; mcpServers?: readonly string[] | null } | null;
+  /** Secrets as booleans, sign-in state attached. */
+  mcpServerResponse(): { servers: readonly ListedMcpServer[] };
 }
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
@@ -37,6 +53,13 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, withServerDetails(mcpServerResponse()));
+    }
+
+    const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
+    if (method === "GET" && ofBot) {
+      const bot = deps.bot(ofBot[1]!);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { servers: botMcpServers(mcpServerResponse().servers, bot) });
     }
 
     const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);

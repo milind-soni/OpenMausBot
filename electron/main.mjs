@@ -104,11 +104,11 @@ import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createClou
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget } from "./lending-target.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
-import { installOneHome } from "./one-home-main.mjs"; import { installOwnHome } from "./own-home-main.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
+import { installOneHome } from "./one-home-main.mjs"; import { handSaved, installOwnHome } from "./own-home-main.mjs"; import { serverOpens } from "./saved-server.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
 import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
-import { createHomePlaces } from "./home-places.mjs"; import { createAddedCloudNotice, installCloudRail, railPlaces } from "./cloud-rail.mjs"; import { otherOwnClouds } from "./cloud-list.mjs"; import { installPlaceLook } from "./place-look.mjs"; import { CHROME_RAIL_PATH, createChromeRail } from "./chrome-rail.mjs";
+import { createHomePlaces } from "./home-places.mjs"; import { createAddedCloudNotice, installCloudRail, railPlaces } from "./cloud-rail.mjs"; import { homeLook, otherOwnClouds, withoutOldCloudHome } from "./cloud-list.mjs"; import { installPlaceLook } from "./place-look.mjs"; import { CHROME_RAIL_PATH, createChromeRail } from "./chrome-rail.mjs";
 import { createWindowStateFile } from "./window-state-file.mjs";
 import { createEnvironmentsFile } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
@@ -476,6 +476,7 @@ import {
   startCompanion,
   stopCompanion,
 } from "./companion.mjs";
+import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
 
@@ -1703,8 +1704,8 @@ async function switchEnvironment(id) {
       if (!(await cloudHomeSignedIn(entry.origin))) { await openCloudSettings(); return; }
     }
   }
-  persistEnvironments(withActive(environmentsState, id));
-  navigateMainWindow(activeOrigin());
+  if (entry && handSaved(entry) && !(await serverOpens(entry, { fetch: (...args) => session.defaultSession.fetch(...args), dialog, forget: (gone) => forgetEnvironment(gone, false, true) }))) return;
+  persistEnvironments(withActive(environmentsState, id)); navigateMainWindow(activeOrigin());
 }
 
 function createLocalEnvironment(name, dataDir) {
@@ -1859,7 +1860,7 @@ async function connectHostedWorkspace(input, name) {
 /** My Cloud, and each team's Cloud the session lists (home-places.mjs), under Servers. */
 function rememberCloudHome(state) {
   try {
-    const next = withCloudHome(environmentsState, state?.status === "connected" ? state.machine : null, () => randomUUID(), cloudLook.pending());
+    const next = withCloudHome(withoutOldCloudHome(environmentsState, state), state?.status === "connected" ? state.machine : null, () => randomUUID(), cloudLook.pending() ?? homeLook(state));
     if (next !== environmentsState) persistEnvironments(next);
     homePlaces.sync(state);
   } catch (error) {
@@ -1922,11 +1923,11 @@ function askRemoteMicrophone(origin) {
   return remoteMicrophoneAsks.get(origin);
 }
 
-async function forgetEnvironment(id, purge = false) {
+async function forgetEnvironment(id, purge = false, confirmed = false) {
   const env = environmentsState.environments.find((e) => e.id === id);
   if (!env) return;
   if (env.kind === "local" && environmentsState.activeId === id) return { ok: false, error: "active" };
-  if (env.kind !== "local") {
+  if (env.kind !== "local" && !confirmed) {
     const { response } = await dialog.showMessageBox({
       type: "warning",
       buttons: ["Forget", "Cancel"],
@@ -2693,7 +2694,7 @@ const rail = installCloudRail({ ipcMain, clipboard, openCloud: openOwnCloud, acc
   guard: handler => (event, ...args) => (chromeRail.owns(event) ? handler(event, ...args) : workspaceOnly(handler)(event, ...args)),
   lists: event => chromeRail.owns(event), trusted: event => chromeRail.owns(event) || senderIsLocal(event), beside: () => chromeRail.shown(),
   targets: () => [mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null, { send: channel => chromeRail.send(channel), isDestroyed: () => false }],
-  places: railList, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id),
+  places: railList, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id), forget: id => forgetEnvironment(id, false, true),
   add: { choices: () => ({ cloud: cloudOffersAllowed(), link: !desktopRemoteAccess, address: !desktopRemoteAccess && !homeWindow.cloudOrigin() }),
     run: (choice, link) => (choice === "link" ? (link ? connectHostedWorkspace(link) : addServerFromClipboard()) : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
 const announceAddedCloud = createAddedCloudNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()), sheetOpen: rail.sheetOpen,
@@ -3107,10 +3108,9 @@ app.whenReady().then(async () => {
   }
   void cloudAccountStarted.then(() => { cloudSignInRestored = true; void oneHome.kick(); void homeWindow.refresh(); }); void ownHome?.kick();
   if (!desktopRemoteAccess && serverReady && companionEnabledAtRest() && !oneHome.away() && !ownHome?.away()) {
-    // Wait until a saved organisation policy is known: it may turn remote access off.
-    void (managedDesktop?.whenRestored() ?? Promise.resolve())
-      .then(() => startDesktopCompanion({ waitForHosted: false, remember: false }))
-      .catch(error => slog(`companion auto-start skipped: ${error?.message ?? error}`));
+    // Retries stop once the person turns the phone off, starts it by hand or quits.
+    const wanted = () => !desktopShutdownStarted && companionEnabledAtRest() && !companionRunning() && !oneHome.away() && !ownHome?.away();
+    void autoStartCompanion({ restored: managedDesktop?.whenRestored(), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }), wanted, log: slog });
   }
   setLocalOrigin(rendererOrigin());
   session.defaultSession.webRequest.onCompleted({ urls: ["https://*/api/*"] }, details => homeWindow.responded(details));

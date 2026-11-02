@@ -13,7 +13,7 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("@/state/store", async (importOriginal) => ({ ...await importOriginal<typeof import("@/state/store")>(), api: fixture.api, useStore: () => ({ state: fixture.state }) }));
 vi.mock("./BrowserProfilesManager", () => ({ BrowserProfilesManager: () => null }));
-const { LiveBrowser } = await import("./BrowserPanel");
+const { BrowserPanel, LiveBrowser } = await import("./BrowserPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -478,5 +478,27 @@ describe("a sign-in that stops at a passkey", () => {
     const again = await streaming("you");
     await go(again, PASSKEY);
     expect(notice()?.textContent).toContain(t("browser.passkey.lendPc", { name: "Pepper" }));
+  });
+});
+
+describe("the browser panel before the browser is installed", () => {
+  async function renderUninstalled(scopes: string[]) {
+    fixture.state = { config: { browserProfiles: [], browserEngine: { kind: "unavailable", installable: true } }, computerControl: {} };
+    fixture.api.mockImplementation(async (path: string) => path === "/api/auth/session" ? { scopes } : { ok: true });
+    await act(async () => root.render(createElement(BrowserPanel, { bot })));
+    await flush();
+  }
+
+  it("offers the install here instead of sending an admin to the panel they are on", async () => {
+    await renderUninstalled(["admin"]);
+    expect(host.textContent).toContain(t("browser.panel.engineNotInstalledHelp", { name: "Pepper" }));
+    expect(host.textContent).not.toContain(t("browser.notInstalled"));
+    expect(button(t("browser.panel.installEngine")).disabled).toBe(false);
+  });
+
+  it("keeps the setup steps for someone who cannot install", async () => {
+    await renderUninstalled([]);
+    expect(host.textContent).toContain(t("browser.notInstalled"));
+    expect(button(t("browser.panel.installEngine")).disabled).toBe(true);
   });
 });
