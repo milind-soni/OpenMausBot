@@ -931,7 +931,6 @@ export function ModelPicker({
           ) : (
             <div className="px-3.5 py-5 text-[13px] leading-[18px] text-ink-secondary">{t("model.noProviders")}</div>
           )}
-          {/* Providers and API keys are set up on the host; a remote client has no such settings. */}
           {!remote && (
             <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
               <button type="button" onClick={openEngines}
