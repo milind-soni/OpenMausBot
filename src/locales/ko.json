@@ -4479,6 +4479,7 @@
   "computer.problem.localNeedsApp": "이 컴퓨터의 {app} 앱만 봇이 이 컴퓨터를 쓰게 할 수 있어요. 쓰려면 여기서 앱을 여세요.",
   "computer.problem.localWindows": "지금은 봇이 이 PC를 쓸 수 없어요. {app}을 다시 시작하고, 그래도 안 되면 설정 → 진단을 여세요.",
   "computer.problem.localMac": "아직 봇이 이 Mac을 쓸 수 없어요. 시스템 설정 → 개인정보 보호 및 보안의 화면 기록과 손쉬운 사용에서 {app}이 허용되어 있는지 확인한 뒤 다시 시작하세요.",
+  "computer.problem.localRemoteServer": "서버에 있는 봇은 이 컴퓨터를 쓸 수 없어요. 쓰려면 서버 메뉴에서 이 컴퓨터로 돌아오세요.",
   "computer.problem.oldImage": "비공개 데스크톱이 오래됐어요. 교체하세요",
   "computer.problem.unmanaged": "기존 컨테이너는 {app}이 만든 것이 아니에요. 다시 만드세요",
   "computer.problem.publicViewer": "비공개 데스크톱의 뷰어가 네트워크에 열려 있어요. 교체하세요",

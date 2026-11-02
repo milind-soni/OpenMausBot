@@ -4619,6 +4619,7 @@
   "computer.problem.localNeedsApp": "Only the {app} app on this computer can let a bot use it. Open the app here to use it.",
   "computer.problem.localWindows": "Bots can't use this PC right now. Restart {app}, and if that doesn't help, open Settings → Diagnostics.",
   "computer.problem.localMac": "Bots can't use this Mac yet. Check that {app} is allowed under Screen Recording and Accessibility in System Settings → Privacy & Security, then restart it.",
+  "computer.problem.localRemoteServer": "Bots on a server can't use this computer. Switch back to this computer in the Server menu to use it.",
   "computer.problem.oldImage": "The private desktop is out of date; replace it",
   "computer.problem.unmanaged": "The existing container was not created by {app}; recreate it",
   "computer.problem.publicViewer": "The private desktop's viewer is open to the network; replace it",
