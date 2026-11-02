@@ -71,6 +71,10 @@ await build({
   format: "esm",
   outbase: server,
   outdir: join(root, "dist-server"),
+  // Function names stay in stack traces. Node prints a whole source line with an uncaught error, so no line may be long.
+  minifyWhitespace: true,
+  minifySyntax: true,
+  lineLimit: 500,
   // Written after tsc, replacing its output for these entry points.
   allowOverwrite: true,
   logLevel: "info",

@@ -309,7 +309,7 @@ async function bundleServer(): Promise<string> {
   const { serverLocalePlugin } = await import("./server-locale-plugin.mjs");
   const outdir = join(work, "dist-server");
   await build({
-    entryPoints: [join(ROOT, "server", "index.ts")], bundle: true, platform: "node", target: "node20", format: "esm", outdir, logLevel: "warning",
+    entryPoints: [join(ROOT, "server", "index.ts")], bundle: true, platform: "node", target: "node20", format: "esm", outdir, logLevel: "warning", minifyWhitespace: true, minifySyntax: true, lineLimit: 500,
     plugins: [{ name: "yaml-esm", setup(builder) { builder.onResolve({ filter: /^yaml$/ }, () => ({ path: join(ROOT, "node_modules", "yaml", "browser", "index.js") })); } }, serverLocalePlugin],
     banner: { js: 'import { createRequire as __ombCreateRequire } from "node:module";\nconst require = __ombCreateRequire(import.meta.url);' },
   });
