@@ -5,7 +5,7 @@ import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { AlertTriangle, ChevronLeft, ChevronRight, Copy, Monitor, RefreshCw, Reply, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
-import { ACTION_ICON, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction, type MessageMenuItem } from "@/components/MessageActions";
+import { ACTION_ICON, ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction, type MessageMenuItem } from "@/components/MessageActions";
 import { copyText } from "@/lib/copy-text";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
 import { useBotMessageMenu, userMessageMenu } from "@/components/message-menu";
@@ -140,7 +140,7 @@ const USER_COLLAPSE_LINES = 8;
 
 interface ChatRows {
   botId: string; threadId: string; botName: string; botColor: Bot["color"]; voiceId?: string;
-  tts: ConfigStatus["tts"]; localVoice: boolean; busy: boolean;
+  tts: ConfigStatus["tts"]; localVoice: boolean;
   hasMore: boolean; bots: readonly Bot[];
   mentionPeers: readonly MentionPeer[]; mentionPerson: { profileName?: string };
   /** On a Team Cloud, the viewer's person key: another person's line carries their name. */
@@ -346,7 +346,7 @@ const Bubble = memo(function Bubble({
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, localVoice, busy, bots, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle, conversational, simple, canReact, openedAt, speakerViewer } = useChatRows();
+  const { botId, threadId, botName, voiceId, tts, localVoice, bots, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle, conversational, simple, canReact, openedAt, speakerViewer } = useChatRows(), busy = onRegenerate || versions ? use(ChatBusyContext) : false;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const peer = peerLine(message) ?? peerRequest(message, botId);
   const user = message.role === "user" && !peer;
@@ -446,7 +446,7 @@ const Bubble = memo(function Bubble({
               ...(simple ? replyAndCopy(() => onReply(message), visibleText) : []),
               ...userMessageMenu({
                 messageId: message.id,
-                onEdit: !speaker && message.kind === "text" && !webhookView && !hasAttachments && !busy && !message.id.startsWith("optimistic-")
+                onEdit: !speaker && message.kind === "text" && !webhookView && !hasAttachments && !message.id.startsWith("optimistic-")
                   ? () => onStartEdit(message.id) : undefined,
                 pin: remoteClient ? undefined : { pinned, onToggle: togglePin },
               }),
@@ -685,7 +685,7 @@ const MessagesList = memo(function MessagesList({
   onRegenerate: () => void;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, botColor, bots, busy, hasMore, focus, showToolCalls, locale, simple = false } = useChatRows();
+  const { botId, threadId, botName, botColor, bots, hasMore, focus, showToolCalls, locale, simple = false } = useChatRows(), busy = use(ChatBusyContext);
   // A finished turn keeps the bot's progress lines and folds only its tool steps under "Worked for", in both modes.
   const items = useMemo(() => groupTranscript(messages), [messages, locale]);
   const newestMessageId = messages.at(-1)?.id;
@@ -915,8 +915,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const reactor = useReactor();
   const speakerViewer = state.config?.team && reactor !== "user" ? reactor : null;
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, botColor: bot.color, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, conversational: isConversational(bot.replyStyle), simple: !advanced, canReact: canWrite !== false, openedAt, speakerViewer }),
-    [bot.id, bot.threadId, bot.name, bot.color, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, bot.replyStyle, advanced, canWrite, openedAt, speakerViewer],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, botColor: bot.color, voiceId: bot.voice, tts, localVoice, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, conversational: isConversational(bot.replyStyle), simple: !advanced, canReact: canWrite !== false, openedAt, speakerViewer }),
+    [bot.id, bot.threadId, bot.name, bot.color, bot.voice, tts, localVoice, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, bot.replyStyle, advanced, canWrite, openedAt, speakerViewer],
   );
   const currentTask = bot.tasks?.find((task) => task.threadId === bot.threadId), place = effectivePlace(bot, currentTask), team = state.config?.team, privateChat = Boolean(team) && currentTask?.private === true, ownHelper = Boolean(team) && !privateChat && Boolean(bot.defaultBot?.person), sharedChat = Boolean(team) && !privateChat && !ownHelper;
 
@@ -1188,7 +1188,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             <div ref={topSentinelRef} className="h-2 w-full pointer-events-none" aria-hidden="true" />
           ) : null}
           {windowedMessages.length === 0 && !bot.busy && <EmptyChat bot={bot} />}
-          <ChatRowsContext.Provider value={rows}><LiveToolsContext value={liveTools}>
+          <ChatRowsContext.Provider value={rows}><LiveToolsContext value={liveTools}><ChatBusyContext value={busy}>
             <MessagesList
               messages={windowedMessages}
               transcript={messages}
@@ -1209,7 +1209,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               onRegenerate={regenerate}
               onReply={selectReply}
             />
-          </LiveToolsContext></ChatRowsContext.Provider>
+          </ChatBusyContext></LiveToolsContext></ChatRowsContext.Provider>
           {stopNoticeDue(messages, stoppedAt, busy) && <CancelledTurnRow name={PERSON_STOPPED_TURN_NAME} />}
           {laterCount > 0 && (
             <div className="flex justify-center">
