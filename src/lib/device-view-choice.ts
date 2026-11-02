@@ -45,6 +45,13 @@ export function knownTargets(view: DeviceView, targets: DeviceViewTargets): Devi
   };
 }
 
+/** The switches for bots or rooms: those offered, plus any the view still names that are no longer offered (an archived
+ * bot, a direct room), so an admin can still turn it off. */
+export function switchTargets(targets: DeviceViewTargets, picked: DeviceView, kind: "bots" | "groups"): Array<{ id: string; name: string }> {
+  const offered = targets[kind];
+  return [...offered, ...targets.existing[kind].filter((item) => picked[kind].includes(item.id) && !offered.some((one) => one.id === item.id))];
+}
+
 /** A paired device's view after one switch flips; every switch off leaves it seeing nothing. */
 export function flipTarget(view: DeviceView, kind: keyof DeviceView, id: string, targets: DeviceViewTargets): DeviceView {
   return knownTargets(togglePicked(view, kind, id), targets);

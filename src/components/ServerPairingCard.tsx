@@ -13,7 +13,7 @@ import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { TeamPhoneCard } from "./TeamPhoneCard";
 import type { DeviceView } from "../../shared/device-view";
-import { EMPTY_VIEW, flipTarget, knownTargets, NO_TARGETS, pairingBody, pickedCount, togglePicked, viewNames, viewTargetsFrom, type DeviceAccess, type DeviceViewTargets } from "../lib/device-view-choice";
+import { EMPTY_VIEW, flipTarget, knownTargets, NO_TARGETS, pairingBody, pickedCount, switchTargets, togglePicked, viewNames, viewTargetsFrom, type DeviceAccess, type DeviceViewTargets } from "../lib/device-view-choice";
 
 export interface PairingOffer {
   id: string;
@@ -55,8 +55,8 @@ const quiet = "ui-button";
 export function ViewTargetPicker({ targets, picked, onToggle, saving = false }: { targets: DeviceViewTargets; picked: DeviceView; onToggle: (kind: keyof DeviceView, id: string) => void; saving?: boolean }) {
   const kinds: Array<{ kind: keyof DeviceView; label: string; items: Array<{ id: string; name: string }> }> = [
     { kind: "sections", label: t("remote.serverPairing.view.department"), items: targets.sections.map((section) => ({ id: section, name: section.trim() || t("remote.serverPairing.view.general") })) },
-    { kind: "bots", label: t("remote.serverPairing.view.bot"), items: targets.bots },
-    { kind: "groups", label: t("remote.serverPairing.view.group"), items: targets.groups },
+    { kind: "bots", label: t("remote.serverPairing.view.bot"), items: switchTargets(targets, picked, "bots") },
+    { kind: "groups", label: t("remote.serverPairing.view.group"), items: switchTargets(targets, picked, "groups") },
   ];
   return (
     <div data-device-view-picker className="flex flex-wrap gap-x-8 gap-y-3 text-[13px]">

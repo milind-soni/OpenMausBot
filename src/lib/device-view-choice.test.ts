@@ -79,6 +79,14 @@ describe("choosing what a paired device sees", () => {
     expect(html).toContain("Standup");
   });
 
+  it("keeps a switch for an archived bot or a direct room the view still names, so an admin can turn it off", () => {
+    const html = renderToStaticMarkup(createElement(ViewTargetPicker, { targets, picked: view({ bots: ["b2"], groups: ["dm1"] }), onToggle: () => {} }));
+    expect(html.match(/role="switch"/g)).toHaveLength(7);
+    expect(html).toMatch(/aria-checked="true"[^>]*aria-label="Old"|aria-label="Old"[^>]*aria-checked="true"/);
+    expect(html).toMatch(/aria-checked="true"[^>]*aria-label="Ops One ↔ Payroll"|aria-label="Ops One ↔ Payroll"[^>]*aria-checked="true"/);
+    expect(renderToStaticMarkup(createElement(ViewTargetPicker, { targets, picked: EMPTY_VIEW, onToggle: () => {} })).match(/role="switch"/g)).toHaveLength(5);
+  });
+
   it("holds every switch while a change is still saving, so two flips never race", () => {
     const html = renderToStaticMarkup(createElement(ViewTargetPicker, { targets, picked: EMPTY_VIEW, onToggle: () => {}, saving: true }));
     expect(html.match(/role="switch"/g)).toHaveLength(5);
