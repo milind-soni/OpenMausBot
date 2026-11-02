@@ -3738,6 +3738,8 @@
   "usage.history.byDay": "Day",
   "usage.history.byEngine": "Provider",
   "usage.history.byRoutine": "Routine",
+  "usage.history.byDepartment": "Department",
+  "usage.history.noDepartment": "No department",
   "usage.history.notRoutine": "Not from a routine",
   "usage.history.export": "Export CSV",
   "usage.history.owner": "This computer",
