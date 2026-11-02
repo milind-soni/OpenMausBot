@@ -82,7 +82,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
       return (
         <div data-simple-policy className="flex flex-col gap-0.5 py-1 pl-8 pr-2">
           <p className="text-[13px] leading-[18px] text-ink-secondary">{t("policy.managedBy", { organization: body.organization })}</p>
-          <p className="text-[12px] leading-4 text-ink-tertiary">{t("policy.modelBlocked", { organization: body.organization })}</p>
+          <p className="text-[12px] leading-4 text-ink-tertiary">{t(body.team ? "policy.teamModelBlocked" : "policy.modelBlocked", { organization: body.organization })}</p>
         </div>
       );
     case "setUp":

@@ -460,7 +460,7 @@ export interface InstanceInfo {
   readOnly?: boolean;
   trialCredit?: "active" | "used_up" | "ended";
   managed?: { organizationId: string; organizationName: string };
-  policy?: { organizationName: string; reason: string };
+  policy?: { organizationName: string; reason: string; team?: boolean };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
