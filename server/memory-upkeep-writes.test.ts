@@ -7,13 +7,14 @@ import { NO_TEXT_ENGINE, createMemoryUpkeep, type UpkeepBot } from "./memory-upk
 import { ensureWorkspace, writeMemoryFile, writeMemoryTopic, WORKSPACES_DIR } from "./workspace.ts";
 
 // Counts every atomic write the upkeep makes, without changing how any of them lands on disk.
-const written = vi.hoisted(() => ({ paths: [] as string[] }));
+const written = vi.hoisted(() => ({ paths: [] as string[], states: [] as { bots: Record<string, unknown> }[] }));
 vi.mock("./atomic.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./atomic.ts")>();
   return {
     ...actual,
     writeFileAtomic: (path: string, data: string | Uint8Array, options?: { mode?: number; durable?: boolean }) => {
       written.paths.push(path);
+      if (typeof data === "string" && path.endsWith("memory-upkeep.json")) written.states.push(JSON.parse(data) as { bots: Record<string, unknown> });
       return actual.writeFileAtomic(path, data, options);
     },
   };
@@ -49,6 +50,7 @@ describe("upkeep state writes", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
     written.paths.length = 0;
+    written.states.length = 0;
     for (const bot of BOTS) {
       ensureWorkspace(bot.id);
       writeMemoryFile(bot.id, NOTEBOOK);
@@ -110,5 +112,47 @@ describe("upkeep state writes", () => {
     expect(report.note).toBe(NO_TEXT_ENGINE);
     expect(writesTo("memory-upkeep.json")).toBe(1);
     expect(state().bots[BOTS[1]!.id]?.lastCapture?.note).toBe(NO_TEXT_ENGINE);
+  });
+
+  it("saves a capture's report while the tick it overlapped is still running", async () => {
+    // Enough live notes for a contradiction check, so the first bot's tidy stops at its model call.
+    writeMemoryFile(BOTS[0]!.id, ["Acme ships Friday", "Beta ships Monday", "Gamma ships Tuesday", "Delta ships Wednesday", "Epsilon ships Thursday", "Zeta ships Friday"]
+      .map((text, i) => `- 2026-09-0${i + 1} · ${text}\n`).join(""));
+    let release!: (answer: string) => void;
+    let entered!: () => void;
+    const held = new Promise<string>((resolve) => { release = resolve; });
+    const atModel = new Promise<void>((resolve) => { entered = resolve; });
+    let calls = 0;
+    const loop = loopWith((botId) => (botId === BOTS[0]!.id ? {
+      generateText: () => {
+        calls += 1;
+        if (calls > 1) return Promise.resolve("{}");
+        entered();
+        return held;
+      },
+    } : null));
+
+    const ticking = loop.tick();
+    await atModel;
+    // The tick holds the only batch open, so nothing of its own is on disk yet.
+    expect(writesTo("memory-upkeep.json")).toBe(0);
+
+    const report = await loop.capture({ botId: BOTS[1]!.id, threadId: "chat", turns: [{ person: "I like short answers", bot: "Noted" }] });
+    expect(report.note).toBe(NO_TEXT_ENGINE);
+    expect(writesTo("memory-upkeep.json")).toBe(1);
+    const midTick = state();
+    expect(midTick.bots[BOTS[1]!.id]?.lastCapture?.note).toBe(NO_TEXT_ENGINE);
+    expect(midTick.bots[BOTS[0]!.id]).toBeUndefined();
+
+    release("{}");
+    await ticking;
+    await loop.idle();
+
+    // One more write for every bot the tick tidied: the tick still writes once, not once per bot.
+    expect(writesTo("memory-upkeep.json")).toBe(2);
+    const saved = state();
+    expect(Object.keys(saved.bots).sort()).toEqual(BOTS.map((bot) => bot.id).sort());
+    for (const bot of BOTS) expect(saved.bots[bot.id]?.lastTidy).toMatchObject({ at: TODAY_AT.getTime() });
+    expect(saved.bots[BOTS[1]!.id]?.lastCapture?.note).toBe(NO_TEXT_ENGINE);
   });
 });

@@ -285,36 +285,40 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   const queue: Waiting[] = [];
   let worker: Promise<void> | null = null;
 
-  // The reports this process knows about: read once, written only when a batch ends. One tick over a
-  // large workspace used to re-read and re-write the whole file once per bot (#4115). Records made
-  // outside a batch are still written at once, so a report is never left only in memory.
+  // The reports this process knows about: read once, written when the batch that recorded them ends,
+  // so a tick over a large workspace writes once however many bots it touches. A capture's batch also
+  // writes while an outer tick batch is open: its report must outlive a restart mid-tick, and the tick
+  // can be minutes away from its own write.
   let known: UpkeepState | null = null;
   let unsaved = false;
-  let batching = 0;
+  const open: { dirty: boolean; flushWhileOpen: boolean }[] = [];
 
   const loaded = (): UpkeepState => (known ??= loadState());
 
   function flush(): void {
     if (!unsaved || !known) return;
-    if (saveState(known)) unsaved = false;
-  }
-
-  function endBatch(): void {
-    batching -= 1;
-    if (!batching) flush();
+    if (!saveState(known)) return;
+    unsaved = false;
+    for (const batch of open) batch.dirty = false;
   }
 
   /** One write for everything recorded inside `work`, however many bots it touches. */
-  function batched<T>(work: () => Promise<T>): Promise<T> {
-    batching += 1;
+  function batched<T>(work: () => Promise<T>, flushWhileOpen = false): Promise<T> {
+    const batch = { dirty: false, flushWhileOpen };
+    open.push(batch);
+    const end = () => {
+      const at = open.lastIndexOf(batch);
+      if (at >= 0) open.splice(at, 1);
+      if (batch.dirty && (batch.flushWhileOpen || !open.length)) flush();
+    };
     let promise: Promise<T>;
     try {
       promise = work();
     } catch (error) {
-      endBatch();
+      end();
       throw error;
     }
-    return promise.finally(endBatch);
+    return promise.finally(end);
   }
 
   const record = (botId: string, patch: { lastTidy?: TidyReport; lastCapture?: CaptureReport; topicCursor?: string; lastDream?: DreamReport; dreamedTo?: number; core?: string[] }) => {
@@ -323,7 +327,11 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const state = loaded();
     state.bots[botId] = { ...state.bots[botId], ...patch };
     unsaved = true;
-    if (!batching) flush();
+    if (!open.length) {
+      flush();
+      return;
+    }
+    for (const batch of open) batch.dirty = true;
   };
 
   const track = <T>(promise: Promise<T>): Promise<T> => {
@@ -502,7 +510,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       while (!cancelled(started) && queue.length) {
         const call = takeCall();
         try {
-          const report = await batched(() => captureCall(call.map((entry) => entry.batch)));
+          const report = await batched(() => captureCall(call.map((entry) => entry.batch)), true);
           for (const entry of call) entry.done?.resolve(report);
         } catch (error) {
           log(`memory upkeep: capture failed for ${call[0]!.batch.botId}: ${(error as Error).message}`);
@@ -823,8 +831,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const started = generation;
     if (cancelled(started)) return;
     // One batch: the state file is written once at the end however many bots this tick touches.
-    batching += 1;
-    try {
+    await batched(async () => {
       for (const bot of deps.bots()) {
         if (cancelled(started)) return;
         if (!upkeepEnabled(bot) || deps.busy(bot.id)) continue;
@@ -843,9 +850,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           log(`memory upkeep: dream failed for ${bot.id}: ${(error as Error).message}`);
         }
       }
-    } finally {
-      endBatch();
-    }
+    });
   }
 
   return {
