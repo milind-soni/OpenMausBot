@@ -6654,5 +6654,9 @@
   "botAccess.overview.botCount.other": "{count} 個のボット",
   "botAccess.overview.noBotsForPerson": "{name} にはまだボットがありません。",
   "botAccess.overview.allPeople": "すべてのメンバー",
-  "botAccess.overview.toastRemoved": "{bot}: {name} を削除しました"
+  "botAccess.overview.toastRemoved": "{bot}: {name} を削除しました",
+  "server.browser.waiting": "ブラウザの空きを待っています：{name} が使用中です。空きしだい自動で続行します。",
+  "server.browser.waitingTask": "ブラウザの空きを待っています：{name} が「{task}」で使用中です。空きしだい自動で続行します。",
+  "server.browser.free": "ブラウザが空きました。続行します。",
+  "server.browser.stoppedWaiting": "ブラウザの待機を終了しました。"
 }

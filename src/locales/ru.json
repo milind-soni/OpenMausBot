@@ -6632,5 +6632,9 @@
   "botAccess.overview.botCount.other": "Ботов: {count}",
   "botAccess.overview.noBotsForPerson": "{name}: ботов пока нет.",
   "botAccess.overview.allPeople": "Все люди",
-  "botAccess.overview.toastRemoved": "{bot}: {name} удалён(а)"
+  "botAccess.overview.toastRemoved": "{bot}: {name} удалён(а)",
+  "server.browser.waiting": "Ожидание браузера: его использует {name}. Работа продолжится сама, когда он освободится.",
+  "server.browser.waitingTask": "Ожидание браузера: {name} использует его для задачи «{task}». Работа продолжится сама, когда он освободится.",
+  "server.browser.free": "Браузер свободен. Продолжаем.",
+  "server.browser.stoppedWaiting": "Ожидание браузера прекращено."
 }

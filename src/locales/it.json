@@ -6428,5 +6428,9 @@
   "botAccess.overview.botCount.other": "{count} bot",
   "botAccess.overview.noBotsForPerson": "{name} non ha ancora bot.",
   "botAccess.overview.allPeople": "Tutte le persone",
-  "botAccess.overview.toastRemoved": "{bot}: rimosso {name}"
+  "botAccess.overview.toastRemoved": "{bot}: rimosso {name}",
+  "server.browser.waiting": "In attesa del browser: {name} lo sta usando. Si riprende da solo appena è libero.",
+  "server.browser.waitingTask": "In attesa del browser: {name} lo sta usando per {task}. Si riprende da solo appena è libero.",
+  "server.browser.free": "Il browser è libero. Si continua.",
+  "server.browser.stoppedWaiting": "Attesa del browser interrotta."
 }

@@ -2836,5 +2836,9 @@
   "botAccess.overview.botCount.other": "{count} Bots",
   "botAccess.overview.noBotsForPerson": "{name} hat noch keine Bots.",
   "botAccess.overview.allPeople": "Alle Personen",
-  "botAccess.overview.toastRemoved": "{bot}: {name} entfernt"
+  "botAccess.overview.toastRemoved": "{bot}: {name} entfernt",
+  "server.browser.waiting": "Warte auf den Browser: {name} verwendet ihn gerade. Es geht von selbst weiter, sobald er frei ist.",
+  "server.browser.waitingTask": "Warte auf den Browser: {name} verwendet ihn gerade für {task}. Es geht von selbst weiter, sobald er frei ist.",
+  "server.browser.free": "Der Browser ist frei. Es geht weiter.",
+  "server.browser.stoppedWaiting": "Warten auf den Browser beendet."
 }

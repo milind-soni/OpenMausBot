@@ -2782,5 +2782,9 @@
   "botAccess.overview.botCount.other": "{count} bots",
   "botAccess.overview.noBotsForPerson": "{name} n'a pas encore de bots.",
   "botAccess.overview.allPeople": "Toutes les personnes",
-  "botAccess.overview.toastRemoved": "{bot} : {name} retiré"
+  "botAccess.overview.toastRemoved": "{bot} : {name} retiré",
+  "server.browser.waiting": "En attente du navigateur : {name} l'utilise. Cela reprendra tout seul dès qu'il sera libre.",
+  "server.browser.waitingTask": "En attente du navigateur : {name} l'utilise pour {task}. Cela reprendra tout seul dès qu'il sera libre.",
+  "server.browser.free": "Le navigateur est libre. On continue.",
+  "server.browser.stoppedWaiting": "Attente du navigateur arrêtée."
 }

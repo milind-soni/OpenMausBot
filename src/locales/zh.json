@@ -7356,5 +7356,9 @@
   "botAccess.overview.botCount.other": "{count} 个机器人",
   "botAccess.overview.noBotsForPerson": "{name} 还没有机器人。",
   "botAccess.overview.allPeople": "所有人员",
-  "botAccess.overview.toastRemoved": "{bot}：已移除 {name}"
+  "botAccess.overview.toastRemoved": "{bot}：已移除 {name}",
+  "server.browser.waiting": "正在等待浏览器：{name} 正在使用。空闲后会自动继续。",
+  "server.browser.waitingTask": "正在等待浏览器：{name} 正在用它处理「{task}」。空闲后会自动继续。",
+  "server.browser.free": "浏览器已空闲，继续进行。",
+  "server.browser.stoppedWaiting": "已停止等待浏览器。"
 }

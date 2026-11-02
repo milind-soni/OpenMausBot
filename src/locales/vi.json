@@ -5222,5 +5222,9 @@
   "botAccess.overview.botCount.other": "{count} bot",
   "botAccess.overview.noBotsForPerson": "{name} chưa có bot nào.",
   "botAccess.overview.allPeople": "Tất cả mọi người",
-  "botAccess.overview.toastRemoved": "{bot}: đã gỡ {name}"
+  "botAccess.overview.toastRemoved": "{bot}: đã gỡ {name}",
+  "server.browser.waiting": "Đang chờ trình duyệt: {name} đang dùng. Sẽ tự tiếp tục khi trình duyệt rảnh.",
+  "server.browser.waitingTask": "Đang chờ trình duyệt: {name} đang dùng cho {task}. Sẽ tự tiếp tục khi trình duyệt rảnh.",
+  "server.browser.free": "Trình duyệt đã rảnh. Đang tiếp tục.",
+  "server.browser.stoppedWaiting": "Đã dừng chờ trình duyệt."
 }

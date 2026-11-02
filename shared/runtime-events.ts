@@ -79,7 +79,7 @@ export type RuntimeEvent = RuntimeEventBase &
       }
     | {
         type: "turn.wait_started";
-        /** The computer resource this turn queued behind (e.g. "computer:box:bx_…"). */
+        /** The computer or browser this turn queued behind (e.g. "computer:box:bx_…", "browser:bot-…"). */
         resource: string;
         /** Where this turn sat in the resource's arrival-ordered waitlist when
          * the wait began. */

@@ -7156,5 +7156,9 @@
   "botAccess.overview.botCount.other": "봇 {count}개",
   "botAccess.overview.noBotsForPerson": "{name} 님에게는 아직 봇이 없어요.",
   "botAccess.overview.allPeople": "모든 사람",
-  "botAccess.overview.toastRemoved": "{bot}: {name} 님을 삭제했어요"
+  "botAccess.overview.toastRemoved": "{bot}: {name} 님을 삭제했어요",
+  "server.browser.waiting": "브라우저를 기다리는 중: {name}이(가) 사용 중입니다. 비는 대로 자동으로 계속합니다.",
+  "server.browser.waitingTask": "브라우저를 기다리는 중: {name}이(가) {task}에 사용 중입니다. 비는 대로 자동으로 계속합니다.",
+  "server.browser.free": "브라우저가 비었습니다. 계속합니다.",
+  "server.browser.stoppedWaiting": "브라우저 대기를 멈췄습니다."
 }
