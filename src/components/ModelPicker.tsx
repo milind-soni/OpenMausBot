@@ -931,19 +931,20 @@ export function ModelPicker({
           ) : (
             <div className="px-3.5 py-5 text-[13px] leading-[18px] text-ink-secondary">{t("model.noProviders")}</div>
           )}
-          <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
-            <button type="button" onClick={openEngines}
-              className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
-              {t("settings.engines.title")}
-            </button>
-            {!remote && (
+          {/* Providers and API keys are set up on the host; a remote client has no such settings. */}
+          {!remote && (
+            <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
+              <button type="button" onClick={openEngines}
+                className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+                {t("settings.engines.title")}
+              </button>
               <button type="button" data-model-add-api-keys onClick={openApiKeys}
                 className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
                 <KeyRound size={14} strokeWidth={MENU_STROKE} aria-hidden="true" />
                 {apiKeysLabel(pickerInstances)}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -997,7 +998,7 @@ export function ModelPicker({
           }}
           onSetUp={openFull}
           onCheckAgain={(instance) => refreshModels(instance.instanceId)}
-          onManage={openEngines}
+          onManage={remote ? undefined : openEngines}
           onResetVariant={resetVariant}
         />
       ) : fullPane}

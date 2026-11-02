@@ -983,6 +983,28 @@ describe("every capability of the picker stays reachable", () => {
     expect(list(onMissing).current).toMatchObject({ meta: "Setup required", warning: true });
   });
 
+  it.each([false, true])("on a paired desktop (Advanced: %s), still picks models but leaves provider settings to the host", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = rich();
+    const forBot = followed();
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const html = menu(open(forBot).html);
+      expect(html).toContain("Sonnet 5.5");
+      for (const hostOnly of ["data-simple-manage", "Model providers and accounts", "data-model-add-api-keys"]) {
+        expect(html, hostOnly).not.toContain(hostOnly);
+      }
+      // Nothing follows the thinking levels, so no divider hangs under them.
+      if (!advanced) {
+        const band = region(html, "data-simple-effort-band");
+        expect(band).toContain(">X-High</button>");
+        expect(band).not.toContain('role="separator"');
+      }
+    } finally {
+      delete window.ogb;
+    }
+  });
+
   it("in Advanced mode, from the chip and the full picker", () => {
     fixture.advanced = true;
     fixture.instances = [updated, signedOutWork, codex, plan, managed, local];
