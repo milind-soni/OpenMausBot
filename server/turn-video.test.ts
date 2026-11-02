@@ -78,7 +78,8 @@ describe.skipIf(!hasFfmpeg())("video frame sampling", () => {
 
   it("never follows a playlist named as a video to the files it points at", async () => {
     const root = store();
-    syntheticClip(root, 2);
+    const clip = spawnSync("ffmpeg", ["-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=5", "-pix_fmt", "yuvj420p", "-y", join(root, "clip.mp4")]);
+    if (clip.status !== 0) throw new Error(`fixture ffmpeg failed: ${clip.stderr?.toString()}`);
     const path = join(root, "disguised.mp4");
     writeFileSync(path, "ffconcat version 1.0\nfile 'clip.mp4'\nduration 2\n");
 
