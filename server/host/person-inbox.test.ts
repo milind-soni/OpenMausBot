@@ -14,6 +14,114 @@ const ask = (botId: string, botName: string, threadId: string, kind: Notificatio
   ({ kind, botId, botName, threadId, title: `${botName} needs approval`, body: "Run: rm -rf ./build" });
 const card = (requestId: string) => ({ title: "Run a command?", subtitle: "rm -rf ./build", options: ["Allow", "Deny"], requestId, tool: "Bash", requestType: "permission" as const });
 
+describe("pending assistant answers", () => {
+  const pending = async (destination: "bot" | "person" | "room" = "bot") => {
+    let started!: () => void, finish!: (answer: string) => void;
+    const generating = new Promise<void>((resolve) => { started = resolve; });
+    const result = new Promise<string>((resolve) => { finish = resolve; });
+    const f = fixture({ representative: { busy: async () => [], timeZone: () => "UTC", generate: async () => { started(); return result; } } });
+    if (destination === "person") f.said("scout-main", "@Ben are you free tomorrow?", CLEO);
+    else expect(f.team.pass("scout", destination === "room" ? "room-thread" : "cleo-private", "Ben", "Are you free tomorrow?").status).toBe(200);
+    await generating;
+    const inbox = f.inboxOf(BEN).threadId;
+    const row = f.lines(inbox)[0]!;
+    const complete = async (answer = '{"answer":"Ben is free tomorrow."}') => {
+      finish(answer);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    };
+    return { f, inbox, row, complete };
+  };
+
+  it.each(['{"answer":"Ben is free tomorrow."}', '{"wait":true}'])("silently drops a result after the person replied (%s)", async (answer) => {
+    const { f, inbox, row, complete } = await pending();
+    expect(f.team.replyIn(session(BEN.email), inbox, row.id, "I am busy tomorrow.", { sendId: "manual-1" })?.status).toBe(202);
+    await complete(answer);
+    expect(f.continued).toEqual([expect.objectContaining({ relay: expect.objectContaining({ kind: "reply" }), text: expect.stringContaining("I am busy tomorrow.") })]);
+    expect(f.lines(inbox)[0]!.inbox!.answers).toEqual([expect.objectContaining({ by: "person", text: "I am busy tomorrow." })]);
+    expect(f.notified).toEqual([]);
+    f.restart();
+    expect(f.team.inbox.waiting(inbox)).toEqual([]);
+  });
+
+  it("silently drops a result after the person's Chief relayed their answer", async () => {
+    const { f, inbox, row, complete } = await pending();
+    f.said(inbox, "Tell Cleo I am busy tomorrow.", BEN);
+    expect(f.team.pass("bens-chief", inbox, "Cleo", "I am busy tomorrow.").status).toBe(200);
+    await complete();
+    expect(f.continued).toHaveLength(1);
+    expect(f.lines(inbox).find((line) => line.id === row.id)!.inbox!.answers).toEqual([expect.objectContaining({ by: "person", text: "I am busy tomorrow." })]);
+    expect(f.notified).toEqual([]);
+  });
+
+  it.each(["person", "room"] as const)("does not send a stale answer to the asking %s", async (destination) => {
+    const { f, inbox, row, complete } = await pending(destination);
+    expect(f.team.replyIn(session(BEN.email), inbox, row.id, "I am busy tomorrow.", {})?.status).toBe(202);
+    const before = f.lines(destination === "person" ? f.inboxOf(CLEO).threadId : "room-thread").slice();
+    const notified = f.notified.slice();
+    await complete();
+    expect(f.lines(destination === "person" ? f.inboxOf(CLEO).threadId : "room-thread")).toEqual(before);
+    expect(f.notified).toEqual(notified);
+    expect(f.lines(inbox)[0]!.inbox!.answers).toEqual([expect.objectContaining({ by: "person", text: "I am busy tomorrow." })]);
+  });
+
+  it.each(["done", "answered at origin", "forgotten", "deleted", "reassigned", "new starter", "archived", "stopped"])("silently drops a result when its inbox item is %s", async (change) => {
+    const { f, inbox, complete } = await pending();
+    const row = f.lines(inbox)[0]!;
+    if (change === "done") expect(f.team.inbox.markDone(key(BEN.email), row.id)).toBe("done");
+    else if (change === "answered at origin") f.said("cleo-private", "I am busy tomorrow.", BEN);
+    else if (change === "forgotten") f.team.inbox.forget(key(BEN.email));
+    else if (change === "deleted") f.deleteThread(inbox);
+    else if (change === "reassigned") f.bots.find((bot) => bot.id === "bens-chief")!.reportsTo = CLEO.email;
+    else if (change === "new starter") f.starters.set(inbox, key(CLEO.email));
+    else if (change === "archived") Object.assign(f.bots.find((bot) => bot.id === "bens-chief")!.tasks.find((task) => task.threadId === inbox)!, { archivedAt: Date.now() });
+    else f.team.stop();
+    await complete();
+    expect(f.continued).toEqual([]);
+    expect(f.notified).toEqual([]);
+    expect(f.lines(inbox).find((line) => line.id === row.id)?.inbox?.answers).toBeUndefined();
+  });
+
+  it("preserves the person's correction made during the assistant answer's write event", async () => {
+    const { f, inbox, row, complete } = await pending();
+    let replied = false;
+    const unsubscribe = f.store.onChange((change) => {
+      if (change.type !== "message.patch" || change.message.id !== row.id || replied || change.message.inbox?.answers?.at(-1)?.by !== "assistant") return;
+      replied = true;
+      expect(f.team.replyIn(session(BEN.email), inbox, row.id, "Actually, I am busy tomorrow.", { sendId: "correction-1" })?.status).toBe(202);
+    });
+    try {
+      await complete();
+      expect(replied).toBe(true);
+      expect(f.continued.map((one) => one.relay?.kind)).toEqual(["assistant", "reply"]);
+      expect(f.continued.at(-1)!.text).toContain("Actually, I am busy tomorrow.");
+      expect(f.lines(inbox)[0]!.inbox!.answers).toEqual([
+        expect.objectContaining({ by: "assistant", text: "Ben is free tomorrow." }),
+        expect.objectContaining({ by: "person", text: "Actually, I am busy tomorrow." }),
+      ]);
+      expect(f.notified).toEqual([]);
+      f.restart();
+      expect(f.team.inbox.view(key(BEN.email))!.rows[0]!.answers?.at(-1)).toMatchObject({ by: "person", text: "Actually, I am busy tomorrow." });
+    } finally { unsubscribe(); }
+  });
+
+  it("does not notify when shutdown begins during the assistant answer's write event", async () => {
+    const { f, inbox, row, complete } = await pending();
+    let stoppedDuringWrite = false;
+    const unsubscribe = f.store.onChange((change) => {
+      if (change.type !== "message.patch" || change.message.id !== row.id || stoppedDuringWrite || change.message.inbox?.answers?.at(-1)?.by !== "assistant") return;
+      stoppedDuringWrite = true;
+      f.team.stop();
+    });
+    try {
+      await complete();
+      expect(stoppedDuringWrite).toBe(true);
+      expect(f.continued.map((one) => one.relay?.kind)).toEqual(["assistant"]);
+      expect(f.lines(inbox)[0]!.inbox!.answers).toEqual([expect.objectContaining({ by: "assistant", text: "Ben is free tomorrow." })]);
+      expect(f.notified).toEqual([]);
+    } finally { unsubscribe(); }
+  });
+});
+
 describe("asks routed to a person", () => {
   it("copies an approval Ben owns into his inbox, sends the one notification from there, and answers the copy where it was asked", () => {
     const f = fixture();

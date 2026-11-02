@@ -123,6 +123,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
   let homes: Record<string, { botId: string; threadId: string }> = {};
   let items: Item[] = [];
+  let stopped = false;
   if (team) {
     try {
       const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
@@ -318,7 +319,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     } catch (error) {
       console.warn(`person inbox: the assistant could not answer: ${error instanceof Error ? error.message : String(error)}`);
     }
+    if (stopped || !items.includes(item) || item.answered || item.done || settled(item)
+      || !deps.person(item.person) || personOf(item.threadId) !== item.person || !isHomeOf(item.threadId, item.person)
+      || deps.starters.get(item.threadId) !== item.person) return;
     if (answer && answerItem(item, answer, "assistant").status === 200) {
+      if (stopped || line(item)?.inbox?.answers?.at(-1)?.by !== "assistant") return;
       notifyItem(item, serverLine(conversationLanguage(item.threadId), "server.notify.assistantAnswered", { title: delivery.title }), delivery.notify, `${delivery.text} → ${answer}`);
     } else notifyItem(item, delivery.title, delivery.notify, delivery.text);
   }
@@ -514,7 +519,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       items = items.filter((item) => item.person !== person);
       save();
     },
-    stop: unsubscribe,
+    stop: () => { stopped = true; unsubscribe(); },
   };
 }
 
