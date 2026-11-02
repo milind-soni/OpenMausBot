@@ -3987,8 +3987,8 @@ describe("the scheduler wakes only when work is due", () => {
       manager.start();
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(ticks.mock.calls.length).toBeLessThanOrEqual(11);
-      manager.create({ name: "Soon", prompt: "Do it", botId: "maus-1", timeoutMinutes: 5, schedule: { type: "once", at: Date.now() + 90_000 } });
-      await vi.advanceTimersByTimeAsync(89_999);
+      manager.create({ name: "Soon", prompt: "Do it", botId: "maus-1", timeoutMinutes: 5, schedule: { type: "once", at: Date.now() + 30_000 } });
+      await vi.advanceTimersByTimeAsync(29_999);
       expect(h.started).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(1);
       expect(h.started).toHaveLength(1);
