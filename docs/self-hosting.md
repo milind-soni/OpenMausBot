@@ -878,9 +878,11 @@ what [Who can see a bot](#who-can-see-a-bot) already allows it:
 - any other group chat shows only when every one of its bots is picked.
 
 Everything else answers `404` the same way, lists leave it out, and the live
-stream never names it. A deleted or renamed target drops out, and a department
-made again under the same name later grants nothing; when nothing it names is
-left, the device sees nothing until an admin picks again. General follows the
+stream never names it. A deleted target drops out. A department is kept by its
+name, so renaming one drops it too, and a department made again under the same
+name later grants nothing. A bot or group chat is kept by its id: renaming it
+keeps the device's access, so turn its switch off to take that away. When
+nothing it names is left, the device sees nothing until an admin picks again. General follows the
 bots that have no department, so it gains the bots of a department that is
 deleted. The companion
 sidecar below has its own credentials and does not apply a view.
