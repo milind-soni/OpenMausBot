@@ -30,6 +30,53 @@ export function compileToolSchema(schema: Record<string, unknown>, options: { al
   catch { throw new Error("MCP tool schema could not be validated; check its constraints, formats, and references"); }
 }
 
+/** A configured server's tool schema. Where strict compilation refuses it, its copy without what asserts nothing is
+ * compiled instead, so a refusal still means a constraint this checker cannot hold. */
+export function compileServerToolSchema(schema: Record<string, unknown>): ValidateFunction {
+  try { return compileToolSchema(schema); }
+  catch (error) {
+    const plain = withoutNonAssertions(schema);
+    if (!plain) throw error;
+    return compileToolSchema(plain);
+  }
+}
+
+const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
+/** What tool generators emit that never asserts: OpenAPI's `example`, `discriminator`, `externalDocs` and `xml`, and VS
+ * Code's editor hints. Vendor `x-` extensions too, except the two compileToolSchema checks. */
+const NON_ASSERTIONS = new Set(["example", "discriminator", "externalDocs", "xml", "markdownDescription", "markdownEnumDescriptions", "enumDescriptions"]);
+const CHECKED_EXTENSIONS = new Set(["x-mcp-header", "x-google-enum-descriptions"]);
+const SCHEMA_KEYWORD_MAPS = ["properties", "$defs", "definitions", "dependentSchemas", "patternProperties"];
+
+function localRefsOnly(schema: unknown, depth = 0): boolean {
+  if (Array.isArray(schema)) return schema.every((child) => localRefsOnly(child, depth + 1));
+  if (!isRecord(schema) || depth > 64) return true;
+  if (typeof schema.$ref === "string" && !schema.$ref.startsWith("#/") && schema.$ref !== "#") return false;
+  return Object.values(schema).every((child) => localRefsOnly(child, depth + 1));
+}
+
+/** Embedded `$id`s go too when every `$ref` is a JSON pointer: Effect Schema gives each `unknown` field the same
+ * `"$id": "/schemas/unknown"`, and Ajv refuses a schema holding one id twice. Undefined when nothing would change. */
+function withoutNonAssertions(schema: Record<string, unknown>): Record<string, unknown> | undefined {
+  const dropIds = localRefsOnly(schema);
+  let changed = false;
+  const visit = (node: unknown, depth: number): unknown => {
+    if (Array.isArray(node)) return node.map((child) => visit(child, depth));
+    if (!isRecord(node) || depth > 64) return node;
+    const copy: Json = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (NON_ASSERTIONS.has(key) || (key.startsWith("x-") && !CHECKED_EXTENSIONS.has(key)) || (dropIds && depth > 0 && key === "$id")) { changed = true; continue; }
+      if (SCHEMA_KEYWORD_MAPS.includes(key) && isRecord(value)) copy[key] = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, visit(child, depth + 1)]));
+      else if (SCHEMA_LISTS.includes(key) || SCHEMA_ONE.includes(key)) copy[key] = visit(value, depth + 1);
+      else copy[key] = value;
+    }
+    return copy;
+  };
+  const plain = visit(schema, 0) as Json;
+  if (plain.$schema === DRAFT_07.slice(0, -1)) { plain.$schema = DRAFT_07; changed = true; }
+  return changed ? plain : undefined;
+}
+
 export function schemaProblems(errors: readonly ErrorObject[] | null | undefined, max = 8): string[] {
   const lines = (errors ?? []).map((error) => {
     const where = error.instancePath ? `${error.instancePath.slice(1).replace(/\//g, ".")}: ` : "";

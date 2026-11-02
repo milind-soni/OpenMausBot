@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
-import { ChatToolSessionError, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -13,11 +13,16 @@ import { wideSchema } from "../testing/oversized-tool-schema.ts";
 import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
 
 const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
+const spawned = vi.hoisted(() => [] as Array<{ owner?: string; opts: { env?: NodeJS.ProcessEnv; box?: unknown } }>);
 vi.mock("../procs.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../procs.ts")>();
   return {
     ...actual,
     // Always runs the real kill for cleanup; the override only forces the verdict and records the budget.
+    spawnCli: (...args: Parameters<typeof actual.spawnCli>) => {
+      spawned.push({ owner: args[3], opts: args[2] });
+      return actual.spawnCli(...args);
+    },
     killCliTree: (child: Parameters<typeof actual.killCliTree>[0], budget = 5_000) => {
       killProbe.budgets.push(budget);
       const run = actual.killCliTree(child, budget);
@@ -240,6 +245,17 @@ describe("Chat MCP session", () => {
     for (const name of secrets) expect(seen).not.toHaveProperty(name);
   });
 
+  it("lets a configured server's own environment, a token included, through the bot box, and no built-in's", async () => {
+    const own = fixture(); const agents = fixture();
+    own.server.env = { ...own.server.env, OP_SERVICE_ACCOUNT_TOKEN: "ops_synthetic" };
+    spawned.length = 0;
+    const session = await mountChatTools({ agents: agents.server, custom: { onepassword: own.server } }, own.controller.signal);
+    sessions.push(session);
+    const of = (receipt: string) => spawned.find((entry) => entry.opts.env?.RECEIPT === receipt)!;
+    expect(of(own.receipt)).toMatchObject({ owner: "bot", opts: { box: { allowEnv: ["RECEIPT", "OP_SERVICE_ACCOUNT_TOKEN"] } } });
+    expect(of(agents.receipt).opts.box).toBeUndefined();
+  });
+
   it("mounts only supported descriptors and preserves conversations with no tools", async () => {
     const controller = new AbortController();
     controllers.push(controller);
@@ -269,7 +285,7 @@ describe("Chat MCP session", () => {
 
   it.each([
     ["repeated cursor", `reply(message, {tools:[],nextCursor:"same"});`],
-    ["too many tools", `reply(message, {tools:Array.from({length:129},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["duplicate tool", `reply(message, {tools:[{name:"same",inputSchema:schema},{name:"same",inputSchema:schema}]});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
     ["oversized incomplete frame", `process.stdout.write("x".repeat(2*1024*1024+1));`],
@@ -282,7 +298,7 @@ describe("Chat MCP session", () => {
   });
 
   it.each([
-    ["too many tools", `reply(message, {tools:Array.from({length:129},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
   ])("still fails startup for a harness mount and awaits child cleanup for %s", async (_label, response) => {
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
@@ -662,17 +678,106 @@ describe("Chat MCP tool limit", () => {
     } finally { warn.mockRestore(); }
   });
 
-  it("still skips a configured server that does not fit beside the built-ins, leaving room for ask_user", async () => {
+  it("reaches a configured server that does not fit beside the built-ins through the tool search, leaving room for ask_user", async () => {
+    const fits = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 13)) } }));
+    expect(fits.names).toHaveLength(127);
+    expect(fits.session.skipped).toEqual([]);
+    expect(fits.session.budget.servers).toEqual([{ name: "notes", tools: 13, direct: true }]);
+    const over = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }));
+    expect(over.names).toHaveLength(117);
+    expect(over.names.slice(-3)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    expect(over.session.skipped).toEqual([]);
+    expect(over.session.trimmed).toEqual([]);
+    expect(over.session.budget).toEqual({ limit: 128, listed: 117, servers: [{ name: "notes", tools: 14, direct: false }] });
+    await expect(over.session.execute("mcp_call_tool", { name: "notes_note_14", arguments: {} }, new AbortController().signal)).resolves.toEqual({ ok: true, text: "ran note_14" });
+  });
+
+  it("keeps room for the tool search when built-ins alone would fill the limit", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const fits = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 13)) } }));
-      expect(fits.names).toHaveLength(127);
-      expect(fits.session.skipped).toEqual([]);
-      const over = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }));
-      expect(over.names).toHaveLength(114);
-      expect(over.session.skipped).toEqual([{ server: "notes", reason: "MCP tool count exceeds the 128-tool limit" }]);
-      expect(over.session.trimmed).toEqual([]);
+      const { session, names } = await mount({ agents: catalog(syntheticToolNames("agent", 51)), localComputer: catalog(syntheticToolNames("vm", 100)), custom: { notes: catalog(syntheticToolNames("note", 5)) } });
+      expect(names).toHaveLength(127);
+      expect(names.filter((name) => name.startsWith("agents_"))).toHaveLength(51);
+      expect(session.trimmed).toEqual([{ server: "computer", listed: 73, of: 100 }]);
+      expect(names.slice(-3)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+      expect(session.budget.servers).toEqual([{ name: "notes", tools: 5, direct: false }]);
     } finally { warn.mockRestore(); }
+  });
+});
+
+describe("Chat MCP servers past the tool limit", () => {
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    dirs.push(dir);
+    return server;
+  }
+  async function mount(custom: Record<string, { command: string; args: string[]; env: Record<string, string> }>, toolScope?: ToolScope) {
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await mountChatTools({ custom }, controller.signal, false, toolScope);
+    sessions.push(session);
+    return { session, signal: controller.signal, names: session.definitions.map((tool) => tool.function.name) };
+  }
+
+  it("lists whole servers that fit in turn order, and reaches the rest through the tool search in the same turn", async () => {
+    const audit = fixture();
+    const { session, signal, names } = await mount({ notes: catalog(syntheticToolNames("note", 124)), extra: catalog(syntheticToolNames("extra", 3)), audit: audit.server });
+    expect(names).toHaveLength(127);
+    expect(names).toEqual([...syntheticToolNames("notes_note", 124), "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    expect(session.skipped).toEqual([]);
+    expect(session.budget).toEqual({ limit: 128, listed: 127, servers: [
+      { name: "notes", tools: 124, direct: true }, { name: "extra", tools: 3, direct: false }, { name: "audit", tools: 1, direct: false },
+    ] });
+    expect(chatToolNotices(session)).toEqual(['To fit the model\'s 128-tool limit, the tools of "extra" and "audit" are reached through the tool search this turn.']);
+    expect(session.definitions.at(-3)!.function.description).toContain('the MCP servers "extra", "audit"');
+
+    const found = JSON.parse((await session.execute("mcp_search_tools", { query: "fixture write" }, signal)).text);
+    expect(found.matches[0]).toMatchObject({ name: "audit_write", input: "{ value: string }" });
+    expect(session.view("mcp_search_tools", { query: "fixture write" })).toEqual({ title: "mcp_search_tools", input: { query: "fixture write" }, ask: false });
+    await expect(session.execute("mcp_describe_tool", { name: "audit_write" }, signal)).resolves.toMatchObject({ ok: true, text: expect.stringContaining('"required":["value"]') });
+
+    const call = { name: "audit_write", arguments: { value: "through search" } };
+    expect(session.view("mcp_call_tool", call)).toEqual({ title: "audit_write", input: { value: "through search" }, ask: true, grant: grantFor("audit", "write") });
+    const misfit = { name: "audit_write", arguments: { value: 7 } };
+    expect(session.view("mcp_call_tool", misfit).ask).toBe(false);
+    const refused = await session.execute("mcp_call_tool", misfit, signal);
+    expect(refused.ok).toBe(true);
+    expect(JSON.parse(refused.text).problems).toEqual(["value: must be string"]);
+    expect(audit.read().calls.some((entry) => entry.method === "tools/call")).toBe(false);
+    await expect(session.execute("mcp_call_tool", call, signal)).resolves.toEqual({ ok: true, text: "recorded:through search" });
+    expect(audit.read().calls.at(-1)).toMatchObject({ method: "tools/call", params: { name: "write", arguments: { value: "through search" } } });
+    await expect(session.execute("mcp_call_tool", { name: "extra_extra_2", arguments: {} }, signal)).resolves.toEqual({ ok: true, text: "ran extra_2" });
+
+    const unknown = { name: "audit_teleport", arguments: {} };
+    expect(session.view("mcp_call_tool", unknown).ask).toBe(false);
+    await expect(session.execute("mcp_call_tool", unknown, signal)).resolves.toMatchObject({ ok: true, text: expect.stringContaining("search_tools") });
+  });
+
+  it("searches a server that alone offers more than the limit, and lists only the search's three tools", async () => {
+    const { session, signal, names } = await mount({ big: catalog(syntheticToolNames("op", 300)) });
+    expect(names).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    expect(session.budget).toEqual({ limit: 128, listed: 3, servers: [{ name: "big", tools: 300, direct: false }] });
+    await expect(session.execute("mcp_call_tool", { name: "big_op_300", arguments: {} }, signal)).resolves.toEqual({ ok: true, text: "ran op_300" });
+  });
+
+  it("finds and runs only tools in the bot's selection through the tool search", async () => {
+    const allow = ["mcp:notes:*", "mcp:big:op_1", "mcp:big:op_2"];
+    const { session, names } = await mount({ notes: catalog(syntheticToolNames("note", 126)), big: catalog(syntheticToolNames("op", 200)) }, { allow, deny: ["mcp:notes:note_126"] });
+    expect(names).toEqual([...syntheticToolNames("notes_note", 125), "big_op_1", "big_op_2"]);
+    const crowded = await mount({ notes: catalog(syntheticToolNames("note", 130)), big: catalog(syntheticToolNames("op", 200)) }, { allow, deny: ["mcp:notes:note_130"] });
+    expect(crowded.names).toEqual(["big_op_1", "big_op_2", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    const found = JSON.parse((await crowded.session.execute("mcp_search_tools", { query: "note 130", limit: 20 }, crowded.signal)).text);
+    expect(found.matches.map((match: { name: string }) => match.name)).not.toContain("notes_note_130");
+    await expect(crowded.session.execute("mcp_call_tool", { name: "notes_note_130", arguments: {} }, crowded.signal)).resolves.toMatchObject({ text: expect.stringContaining("No tool named") });
+    await expect(crowded.session.execute("mcp_call_tool", { name: "notes_note_129", arguments: {} }, crowded.signal)).resolves.toEqual({ ok: true, text: "ran note_129" });
+    expect(session.budget.servers.every((server) => server.direct)).toBe(true);
+  });
+
+  it("keeps the tool search's own three tools inside the room it divides", () => {
+    expect([...directServers([{ name: "a", tools: 10 }, { name: "b", tools: 3 }], 13)]).toEqual(["a", "b"]);
+    expect([...directServers([{ name: "a", tools: 12 }, { name: "b", tools: 5 }], 13)]).toEqual(["b"]);
+    expect([...directServers([{ name: "a", tools: 4 }, { name: "b", tools: 40 }, { name: "c", tools: 6 }], 13)]).toEqual(["a", "c"]);
+    expect([...directServers([{ name: "a", tools: 4 }], 3)]).toEqual([]);
   });
 });
 
@@ -841,6 +946,32 @@ describe("Chat MCP schema validation", () => {
     const session = await f.mount();
     expect(() => session.validate("audit_write", {value:valid})).not.toThrow();
     expect(() => session.validate("audit_write", {value:invalid})).toThrow("input schema");
+  });
+
+  const unknownField = { $id: "/schemas/unknown", title: "unknown" };
+  it.each([
+    ["OpenAPI's example", { type: "object", properties: { value: { type: "string", example: "hello" } }, required: ["value"] }],
+    ["a vendor x- extension and OpenAPI's discriminator", { type: "object", "x-generator": "openapi", discriminator: { propertyName: "value" }, properties: { value: { type: "string", "x-order": 1 } }, required: ["value"] }],
+    ["VS Code's markdownDescription", { type: "object", properties: { value: { type: "string", markdownDescription: "**Value**" } }, required: ["value"] }],
+    ["Effect Schema's repeated $id", { $schema: "http://json-schema.org/draft-07/schema#", type: "object", properties: { value: { type: "string" }, a: unknownField, b: unknownField }, required: ["value"] }],
+    ["draft-07 named without its #", { $schema: "http://json-schema.org/draft-07/schema", type: "object", properties: { value: { type: "string" } }, required: ["value"] }],
+  ])("mounts a server whose schema carries %s, and still enforces every constraint", async (_label, toolSchema) => {
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(session.skipped).toEqual([]);
+    expect(session.definitions[0]!.function.parameters).toEqual(toolSchema);
+    expect(() => session.validate("audit_write", { value: "ok" })).not.toThrow();
+    expect(() => session.validate("audit_write", { value: 7 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", {})).toThrow("input schema");
+  });
+
+  it("keeps a property named like a dropped keyword", async () => {
+    const f = fixture("", { type: "object", properties: { example: { type: "string" }, unknownAssertion: { type: "string", unrecognizedAssertion: true } } });
+    await expectSkipped(f, /schema could not be validated/);
+    const g = fixture("", { type: "object", properties: { example: { type: "string", example: "x" } }, required: ["example"] });
+    const session = await g.mount();
+    expect(() => session.validate("audit_write", { example: "ok" })).not.toThrow();
+    expect(() => session.validate("audit_write", {})).toThrow("input schema");
   });
 
   it.each([

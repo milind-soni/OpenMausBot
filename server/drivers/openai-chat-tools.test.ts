@@ -15,6 +15,7 @@ import { recordEvents } from "../testing/events.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { toolBudgetOf } from "../tool-budgets.ts";
 import { GrokDriver } from "./grok.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
@@ -1373,6 +1374,18 @@ describe("a turn with the person's Windows computer, the built-in browser and th
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice",
       message: `"data" listed 2 of 5 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.` }));
     expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+  });
+
+  it("reaches a configured server past the limit through the tool search, says so in one line, and keeps the bot's tool budget", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    await f.start({ botId: "mira", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toHaveLength(118);
+    expect(names.slice(-4)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"]);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.notice").map((event) => (event as { message: string }).message))
+      .toEqual([`To fit the model's 128-tool limit, the tools of "notes" are reached through the tool search this turn.`]);
+    expect(toolBudgetOf("mira")).toEqual({ limit: 128, listed: 117, servers: [{ name: "notes", tools: 14, direct: false }] });
   });
 });
 

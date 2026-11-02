@@ -3,6 +3,7 @@ import { createServer, request as httpRequest, type RequestOptions, type Server 
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openCredentialBroker, type CredentialBroker } from "../bot-box/broker.ts";
@@ -13,6 +14,7 @@ import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
 import { listMcpServers } from "../mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { forgetToolBudgets, noteToolBudget } from "../tool-budgets.ts";
 import { createMcpServerRoutes } from "./mcp-servers.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -25,7 +27,7 @@ afterEach(async () => {
 
 type Bot = { id: string; mcpServers?: string[] };
 
-async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>> } = {}) {
+async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>>; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
   const cfg: Pick<AppConfig, "mcpServers"> = { mcpServers: {} };
   const changes: string[] = [];
   let busy = false;
@@ -44,6 +46,7 @@ async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]
     savedCustomDomain: () => null,
     connectionsChanged: (change) => { changes.push(change); },
     ...(options.botsPath ? { botsPath: options.botsPath } : {}),
+    ...(options.probeAs ? { probeAs: options.probeAs } : {}),
   });
   const active = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -220,5 +223,31 @@ describe.skipIf(process.platform === "win32")("Test, where bots reach URL server
     await mcp.close();
     mcp = undefined;
     expect(await tested(await brokerPath(), url)).toEqual({ ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" });
+  });
+});
+
+describe("a bot's tool budget and a command server's Test", () => {
+  afterEach(() => forgetToolBudgets());
+
+  it("gives a bot's last chat turn's tool budget, nothing before one ran, and not found for no bot", async () => {
+    const { base } = await serve({ bots: [{ id: "ada" }] });
+    expect(await (await fetch(`${base}/api/bots/ada/tool-budget`)).json()).toEqual({ budget: null });
+    const budget = { limit: 128, listed: 127, servers: [{ name: "notes", tools: 124, direct: true }, { name: "sogni", tools: 30, direct: false }] };
+    noteToolBudget("ada", budget);
+    expect(await (await fetch(`${base}/api/bots/ada/tool-budget`)).json()).toEqual({ budget });
+    expect((await fetch(`${base}/api/bots/nobody/tool-budget`)).status).toBe(404);
+  });
+
+  it("starts a command server for Test as its bot's turn would", async () => {
+    const seen: Array<string | undefined> = [];
+    const fake = fileURLToPath(new URL("../testing/fake-mcp-server.ts", import.meta.url));
+    const { cfg, post } = await serve({ probeAs: (server) => { seen.push(server.bot ?? "any bot"); return {}; } });
+    cfg.mcpServers = {
+      notes: { command: process.execPath, args: ["--experimental-strip-types", fake], env: {}, enabled: true },
+      own: { command: process.execPath, args: ["--experimental-strip-types", fake], env: {}, enabled: true, bot: "ada" },
+    };
+    expect(await (await post("/api/mcp/servers/notes/test", {})).json()).toMatchObject({ ok: true, tools: [{ name: "read_notes" }] });
+    expect(await (await post("/api/mcp/servers/own/test", {})).json()).toMatchObject({ ok: true });
+    expect(seen).toEqual(["any bot", "ada"]);
   });
 });
