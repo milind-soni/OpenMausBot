@@ -327,7 +327,7 @@ it("starts with a saved view that names a department gone while it was stopped",
   try {
     expect((await api("POST", "/api/bots", { name: "Temp bot", section: "Temp" })).status).toBeLessThan(300);
     const invitation = await api("POST", "/api/auth/pairing", { label: "Temp tablet", scopes: ["client"], view: { sections: ["Temp"], bots: [], groups: [] } });
-    expect((await api("POST", "/api/auth/pair", { code: invitation.body.code, label: "Temp tablet" })).status).toBe(200);
+    expect((await api("POST", "/api/auth/pair", { code: (invitation.body as { code: string }).code, label: "Temp tablet" })).status).toBe(200);
     await waitForExit(fixture.child, { signal: "SIGTERM" });
     const sessionsPath = join(dataDir, "sessions.json");
     writeFileSync(sessionsPath, readFileSync(sessionsPath, "utf8").replaceAll('"Temp"', '"Gone"'));
