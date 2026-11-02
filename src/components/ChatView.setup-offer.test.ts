@@ -33,7 +33,7 @@ async function draw(bot: Bot) {
     ...initialState, connected: true, selectedId: bot.id, bots: [bot],
     instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" }, capabilities: { agentsMcp: true } } as InstanceInfo],
   };
-  const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
   await settle();
 }

@@ -5,10 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), navigationRevision: { current: 0 } }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [] as Bot[] }, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [] as Bot[] }, dispatch: fixture.dispatch, navigationRevision: fixture.navigationRevision }) };
 });
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, readAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({

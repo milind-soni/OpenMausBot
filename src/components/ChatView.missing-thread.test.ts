@@ -32,7 +32,7 @@ afterEach(() => {
 
 const instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" } } as InstanceInfo];
 const draw = (state: AppState) => {
-  const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: () => {}, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot: state.bots.find((bot) => bot.id === state.selectedId)! }) })));
 };
 

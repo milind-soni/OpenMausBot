@@ -41,7 +41,7 @@ let root: Root;
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 async function mount(panel: typeof InspectorPanel | typeof ActivityPanel) {
   const state: AppState = { ...initialState, bots: [bot], selectedId: bot.id };
-  const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

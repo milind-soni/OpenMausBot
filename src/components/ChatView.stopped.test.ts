@@ -41,7 +41,7 @@ const scout = (messages: Message[], busy: boolean): Bot => ({
 });
 const draw = (bot: Bot) => {
   const state: AppState = { ...initialState, connected: true, selectedId: bot.id, bots: [bot], instances };
-  const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: () => {}, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
 };
 const ask: Message = { id: "u1", role: "user", kind: "text", text: "Write a 250 word poem about cheese", at: Date.now() - 2_000 };

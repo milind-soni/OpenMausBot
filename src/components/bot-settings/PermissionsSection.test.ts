@@ -29,7 +29,7 @@ function render(bot: Bot, trustedModesAvailable = false, others: Bot[] = []) {
   } as unknown as Derived;
   flushSync(() => root.render(createElement(BotEditorStore, {
     value: { state: { ...initialState, bots: [bot, ...others] }, dispatch,
-      flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
+      navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
     children: createElement(PermissionsSection, { bot, derived }),
   })));
 }
@@ -92,7 +92,7 @@ describe("PermissionsSection parts", () => {
     } as unknown as Derived;
     flushSync(() => root.render(createElement(BotEditorStore, {
       value: { state: { ...initialState, bots: [base] }, dispatch,
-        flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
+        navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
       children: createElement(PermissionsSection, { bot: base, derived, parts: ["approval", "outbound"] }),
     })));
     expect(host.textContent).toContain("Approval level");

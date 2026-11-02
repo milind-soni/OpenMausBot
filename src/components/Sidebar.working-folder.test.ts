@@ -31,7 +31,7 @@ let host: HTMLDivElement;
 let root: Root;
 const render = () => flushSync(() => root.render(createElement(BotEditorStore, {
   value: { state: { ...initialState, connected: true, bots: [bot], selectedId: bot.id }, dispatch,
-    flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
+    navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
   children: createElement(Sidebar, { open: true, onClose: () => {} }),
 })));
 const openMenu = () => flushSync(() => document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Pepper"]')!.click());

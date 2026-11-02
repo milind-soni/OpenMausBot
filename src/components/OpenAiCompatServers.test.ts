@@ -32,7 +32,7 @@ function render(instances: store.InstanceInfo[]) {
   vi.spyOn(store, "useStore").mockReturnValue({
     state: { ...store.initialState, instances },
     dispatch: vi.fn(),
-    flushBotPatches: vi.fn(),
+    navigationRevision: { current: 0 }, flushBotPatches: vi.fn(),
     refreshInstances: vi.fn(),
     refreshModels: vi.fn(),
   });
@@ -73,7 +73,7 @@ describe("adding another OpenAI-compatible server", () => {
   function form() {
     vi.stubGlobal("window", {});
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
     fixture.counting = true;
@@ -115,7 +115,7 @@ describe("how long a server may take to reply", () => {
     vi.stubGlobal("window", {});
     const servers = [instance("openai-compat-1", "Ollama", { url: "http://127.0.0.1:11434/v1", ...(replyWaitMinutes ? { replyWaitMinutes } : {}) })];
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: servers }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: servers }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
     fixture.counting = true;
@@ -164,7 +164,7 @@ describe("LM Studio and Bionic setup", () => {
   it("asks only for the port and an optional token", () => {
     vi.stubGlobal("window", {});
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const html = renderToStaticMarkup(createElement(LmStudioServer));
     expect(html).toContain("LM Studio (Bionic)");
@@ -184,7 +184,7 @@ describe("LM Studio and Bionic setup", () => {
     fixture.api.mockResolvedValueOnce({ instances: [] });
     vi.stubGlobal("window", {});
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const button = () => {
       fixture.counting = true;
@@ -210,7 +210,7 @@ describe("LM Studio and Bionic setup", () => {
     fixture.api.mockResolvedValueOnce({ instances: [] });
     vi.stubGlobal("window", {});
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const fields = () => {
       fixture.counting = true;
@@ -235,7 +235,7 @@ describe("LM Studio and Bionic setup", () => {
         ...store.initialState,
         instances: [instance("openai-compat-1", "LM Studio", { url: "http://127.0.0.1:1234/v1" })],
       },
-      dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const html = renderToStaticMarkup(createElement(LmStudioServer));
     expect(html).toContain("This server is already added.");

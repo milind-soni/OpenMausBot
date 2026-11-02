@@ -1278,6 +1278,15 @@ describe("optimistic sent messages", () => {
     expect(reconciled.bots[0]?.activeLeafId).toBe(canonical.id);
   });
 
+  it("hangs a send still in flight on the server's copy of the send before it", () => {
+    let state: AppState = { ...initialState, bots: [bot] };
+    state = reducer(state, { type: "send", botId: bot.id, sendId: "s1", text: "one" });
+    state = reducer(state, { type: "send", botId: bot.id, sendId: "s2", text: "two" });
+    const canonical: Message = { id: "server-s1", role: "user", kind: "text", text: "one", at: 2, parentId: root.id, sendId: "s1" };
+    state = reducer(state, { type: "messageAdded", threadId: bot.threadId, message: canonical });
+    expect(visibleMessages(state.bots[0]!).map((message) => message.id)).toEqual([root.id, canonical.id, "optimistic-s2"]);
+  });
+
   it("removes only the optimistic row when a send queues or fails", () => {
     const sent = reducer(
       { ...initialState, bots: [bot] },
@@ -3160,5 +3169,53 @@ describe("fleet order from the server", () => {
   it("ignores ids it does not know and leaves an unchanged order alone", () => {
     expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c", "d"]);
     expect(reducer(hydrated, { type: "botsOrdered", botIds: ["a", "b", "c", "d"] })).toBe(hydrated);
+  });
+});
+
+describe("a snapshot taken while a send is on its way", () => {
+  const line = (id: string, extra: Partial<Message> = {}): Message => ({ id, at: 1, role: "user", kind: "text", text: id, ...extra });
+  const ids = (messages: Message[]) => messages.map((message) => message.id);
+  const bot: Bot = {
+    id: "b1", threadId: "t1", name: "Ada", title: "", description: "", notifications: false, color: "green", unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" }, messages: [line("a")], activeLeafId: "a",
+  };
+  const room: Group = {
+    id: "room", name: "Room", threadId: "rt", memberIds: [], createdAt: 1,
+    defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [line("r")],
+  };
+  const sent = [
+    { type: "send", botId: "b1", text: "hi", sendId: "s1" },
+    { type: "sendGroup", groupId: "room", text: "hi", sendId: "s2" },
+  ].reduce((state, action) => reducer(state, action as Action), { ...initialState, bots: [bot], groups: [room] });
+  const hydrate = (bots: Bot[], groups: Group[]) => reducer(sent, { type: "hydrate", bots, groups, computerControl: {} });
+
+  it("keeps the sends it does not carry yet, and the bot's leaf on its send", () => {
+    const next = hydrate([bot], [room]);
+    expect(ids(visibleMessages(next.bots[0]!))).toEqual(["a", "optimistic-s1"]);
+    expect(ids(next.groups[0]!.messages)).toEqual(["r", "optimistic-s2"]);
+  });
+
+  it("shows each send once when it already carries it", () => {
+    const next = hydrate(
+      [{ ...bot, messages: [line("a"), line("m1", { sendId: "s1", parentId: "a" })], activeLeafId: "m1" }],
+      [{ ...room, messages: [line("r"), line("m2", { sendId: "s2" })] }],
+    );
+    expect(ids(next.bots[0]!.messages)).toEqual(["a", "m1"]);
+    expect(next.bots[0]!.activeLeafId).toBe("m1");
+    expect(ids(next.groups[0]!.messages)).toEqual(["r", "m2"]);
+  });
+
+  it("does not carry a send into another thread", () => {
+    const next = hydrate([{ ...bot, threadId: "t2", messages: [line("b")], activeLeafId: "b" }], [{ ...room, threadId: "rt2", messages: [] }]);
+    expect(ids(next.bots[0]!.messages)).toEqual(["b"]);
+    expect(next.bots[0]!.activeLeafId).toBe("b");
+    expect(next.groups[0]!.messages).toEqual([]);
+  });
+
+  it("hangs a send still on its way on the snapshot's copy of the send before it", () => {
+    const twice = reducer(sent, { type: "send", botId: "b1", text: "again", sendId: "s3" });
+    const settled = { ...bot, messages: [line("a"), line("m1", { sendId: "s1", parentId: "a" })], activeLeafId: "m1" };
+    const next = reducer(twice, { type: "hydrate", bots: [settled], groups: [room], computerControl: {} });
+    expect(ids(visibleMessages(next.bots[0]!))).toEqual(["a", "m1", "optimistic-s3"]);
   });
 });

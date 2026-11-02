@@ -43,6 +43,7 @@ const requests: Array<{ path: string; body?: string }> = [];
 let server: BotAnnouncement;
 let firstBot = "other";
 let state: AppState;
+let navigationRevision: Readonly<{ current: number }>;
 let dispatch: (action: Action) => void;
 
 const { StoreProvider, useStore, openBot } = await import("./store");
@@ -60,7 +61,7 @@ const announcedThen = (body: unknown) => new Promise<Response>((resolve) => setT
 }, 0));
 
 function Probe() {
-  ({ state, dispatch } = useStore());
+  ({ state, dispatch, navigationRevision } = useStore());
   return null;
 }
 
@@ -205,7 +206,7 @@ describe("opening a bot with threads hidden", () => {
     await landOnSearchHit({
       botId: "scout", name: "Scout", threadId: "finished", messageId: "hit", role: "bot", kind: "text", at: 3,
       snippet: "the side job is done", matchStart: 4, matchLength: 8, onActivePath: true,
-    }, state, dispatch, false);
+    }, state, dispatch, false, navigationRevision);
     await settle();
     expect(sent().filter((request) => request.startsWith("/api/bots/scout/tasks/"))).toEqual(["/api/bots/scout/tasks/finished {}"]);
     expect(reads()).toEqual(["finished"]);

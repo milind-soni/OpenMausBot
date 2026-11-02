@@ -20,7 +20,7 @@ function Probe({ following }: { following: boolean }) {
   return null;
 }
 async function draw(following: boolean) {
-  const value = { state, dispatch: (action: Action) => { dispatched.push(action); }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: (action: Action) => { dispatched.push(action); }, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   await act(async () => root.render(createElement(BotEditorStore, { value, children: createElement(Probe, { following }) })));
 }
 const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });

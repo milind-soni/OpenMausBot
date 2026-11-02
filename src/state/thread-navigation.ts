@@ -117,3 +117,39 @@ export function openThread(
   dispatch({ type: "notice", notice: { kind: "thread-gone", botName: bot?.name ?? null } });
   return false;
 }
+
+export function advanceNavigation(
+  action: Action,
+  state: Pick<AppState, "bots" | "selectedId">,
+  selection: { current: number },
+  presence: { current: number },
+): void {
+  const selects = advancesNavigation(action, state);
+  if (selects) selection.current++;
+  if (selects || [
+    "searchNavigationStarted",
+    "toggleSettings", "toggleComputer", "toggleActivity", "toggleInspector", "toggleAppSettings", "togglePlugins",
+    "toggleShortcuts", "toggleNotifications", "toggleWelcome", "toggleTour", "openCloudAdd", "closeCloudAdd", "cloudHowTo",
+  ].includes(action.type)) presence.current++;
+}
+
+function advancesNavigation(action: Action, state: Pick<AppState, "bots" | "selectedId">): boolean {
+  switch (action.type) {
+    case "openDataResult":
+    case "openSignIn":
+    case "toggleComputer":
+    case "toggleSettings":
+      return action.botId !== undefined && state.bots.some((bot) => bot.id === action.botId && (action.type !== "toggleSettings" || !bot.hidden));
+    case "newBot":
+    case "botAdded":
+      return !action.preserveSelection;
+    case "duplicateBot":
+      return state.bots.some((bot) => bot.id === action.botId);
+    case "deleteBot":
+      return state.selectedId === action.botId;
+    case "deleteGroup":
+      return state.selectedId === action.groupId;
+    default:
+      return ["select", "newTask", "switchTask", "switchBranch", "createGroup", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type);
+  }
+}

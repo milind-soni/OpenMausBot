@@ -19,11 +19,12 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { advanceNavigation, botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import type { EngineInstall } from "./engine-install";
-import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
+import { keepSendsInFlight, optimisticMessageId, optimisticUserMessage, parentOnConfirmedSends, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
+import { switchRoomTask } from "./room-task-navigation";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
@@ -703,7 +704,7 @@ export type Action =
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }
-  | { type: "switchGroupTask"; groupId: string; threadId: string }
+  | { type: "switchGroupTask"; groupId: string; threadId: string; whole?: true }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
   | { type: "setConversationTurnLimit"; groupId: string; threadId: string; minutes: number | null; dm: boolean }
@@ -755,6 +756,7 @@ export type Action =
     }
   | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void }
   | { type: "switchTask"; botId: string; threadId: string; whole?: true }
+  | { type: "searchNavigationStarted"; botId: string }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -919,12 +921,12 @@ export function reducer(state: AppState, action: Action): AppState {
         bots: action.bots.map((sent) => {
           const bot = sent.messages ? sent : { ...sent, messages: [] };
           const previous = state.bots.find((candidate) => candidate.id === bot.id);
-          return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
+          return keepBotNavigation(previous, previous ? { ...keepSendsInFlight(bot, previous), tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
             action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
         }),
         groups: action.groups.map((group) => {
           const previous = state.groups.find((candidate) => candidate.id === group.id);
-          const merged = previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
+          const merged = previous ? { ...keepSendsInFlight(group, previous), tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
           // The wire carries an explicitly-cleared description as null; client state keeps it absent.
           if (merged.description === null) merged.description = undefined;
           return keepGroupNavigation(previous, merged, action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
@@ -1267,9 +1269,9 @@ export function reducer(state: AppState, action: Action): AppState {
       if (optimisticIndex >= 0) {
         return updateBot(stamped, bot.id, (current) => ({
           ...current,
-          messages: current.messages.map((message, index) =>
+          messages: parentOnConfirmedSends(current.messages.map((message, index) =>
             index === optimisticIndex ? action.message : message
-          ),
+          ), [action.message]),
           activeLeafId: current.activeLeafId === optimisticId
             ? action.message.id
             : current.activeLeafId,
@@ -1746,6 +1748,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
+    case "searchNavigationStarted":
+      return updateBot(state, action.botId, (bot) => ({ ...bot, switchingTo: undefined }));
     case "switchTaskFailed":
       return updateBot(state, action.botId, (bot) => bot.switchingTo === action.threadId ? { ...bot, switchingTo: undefined } : bot);
     case "renameTask":
@@ -2100,6 +2104,7 @@ export function runtimeFrameAction(event: RuntimeEvent): Action | null {
 export const StoreContext = createContext<{
   state: AppState;
   dispatch: React.Dispatch<Action>;
+  navigationRevision: Readonly<{ current: number }>;
   flushBotPatches: (botId: string) => Promise<BotAnnouncement | null>;
   refreshInstances: (options?: { reportErrors?: boolean }) => Promise<void>;
   refreshModels: (instanceId: string) => Promise<void>;
@@ -2117,7 +2122,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
   const [state, rawDispatch] = useReducer(reducer, initialState, restoreBotSettingsSection);
-  const stateRef = useRef(state), selectionRevision = useRef(0);
+  const stateRef = useRef(state), selectionRevision = useRef(0), presenceRevision = useRef(0);
   stateRef.current = state;
   const showThreads = useShowThreads();
   const showThreadsRef = useRef(showThreads);
@@ -2267,7 +2272,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel"].includes(action.type)) selectionRevision.current++;
+      advanceNavigation(action, stateRef.current, selectionRevision, presenceRevision);
+      if (action.type === "searchNavigationStarted") navigation.set(action.botId, (navigation.get(action.botId) ?? 0) + 1);
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
@@ -2885,9 +2891,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "switchGroupTask":
-          api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST" })
-            .then(roomAnswer(action.groupId, true))
-            .catch(showError);
+          void switchRoomTask(action, stateRef.current.groups, roomAnswer(action.groupId, true)).catch(showError);
           break;
         case "renameGroupTask":
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
@@ -3354,7 +3358,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [botPatchQueue],
   );
   const value = useMemo(
-    () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
+    () => ({ state, dispatch, navigationRevision: presenceRevision, flushBotPatches, refreshInstances, refreshModels }),
     [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
