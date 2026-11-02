@@ -4759,8 +4759,6 @@ function closeSessionStreams(sessionId: string): void {
     if (client.sessionId === sessionId) client.close();
   }
 }
-const sessionSnapshots = snapshotsAfterViewChanges(sessions, () => lastSeq, closeSessionStreams);
-keepViewsToDepartments(sessions, store);
 sessions.onSessionRevoked((sessionId) => {
   providerAuthSessions.revokeOwner(sessionId);
   mcpOAuth.revokeOwner(sessionId);
@@ -4794,6 +4792,8 @@ const SSE_HEARTBEAT_MS =
     : 15_000;
 let lastSeq = 0;
 const replayBuffer = new ReplayBuffer();
+const sessionSnapshots = snapshotsAfterViewChanges(sessions, () => lastSeq, closeSessionStreams);
+keepViewsToDepartments(sessions, store);
 
 const wants = (client: SseClient, kind: string) => kind !== "screen" || client.screens;
 

@@ -1,7 +1,11 @@
-import { writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
+import { waitForExit } from "./testing/cleanup.ts";
 
 describe("paired devices limited to one department, bot or group chat", () => {
   let fixture: VerificationServer;
@@ -298,3 +302,35 @@ describe("paired devices limited to one department, bot or group chat", () => {
     expect((await api("PATCH", `/api/bots/${ids.ops2}`, { section: "Ops" })).status).toBeLessThan(300);
   });
 });
+
+it("starts with a saved view that names a department gone while it was stopped", async () => {
+  const fixture = await launchVerificationServer();
+  const { url, dataDir, logPath } = fixture.info;
+  let server: ChildProcess | undefined;
+  const api = async (method: string, path: string, body?: unknown) => {
+    const response = await fetch(url + path, { method, headers: { "content-type": "application/json", origin: url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    expect((await api("POST", "/api/bots", { name: "Temp bot", section: "Temp" })).status).toBeLessThan(300);
+    const invitation = await api("POST", "/api/auth/pairing", { label: "Temp tablet", scopes: ["client"], view: { sections: ["Temp"], bots: [], groups: [] } });
+    expect((await api("POST", "/api/auth/pair", { code: invitation.body.code, label: "Temp tablet" })).status).toBe(200);
+    await waitForExit(fixture.child, { signal: "SIGTERM" });
+    const sessionsPath = join(dataDir, "sessions.json");
+    writeFileSync(sessionsPath, readFileSync(sessionsPath, "utf8").replaceAll('"Temp"', '"Gone"'));
+    const log = openSync(logPath, "a", 0o600);
+    server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), stdio: ["ignore", log, log],
+    });
+    closeSync(log);
+    await expect.poll(async () => {
+      try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
+    }, { timeout: 20_000 }).toBe(true);
+    const saved = JSON.parse(readFileSync(sessionsPath, "utf8")) as { sessions: Array<{ view?: { sections: string[] } }> };
+    expect(saved.sessions.flatMap((session) => session.view?.sections ?? [])).not.toContain("Gone");
+  } finally {
+    if (server) await waitForExit(server, { signal: "SIGTERM" });
+    await fixture.close();
+  }
+}, 120_000);
