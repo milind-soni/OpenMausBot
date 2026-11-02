@@ -21,7 +21,6 @@ export function useRoutineRunsFrom(start: number): void {
 export function useThreadRoutineRun(botId: string, threadId: string): RoutineRun | undefined {
   const { state, dispatch } = useStore();
   const run = state.routineRuns.find((candidate) => candidate.target === "bot" && candidate.botId === botId && candidate.threadId === threadId
-    // A run that only joined this chat (a wait's follow-up, a limit-reset continuation) does not make it a run page.
     && candidate.threadId !== candidate.resultsThreadId && candidate.threadId !== candidate.sourceThreadId);
   const marked = state.bots.find((bot) => bot.id === botId)?.tasks?.some((task) => task.threadId === threadId && task.routineRunId);
   const missing = !run && Boolean(marked) && state.routineRunsSince !== null;
