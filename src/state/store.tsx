@@ -37,6 +37,7 @@ import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { desktopCapabilitiesNow } from "@/lib/desktop";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
+import { StoreRefContext } from "./store-ref";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { ModelRequestCardData } from "../../shared/model-request";
@@ -3357,7 +3358,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
     [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  const ref = useMemo(() => ({ dispatch, state: () => stateRef.current }), [dispatch]);
+  return <StoreRefContext value={ref}><StoreContext.Provider value={value}>{children}</StoreContext.Provider></StoreRefContext>;
 }
 
 export function useStore() {
@@ -3367,13 +3369,7 @@ export function useStore() {
 }
 
 export function BotEditorStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <StoreRefContext value={null}><StoreContext.Provider value={value}>{children}</StoreContext.Provider></StoreRefContext>;
 }
 
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-
-export function formatTime(at: number) {
-  const date = new Date(at);
-  // toLocaleTimeString's output, where Intl.DateTimeFormat.format would throw
-  return Number.isNaN(date.getTime()) ? "Invalid Date" : TIME_FORMAT.format(date);
-}
+export { formatTime } from "@/lib/format-time";

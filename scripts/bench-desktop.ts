@@ -347,7 +347,7 @@ async function pageLoad(page: Page, url: string, timeoutMs = 60_000) {
 }
 
 async function benchSnapshot(page: Page) {
-  return page.evaluate<{ commits: number; commitMs: number; probeMs: number; renderedTotal: number; maxRendered: number; renders: Record<string, number>; selfMs: Record<string, number>; mounts: Record<string, number>; timerFires: Record<string, number>; sse: { frames: number; bytes: number; kinds: Record<string, { n: number; bytes: number }> }; longTasks: Array<[number, number]>; liveIntervals: string[] }>(
+  return page.evaluate<{ commits: number; commitMs: number; probeMs: number; renderedTotal: number; maxRendered: number; renders: Record<string, number>; selfMs: Record<string, number>; mounts: Record<string, number>; why: Record<string, Record<string, number>>; timerFires: Record<string, number>; sse: { frames: number; bytes: number; kinds: Record<string, { n: number; bytes: number }> }; longTasks: Array<[number, number]>; liveIntervals: string[] }>(
     "(() => { const b = window.__bench; return { ...b, liveIntervals: [...b.liveIntervals.values()], reset: undefined }; })()");
 }
 
@@ -464,7 +464,7 @@ async function streamTurn(chrome: Chrome, page: Page, fixture: Fixture, botId: s
     reactCommits: snapshot.commits, commitsPerSec: round(snapshot.commits / seconds),
     renderMsTotal: Math.round(snapshot.commitMs),
     componentsRenderedPerCommit: round(snapshot.renderedTotal / Math.max(1, snapshot.commits)), maxComponentsInOneCommit: snapshot.maxRendered,
-    topRendered: Object.fromEntries(top.map(([name, count]) => [name, { renders: count, perCommit: round(count / Math.max(1, snapshot.commits), 2), selfMs: Math.round(snapshot.selfMs[name] ?? 0) }])),
+    topRendered: Object.fromEntries(top.map(([name, count]) => [name, { renders: count, perCommit: round(count / Math.max(1, snapshot.commits), 2), selfMs: Math.round(snapshot.selfMs[name] ?? 0), why: snapshot.why[name] }])),
     groups: componentGroups(snapshot.renders, snapshot.selfMs),
     mounts: Object.values(snapshot.mounts).reduce((sum, n) => sum + n, 0),
     animationsMidTurn,
