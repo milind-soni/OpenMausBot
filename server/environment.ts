@@ -119,6 +119,13 @@ export function loadEnvironmentId(dataDir: string): string {
   }
 }
 
+let stamp: string | undefined;
+/** This server's release and, on a Cloud, its image: what it runs changes with either, the engines' CLIs included. */
+export function buildStamp(): string {
+  stamp ??= [serverVersion(), process.env.OMB_CLOUD_IMAGE?.trim()].filter(Boolean).join(" ");
+  return stamp;
+}
+
 /** The desktop's own version, else the bundle's package.json (scripts/bundle-server.mjs), else the checkout's. */
 export function serverVersion(root = SERVER_ROOT): string {
   const fromEnv = process.env.OMB_APP_VERSION?.trim();

@@ -227,8 +227,7 @@ export function QuestionCard({
   );
 }
 
-/** At Full access a bot decides a teammate's question instead of the person: it blocks nothing, and the person may still
- * give their own answer. */
+/** A bot answered the question instead of the person: it blocks nothing, and the person may still give their own answer. */
 export const decidedByBot = (card: NonNullable<Message["card"]>): boolean =>
   card.answeredBy?.kind === "bot" && card.answered === "answer" && !card.dismissed && !card.expired && !card.stopped;
 

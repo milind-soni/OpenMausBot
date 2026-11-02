@@ -1,8 +1,14 @@
 import type { Bot, Group, Message } from "./store";
 
+// One branch per transcript array and leaf: every sidebar row, the composer and the chat ask for it on each store
+// change, and an unchanged transcript keeps the same array (so memos keyed on it hold).
+const branches = new WeakMap<readonly Message[], { leafId: string; path: Message[] }>();
+
 export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Message[] {
   const leafId = bot.activeLeafId;
   if (!leafId) return bot.messages;
+  const cached = branches.get(bot.messages);
+  if (cached?.leafId === leafId) return cached.path;
   const byId = new Map(bot.messages.map((m) => [m.id, m]));
   if (!byId.has(leafId)) return bot.messages;
   const path: Message[] = [];
@@ -11,7 +17,9 @@ export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Me
     path.push(cur);
     cur = cur.parentId ? byId.get(cur.parentId) : undefined;
   }
-  return path.reverse();
+  path.reverse();
+  branches.set(bot.messages, { leafId, path });
+  return path;
 }
 
 export function navigatedSince(

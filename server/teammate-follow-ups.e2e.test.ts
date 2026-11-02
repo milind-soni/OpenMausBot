@@ -3,7 +3,9 @@
 // on comes back to Clive, and Clive's reply to her thread, in any later turn and without naming the question, answers it:
 // a NEEDS INPUT question and the card her ask tool waits on alike. A correction Clive sends while Mira works reaches her
 // running turn, and Clive can send a follow-up to one particular thread he opened on her. Each time Mira's one result
-// still comes back once, and no second job starts. It proves where things land, not a model's judgement.
+// still comes back once, and no second job starts. A question Mira asks the person in their own chat with her Clive may
+// answer for them there, as her Chief; a bot that is not her Chief may not. It proves where things land, not a model's
+// judgement.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -236,6 +238,121 @@ it("F4 keeps a second assignment Clive hands Mira in the same turn its own job, 
   } finally {
     f.open("mira");
   }
+}), hostTimeout(90_000));
+
+const PERSON_QUESTION = "Keep the old pricing page as a backup?";
+const askThePerson = (f: any, key: string) => f.script(f.mira.id, { key: "M1", match: [key], timeoutMs: 90_000,
+  steps: [{ server: "ogb", tool: "ask_user", arguments: { question: PERSON_QUESTION, choices: ["Keep it", "Delete it"] }, capture: { answer: "([\\s\\S]+)" } }],
+  reply: `${key}-RESULT: done with {{answer}}` });
+const asking = async (f: any, chat: string) => (await f.messages(chat)).find((message: any) => message.card?.subtitle === PERSON_QUESTION)?.card;
+
+it("P1 lets Clive, as Mira's Chief, answer for the person the question she asks them in their own chat, and her turn carries on with it", () => scenario(async (f) => {
+  await f.askMeFirst();
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P1");
+  f.script(f.clive.id, { key: "C-ANSWER", match: ["P1-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat } }], reply: "C-ANSWER: answered Mira for you." });
+  await f.say(f.mira.id, chat, "P1: redo the pricing page.");
+  await expect.poll(async () => { const card = await asking(f, chat); return Boolean(card) && !card.answered; }, { timeout: 30_000 }).toBe(true);
+
+  await f.say(f.clive.id, f.job, "P1-SAG: tell Mira to keep it.");
+  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-ANSWER"]);
+  expect(f.given("C-ANSWER"), "Clive's turn lists what Mira waits on the person for").toContain("Teammates you manage wait on the person's answer");
+  expect(f.given("C-ANSWER")).toContain(chat);
+  expect(f.given("C-ANSWER")).toContain(PERSON_QUESTION);
+  const [sent] = f.replies("C-ANSWER");
+  expect(sent.receipts).toEqual([expect.objectContaining({ outcome: "injected", threadId: chat, detail: expect.stringContaining(`answered its question "${PERSON_QUESTION}" for the person`) })]);
+  await expect.poll(async () => (await f.messages(chat)).some((message: any) => message.role === "bot" && String(message.text).startsWith("P1-RESULT")), { timeout: 30_000 }).toBe(true);
+  const result = (await f.messages(chat)).find((message: any) => String(message.text).startsWith("P1-RESULT")).text as string;
+  expect(result).toContain("@Clive answered for the person");
+  expect(result).toContain("Keep it");
+  expect(await asking(f, chat)).toMatchObject({ answered: "answer", answeredText: "Keep it", answeredBy: { kind: "bot", name: "Clive" } });
+  expect(f.children(), "no work was handed out").toEqual([]);
+  expect(f.keys(f.mira.id)).toEqual(["M1"]);
+}), hostTimeout(120_000));
+
+it("P2 refuses the person's chat with Mira to a bot that is not her Chief, and her question stays the person's", () => scenario(async (f) => {
+  await f.askMeFirst();
+  expect((await f.api("PATCH", `/api/bots/${f.clive.id}`, { chiefOfStaff: false })).status).toBe(200);
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P2");
+  f.script(f.clive.id, { key: "C0", match: ["P2-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat }, expectError: true }], reply: "C0: refused." });
+  await f.say(f.mira.id, chat, "P2: redo the pricing page.");
+  await expect.poll(async () => (await asking(f, chat)) !== undefined, { timeout: 30_000 }).toBe(true);
+
+  await f.say(f.clive.id, f.job, "P2-SAG: tell Mira to keep it.");
+  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C0"]);
+  expect(f.given("C0")).not.toContain("Teammates you manage wait on the person's answer");
+  expect(f.replies("C0")).toEqual([`"${chat}" is not a thread you opened on Mira: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`]);
+  expect((await asking(f, chat))?.answered).toBeUndefined();
+  expect(f.children()).toEqual([]);
+}), hostTimeout(90_000));
+
+it("P3 lets the person replace Clive's answer: the card shows theirs, and Mira gets it in a new turn", () => scenario(async (f) => {
+  await f.askMeFirst();
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P3");
+  f.script(f.clive.id, { key: "C-ANSWER", match: ["P3-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat } }], reply: "C-ANSWER: answered Mira for you." });
+  f.script(f.mira.id, { key: "M2", match: ["Delete it"], reply: "M2: deleted it instead." });
+  await f.say(f.mira.id, chat, "P3: redo the pricing page.");
+  await expect.poll(async () => { const card = await asking(f, chat); return Boolean(card) && !card.answered; }, { timeout: 30_000 }).toBe(true);
+  await f.say(f.clive.id, f.job, "P3-SAG: tell Mira to keep it.");
+  await expect.poll(async () => f.said(chat, "P3-RESULT"), { timeout: 30_000 }).toBe(1);
+
+  const { requestId } = await asking(f, chat);
+  const changed = await f.api("POST", `/api/threads/${chat}/respond`, { requestId, behavior: "answer", message: "Delete it" });
+  expect(changed.status, JSON.stringify(changed.body)).toBeLessThan(300);
+  await expect.poll(() => f.keys(f.mira.id), { timeout: 30_000 }).toEqual(["M1", "M2"]);
+  await expect.poll(async () => f.said(chat, "M2: deleted it instead."), { timeout: 30_000 }).toBe(1);
+  const card = await asking(f, chat);
+  expect(card).toMatchObject({ answered: "answer", answeredText: "Delete it" });
+  expect(card.answeredBy?.kind).not.toBe("bot");
+  expect(f.children(), "no work was handed out").toEqual([]);
+}), hostTimeout(120_000));
+
+it("P4 keeps Mira's question from a Clive turn a webhook started: it is not listed, the thread is refused, and it stays the person's", () => scenario(async (f) => {
+  await f.askMeFirst();
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P4");
+  f.script(f.clive.id, { key: "C-HOOK", match: ["P4-HOOK"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat }, expectError: true }], reply: "C-HOOK: refused." });
+  await f.say(f.mira.id, chat, "P4: redo the pricing page.");
+  await expect.poll(async () => (await asking(f, chat)) !== undefined, { timeout: 30_000 }).toBe(true);
+
+  const hook = await f.api("POST", "/api/webhooks", { name: "P4", prompt: "P4-HOOK: tell Mira to keep it.", botId: f.clive.id, runOn: "maus" });
+  expect(hook.status, JSON.stringify(hook.body)).toBe(201);
+  const delivered = await fetch(hook.body.credential.url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  expect(delivered.status).toBe(202);
+  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-HOOK"]);
+  expect(f.given("C-HOOK")).not.toContain("Teammates you manage wait on the person's answer");
+  expect(f.replies("C-HOOK")).toEqual([`"${chat}" is not a thread you opened on Mira: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`]);
+  expect((await asking(f, chat))?.answered).toBeUndefined();
+  expect(f.children()).toEqual([]);
+}), hostTimeout(90_000));
+
+it("P5 does not take a message that names other work as the answer to Mira's question to the person", () => scenario(async (f) => {
+  await f.askMeFirst();
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P5");
+  f.script(f.clive.id, { key: "C-ANSWERS", match: ["P5-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat, answers: "no-such-work" }, expectError: true }], reply: "C-ANSWERS: refused." });
+  await f.say(f.mira.id, chat, "P5: redo the pricing page.");
+  await expect.poll(async () => (await asking(f, chat)) !== undefined, { timeout: 30_000 }).toBe(true);
+
+  await f.say(f.clive.id, f.job, "P5-SAG: answer the other job.");
+  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-ANSWERS"]);
+  expect(f.replies("C-ANSWERS")).toEqual([`"${chat}" is not a thread you opened on Mira: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`]);
+  expect((await asking(f, chat))?.answered).toBeUndefined();
+}), hostTimeout(90_000));
+
+it("P6 does not take a one-way notice as the answer to Mira's question to the person", () => scenario(async (f) => {
+  await f.askMeFirst();
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P6");
+  f.script(f.clive.id, { key: "C-NOTICE", match: ["P6-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat, reply: "none" }, expectError: true }], reply: "C-NOTICE: refused." });
+  await f.say(f.mira.id, chat, "P6: redo the pricing page.");
+  await expect.poll(async () => (await asking(f, chat)) !== undefined, { timeout: 30_000 }).toBe(true);
+
+  await f.say(f.clive.id, f.job, "P6-SAG: let Mira know.");
+  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-NOTICE"]);
+  expect((await asking(f, chat))?.answered).toBeUndefined();
 }), hostTimeout(90_000));
 
 it("F3 refuses a thread Clive did not open on Mira, saying where thread ids come from", () => scenario(async (f) => {

@@ -17,6 +17,8 @@ export function cloudTarget(env = process.env) {
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
+/** What the Admin says of a Cloud of this account's a computer moved to (POST moved-to). */
+const MOVED_TO = Object.freeze(["deleted", "ended", "live", "unknown"]);
 const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
@@ -846,6 +848,17 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!current) return false;
       try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
       catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
+    /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to), for a computer frozen
+     * for a Cloud that is not My Cloud now: "deleted", "ended" (stopped and kept only until it is deleted), "live", or
+     * "unknown" (none of this account's ever was). Null without a verified sign-in, or from an Admin that doesn't say (404). */
+    async movedTo(cloudOrigin) {
+      const current = grant;
+      if (!current || value.status !== "connected" || typeof cloudOrigin !== "string") return null;
+      let result;
+      try { result = await request("moved-to", { method: "POST", body: { origin: cloudOrigin }, token: current.token }); }
+      catch (error) { if (error?.status === 404 && !error.opaque) return null; throw error; }
+      return grant === current && result?.cloudContractVersion === 1 && MOVED_TO.includes(result.state) ? result.state : null;
     },
     /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status; move-status.mjs
      * builds `report`). False when there is no sign-in or the Admin doesn't take it yet (404). */
