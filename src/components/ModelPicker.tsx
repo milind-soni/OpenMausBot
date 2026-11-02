@@ -478,6 +478,11 @@ export function ModelPicker({
     dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: false, selection: profile.modelSelection });
   };
 
+  /** Whether this menu shows a reasoning row (effort levels or model variants) for `next` on `instance`. */
+  const offersReasoning = (instance: InstanceInfo, next: ModelSelection) => !contained && (instance.capabilities?.modelVariants
+    ? Boolean(variantChoices(state, next, threadId ?? bot.threadId))
+    : Boolean(instance.capabilities?.effortLevels?.length));
+
   const pick = (instance: InstanceInfo, model: string, variant?: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
@@ -500,7 +505,9 @@ export function ModelPicker({
       selection: nextSelection,
     });
     if (updateBotDefault && threadId) setChangedBotModel(true);
-    close(true);
+    // A model with reasoning levels keeps the menu open, so its level can be set next without opening it again;
+    // picking a variant row already sets that level.
+    if (variant !== undefined || !offersReasoning(instance, nextSelection)) close(true);
   };
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
