@@ -103,6 +103,16 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   return node;
 }
 
+function announcingWrites(store: RuntimeStore, wrote: () => void): RuntimeStore {
+  const announced = <A extends unknown[], R>(write: (...args: A) => R) => (...args: A): R => {
+    const result = write(...args);
+    wrote();
+    return result;
+  };
+  return { ...store, insert: announced(store.insert), update: announced(store.update), addInbox: announced(store.addInbox),
+    markDelivered: announced(store.markDelivered), prune: announced(store.prune) };
+}
+
 /** How often a request that joined another looks at it. */
 const JOIN_POLL_MS = 1_000;
 const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answered once, for both of you:";
@@ -126,7 +136,8 @@ export class RuntimeCoordinator implements Coordinator {
     this.legacyThreads = options.legacyThreads;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.error("coordinator:", line));
-    this.store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+    const store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+    this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
       limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
@@ -437,6 +448,11 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     this.pruneDaily();
     this.runtime.tick();
+  }
+
+  pace(): "busy" | "parked" | "idle" {
+    this.ready();
+    return this.runtime.pace();
   }
 
   private pruneDaily(): void {

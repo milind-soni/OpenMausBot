@@ -228,6 +228,16 @@ export class Runtime {
     return { ok: true, assignment: node, duplicate: false };
   }
 
+  /** How soon the next tick() matters: "busy" while work may move without a call in here (a turn, a queued or resumable
+   * assignment, a report to send); "parked" while live assignments only wait on a person, a teammate or a time limit. */
+  pace(): "busy" | "parked" | "idle" {
+    if (!this.opened) this.open();
+    if (this.turns.size > 0 || this.reportDue.size > 0) return "busy";
+    const live = this.store.all({ nonTerminal: true });
+    if (live.some(n => n.status === "queued" || n.status === "resume" || n.status === "running")) return "busy";
+    return live.length > 0 ? "parked" : "idle";
+  }
+
   /** Never overlaps itself; does nothing after close(). */
   tick(): void {
     if (!this.opened) this.open();

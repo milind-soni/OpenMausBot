@@ -1610,3 +1610,25 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     expect(w.coordinator.parkedFor("tester")).toEqual([]);
   });
 });
+
+describe("pace: how soon the host must tick", () => {
+  it("is busy while a turn runs, parked while the work only waits on the person, idle once done; every write is announced", async () => {
+    const host = fakeHost();
+    const wrote = vi.fn();
+    const w: World = { host, coordinator: new RuntimeCoordinator({ dataDir: ":memory:", host, wrote }), logs: [] };
+    expect(w.coordinator.pace()).toBe("idle");
+    begun(w, chief, "gen-1");
+    expect(wrote).toHaveBeenCalled();
+    expect(w.coordinator.pace()).toBe("busy");
+    w.coordinator.endTurn("gen-1", { ok: true, text: "", cards: { question: "Approve the key", ids: ["msg-1"] } });
+    expect(w.coordinator.pace()).toBe("parked");
+    wrote.mockClear();
+    expect(w.coordinator.answerRoot("gen-1", "The user approved the key.")).toBe(true);
+    expect(wrote).toHaveBeenCalled();
+    expect(w.coordinator.pace()).toBe("busy");
+    w.coordinator.tick(); await flush();
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "completed" });
+    expect(w.coordinator.pace()).toBe("idle");
+  });
+});
