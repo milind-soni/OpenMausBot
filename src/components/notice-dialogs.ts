@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import type { DesktopNoticesBridge, DesktopNoticesState } from "../../electron/desktop-prefs.mjs";
 import { SIMPLE_MODE_PROMPT } from "./SimpleModePrompt";
 import { UPDATES_CONSENT_POPUP } from "./UpdatesConsent";
@@ -24,12 +24,15 @@ export function otherDialogOpen(): boolean {
   return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(QUEUE_POPUPS) && element.checkVisibility());
 }
 
+// Looked up when watching starts (before paint) and once a second after, never during a render: the app's root renders on
+// every store change, and a document-wide query there forced a style recalculation each time.
 export function useOtherDialogOpen(watch: boolean): boolean {
-  const [, setOpen] = useState(false);
-  useEffect(() => {
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
     if (!watch) return;
+    setOpen(otherDialogOpen());
     const timer = setInterval(() => setOpen(otherDialogOpen()), 1_000);
     return () => clearInterval(timer);
   }, [watch]);
-  return watch && otherDialogOpen();
+  return watch && open;
 }

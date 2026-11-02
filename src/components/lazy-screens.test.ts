@@ -162,7 +162,7 @@ describe("preloadScreens", () => {
     });
     vi.stubGlobal("cancelIdleCallback", cancel);
     const preloads = stubPreloads();
-    expect(preloads.length).toBe(14);
+    expect(preloads.length).toBe(15);
     const stop = preloadScreens();
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
     idle!();
@@ -213,9 +213,10 @@ describe("launch bundle", () => {
     return null;
   };
   const staticImports = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)(?:[^"'`;]*?\sfrom\s+)?["']([^"']+)["']/g;
-  const launchModules = (entry = "main.tsx") => {
+  // The app's launch is main.tsx and App.tsx, whose fetch main.tsx starts at once on every path but /pair and /home.
+  const launchModules = (...entries: string[]) => {
     const seen = new Set<string>();
-    const queue = [join(srcRoot, entry)];
+    const queue = (entries.length ? entries : ["main.tsx", "App.tsx"]).map((entry) => join(srcRoot, entry));
     while (queue.length) {
       const file = queue.pop()!;
       if (seen.has(file)) continue;
@@ -236,10 +237,17 @@ describe("launch bundle", () => {
     expect(reached.has("components/Sidebar.tsx")).toBe(true);
     const deferred = [
       "ActivityPanel", "BotSettingsDialog", "ComputerPanel", "InspectorPanel", "KeyboardShortcutsModal",
-      "LocalVmWorkspace", "NewBotDialog", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
+      "LocalVmWorkspace", "NewBotDialog", "PluginsPanel", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
       "RoutinesPage", "SettingsModal", "TeamMapPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
     ].map((name) => `components/${name}.tsx`);
     expect(deferred.filter((file) => reached.has(file))).toEqual([]);
+  });
+
+  it("the sign-in and home pages leave the app out", () => {
+    const page = launchModules("main.tsx");
+    expect(page.has("pair/PairPage.tsx")).toBe(true);
+    expect(page.has("components/HomeScreen.tsx")).toBe(true);
+    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/ChatView.tsx"].filter((file) => page.has(file))).toEqual([]);
   });
 
   it("carries English and no other language: the one a person chose loads before the first render", () => {
