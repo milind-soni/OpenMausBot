@@ -377,7 +377,9 @@ describe("Where the bot works", () => {
 
   it("leaves This Mac out on another server's page, where this computer can never be a bot's place", () => {
     fixture.localComputer = { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: "remote-server" };
-    expect(grid(render(makeBot())).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud desktop", "Private desktop", "Browser", "Off"]);
+    const rendered = render(makeBot());
+    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud desktop", "Private desktop", "Browser", "Off"]);
+    expect(placeLine(rendered)).toBe("Uses the built-in browser, or a running private desktop when a task needs one.");
   });
 
   it("shows a bot set to This Mac as Auto on another server's page, without changing its setting", () => {

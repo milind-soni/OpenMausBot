@@ -18,7 +18,7 @@ export type PlaceAvailability = Record<Place, boolean>;
 export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reachable: boolean; policy: boolean; listed: boolean }> {
   const { state } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const seat = usePlaceSeat(state.config, capabilities.host.platform);
+  const seat = usePlaceSeat(state.config, capabilities);
   const backend = bot.cloudBackend === "vps" ? "vps" : "box";
   const allowed = state.config?.managedPolicy?.computers ?? { thisComputer: true, localVm: true, box: true, vps: true };
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
