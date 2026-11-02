@@ -631,7 +631,9 @@ export function roomMemberMissing(payload: Record<string, unknown>, visible: Pic
   if (!visible.roomOnly) return false;
   const group = payload.kind === "group" && payload.group && typeof payload.group === "object" ? payload.group as { id?: unknown; memberIds?: unknown } : null;
   if (!group || typeof group.id !== "string" || !Array.isArray(group.memberIds) || !visible.group(group.id)) return false;
-  return group.memberIds.some((id) => typeof id === "string" && visible.bot(id) && !seen.bots.has(id));
+  if (group.memberIds.some((id) => typeof id === "string" && visible.bot(id) && !seen.bots.has(id))) return true;
+  // A bot that left the room is gone from what the device may see, but no frame of its own withdraws it.
+  return [...seen.bots].some((id) => !visible.bot(id));
 }
 
 /** Kept current while nothing is restricted, so restricting a bot later withdraws it from this stream. */

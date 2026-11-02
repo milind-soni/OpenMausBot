@@ -211,6 +211,19 @@ describe("paired devices limited to one department, bot or group chat", () => {
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { memberIds: [ids.ops1, ids.hr] })).status).toBeLessThan(300);
   });
 
+  it("a bot removed from the device's room leaves its stream", async () => {
+    const room = openStream("room-screen");
+    await expect.poll(() => room.state.hello, { timeout: 10_000 }).toBe(true);
+    expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { memberIds: [ids.ops1] })).status).toBeLessThan(300);
+    await expect.poll(() => room.state.ended, { timeout: 10_000 }).toBe(true);
+    const back = openStream("room-screen", room.state.cursor);
+    await expect.poll(() => back.state.hello, { timeout: 10_000 }).toBe(true);
+    expect(back.state.resumed, "a replay cannot withdraw a bot the device already has").toBe(false);
+    expect((await seen("room-screen")).bots).toEqual([ids.ops1]);
+    back.close();
+    expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { memberIds: [ids.ops1, ids.hr] })).status).toBeLessThan(300);
+  });
+
   it("an admin changes a paired device's view; its stream ends and it never gets admin back", async () => {
     const sessions = (await api("GET", "/api/auth/sessions")).body.sessions;
     const plain = sessions.find((row: any) => row.label === "plain-phone");

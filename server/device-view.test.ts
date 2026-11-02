@@ -273,3 +273,13 @@ describe("a bot joining a group-limited device's room", () => {
     expect(roomMemberMissing({ kind: "group", group: { id: "room-ops", memberIds: ["ops1", "ops2"] } }, set(lensed(only({ sections: ["Ops"] }))), { bots: new Set(["ops1"]), groups: new Set() })).toBe(false);
   });
 });
+
+describe("a bot leaving a group-limited device's room", () => {
+  it("tells the stream to start over, since no frame withdraws the bot it came with", () => {
+    const left = (view: DeviceView) => new VisibleSet(bots, groups.map((group) => (group.id === "room-mixed" ? { ...group, memberIds: ["ops1"] } : group)), lensed(view));
+    const seen: StreamSeen = { bots: new Set(["ops1", "hr"]), groups: new Set(["room-mixed"]) };
+    const frame = { kind: "group", group: { id: "room-mixed", memberIds: ["ops1"] } };
+    expect(roomMemberMissing(frame, left(only({ groups: ["room-mixed"] })), seen)).toBe(true);
+    expect(roomMemberMissing(frame, left(only({ groups: ["room-mixed"], bots: ["hr"] })), seen), "picked by itself, it stays").toBe(false);
+  });
+});
