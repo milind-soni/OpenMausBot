@@ -21,6 +21,9 @@ import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
+// These tests are about a model on this network, so their loopback fixture counts as one.
+process.env.OMB_TEST_FIXTURE_MODELS = "";
+
 interface ChatRequest {
   messages: Array<{
     role: string;

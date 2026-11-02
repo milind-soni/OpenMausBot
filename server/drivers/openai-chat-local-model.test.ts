@@ -13,6 +13,9 @@ import { recordEvents } from "../testing/events.ts";
 import { GrokDriver } from "./grok.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
+// These tests are about a model on this network, so their loopback fixture counts as one.
+process.env.OMB_TEST_FIXTURE_MODELS = "";
+
 interface ChatRequest { messages: Array<{ role: string; content: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> }> }
 type Script = (body: ChatRequest, response: ServerResponse, round: number) => void;
 
@@ -20,7 +23,6 @@ const MCP_SCRIPT = `
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
-process.env.OMB_TEST_FIXTURE_MODELS = "";
 const [effects] = process.argv.slice(2);
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
 const schema = { type: "object", properties: { name: { type: "string" } }, required: ["name"], additionalProperties: false };

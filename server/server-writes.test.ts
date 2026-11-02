@@ -23,8 +23,8 @@ const bots = () => readFileSync(join(DATA_DIR, "bots.json"), "utf8");
 
 describe("bots.json saves", () => {
   beforeEach(() => {
-    // Windows holds a just-closed file for a moment, so the first attempt can answer EPERM.
-    rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    // Windows can refuse the folder itself while something still has it open; its files are gone by then, which is all this needs.
+    try { rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch (error) { if (process.platform !== "win32") throw error; }
     vi.mocked(fs.renameSync).mockClear();
   });
 

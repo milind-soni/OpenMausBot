@@ -17,6 +17,9 @@ import { recordEvents } from "../testing/events.ts";
 import { TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
+// These tests are about a model on this network, so their loopback fixture counts as one.
+process.env.OMB_TEST_FIXTURE_MODELS = "";
+
 interface ChatRequest {
   messages: Array<{ role: string; content: unknown; tool_call_id?: string }>;
   tools?: Array<{ function: { name: string } }>;

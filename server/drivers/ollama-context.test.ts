@@ -11,7 +11,9 @@ import { applyClaudeInject, decodeInjectId, encodeInjectId, injectedContextWindo
 import { forgetServedModels, isContextName, isOllama, pickedName, servedModel, serveWithWindow, showFacts, windowFor } from "./ollama-context.ts";
 import type { ProviderInstance } from "../contracts.ts";
 
+// These tests are about a model on this network, so their loopback fixture counts as one.
 process.env.OMB_TEST_FIXTURE_MODELS = "";
+
 
 const GB = 1024 ** 3;
 const ORIGIN = "http://127.0.0.1:11434";
