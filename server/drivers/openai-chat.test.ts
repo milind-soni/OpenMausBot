@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
-import { flushNativeLog } from "./native.ts";
+import { discardNativeLog, flushNativeLog } from "./native.ts";
 import type { RuntimeEvent, SendTurnInput } from "../contracts.ts";
 import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
@@ -808,6 +808,7 @@ describe("createOpenAIChatRuntime refused tool calls", () => {
   it("stops after three refusals, says what happened and what to do, and logs each refusal whole", async () => {
     ensureDirs();
     const log = join(NATIVE_DIR, "thread.ndjson");
+    discardNativeLog("thread");
     rmSync(log, { force: true });
     let requests = 0;
     const events = await runTurn(() => (requests++, refusedStream()));
