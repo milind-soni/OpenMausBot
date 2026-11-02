@@ -3876,9 +3876,10 @@ describe("harness HTTP API", () => {
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "cancelled", 2, null], [roomBot.id, null, "queued", 1, COMPUTER_FREE_NOTE]]);
       expect((await isolatedApi("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "cancelled", 2, null], [roomBot.id, null, "cancelled", 1, COMPUTER_FREE_NOTE]]);
+      const beforeFreed = promptsOnParkBox();
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: siblingThreadId })).status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnParkBox()).toBe(9);
+      expect(promptsOnParkBox(), `nothing stopped resumes once the computer frees: ${claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).slice(beforeFreed).join("\n").slice(-1_500)}`).toBe(beforeFreed);
       expect((await isolatedApi("GET", "/api/bots?messages=0")).body.bots
         .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === stoppedThreadId)?.busy).toBe(false);
 
