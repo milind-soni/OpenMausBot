@@ -85,7 +85,7 @@ type Author = { bot: BotRecord; summary: BotSummary } | { why: string };
 
 export interface DevsReportsDeps {
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "botByThread" | "groupByThread" | "projectBotForTask" | "activePath" | "appendMessage" | "patchMessage" | "onChange">;
+  store: Pick<Store, "bots" | "sections" | "bot" | "botByThread" | "groupByThread" | "projectBotForTask" | "activePath" | "appendMessage" | "patchMessage" | "onChange">;
   installId: string;
   appVersion: string;
   /** Where this server runs, as the team reads it: desktop app, My Cloud, Team Cloud… */
@@ -220,7 +220,8 @@ export function createDevsReports(deps: DevsReportsDeps) {
     try { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${said.line}`, ok: said.ok } }); }
     catch { /* the conversation is gone; the report still went */ }
   };
-  const botNames = () => store.bots.map((bot) => bot.name);
+  // A bot or a department named devs is tagged instead.
+  const namesBeforeDevs = () => [...store.bots.map((bot) => bot.name), ...store.sections];
   const secrets = () => environmentSecrets();
   const languageFor = (person: string | undefined) => (deps.lineLanguage ? deps.lineLanguage(person) : deps.language());
 
@@ -446,12 +447,14 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function personWrote(threadId: string, line: Message): void {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
-    if (!tagsDevs(line.text, botNames())) return;
+    if (!tagsDevs(line.text)) return;
+    const names = namesBeforeDevs();
+    if (!tagsDevs(line.text, names)) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
     if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(languageFor(line.sender?.id)), marker: "" });
     const redact = (text: string) => clip(redactReportText(text, secrets()), 3_000);
-    waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(withoutDevsTags(line.text, botNames())),
+    waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(withoutDevsTags(line.text, names)),
       ...(line.sender ? { sender: { name: line.sender.name, ...(line.sender.id ? { id: line.sender.id } : {}) } } : {}) });
     save();
   }

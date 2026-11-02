@@ -18,7 +18,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const SCOUT = { id: "scout", name: "Scout", threadId: "scout-main", modelSelection: { instanceId: "claude", model: "claude-opus-5-5" }, composio: true };
 const ROVER = { id: "rover", name: "Rover", threadId: "rover-main", modelSelection: { instanceId: "codex", model: "gpt-5.5", effort: "high" } };
 
-function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions?: PublicSession[]; ownerKey?: string | null; team?: boolean;
+function fixture(options: { dataDir?: string; sections?: string[]; outcomes?: SendOutcome[]; sessions?: PublicSession[]; ownerKey?: string | null; team?: boolean;
   profileEmail?: string; automated?: boolean; lineLanguage?: DevsReportsDeps["lineLanguage"]; appVersion?: string; clock?: number;
   /** The conversations, kept across a restart (another fixture on the same data). */
   threads?: Map<string, Message[]>;
@@ -34,6 +34,7 @@ function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions
   const groups = [{ id: "launch", name: "Launch", threadId: "room", memberIds: ["scout", "rover"] }];
   const store = {
     bots,
+    sections: options.sections ?? [],
     bot: (id: string) => bots.find((bot) => bot.id === id) ?? null,
     botByThread: (threadId: string) => bots.find((bot) => bot.threadId === threadId) ?? null,
     groupByThread: (threadId: string) => groups.find((group) => group.threadId === threadId),
@@ -197,6 +198,17 @@ describe("a message that tags @devs", () => {
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
     expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+  it("is never a message that tags a department named devs", async () => {
+    const fx = fixture({ sections: ["Devs"] });
+    fx.person("scout-main", "I added Rover to the @devs department, notify Scout");
+    fx.busy.add("scout-main");
+    expect(fx.reports.note("scout-main", true)).toBe("");
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toEqual([]);
+    expect((await fx.call("scout", "scout-main", { went_wrong: "x" })).status).toBe(409);
     fx.stop();
   });
 });
