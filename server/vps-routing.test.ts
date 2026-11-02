@@ -203,6 +203,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
     writeFileSync(join(fakeBin, "ssh"), `#!${process.execPath}
 import { createServer } from 'node:net';
 const args = process.argv.slice(2);
+if (!args.includes('-L')) process.exit(0);
 const forward = args[args.indexOf('-L') + 1];
 const port = Number(forward.split(':')[1]);
 createServer(socket => socket.end()).listen(port, '127.0.0.1');

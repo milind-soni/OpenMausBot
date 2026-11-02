@@ -54,6 +54,7 @@ describe.skipIf(process.platform === "win32")("VPS Cua MCP bridge", () => {
   it("passes MCP bytes unchanged to docker exec over the validated SSH target", async () => {
     const bin = await mkdtemp(join(tmpdir(), "openmausbot-vps-mcp-"));
     temporary.push(bin);
+    await writeFile(join(bin, "ssh"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
     const fakeDocker = join(bin, "docker");
     await writeFile(fakeDocker, "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\" >&2\ncat\n", { mode: 0o700 });
     await chmod(fakeDocker, 0o700);
@@ -73,6 +74,7 @@ describe.skipIf(process.platform === "win32")("VPS Cua MCP bridge", () => {
   it("survives docker closing stdin before consuming the request", async () => {
     const bin = await mkdtemp(join(tmpdir(), "openmausbot-vps-mcp-"));
     temporary.push(bin);
+    await writeFile(join(bin, "ssh"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
     const fakeDocker = join(bin, "docker");
     await writeFile(fakeDocker, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
     await chmod(fakeDocker, 0o700);
