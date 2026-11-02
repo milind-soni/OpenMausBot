@@ -309,7 +309,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
-      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs() } : {}),
+      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs(), localModel: true } : {}),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,

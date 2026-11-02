@@ -1,8 +1,5 @@
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
-import { createHash } from "node:crypto";
-
 import { findCliCandidates } from "../env-path.ts";
-import { buildStamp } from "../environment.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
@@ -84,11 +81,6 @@ function withinDeadline(read: () => Promise<ProviderSnapshot>): Promise<Provider
   ]).finally(() => clearTimeout(deadline));
 }
 
-/** An engine the last run found ready this recently is taken as read at start, so a restart or a Cloud's wake probes no
- * CLI; one it found unavailable or signed out is probed, since a restart is how a fix gets picked up. A probe that finds
- * the same status refreshes the recorded time only once it is half this old, so it is not rewritten. */
-export const ENGINE_STATUS_FRESH_MS = 30 * 60_000;
-
 /** How long the start-up read waits on one CLI before probing the next, so a stuck CLI holds back no other for long. */
 export const START_READ_STEP_MS = 5_000;
 
@@ -115,12 +107,6 @@ export class ProviderRegistry {
   private lastSnapshots = new Map<InstanceId, ProviderSnapshot>();
   private seeds = new Map<InstanceId, ProviderSnapshot>();
   private seedObjects = new WeakSet<ProviderSnapshot>();
-  private checkedAt = new Map<InstanceId, number>();
-  /** Engines taken as read at start and not probed since: the server's own reads answer from that status while it is fresh. */
-  private takenAsRead = new Set<InstanceId>();
-  /** A digest of each engine's settings and this server's build: a status probed under other settings (a key, a sign-out)
-   * or another build's CLIs is not fresh. */
-  private settings = new Map<InstanceId, string>();
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
@@ -187,7 +173,6 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      this.settings.set(instanceId, createHash("sha256").update(JSON.stringify([entry, buildStamp()])).digest("hex").slice(0, 16));
       const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
@@ -235,7 +220,6 @@ export class ProviderRegistry {
   forgetSnapshots(): void {
     this.snapshotGeneration += 1;
     this.seeds.clear();
-    this.takenAsRead.clear();
   }
 
   /**
@@ -243,24 +227,16 @@ export class ProviderRegistry {
    * each CLI is read from a cold disk with no other in the way; `afterFirst` runs once the first has answered; engines
    * without a CLI are read at once. An engine the last run saw available that a probe now finds unavailable is probed
    * once more, warm, before the read ends. Until the read reaches an engine, a turn on it probes that engine itself
-   * (`engineRead`) and `describe({ known: true })` answers it from the last run's status, unless that status is fresh
-   * (`ENGINE_STATUS_FRESH_MS`) and counts as read.
+   * (`engineRead`) and `describe({ known: true })` answers it from the last run's status.
    */
-  async readAtStart(first: readonly InstanceId[] = [], afterFirst: () => void = () => {}, now = Date.now()) {
+  async readAtStart(first: readonly InstanceId[] = [], afterFirst: () => void = () => {}) {
     const live = this.instances().map((instance) => instance.instanceId);
-    const fresh = new Set<InstanceId>();
-    for (const [instanceId, { snapshot, checkedAt, settings }] of this.status?.read((id) => this.byId.get(id)?.live ? this.cliTarget(id) : null) ?? []) {
+    for (const [instanceId, snapshot] of this.status?.read((id) => this.byId.get(id)?.live ? this.cliTarget(id) : null) ?? []) {
       this.seeds.set(instanceId, snapshot);
-      if (snapshot.state === "available" && snapshot.authenticated !== false && settings === this.settings.get(instanceId)
-        && checkedAt !== null && now - checkedAt >= 0 && now - checkedAt < ENGINE_STATUS_FRESH_MS) {
-        fresh.add(instanceId);
-        this.takenAsRead.add(instanceId);
-        this.lastSnapshots.set(instanceId, snapshot);
-        this.checkedAt.set(instanceId, checkedAt);
-      } else this.seedObjects.add(snapshot);
+      this.seedObjects.add(snapshot);
     }
     const seeded = new Map(this.seeds);
-    this.unread = new Set(live.filter((id) => !fresh.has(id)));
+    this.unread = new Set(live);
     try {
       const withCli = new Set(live.filter((id) => this.cliTarget(id)?.cli));
       const withoutCli = this.engineRead(...live.filter((id) => !withCli.has(id)));
@@ -424,17 +400,12 @@ export class ProviderRegistry {
     return isAppStandaloneCopy(cli, this.enginesBaseDir, standaloneLookupPath(this.enginesBaseDir));
   }
 
-  /** `known` is the engine list a person asks for: it probes an engine taken as read at start, and answers one the
-   * start-up read has yet to reach from the last run's status. `reuse`: answer from a status read since the last
-   * forgetSnapshots(); one older than `ms` is read again in the background and `changed` runs when that read differs. */
+  /** `reuse`: answer from a status read since the last forgetSnapshots(); one older than `ms` is read again in the background
+   * and `changed` runs when that read differs. */
   describe(options: { known?: boolean; reuse?: { ms: number; changed(): void } } = {}) {
     return this.describeWith((instance) => {
-      const { instanceId } = instance;
-      const seed = options.known && this.unread?.has(instanceId) ? this.seeds.get(instanceId) : undefined;
-      const taken = !options.known && this.takenAsRead.has(instanceId) && Date.now() - (this.checkedAt.get(instanceId) ?? 0) < ENGINE_STATUS_FRESH_MS
-        ? this.lastSnapshots.get(instanceId) : undefined;
-      const answer = seed ?? taken;
-      if (answer) return Promise.resolve(answer);
+      const seed = options.known && this.unread?.has(instance.instanceId) ? this.seeds.get(instance.instanceId) : undefined;
+      if (seed) return Promise.resolve(seed);
       const last = options.reuse && this.readsOf.get(instance);
       if (!options.reuse || !last || last.generation !== this.snapshotGeneration) return this.read(instance);
       if (Date.now() - last.at >= options.reuse.ms) {
@@ -456,11 +427,7 @@ export class ProviderRegistry {
     }
     // Only while this is still the live instance: a reload may have replaced it during the read.
     if (this.byId.get(instance.instanceId)?.live === instance) {
-      const before = this.lastSnapshots.get(instance.instanceId), checkedAt = this.checkedAt.get(instance.instanceId);
-      if (checkedAt === undefined || Date.now() - checkedAt >= ENGINE_STATUS_FRESH_MS / 2 || !before
-        || JSON.stringify(snapshotFrom(before)) !== JSON.stringify(snapshotFrom(snapshot))) this.checkedAt.set(instance.instanceId, Date.now());
       this.lastSnapshots.set(instance.instanceId, snapshot);
-      this.takenAsRead.delete(instance.instanceId);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
     }
@@ -470,9 +437,7 @@ export class ProviderRegistry {
   private saveStatus(): void {
     this.status?.save(this.instances().flatMap(({ instanceId, driverKind }) => {
       const snapshot = this.lastSnapshots.get(instanceId) ?? this.seeds.get(instanceId);
-      const checkedAt = this.lastSnapshots.has(instanceId) ? this.checkedAt.get(instanceId) : undefined, settings = this.settings.get(instanceId);
-      return snapshot ? [{ instanceId, driverKind, cli: this.cliTarget(instanceId)?.cli ?? null, snapshot,
-        ...(checkedAt === undefined || settings === undefined ? {} : { checkedAt, settings }) }] : [];
+      return snapshot ? [{ instanceId, driverKind, cli: this.cliTarget(instanceId)?.cli ?? null, snapshot }] : [];
     }));
   }
 
@@ -556,9 +521,6 @@ export class ProviderRegistry {
     this.byId.clear();
     this.cliByInstance.clear();
     this.lastSnapshots.clear();
-    this.checkedAt.clear();
-    this.takenAsRead.clear();
-    this.settings.clear();
     this.seeds.clear();
   }
 
@@ -567,9 +529,6 @@ export class ProviderRegistry {
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
     this.lastSnapshots.delete(instanceId);
-    this.checkedAt.delete(instanceId);
-    this.takenAsRead.delete(instanceId);
-    this.settings.delete(instanceId);
     this.seeds.delete(instanceId);
     await entry?.live?.dispose();
   }
