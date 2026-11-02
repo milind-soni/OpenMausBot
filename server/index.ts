@@ -14557,7 +14557,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "voice notes are turned off for this bot" });
         }
         try {
-          const audio = await tts.speak(cfg, text, voiceBot.voice);
+          const audio = await tts.speak(cfg, text, voiceBot.voice, undefined, pagesCall.signal);
           // Synthesis can outlive its turn: re-check before saving, so the clip never parks onto a later turn.
           requireActiveInternalCapability();
           const turnId = liveTurnByThread.get(internalCapability.threadId);

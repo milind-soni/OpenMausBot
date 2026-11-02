@@ -7295,5 +7295,20 @@
   "botAccess.overview.setForEveryone": "Set for everyone: {bot}",
   "botAccess.overview.cell": "What {name} can do with {bot}",
   "botAccess.overview.toastEveryone": "{bot}: everyone in {team} · {level}",
-  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}",
+  "voice.openai.description": "Read replies and voice messages with AI-generated voices. Uses your OpenAI API key and is billed by OpenAI based on API usage. Live call settings are separate.",
+  "voice.openai.missingKey": "Add an OpenAI API key in Settings → API keys on the host to use readout.",
+  "voice.sample": "Good morning. The tests passed overnight, and I left two notes for you in the chat.",
+  "keys.purpose.openaiVoice": "Read replies aloud and make live calls with your OpenAI API key",
+  "voice.openai.error.key": "Add an OpenAI API key in Settings → API keys to read replies aloud.",
+  "voice.openai.error.auth": "OpenAI rejected the API key or its Realtime access. Check the key and project permissions in Settings.",
+  "voice.openai.error.rateLimit": "OpenAI speech is rate limited or out of API credits. Check your API usage before trying again.",
+  "voice.openai.error.timeout": "OpenAI speech timed out. No audio was played for this segment.",
+  "voice.openai.error.connection": "OpenAI speech was interrupted. Check your connection and proxy settings.",
+  "voice.openai.error.empty": "OpenAI returned no speech audio for this segment.",
+  "voice.openai.error.invalid": "OpenAI returned an unexpected speech response.",
+  "voice.openai.error.limit": "OpenAI speech exceeded the 8 MiB limit for one segment.",
+  "voice.openai.error.cancelled": "OpenAI speech was cancelled.",
+  "voice.openai.error.failed": "OpenAI could not generate speech for this segment. Check your API access and usage.",
+  "voice.openai.error.voice": "Choose an OpenAI voice before reading replies aloud."
 }

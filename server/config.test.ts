@@ -120,6 +120,12 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { provider: "unknown" } })).toThrow("provider");
   });
 
+  it("stores OpenAI readout without changing live-call settings or enabling readout", () => {
+    const patch = { tts: { provider: "openai", voice: "marin" }, openai: { key: "fixture-key" } };
+    expect(parseConfigPatch(patch)).toEqual(patch);
+    expect(parseStoredConfig(patch)).toEqual(patch);
+  });
+
   it("accepts only known Fish Audio speech models", () => {
     for (const fishModel of ["s2.1-pro", "s2.1-pro-free"]) {
       expect(parseConfigPatch({ tts: { fishModel } }).tts).toEqual({ fishModel });

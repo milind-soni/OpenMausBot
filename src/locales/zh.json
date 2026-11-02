@@ -3568,5 +3568,20 @@
   "botAccess.overview.setForEveryone": "为所有人设置：{bot}",
   "botAccess.overview.cell": "{name} 能对 {bot} 做什么",
   "botAccess.overview.toastEveryone": "{bot}：{team} 的所有人 · {level}",
-  "botAccess.overview.toastPerson": "{bot}：{name} · {level}"
+  "botAccess.overview.toastPerson": "{bot}：{name} · {level}",
+  "voice.openai.description": "使用 AI 生成的声音朗读回复和语音消息。复用 OpenAI API 密钥，按 API 用量计费；实时通话单独设置。",
+  "voice.openai.missingKey": "请先在主机的“设置 → API 密钥”中添加 OpenAI API 密钥，即可使用朗读功能。",
+  "voice.sample": "早上好，昨晚的测试已经通过。我还在会话中给你留了两条备注。",
+  "keys.purpose.openaiVoice": "朗读回复与实时通话共用 OpenAI API 密钥",
+  "voice.openai.error.key": "请在“设置 → API 密钥”中添加 OpenAI API 密钥，才能朗读回复。",
+  "voice.openai.error.auth": "OpenAI 未接受此 API 密钥，或该项目没有 Realtime 访问权限。请检查密钥和项目权限。",
+  "voice.openai.error.rateLimit": "OpenAI 语音请求受到限流，或 API 额度不足。请检查用量后再试。",
+  "voice.openai.error.timeout": "OpenAI 语音生成超时，这一段尚未播放。",
+  "voice.openai.error.connection": "OpenAI 语音连接中断，请检查网络和代理设置。",
+  "voice.openai.error.empty": "OpenAI 没有返回这一段的语音。",
+  "voice.openai.error.invalid": "OpenAI 返回的语音数据格式异常。",
+  "voice.openai.error.limit": "这一段的语音超过了 8 MiB 大小限制。",
+  "voice.openai.error.cancelled": "已取消 OpenAI 语音生成。",
+  "voice.openai.error.failed": "OpenAI 未能生成这一段的语音，请检查 API 访问权限和用量。",
+  "voice.openai.error.voice": "请先选择一个 OpenAI 声音，再朗读回复。"
 }

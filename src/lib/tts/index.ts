@@ -1,5 +1,6 @@
 // Audio comes from the harness, which holds the voice keys: the renderer never sees them or calls a voice provider.
 
+import { tFromServer } from "@/lib/i18n";
 import { localSystemVoiceActive, remoteSystemVoice, resolveLocalSystemVoice } from "@/lib/local-voice";
 import { recordBlockTiming, recordPrepared, recordSpeakEnter } from "../voice-latency-probe";
 
@@ -40,7 +41,7 @@ export interface SpeechStream {
 }
 
 type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string };
-type TtsErrorBody = { error?: string };
+type TtsErrorBody = { error?: string; errorKey?: string };
 
 const IDLE: SpeechSnapshot = { status: "idle" };
 const PREFETCH_WINDOW = 3;
@@ -380,7 +381,7 @@ export class Speaker {
     });
     if (!res.ok) {
       const body: TtsErrorBody = await res.json().catch(() => ({}));
-      throw new Error(body.error ?? `the voice service returned ${res.status}`);
+      throw new Error(tFromServer(body.errorKey, body.error) ?? `the voice service returned ${res.status}`);
     }
     return res.blob();
   }

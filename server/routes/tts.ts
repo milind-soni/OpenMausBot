@@ -2,6 +2,7 @@
 // ElevenLabs Voice Library voice to My Voices, and speaking a line. Scopes are keyed by path in server/request-auth.ts.
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { OpenAiVoiceError } from "../tts/openai.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -54,8 +55,12 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       if (!text) return json(res, 400, { error: "text required" });
       // A hard ceiling, so an arbitrary local request cannot turn the hosted voice account into an unbounded billable job.
       if (text.length > 500) return json(res, 413, { error: "voice utterances are limited to 500 characters" });
+      const controller = new AbortController();
+      const cancel = () => { if (!res.writableEnded) controller.abort(); };
+      res.on("close", cancel);
       try {
-        const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined);
+        const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined, undefined, controller.signal);
+        if (controller.signal.aborted) return;
         res.writeHead(200, {
           "content-type": audio.mime,
           "content-length": String(audio.bytes.byteLength),
@@ -64,8 +69,12 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         res.end(Buffer.from(audio.bytes));
         return;
       } catch (e) {
+        if (controller.signal.aborted) return;
+        if (e instanceof OpenAiVoiceError) return json(res, e.errorKey === "voice.openai.error.key" ? 409 : 502, { error: e.message, errorKey: e.errorKey });
         if (e instanceof tts.NoVoiceConfigured) return json(res, 409, { error: e.message });
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      } finally {
+        res.off("close", cancel);
       }
     }
     return PASS;

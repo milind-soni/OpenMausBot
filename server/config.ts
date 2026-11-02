@@ -380,12 +380,12 @@ const appConfigSchema = z.object({
   vps: vpsConfigSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
-  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`) or "chatterbox" (local; `baseUrl`, `model`). */
+  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "openai" (`openai.key`) or "chatterbox" (local; `baseUrl`, `model`). */
   tts: z.object({
     key: optionalText,
     fishKey: optionalText,
     voice: optionalText,
-    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai"]).optional(),
+    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "openai"]).optional(),
     baseUrl: z
       .string()
       .trim()
@@ -507,7 +507,7 @@ export interface AppConfig extends HelperConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
+  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "openai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };

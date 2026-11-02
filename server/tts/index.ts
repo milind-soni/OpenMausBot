@@ -2,11 +2,12 @@ import type { AppConfig } from "../config.ts";
 import { voiceCredential } from "../included-services.ts";
 import * as chatterbox from "./chatterbox.ts";
 import * as elevenlabs from "./elevenlabs.ts";
+import * as openai from "./openai.ts";
 import * as grok from "./grok.ts";
 import * as fish from "./fish.ts";
 import * as systemVoices from "./system-voices.ts";
 
-export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
+export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "openai";
 
 export class NoVoiceConfigured extends Error {
   // Not a parameter property: the harness runs under strip-only `node --experimental-strip-types`, which rejects one at load.
@@ -27,11 +28,12 @@ const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
 
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
-  return provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
+  return provider === "openai" || provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
 }
 
 export function providerConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "openai") return Boolean(cfg.openai?.key);
   if (provider === "xai") return Boolean(cfg.xai?.key);
   if (provider === "system") return systemVoices.systemVoicesAvailable();
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim());
@@ -41,6 +43,7 @@ export function providerConfigured(cfg: AppConfig): boolean {
 
 export function voiceConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "openai") return Boolean(cfg.openai?.key && cfg.tts?.voice);
   if (provider === "xai") return Boolean(cfg.xai?.key && cfg.tts?.voice);
   if (provider === "system") {
     return systemVoices.systemVoicesAvailable() && Boolean(cfg.tts?.voice);
@@ -52,6 +55,7 @@ export function voiceConfigured(cfg: AppConfig): boolean {
 
 export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "openai") return Boolean(cfg.openai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "xai") return Boolean(cfg.xai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "system") {
     return systemVoices.systemVoicesAvailable() && Boolean(voiceId || cfg.tts?.voice);
@@ -87,6 +91,7 @@ export async function listVoices(
   search?: fish.VoiceSearch,
 ): Promise<elevenlabs.Voice[]> {
   const provider = voiceProvider(cfg);
+  if (provider === "openai") return cfg.openai?.key ? openai.listVoices() : [];
   if (provider === "xai") return cfg.xai?.key ? grok.listVoices(cfg.xai.key) : [];
   if (provider === "system") return systemVoices.listSystemVoices(run);
   if (provider === "chatterbox") {
@@ -108,8 +113,9 @@ export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voic
   return elevenlabs.addSharedVoice(credential.token, credential.api, publicOwnerId, voiceId, name);
 }
 
-export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner) {
+export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner, signal?: AbortSignal) {
   const provider = voiceProvider(cfg);
+  if (provider === "openai") return openai.synthesize(text, voiceId || cfg.tts?.voice || "", cfg.openai?.key || "", signal);
   if (provider === "xai") {
     const key = cfg.xai?.key;
     if (!key) throw new NoVoiceConfigured("key", "Add an xAI key in Settings to use Grok voice.");
