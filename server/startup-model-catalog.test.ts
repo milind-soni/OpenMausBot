@@ -164,36 +164,55 @@ describe("startup model catalogs", () => {
     seedBots();
     let refreshes = 0;
     const now = 1_800_000_000_000;
-    const open = (age: number) => {
-      writeStartupModelCache("timed", CACHED, { checkedAt: now - age });
+    const open = (instanceId: string, age: number, build?: string) => {
+      writeStartupModelCache(instanceId, CACHED, { checkedAt: now - age, ...(build ? { build } : {}) });
       let used: ModelCatalog | null = null;
-      const opened = openStartupModelCatalog({ instanceId: "timed", use: (catalog) => { used = catalog; }, current: () => CACHED,
+      const opened = openStartupModelCatalog({ instanceId, use: (catalog) => { used = catalog; }, current: () => CACHED,
         refresh: async () => { refreshes += 1; }, now });
       return { opened, used: () => used };
     };
-    const fresh = open(STARTUP_MODEL_CACHE_FRESH_MS - 1);
+    const fresh = open("timed-fresh", STARTUP_MODEL_CACHE_FRESH_MS - 1);
     expect(fresh.used()).toEqual(CACHED);
     expect(await fresh.opened).toBeNull();
     expect(refreshes).toBe(0);
-    await (open(STARTUP_MODEL_CACHE_FRESH_MS).opened as { pending: Promise<void> }).pending;
+    await (open("timed-old", STARTUP_MODEL_CACHE_FRESH_MS).opened as { pending: Promise<void> }).pending;
     expect(refreshes).toBe(1);
     // A clock set back is no proof the list is fresh, and another build's CLIs may list other models.
-    await (open(-60_000).opened as { pending: Promise<void> }).pending;
+    await (open("timed-ahead", -60_000).opened as { pending: Promise<void> }).pending;
     expect(refreshes).toBe(2);
-    writeStartupModelCache("timed", CACHED, { checkedAt: now, build: "0.0.1 an older image" });
-    await (openStartupModelCatalog({ instanceId: "timed", use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; }, now }) as { pending: Promise<void> }).pending;
+    await (open("timed-build", 0, "0.0.1 an older image").opened as { pending: Promise<void> }).pending;
     expect(refreshes).toBe(3);
-    expect(readStartupModelCacheEntry("timed")).toMatchObject({ catalog: CACHED, checkedAt: expect.any(Number), build: expect.any(String) });
+    expect(readStartupModelCacheEntry("timed-fresh")).toMatchObject({ catalog: CACHED, checkedAt: now - STARTUP_MODEL_CACHE_FRESH_MS + 1, build: expect.any(String) });
+  });
+
+  it("reads the list again when an engine opens a second time in one run: its key or settings just changed", async () => {
+    seedBots();
+    let refreshes = 0;
+    const open = () => openStartupModelCatalog({ instanceId: "reopened", use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; } });
+    writeStartupModelCache("reopened", CACHED);
+    expect(await open()).toBeNull();
+    expect(refreshes).toBe(0);
+    await (open() as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(1);
+
+    // A key saved in a server's first run: the bots exist by then, and the engine has opened once already.
+    rmSync(join(DATA_DIR, "bots.json"), { force: true });
+    const firstRun = () => openStartupModelCatalog({ instanceId: "first-run", use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; } });
+    await firstRun();
+    expect(refreshes).toBe(2);
+    seedBots();
+    await (firstRun() as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(3);
   });
 
   it("reads a list the engine did not confirm again at the next start", async () => {
     seedBots();
     const standIn = { ...CACHED };
     unconfirmedModelCatalog(standIn);
-    writeStartupModelCache("timed", standIn);
-    expect(readStartupModelCacheEntry("timed")?.checkedAt).toBe(0);
+    writeStartupModelCache("unconfirmed", standIn);
+    expect(readStartupModelCacheEntry("unconfirmed")?.checkedAt).toBe(0);
     let refreshes = 0;
-    const opened = openStartupModelCatalog({ instanceId: "timed", use: () => {}, current: () => standIn, refresh: async () => { refreshes += 1; } }) as { pending: Promise<void> };
+    const opened = openStartupModelCatalog({ instanceId: "unconfirmed", use: () => {}, current: () => standIn, refresh: async () => { refreshes += 1; } }) as { pending: Promise<void> };
     await opened.pending;
     expect(refreshes).toBe(1);
   });
