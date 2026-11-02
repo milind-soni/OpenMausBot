@@ -2,7 +2,7 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
@@ -87,7 +87,6 @@ export class BoxRunner {
     const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
-    if (seccomp) extraFds.push(openSync(seccomp, "r"));
     const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
@@ -102,9 +101,16 @@ export class BoxRunner {
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
     const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
     const brokered = this.broker(env, plan, request);
-    const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
-    const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
-    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    try {
+      const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
+      const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
+      if (seccomp) extraFds.push(openSync(seccomp, "r"));
+      return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    } catch (error) {
+      for (const fd of extraFds) { try { closeSync(fd); } catch {} }
+      brokered.release();
+      throw error;
+    }
   }
 
   /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
