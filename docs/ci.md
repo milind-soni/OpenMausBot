@@ -126,13 +126,38 @@ three platforms) when shards drift apart:
 node scripts/testing/update-shard-weights.mjs --run <run id> --run <run id> --run <run id>
 ```
 
-To run one CI shard locally, use the same OS, `--shard` and `OMB_VITEST_E2E`:
-`OMB_VITEST_E2E=host pnpm exec vitest run --shard=3/8` is Windows shard 3 on a
-Windows machine.
-The locale and docs tests are the same command with their files first:
-`pnpm exec vitest run src/ scripts/generate-locale.test.mjs --shard=1/2` is
-locale tests 1/2 (those jobs set `OMB_VITEST_SUBSET`, so the sequencer does not
-warn that most weighted files are missing).
+To reproduce a failing Vitest job locally:
+
+1. Use the checkout revision shown in that job's log and install its locked
+   dependencies with `pnpm install --frozen-lockfile`. A PR's CI checkout may
+   be a merge commit rather than the branch tip.
+2. Use the same OS. Shard weights are platform-specific, so Windows shard 3
+   and Linux shard 3 do not contain the same files.
+3. Copy the expanded command from **Run tests**, including any file filters
+   and the complete `--shard=n/count` fraction. Copy its `OMB_VITEST_E2E`
+   and `OMB_VITEST_SUBSET` environment values too. On Boat, the static job
+   contains each shard's output in a `vitest (ubuntu-latest, ...)` lane's
+   log group; the lane uses the same matrix values.
+
+For example, a full Windows shard 3/8 uses PowerShell syntax:
+
+```powershell
+$env:OMB_VITEST_E2E = "host"
+$env:OMB_VITEST_SUBSET = ""
+pnpm exec vitest run --shard=3/8
+```
+
+The full Linux shard 3/8 uses a POSIX shell:
+
+```sh
+OMB_VITEST_E2E=all OMB_VITEST_SUBSET= pnpm exec vitest run --shard=3/8
+```
+
+Docs and locale jobs select smaller file lists and have their own shard
+counts. Keep their file filters: removing them changes the set the sequencer
+divides, even with the same `--shard`. `OMB_VITEST_SUBSET` suppresses the CI
+warning about missing weighted files; the command's file filters select the
+tests. Copy the current job's list rather than assuming it is the full suite.
 
 Deleting or renaming a test file in the weights fails
 `scripts/testing/duration-sequencer.test.ts` until its entry is removed or

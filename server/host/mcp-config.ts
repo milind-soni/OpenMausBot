@@ -32,6 +32,8 @@ export interface McpConfigDeps {
   connectionsChanged?(change: "added" | "removed"): void;
   /** How bots' turns reach a URL server here: through the broker where turns are boxed (null: directly). */
   botsPath?(): BrokerPath | null;
+  /** How Test starts a command server when no bot asks: as the turns of its bot, or of any bot (server/mcp-probe.ts `asBot`). */
+  probeAs?(server: { bot?: string }): NonNullable<McpProbeOptions["asBot"]>;
 }
 
 export type McpConfigRefusal = { status: number; error: string; code?: string };
@@ -240,7 +242,7 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
           const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
           if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
         }
-        const options = { ...(personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {}), ...(asBot ? { asBot } : {}) };
+        const options = { ...(personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {}), ...(asBot ? { asBot } : isRemoteMcpServer(target) ? {} : { asBot: deps.probeAs?.(target) ?? {} }) };
         const viaBots = isRemoteMcpServer(target) ? deps.botsPath?.() ?? null : null;
         const result = viaBots && isRemoteMcpServer(target)
           ? await probeAsBots(viaBots, name, target, signal, options)

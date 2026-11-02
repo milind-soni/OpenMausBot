@@ -1,5 +1,5 @@
 import { hostTimeZone } from "../turn-clock.ts";
-import { engineFailureMessage, type EngineFailureKind } from "./engine-errors.ts";
+import { engineFailureMessage, limitResetTime, type EngineFailureKind } from "./engine-errors.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
 export interface ClaudeLimit {
@@ -73,13 +73,7 @@ export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now
   const name = limit?.window && Object.hasOwn(CLAUDE_LIMIT_NAMES, limit.window) ? CLAUDE_LIMIT_NAMES[limit.window] : "usage limit";
   const meanwhile = modelWindow(limit?.window) ? "choose another model for this bot" : "switch this bot to another AI or Claude account";
   if (limit?.resetsAt && limit.resetsAt * 1000 > now) {
-    let resets: string;
-    try {
-      resets = `${new Date(limit.resetsAt * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`;
-    } catch {
-      resets = `${new Date(limit.resetsAt * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
-    }
-    return `This Claude account has reached its ${name}, which resets ${resets}. Until then, ${meanwhile}.`;
+    return `This Claude account has reached its ${name}, which resets ${limitResetTime(limit.resetsAt * 1000, timeZone)}. Until then, ${meanwhile}.`;
   }
   const words = said?.trim().replace(/[.\s]+$/, "");
   return `This Claude account has reached its ${name}${words ? ` (Claude says: "${words}")` : ""}. For now, ${meanwhile}.`;

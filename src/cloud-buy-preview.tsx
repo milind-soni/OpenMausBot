@@ -12,7 +12,7 @@ import { CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } f
 import { WhatsNewPopup } from "@/components/whats-new/WhatsNewPopup";
 import { ChooseScreen } from "@/components/cloud-buy/ChooseScreen";
 import type { CloudAddView } from "@/lib/cloud-plan";
-import { setLocale } from "@/lib/i18n";
+import { loadLocale } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
 import { whatsNewView } from "@/lib/whats-new";
 import "./styles.css";
@@ -78,7 +78,6 @@ function Preview() {
   const skin = (SKIN_IDS as readonly string[]).includes(params.get("skin") ?? "") ? params.get("skin") as SkinId : "midnight";
   document.documentElement.dataset.skin = skin;
   if (params.get("reduced") === "1") document.documentElement.dataset.reducedMotion = "true";
-  setLocale(params.get("lang") ?? "en");
   const state = params.get("state") ?? "choose";
   const asked = POPUPS[state], popup = asked ? whatsNewView(asked.account, asked.offer) : null;
   if (popup && typeof popup === "object") {
@@ -102,4 +101,5 @@ function Preview() {
   </div>;
 }
 
+await loadLocale(new URLSearchParams(location.search).get("lang") ?? "en");
 createRoot(document.getElementById("root")!).render(<StrictMode><Preview /></StrictMode>);

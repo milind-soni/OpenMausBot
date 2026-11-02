@@ -55,7 +55,8 @@ describe("this computer's copy, frozen at the move", () => {
       expect(freeze.refuses(method!, path!), `${method} ${path}`).toBe(MOVED_REFUSAL);
     }
     for (const [method, path] of [["GET", "/api/bots"], ["DELETE", "/api/move/freeze"], ["DELETE", "/api/cloud-send/kind"], ["POST", "/api/cloud-send/chats/verify"],
-      ["POST", "/api/auth/logout"], ["POST", "/api/workspace-backup/export"], ["POST", "/api/cloud/pairing"], ["POST", "/api/sync/upload"]]) {
+      ["POST", "/api/auth/logout"], ["POST", "/api/workspace-backup/export"], ["POST", "/api/cloud/pairing"], ["POST", "/api/sync/upload"],
+      ["POST", "/api/desktop/shared-computer-control"]]) {
       expect(freeze.refuses(method!, path!), `${method} ${path}`).toBeNull();
     }
   });
@@ -83,6 +84,7 @@ describe("this computer's copy, frozen at the move", () => {
     expect(freeze.unfreeze()).toBe(false);
     expect(freeze.frozen()).toBe(true);
     expect(freeze.refuses("POST", "/api/bots/b1/messages")).toBe(ENDED_REFUSAL);
+    expect(freeze.refuses("POST", "/api/desktop/shared-computer-control"), "an ended Cloud runs no bots, so no screen lease").toBe(ENDED_REFUSAL);
   });
 });
 

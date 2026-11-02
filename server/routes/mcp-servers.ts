@@ -3,6 +3,7 @@ import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
+import { toolBudgetOf } from "../tool-budgets.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import type { json } from "../harness/http.ts";
@@ -53,6 +54,12 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, withServerDetails(mcpServerResponse()));
+    }
+
+    const budgetOf = /^\/api\/bots\/([\w-]+)\/tool-budget$/.exec(path);
+    if (method === "GET" && budgetOf) {
+      if (!deps.bot(budgetOf[1]!)) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { budget: toolBudgetOf(budgetOf[1]!) ?? null });
     }
 
     const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
