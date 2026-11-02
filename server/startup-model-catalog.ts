@@ -53,6 +53,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       provider?: unknown;
       contextWindow?: unknown;
       variants?: unknown;
+      orgBlocked?: unknown;
     };
     if (typeof option.id !== "string" || typeof option.label !== "string") return null;
     const variants = variantList(option.variants);
@@ -66,6 +67,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
         ? { contextWindow: option.contextWindow }
         : {}),
       ...(variants ? { variants } : {}),
+      ...(option.orgBlocked === true ? { orgBlocked: true as const } : {}),
     });
   }
   return { default: raw.default, options };

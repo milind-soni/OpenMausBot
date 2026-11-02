@@ -68,6 +68,14 @@ export class EngineHomes {
     return this.#migration;
   }
 
+  /** The environment as an engine sees it from each place it can run: the server's HOME, and on a Team Cloud every
+   * audience's home too. */
+  everyHome(env: Record<string, string | undefined>): Array<Record<string, string | undefined>> {
+    const setup = this.#setup;
+    if (!setup) return [env];
+    return [env, ...audienceHomes(setup.dataDir).map((home) => homedSpawn(env, { dataDir: setup.dataDir, serverHome: setup.serverHome, home }).env)];
+  }
+
   /** On a Team Cloud, inside a conversation: the spawn with HOME and the engines' folders in its audience's home, the
    * home made, and the team's sign-ins in it. Null otherwise. */
   forSpawn(env: Record<string, string | undefined>): HomedSpawn | null {

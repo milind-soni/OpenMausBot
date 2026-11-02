@@ -128,6 +128,14 @@ describe("team-wide settings", () => {
     expect(planTeamChange([bot("busy", { busy: true })], instances, { kind: "model", model: "sonnet" })[0]).toMatchObject({ status: "skip" });
   });
 
+  it("offers no model the organization turned off, nor applies one", () => {
+    const blocked = instances.map((instance) => instance.instanceId === "claude"
+      ? { ...instance, models: { default: "sonnet", options: instance.models.options.map((option) => option.id === "opus" ? { ...option, orgBlocked: true as const } : option) } }
+      : instance);
+    expect(teamModelChoices([bot("a")], blocked).map((choice) => choice.id)).not.toContain("opus");
+    expect(planTeamChange([bot("a")], blocked, { kind: "model", model: "opus" })[0]).toMatchObject({ status: "skip" });
+  });
+
   it("lists each model once with the engines offering it, and only effort levels some engine offers", () => {
     const bots = [bot("a"), bot("b", { modelSelection: { instanceId: "codex", model: "gpt-5" } })];
     expect(teamModelChoices(bots, instances).map((choice) => `${choice.id}:${choice.engines.join("+")}`))
