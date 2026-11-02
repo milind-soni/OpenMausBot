@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, useState } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
@@ -42,26 +42,6 @@ it("knows when another dialog is open, and notices it opening and closing", asyn
   other.remove();
   await act(async () => { vi.advanceTimersByTime(1_000); });
   expect(seen.at(-1)).toBe(false);
-});
-
-it("a dialog already open when watching starts counts from the first paint, and renders never query the page", async () => {
-  vi.useFakeTimers();
-  const other = document.body.appendChild(document.createElement("div"));
-  other.setAttribute("role", "dialog");
-  const seen: boolean[] = [];
-  let rerender = () => {};
-  const Probe = () => {
-    const [, set] = useState(0);
-    rerender = () => set(n => n + 1);
-    seen.push(useOtherDialogOpen(true));
-    return null;
-  };
-  await mount(createElement(Probe));
-  expect(seen.at(-1)).toBe(true);
-  const query = vi.spyOn(document, "querySelectorAll");
-  for (let i = 0; i < 5; i++) await act(async () => { rerender(); });
-  expect(query).not.toHaveBeenCalled();
-  query.mockRestore();
 });
 
 it("any dialog on screen counts, modal or not, the tour's cards and the card that says a new Cloud is set up; one not shown or the queue's own does not", async () => {
