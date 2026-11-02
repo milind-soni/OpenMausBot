@@ -398,6 +398,11 @@ export function readThread(threadId: string, legacyFile: string): ThreadRows {
   return importLegacy(threadId, legacyFile);
 }
 
+export function readMessage(threadId: string, messageId: string): Message | null {
+  const row = db().prepare("SELECT json FROM messages WHERE thread_id = ? AND id = ?").get(threadId, messageId);
+  return row ? rowToMessage(row as { json: string }) : null;
+}
+
 export interface ThreadTailRows extends ThreadRows {
   hasMore?: boolean;
 }
