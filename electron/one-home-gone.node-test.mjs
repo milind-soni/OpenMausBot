@@ -251,3 +251,12 @@ test("wired up for real: a stuck computer's own server is asked, the Admin's wor
     assert.deepEqual([kept.phase, kept.gone, kept.cloud.account, choice?.on, opened], ["back", "deleted", "acct-1", true, 1]);
   } finally { main.close(); }
 });
+
+test("My Cloud held with no address gives no sign of being another Cloud: it comes home as it always did, with its automations as they were", async () => {
+  const w = computer({ journal: doneTo(GONE), admin: { [GONE]: "ended" }, cloud: { origin: null, machine: null, ready: false, ended: true } });
+  await w.home.kick();
+  assert.deepEqual(w.asked, []);
+  assert.deepEqual(w.server.thaws, [null]);
+  assert.equal(w.journal.gone, undefined);
+  assert.equal(w.journal.phase, "back");
+});

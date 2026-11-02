@@ -82,6 +82,10 @@ const stageOf = (phase) => (phase === "freeze" ? "wait" : phase);
 /** A failure of the move's own, with the code it is reported by. */
 const tagged = (message, code, extra = {}) => Object.assign(new Error(message), { code, ...extra });
 
+/** The session's My Cloud is known to be another Cloud than the one at `origin`. A held Cloud that names no address gives no
+ * sign of being another, so it is taken for that one. */
+const anotherCloud = (cloud, origin) => cloud.origin !== origin && !(cloud.ended && !cloud.origin);
+
 /** A journal read back, kept to its known shape; null when there is none. */
 export function parseJournal(value) {
   if (!record(value) || value.v !== 1 || !PHASES.has(value.phase) || !record(value.cloud) || typeof value.cloud.origin !== "string" || typeof value.cloud.account !== "string") return null;
@@ -434,7 +438,7 @@ export function createOneHome(deps) {
    * this app kept no journal of it. Never a server of the person's own (`place`), nor one another account moved to. */
   async function frozenFor(journal, cloud) {
     if (!cloud?.verified || !deps.gone) return null;
-    if (journal && (awayIn(journal) || journal.phase === "home-again")) return journal.cloud.origin !== cloud.origin ? journal : null;
+    if (journal && (awayIn(journal) || journal.phase === "home-again")) return anotherCloud(cloud, journal.cloud.origin) ? journal : null;
     if (journal && journal.phase !== "back") return null;
     const marker = await deps.local.marker?.().catch(() => null);
     if (!marker?.frozen || marker.place || typeof marker.cloud !== "string" || marker.cloud === cloud.origin) return null;
@@ -456,7 +460,7 @@ export function createOneHome(deps) {
    * nor takes a top-up by that word, and a move not yet switched over stops as it does when My Cloud ends (nothing runs
    * there yet). Only a verified session's word, for the journal's own account. */
   function judged(cloud, journal) {
-    if (!cloud?.verified || !journal || journal.phase === "back" || cloud.account !== journal.cloud.account || cloud.origin === journal.cloud.origin) return cloud;
+    if (!cloud?.verified || !journal || journal.phase === "back" || cloud.account !== journal.cloud.account || !anotherCloud(cloud, journal.cloud.origin)) return cloud;
     const { homecoming: _, ...rest } = cloud;
     return awayIn(journal) || journal.phase === "home-again" ? { ...rest, ready: false, ended: false } : { ...rest, ended: true };
   }

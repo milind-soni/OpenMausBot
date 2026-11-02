@@ -72,7 +72,7 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
-  if (connected && state.machine?.hold && (!moved.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
+  if (connected && state.machine?.hold && (!moved.origin || !state.machine.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
   const signedIn = state?.account?.id ?? null;
   if (!signedIn || state.status === "signed-out" || state.status === "connecting") return { kind: "signin" };
   if (moved.account && moved.account !== signedIn) return { kind: "signin", other: true };

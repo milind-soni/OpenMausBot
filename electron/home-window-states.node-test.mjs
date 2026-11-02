@@ -139,6 +139,9 @@ test("My Cloud ending sends home only a computer that moved to that Cloud", asyn
   const here = world({ state: held });
   await here.home.show();
   assert.deepEqual(here.home.current(), { kind: "computer" });
+  const unnamed = world({ state: { ...connected(), machine: { status: "stopped", hold: { until: 1_900_000_000_000 } } } });
+  await unnamed.home.show();
+  assert.deepEqual(unnamed.home.current(), { kind: "computer" }, "a hold that names no address is taken for the Cloud moved to");
 });
 
 test("Sign in never dead-ends: another account's sign-in ends first, then the browser signs in; one still good only looks again; one open in the browser opens again", async () => {
