@@ -452,7 +452,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
   }, 90_000);
 
   it("sends a member every bot without its audience list or hidden teammates, whichever route answers", async () => {
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: [ids.board, ids.pub] }, BOSS)).status).toBe(200);
     const task = await api("POST", `/api/bots/${ids.hr}/tasks`, { title: "Ada's thread" }, ADA);
     expect(task.status).toBe(201);
     const answers = [
@@ -469,12 +468,10 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(bots.length, route).toBeGreaterThan(0);
       for (const bot of bots) {
         expect(bot.visibility, route).toBeUndefined();
-        if (bot.peers) expect(bot.peers, route).toEqual([ids.pub]);
       }
       expect(JSON.stringify(answer.body), route).not.toContain(ADA);
     }
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] }, peers: [ids.board, ids.pub] });
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: null, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] } });
   });
 
   it("keeps a room fewer people can see out of a visible bot's recall, and refuses to mix audiences in a room", async () => {

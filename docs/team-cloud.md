@@ -264,7 +264,7 @@ else's. A bot sent to anyone carries only the conversations they may read; when 
 else's, the main chat is named instead, without the other's messages, and its unread mark counts only what they see.
 Search, SSE (live and replayed), attachments, notifications, usage traces, routine runs, the activity and decision rows
 (kept as when, bot, tool and outcome, without their words), a bot's activity, synced folders and a team backup go
-through the same check, a deleted private chat included. Incidents and escalations from a private chat go to its person,
+through the same check, a deleted private chat included. Incidents from a private chat go to its person,
 never into a Chief's thread; work handed on from a private chat runs in a thread of that same person's, and nothing
 from a private chat is handed into a room or posted in one; a conversation a bot opens from a shared chat is the
 team's, never the last speaker's; `retry_thread`, `close_thread` and `session_search` reading a message reach only what the turn may read;
@@ -335,7 +335,7 @@ reports to `createdBy`, the member who created it or moved it in (a bot a Chief 
 made before owners were recorded have none until someone picks one, and their asks go to the Admins. The sidebar shows
 the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada. The Team map's
 "Who reports to whom" (also "See who reports to whom" in a department's menu) shows each person with their Chief and
-the bots that report to them by department; dragging a bot onto a person changes its owner. Each face is the person's
+the bots that report to them by department; a bot's Reports to… button changes its owner. Each face is the person's
 picture from their team profile, or their initial when they have none.
 
 | Route | Who | What |
@@ -343,7 +343,7 @@ picture from their team profile, or their initial when they have none.
 | `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?}` |
 | `GET /api/team/people/<person>/picture?v=<version>` | the team's members | that member's picture (`<person>` is their person key). `pictureUrl` names it, and its `v` changes whenever they change it; it is revalidated on every use (`private, no-cache` with an ETag). A session that isn't a member of this team gets 403, anything off a team or not a current member's picture 404 |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
-| `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set owner for all bots…" on a department |
+| `PUT /api/team/reports-to {botIds, email}` | an Admin | one owner for several bots at once (no screen in the app calls it) |
 | `GET /api/needs-you` | any member | what bots ask of this person now, and the tags and passed messages waiting for them |
 
 **Routing** (`server/ask-routing.ts`). A bot's ask is a question or approval card, a sign-in, a failure, or a routine's
@@ -356,18 +356,17 @@ whose inbox a bot's own asks reach; who may chat with the bot is its sharing's (
 
 **One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
 person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
-exactly the bots that person owns, in every department: they are its team in its roster, their incidents and
-escalations come to it (into a notices chat of the person's own; a notice from someone else's private chat goes to
-that person instead), and it retries their threads and changes their setup. The person's private chat with it is their
+exactly the bots that person owns, in every department: they are its team in its roster, their incidents come to it
+(into a notices chat of the person's own; a notice from someone else's private chat goes to that person instead), and
+it retries their threads and changes their setup. The person's private chat with it is their
 inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
 
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
 `server/peer-roster.ts`). Each bot's roster lists them all, its own department first; a Chief's lists its own team
-first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, escalations,
-the inbox, setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`).
-Only three things narrow reach: a bot's own peers list (a person can open it again in the bot's settings, under
-Permissions), archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
+first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, the inbox,
+setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`). Only two
+things narrow reach: archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
 private chat may ask any bot, and the work it hands on stays in that person's audience; it never hands work into a room
 or posts in one.
 

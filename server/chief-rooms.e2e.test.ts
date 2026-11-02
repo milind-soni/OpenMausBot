@@ -108,11 +108,6 @@ it("creates and manages an own-section room through the mounted Chief MCP proxy"
     await tool("create_room", { name: "Mixed room", member_bot_ids: [foreign.id] });
     expect((await rooms()).find((candidate) => candidate.name === "Mixed room"))
       .toMatchObject({ section: "Room verification", memberIds: [chief.id, foreign.id] });
-    await api("PATCH", `/api/bots/${chief.id}`, { peers: [peer.id, second.id], acknowledgePeerScope: true });
-    await tool("create_room", { name: "Forbidden room", member_bot_ids: [foreign.id] }, true);
-    await tool("manage_room", { room_id: room.id, action: "add_members", member_bot_ids: [foreign.id] }, true);
-    expect((await rooms()).find((candidate) => candidate.id === room.id)).toEqual(saved);
-    expect((await rooms()).some((candidate) => candidate.name === "Forbidden room")).toBe(false);
     await control(["messages", "--channel", room.id, "--limit", "10"]);
     await control(["interrupt", "--bot", chief.id]);
     await tool("manage_room", { room_id: room.id, action: "rename", name: "Expired turn" }, true);

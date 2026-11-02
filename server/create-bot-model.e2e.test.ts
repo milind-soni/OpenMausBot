@@ -65,7 +65,7 @@ it("Chief creation uses the workspace default or a validated explicit model with
     expect(bots.find((bot: any) => bot.id === chief.id).modelSelection).toEqual(chiefModel);
     for (const [id, modelSelection] of [[first.id, defaultModel], [second.id, explicit]]) {
       expect(bots.find((bot: any) => bot.id === id)).toMatchObject({
-        section: "Design", modelSelection, approvalMode: "full", autoApprove: false, approvePeerComms: false, connectorScopes: { apps: { gmail: "read" } },
+        section: "Design", modelSelection, approvalMode: "full", autoApprove: false, connectorScopes: { apps: { gmail: "read" } },
         soul: "Complete assigned work.",
       });
     }

@@ -27,7 +27,7 @@ function fakeHost(): CoordinatorHost {
 
 const handoff = (fields: Partial<HandoffView> & Pick<HandoffView, "id" | "botId" | "status">): HandoffView => ({
   rootId: fields.id, threadId: `${fields.botId}-chat`, key: fields.botId, text: "Do it", createdAt: 0, result: "", reported: false, executions: 1,
-  approvalGranted: false, kind: "work", restarts: 0, mode: "work", reply: "resume", ...fields,
+  kind: "work", restarts: 0, mode: "work", reply: "resume", ...fields,
 });
 
 /** This computer as the move sees it: two bots, a room, and whatever each test puts under way. */

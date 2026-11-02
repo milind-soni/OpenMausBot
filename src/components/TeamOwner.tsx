@@ -7,15 +7,15 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, departmentOwner, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import type { NeedsYouItem } from "../../shared/today";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 
-export type OwnerPickerTarget = { botIds: string[]; title: string; current: string | null; x: number; y: number };
+export type OwnerPickerTarget = { botId: string; current: string | null; x: number; y: number };
 
 const hosts: Array<(target: OwnerPickerTarget) => void> = [];
-/** Opens the picker of the host mounted last, from a bot row, a bot's menu, a department's or the Team map. */
+/** Opens the picker of the host mounted last, from a bot row, a bot's menu or the Team map. */
 export function requestOwnerPick(target: OwnerPickerTarget): void {
   hosts.at(-1)?.(target);
 }
@@ -58,12 +58,12 @@ export function OwnerFace({ bot }: { bot: Bot }) {
     onClick={(event) => {
       event.stopPropagation();
       const rect = event.currentTarget.getBoundingClientRect();
-      requestOwnerPick({ botIds: [bot.id], title: t("owner.pickTitle"), current: owner?.email ?? null, x: rect.left, y: rect.bottom + 4 });
+      requestOwnerPick({ botId: bot.id, current: owner?.email ?? null, x: rect.left, y: rect.bottom + 4 });
     }}
     className="flex shrink-0 rounded-full outline-none hover:ring-2 hover:ring-accent/40 focus-visible:ring-2 focus-visible:ring-accent/60">{face}</button>;
 }
 
-/** Changes who one bot, or every bot of a department, reports to. */
+/** Changes who one bot reports to. */
 export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | null; onClose: () => void }) {
   const { dispatch } = useStore();
   const team = useTeamPeople();
@@ -82,13 +82,8 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
   const pick = async (person: TeamPerson) => {
     setBusy(true);
     try {
-      if (shown.botIds.length === 1) {
-        const answer = await api<{ bot?: Bot }>(`/api/bots/${shown.botIds[0]}/reports-to`, { method: "PUT", body: JSON.stringify({ email: person.email }) });
-        if (answer?.bot) dispatch({ type: "botPatched", bot: answer.bot });
-      } else {
-        const answer = await api<{ bots?: Bot[] }>("/api/team/reports-to", { method: "PUT", body: JSON.stringify({ botIds: shown.botIds, email: person.email }) });
-        for (const bot of answer?.bots ?? []) dispatch({ type: "botPatched", bot });
-      }
+      const answer = await api<{ bot?: Bot }>(`/api/bots/${shown.botId}/reports-to`, { method: "PUT", body: JSON.stringify({ email: person.email }) });
+      if (answer?.bot) dispatch({ type: "botPatched", bot: answer.bot });
       ownerChanged();
       onClose();
     } catch (error) {
@@ -100,9 +95,9 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
   const top = Math.max(8, Math.min(shown.y, window.innerHeight - 320));
   const left = Math.max(8, Math.min(shown.x, window.innerWidth - 260));
   return createPortal(
-    <div data-owner-picker role="menu" aria-label={shown.title} style={{ top, left }}
+    <div data-owner-picker role="menu" aria-label={t("owner.pickTitle")} style={{ top, left }}
       className={cn("fixed z-50 w-[248px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
-      <div className={MENU_HEADING}>{shown.title}</div>
+      <div className={MENU_HEADING}>{t("owner.pickTitle")}</div>
       <div className="flex max-h-[260px] flex-col gap-1 overflow-y-auto">
         {team.people.map((person) => (
           <button key={person.email} type="button" role="menuitemradio" aria-checked={person.email === shown.current} disabled={busy}
@@ -129,12 +124,9 @@ export function ownerMenuLabel(bot: Bot, team: TeamPeople): string {
   return owner ? t("owner.menu", { name: owner.name }) : t("owner.menuNone");
 }
 
-/** Opens the picker for one bot, or for every bot of a department ("Set owner for all bots…"). */
-export function pickOwnerOf(bots: readonly Bot[], team: TeamPeople, at: { x: number; y: number; name?: string }): void {
-  if (!bots.length) return;
-  const title = bots.length === 1 && at.name === undefined ? t("owner.pickTitle") : t("owner.setForAllTitle", { name: at.name ?? "" });
-  const current = bots.length === 1 ? ownerOf(bots[0]!, team)?.email ?? null : departmentOwner(bots, team)?.email ?? null;
-  requestOwnerPick({ botIds: bots.map((bot) => bot.id), title, current, x: at.x, y: at.y });
+/** The bot menu's "Reports to…": opens the picker for that bot. */
+export function pickOwnerOf(bot: Bot, team: TeamPeople, at: { x: number; y: number }): void {
+  requestOwnerPick({ botId: bot.id, current: ownerOf(bot, team)?.email ?? null, x: at.x, y: at.y });
 }
 
 /** A tag or passed message is done once its person opens it, even in a shared chat someone else already read. */

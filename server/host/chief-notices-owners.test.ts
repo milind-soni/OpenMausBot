@@ -30,7 +30,7 @@ function fixture() {
   const startTurn = vi.fn(async (_botId: string, _text: string, _opts: { threadId: string }) => undefined);
   const notices = createChiefNotices({
     store: store as never, notify: (notification) => { notified.push(notification); }, threadBusy: () => false, botAtThreadCapacity: () => false,
-    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, escalationsEnabled: () => true,
+    groupTurnActive: () => false, startTurn, assignerOf: () => undefined,
     routing: {
       askedPerson: (_botId, threadId) => starters.get(threadId) ?? BOB,
       personOf: (chief) => (chief.reportsTo === "bob@acme.test" ? BOB : null),
@@ -56,6 +56,5 @@ describe("a Team Cloud Chief's notices", () => {
     f.notices.reportIncident({ kind: "failed", bot: f.fox as never, threadId: "fox-olive", detail: "Olive's draft failed" });
     expect(f.startTurn).not.toHaveBeenCalled();
     expect(f.notified).toEqual([expect.objectContaining({ kind: "incident", threadId: "fox-olive" })]);
-    expect(f.notices.reportEscalation({ kind: "raised", bot: f.fox as never, threadId: "fox-olive", gate: "x", reason: "y", alreadyNotified: false })).toBe("person");
   });
 });

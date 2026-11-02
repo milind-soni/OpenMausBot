@@ -7,7 +7,7 @@ import { departmentOwner, setTeamPeople, type TeamPeople } from "@/state/team-pe
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
-import { BotListItem, botRowProps, TeamMenuItems } from "./Sidebar";
+import { BotListItem, botRowProps } from "./Sidebar";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { MentionMenu, teammateChoices } from "./MentionMenu";
 import { AskingLine, NeedsYouButton, NeedsYouTitle, PersonFace } from "./TeamOwner";
@@ -61,12 +61,6 @@ describe("who a team bot reports to, in the sidebar", () => {
     const header = renderToStaticMarkup(createElement(SidebarSectionHeader, { name: "Product A", lead: "Bob", collapsed: false, reorderable: false, dragging: false, line: true }));
     expect(header).toContain(">→ Bob<");
     expect(header).toContain("Every bot in Product A reports to Bob");
-  });
-
-  it("offers Set owner for all bots in a department's menu only when the caller passes it", () => {
-    const items = (onSetOwner?: () => void) => renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn(), onSetOwner }));
-    expect(items(vi.fn())).toContain("Set owner for all bots…");
-    expect(items()).not.toContain("Set owner for all bots…");
   });
 });
 

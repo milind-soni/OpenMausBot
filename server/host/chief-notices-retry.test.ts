@@ -37,7 +37,7 @@ function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   });
   const notices = createChiefNotices({
     store: store as never, notify: () => {}, threadBusy: () => false, botAtThreadCapacity: () => false,
-    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, escalationsEnabled: () => true, schedule: (run) => run(), ...over,
+    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, schedule: (run) => run(), ...over,
   });
   const turnsOf = (botId: string) => startTurn.mock.calls.filter(([id]) => id === botId).map(([, text, opts]) => ({ text, threadId: opts.threadId }));
   return { notices, store, startTurn, turnsOf, chief: bots[0]!, ada: bots[1]! };

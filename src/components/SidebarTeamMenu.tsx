@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCheck, Loader2, Network, Share2, SlidersHorizontal, SquarePen, Trash2, UserRound, Users } from "lucide-react";
+import { CheckCheck, Loader2, Network, Share2, SlidersHorizontal, SquarePen, Trash2, Users } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { departmentUnread, markDepartmentRead } from "@/lib/folder-read";
 import { t } from "@/lib/i18n";
@@ -31,7 +31,7 @@ function MarkDepartmentRead({ name, className, onDone }: { name: string; classNa
   </button>;
 }
 
-export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, onSetOwner, onSeeReports, department, onRead }: {
+export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, onSeeReports, department, onRead }: {
   /** The department this menu is for: with it, the menu offers Mark all as read. */
   department?: string;
   onRead?: () => void;
@@ -40,7 +40,6 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetFor
   onShare: () => void;
   onDelete: () => void;
   onSetForAll?: () => void;
-  onSetOwner?: () => void;
   onSeeReports?: () => void;
 }) {
   const item = cn(MENU_ITEM, "hover:bg-menu-hover [&>svg]:text-ink-secondary");
@@ -48,7 +47,6 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetFor
     <>
       <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={16} />{t("team.addBots")}</button>
       {department !== undefined && <MarkDepartmentRead name={department} className={cn(item, "disabled:opacity-60")} onDone={onRead ?? (() => {})} />}
-      {onSetOwner && <button type="button" role="menuitem" className={item} onClick={onSetOwner}><UserRound size={16} />{t("owner.setForAll")}</button>}
       {onSeeReports && <button type="button" role="menuitem" className={item} onClick={onSeeReports}><Network size={16} />{t("orgChart.seeWho")}</button>}
       {onSetForAll && <button type="button" role="menuitem" className={item} onClick={onSetForAll}><SlidersHorizontal size={16} />{t("teamSettings.menu")}</button>}
       <button type="button" role="menuitem" className={item} onClick={onRename}><SquarePen size={16} />{t("team.rename")}</button>

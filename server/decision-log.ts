@@ -1,6 +1,6 @@
 // The authorization decision log: one fleet-wide, append-only NDJSON file per UTC month (<data>/decisions/YYYY-MM.ndjson)
 // recording why a tool call was allowed, denied or carded. 0600 and redacted (rows carry what the agent typed, credentials
-// included), and fire-and-forget: an audit log must never take down the decision it audits. ask_bot peer-approval cards are not covered.
+// included), and fire-and-forget: an audit log must never take down the decision it audits.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises";

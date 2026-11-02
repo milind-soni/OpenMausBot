@@ -13,7 +13,7 @@ export const BOT_PARTS = Object.freeze({
   voice: ["speakReplies", "replyStyle", "voice", "voiceNotes"],
   tools: ["browser", "composio", "connectorTools", "connectorScopes", "outbound", "xResearch", "mcpServers", "toolScope"],
   memory: ["memoryEnabled", "memoryUpkeep"],
-  team: ["section", "approvePeerComms", "peers"],
+  team: ["section"],
   habits: ["notifications", "parkDirectMessages", "helperModel", "cacheKeepWarm", "recordBrowserSteps"],
 });
 /** A bot's parts only a move compares and carries: My Cloud sets them over its own move route, under the same ids. */

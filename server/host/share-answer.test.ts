@@ -8,7 +8,7 @@ import { createShareAnswer } from "./share-answer.ts";
 const PRIVATE = join("/data", "task-workspaces");
 const node = (id: string, parentId: string | undefined, threadId: string): HandoffView => ({
   id, rootId: "root", ...(parentId ? { parentId } : {}), threadId, botId: "bolt", key: "bolt", text: "", createdAt: 0, status: "running",
-  result: "", reported: false, executions: 1, approvalGranted: false, kind: "work", restarts: 0, mode: "consult", reply: "resume",
+  result: "", reported: false, executions: 1, kind: "work", restarts: 0, mode: "consult", reply: "resume",
 });
 
 function rule(over: { audiences?: Record<string, string>; pinned?: Record<string, string | null>; botFolder?: string } = {}) {

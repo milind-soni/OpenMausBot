@@ -3,9 +3,9 @@
 Run against disposable servers and repository-owned fake engines only:
 
 ```sh
-pnpm exec vitest run server/external-runtime.test.ts server/external-runtime.e2e.test.ts server/external-runtime-busy.e2e.test.ts server/external-runtime-timeout.e2e.test.ts
+pnpm exec vitest run server/external-runtime.test.ts server/external-runtime.e2e.test.ts server/external-runtime-timeout.e2e.test.ts
 pnpm exec vitest run server/runtime-paths.e2e.test.ts -t "external runtime"
-pnpm exec vitest run server/comms.test.ts server/routine-delegation.e2e.test.ts server/peer-allowlist.e2e.test.ts server/drivers/agents-proxy.test.ts
+pnpm exec vitest run server/comms.test.ts server/routine-delegation.e2e.test.ts server/drivers/agents-proxy.test.ts
 pnpm exec vitest run server/workspace-backup-policy.test.ts server/workspace-backup.test.ts
 ```
 

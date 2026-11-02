@@ -39,15 +39,6 @@ describe("the Team map's Who reports to whom", () => {
     expect(chart).toMatch(/data-org-person="bob@acme.test"[^>]*><header[^>]*><span aria-hidden="true"[^>]*>B<\/span>/);
   });
 
-  it("lets a member drag only the bots that report to them; an Admin drags any", () => {
-    setTeamPeople(asBob());
-    const member = render(createElement(TeamOrgChart, { bots }));
-    expect(member).toMatch(/data-org-bot="Fox" draggable="true"/);
-    expect(member).not.toMatch(/data-org-bot="Tech Lead" draggable="true"/);
-    setTeamPeople(asBob(true));
-    expect(render(createElement(TeamOrgChart, { bots }))).toMatch(/data-org-bot="Tech Lead" draggable="true"/);
-  });
-
   it("shows nothing anywhere but a team", () => {
     expect(render(createElement(TeamOrgChart, { bots }))).toBe("");
   });
