@@ -115,8 +115,13 @@ export function writeFileAtomicIfChanged(path: string, data: string, options: At
  * skipped without reading the disk back. */
 export class OwnedFile {
   private last: string | undefined;
+  readonly path: string;
+  private readonly options: AtomicWriteOptions;
 
-  constructor(readonly path: string, private readonly options: AtomicWriteOptions = {}) {}
+  constructor(path: string, options: AtomicWriteOptions = {}) {
+    this.path = path;
+    this.options = options;
+  }
 
   loaded(text: string): void {
     this.last = text;

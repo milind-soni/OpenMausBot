@@ -370,7 +370,7 @@ export class RoutineManager {
       }
       cut.push(cloneRun(run));
     }
-    if (cut.length > 0) this.save();
+    if (cut.length > 0) this.saveLater();
     for (const run of cut) {
       if (run.threadId) this.options.onRunCut?.(run);
       this.notifyRunChanged(run);
@@ -389,7 +389,7 @@ export class RoutineManager {
         this.options.frozenResultsThread?.(routine.botId, routine.resultsThreadId)) delete routine.resultsThreadId;
     }
     this.frozenPending = false;
-    this.save();
+    this.saveLater();
   }
 
   private routineWithHealth(routine: Routine): Routine {
@@ -509,7 +509,7 @@ export class RoutineManager {
     if (!run) return null;
     if (report) run.report = report;
     else delete run.report;
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     return cloneRun(run);
   }
@@ -710,7 +710,7 @@ export class RoutineManager {
       }
       changed = true;
     }
-    if (changed) this.save();
+    if (changed) this.saveLater();
   }
 
   runNow(id: string, request?: RoutineRequestCommitFor<"run_now">): RoutineRun | null {
@@ -793,7 +793,7 @@ export class RoutineManager {
     const previousRuns = this.runs.slice();
     apply();
     this.webhookRunReceipts = receipts;
-    try { this.saveNow(); }
+    try { this.save(); }
     catch (error) {
       // Keep the live run objects tick() may be awaiting, not cloned snapshots.
       this.runs = previousRuns;
@@ -822,7 +822,7 @@ export class RoutineManager {
       this.emitRun(run);
       changed = true;
     }
-    if (changed) this.save();
+    if (changed) this.saveLater();
   }
 
   async cancelRun(id: string, reason?: string): Promise<RoutineRun | null> {
@@ -833,7 +833,7 @@ export class RoutineManager {
     run.attention = undefined;
     run.finishedAt = this.now();
     if (reason) run.error = reason;
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     if (run.threadId) {
       if (run.target === "room-goal") {
@@ -851,7 +851,7 @@ export class RoutineManager {
     if (!run) return null;
     if (!run.seenAt) {
       run.seenAt = this.now();
-      this.save();
+      this.saveLater();
       this.emitRun(run);
     }
     return cloneRun(run);
@@ -885,7 +885,7 @@ export class RoutineManager {
       routine.nextRunAt = next;
       return true;
     });
-    if (moved.length) this.save();
+    if (moved.length) this.saveLater();
     for (const routine of moved) this.emitRoutine(routine);
     return moved.length;
   }
@@ -900,7 +900,7 @@ export class RoutineManager {
       routine.nextRunAt = schedule.at;
       return true;
     });
-    if (moved.length) this.save();
+    if (moved.length) this.saveLater();
     for (const routine of moved) this.emitRoutine(routine);
     return moved.length;
   }
@@ -1086,7 +1086,7 @@ export class RoutineManager {
           const latest = latestIntervalOccurrence(definition.schedule, now);
           if (latest !== null && latest > run.scheduledFor) {
             run.scheduledFor = latest;
-            this.save();
+            this.saveLater();
             this.emitRun(run);
           }
           const requiresCurrentDayOccurrence =
@@ -1111,12 +1111,12 @@ export class RoutineManager {
         if (state === "busy") {
           if (run.deferredAt == null) {
             run.deferredAt = now;
-            this.save();
+            this.saveLater();
             this.emitRun(run);
           }
           if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt >= ROUTINE_DEFERRAL_NOTICE_MS) {
             run.deferredNoticeAt = now;
-            this.save();
+            this.saveLater();
             this.emitRun(run);
             this.options.onRunDeferred?.(cloneRun(run));
           }
@@ -1144,7 +1144,7 @@ export class RoutineManager {
           continue;
         }
         Object.assign(run, { threadId: task.threadId, startedAt, status: "running" } satisfies Partial<RoutineRun>);
-        try { this.saveNow(); } catch (error) { Object.assign(run, { status: "queued", startedAt: undefined } satisfies Partial<RoutineRun>); throw error; }
+        try { this.save(); } catch (error) { Object.assign(run, { status: "queued", startedAt: undefined } satisfies Partial<RoutineRun>); throw error; }
         this.emitRun(run);
         try {
           const prompt = run.prompt ?? this.routines.find((r) => r.id === run.routineId)?.prompt;
@@ -1289,7 +1289,7 @@ export class RoutineManager {
     } else {
       return null;
     }
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
@@ -1313,7 +1313,7 @@ export class RoutineManager {
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert);
     else {
-      this.save();
+      this.saveLater();
       this.emitRun(run);
       if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
     }
@@ -1338,7 +1338,7 @@ export class RoutineManager {
     } else if (status === "needs-input" || status === "paused") {
       this.wait(run, safeDetail.slice(0, 500) || (status === "paused" ? "The room goal is paused" : "The team needs your input"));
       run.error = undefined;
-      this.save();
+      this.saveLater();
       this.emitRun(run);
     } else {
       run.status = status === "stopped" ? "cancelled" : "completed";
@@ -1346,7 +1346,7 @@ export class RoutineManager {
       run.finishedAt = this.now();
       run.error = undefined;
       if (status !== "stopped") run.output = safeDetail.slice(0, 2_000) || undefined;
-      this.save();
+      this.saveLater();
       this.emitRun(run);
     }
     queueMicrotask(() => this.tickInBackground());
@@ -1369,7 +1369,7 @@ export class RoutineManager {
 
   private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
     Object.assign(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() } satisfies Partial<RoutineRun>);
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     const repeat = failsLikeLastOutcome(this.runs, run) || (run.checkKey !== undefined && outcomesNewestFirst(this.runs, run.routineId, run.id)[0]?.status === "failed");
     this.options.onRunFailed?.(cloneRun(run), alert === undefined && repeat ? null : alert);
@@ -1529,7 +1529,7 @@ export class RoutineManager {
     };
     try {
       mutate();
-      this.saveNow();
+      this.save();
     } catch (error) {
       this.routines = before.routines;
       this.runs = before.runs;
@@ -1540,9 +1540,9 @@ export class RoutineManager {
     }
   }
 
-  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses saveNow. */
-  private save() { saveSoon(this, () => this.saveNow()); }
-  private saveNow() {
+  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses save. */
+  private saveLater() { saveSoon(this, () => this.save()); }
+  private save() {
     if (this.unreadable) return;
     // Evict only terminal receipts: an active one owns cancellation, timeout and event routing.
     let excess = this.runs.length - MAX_RUNS;
