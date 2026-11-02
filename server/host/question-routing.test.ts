@@ -248,7 +248,10 @@ describe("a Chief's answer, for the person, to a question a teammate asks them",
   it("lists the questions teammates wait on the person for, leaving out threads the Chief opened, archived ones and ones it may not read", () => {
     const w = world({ live: ["req-p"] });
     for (const threadId of ["chat", "old-chat", "chief-work"]) asks(w, threadId);
-    expect(w.routing.waitingForPerson(FUCHS, [DACHS, OTTER])).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION }]);
+    const waiting = w.routing.waitingForPerson(FUCHS, [DACHS, OTTER]);
+    expect(waiting).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION, since: expect.any(Number) }]);
+    // Since when: the card's own time, so a Chief can say how long it has waited.
+    expect(waiting[0]!.since).toBe(w.rows("chat").find((row) => row.card)!.at);
     expect(w.routing.waitingForPerson(FUCHS, [DACHS], (threadId) => threadId !== "chat")).toEqual([]);
   });
 });
