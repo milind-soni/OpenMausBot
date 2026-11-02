@@ -108,7 +108,8 @@ export function BotConversations({ bot }: { bot: Bot }) {
     setSearching(false);
   };
 
-  const listed = conversations.length >= 2;
+  // An open search stays up even if archiving leaves one conversation, so it can still be cleared.
+  const listed = conversations.length >= 2 || searching;
   const row = (task: (typeof threads)[number]) => (
     <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
       <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}

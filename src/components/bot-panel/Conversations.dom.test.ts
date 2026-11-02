@@ -240,6 +240,17 @@ describe("a bot's conversations in its panel", () => {
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { archivedAt: expect.any(Number) } }]]);
   });
 
+  it("keeps the search open when archiving leaves one conversation listed", () => {
+    const two = [task("who", "Who am I?", 2), task("deck", "Summarise the board deck", 4)];
+    render(research({ tasks: two }));
+    click(host.querySelector("[data-conversations-search]"));
+    type(host.querySelector<HTMLInputElement>("[data-conversations-query]")!, "deck");
+    render(research({ tasks: [two[0]!, { ...two[1]!, archivedAt: now - 1000 }] }));
+    expect(host.querySelector("[data-conversations-query]")).not.toBeNull();
+    expect(host.querySelector("[data-conversations-search]")).not.toBeNull();
+    expect(host.textContent).toContain("Nothing matches “deck”");
+  });
+
   it("lists archived conversations under Archived (N), where they can be unarchived", () => {
     render(research({ tasks: tasks.map((task) => task.threadId === "launch" || task.threadId === "deck" ? { ...task, archivedAt: now - 1000 } : task) }));
     expect(listed()).toEqual(["hiring", "who", "pricing"]);
