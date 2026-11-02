@@ -140,6 +140,8 @@ interface RuntimeOptions<Config> {
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
+  /** The name to send for a model, when its server knows it by another. */
+  servedModel?: (model: string) => Promise<string>;
   /** Smaller models announce a step and end the turn without calling a tool; such a reply gets a nudge, at most three
    * per turn and each only after tool progress since the last. */
   nudgeAnnouncedAction?: boolean;
@@ -361,7 +363,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         : timeoutController.signal;
 
       const payload = JSON.stringify({
-        ...options.requestBody(model, messages, stream),
+        ...options.requestBody(options.servedModel ? await options.servedModel(model) : model, messages, stream),
         ...(tools.length ? { tools } : {}),
       });
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
