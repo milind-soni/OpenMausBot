@@ -985,5 +985,7 @@ export type ServerFrame =
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
+  /** A Team Cloud's groups of people changed (server/team-groups.ts). */
+  | { kind: "teamGroups"; groups: Array<{ id: string; name: string; members: string[] }> }
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

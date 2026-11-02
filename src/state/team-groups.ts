@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import type { GroupMembers } from "../../shared/bot-access";
+import { listenLiveFrames } from "@/lib/live-events";
 import { api } from "./store";
 
 export interface TeamGroup { id: string; name: string; members: string[] }
@@ -18,10 +19,23 @@ export async function reloadTeamGroups(): Promise<void> {
   publish((await api<{ groups?: TeamGroup[] }>("/api/team/groups")).groups ?? []);
 }
 
+let listening = false;
+/** Another admin's change, or someone leaving the team, arrives as a teamGroups frame. */
+function listen(): void {
+  if (listening) return;
+  listening = true;
+  listenLiveFrames({
+    onFrame: (frame) => { if (frame.kind === "teamGroups") publish(frame.groups); },
+    onMissedFrames: () => { if (groups) void reloadTeamGroups().catch(() => {}); },
+  });
+}
+
 /** The team's groups, or null off a team and until they load. */
 export function useTeamGroups(team: boolean): TeamGroup[] | null {
   useEffect(() => {
-    if (team) void reloadTeamGroups().catch(() => {});
+    if (!team) return;
+    listen();
+    void reloadTeamGroups().catch(() => {});
   }, [team]);
   const current = useSyncExternalStore((listener) => {
     listeners.add(listener);

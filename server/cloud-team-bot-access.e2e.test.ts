@@ -388,6 +388,7 @@ describe("asking to chat", () => {
     const after = ((await as("ada", "GET", "/api/team/groups")).body.groups as Array<{ id: string; members: string[] }>).find((group) => group.id === finance.id);
     expect(after?.members).toEqual([DAN.email]);
     expect(JSON.stringify((await botOf("ada", vault.id))?.visibility)).not.toContain(FAY.email);
+    expect((await as("ada", "PUT", `/api/team/groups/${finance.id}`, { name: "Finance", members: [DAN.email, FAY.email] })).status, "someone who left can't be put back").toBe(400);
 
     expect((await as("ada", "DELETE", `/api/team/groups/${finance.id}`)).status).toBe(200);
     expect(await botOf("dan", vault.id), "the group is gone").toBeUndefined();

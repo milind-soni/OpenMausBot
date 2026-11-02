@@ -38,7 +38,11 @@ export function createTeamGroups(dataDir: string) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`team groups: ${file} is unreadable; starting fresh`);
   }
-  const save = () => writeFileAtomic(file, `${JSON.stringify({ version: 1, groups })}\n`, { mode: 0o600 });
+  /** Written before it is kept in memory, so a failed write changes nothing and the change can be tried again. */
+  const commit = (next: TeamGroup[]) => {
+    writeFileAtomic(file, `${JSON.stringify({ version: 1, groups: next })}\n`, { mode: 0o600 });
+    groups = next;
+  };
   const unique = (members: readonly string[]) => [...new Set(members.map((email) => ownerEmail(email)))].sort();
   return {
     list(): TeamGroup[] {
@@ -55,8 +59,7 @@ export function createTeamGroups(dataDir: string) {
       const known = id ? groups.find((group) => group.id === id) : undefined;
       if (!known && groups.length >= MAX_TEAM_GROUPS) return null;
       const group: TeamGroup = { id: known?.id ?? id ?? `g-${randomBytes(6).toString("hex")}`, name: body.name.trim(), members: unique(body.members) };
-      groups = [...groups.filter((one) => one.id !== group.id), group];
-      save();
+      commit([...groups.filter((one) => one.id !== group.id), group]);
       return group;
     },
     /** Takes a person out of every group; the ids of the groups they were in. */
@@ -64,15 +67,13 @@ export function createTeamGroups(dataDir: string) {
       const address = ownerEmail(email);
       const left = groups.filter((group) => group.members.includes(address)).map((group) => group.id);
       if (!left.length) return [];
-      groups = groups.map((group) => (left.includes(group.id) ? { ...group, members: group.members.filter((one) => one !== address) } : group));
-      save();
+      commit(groups.map((group) => (left.includes(group.id) ? { ...group, members: group.members.filter((one) => one !== address) } : group)));
       return left;
     },
     remove(id: string): TeamGroup | undefined {
       const known = groups.find((group) => group.id === id);
       if (!known) return undefined;
-      groups = groups.filter((group) => group.id !== id);
-      save();
+      commit(groups.filter((group) => group.id !== id));
       return known;
     },
   };
