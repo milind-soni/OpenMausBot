@@ -1,5 +1,5 @@
 import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
@@ -27,7 +27,8 @@ const BOTS: UpkeepBot[] = Array.from({ length: BOT_COUNT }, (_, i) => ({
   id: `counted-${String(i + 1).padStart(2, "0")}`,
   name: `Bot ${i + 1}`,
 }));
-const writesTo = (name: string) => written.paths.filter((path) => path.endsWith(`/${name}`) || path === name).length;
+// By file name, so a Windows path (backslashes) counts the same as any other.
+const writesTo = (name: string) => written.paths.filter((path) => basename(path) === name).length;
 const state = () => JSON.parse(readFileSync(join(DATA_DIR, "memory-upkeep.json"), "utf8")) as {
   bots: Record<string, { lastTidy?: { at: number; expired: number; topicChecks?: number; contradictionsChecked: boolean }; lastCapture?: { note?: string }; topicCursor?: string }>;
 };
