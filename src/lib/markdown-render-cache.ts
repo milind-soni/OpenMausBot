@@ -8,9 +8,9 @@ import type { ReactElement } from "react";
 export const MARKDOWN_CACHE_BYTES = 10 * 1024 * 1024;
 /** A longer text is parsed each time it is drawn rather than pinning its element tree. */
 export const MARKDOWN_CACHE_MAX_CHARS = 200_000;
-/** What one source character costs as Markdown/HTML syntax trees plus React elements: about 16–24 bytes in Chrome
- * for chat replies (prose, lists, code, tables); the high end, so the budget errs low. */
-export const MARKDOWN_BYTES_PER_CHAR = 24;
+/** What one source character holds as an HTML syntax tree plus React elements: 57 bytes of V8 heap measured over 2,000
+ * replies of prose, lists, code and tables, so 10 MB is about 170,000 characters of Markdown. */
+export const MARKDOWN_BYTES_PER_CHAR = 60;
 
 interface Entry {
   variant: string;

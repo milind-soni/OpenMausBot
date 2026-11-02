@@ -791,8 +791,11 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     urlTransform: chatUrlTransform,
     components: MARKDOWN_COMPONENTS,
   }));
+  // With the elements kept, an unchanged scope lets React skip the whole message when this component renders again.
+  const threadId = message?.threadId, messageId = message?.messageId;
+  const scope = useMemo(() => ({ message: threadId && messageId ? { threadId, messageId } : undefined, imageOffsets, threads, currentBotId, delivered }), [threadId, messageId, imageOffsets, threads, currentBotId, delivered]);
   return (
-    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
+    <MessageScopeContext.Provider value={scope}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">{markdown}</div>
     </MessageScopeContext.Provider>
   );
