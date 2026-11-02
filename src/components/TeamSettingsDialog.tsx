@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
   applyTeamPlan,
+  planAccess,
   planNeedsLocalAutoConsent,
   planTeamChange,
   TEAM_APPROVAL_MODES,
@@ -73,6 +74,8 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
   const dialog = useRef<HTMLDivElement>(null);
 
   const bots = useMemo(() => teamBots(state.bots, team), [state.bots, team]);
+  const latestBots = useRef(state.bots);
+  latestBots.current = state.bots;
   const models = useMemo(() => teamModelChoices(bots, state.instances), [bots, state.instances]);
   const efforts = useMemo(() => teamEffortChoices(bots, state.instances, EFFORT_LEVELS), [bots, state.instances]);
   const change: TeamChange | null = tab === "approval"
@@ -107,7 +110,12 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
       dispatch({ type: "botPatched", bot: saved });
     }, {
       acknowledgeLocalAuto, onProgress: setProgress,
-      share: async (bot, access) => dispatch({ type: "botPatched", bot: await saveAccess(bot.id, access) }),
+      share: async (bot) => {
+        const latest = latestBots.current.find((one) => one.id === bot.id) ?? bot;
+        const row = change?.kind === "access" ? planAccess(latest, change) : null;
+        if (row?.status === "skip") throw new Error(row.reason);
+        if (row?.status === "apply" && "access" in row) dispatch({ type: "botPatched", bot: await saveAccess(bot.id, row.access) });
+      },
     });
     setResults(outcome);
     setRunning(false);

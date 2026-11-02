@@ -69,7 +69,9 @@ export function teamEffortChoices(bots: readonly Bot[], instances: readonly Inst
   return order.filter((level) => offered.has(level));
 }
 
-function planAccess(bot: Bot, change: Extract<TeamChange, { kind: "access" }>): TeamPlanRow {
+/** Sharing is saved whole, so each bot's row is planned again from its latest copy just before it is sent: a grant
+ * another admin changed since the preview is kept as they left it. */
+export function planAccess(bot: Bot, change: Extract<TeamChange, { kind: "access" }>): TeamPlanRow {
   if (bot.defaultBot?.person) return { bot, status: "skip", reason: t("teamSettings.skip.ownMausBot") };
   if (bot.yourAccess !== "edit") return { bot, status: "skip", reason: t("teamSettings.skip.cantShare") };
   const before = accessOfBot(bot);

@@ -6,6 +6,7 @@ import { persistBotUpdate, type Bot, type InstanceInfo } from "@/state/store";
 import { EFFORT_LEVELS } from "../../shared/wire";
 import {
   applyTeamPlan,
+  planAccess,
   planNeedsLocalAutoConsent,
   planTeamChange,
   TEAM_APPROVAL_MODES,
@@ -192,6 +193,14 @@ describe("who can use a department's bots", () => {
     const owned = shared("owned", { everyone: "none", people: {} });
     const plan = planTeamChange([own, viewOnly, owned], instances, { kind: "access", person: { email: ADA, level: "chat" } });
     expect(plan.map((row) => row.status === "skip" ? row.reason : row.status)).toEqual(["it's someone's own MausBot", "you can't change who can use it", "unchanged"]);
+  });
+
+  it("plans again from the bot's latest sharing, so a grant another admin removed after the preview stays removed", () => {
+    const previewed = shared("payroll", { everyone: "none", people: { [CARA]: "chat" } });
+    const latest = shared("payroll", { everyone: "none", people: {} });
+    const change = { kind: "access" as const, everyone: "view" as const };
+    expect(planTeamChange([previewed], instances, change)[0]).toMatchObject({ access: { everyone: "view", people: { [CARA]: "chat" } } });
+    expect(planAccess(latest, change)).toEqual({ bot: latest, status: "apply", access: { everyone: "view", people: {} } });
   });
 
   it("saves each bot's sharing through its own request, one at a time, and never as a settings patch", async () => {
