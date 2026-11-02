@@ -768,8 +768,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
           messages.push({ ...assistantReply(model, completion, completion.text || null), tool_calls: completion.toolCalls });
-          // After a corrective round, the failure stays pending only until the bot runs tools again.
-          if (correctiveRounds && !denials.length) { toolFailed = false; failedCalls.length = 0; }
+          // After a corrective round, the failure stays pending only until the bot runs tools again. A local model that
+          // went on to use more tools has already reacted: a wrong guess, a search, then the right call is not a failed turn.
+          if ((correctiveRounds || options.localModel) && !denials.length) { toolFailed = false; failedCalls.length = 0; }
           const screenshotParts: ChatContentPart[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();

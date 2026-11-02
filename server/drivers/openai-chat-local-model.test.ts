@@ -84,6 +84,7 @@ async function fixture(script: Script, driver: "local" | "hosted" = "local") {
   });
   return {
     requests, recorder, threadId,
+    respond: (requestId: string, behavior: "allow" | "deny") => instance.adapter.respondToRequest(threadId, requestId, { behavior }),
     effects: () => existsSync(effectsFile) ? readFileSync(effectsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { name: string }) : [],
     start: (input: Partial<SendTurnInput> = {}) => instance.adapter.sendTurn({ threadId, text: "Do it.", model: "fixture-model", integrations, approvalMode: "full", ...input }),
     completed: () => recorder.until((event) => event.type === "turn.completed"),
@@ -207,6 +208,34 @@ describe("a local model repeating itself", () => {
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.effects().map((effect) => effect.name)).toEqual(["same", "same"]);
     expect(JSON.stringify(f.requests[2]!.messages.at(-1))).toContain("Re-run the failed operations");
+  });
+
+  it("does not nag a model that reacted to a failure by using more tools", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) structured(response, "audit_fail", "call-1");
+      else if (round === 2) structured(response, "audit_write", "call-2");
+      else say(response, "Done another way.");
+    });
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+  });
+
+  it("still ends the turn if the model never fixes it", async () => {
+    const f = await fixture((_body, response, round) => round === 1 ? structured(response, "audit_fail", "call-1") : say(response, "It is finished."));
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(f.requests).toHaveLength(4);
+  });
+
+  it("a person's no is never argued with", async () => {
+    const f = await fixture((_body, response, round) => round === 1 ? structured(response, "audit_write", "call-1") : say(response, "I could not."));
+    await f.start({ approvalMode: "ask" });
+    const ask = await f.recorder.until((event) => event.type === "request.opened");
+    await f.respond(ask.requestId!, "deny");
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.effects()).toEqual([]);
   });
 
   it("a hosted model's failed turn ends as before", async () => {
