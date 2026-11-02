@@ -315,6 +315,14 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(store.bot(bot.id)?.phoneApps).toEqual({});
   });
 
+  it("refuses an archived conversation, which the main-thread resolver skips", async () => {
+    const { store, bot, patch } = fixture();
+    const archived = store.createTask(bot.id, "Done", false)!;
+    store.patchTask(bot.id, archived.threadId, { archivedAt: Date.now() });
+    expect((await patch(bot.id, { mainThreadChoice: archived.threadId })).status).toBe(400);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+
   it("refuses a client session and a paired device", async () => {
     const { store, bot, patch } = fixture();
 
