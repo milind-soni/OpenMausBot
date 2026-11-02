@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT, browserEngineStatus, clearBrowserSessionState, closeBrowserSession, runningBrowserSessionNames } from "../browser-engine.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
+import { LocalBackend } from "../browser/backends.ts";
+import { FakeBackend } from "../browser/testing/fake-chrome.ts";
 import { TOOL_LIST } from "../browser/tools.ts";
 import { browserEgress } from "../browser/egress/registry.ts";
 import { REDDIT_REFUSAL } from "../browser/egress/reddit.ts";
@@ -97,6 +99,25 @@ describe("the bots' browser host and the engine memory guard", () => {
 });
 
 describe("the bots' browser host with browserEngine.engine set to chrome", () => {
+  it("keeps Chrome open between browser calls until the host's whole-turn claim is released", async () => {
+    const backend = new FakeBackend();
+    const open = vi.spyOn(LocalBackend.prototype, "open").mockImplementation((request) => backend.open(request));
+    try {
+      const resources = new TurnResources();
+      const { host } = setup("chrome", { turnResources: resources });
+      const browser = (await host.browserIntegration("scout", undefined, turn))!;
+      const result = await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: "agent_browser_status", arguments: {} }, () => {
+        expect(resources.claim(`browser:${browser.session}`, turn)).toBe(true);
+      });
+      expect(result).not.toHaveProperty("isError", true);
+      expect(await host.browserRuntime.closeUnused(browser.session, browser.spec)).toBe(false);
+      resources.release(turn);
+      expect(await host.browserRuntime.closeUnused(browser.session, browser.spec)).toBe(true);
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   it("gives a bot's turn the browser MCP server over its own profile on the new engine", async () => {
     const { host, minted } = setup("chrome");
     const browser = await host.browserIntegration("scout", undefined, turn);
