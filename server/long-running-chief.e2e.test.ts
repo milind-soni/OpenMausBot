@@ -34,6 +34,8 @@ async function chiefJob(test: (f: any) => Promise<void>) {
   const model = createServer(async (req, res) => {
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     let body = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const sent = JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
     const text = (message: { content?: unknown }) => typeof message.content === "string" ? message.content
@@ -47,7 +49,9 @@ async function chiefJob(test: (f: any) => Promise<void>) {
       if ("hold" in given) { await given.hold; return reply(out, given.after); }
       out.writeHead(200, { "content-type": "text/event-stream" });
       out.end("say" in given ? frame({ content: given.say }, "stop") + "data: [DONE]\n\n"
-        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
+        // Each call carries its own round: a local model that repeats one identical call is stopped after ten (chat-repeat-guard.ts),
+        // and this loop is meant to run to the step cap.
+        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: JSON.stringify({ round: callSerial }) } }] }, "tool_calls") + "data: [DONE]\n\n");
     };
     await reply(res, answer(request)).catch(() => {});
   });
