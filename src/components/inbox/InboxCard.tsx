@@ -71,7 +71,7 @@ export function InboxCard({ view }: { view: InboxView }) {
   const rows = rowsIn(view, "needs-you").slice(0, CARD_ROWS);
   const openRow = (row: InboxRow) => { readInboxRow(row); openInbox({ reading: row.id }); };
   const openAll = () => openInbox({ tab: counts["needs-you"] ? "needs-you" : "info" });
-  const shell = cn("my-1 w-full max-w-[560px] rounded-[20px]", ELEVATED_CARD);
+  const shell = cn("my-1 w-full max-w-[560px] rounded-[24px]", ELEVATED_CARD);
   if (!rows.length) {
     return (
       <section data-inbox-card="caught-up" aria-label={t("inbox.card.caughtUp")} className={cn(shell, "flex items-center gap-2 px-4 py-2 text-[13px] text-ink-secondary")}>

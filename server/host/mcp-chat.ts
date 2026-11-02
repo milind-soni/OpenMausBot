@@ -89,7 +89,7 @@ export function createMcpChat(deps: McpChatDeps) {
       canUse: (name) => canUseMcpServer(sender.toolScope, name),
       config: deps.mcpConfig(), cfg: () => cfg, personal: () => teamConnections.personMcp(),
       authState: (name, url) => mcpOAuth.authState(name, url),
-      managedBy: mcpManagedBy, policyRefusal: mcpPolicyRefusal,
+      managedBy: mcpManagedBy, policyRefusal: mcpPolicyRefusal, addRefusal: () => managedPolicy.botMcpRefusal(),
       signOut: async (name, url) => { await mcpOAuth.signOut(name, url); broadcast({ kind: "mcp.changed" }); },
       testAs: (name, url) => {
         const person = teamConnections.turnPerson(threadId, generation);
@@ -127,7 +127,7 @@ export function createMcpChat(deps: McpChatDeps) {
   }
   /** The organisation whose policy leaves this server out, if one does. */
   function mcpManagedBy(name: string, server: object): string | undefined {
-    return managedPolicy.mcpAllowed(name, mcpServerUrl(server)) ? undefined : managedPolicy.current()?.organizationName;
+    return managedPolicy.mcpAllowed(name, mcpServerUrl(server), "bot" in server && Boolean(server.bot)) ? undefined : managedPolicy.current()?.organizationName;
   }
 
   return { mcpRequests, mcpSignInCards, mcpServerDeps, resolveAndSendMcp, mcpServerResponse, mcpPolicyRefusal };

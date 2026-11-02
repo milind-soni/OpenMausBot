@@ -52,6 +52,8 @@ export interface InternalMcpDeps {
   authState(name: string, url: string): McpAuthState;
   managedBy(name: string, server: StoredMcpServer): string | undefined;
   policyRefusal(name: string, server: StoredMcpServer): string | undefined;
+  /** A team that uses only the servers its admins add: no server is added from a chat, whoever asks. */
+  addRefusal?(): string | undefined;
   signOut(name: string, url: string): Promise<void>;
   /** The person this turn acts for, testing their own connection to a personal server. */
   testAs(name: string, url: string): { oauth: McpOAuthManager; key?: { header: string; value: string } } | null;
@@ -192,6 +194,8 @@ function list(deps: Deps): Outcome {
 }
 
 async function add(deps: Deps, name: string, fields: Record<string, unknown>, signal: AbortSignal): Promise<Outcome> {
+  const managed = deps.addRefusal?.();
+  if (managed) return { status: 403, error: managed };
   if (!deps.teamAdmin()) return { status: 403, error: ASK_ADMIN };
   if (Object.hasOwn(deps.cfg().mcpServers ?? {}, name)) return { status: 409, error: `${name} already exists. Use update, or pick another name.` };
   const redeemed = deps.redeem(trimmedRefs({ name, ...fields }));

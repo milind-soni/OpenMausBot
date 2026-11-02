@@ -23,7 +23,7 @@ export interface MenuModelRow {
 }
 
 export type MenuGroupBody =
-  | { kind: "policy"; organization: string }
+  | { kind: "policy"; organization: string; team?: boolean }
   | { kind: "setUp" }
   | { kind: "signIn" }
   | { kind: "empty"; loading: boolean }
@@ -152,7 +152,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
   const current = ordered.find((instance) => instance.instanceId === selection.instanceId);
 
   function groupBody(instance: InstanceInfo, provider: string): MenuGroupBody | null {
-    if (instance.policy) return query ? null : { kind: "policy", organization: instance.policy.organizationName };
+    if (instance.policy) return query ? null : { kind: "policy", organization: instance.policy.organizationName, ...(instance.policy.team ? { team: true } : {}) };
     if (needsCli(instance)) return query ? null : { kind: "setUp" };
     const { signedOut, own, all } = models.get(instance.instanceId)!;
     if (all.length === 0) return query ? null : signedOut ? { kind: "signIn" } : { kind: "empty", loading: input.refreshing === instance.instanceId };

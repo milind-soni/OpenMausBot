@@ -1,5 +1,5 @@
 // Loaded with --import into a fixture server that scripts/bench-desktop.ts starts, never into the app: it counts
-// timer callbacks and file writes, and on SIGUSR2 writes the running totals, CPU and memory to $OMB_BENCH_TALLY.
+// timer callbacks, child processes and file writes, and on SIGUSR2 writes the running totals, CPU and memory to $OMB_BENCH_TALLY.
 import childProcess from "node:child_process";
 import fs from "node:fs";
 import module from "node:module";
@@ -15,6 +15,7 @@ const writes = new Map();
 const fdPaths = new Map();
 let fsyncs = 0;
 let renames = 0;
+let spawns = 0;
 
 const fileKey = (path) => {
   const name = basename(String(path))
@@ -44,7 +45,7 @@ const siteOf = () => {
 const wrapTimer = (original, kind) => function (callback, delay, ...args) {
   if (typeof callback !== "function") return original.call(this, callback, delay, ...args);
   const ms = Math.round(Number(delay) || 0);
-  const key = kind === "interval" ? `interval:${ms}:${siteOf()}` : `timeout:${ms < 1000 ? ms : `${Math.round(ms / 1000)}s`}`;
+  const key = kind === "interval" ? `interval:${ms}:${siteOf()}` : ms < 1000 ? `timeout:${ms}` : `timeout:${Math.round(ms / 1000)}s:${siteOf()}`;
   if (kind === "interval") intervals.set(key, (intervals.get(key) ?? 0) + 1);
   return original.call(this, function (...inner) { countFire(key); return callback.apply(this, inner); }, delay, ...args);
 };
@@ -87,6 +88,10 @@ for (const method of ["spawn", "spawnSync", "execFile", "fork"]) {
   const original = childProcess[method];
   childProcess[method] = function (file, args, ...rest) { const started = original.call(this, file, args, ...rest); countSpawn(file, args, started); return started; };
 }
+for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
+  const original = childProcess[name];
+  childProcess[name] = function (...args) { spawns += 1; return original.apply(this, args); };
+}
 module.syncBuiltinESMExports();
 
 if (out) {
@@ -101,6 +106,7 @@ if (out) {
       fsyncs,
       renames,
       spawned: Object.fromEntries(spawned),
+      spawns,
     }));
   });
 }

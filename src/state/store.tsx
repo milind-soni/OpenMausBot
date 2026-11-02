@@ -460,7 +460,7 @@ export interface InstanceInfo {
   readOnly?: boolean;
   trialCredit?: "active" | "used_up" | "ended";
   managed?: { organizationId: string; organizationName: string };
-  policy?: { organizationName: string; reason: string };
+  policy?: { organizationName: string; reason: string; team?: boolean };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
@@ -2090,7 +2090,7 @@ export const StoreContext = createContext<{
   state: AppState;
   dispatch: React.Dispatch<Action>;
   flushBotPatches: (botId: string) => Promise<BotAnnouncement | null>;
-  refreshInstances: (options?: { reportErrors?: boolean }) => Promise<void>;
+  refreshInstances: (options?: { reportErrors?: boolean; cached?: boolean }) => Promise<void>;
   refreshModels: (instanceId: string) => Promise<void>;
 } | null>(null);
 
@@ -3299,19 +3299,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const instanceProbe = useRef<Promise<void> | null>(null);
-  const refreshInstances = useCallback(async (options?: { reportErrors?: boolean }) => {
-    const probe = instanceProbe.current ??= api("/api/instances", { timeoutMs: 120_000 }).then(({ instances }) => {
+  const instanceProbes = useRef(new Map<string, Promise<void>>());
+  const refreshInstances = useCallback(async (options?: { reportErrors?: boolean; cached?: boolean }) => {
+    const path = options?.cached ? "/api/instances" : "/api/instances?fresh=1", probes = instanceProbes.current;
+    const probe = probes.get(path) ?? api(path, { timeoutMs: 120_000 }).then(({ instances }) => {
       if (!Array.isArray(instances)) throw new Error(t("engineSetup.invalidStatus"));
       rawDispatch({ type: "instances", instances });
     });
-    try {
-      await probe;
-    } catch (error) {
-      if (options?.reportErrors) throw error;
-    } finally {
-      if (instanceProbe.current === probe) instanceProbe.current = null;
-    }
+    probes.set(path, probe);
+    await probe.catch((error) => { if (options?.reportErrors) throw error; })
+      .finally(() => { if (probes.get(path) === probe) probes.delete(path); });
   }, []);
 
   const refreshModels = useCallback(async (instanceId: string) => {
@@ -3325,9 +3322,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onFocus = () => {
       const now = Date.now();
-      if (now - lastFocusProbe.current < 30_000) return; // every engine's CLI runs; a Keychain prompt refocuses the window
+      if (now - lastFocusProbe.current < 30_000) return; // a status read can run engine CLIs, and a Keychain prompt refocuses the window
       lastFocusProbe.current = now;
-      void refreshInstances();
+      void refreshInstances({ cached: true });
     };
     window.addEventListener("focus", onFocus);
     const onVisible = () => { if (document.visibilityState === "visible") onFocus(); };
