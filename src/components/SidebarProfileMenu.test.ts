@@ -602,6 +602,12 @@ describe("the usage meta", () => {
     expect(planUsageSummary({ providers: [provider({ fiveHour: window(40, "2026-10-27T15:00:00Z") })] }, now)).toEqual({ value: "40% used", weekly: false, resets: "Resets in 3 hours" });
   });
 
+  it("falls back to a plan's monthly budget when it has no rolling window", () => {
+    const report = { providers: [provider({ extra: [{ label: "Monthly spend", usedPercent: 9.3 }, { label: "Other", usedPercent: 80 }] })] };
+    expect(planUsageSummary(report, now)).toEqual({ value: "9% used" });
+    expect(planUsageSummary({ providers: [provider({ extra: [{ label: "Other", usedPercent: 80 }] })] }, now)).toBeNull();
+  });
+
   it("shows nothing without a percent, not even the plan's name", () => {
     expect(planUsageSummary({ providers: [provider({ plan: "Max" })] }, now)).toBeNull();
     expect(planUsageSummary({ providers: [provider()] }, now)).toBeNull();
