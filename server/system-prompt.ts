@@ -26,7 +26,7 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string; person?: s
 // at the computer, or not there) and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent", "availability", "active-routines",
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "recent", "availability", "active-routines",
   "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place"]);
 
 /** Its id is what puts it in the volatile half. */

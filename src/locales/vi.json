@@ -259,6 +259,7 @@
   "server.teammates.resumedWorkResultsRestart": "Sau khi khởi động lại, tiếp tục với kết quả của việc đã giao, đang xem xét",
   "server.teammates.delegatedWork": "việc đã giao",
   "server.teammates.answerPassed": "Đã chuyển câu trả lời đến việc đang chờ",
+  "server.teammates.answeredForPerson": "Đã trả lời câu hỏi của {name} thay cho người dùng",
   "server.teammates.personReplied": "{name} đã trả lời",
   "server.teammates.personAssistantAnswered": "Trợ lý của {name} đã trả lời",
   "server.teammates.told": "Đã báo cho {name}",

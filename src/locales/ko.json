@@ -324,6 +324,7 @@
   "server.teammates.resumedWorkResultsRestart": "재시작 후 맡긴 작업의 결과로 다시 시작해 검토 중이에요",
   "server.teammates.delegatedWork": "맡긴 작업",
   "server.teammates.answerPassed": "기다리던 작업에 답을 전달했어요",
+  "server.teammates.answeredForPerson": "본인을 대신해 {name} 님의 질문에 답했어요",
   "server.teammates.personReplied": "{name} 님이 답했어요",
   "server.teammates.personAssistantAnswered": "{name} 님의 어시스턴트가 답했어요",
   "server.teammates.told": "{name} 님에게 알렸어요",

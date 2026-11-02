@@ -258,6 +258,7 @@
   "server.teammates.resumedWorkResultsRestart": "重新啟動後已帶著委派工作的結果繼續，正在查看",
   "server.teammates.delegatedWork": "委派的工作",
   "server.teammates.answerPassed": "回答已轉給等待中的工作",
+  "server.teammates.answeredForPerson": "已代為回答 {name} 的問題",
   "server.teammates.personReplied": "{name} 已回覆",
   "server.teammates.personAssistantAnswered": "{name} 的助理已回答",
   "server.teammates.told": "已告知 {name}",

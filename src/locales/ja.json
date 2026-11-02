@@ -281,6 +281,7 @@
   "server.teammates.resumedWorkResultsRestart": "再起動後、任せた作業の結果を受けて再開し、確認中です",
   "server.teammates.delegatedWork": "任せた作業",
   "server.teammates.answerPassed": "回答を待っている作業に渡しました",
+  "server.teammates.answeredForPerson": "本人の代わりに {name} の質問に答えました",
   "server.teammates.personReplied": "{name} が返信しました",
   "server.teammates.personAssistantAnswered": "{name} のアシスタントが回答しました",
   "server.teammates.told": "{name} に伝えました",

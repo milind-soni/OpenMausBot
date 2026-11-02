@@ -232,6 +232,7 @@
   "server.teammates.resumedWorkResultsRestart": "Nach einem Neustart mit den Ergebnissen der delegierten Arbeit fortgesetzt, wird geprüft",
   "server.teammates.delegatedWork": "delegierter Arbeit",
   "server.teammates.answerPassed": "Antwort an die wartende Arbeit weitergegeben",
+  "server.teammates.answeredForPerson": "Frage von {name} für die Person beantwortet",
   "server.teammates.personReplied": "{name} hat geantwortet",
   "server.teammates.personAssistantAnswered": "Die Assistenz von {name} hat geantwortet",
   "server.teammates.told": "{name} Bescheid gegeben",

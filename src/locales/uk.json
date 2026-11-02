@@ -227,6 +227,7 @@
   "server.teammates.resumedWorkResultsRestart": "Після перезапуску продовжено з результатами доручених завдань, триває перевірка",
   "server.teammates.delegatedWork": "доручені завдання",
   "server.teammates.answerPassed": "Відповідь передано роботі, що чекала",
+  "server.teammates.answeredForPerson": "Дано відповідь за людину на запитання: {name}",
   "server.teammates.personReplied": "{name} відповів",
   "server.teammates.personAssistantAnswered": "Асистент {name} відповів",
   "server.teammates.told": "Повідомлено: {name}",

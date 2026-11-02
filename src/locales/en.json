@@ -329,6 +329,7 @@
   "server.teammates.resumedWorkResultsRestart": "Resumed with delegated work results after a restart, reviewing",
   "server.teammates.delegatedWork": "delegated work",
   "server.teammates.answerPassed": "Answer passed to the waiting work",
+  "server.teammates.answeredForPerson": "Answered {name}'s question for the person",
   "server.teammates.personReplied": "{name} replied",
   "server.teammates.personAssistantAnswered": "{name}'s assistant answered",
   "server.teammates.told": "Told {name}",

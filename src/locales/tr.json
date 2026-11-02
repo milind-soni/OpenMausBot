@@ -259,6 +259,7 @@
   "server.teammates.resumedWorkResultsRestart": "Yeniden başlatmanın ardından devredilen işin sonuçlarıyla devam edildi, inceleniyor",
   "server.teammates.delegatedWork": "devredilen iş",
   "server.teammates.answerPassed": "Yanıt bekleyen işe iletildi",
+  "server.teammates.answeredForPerson": "{name} botunun sorusu kişi adına yanıtlandı",
   "server.teammates.personReplied": "{name} yanıtladı",
   "server.teammates.personAssistantAnswered": "{name} asistanı yanıtladı",
   "server.teammates.told": "{name} bilgilendirildi",
