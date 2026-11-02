@@ -1,7 +1,7 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
+import { Mic, Paperclip, Square, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
@@ -10,6 +10,7 @@ import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
+import { alternateSend, alternateSendLabel, useFollowUpDefault } from "@/lib/follow-up"; import { followUpChoices, resolveFollowUp, type FollowUp } from "../../shared/follow-up";
 import {
   draftRevision,
   appendDraftAttachments,
@@ -64,7 +65,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple";
+import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
@@ -133,7 +134,7 @@ export function Composer({
   const singleRow = useMediaQuery(PHONE_LAYOUT);
   // Simple mode on a wider screen: one pill holding a round +, the field, the mic and one round button in the bot's colour.
   const simpleDock = !advanced && !singleRow;
-  const sendKey = useSendKey();
+  const sendKey = useSendKey(); const followUpDefault = useFollowUpDefault();
   const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const threadId = group?.threadId ?? bot?.threadId ?? "";
@@ -531,7 +532,10 @@ export function Composer({
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
   const callShown = !simpleDock || (!hasContent && !stopInSlot);
   const slot = slotColors(bot?.color, Boolean(group));
-  const sendNames = sendLabels({ simple: !advanced, busy, canSteer, name: busyName, sendLabel });
+  // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
+  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
+  const steersNow = group ? canSteer : followUpFor(false) === "steer";
+  const sendNames = sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -561,7 +565,7 @@ export function Composer({
       dispatch({ type: "send", botId: bot.id, mode: failedMode, ...retry });
     }
   };
-  const send = () => {
+  const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
@@ -603,10 +607,10 @@ export function Composer({
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       dispatch({
         type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode,
-        ...(points ? { pointed: points.pointed } : {}),
+        ...(points ? { pointed: points.pointed } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && !canSteer);
+      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && followUp !== "steer");
     }
     setText("");
     setAttachments([]);
@@ -918,7 +922,7 @@ export function Composer({
                 steerQueued();
                 return;
               }
-              send();
+              send(followUpFor(alternateSend(e.nativeEvent, sendKey)));
             }
             if (e.key === "Escape" && recording) stopDictation();
           }}
@@ -928,7 +932,7 @@ export function Composer({
           aria-busy={bot?.awaitingThreadSnapshot || undefined}
           placeholder={composerPlaceholder({
             simple: !advanced, locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
-            replying: Boolean(replyTo), busy, canSteer, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
+            replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
             setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
           })}
@@ -976,20 +980,9 @@ export function Composer({
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (
-          <button
-            onClick={send}
-            disabled={attachmentPending}
-            aria-label={sendNames.label}
-            title={sendNames.title}
-            style={busy && !canSteer ? undefined : slot.button.style}
-            className={cn(
-              "flex shrink-0 items-center justify-center rounded-full disabled:cursor-default",
-              simpleDock ? "size-7 animate-[slot-fade-in_120ms_ease-out]" : "size-8",
-              busy && !canSteer ? "bg-raised text-ink-secondary hover:bg-raised-hover" : slot.button.className,
-            )}
-          >
-            {busy && !canSteer ? <Clock size={simpleDock ? 14 : 15} /> : <ArrowUp size={16} strokeWidth={1.75} absoluteStrokeWidth />}
-          </button>
+          <ComposerSendButton compact={simpleDock} waits={busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
+            disabled={attachmentPending} onSend={(alternate) => send(followUpFor(alternate))} onChoose={send}
+            menu={followUpFor(false) && { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) }} />
           )}
           </div>
         </div>

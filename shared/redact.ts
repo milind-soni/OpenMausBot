@@ -26,6 +26,7 @@ const KEY_PREFIXES: RegExp[] = [
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g, // github fine-grained
   /\bgl(?:pat|dt|rtr?)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g, // gitlab personal, deploy and runner tokens (routable ones carry .-parts)
   /\bxox[abposr]-[A-Za-z0-9-]{20,}/g, // slack
+  /\bxapp-\d-[A-Za-z0-9-]{20,}/g, // slack app-level (socket mode) tokens
   /\bAKIA[0-9A-Z]{16}\b/g, // aws access key id
   /\bAIza[0-9A-Za-z_-]{30,}/g, // google api key
   /\bnpm_[A-Za-z0-9]{20,}/g, // npm

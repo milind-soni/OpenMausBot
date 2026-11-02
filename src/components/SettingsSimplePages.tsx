@@ -31,7 +31,7 @@ import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
-import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
+import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
 import { ThemeRow } from "./ThemeRow";
 import { AdminOnly } from "./AdminOnly";
 
@@ -69,6 +69,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ColorUserBubblesRow simple />
             <LanguageRow simple />
             <SendKeyRow simple />
+            <FollowUpRow simple />
             <SettingRow title={t("settings.simple.looks.title")}>
               <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
             </SettingRow>

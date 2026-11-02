@@ -6,7 +6,8 @@ import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { isPersistentQuestionCard } from "../../shared/ask-question.ts";
 import { normalizeReaction, reactionAnswer } from "../../shared/reactions.ts";
 import type { WidgetAction } from "../../shared/widget.ts";
-import type { ResolvedSender, SteerQueueReason } from "../../shared/wire.ts";
+import { parseFollowUp } from "../../shared/follow-up.ts";
+import type { ResolvedSender } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import { dismissQuestionCard } from "../card-dismissal.ts";
 import { AppMessageRate, appContextBlock, prepareAppMessage } from "../chat-apps.ts";
@@ -25,6 +26,7 @@ import type { ReplyTarget } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
+import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
 import { cancelSteeredMessage, holdSteeredQueue, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
@@ -34,10 +36,6 @@ import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type RunningInstance = ReturnType<ProviderRegistry["get"]>;
-
-type DirectSendReceipt =
-  | { ok: true; threadId: string; message: Message; steered?: true }
-  | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason };
 
 type SkillResolution =
   | { claimed: false }
@@ -63,14 +61,7 @@ export interface BotMessageRouteDeps {
   desktopManaged: boolean;
   cloudHome: boolean;
   DirectSendRefused: abstract new (...args: never[]) => { readonly status: number; readonly body: Record<string, unknown> };
-  acceptDirectSend(
-    input: {
-      botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
-      trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
-      app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
-    },
-    guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
-  ): Promise<DirectSendReceipt>;
+  acceptDirectSend(input: DirectSendInput, guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>): Promise<DirectSendReceipt>;
   directSendRefusal(botId: string, threadId: string): { status: number; body: Record<string, unknown> } | null;
   startTurn(botId: string, text: string, opts?: {
     threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean;
@@ -193,6 +184,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pressed && fromAnApp) return json(res, 400, { error: "send widgetAction or appMessage, not both" });
       const pointing = body.pointed !== undefined && body.pointed !== null;
       if (pointing && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry what the person pointed at" });
+      const followUp = parseFollowUp(body.followUp);
+      if (followUp === null) return json(res, 400, { error: "followUp must be steer, queue or restart" });
+      if (followUp && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can choose how it meets the running turn" });
       // A distinct route, so an older server answers 404 instead of ignoring the safety preconditions.
       const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
       if (guardedBody && !guardedBody.success) {
@@ -317,7 +311,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
           // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
           // paired session or the desktop capability proves a person and lifts the webhook block.
-          personPresent: auth.kind === "session" || DESKTOP_MANAGED,
+          personPresent: auth.kind === "session" || DESKTOP_MANAGED, ...(followUp ? { followUp } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();
