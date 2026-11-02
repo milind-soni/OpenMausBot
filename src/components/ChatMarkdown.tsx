@@ -780,17 +780,12 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const mentions = source.includes("@"), linksThreads = threads.length > 0;
   const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
   // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
-  const markdown = markdownCache.render(text, variant, () => Markdown({
-    children: source,
-    remarkPlugins: mentions || linksThreads ? [
-      ...BASE_REMARK_PLUGINS,
-      ...(mentions ? [[remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }] as const] : []),
-      ...(linksThreads ? [remarkThreadRefs(threads, currentBotId)] : []),
-    ] : BASE_REMARK_PLUGINS,
-    rehypePlugins: rehypePluginsFor(mathPlugin),
-    urlTransform: chatUrlTransform,
-    components: MARKDOWN_COMPONENTS,
-  }));
+  const markdown = markdownCache.render(text, variant, () => {
+    const remarkPlugins = [...BASE_REMARK_PLUGINS];
+    if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
+    if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
+    return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+  });
   // With the elements kept, an unchanged scope lets React skip the whole message when this component renders again.
   const threadId = message?.threadId, messageId = message?.messageId;
   const scope = useMemo(() => ({ message: threadId && messageId ? { threadId, messageId } : undefined, imageOffsets, threads, currentBotId, delivered }), [threadId, messageId, imageOffsets, threads, currentBotId, delivered]);
