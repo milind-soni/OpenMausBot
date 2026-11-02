@@ -1,10 +1,10 @@
 // Claude Code keeps what an organization allows in its account config: `modelAccessCache`, `[{ apiName, entitled }]`, as
 // it stood at the CLI's last start (2.1.312). The CLI answers a turn on a denied model with the organization's default.
 import { readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../contracts.ts";
+import { userHome } from "../env-path.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 import { topLevelJsonMember } from "../setup-import.ts";
 
@@ -40,9 +40,10 @@ export function parseOrgBlockedModels(text: string): Set<string> {
 }
 
 /** Where 2.1.312 keeps its account config: `.config.json` in its config folder when that has content (older installs), else
- * `.claude.json` in `CLAUDE_CONFIG_DIR` or the home folder. */
+ * `.claude.json` in `CLAUDE_CONFIG_DIR` or the home folder. Its home folder is `os.homedir()`: on Windows that is USERPROFILE,
+ * never a HOME a POSIX-flavoured shell left behind. */
 export function claudeAccountFiles(env: Record<string, string | undefined>): string[] {
-  const home = env.HOME || env.USERPROFILE || homedir();
+  const home = userHome(env);
   const folder = env.CLAUDE_CONFIG_DIR?.trim();
   return [join(folder || join(home, ".claude"), ".config.json"), join(folder || home, ".claude.json")];
 }
@@ -61,7 +62,11 @@ type AccountEnv = Record<string, string | undefined>;
 
 /** Keeps the catalog in step with the account config. `environments` names every place the CLI may have written it: on a
  * Team Cloud each audience's engine home holds its own copy of the same organization's answer, and the newest speaks. */
-export function createOrgModelBlocks(environments: () => AccountEnv[], apply: (blocked: ReadonlySet<string>) => void) {
+export function createOrgModelBlocks(
+  environments: () => AccountEnv[],
+  apply: (blocked: ReadonlySet<string>) => void,
+  read: (path: string) => Promise<string> = (path) => readFile(path, "utf8"),
+) {
   let lastRead = "";
   return {
     async refresh(force = false): Promise<void> {
@@ -75,11 +80,17 @@ export function createOrgModelBlocks(environments: () => AccountEnv[], apply: (b
           break;
         }
       }
-      const read = newest ? `${newest.path}:${newest.mtimeMs}` : "none";
-      if (!force && read === lastRead) return;
-      lastRead = read;
-      if (!newest || newest.size > ACCOUNT_FILE_MAX_BYTES) return apply(new Set());
-      apply(parseOrgBlockedModels(await readFile(newest.path, "utf8").catch(() => "")));
+      const version = newest ? `${newest.path}:${newest.mtimeMs}` : "none";
+      if (!force && version === lastRead) return;
+      if (!newest || newest.size > ACCOUNT_FILE_MAX_BYTES) {
+        lastRead = version;
+        return apply(new Set());
+      }
+      // Windows refuses a read while the CLI is renaming this file into place: what was known stands until a read succeeds.
+      const text = await read(newest.path).catch(() => null);
+      if (text === null) return;
+      lastRead = version;
+      apply(parseOrgBlockedModels(text));
     },
   };
 }
