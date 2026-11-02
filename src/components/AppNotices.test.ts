@@ -1044,7 +1044,7 @@ describe("the Simple mode popup after the update", () => {
 describe("bots in two places", () => {
   const GARAGE = { key: "server:https://garage.example.test", name: "Garage server", kind: "server" as const };
   const BODY = "Your bots live in two places, so they can&#x27;t work together. Bring them together on Garage server?";
-  let suggest: typeof GARAGE | null;
+  let suggest: { key: string; name: string; kind: "cloud" | "server" } | null;
   let accepted: string[], dismissed: string[];
   beforeEach(() => {
     suggest = GARAGE; accepted = []; dismissed = [];
@@ -1053,7 +1053,7 @@ describe("bots in two places", () => {
     desk.handlers.set("two-places:dismiss", async (_event, key) => { dismissed.push(String(key)); suggest = null; return { suggest }; });
   });
 
-  it("one plain card on this computer's page, before any promotion; its one tap asks main to bring them together there", async () => {
+  it("one plain card on this computer's page, before any promotion; bots move there only after the person confirms (#4192)", async () => {
     returning();
     storage.delete(PRODUCT_HUNT_NOTICE);
     const html = await launch();
@@ -1062,10 +1062,32 @@ describe("bots in two places", () => {
     expect(html).toContain(BODY);
     expect(html).not.toContain(STAR);
     press("Bring them together");
+    const asking = await settle();
+    expect(accepted, "one tap never moves anyone").toEqual([]);
+    expect(asking).toContain("Move this computer&#x27;s bots to Garage server?");
+    expect(asking, "the undo switch is My Cloud's only").not.toContain("Keep this computer&#x27;s bots on this computer");
+    press("Move bots");
     await flush();
     expect(accepted).toEqual([GARAGE.key]);
     expect(track).toHaveBeenCalledWith("two_places_card", { action: "bring", kind: "server" });
     expect(await settle()).not.toContain('data-notice="two-places"');
+  });
+
+  it("Cancel on the confirm step moves nothing and keeps the card (#4192)", async () => {
+    returning();
+    suggest = { key: "cloud:mine", name: "My Cloud", kind: "cloud" };
+    await launch();
+    press("Bring them together");
+    const asking = await settle();
+    expect(asking).toContain("Move this computer&#x27;s bots to My Cloud?");
+    expect(asking, "My Cloud names the way back").toContain("Keep this computer&#x27;s bots on this computer");
+    press("Cancel");
+    const after = await settle();
+    expect(accepted).toEqual([]);
+    expect(dismissed).toEqual([]);
+    expect(after).toContain('data-notice="two-places"');
+    expect(after).not.toContain("Move bots");
+    expect(after).toContain("Bring them together");
   });
 
   it("Not now hands main the place to remember, and the card goes", async () => {
