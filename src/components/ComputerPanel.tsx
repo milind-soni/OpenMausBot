@@ -41,6 +41,7 @@ import {
   instanceSupportsLocalComputer,
   localComputerDisabledReason,
   localComputerSelectable,
+  pageOnRemoteServer,
   persistedComputerSelectionMatches,
   isReadyBoatState,
   resolveBoatPanelAction,
@@ -1111,6 +1112,7 @@ export function ComputerPanel({
     : undefined;
   const cloudView = viewOf("cloud", cloudRefused);
   const autoView = viewOf("auto");
+  const localHidden = pageOnRemoteServer(capabilities);
   const placeOptions = ([
     [null, "vm.dest.auto", "computer.dest.autoDesc", Sparkles],
     ["cloud", "place.cloud", "computer.dest.cloudDesc", Cloud],
@@ -1118,8 +1120,8 @@ export function ComputerPanel({
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
     ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server"))).map(([mode, labelKey, descriptionKey, Icon]) => {
-    const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
+  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && localHidden))).map(([mode, labelKey, descriptionKey, Icon]) => {
+    const selected = mode === null ? !profileBot.computer || (profileBot.computer === "local" && localHidden) : profileBot.computer === mode;
     const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
     const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
     const view = mode === null ? autoView : mode === "cloud" ? cloudView : viewOf(mode);
