@@ -237,7 +237,7 @@ describe("launch bundle", () => {
     }
     return null;
   };
-  const staticImports = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)(?:[^"'`;]*?\sfrom\s+)?["']([^"']+)["']/g;
+  const staticImports = /(?:^|[\n;])\s*(?:import|export)\s+(?!type\s)(?:[^"'`;]*?\sfrom\s+)?["']([^"']+)["']/g;
   // The app's launch is main.tsx and App.tsx, whose fetch main.tsx starts at once on every path but /pair and /home.
   const launchModules = (...entries: string[]) => {
     const seen = new Set<string>();
