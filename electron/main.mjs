@@ -1,5 +1,8 @@
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme, net } from "electron";
 import { createRequire } from "node:module";
+import { setGlobalProxyFromEnv } from "node:http";
+import { startSystemProxy } from "./system-proxy.mjs";
+import { createSystemProxyResolver } from "./system-proxy-resolver.mjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -268,6 +271,7 @@ let secureCredentialState = null;
 let desktopDataDirLease = null;
 // The folder this process leases; environmentsState.activeId can name a remote server instead.
 let runningDataDir = null;
+let desktopProxy = null;
 let localSwitchInFlight = false;
 let managedDesktop = null;
 let cloudAccount = null, updatesConsent = null, desktopPrefs = null, ownHome = null, twoPlaces = null, windowFrameMade = null;
@@ -802,6 +806,7 @@ async function gatherDiagnostics() {
       uptimeSeconds: Math.round(process.uptime()),
     },
     configSummary: serverStatus ?? {},
+    networkProxy: desktopProxy?.status(),
     desktopLogTail: desktopLog?.tail ?? "",
     updaterLogTail: updaterLog?.tail ?? "",
     logTail: log?.tail ?? "",
@@ -2888,6 +2893,18 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  const proxyResolver = session.fromPartition("omb-system-proxy-resolver", { cache: false });
+  desktopProxy = await startSystemProxy({ session: createSystemProxyResolver({ session: proxyResolver }), request: options => net.request(options) });
+  app.on("login", desktopProxy.login);
+  await desktopProxy.configureSession(session.defaultSession);
+  app.on("session-created", created => {
+    if (created !== proxyResolver) void desktopProxy.configureSession(created).catch(() => slog("proxy session configuration failed"));
+  });
+  Object.assign(process.env, desktopProxy.environment);
+  setGlobalProxyFromEnv();
+  powerMonitor.on("resume", () => { void desktopProxy.refresh(); });
+  ipcMain.on("desktop:network-online", localOnlySync("desktop:network-online", () => { void desktopProxy.refresh(); }));
+  app.on("will-quit", () => desktopProxy.close());
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),

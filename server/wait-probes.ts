@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { resolveTarget } from "./browser/egress/gate.ts";
+import { desktopRequestAgent } from "./desktop-proxy-tunnel.ts";
 import { addressClass, ownAddresses } from "./browser/egress/policy.ts";
 
 export interface FileStamp {
@@ -182,7 +183,8 @@ type Answer = { status: number; location?: string; headers: IncomingHttpHeaders;
 
 const fail = (error: string, refused = false): Failure => ({ ok: false, refused, error });
 
-function requestOnce(url: URL, address: { address: string; family: number }, signal: AbortSignal, maxBytes: number): Promise<Answer> {
+async function requestOnce(url: URL, address: { address: string; family: number }, signal: AbortSignal, maxBytes: number): Promise<Answer> {
+  const agent = await desktopRequestAgent(url, [address]);
   return new Promise((resolve, reject) => {
     const pinned: LookupFunction = (_host, lookupOptions, callback) => {
       if (lookupOptions.all) callback(null, [address]);
@@ -192,7 +194,7 @@ function requestOnce(url: URL, address: { address: string; family: number }, sig
     const req = send(
       url,
       {
-        agent: false,
+        agent,
         signal,
         lookup: pinned,
         headers: { "user-agent": "OpenMausBot-wait", accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },

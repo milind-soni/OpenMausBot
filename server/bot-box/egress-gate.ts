@@ -2,12 +2,13 @@
 // loopback port inside the box is bridged to. Like the browser's SOCKS gate (server/browser/egress/gate.ts) it resolves
 // names itself and connects only to public addresses, so a bot's shell reaches neither this server's loopback routes,
 // the local network, the cloud metadata service nor Fly's private network, whatever name it uses.
-import { createServer, request as httpRequest, type ClientRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { Agent, createServer, request as httpRequest, type ClientRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 
 import { resolveTarget, type ResolvedAddress } from "../browser/egress/gate.ts";
 import { refusalFor, type EgressRules } from "../browser/egress/policy.ts";
+import { openDesktopProxyTunnel } from "../desktop-proxy-tunnel.ts";
 
 export interface EgressGateOptions {
   socketPath: string;
@@ -86,8 +87,16 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
     if ("unresolved" in verdict) { res.writeHead(502, { "content-type": "text/plain" }).end("The name could not be resolved.\n"); return; }
     const headers: Record<string, string | string[]> = {};
     for (const [name, value] of Object.entries(req.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) headers[name] = value;
+    const agent = new Agent();
+    if (process.env.OMB_DESKTOP_PROXY) {
+      try {
+        const socket = track(await openDesktopProxyTunnel(target, verdict.addresses));
+        agent.createConnection = () => socket;
+      } catch { res.writeHead(502).end("Desktop proxy unavailable"); return; }
+    }
     const upstream = track(httpRequest({
       host: target.host, port: target.port, method: req.method, path: `${url.pathname}${url.search}`, headers,
+      agent,
       lookup: pinnedLookup(verdict.addresses) as never,
     }, (answer) => {
       res.writeHead(answer.statusCode ?? 502, answer.headers);
@@ -105,6 +114,20 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
     if (client.destroyed) return;
     if ("refused" in verdict) { client.end(`HTTP/1.1 403 Forbidden\r\nX-Omb-Blocked: ${verdict.refused}\r\nConnection: close\r\n\r\n`); return; }
     if ("unresolved" in verdict) { client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"); return; }
+    if (process.env.OMB_DESKTOP_PROXY) {
+      try {
+        const upstream = track(await openDesktopProxyTunnel(target, verdict.addresses));
+        if (client.destroyed) { upstream.destroy(); return; }
+        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        if (head.length) upstream.write(head);
+        upstream.pipe(client);
+        client.pipe(upstream);
+        upstream.on("close", () => client.destroy());
+        client.on("close", () => upstream.destroy());
+        upstream.resume();
+      } catch { client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"); }
+      return;
+    }
     const upstream = track(connect({ host: target.host, port: target.port, autoSelectFamily: true, lookup: pinnedLookup(verdict.addresses) as never }));
     let connected = false;
     upstream.once("connect", () => {

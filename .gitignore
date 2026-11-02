@@ -1,4 +1,6 @@
 node_modules
+.cache/
+.pnpm-store/
 .worktrees/
 dist
 dist-electron

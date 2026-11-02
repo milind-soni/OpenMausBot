@@ -269,6 +269,7 @@ function flattenSummary(input, prefix = "", depth = 0, out = {}) {
 export function buildDiagnosticsReport({
   appInfo = {},
   configSummary = {},
+  networkProxy,
   desktopLogTail,
   updaterLogTail,
   logTail,
@@ -285,6 +286,11 @@ export function buildDiagnosticsReport({
   }
   lines.push("");
   lines.push("## Configuration");
+  if (networkProxy) {
+    const source = ["system", "environment"].includes(networkProxy.source) ? networkProxy.source : "unknown";
+    const state = ["initializing", "direct", "proxy", "unavailable"].includes(networkProxy.state) ? networkProxy.state : "unknown";
+    lines.push(`Network proxy: source=${source} state=${state}`);
+  }
   lines.push("# presence/count/mode only — credentials stay OS-encrypted and are never read");
   const summary = flattenSummary(configSummary);
   let shown = 0;
