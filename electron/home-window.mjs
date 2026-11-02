@@ -624,8 +624,8 @@ export function createHomeWindow(deps) {
       if (status === "reauth-required") return void await client.signInAgain();
       if (status === "connecting") return void await client.reopen?.();
       if (status !== "signed-out") {
-        const now = await refresh();
-        if (!(now.kind === "signin" && now.other)) return void await show();
+        const current = await refresh();
+        if (!(current.kind === "signin" && current.other)) return void await show();
         await client.signOut?.();
       }
       await client.begin();

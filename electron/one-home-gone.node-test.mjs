@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createOneHome, QUIET_MS } from "./one-home.mjs";
-import { createGoneCheck, GONE_ASK_MS, oneHomeCloud } from "./one-home-main.mjs";
+import { createGoneCheck, GONE_ASK_MS, installOneHome, oneHomeCloud } from "./one-home-main.mjs";
 import { moveStatus } from "./move-status.mjs";
 
 // A computer whose bots moved to one Cloud of the person's, while the account has others: that Cloud ends or is deleted and
@@ -204,4 +204,50 @@ test("one home's view of the session says when it is the Admin's verified word",
   const state = { status: "connected", account: { id: "acct-1" }, machine: { status: "ready", origin: MINE } };
   assert.equal(oneHomeCloud(state).verified, true);
   assert.equal(oneHomeCloud({ ...state, status: "unavailable" }).verified, false);
+});
+
+test("on their way home by the person's choice when the Cloud goes: what that way home would have switched on stays off", async () => {
+  const w = computer({ journal: { ...doneTo(GONE), phase: "keeping", keptFrom: "done", keptAt: 1_700, switchBack: { "routine:r1": true }, webhooks: ["w1"], offThere: true } });
+  w.keep = { v: 1, on: true };
+  await w.home.kick();
+  assert.deepEqual(w.server.thaws, [{ automations: "off" }]);
+  assert.equal(w.journal.phase, "back");
+  for (const field of ["switchBack", "webhooks", "keptFrom", "offThere"]) assert.equal(w.journal[field], undefined, field);
+  await w.home.kick();
+  assert.deepEqual(w.server.on, { "routine:r1": false, "webhook:w1": false });
+});
+
+test("a copy this computer already deleted still opens, and is not said to be back as it was", async () => {
+  const w = computer({ journal: doneTo(GONE, { forgot: true }) });
+  await w.home.kick();
+  assert.equal(w.server.marker.frozen, false);
+  assert.equal(w.journal.phase, "back");
+  assert.equal(w.home.view(), null);
+});
+
+test("wired up for real: a stuck computer's own server is asked, the Admin's word comes from the sign-in, and the freeze lifts with automations off", async () => {
+  const state = { status: "connected", deviceId: "device-2", account: { id: "acct-1" }, machine: { status: "ready", origin: MINE, moves: true } };
+  const asked = [], requests = [];
+  let frozen = true, kept = null, choice = null, opened = 0;
+  const main = installOneHome({
+    ipcMain: { handle: () => {} }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => new Response("{}", { status: 401 }),
+    reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => "http://127.0.0.1:4100",
+    fetch: async () => new Response("{}", { status: 404 }),
+    localRequest: async (route, init) => {
+      requests.push([init?.method ?? "GET", route, init?.body ?? null]);
+      if (route === "/api/move/freeze" && init?.method === "DELETE") { frozen = false; return new Response(JSON.stringify({ frozen: false })); }
+      if (route === "/api/move/freeze") return new Response(JSON.stringify(frozen ? { frozen: true, cloud: GONE } : { frozen: false }));
+      return new Response("{}", { status: 404 });
+    },
+    account: () => ({ state: () => state, movedTo: async (origin) => { asked.push(origin); return "deleted"; } }),
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", openLocal: () => { opened++; },
+    journal: { read: () => kept, write: (value) => { kept = value; } }, keep: { read: () => choice, write: (value) => { choice = value; } },
+  });
+  try {
+    await main.kick();
+    assert.deepEqual(asked, [GONE]);
+    assert.deepEqual(requests.find(([method]) => method === "DELETE"), ["DELETE", "/api/move/freeze", JSON.stringify({ automations: "off" })]);
+    assert.equal(frozen, false);
+    assert.deepEqual([kept.phase, kept.gone, kept.cloud.account, choice?.on, opened], ["back", "deleted", "acct-1", true, 1]);
+  } finally { main.close(); }
 });

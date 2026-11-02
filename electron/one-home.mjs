@@ -421,9 +421,11 @@ export function createOneHome(deps) {
     try { await deps.local.unfreeze({ automations: "off" }); }
     catch (error) { log(`one home: could not open this computer's copy yet (${error?.message ?? error})`); later(MINUTE); return; }
     try { deps.keep?.write({ v: 1, on: true, at: now() }); } catch {}
-    const { retryAt: _, ...rest } = from;
-    log(`one home: the Cloud this computer moved to is ${gone === "deleted" ? "deleted" : "ended"}; its own copy is open again, with every automation off`);
-    write({ ...rest, v: 1, phase: "back", gone, endedAt: from.endedAt ?? now(), told: undefined });
+    // A way home already under way ends here: what it would have switched on here stays off.
+    const { retryAt: _retry, switchBack: _back, webhooks: _hooks, keptFrom: _from, keptAt: _at, offThere: _off, thawed: _thawed, updating: _updating, ...rest } = from;
+    log(`one home: the Cloud this computer moved to is ${gone}; its own copy is open again, with every automation off`);
+    // A copy already deleted has nothing to say "as they were" about.
+    write({ ...rest, v: 1, phase: "back", gone, endedAt: from.endedAt ?? now(), told: from.forgot ? true : undefined });
     deps.openLocal?.();
   }
 

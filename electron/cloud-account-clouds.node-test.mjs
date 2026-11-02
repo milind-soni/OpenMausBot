@@ -311,3 +311,12 @@ test("the Admin's word on a Cloud this computer moved to: only a word it knows, 
   f.movedTo = () => [429, { error: "rate_limited" }];
   await assert.rejects(f.client.movedTo(gone), { status: 429 });
 });
+
+test("starting a sign-in over a good one is refused, and goes once that one has ended: what the home screen's Sign in does for another account", async t => {
+  const f = await admin(t);
+  await f.client.start();
+  await assert.rejects(f.client.begin(), /Sign out before/);
+  await f.client.signOut();
+  await f.client.begin();
+  assert.equal(f.requests.some(row => row.route === "/api/cloud/desktop/authorize"), true);
+});
