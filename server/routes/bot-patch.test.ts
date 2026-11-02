@@ -45,6 +45,7 @@ function fixture() {
   const bot = store.createBot({ name: "Scout" });
   const cfg = { vps: { sshAlias: "production-vps" } } as AppConfig;
   const activeVpsThreads = new Set<string>();
+  const privateThreads = new Set<string>();
   // Only what a vpsAlias patch touches; any other dependency is absent, and a route that reached for one would throw.
   const deps = {
     store,
@@ -58,6 +59,7 @@ function fixture() {
     routines: () => null,
     // A member's session may chat with this bot: the level that still can't move it or change what it may do.
     levelOf: () => "chat",
+    mainThreadTasks: (botId: string) => store.tasks(botId).filter((task) => !privateThreads.has(task.threadId)),
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
   const patch = async (botId: string, body: Record<string, unknown>, as: { auth?: RequestAuth; headers?: Record<string, string> } = {}) => {
@@ -78,7 +80,7 @@ function fixture() {
     expect(sent).toHaveLength(1);
     return sent[0]!;
   };
-  return { store, bot, activeVpsThreads, patch };
+  return { store, bot, activeVpsThreads, privateThreads, patch };
 }
 
 describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
@@ -342,6 +344,17 @@ describe("PATCH /api/bots/:id mainThreadChoice", () => {
     expect(store.bot(bot.id)?.mainThreadChoice).toBe(chosen.threadId);
 
     expect((await patch(bot.id, { mainThreadChoice: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+
+  it("refuses a conversation the main-thread resolver can't pick, the same way as an unknown id", async () => {
+    const { store, bot, patch, privateThreads } = fixture();
+    const hidden = store.createTask(bot.id, "Private", false)!;
+    privateThreads.add(hidden.threadId);
+    const refused = await patch(bot.id, { mainThreadChoice: hidden.threadId });
+    const unknown = await patch(bot.id, { mainThreadChoice: "missing" });
+    expect(refused).toEqual(unknown);
+    expect(refused.status).toBe(400);
     expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
   });
 

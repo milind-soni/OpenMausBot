@@ -62,8 +62,9 @@ export type BotUpdatePatch = Partial<
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "peers" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId"
+  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "peers" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
 > & {
+  mainThreadId?: string;
   peers?: string[];
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
@@ -122,6 +123,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     applyToAllThreads: _allThreads,
     keepThreadModels: _keepThreadModels,
     threadId: _threadId,
+    mainThreadChoice,
     computer,
     connectorTools,
     connectorScopes,
@@ -139,6 +141,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   if (phoneApps === null) normalized.phoneApps = undefined;
   else if (phoneApps !== undefined) normalized.phoneApps = phoneApps;
   if (peers !== undefined) normalized.peers = peers ?? undefined;
+  // A pending choice shows as the bot's main thread, so a broadcast during the save does not revert it.
+  if (typeof mainThreadChoice === "string") normalized.mainThreadId = mainThreadChoice;
   return normalized;
 };
 
