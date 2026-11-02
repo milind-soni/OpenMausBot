@@ -3976,3 +3976,28 @@ describe("runs that report into a chat", () => {
     expect(h.manager.handleRuntimeEvent(event("thread-1", "turn.completed"))).toMatchObject({ id: run.id, status: "completed" });
   });
 });
+
+describe("the scheduler wakes only when work is due", () => {
+  it("sleeps with nothing due, runs a new routine on its time and stops the run at its limit", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-09-13T08:00:00Z") });
+    try {
+      const h = harness();
+      const manager = new RoutineManager({ ...h.options, now: () => Date.now() });
+      const ticks = vi.spyOn(manager, "tick");
+      manager.start();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(ticks.mock.calls.length).toBeLessThanOrEqual(11);
+      manager.create({ name: "Soon", prompt: "Do it", botId: "maus-1", timeoutMinutes: 5, schedule: { type: "once", at: Date.now() + 90_000 } });
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(h.started).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.started).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(h.interruptedTurns).toHaveLength(1);
+      expect(manager.listRuns()[0]).toMatchObject({ status: "failed" });
+      manager.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -1,5 +1,6 @@
 // Loaded with --import into a fixture server that scripts/bench-desktop.ts starts, never into the app: it counts
-// timer callbacks and file writes, and on SIGUSR2 writes the running totals, CPU and memory to $OMB_BENCH_TALLY.
+// timer callbacks, child processes and file writes, and on SIGUSR2 writes the running totals, CPU and memory to $OMB_BENCH_TALLY.
+import childProcess from "node:child_process";
 import fs from "node:fs";
 import module from "node:module";
 import { basename, dirname } from "node:path";
@@ -14,6 +15,7 @@ const writes = new Map();
 const fdPaths = new Map();
 let fsyncs = 0;
 let renames = 0;
+let spawns = 0;
 
 const fileKey = (path) => {
   const name = basename(String(path))
@@ -73,6 +75,10 @@ for (const method of ["write", "writeFile", "appendFile"]) {
   const original = FileHandle[method];
   FileHandle[method] = function (data, ...rest) { const path = handlePaths.get(this); if (path) tallyWrite(path, data); return original.call(this, data, ...rest); };
 }
+for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
+  const original = childProcess[name];
+  childProcess[name] = function (...args) { spawns += 1; return original.apply(this, args); };
+}
 module.syncBuiltinESMExports();
 
 if (out) {
@@ -86,6 +92,7 @@ if (out) {
       writes: Object.fromEntries(writes),
       fsyncs,
       renames,
+      spawns,
     }));
   });
 }

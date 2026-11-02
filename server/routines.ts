@@ -6,7 +6,8 @@ import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { activeRunsOf, nextDueOf, wakeHoldOf } from "./routine-due.ts";
+import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-due.ts";
+import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
@@ -302,7 +303,7 @@ export class RoutineManager {
   private runs: RoutineRun[] = [];
   private routineRequestReceipts: RoutineRequestReceipt[] = [];
   private webhookRunReceipts: EventRunReceipt[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: DueTimer | null = null;
   private startupRunsQueued = false;
   private startupLaunchId: string | undefined;
   private ticking = false;
@@ -941,13 +942,12 @@ export class RoutineManager {
   start() {
     if (this.closing || this.timer) return;
     if (!this.startupRunsQueued) this.startupRunsQueued = this.queueStartupRuns();
-    this.tickInBackground();
-    this.timer = setInterval(() => this.tickInBackground(), 10_000);
-    this.timer.unref?.();
+    this.timer = startDueTimer({ run: () => this.tick(), now: this.now, onError: (error) => console.error("routines: a scheduler pass failed", error),
+      next: () => schedulerDueOf(this.routines, this.runs, this.now(), this.bootedAt + CHECK_BOOT_HOLD_MS, (routine) => this.targetState(routine) === "missing") });
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 
@@ -1072,7 +1072,7 @@ export class RoutineManager {
       for (const { id, hold } of checks) this.runChecks(id, hold).catch((error) => console.error(`routines: the checks of ${id} failed`, error));
 
       // Oldest first, by id: a rollback across awaits can replace the run objects.
-      for (const id of this.runs.map((run) => run.id)) {
+      for (const id of this.runs.filter((run) => run.status === "queued").map((run) => run.id)) {
         if (this.closing) return;
         const run = this.runs.find((candidate) => candidate.id === id);
         if (!run || run.status !== "queued" || (run.retryAt ?? 0) > now) continue;
@@ -1468,11 +1468,11 @@ export class RoutineManager {
   }
 
   private emitRoutine(routine: Routine) {
-    this.options.emit?.({ kind: "routine", routine: this.routineWithHealth(routine) });
+    this.timer?.poke(); this.options.emit?.({ kind: "routine", routine: this.routineWithHealth(routine) });
   }
 
   private emitRun(run: RoutineRun) {
-    this.options.emit?.({ kind: "routine.run", run: cloneRun(run) });
+    this.timer?.poke(); this.options.emit?.({ kind: "routine.run", run: cloneRun(run) });
     this.notifyRunChanged(run);
     if (run.checkKey && !["queued", "running", "waiting"].includes(run.status)) this.options.checks?.settled(cloneRun(run));
     if (run.status === "completed" || run.status === "failed") {

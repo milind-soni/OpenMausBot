@@ -337,7 +337,7 @@ export function ModelPicker({
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setLoadingInstances(true);
-    void refreshInstances()
+    void refreshInstances({ cached: true })
       .catch(() => {})
       .finally(() => {
         refreshingRef.current = false;
