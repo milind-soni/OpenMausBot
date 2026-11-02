@@ -23,6 +23,8 @@ export const SESSION_TTL_MS = daysMs(process.env.OMB_SESSION_TTL_DAYS, 30);
 /** OMB_SESSION_MAX_DAYS (default 180): renewal never passes this, so a stolen cookie has a bounded life. */
 export const SESSION_MAX_AGE_MS = daysMs(process.env.OMB_SESSION_MAX_DAYS, 180);
 export const SESSION_RENEW_WHEN_LEFT_MS = SESSION_TTL_MS / 2;
+/** OMB_SESSION_IDLE_DAYS (default: the session term): revoke a session this many days after its last use. */
+export const SESSION_IDLE_MS = daysMs(process.env.OMB_SESSION_IDLE_DAYS, SESSION_TTL_MS / 86_400_000);
 
 export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.now()): number {
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
@@ -180,6 +182,10 @@ export interface SessionStoreOptions {
   emailScopes?: EmailScopesResolver;
   emailScopesSnapshot?: () => EmailScopesResolver;
   portalMembership?: boolean;
+  /** Tests only: an idle window shorter than a day is unsound here — `lastSeenAt` is
+   * persisted at most once a minute (LAST_SEEN_WRITE_INTERVAL_MS), so sub-day windows
+   * can revoke a session used moments ago. Production idle windows are whole days. */
+  idleMs?: number;
 }
 
 export class SessionRegistry {
@@ -192,6 +198,7 @@ export class SessionRegistry {
   private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
+  private readonly idleMs: number;
   private readonly options: SessionStoreOptions;
   private readonly openMarker: string;
   private closed = false;
@@ -201,6 +208,7 @@ export class SessionRegistry {
   constructor(options: SessionStoreOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
+    this.idleMs = options.idleMs ?? SESSION_IDLE_MS;
     this.openMarker = `${options.file}.open`;
     const unclean = existsSync(this.openMarker);
     try {
@@ -265,11 +273,16 @@ export class SessionRegistry {
     for (const [source, entry] of this.failures) {
       if (entry.lockedUntil <= now && now - entry.windowStart > LOCKOUT.windowMs) this.failures.delete(source);
     }
-    const expired = this.sessions.filter((s) => s.expiresAt <= now);
+    const expired = this.sessions.filter((s) => s.expiresAt <= now || now - s.lastSeenAt > this.idleMs);
     if (expired.length) {
-      this.sessions = this.sessions.filter((s) => s.expiresAt > now);
+      this.sessions = this.sessions.filter((s) => s.expiresAt > now && now - s.lastSeenAt <= this.idleMs);
       for (const s of expired) this.forget(s.id);
-      this.persist();
+      try {
+        this.persist();
+      } catch {
+        // Memory already holds the reduced set; the heartbeat reaches prune() through isLive(), where an escaping write failure would exit the process.
+        console.error("Could not persist session pruning.");
+      }
     }
   }
 
@@ -547,6 +560,13 @@ export class SessionRegistry {
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
     if (!record || record.expiresAt <= now || this.personal(record.scopes)) return null;
+    if (now - record.lastSeenAt > this.idleMs) {
+      this.sessions = this.sessions.filter((s) => s.id !== record.id);
+      this.forget(record.id);
+      // The revocation holds in memory either way; a restart re-reads the saved set.
+      try { this.persist(); } catch { console.error("Could not persist idle session revocation."); }
+      return null;
+    }
     const lastWrite = this.lastSeenWrites.get(record.id) ?? 0;
     if (now - lastWrite >= LAST_SEEN_WRITE_INTERVAL_MS) {
       record.lastSeenAt = now;

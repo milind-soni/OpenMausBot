@@ -447,6 +447,17 @@ describe("sessions", () => {
     expect(readFileSync(blocked, "utf8")).toContain(paired.session.id);
   });
 
+  it("still reduces the in-memory set when persisting a prune fails", () => {
+    pair();
+    clock += SESSION_TTL_MS + 1;
+    const logger = vi.spyOn(console, "error").mockImplementation(() => {});
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("EIO: the session file is unwritable"); });
+    expect(() => registry.list(), "the heartbeat prunes through isLive(), where a throw would exit the process").not.toThrow();
+    expect(registry.list()).toEqual([]);
+    expect(logger.mock.calls.flat().join(" ")).toContain("Could not persist session pruning.");
+    writes.mockRestore();
+  });
+
   it("stores only a hash, owner-only, and reloads from disk", () => {
     const { token, session } = pair();
     const onDisk = readFileSync(file(), "utf8");
@@ -481,6 +492,45 @@ describe("sessions", () => {
     registry.authenticate(token);
     expect(registry.list()[0]?.lastSeenAt).toBe(clock);
     expect(statSync(file()).mtimeMs).toBeGreaterThanOrEqual(before);
+  });
+
+  it("revokes a session no one has used inside the idle window, before its term is up", () => {
+    const local = new SessionRegistry({ file: file(), now: () => clock, idleMs: 120_000 });
+    const { code } = local.openPairing({ label: "phone" });
+    const paired = local.exchange({ code, label: "phone", source: "a" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(local.authenticate(paired.token)?.id).toBe(paired.session.id);
+    clock += 121_000; // the 30-day term is still ahead; only the idle window has passed
+    expect(local.authenticate(paired.token)).toBeNull();
+    expect(local.list()).toEqual([]);
+    expect(JSON.parse(readFileSync(file(), "utf8")).sessions).toEqual([]);
+  });
+
+  it("keeps a session used inside the idle window alive, and revokes it once the quiet returns", () => {
+    const local = new SessionRegistry({ file: file(), now: () => clock, idleMs: 120_000 });
+    const { code } = local.openPairing({ label: "phone" });
+    const paired = local.exchange({ code, label: "phone", source: "a" });
+    if (!paired.ok) throw new Error(paired.error);
+    clock += 61_000; // past the once-a-minute last-seen write, so this use counts
+    expect(local.authenticate(paired.token)?.id, "a use inside the window counts").toBe(paired.session.id);
+    clock += 30_000;
+    expect(local.authenticate(paired.token)?.id, "still inside the window after the last use").toBe(paired.session.id);
+    clock += 121_000;
+    expect(local.authenticate(paired.token)).toBeNull();
+  });
+
+  it("closes an idle session's stream tickets and tells revocation listeners", () => {
+    const local = new SessionRegistry({ file: file(), now: () => clock, idleMs: 120_000 });
+    const { code } = local.openPairing({ label: "phone" });
+    const paired = local.exchange({ code, label: "phone", source: "a" });
+    if (!paired.ok) throw new Error(paired.error);
+    const { ticket } = local.issueStreamTicket(paired.session.id);
+    const revoked: string[] = [];
+    local.onSessionRevoked((id) => revoked.push(id));
+    clock += 121_000;
+    expect(local.list()).toEqual([]);
+    expect(revoked).toEqual([paired.session.id]);
+    expect(local.redeemStreamTicket(ticket)).toBeNull();
   });
 
   it("renews a session with half its term or less left, and never revives an expired one", () => {
