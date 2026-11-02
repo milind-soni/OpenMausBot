@@ -52,11 +52,14 @@ describe("ToolActivity: a clipped step", () => {
     expect(host.textContent).toContain("Showing the start of the result only");
   });
 
-  it("asks again after being closed mid-load", async () => {
+  it("cancels the request when closed mid-load, and asks again on reopen", async () => {
     api.mockReturnValueOnce(new Promise(() => {})).mockResolvedValueOnce({ output: whole });
     render({ output: preview, clipped: true });
     await toggle(true);
+    const first = (api.mock.calls[0]![1] as RequestInit).signal!;
+    expect(first.aborted).toBe(false);
     await toggle(false);
+    expect(first.aborted).toBe(true);
     await toggle(true);
     expect(api).toHaveBeenCalledTimes(2);
     expect(shown()).toBe(whole);

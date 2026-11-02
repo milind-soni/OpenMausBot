@@ -67,11 +67,12 @@ function useFullOutput(source: MessageAttachmentContext | undefined, preview: st
   useEffect(() => {
     if (!url || have) return;
     let current = true;
+    const abort = new AbortController();
     setFull({ state: "loading", key });
-    api<{ output: string }>(url)
+    api<{ output: string }>(url, { signal: abort.signal })
       .then((body) => { if (current) setFull({ state: "done", key, output: body.output }); })
       .catch(() => { if (current) setFull({ state: "failed", key }); });
-    return () => { current = false; };
+    return () => { current = false; abort.abort(); };
   }, [url, key, have]);
   return full.key === key ? full : { state: "idle" };
 }
