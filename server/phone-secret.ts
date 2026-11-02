@@ -1,12 +1,7 @@
 import { createECDH, createHash, type webcrypto } from "node:crypto";
 
 import { desktopCredentialSlot, isCredentialTargetId } from "../shared/credential-request.ts";
-import {
-  Aes256Gcm,
-  CipherSuite,
-  DhkemP256HkdfSha256,
-  HkdfSha256,
-} from "@hpke/core";
+import type { CipherSuite } from "@hpke/core";
 
 export const PHONE_SECRET_PROTOCOL_VERSION = 1 as const;
 export const PHONE_SECRET_INFO = "OpenMausBot phone credential v1";
@@ -60,11 +55,12 @@ export class PhoneSecretError extends Error {
   }
 }
 
-const suite = new CipherSuite({
+let hpkeSuite: Promise<CipherSuite> | undefined;
+const suite = () => hpkeSuite ??= import("@hpke/core").then(({ Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256 }) => new CipherSuite({
   kem: new DhkemP256HkdfSha256(),
   kdf: new HkdfSha256(),
   aead: new Aes256Gcm(),
-});
+}));
 const INFO = new TextEncoder().encode(PHONE_SECRET_INFO);
 
 const decodeBase64URL = (value: unknown, expectedBytes?: number): Uint8Array | null => {
@@ -288,7 +284,7 @@ async function importIdentity(message: Record<string, unknown>): Promise<PhoneSe
   } catch {
     throw new PhoneSecretError("The desktop credential key is invalid", 503);
   }
-  const imported = await suite.kem.importKey("jwk", {
+  const imported = await (await suite()).kem.importKey("jwk", {
     kty: "EC",
     crv: "P-256",
     x: privateKey.x,
@@ -406,7 +402,7 @@ export class PhoneSecretBridge {
 
     let opened: ArrayBuffer;
     try {
-      opened = await suite.open(
+      opened = await (await suite()).open(
         { recipientKey: identity.privateKey, enc: encapsulatedKey, info: INFO },
         ciphertext,
         phoneSecretAAD(context),

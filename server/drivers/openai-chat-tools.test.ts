@@ -103,6 +103,8 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
       return;
     }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     if (request.url === "/mcp-start") {
       rpcStarted.resolve(JSON.parse(data));
@@ -213,7 +215,8 @@ describe("bounded action announcement recovery", () => {
       : answer(response, "I'll write the receipt now."));
     await f.start({ approvalMode: "full" });
     expect(await f.completed()).toMatchObject({ ok: false });
-    expect(f.requests).toHaveLength(2);
+    // This fixture is on this machine, so the model is sent back twice to fix the call before the turn ends on it.
+    expect(f.requests).toHaveLength(4);
     expect(f.effects()).toEqual([]);
   });
 
@@ -703,7 +706,8 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
 
   it("preserves ordinary transcript chat and leaves textual tool imitations as text", async () => {
     const imitation = '<tool_call>{"name":"audit_write","arguments":{"value":"pretend"}}</tool_call>';
-    const f = await fixture((_body, response) => answer(response, imitation), provider);
+    // Only a hosted model: a server on this machine counts as a local one, covered in openai-chat-local-model.test.ts.
+    const f = await fixture((_body, response) => answer(response, imitation), provider === "openai-compat" ? "grok" : provider);
     await f.start({ integrations: undefined, system: "Fixture persona", transcript: [{ role: "user", text: "Earlier question" }, { role: "assistant", text: "Earlier answer" }] });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(1);
@@ -1008,9 +1012,9 @@ describe("structured tool execution boundaries", () => {
     expect(readFileSync(join(NATIVE_DIR, `${f.threadId}.ndjson`), "utf8")).not.toContain(API_KEY_CANARY);
   });
 
-  it("never promotes textual tool syntax into execution, even when that tool is mounted", async () => {
+  it("never promotes a hosted model's textual tool syntax into execution, even when that tool is mounted", async () => {
     const imitation = '<tool_call>{"name":"audit_write","arguments":{"name":"receipt","value":"pretend"}}</tool_call>';
-    const f = await fixture((_body, response) => answer(response, imitation));
+    const f = await fixture((_body, response) => answer(response, imitation), "grok");
     await f.start();
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests[0].tools?.some((tool) => tool.function.name === "audit_write")).toBe(true);
@@ -1207,7 +1211,7 @@ describe("structured tool execution boundaries", () => {
   it("stops a model that keeps requesting tools after 64 steps, with one next action that does not repeat the steps that ran", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', `call_${round}`)] }, "tool_calls"),
-    ]));
+    ]), "grok");
     const stop = f.instance.adapter.onEvent((event) => {
       if (event.type === "request.opened") void f.instance.adapter.respondToRequest(f.threadId, event.requestId!, { behavior: "allow" });
     });

@@ -7,6 +7,7 @@ import {
   computerSkippedNote,
   computerToolsRefusal,
   parseSurface,
+  pinSource,
   placeUnavailable,
   resolveSurface,
   surfaceOfComputerKind,
@@ -21,6 +22,17 @@ describe("browserIsThePlace", () => {
     expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: false }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "local", browserOn: true }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "off", browserOn: true }))).toBe(false);
+  });
+});
+
+describe("pinSource", () => {
+  it("counts a turn's own pin to the place Works on names as Works on, so This computer is not asked for again", () => {
+    expect(pinSource("local", { surfaceSource: "auto" }, "local")).toBe("works-on");
+    expect(pinSource("local", { surfaceSource: "auto" }, undefined)).toBe("auto-pin");
+    expect(pinSource("local", { surfaceSource: "auto" }, "vm")).toBe("auto-pin");
+    expect(pinSource("local", { surfaceSource: "user" }, "local")).toBe("pin");
+    expect(pinSource("local", {}, undefined)).toBe("pin");
+    expect(pinSource("local", undefined, "cloud")).toBe("pin");
   });
 });
 

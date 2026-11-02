@@ -10,7 +10,6 @@ import { homedir } from "node:os";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Worker } from "node:worker_threads";
-import * as tar from "tar";
 import { writeFileAtomic } from "./atomic.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
@@ -422,6 +421,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     const cipher = createCipheriv("aes-256-gcm", key, iv);
     cipher.setAAD(header);
     writeFileSync(path, header, { mode: 0o600, flag: "wx" });
+    const tar = await import("tar");
     await pipeline(tar.c({ cwd: snapshot, portable: true, strict: true }, ["manifest.json", "data"]), cipher, createWriteStream(path, { flags: "a", mode: 0o600 }));
     const fd = openSync(path, "a");
     try { writeSync(fd, cipher.getAuthTag()); fsyncSync(fd); } finally { closeSync(fd); }
@@ -514,6 +514,7 @@ async function inspectTar(path: string): Promise<Map<string, { type: string; siz
   const names = new Set<string>();
   let bytes = 0;
   let problem = "";
+  const tar = await import("tar");
   await tar.t({ file: path, strict: true, brotli: false, zstd: false, onReadEntry(entry) {
     const name = entry.type === "Directory" ? entry.path.replace(/\/$/, "") : entry.path;
     const expectedRoot = name === "manifest.json" || name === "data" || name.startsWith("data/");
@@ -591,6 +592,7 @@ export async function stageWorkspaceBackup(dataDir: string, archivePath: string,
     const expected = await inspectTar(plaintext);
     const staged = join(job.directory, "staged");
     folder(staged);
+    const tar = await import("tar");
     await tar.x({ file: plaintext, cwd: staged, strict: true, preservePaths: false, umask: 0o077, noChmod: true, brotli: false, zstd: false });
     const manifest = validateStaged(staged, expected);
     const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
