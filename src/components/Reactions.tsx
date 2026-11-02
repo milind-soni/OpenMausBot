@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { api, type Bot, type Message } from "@/state/store";
-import { useStoreDispatch } from "@/state/store-ref";
+import { useStoreRef } from "@/state/store-ref";
 
 const LABEL: Record<Reaction, LocaleKey> = {
   "👍": "chat.reaction.yes",
@@ -34,7 +34,7 @@ const newestTap = new Map<string, number>();
 let taps = 0;
 
 function useReaction(threadId: string, message: Message) {
-  const dispatch = useStoreDispatch();
+  const { dispatch } = useStoreRef();
   const me = useReactor();
   const latest = useRef(message);
   useLayoutEffect(() => { latest.current = message; });

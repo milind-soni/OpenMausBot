@@ -64,7 +64,7 @@ export function ThreadLink({ target, ambiguous, children }: { target: ThreadLink
     <button
       type="button"
       data-thread-link={target.threadId}
-      onClick={() => { if (store) openThread(store.dispatch, target, store.state(), showThreads); }}
+      onClick={() => openThread(store.dispatch, target, store.state(), showThreads)}
       title={ambiguous ? t("chat.openThreadOn", { title: target.title, name: target.botName }) : t("chat.openThread", { title: target.title })}
       className="inline break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent"
     >

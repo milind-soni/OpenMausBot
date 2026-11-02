@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type MouseEvent } from "react";
 import { PAGE_ID } from "../../shared/published-page";
 import type { Bot } from "@/state/store";
-import { useStoreRef } from "@/state/store-ref";
+import { useOptionalStoreRef } from "@/state/store-ref";
 import { openExternalLink } from "./app-links";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "./feature-flags";
 
@@ -72,7 +72,7 @@ export function usePanelPage(botId: string, open: (page: PanelPage) => void): vo
  * anything else outside the chat. It never sends a message, starts a turn or opens a chat. */
 export function usePageOpener(): (url: string) => void {
   // Outside the app's store (a message drawn on its own) there is no panel: the page opens outside the chat.
-  const store = useStoreRef();
+  const store = useOptionalStoreRef();
   const latest = useRef(store);
   latest.current = store;
   return useCallback((url: string) => {

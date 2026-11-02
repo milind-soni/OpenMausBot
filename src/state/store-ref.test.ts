@@ -4,7 +4,8 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BotEditorStore, StoreProvider, useStore } from "./store";
-import { useStoreRef, type StoreRef } from "./store-ref";
+import { useStoreRef } from "./store-ref";
+import type { StoreRef } from "./store-ref-context";
 
 class FixtureEventSource {
   onopen: (() => void) | null = null;
