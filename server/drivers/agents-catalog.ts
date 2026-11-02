@@ -5,6 +5,7 @@ import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
+import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
 import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
@@ -256,6 +257,7 @@ const TOOL_DEFINITIONS = [
       "List every other bot (agent) you can contact, in every department, with its department, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
     inputSchema: { type: "object", properties: {} },
   },
+  USAGE_LIMITS_TOOL_DEFINITION,
   {
     name: "list_rooms",
     description:

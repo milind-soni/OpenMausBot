@@ -97,7 +97,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice+non-chief": 51453,
   "skills+shared+non-chief": 52903,
   "skills+shared+voice+non-chief": 53684,
-  "skills+shared+voice+cloud-home": 61822,
+  "skills+shared+voice+cloud-home": 63404,
   "skills+shared+voice+non-chief+cloud-home": 53961,
   "default+legacy-switches": 56910,
   "default+mausbot": 57561,
@@ -107,7 +107,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+escalations+x+team": 68042,
   "default+no-computer-pick": 55698,
   "default+room": 48780,
-  "non-chief+room": 39723,
+  "non-chief+room": 40586,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
