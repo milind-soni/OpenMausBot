@@ -261,7 +261,7 @@ describe("a message to the thread where work the sender handed on is running", (
     expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "work", requestId: node.id });
     expect(w.steered).toHaveLength(1);
     expect(w.steered[0]!.threadId).toBe("work");
-    expect(w.steered[0]!.text).toContain(`[OpenMausBot assignment ${node.id}: @Fuchs adds this while you work on it]`);
+    expect(w.steered[0]!.text).toContain(`[From @Fuchs (bot) · addition to assignment ${node.id}, while you work on it · `);
     expect(w.steered[0]!.text).toContain(JSON.stringify("Nimm auch die Steuerspalte mit"));
     expect(w.rows("work")).toEqual([expect.objectContaining({ role: "user", text: "Nimm auch die Steuerspalte mit", peerAsk: { botId: "fuchs", name: "Fuchs" }, aside: true, steered: true })]);
     expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Sent to Dachs" }), threadRef: { botId: "dachs", threadId: "work", title: "Fix" } })]);

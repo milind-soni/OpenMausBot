@@ -87,13 +87,13 @@ it("reports a crashed run to the Chief, who retries it from the incidents thread
     ), { timeout: 10_000 }).toBe(true);
     const chiefRun = await dump(incidents.threadId);
     const prompt = JSON.stringify(chiefRun.prompt);
-    expect(prompt).toContain("[Incident report from OpenMausBot — not from the person.");
+    expect(prompt).toContain("[From OpenMausBot · incident report · information only — not from the person.");
     expect(prompt).toContain("Ada's run in its thread #Reconcile the September invoices. failed");
     expect(prompt).toContain("Reconcile the September invoices.");
     expect(prompt).toContain(`retry_thread with bot_id \\"${ada.id}\\" and thread_id \\"${ada.activeTaskId}\\"`);
     expect(chiefRun.systemPrompt).toContain("Team incidents");
     expect(chiefRun.systemPrompt).toContain("retry_thread");
-    const reportLine = (await messages(incidents.threadId)).find((m) => m.role === "user" && /Incident report/.test(m.text ?? ""));
+    const reportLine = (await messages(incidents.threadId)).find((m) => m.role === "user" && /incident report/.test(m.text ?? ""));
     expect(reportLine?.peerAsk).toEqual({ botId: ada.id, name: "Ada", unattended: true, incident: { threadId: ada.activeTaskId } });
 
     const token = chiefRun.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
@@ -111,7 +111,7 @@ it("reports a crashed run to the Chief, who retries it from the incidents thread
     expect((await control(["wait", "--bot", chief.id, "--task", incidents.threadId, "--timeout", "30"])).status).toBe("settled");
 
     const adaMessages = await messages(ada.activeTaskId);
-    const retryLine = adaMessages.find((m) => m.role === "user" && /Retry requested by Clive, your Chief of Staff/.test(m.text ?? ""));
+    const retryLine = adaMessages.find((m) => m.role === "user" && /requested by Clive, your Chief of Staff/.test(m.text ?? ""));
     expect(retryLine?.text).toContain("Note from Clive: The service was down; try again.) (Delegated by @Clive");
     expect(retryLine?.text.split("\n")).toHaveLength(1);
     expect(retryLine?.text.match(/[[\]]/g)).toEqual(["[", "]"]);
@@ -183,7 +183,7 @@ it("queues reports that find the Chief's incidents thread busy, answers them tog
     };
     await failsWhileBusy(ben, "Ben", "Draft the vendor letter.");
     await failsWhileBusy(cara, "Cara", "File the expense report.");
-    expect((await messages(incidents)).filter((m) => m.role === "user" && /Incident report/.test(m.text ?? "")).length).toBe(1);
+    expect((await messages(incidents)).filter((m) => m.role === "user" && /incident report/.test(m.text ?? "")).length).toBe(1);
     expect((await messages(incidents)).some((m) => /could not reach|error:/.test(m.tool?.name ?? ""))).toBe(false);
 
     writeFileSync(file(incidents, "gate"), "finish");
@@ -195,7 +195,7 @@ it("queues reports that find the Chief's incidents thread busy, answers them tog
     expect((await control(["wait", "--bot", chief.id, "--task", incidents, "--timeout", "30"])).status).toBe("settled");
 
     const lines = await messages(incidents);
-    const reports = lines.filter((m) => m.role === "user" && /Incident report/.test(m.text ?? ""));
+    const reports = lines.filter((m) => m.role === "user" && /incident report/.test(m.text ?? ""));
     expect(reports.map((m) => m.peerAsk)).toEqual([ada, ben, cara].map((bot, at) => ({
       botId: bot.id, name: ["Ada", "Ben", "Cara"][at], unattended: true, incident: { threadId: bot.activeTaskId },
     })));
