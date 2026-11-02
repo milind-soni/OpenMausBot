@@ -51,7 +51,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
 }));
 
-const { ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
+const { EffortRow, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
 const { FollowBotModelRow, ModelEngineRail, ModelRow } = await import("./ModelPickerFull");
 const { SimpleModelMenu } = await import("./SimpleModelMenu");
 const { EngineSetup } = await import("./EngineSetup");
@@ -468,11 +468,11 @@ describe("the model picker in Simple mode", () => {
 
   it("does not reuse the full picker's bot scope for a Cloud guest's Simple choice", () => {
     fixture.cloudHome = true;
-    fixture.ownerOrAdmin = false;
     fixture.advanced = true;
     const forBot = bot();
     const full = open(forBot);
     click(full.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
+    fixture.ownerOrAdmin = false;
     fixture.advanced = false;
     pane(render(forBot))!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: false }));
@@ -498,6 +498,20 @@ describe("the model picker in Simple mode", () => {
     const opened = open(bot());
     expect(pane(opened)).toBeUndefined();
     expect(opened.html).toContain("Only this thread");
+  });
+
+  it.each([false, null])("offers a guest no bot scope in the full picker and keeps its picks thread-only (owner status: %s)", (ownerOrAdmin) => {
+    fixture.advanced = true;
+    const forBot = bot();
+    const asOwner = open(forBot);
+    click(asOwner.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
+    fixture.ownerOrAdmin = ownerOrAdmin;
+    const asGuest = render(forBot);
+    expect(asGuest.html).not.toContain("Thread + bot default");
+    const effort = asGuest.nodes.find((node) => node.type === EffortRow)!;
+    expect(effort.props.updateBotDefault).toBe(false);
+    (asGuest.nodes.find((node) => (node.props.option as Option | undefined)?.id === "claude-sonnet-5-5")!.props.onPick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: false }));
   });
 
   it("opens the same floating menu from bot settings' Default model, without a second Thinking control, and edits the bot's default", () => {
@@ -619,7 +633,8 @@ describe("the model picker in Simple mode", () => {
       pane(open(forBot))!.props.onSetUp(missing, false);
       fixture.instances = [claude(), cursor];
       const full = render(forBot);
-      expect(menu(full.html)).toContain(updatesDefault ? "every thread that uses the bot&#x27;s model" : "This thread only.");
+      expect(menu(full.html).includes("every thread that uses the bot&#x27;s model")).toBe(updatesDefault);
+      expect(menu(full.html).includes("Thread + bot default")).toBe(updatesDefault);
       (full.nodes.find((node) => node.type === ModelRow)!.props.onPick as () => void)();
       expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
         type: "setModel", threadId: "thread-scout", updateBotDefault: updatesDefault,
