@@ -41,6 +41,9 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
+import { backfillPrivateTasks, persistedBots, persistedPin } from "./store-tasks.ts";
+import type { StoreChange } from "./store-change.ts";
+export type { StoreChange } from "./store-change.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -102,7 +105,7 @@ export function toWireTask(task: TaskRecord, botModel: ModelSelection): WireTask
 const ASK_NOW = { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] as string[] };
 
 const TASK_PATCH_FIELDS = [
-  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
+  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow", "private",
   "unread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "setupRequest",
 ] as const satisfies readonly (keyof TaskRecord)[];
@@ -114,27 +117,7 @@ function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void 
   Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
 }
 
-function persistedPin<T extends { pinned?: boolean }>(task: T): T {
-  if (task.pinned === true) return task;
-  if (!("pinned" in task)) return task;
-  const { pinned: _pinned, ...rest } = task;
-  return rest as T;
-}
-
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
-
-export type StoreChange =
-  | { type: "sections" }
-  | { type: "message"; threadId: string; message: Message }
-  | { type: "message.patch"; threadId: string; message: Message }
-  | { type: "thread"; threadId: string; activeLeafId: string }
-  | { type: "thread.deleted"; threadId: string }
-  | { type: "bot"; botId: string }
-  | { type: "bot.deleted"; botId: string }
-  /** The fleet was reordered as a whole; the broadcast carries every id in its new place. */
-  | { type: "bots.order" }
-  | { type: "group"; groupId: string }
-  | { type: "group.deleted"; groupId: string };
 
 export const UNTITLED_TASK = "New task";
 export const UNTITLED_THREAD = "New thread";
@@ -302,6 +285,7 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
 export class Store {
   bots: BotRecord[] = [];
   groups: GroupRecord[] = [];
+  private unsavedPrivateTasks = false;
   private threads = new ThreadCache(() => this.busyThreadIds());
   private defaultSelection: () => ModelSelection;
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
@@ -708,10 +692,10 @@ export class Store {
 
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
-      ...bot,
-      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
-    })), null, 2), { mode: 0o600 });
+    writeFileAtomicIfChanged(BOTS_FILE, persistedBots(bots), { mode: 0o600 });
+    if (!this.unsavedPrivateTasks) return;
+    this.unsavedPrivateTasks = false;
+    this.emit({ type: "private.tasks.saved" });
   }
 
   private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {
@@ -2043,6 +2027,12 @@ export class Store {
 
   taskByThread(botId: string, threadId: string): TaskRecord | undefined {
     return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
+  }
+
+  get privateTasksSaved(): boolean { return !this.unsavedPrivateTasks; }
+
+  backfillPrivateTasks(destinations: readonly { botId: string; threadId: string }[]): void {
+    this.unsavedPrivateTasks = !backfillPrivateTasks(this.bots, destinations, () => this.saveBots()) || this.unsavedPrivateTasks;
   }
 
   workThread(botId: string, fromBotId: string, fromThreadId: string, roomLane = false, also: (task: TaskRecord) => boolean = () => true): TaskRecord | undefined {

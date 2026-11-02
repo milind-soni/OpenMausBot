@@ -161,7 +161,7 @@ export function migrateEngineHomes(input: MigrationInput): MigrationResult {
 export type StoreBotThreads = ReadonlyArray<{
   threadId?: string;
   resumeCursors?: Record<string, unknown>;
-  tasks?: ReadonlyArray<{ threadId: string; resumeCursors?: Record<string, unknown>; cwd?: string | null }>;
+  tasks?: ReadonlyArray<{ threadId: string; resumeCursors?: Record<string, unknown>; cwd?: string | null; private?: true; routineRunId?: string }>;
 }>;
 
 /** The store's conversations with the engine sessions they resume and the folders they run in. */

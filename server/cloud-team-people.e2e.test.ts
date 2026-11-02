@@ -3,7 +3,7 @@
 // told the team's people and get message_person; someone who left is refused in plain words, passes from one
 // conversation are capped, and a My Cloud has none of it. Where a message lands is cloud-team-inbox.e2e.test.ts.
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
@@ -79,6 +79,32 @@ beforeAll(async () => {
 afterAll(async () => {
   await fx?.close();
 });
+
+it("refuses an inbox delivery when its owner cannot be saved and leaves no provisional thread after restart", async () => {
+  const created = await team.as(olive, "POST", "/api/bots", { name: "Bob's Chief", reportsTo: BOB.email });
+  expect(created.status).toBe(201);
+  const chief = created.body.bot as { id: string; tasks: Array<{ threadId: string }> };
+  expect((await team.as(olive, "PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+  const diskTasks = () => (JSON.parse(readFileSync(join(team.home, ".openmausbot", "bots.json"), "utf8")) as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+    .find((bot) => bot.id === chief.id)!.tasks.map((task) => task.threadId);
+  const before = diskTasks();
+  const file = join(team.home, ".openmausbot", "thread-starters.json");
+  const saved = `${file}.saved`;
+  renameSync(file, saved);
+  mkdirSync(file);
+  try {
+    const answer = await passDirect(adaThread, "Bob", "Private ownership failure fixture");
+    expect(answer.status, JSON.stringify(answer.body)).toBe(500);
+    expect((await messages(ada, adaThread)).rows).toEqual([]);
+    expect(diskTasks()).toEqual(before);
+  } finally {
+    rmSync(file, { recursive: true });
+    renameSync(saved, file);
+  }
+  await team.relaunch();
+  expect(diskTasks()).toEqual(before);
+  expect(JSON.stringify((await team.as(ada, "GET", "/api/search?q=ownership")).body)).not.toContain("Private ownership failure fixture");
+}, hostTimeout(90_000));
 
 it("lists the team's people for the @ menu and mounts message_person on a team's turns", async () => {
   const people = (await team.as(ada, "GET", "/api/team/people")).body.people as Array<{ email: string; name: string; you?: boolean }>;

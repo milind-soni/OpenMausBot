@@ -86,10 +86,11 @@ export function layerAudience(id: string): Audience {
 }
 
 /** A conversation's audience from where it is and who opened it: a room's is the room's; a person's conversation with a
- * bot is theirs; the bot's main chat, and a conversation nobody or a marker (nobody, outside) opened, is the team's. */
-export function threadAudienceFrom(input: { room: string | null | undefined; starter: string | undefined; markers: ReadonlySet<string> }): Audience {
+ * bot is theirs; the bot's main chat, and a conversation nobody or a marker (nobody, outside) opened, is the team's.
+ * A private thread without an owner stays isolated, under a key that cannot name a person. */
+export function threadAudienceFrom(input: { room: string | null | undefined; starter: string | undefined; markers: ReadonlySet<string>; privateThread?: string }): Audience {
   if (input.room) return roomAudience(input.room);
   const starter = input.starter;
-  if (!starter || !ID.test(starter) || input.markers.has(starter)) return "team";
+  if (!starter || !ID.test(starter) || input.markers.has(starter)) return input.privateThread ? memberAudience(`unowned-${input.privateThread}`) : "team";
   return memberAudience(starter);
 }
