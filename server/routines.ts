@@ -28,7 +28,7 @@ import {
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
-import { attachmentPathsOf, cloneAttachments } from "./routine-attachments.ts";
+import { attachmentPathsOf, attachmentsMalformed, cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
@@ -312,8 +312,8 @@ export class RoutineManager {
   /** Why routines are held now (routine-holds.ts): a change between two of these pauses or frees routines. */
   private holds: RoutineHoldCause[] = [];
   private readonly failureFacts = new Map<string, RoutineFailureFacts>();
-  /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
-  private unreadable = false;
+  /** Saves are refused while unreadable, so an empty state never overwrites the file; malformedAttachments: a saved list failed to load, so no clear may trust attachmentPaths(). */
+  private unreadable = false; private malformedAttachments = false;
   private frozenPending = false;
   private readonly bootedAt: number;
   private readonly checking = new Set<string>();
@@ -337,7 +337,7 @@ export class RoutineManager {
         }
         return loaded ? [loaded] : [];
       }) : [];
-      this.runs = Array.isArray(disk.runs) ? disk.runs.map(loadRun) : [];
+      this.runs = Array.isArray(disk.runs) ? disk.runs.map(loadRun) : []; this.malformedAttachments = attachmentsMalformed([...(disk.routines ?? []), ...(disk.runs ?? [])]);
       this.routineRequestReceipts = loadRequestReceipts(disk.routineRequestReceipts);
       this.webhookRunReceipts = loadEventReceipts(disk.webhookRunReceipts, this.runs, this.now());
       this.frozenPending = disk.frozenResultsCleared !== true;
@@ -376,7 +376,7 @@ export class RoutineManager {
   }
 
   /** Files every saved routine and run names, unloaded rows too; null while routines.json is unreadable or a row's attachments are malformed, so nothing can clear them. */
-  attachmentPaths(): string[] | null { return this.unreadable ? null : attachmentPathsOf([...this.routines, ...this.unloadedRoutines, ...this.runs]); }
+  attachmentPaths(): string[] | null { return this.unreadable || this.malformedAttachments ? null : attachmentPathsOf([...this.routines, ...this.unloadedRoutines, ...this.runs]); }
 
   listRoutines(): Routine[] {
     return this.routines.map(routine => this.routineWithHealth(routine));

@@ -43,6 +43,13 @@ export function attachmentPathsOf(owners: ReadonlyArray<{ attachments?: unknown 
   return paths;
 }
 
+/** True when any saved list would not load as it is: loading drops such a list, so its files are no longer named. */
+export function attachmentsMalformed(owners: ReadonlyArray<{ attachments?: unknown }>): boolean {
+  return owners.some(({ attachments }) => {
+    try { cleanAttachments(attachments); return false; } catch { return true; }
+  });
+}
+
 export function cleanTimeoutMinutes(value: unknown): number | undefined {
   if (value == null) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 5 || value > 240) {

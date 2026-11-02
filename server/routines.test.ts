@@ -1234,6 +1234,24 @@ describe("RoutineManager", () => {
     }
   });
 
+  it("names no files for a clear when a loaded routine's or run's attachment list holds a bad entry", () => {
+    for (const owner of ["routines", "runs"] as const) {
+      const h = harness();
+      const file = h.options.file as string;
+      const routine = h.manager.create({
+        name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] },
+        attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+      });
+      h.manager.runNow(routine.id);
+      const disk = JSON.parse(readFileSync(file, "utf8")) as Record<typeof owner, Array<{ attachments?: unknown[] }>>;
+      disk[owner][0]!.attachments!.push(null);
+      writeFileSync(file, JSON.stringify(disk));
+      const reloaded = new RoutineManager(h.options);
+      expect(reloaded.listRoutines()).toHaveLength(1);
+      expect(reloaded.attachmentPaths()).toBeNull();
+    }
+  });
+
   it("treats a routines file with a damaged top-level shape as unreadable", () => {
     const h = harness();
     const file = h.options.file as string;
