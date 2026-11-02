@@ -51,7 +51,8 @@ describe("plan usage parsers", () => {
       spend: { enabled: true, used: { amount_minor: 4_631, currency: "USD", exponent: 2 }, limit: { amount_minor: 50_000, currency: "USD", exponent: 2 }, percent: 9 },
       extra_usage: { is_enabled: true, used_credits: 4_631, monthly_limit: 50_000, utilization: 9.262, currency: "USD", decimal_places: 2 },
     };
-    const line = (label: string, used: number, spend?: object) => ({ label, usedPercent: expect.closeTo(used, 2), remainingPercent: expect.closeTo(100 - used, 2), resetsAt: null, ...(spend ? { spend } : {}) });
+    // The plan's own monthly budget is its monthly window, so clients find it by kind; extra usage on top of rolling windows is not.
+    const line = (label: string, used: number, spend?: object) => ({ label, ...(label === "Monthly spend" ? { kind: "monthly" } : {}), usedPercent: expect.closeTo(used, 2), remainingPercent: expect.closeTo(100 - used, 2), resetsAt: null, ...(spend ? { spend } : {}) });
 
     it("shows an Enterprise seat's monthly spend with its amounts, once", () => {
       const parsed = parseClaudeUsage(enterprise);

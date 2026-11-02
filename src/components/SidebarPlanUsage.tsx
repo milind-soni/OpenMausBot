@@ -39,7 +39,7 @@ function providerWindows(provider: SidebarPlanProvider): SidebarPlanWindow[] {
   return [
     { label: t("planUsage.fiveHour"), percent: windowPercent(provider.fiveHour) },
     { label: t("planUsage.weekly"), percent: windowPercent(provider.weekly) },
-    { label: t("planUsage.monthly"), percent: monthly ? windowPercent({ available: true, ...monthly }) : null },
+    { label: t(monthly?.label === "Monthly spend" ? "planUsage.monthlySpend" : "planUsage.monthly"), percent: monthly ? windowPercent({ available: true, ...monthly }) : null },
   ].filter((entry): entry is SidebarPlanWindow => entry.percent !== null);
 }
 

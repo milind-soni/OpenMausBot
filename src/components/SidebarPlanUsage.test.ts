@@ -33,6 +33,13 @@ describe("sidebarPlanViews", () => {
     expect(sidebarPlanViews({ providers: [claude("Claude (API key)", null, null), copilot("GitHub Copilot", null)] })).toEqual([]);
   });
 
+  it("shows an Enterprise seat's monthly spend when its plan has no 5-hour or weekly window", () => {
+    const budget = { label: "Monthly spend", kind: "monthly" as const, usedPercent: 9.262, remainingPercent: 90.738 };
+    expect(sidebarPlanView({ providers: [claude("Claude", null, null, { fiveHour: use(null, false), weekly: use(null, false), extra: [budget] })] })).toEqual({
+      state: "ok", product: "claude", name: "Claude", windows: [{ label: "Monthly spend", percent: 9 }],
+    });
+  });
+
   it("says the use is unavailable when Claude's usage check fails", () => {
     expect(sidebarPlanView({ providers: [claude("Claude", null, null, { ok: false })] })).toEqual({ state: "unavailable", product: "claude", name: "Claude" });
   });

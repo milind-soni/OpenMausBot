@@ -437,7 +437,8 @@ function currencyDigits(currency: string): number | null {
 /** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage
  * bought on top of them. */
 function readClaudeBudget(root: Record<string, unknown>, hasWindows: boolean): PlanExtra | null {
-  return readSpendBudget(root.spend) ?? readExtraUsage(root.extra_usage, hasWindows ? EXTRA_USAGE : MONTHLY_SPEND);
+  const budget = readSpendBudget(root.spend) ?? readExtraUsage(root.extra_usage, hasWindows ? EXTRA_USAGE : MONTHLY_SPEND);
+  return budget?.label === MONTHLY_SPEND ? { ...budget, kind: "monthly" } : budget;
 }
 
 function claudeExtraLabel(key: string): string {
