@@ -84,6 +84,11 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
 }
 
 /** On Auto, work handed over by another bot runs on the receiving bot's own cloud computer when it has one (asleep or awake): the handoff cannot pick a place itself. Auto still never creates one; Works on, a pin, a person's turn and a consult keep their usual place. */
+/** Work another bot handed over: a child node (a person's own root also runs as "work" when it resumes), never a consult. */
+export function isHandedWork(node: { parentId?: string; mode: string } | undefined): boolean {
+  return Boolean(node?.parentId && node.mode !== "consult");
+}
+
 export function handoffUsesOwnCloud(input: { plan: Pick<SurfacePlan, "computer">; handoffWork: boolean; ownCloudState: string | null | undefined }): boolean {
   return input.handoffWork && input.plan.computer === undefined && Boolean(input.ownCloudState);
 }

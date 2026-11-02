@@ -104,11 +104,12 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     used(held.owner);
   }
 
-  async function start(bot: BotRecord, turn: TurnOwner) {
+  /** `existingOnly`: wake or attach the bot's computer, but never create one (null when it has none). */
+  async function start(bot: BotRecord, turn: TurnOwner, opts: { existingOnly?: boolean } = {}) {
     attached(turn, bot.id);
     starting.set(bot.id, (starting.get(bot.id) ?? 0) + 1);
     try {
-      return await startBotBoat(bot);
+      return await startBotBoat(bot, opts.existingOnly === true);
     } finally {
       const left = (starting.get(bot.id) ?? 1) - 1;
       if (left > 0) starting.set(bot.id, left);
@@ -116,10 +117,11 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     }
   }
 
-  async function startBotBoat(bot: BotRecord) {
+  async function startBotBoat(bot: BotRecord, existingOnly: boolean) {
     let b = await boat.findBoat(cfg, bot.id);
     const lifecycleOf = () => boat.boatTurnLifecycleAction(typeof b?.state === "string" ? b.state : null);
     let lifecycle = lifecycleOf();
+    if (lifecycle === "provision" && existingOnly) return null;
     if (lifecycle === "provision") {
       broadcast({ kind: "computer", botId: bot.id, state: "provisioning", place: "cloud" });
       await boat.provisionBoat(cfg, bot.id, bot.name);
