@@ -7,7 +7,7 @@ import { APP_LIMITS } from "../../shared/app";
 const folder = join(process.cwd(), "skills", "social-posts");
 const template = readFileSync(join(folder, "posts.html"), "utf8");
 const pageScript = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1]!;
-const DATA_BLOCK = /<script id="posts-data" type="application\/json">\n([\s\S]*?)\n<\/script>/;
+const DATA_BLOCK = /<script id="posts-data" type="application\/json">\s*([\s\S]*?)\s*<\/script>/;
 
 function mount(data: unknown): void {
   const json = typeof data === "string" ? data : JSON.stringify(data);
