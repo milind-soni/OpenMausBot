@@ -186,7 +186,7 @@ export class BrowserService {
   }
 
   async #start(profile: ProfileState, epoch: number): Promise<Running> {
-    await this.#capacity(profile);
+    await this.#capacity(profile, epoch);
     this.#stillWanted(profile, epoch);
     const opening = this.#open(profile, epoch);
     profile.opening = opening;
@@ -281,11 +281,12 @@ export class BrowserService {
 
   /** Graceful: Chrome's own quit, so its next start reopens the tabs and keeps session cookies. */
   async #stop(profile: ProfileState, reopened: Reopened, { erase = false }: { erase?: boolean } = {}): Promise<void> {
-    if (profile.stopping) return profile.stopping;
+    if (profile.stopping && !erase) return profile.stopping;
     profile.epoch++;
+    if (profile.stopping) return this.#barrier(profile, profile.stopping.then(() => this.#erase(profile)));
     const run = profile.run;
     const opening = profile.opening;
-    const stopping = (async () => {
+    return this.#barrier(profile, (async () => {
       profile.control.closing = true;
       profile.control.changed();
       try {
@@ -300,17 +301,27 @@ export class BrowserService {
         if (profile.run === run) profile.run = null;
         profile.tabs.clear();
         if (reopened) profile.reopened = reopened;
-        if (profile.temporary || erase) this.#erase(profile);
-        profile.control.closing = false;
-        profile.control.settle();
+        try {
+          if (erase) this.#erase(profile);
+          else if (profile.temporary) this.#eraseFiles(profile.key);
+        } finally {
+          profile.control.closing = false;
+          profile.control.settle();
+        }
       }
-    })().finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
+    })());
+  }
+
+  #barrier(profile: ProfileState, work: Promise<void>): Promise<void> {
+    const stopping = work.finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
     profile.stopping = stopping;
     return stopping;
   }
 
   #erase(profile: ProfileState): void {
+    if (this.#profiles.get(profile.key) !== profile) return;
     this.#eraseFiles(profile.key);
+    this.#profiles.delete(profile.key);
   }
 
   #eraseFiles(key: string): void {
@@ -326,9 +337,10 @@ export class BrowserService {
   }
 
   /** The least recently used unwatched idle browser makes room; with none, the call waits, then is told why it cannot start. */
-  async #capacity(profile: ProfileState): Promise<void> {
+  async #capacity(profile: ProfileState, epoch: number): Promise<void> {
     const until = Date.now() + this.#options.capacityWaitMs;
     for (;;) {
+      this.#stillWanted(profile, epoch);
       const others = this.profiles().filter((other) => other !== profile && (other.run || other.starting));
       if (others.length < this.#options.maxRunning) return;
       const candidate = others.filter((other) => other.hub.size === 0 && this.#unused(other, 0)).sort((a, b) => a.lastUsed - b.lastUsed)[0];
@@ -377,7 +389,6 @@ export class BrowserService {
     const profile = this.#profiles.get(key);
     if (profile) {
       await this.#stop(profile, null, { erase: true });
-      this.#profiles.delete(key);
       this.#holds.drop(profile.session);
     } else {
       this.#eraseFiles(key);
