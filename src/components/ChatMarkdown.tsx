@@ -786,11 +786,8 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
     return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
   });
-  // With the elements kept, an unchanged scope lets React skip the whole message when this component renders again.
-  const threadId = message?.threadId, messageId = message?.messageId;
-  const scope = useMemo(() => ({ message: threadId && messageId ? { threadId, messageId } : undefined, imageOffsets, threads, currentBotId, delivered }), [threadId, messageId, imageOffsets, threads, currentBotId, delivered]);
   return (
-    <MessageScopeContext.Provider value={scope}>
+    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">{markdown}</div>
     </MessageScopeContext.Provider>
   );

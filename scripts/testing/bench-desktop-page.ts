@@ -19,6 +19,10 @@ class Cdp {
   private socket: WebSocket;
   constructor(socket: WebSocket) {
     this.socket = socket;
+    socket.addEventListener("close", () => {
+      for (const waiter of this.pending.values()) waiter.reject(new Error(`${waiter.method}: Chrome closed the connection`));
+      this.pending.clear();
+    });
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; result?: Params; error?: { message: string }; method?: string; params?: Params; sessionId?: string };
       if (message.id !== undefined) {
