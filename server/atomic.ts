@@ -110,3 +110,22 @@ export function writeFileAtomicIfChanged(path: string, data: string, options: At
   writeFileAtomic(path, data, options);
   return true;
 }
+
+/** A file only this process writes while it runs: a save whose text equals the last one written (or read at load) is
+ * skipped without reading the disk back. */
+export class OwnedFile {
+  private last: string | undefined;
+
+  constructor(readonly path: string, private readonly options: AtomicWriteOptions = {}) {}
+
+  loaded(text: string): void {
+    this.last = text;
+  }
+
+  write(text: string): boolean {
+    if (text === this.last) return false;
+    writeFileAtomic(this.path, text, this.options);
+    this.last = text;
+    return true;
+  }
+}

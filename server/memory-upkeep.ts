@@ -113,6 +113,9 @@ interface UpkeepState {
 
 const MAX_CORE = 500;
 
+type StatePatch = Partial<UpkeepState["bots"][string]>;
+interface StateWrites { keep(botId: string, patch: StatePatch): void; settle(): void }
+
 function statePath(): string {
   return join(DATA_DIR, "memory-upkeep.json");
 }
@@ -282,12 +285,32 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   const queue: Waiting[] = [];
   let worker: Promise<void> | null = null;
 
-  const record = (botId: string, patch: { lastTidy?: TidyReport; lastCapture?: CaptureReport; topicCursor?: string; lastDream?: DreamReport; dreamedTo?: number }) => {
+  const record = (botId: string, patch: StatePatch) => {
     // a capture or tidy that was out when its bot was deleted leaves nothing behind
     if (!deps.bot(botId)) return;
     const state = loadState();
     state.bots[botId] = { ...state.bots[botId], ...patch };
     saveState(state);
+  };
+  const direct: StateWrites = { keep: record, settle: () => {} };
+  /** A pass's writes wait for its next model call or its end, and it yields to nothing else in between, so the file
+   * holds what one write per bot would have left whenever anything else runs. */
+  const heldWrites = (): StateWrites => {
+    const held = new Map<string, StatePatch>();
+    return {
+      keep: (botId, patch) => { held.set(botId, { ...held.get(botId), ...patch }); },
+      settle: () => {
+        if (!held.size) return;
+        const state = loadState();
+        for (const [botId, patch] of held) if (deps.bot(botId)) state.bots[botId] = { ...state.bots[botId], ...patch };
+        held.clear();
+        saveState(state);
+      },
+    };
+  };
+  const ask = (writes: StateWrites, engine: UpkeepEngine, prompt: string, timeoutMs?: number) => {
+    writes.settle();
+    return askModel(engine, prompt, timeoutMs);
   };
 
   const track = <T>(promise: Promise<T>): Promise<T> => {
@@ -506,7 +529,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     },
   });
 
-  async function organize(botId: string): Promise<number> {
+  async function organize(botId: string, writes = direct): Promise<number> {
     const started = generation;
     const engine = deps.engine(botId);
     if (!engine?.generateText) return 0;
@@ -516,7 +539,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const candidates = organizeCandidates(first, today, core);
     if (!candidates.length) return 0;
-    const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId)));
+    const answer = await ask(writes, engine, organizePrompt(candidates, memoryTopicIndex(botId)));
     if (answer === null || cancelled(started) || !upkeepEnabled(deps.bot(botId))) return 0;
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first) return 0;
@@ -525,9 +548,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const moved = new Set(proposed.map((move) => move.entry.line));
     const moves = proposed.slice(0, MAX_MOVES);
     const judgedCore = candidates.filter((entry) => !moved.has(entry.line)).map((entry) => factIdentity(entry.body));
-    const saved = loadState();
-    saved.bots[botId] = { ...saved.bots[botId], core: [...new Set([...(saved.bots[botId]?.core ?? []), ...judgedCore])].slice(-MAX_CORE) };
-    saveState(saved);
+    writes.keep(botId, { core: [...new Set([...(loadState().bots[botId]?.core ?? []), ...judgedCore])].slice(-MAX_CORE) });
     if (!moves.length) return 0;
     return writing(botId, () => {
       const { byTopic } = applyMoves(before, moves);
@@ -568,7 +589,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     recordMemoryChange(botId, { path: ARCHIVE_PATH, actor: "upkeep", via: "tidy", before: archiveBefore, after: readRaw(botId, ARCHIVE_PATH) });
   }
 
-  async function runTidy(botId: string): Promise<TidyReport> {
+  async function runTidy(botId: string, writes: StateWrites): Promise<TidyReport> {
     const started = generation;
     const bot = deps.bot(botId);
     const at = now().getTime();
@@ -576,7 +597,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const stopped: TidyReport = { at, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false, note: "Memory upkeep is off or paused; no further changes were made." };
     if (cancelled(started) || !upkeepEnabled(bot)) return stopped;
     ensureWorkspace(botId);
-    const organized = await organize(botId);
+    const organized = await organize(botId, writes);
     if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const engine = deps.engine(botId);
@@ -587,7 +608,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     if (!engine?.generateText) note = NO_TEXT_ENGINE;
     else if (candidates.length < MIN_ENTRIES_FOR_CONTRADICTIONS) note = `Contradictions are checked from ${MIN_ENTRIES_FOR_CONTRADICTIONS} notes on.`;
     else {
-      const answer = await askModel(engine, contradictionPrompt(candidates));
+      const answer = await ask(writes, engine, contradictionPrompt(candidates));
       if (answer === null) note = "The contradiction check did not answer in time.";
       else {
         contradictions = parseContradictions(answer, candidates.length);
@@ -633,7 +654,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
         else {
           topicChecks++;
           topicCursor = topic.name;
-          const answer = await askModel(engine, contradictionPrompt(topicCandidates), remaining);
+          const answer = await ask(writes, engine, contradictionPrompt(topicCandidates), remaining);
           if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
           if (readRaw(botId, path) !== topicBefore) {
             topicsDeferred++;
@@ -672,15 +693,18 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       topicsDeferred,
       ...(note ? { note } : {}),
     };
-    record(botId, { lastTidy: report, topicCursor });
+    writes.keep(botId, { lastTidy: report, topicCursor });
     if (report.expired || report.duplicates || report.superseded || organized) log(`memory upkeep: tidied ${bot?.name ?? botId} — ${report.expired} expired, ${report.duplicates} duplicate(s), ${report.superseded} contradicted`);
     return report;
   }
 
-  function tidy(botId: string): Promise<TidyReport> {
+  function tidy(botId: string, writes = direct): Promise<TidyReport> {
     const running = tidying.get(botId);
-    if (running) return running;
-    const promise = track(runTidy(botId)).finally(() => tidying.delete(botId));
+    if (running) {
+      writes.settle();
+      return running;
+    }
+    const promise = track(runTidy(botId, writes)).finally(() => tidying.delete(botId));
     tidying.set(botId, promise);
     return promise;
   }
@@ -690,7 +714,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     return loadState().bots[botId]?.dreamedTo ?? at - DREAM_FIRST_LOOKBACK_MS;
   }
 
-  async function runDream(botId: string): Promise<DreamReport> {
+  async function runDream(botId: string, writes: StateWrites): Promise<DreamReport> {
     const started = generation;
     const bot = deps.bot(botId);
     const at = now().getTime();
@@ -700,24 +724,24 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const engine = deps.engine(botId);
     if (!engine?.generateText) {
       const off = report(NO_DREAM_ENGINE);
-      record(botId, { lastDream: off });
+      writes.keep(botId, { lastDream: off });
       return off;
     }
     const conversations = deps.conversations(botId, dreamSince(botId, at));
     if (conversations.length < DREAM_MIN_CONVERSATIONS) {
       const few = report(`A dream needs at least ${DREAM_MIN_CONVERSATIONS} chats where you wrote since the last one; there ${conversations.length === 1 ? "is 1" : `are ${conversations.length}`}.`, conversations.length);
-      record(botId, { lastDream: few });
+      writes.keep(botId, { lastDream: few });
       return few;
     }
     ensureWorkspace(botId);
     const today = memoryDate(now());
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const notebook = contradictionCandidates(first, today);
-    const answer = await askModel(engine, dreamPrompt({ botName: bot.name, today, conversations, notebook, topics: memoryTopicIndex(botId) }), DREAM_TIMEOUT_MS);
+    const answer = await ask(writes, engine, dreamPrompt({ botName: bot.name, today, conversations, notebook, topics: memoryTopicIndex(botId) }), DREAM_TIMEOUT_MS);
     if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return report("Memory upkeep was stopped, switched off or paused during the dream; no changes were made.", conversations.length);
     if (answer === null) {
       const late = report("The dream did not answer in time.", conversations.length);
-      record(botId, { lastDream: late });
+      writes.keep(botId, { lastDream: late });
       return late;
     }
     const dreamt = parseDream(answer, conversations.length, notebook.length);
@@ -755,16 +779,19 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       aboutMe,
       ...(written.stale ? { note: "The notes changed during the dream, so outdated notes wait for the next one." } : {}),
     };
-    record(botId, { lastDream: done, dreamedTo: at });
+    writes.keep(botId, { lastDream: done, dreamedTo: at });
     log(`memory upkeep: ${bot.name} (${botId}) dreamt over ${conversations.length} chats — ${done.learned.length} learned, ${done.outdated.length} updated, ${done.ideas.length} idea(s), ${aboutMe} for About me`);
     return done;
   }
 
-  function dream(botId: string): Promise<DreamReport> {
+  function dream(botId: string, writes = direct): Promise<DreamReport> {
     const started = generation;
     const running = dreaming.get(botId);
-    if (running?.generation === started) return running.promise;
-    const promise = track(runDream(botId)).finally(() => {
+    if (running?.generation === started) {
+      writes.settle();
+      return running.promise;
+    }
+    const promise = track(runDream(botId, writes)).finally(() => {
       if (dreaming.get(botId)?.promise === promise) dreaming.delete(botId);
     });
     dreaming.set(botId, { generation: started, promise });
@@ -789,23 +816,28 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   async function tick(): Promise<void> {
     const started = generation;
     if (cancelled(started)) return;
-    for (const bot of deps.bots()) {
-      if (cancelled(started)) return;
-      if (!upkeepEnabled(bot) || deps.busy(bot.id)) continue;
-      if (due(bot.id)) {
+    const writes = heldWrites();
+    try {
+      for (const bot of deps.bots()) {
+        if (cancelled(started)) return;
+        if (!upkeepEnabled(bot) || deps.busy(bot.id)) continue;
+        if (due(bot.id)) {
+          try {
+            await tidy(bot.id, writes);
+          } catch (error) {
+            log(`memory upkeep: tidy failed for ${bot.id}: ${(error as Error).message}`);
+          }
+        }
+        if (cancelled(started)) return;
         try {
-          await tidy(bot.id);
+          if (deps.busy(bot.id) || !dreamDue(bot.id)) continue;
+          await dream(bot.id, writes);
         } catch (error) {
-          log(`memory upkeep: tidy failed for ${bot.id}: ${(error as Error).message}`);
+          log(`memory upkeep: dream failed for ${bot.id}: ${(error as Error).message}`);
         }
       }
-      if (cancelled(started)) return;
-      try {
-        if (deps.busy(bot.id) || !dreamDue(bot.id)) continue;
-        await dream(bot.id);
-      } catch (error) {
-        log(`memory upkeep: dream failed for ${bot.id}: ${(error as Error).message}`);
-      }
+    } finally {
+      writes.settle();
     }
   }
 

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import { writeFileAtomic } from "./atomic.ts";
+import { OwnedFile } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { activeRunsOf, nextDueOf, wakeHoldOf } from "./routine-due.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
@@ -293,7 +293,7 @@ function cloneRun(run: RoutineRun): RoutineRun {
 }
 
 export class RoutineManager {
-  private readonly file: string;
+  private readonly file: string; private readonly disk: OwnedFile;
   private readonly now: () => number;
   private readonly options: RoutineManagerOptions;
   private routines: Routine[] = [];
@@ -319,11 +319,11 @@ export class RoutineManager {
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
-    this.file = options.file ?? join(DATA_DIR, "routines.json");
+    this.file = options.file ?? join(DATA_DIR, "routines.json"); this.disk = new OwnedFile(this.file, { mode: 0o600 });
     this.now = options.now ?? Date.now;
     this.bootedAt = this.now();
     try {
-      const disk = JSON.parse(readFileSync(this.file, "utf8")) as Partial<RoutineFile>;
+      const text = readFileSync(this.file, "utf8"), disk = JSON.parse(text) as Partial<RoutineFile>; this.disk.loaded(text);
       if (disk === null || typeof disk !== "object" || Array.isArray(disk)) throw new Error("Invalid routines file");
       for (const key of ["routines", "runs", "routineRequestReceipts", "webhookRunReceipts"] as const) {
         if (key in disk && !Array.isArray(disk[key])) throw new Error(`Invalid routines file: ${key} is not a list`);
@@ -793,7 +793,7 @@ export class RoutineManager {
     const previousRuns = this.runs.slice();
     apply();
     this.webhookRunReceipts = receipts;
-    try { this.save(); }
+    try { this.saveNow(); }
     catch (error) {
       // Keep the live run objects tick() may be awaiting, not cloned snapshots.
       this.runs = previousRuns;
@@ -1071,10 +1071,12 @@ export class RoutineManager {
       }
       for (const { id, hold } of checks) this.runChecks(id, hold).catch((error) => console.error(`routines: the checks of ${id} failed`, error));
 
-      // Oldest first, by id: a rollback across awaits can replace the run objects.
+      // Oldest first, by id: a rollback across awaits can replace the run objects, and the array with them.
+      let indexed: RoutineRun[] | null = null, byId = new Map<string, RoutineRun>();
       for (const id of this.runs.map((run) => run.id)) {
         if (this.closing) return;
-        const run = this.runs.find((candidate) => candidate.id === id);
+        if (indexed !== this.runs) [indexed, byId] = [this.runs, new Map(this.runs.map((run) => [run.id, run]))];
+        const run = byId.get(id);
         if (!run || run.status !== "queued" || (run.retryAt ?? 0) > now) continue;
         const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
         const definition = triggerSource === "schedule"
@@ -1142,7 +1144,7 @@ export class RoutineManager {
           continue;
         }
         Object.assign(run, { threadId: task.threadId, startedAt, status: "running" } satisfies Partial<RoutineRun>);
-        try { this.save(); } catch (error) { Object.assign(run, { status: "queued", startedAt: undefined } satisfies Partial<RoutineRun>); throw error; }
+        try { this.saveNow(); } catch (error) { Object.assign(run, { status: "queued", startedAt: undefined } satisfies Partial<RoutineRun>); throw error; }
         this.emitRun(run);
         try {
           const prompt = run.prompt ?? this.routines.find((r) => r.id === run.routineId)?.prompt;
@@ -1354,8 +1356,7 @@ export class RoutineManager {
   /** Timed from when it began, so a later occurrence can tell a wait that went unanswered. */
   private wait(run: RoutineRun, attention: string | undefined) {
     if (run.status !== "waiting" || run.waitingSince === undefined) run.waitingSince = this.now();
-    run.status = "waiting";
-    run.attention = attention;
+    Object.assign(run, { status: "waiting", attention } satisfies Partial<RoutineRun>);
   }
 
   private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
@@ -1367,10 +1368,7 @@ export class RoutineManager {
   }
 
   private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
-    run.status = status;
-    run.attention = undefined;
-    run.error = redactSecretsInText(message).slice(0, 500);
-    run.finishedAt = this.now();
+    Object.assign(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() } satisfies Partial<RoutineRun>);
     this.save();
     this.emitRun(run);
     const repeat = failsLikeLastOutcome(this.runs, run) || (run.checkKey !== undefined && outcomesNewestFirst(this.runs, run.routineId, run.id)[0]?.status === "failed");
@@ -1531,7 +1529,7 @@ export class RoutineManager {
     };
     try {
       mutate();
-      this.save();
+      this.saveNow();
     } catch (error) {
       this.routines = before.routines;
       this.runs = before.runs;
@@ -1542,7 +1540,9 @@ export class RoutineManager {
     }
   }
 
-  private save() {
+  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses saveNow. */
+  private save() { saveSoon(this, () => this.saveNow()); }
+  private saveNow() {
     if (this.unreadable) return;
     // Evict only terminal receipts: an active one owns cancellation, timeout and event routing.
     let excess = this.runs.length - MAX_RUNS;
@@ -1555,7 +1555,7 @@ export class RoutineManager {
       excess -= 1;
     }
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileAtomic(this.file, JSON.stringify({
+    this.disk.write(JSON.stringify({
       version: 1,
       ...(this.frozenPending ? {} : { frozenResultsCleared: true }),
       routines: [...this.routines, ...this.unloadedRoutines],
@@ -1565,6 +1565,6 @@ export class RoutineManager {
       ...(this.startupLaunchId === undefined ? {} : { startupLaunchId: this.startupLaunchId }),
       ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
       ...(this.holds.length ? { holds: this.holds } : {}),
-    } satisfies RoutineFile, null, 2), { mode: 0o600 });
+    } satisfies RoutineFile));
   }
 }
