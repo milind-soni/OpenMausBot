@@ -592,7 +592,14 @@ async function main() {
           await open.close();
         }
       }
-      result.screens = { firstOpenMs: firstOpen };
+      const pair = await chrome.newPage({ storage: STORAGE });
+      await pair.send("Page.navigate", { url: `${fixture.url}/pair` });
+      await sleep(2_000);
+      const signIn = await pair.evaluate<Record<string, unknown>>(`(() => ({
+        scriptKb: Math.round(performance.getEntriesByType("resource").filter((e) => /\\.js$/.test(e.name)).reduce((t, e) => t + (e.decodedBodySize || 0), 0) / 1024),
+        drew: document.getElementById("root").childElementCount > 0, inputs: document.querySelectorAll("input").length }))()`);
+      await pair.close();
+      result.screens = { firstOpenMs: firstOpen, signInPage: signIn };
     }
     if (only.has("idle")) {
       const rail = await chrome.newPage({ storage: STORAGE, railBridge: true }, 72, 900);
