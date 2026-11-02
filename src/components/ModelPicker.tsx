@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
-import { useStore, currentTaskBot, type AppState, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
+import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
@@ -25,6 +25,7 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
+import { offersReasoning, useRefocusAfterPick, variantChoices } from "./model-picker-reasoning";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -122,17 +123,6 @@ export function EffortRow({
 
 const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
   option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
-
-/** ACP variant ids are opaque; their model/session declares the available choices. */
-function variantChoices(state: Pick<AppState, "instances" | "modelVariantSessions">, selection: ModelSelection, threadId: string | undefined) {
-  const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
-  if (!instance?.capabilities?.modelVariants) return null;
-  const session = threadId === undefined ? undefined : state.modelVariantSessions[threadId];
-  const reported = session?.instanceId === selection.instanceId && session.model === selection.model ? session.variants : undefined;
-  const options = reported?.options ?? instance.models.options.find((option) => option.id === selection.model)?.variants ?? [];
-  if (!options.length && selection.variant === undefined) return null;
-  return { instance, reported, options };
-}
 
 export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false, quiet = false }: {
   bot: Bot;
@@ -261,7 +251,6 @@ export function ModelPicker({
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
   const focusOnPlace = useRef<string | null>(null);
-  const refocusAfterPick = useRef(false);
   const typed = useRef<Typeahead | null>(null);
   const menuId = useId();
   const inside = useRef({ contains: (target: unknown) => [rootRef.current, menuRef.current].some((node) => node?.contains(target as Node)) });
@@ -307,15 +296,7 @@ export function ModelPicker({
   }, [open, placement]);
 
   const selection = bot.modelSelection;
-  // Applying a pick can redraw the picked row elsewhere and drop focus out of the open menu; bring it back
-  // (to the thinking level when there is one) so Escape and the arrow keys keep working.
-  useEffect(() => {
-    if (!refocusAfterPick.current) return;
-    refocusAfterPick.current = false;
-    const menu = menuRef.current;
-    if (!open || !menu || menu.contains(document.activeElement)) return;
-    (menu.querySelector<HTMLElement>('[data-simple-effort] [tabindex="0"]') ?? menu).focus({ preventScroll: true });
-  }, [selection, open]);
+  const refocusAfterPick = useRefocusAfterPick(menuRef, open, selection);
   const instances = withTypedModels(state.instances, selection, query);
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const pickerInstances = configuredModelInstances(instances, selection.instanceId);
@@ -488,11 +469,6 @@ export function ModelPicker({
     dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: false, selection: profile.modelSelection });
   };
 
-  /** Whether this menu shows a reasoning row (effort levels or model variants) for `next` on `instance`. */
-  const offersReasoning = (instance: InstanceInfo, next: ModelSelection) => !contained && (instance.capabilities?.modelVariants
-    ? Boolean(variantChoices(state, next, threadId ?? bot.threadId))
-    : Boolean(instance.capabilities?.effortLevels?.length));
-
   const pick = (instance: InstanceInfo, model: string, variant?: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
@@ -517,8 +493,8 @@ export function ModelPicker({
     if (updateBotDefault && threadId) setChangedBotModel(true);
     // A model with reasoning levels keeps the menu open, so its level can be set next without opening it again;
     // picking a variant row already sets that level.
-    if (variant !== undefined || !offersReasoning(instance, nextSelection)) close(true);
-    else refocusAfterPick.current = true;
+    if (variant !== undefined || contained || !offersReasoning(state, instance, nextSelection, threadId ?? bot.threadId)) close(true);
+    else refocusAfterPick();
   };
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
