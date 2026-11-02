@@ -42,11 +42,12 @@ export function createMemberOwnBot(deps: MemberOwnBotDeps) {
       const store = deps.store();
       const bot = store.bot(botId);
       if (!bot) return false;
+      const { defaultBot, sidebarHidden, chiefOfStaff } = bot;
       store.patchBot(botId, { defaultBot: undefined, sidebarHidden: undefined, chiefOfStaff: undefined });
       const result = await deps.deleteBot(botId).catch((error: unknown) => ({ status: 500, body: { error: error instanceof Error ? error.message : String(error) } }));
       if (result.status < 400) return true;
       console.warn(`team member left: could not delete their MausBot ${botId}: ${result.body.error ?? result.status}`);
-      if (store.bot(botId)) store.patchBot(botId, { defaultBot: bot.defaultBot, sidebarHidden: bot.sidebarHidden, chiefOfStaff: bot.chiefOfStaff });
+      if (store.bot(botId)) store.patchBot(botId, { defaultBot, sidebarHidden, chiefOfStaff });
       return false;
     },
   };

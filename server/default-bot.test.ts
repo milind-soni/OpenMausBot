@@ -270,7 +270,7 @@ describe("MausBot, every person's helper", () => {
     expect(ensureDefaultBot(store, { dataDir: DATA_DIR, person: "ada@example.com", team: "Acme" })?.id).toBe(ada.id);
     expect(ada).toMatchObject({ name: "MausBot", defaultBot: { person: "ada@example.com" }, visibility: { people: ["ada@example.com"] } });
     expect(bea).toMatchObject({ defaultBot: { person: "bea@example.com" }, visibility: { people: ["bea@example.com"] } });
-    expect(ada.chiefOfStaff).toBeFalsy();
+    expect(ada.chiefOfStaff, "its person's Chief, without saying so in its intro").toBe(true);
     expect(intros(store, ada)[0]?.text).toContain("On Acme, I'm here for you and look after your own bots.");
     expect(intros(store, ada)[0]?.text).not.toContain("keep an eye on your day");
     expect(store.bots).toHaveLength(3);

@@ -110,18 +110,18 @@ describe("incident wording", () => {
 
   it("words a stall, a start failure, a routine and a room each in their own terms", () => {
     expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Ada hit a problem: its run in its thread #Invoice reconciliation stopped after showing no activity");
-    expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada's run in its main conversation could not start");
-    expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada's scheduled routine in its thread #Inbox digest failed");
-    expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada\'s run in the room "Standup" failed');
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada hit a problem: its run in its main conversation could not start");
+    expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada hit a problem: its scheduled routine in its thread #Inbox digest failed");
+    expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada hit a problem: its run in the room "Standup" failed');
   });
 
   it("tells the person in their language, while the Chief's report stays English", () => {
-    expect(incidentChip(incident, "de")).toBe("Vorfall: Die Ausführung von Ada im Thread #Invoice reconciliation ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip(incident, "de")).toBe("Ada hatte ein Problem: Die Ausführung im Thread #Invoice reconciliation ist fehlgeschlagen: „exit_before_result“");
     expect(incidentChip({ ...incident, kind: "stalled", detail: "" }, "de"))
-      .toBe("Vorfall: Die Ausführung von Ada im Thread #Invoice reconciliation wurde gestoppt, weil sie keine Aktivität mehr zeigte");
+      .toBe("Ada hatte ein Problem: Die Ausführung im Thread #Invoice reconciliation wurde gestoppt, weil sie keine Aktivität mehr zeigte");
     expect(incidentChip({ ...incident, kind: "routine-failed", title: null, room: "Standup" }, "de"))
-      .toBe("Vorfall: Die geplante Routine von Ada im Raum „Standup“ ist fehlgeschlagen: „exit_before_result“");
-    expect(incidentChip({ ...incident, kind: "could-not-start", title: null, detail: "" }, "de")).toBe("Vorfall: Die Ausführung von Ada in der Hauptunterhaltung konnte nicht starten");
+      .toBe("Ada hatte ein Problem: Die geplante Routine im Raum „Standup“ ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null, detail: "" }, "de")).toBe("Ada hatte ein Problem: Die Ausführung in der Hauptunterhaltung konnte nicht starten");
     expect(incidentText(incident, { count: 1, mayRetry: true, muted: false })).toContain("Ada's run in its thread #Invoice reconciliation failed");
   });
 });

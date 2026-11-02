@@ -1,3 +1,4 @@
+import { readTeamRolesWith } from "./chief-level.ts";
 import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,8 +67,13 @@ const specialist = (key: string, section: string, modelSelection = { instanceId:
 describe("reviewed Chief team setup", () => {
   it("never lets a member's crowned MausBot change who the Chief is", () => {
     const h = harness(); h.peer.section = "Engineering";
-    h.store.bots[0]!.defaultBot = { person: "ada@acme.test" };
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/Only the Chief of Staff changes who the Chief is/);
+    h.chief.defaultBot = { person: "ada@acme.test" };
+    readTeamRolesWith(() => "admin");
+    try {
+      expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/Only the Chief of Staff changes who the Chief is/);
+    } finally {
+      readTeamRolesWith(() => null);
+    }
   });
 
   it("reviews promotion in an authorized team without changing anything on denial", async () => {
