@@ -277,7 +277,7 @@ const instanceConfigSchema = z.object({
       .refine((icon) => providerIconError(icon) === null, { message: "Invalid provider icon" }),
   ]).optional(),
   environment: z.record(z.string(), z.string()).optional(),
-  enabled: z.boolean().optional(),
+  enabled: z.boolean().optional(), hidden: z.boolean().optional(),
   access: z.enum(["subscription", "custom", "api"]).optional(),
   config: z.json().optional(),
 });
