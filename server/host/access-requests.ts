@@ -102,8 +102,9 @@ export function createAccessRequests(deps: AccessRequestDeps) {
     if (allow) {
       if (!bot || !person || levelFor(person, bot.id) !== "edit") return { status: 403, body: { error: `Only people who can edit ${ask.botName} can let someone chat with it.` } };
       const access = accessOf(bot);
-      const after = { everyone: access.everyone, people: { ...access.people, [ask.email]: "chat" as const } };
-      if (!atLeast(access.people[ask.email], "chat")) deps.writeAccess(bot, after);
+      const raised = !atLeast(access.people[ask.email], "chat");
+      const after = raised ? { everyone: access.everyone, people: { ...access.people, [ask.email]: "chat" as const } } : access;
+      if (raised) deps.writeAccess(bot, after);
       deps.record?.({ category: "visibility", action: "access.allow", target: { kind: "bot", id: bot.id, name: bot.name }, before: { access, asked: ask.email }, after: { access: after, asked: ask.email } }, person.email);
       deps.inbox().deliver(personKeyOf(ask.email), {
         kind: "notice", from: { name: nameOf(person.email), email: person.email },

@@ -55,7 +55,7 @@ function fixture(bot: Partial<BotRecord>) {
     return answered!;
   };
   const cards = (email: string) => (threads.get(`inbox-${email}`) ?? []).filter((line) => line.card?.accessRequest);
-  return { requests, ask, cards, writes, threads, audited };
+  return { requests, ask, cards, writes, threads, audited, record };
 }
 
 describe("asking to chat", () => {
@@ -82,6 +82,17 @@ describe("asking to chat", () => {
     expect(writes).toEqual([]);
     expect(audited).toEqual([{ by: OLIVE.email, row: expect.objectContaining({ action: "access.decline", after: { asked: BOB.email } }) }]);
     expect(requests.resolve(`inbox-${OLIVE.email}`, "some-other-card", "answer", "Allow")).toBeNull();
+  });
+
+  it("records the access as it stands when the asker already got more than chat before the Allow", async () => {
+    const { requests, ask, cards, writes, audited, record } = fixture({ reportsTo: OLIVE.email });
+    await ask(BOB.email);
+    const card = cards(OLIVE.email)[0]!.card!;
+    const raised = { everyone: "none" as const, people: { [BOB.email]: "edit" as const } };
+    record.access = raised;
+    expect(requests.resolve(`inbox-${OLIVE.email}`, card.requestId!, "answer", "Allow")?.status).toBe(200);
+    expect(writes).toEqual([]);
+    expect(audited[0]!.row.after).toEqual({ access: raised, asked: BOB.email });
   });
 
   it("refuses an ask from someone who can already chat", async () => {
