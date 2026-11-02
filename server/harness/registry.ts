@@ -113,6 +113,8 @@ export class ProviderRegistry {
   private seeds = new Map<InstanceId, ProviderSnapshot>();
   private seedObjects = new WeakSet<ProviderSnapshot>();
   private checkedAt = new Map<InstanceId, number>();
+  /** Engines taken as read at start and not probed since: the server's own reads answer from that status while it is fresh. */
+  private takenAsRead = new Set<InstanceId>();
   /** A digest of each engine's settings and this server's build: a status probed under other settings (a key, a sign-out)
    * or another build's CLIs is not fresh. */
   private settings = new Map<InstanceId, string>();
@@ -228,6 +230,7 @@ export class ProviderRegistry {
   forgetSnapshots(): void {
     this.snapshotGeneration += 1;
     this.seeds.clear();
+    this.takenAsRead.clear();
   }
 
   /**
@@ -246,6 +249,7 @@ export class ProviderRegistry {
       if (snapshot.state === "available" && snapshot.authenticated !== false && settings === this.settings.get(instanceId)
         && checkedAt !== null && now - checkedAt >= 0 && now - checkedAt < ENGINE_STATUS_FRESH_MS) {
         fresh.add(instanceId);
+        this.takenAsRead.add(instanceId);
         this.lastSnapshots.set(instanceId, snapshot);
         this.checkedAt.set(instanceId, checkedAt);
       } else this.seedObjects.add(snapshot);
@@ -415,10 +419,16 @@ export class ProviderRegistry {
     return isAppStandaloneCopy(cli, this.enginesBaseDir, standaloneLookupPath(this.enginesBaseDir));
   }
 
+  /** `known` is the engine list a person asks for: it probes an engine taken as read at start, and answers one the
+   * start-up read has yet to reach from the last run's status. */
   describe(options: { known?: boolean } = {}) {
     return this.describeWith((instance) => {
-      const seed = options.known && this.unread?.has(instance.instanceId) ? this.seeds.get(instance.instanceId) : undefined;
-      return seed ? Promise.resolve(seed) : this.read(instance);
+      const { instanceId } = instance;
+      const seed = options.known && this.unread?.has(instanceId) ? this.seeds.get(instanceId) : undefined;
+      const taken = !options.known && this.takenAsRead.has(instanceId) && Date.now() - (this.checkedAt.get(instanceId) ?? 0) < ENGINE_STATUS_FRESH_MS
+        ? this.lastSnapshots.get(instanceId) : undefined;
+      const answer = seed ?? taken;
+      return answer ? Promise.resolve(answer) : this.read(instance);
     });
   }
 
@@ -435,6 +445,7 @@ export class ProviderRegistry {
       if (checkedAt === undefined || Date.now() - checkedAt >= ENGINE_STATUS_FRESH_MS / 2 || !before
         || JSON.stringify(snapshotFrom(before)) !== JSON.stringify(snapshotFrom(snapshot))) this.checkedAt.set(instance.instanceId, Date.now());
       this.lastSnapshots.set(instance.instanceId, snapshot);
+      this.takenAsRead.delete(instance.instanceId);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
     }
@@ -531,6 +542,7 @@ export class ProviderRegistry {
     this.cliByInstance.clear();
     this.lastSnapshots.clear();
     this.checkedAt.clear();
+    this.takenAsRead.clear();
     this.settings.clear();
     this.seeds.clear();
   }
@@ -541,6 +553,7 @@ export class ProviderRegistry {
     this.cliByInstance.delete(instanceId);
     this.lastSnapshots.delete(instanceId);
     this.checkedAt.delete(instanceId);
+    this.takenAsRead.delete(instanceId);
     this.settings.delete(instanceId);
     this.seeds.delete(instanceId);
     await entry?.live?.dispose();

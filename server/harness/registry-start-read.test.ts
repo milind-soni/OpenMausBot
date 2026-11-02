@@ -208,6 +208,19 @@ describe("the start-up read", () => {
     expect(registry.provisional()).toBe(false);
     await saved();
     expect(JSON.parse(readFileSync(file, "utf8")).engines[0].checkedAt).toBe(checkedAt);
+    // The server's own reads answer from it (a later catalog's new-bot default must not probe every CLI)...
+    expect((await registry.describe()).find((engine) => engine.instanceId === "ready")?.snapshot).toEqual(AVAILABLE);
+    expect(probes().ready).toBe(0);
+    // ...and the list a person asks for probes it.
+    await registry.describe({ known: true });
+    expect(probes().ready).toBe(1);
+
+    const again = await engines(options, { statusFile: file },
+      { ready: { driver: "ready" }, gone: { driver: "gone" }, rekeyed: { driver: "rekeyed", environment: { FAKE_KEY: "other" } } });
+    await again.registry.readAtStart([], () => {}, checkedAt + ENGINE_STATUS_FRESH_MS - 1);
+    again.registry.forgetSnapshots();
+    await again.registry.describe();
+    expect(again.probes().ready).toBe(1);
 
     const stale = await engines(options, { statusFile: file });
     await stale.registry.readAtStart([], () => {}, checkedAt + ENGINE_STATUS_FRESH_MS);
