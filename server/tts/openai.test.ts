@@ -162,7 +162,9 @@ describe("OpenAI readout", () => {
 });
 
 
-it("uses the server's Node proxy agents when enabled, and connects directly when disabled", async () => {
+it("uses the server's Node proxy agents when enabled, and connects directly when disabled", async ({ skip }) => {
+  const http = await import("node:http");
+  if (typeof http.setGlobalProxyFromEnv !== "function") return skip();
   let proxied = 0;
   const proxy = createServer();
   proxy.on("upgrade", (req, socket, head) => {

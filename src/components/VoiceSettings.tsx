@@ -54,7 +54,7 @@ export function VoiceSettings({
   const [loadingVoices, setLoadingVoices] = useState(false);
   const [addingVoice, setAddingVoice] = useState<PickerVoice | null>(null);
   const addGeneration = useRef(0);
-  const currentBot = useRef(bot.id);
+  const currentBot = useRef({ id: bot.id, voice: bot.voice });
   const [addError, setAddError] = useState<string | null>(null);
   const [voiceQuery, setVoiceQuery] = useState("");
   const [searchedQuery, setSearchedQuery] = useState("");
@@ -104,9 +104,10 @@ export function VoiceSettings({
   const configured = usesLocalSystem || hostConfigured;
 
   useEffect(() => {
-    currentBot.current = bot.id;
     setDeviceVoice(remoteSystemVoice(bot.id));
   }, [bot.id]);
+
+  useEffect(() => { currentBot.current = { id: bot.id, voice: bot.voice }; }, [bot.id, bot.voice]);
 
   const sampleVoice = usesLocalSystem ? deviceVoice : bot.voice;
   useEffect(() => () => {
@@ -176,6 +177,7 @@ export function VoiceSettings({
       setDeviceVoice(voiceId);
       return;
     }
+    currentBot.current = { id: bot.id, voice: voiceId };
     onPatch({ voice: voiceId });
   };
 
@@ -208,7 +210,7 @@ export function VoiceSettings({
     setError(null);
     api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { provider: next } }) })
       .then((status: ConfigStatus) => {
-        if (next === "openai" && currentBot.current === bot.id && !OPENAI_VOICES.some((voice) => voice === bot.voice)) {
+        if (next === "openai" && currentBot.current.id === bot.id && !OPENAI_VOICES.some((voice) => voice === currentBot.current.voice)) {
           onPatch({ voice: DEFAULT_OPENAI_VOICE });
         }
         dispatch({ type: "configStatus", config: status });

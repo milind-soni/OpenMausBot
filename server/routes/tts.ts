@@ -2,7 +2,7 @@
 // ElevenLabs Voice Library voice to My Voices, and speaking a line. Scopes are keyed by path in server/request-auth.ts.
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
-import { OpenAiVoiceError } from "../tts/openai.ts";
+import { voiceFailure } from "../tts/errors.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -70,8 +70,8 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         return;
       } catch (e) {
         if (controller.signal.aborted) return;
-        if (e instanceof OpenAiVoiceError) return json(res, e.errorKey === "voice.openai.error.key" ? 409 : 502, { error: e.message, errorKey: e.errorKey });
-        if (e instanceof tts.NoVoiceConfigured) return json(res, 409, { error: e.message });
+        const failure = voiceFailure(e);
+        if (failure) return json(res, failure.status, failure.body);
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
       } finally {
         res.off("close", cancel);

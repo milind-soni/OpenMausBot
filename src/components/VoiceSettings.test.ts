@@ -150,3 +150,21 @@ it("sets the default voice even when the provider broadcast arrives before the s
   await act(async () => resolve({ tts: { provider: "openai", configured: true } }));
   expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "marin" });
 });
+
+it("keeps a voice selected before the pending provider save completes, even before bot props update", async () => {
+  let resolve!: (v: unknown) => void;
+  fixture.api.mockImplementation((path) => path === "/api/config"
+    ? new Promise((done) => { resolve = done; })
+    : Promise.resolve({ voices: [{ id: "cedar", label: "Cedar" }, { id: "marin", label: "Marin" }] }));
+  const onPatch = vi.fn();
+  const pepper = bot("pepper");
+  await render(pepper, onPatch);
+  const radio = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.textContent === "OpenAI")!;
+  await act(async () => radio.click());
+  fixture.config = { tts: { provider: "openai", configured: true } };
+  await render(pepper, onPatch);
+  const picker = host.querySelector<HTMLSelectElement>('select[data-voice-picker]')!;
+  await act(async () => { picker.value = "cedar"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => resolve({ tts: { provider: "openai", configured: true } }));
+  expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "cedar" });
+});

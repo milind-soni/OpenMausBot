@@ -315,6 +315,7 @@ import {
   toWireTask,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
+import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
 import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
 import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
@@ -14571,11 +14572,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           turnAttachmentsByTurn.set(key, current);
           return json(res, 201, { attached: true });
         } catch (error) {
-          if (error instanceof tts.NoVoiceConfigured) return json(res, 409, { error: error.message });
-          const status = (error as { status?: number }).status;
-          if (typeof status === "number" && status >= 400 && status < 500) {
-            return json(res, status, { error: error instanceof Error ? error.message : "voice note failed" });
-          }
+          const failure = voiceNoteFailure(error);
+          if (failure) return json(res, failure.status, failure.body);
           throw error;
         }
       }
