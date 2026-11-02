@@ -53,7 +53,10 @@ describe("remote connection Settings", () => {
     expect(html).toContain('<option value="server" selected="">Self-hosted server</option>');
     expect(html).toContain('<option value="companion">Desktop companion</option>');
     expect(html).toContain("Server pairing link");
-    expect(html).toContain("npx openmausbot pair --client");
+    // Full access first: only it can make a server you own your bots' home; chat-only says what it can't do.
+    expect(html.indexOf('data-pair-access="full"')).toBeLessThan(html.indexOf('data-pair-access="client"'));
+    expect(html).toMatch(/data-pair-access="full"[\s\S]*?Your own server: full access[\s\S]*?>npx openmausbot pair<\/code>/);
+    expect(html).toMatch(/data-pair-access="client"[\s\S]*?chat and approvals only[\s\S]*?>npx openmausbot pair --client<\/code>[\s\S]*?make the server your bots[\s\S]{1,8}home/);
     expect(html).toContain("12-character code");
     expect(html).toContain("custom domains and Cloudflare Tunnel");
     expect(html).toContain("Connect to server");
