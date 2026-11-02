@@ -1,9 +1,23 @@
 // Container entry: restarts the server in place on RESTART_EXIT_CODE, since a container restart cuts off a Caddy sharing its network.
 import { spawn, type ChildProcess } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { boxMemory, heapSizeArgs, type BoxMemory } from "./box-memory.ts";
 import { restartPolicy } from "./restart.ts";
+
+/** The server's heap sized to the container's memory limit, run through the bootstrap that keeps Node's compile cache on
+ * the data volume, so a restarted container reuses the compiled bundle. */
+export function serverCommand(here: string, env: NodeJS.ProcessEnv, options: { exists?: (path: string) => boolean; box?: BoxMemory } = {}) {
+  const bootstrap = join(here, "desktop-entry.mjs");
+  const cached = (options.exists ?? existsSync)(bootstrap);
+  const dataDir = env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
+  return {
+    args: [...heapSizeArgs((options.box ?? boxMemory()).cgroupLimit, env.NODE_OPTIONS), cached ? bootstrap : join(here, "index.js")],
+    env: cached ? { ...env, OMB_SERVER_COMPILE_CACHE: join(dataDir, "cache", "node-compile") } : env,
+  };
+}
 
 export function superviseServer(start: () => ChildProcess, options: { signals?: Pick<NodeJS.Process, "on" | "off">; now?: () => number } = {}): Promise<number> {
   const signals = options.signals ?? process, now = options.now ?? Date.now;
@@ -37,6 +51,6 @@ function isEntry(): boolean {
 }
 
 if (isEntry()) {
-  const server = join(dirname(fileURLToPath(import.meta.url)), "index.js");
-  void superviseServer(() => spawn(process.execPath, [server], { stdio: "inherit" })).then((code) => { process.exitCode = code; });
+  const server = serverCommand(dirname(fileURLToPath(import.meta.url)), process.env);
+  void superviseServer(() => spawn(process.execPath, server.args, { stdio: "inherit", env: server.env })).then((code) => { process.exitCode = code; });
 }

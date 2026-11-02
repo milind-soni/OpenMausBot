@@ -29,13 +29,13 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
 
-function setup(options: { home?: boolean; quota?: number } = {}) {
+function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean } = {}) {
   const service = fakePagesService({ quota: options.quota });
   const work = join(dir, "work"), data = join(dir, "data");
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
-  const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, fetch: (input, init) => service.fetch(input, init),
+  const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -50,6 +50,15 @@ describe("publishing a page", () => {
     writeSite(join(f.work, "site"));
     const outcome = await f.publish({ path: "site" });
     expect(outcome).toEqual({ status: 403, text: "Publishing a page needs a MausBot account. Sign in to MausBot in the app's Settings, then ask again." });
+    expect(f.service.minted).toEqual([]);
+    expect(f.cards).toEqual([]);
+  });
+
+  it("says publishing isn't available on a self-hosted server, never \"sign in\", since it has no Settings sign-in to hand over", async () => {
+    const f = setup({ selfHosted: true });
+    writeSite(join(f.work, "site"));
+    const outcome = await f.publish({ path: "site" });
+    expect(outcome).toEqual({ status: 503, text: "Publishing pages isn't available on self-hosted servers yet." });
     expect(f.service.minted).toEqual([]);
     expect(f.cards).toEqual([]);
   });

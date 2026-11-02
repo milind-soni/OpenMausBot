@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { Connect, Plugin } from "vite";
 import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -14,6 +15,21 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+const page = (file: string) => fileURLToPath(new URL(file, import.meta.url));
+
+/** The window's rail of places loads /rail: rail.html, its own small page, in development as from the server. */
+function railPage(): Plugin {
+  const rewrite: Connect.NextHandleFunction = (req, _res, next) => {
+    if (req.url === "/rail" || req.url?.startsWith("/rail?")) req.url = `/rail.html${req.url.slice("/rail".length)}`;
+    next();
+  };
+  return {
+    name: "rail-page",
+    configureServer: (server) => void server.middlewares.use(rewrite),
+    configurePreviewServer: (server) => void server.middlewares.use(rewrite),
+  };
+}
+
 const include = [
   "evals/**/*.test.ts",
   "server/**/*.test.ts",
@@ -28,7 +44,10 @@ const include = [
 ];
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), railPage()],
+  build: {
+    rollupOptions: { input: { index: page("./index.html"), rail: page("./rail.html") } },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(version),
   },
@@ -37,7 +56,7 @@ export default defineConfig({
     include,
     // OMB_VITEST_E2E=host (CI's Windows and macOS shards) leaves the e2e files that run on Linux only.
     exclude: [...configDefaults.exclude, ...(hostE2eOnly() ? portableE2eFiles(root, include) : [])],
-    setupFiles: ["server/testing/setup.ts"],
+    setupFiles: ["server/testing/setup.ts", "src/testing/all-locales.ts"],
     // the suite spawns fake provider CLIs and a real harness server;
     // parallel files introduce load-sensitive flakes for no win
     fileParallelism: false,

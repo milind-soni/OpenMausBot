@@ -16,8 +16,10 @@ type OneHomePhase =
   | { phase: "keeping"; updating?: true }
   /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`; or, with
    * `elsewhere`, they came back to that other computer and this one keeps its own copy from `since`, with automations off.
-   * `kept`: My Cloud goes on, and this computer's bots came home because the person keeps them here. */
-  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number }; kept?: true };
+   * `kept`: My Cloud goes on, and this computer's bots came home because the person keeps them here. `gone`: the Cloud this
+   * computer moved to was deleted, or ended while another Cloud is My Cloud; its own copy is open as it was at the move, with
+   * every automation off. */
+  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number }; kept?: true; gone?: true };
 export interface OneHomeCounts { bots: number; skills: number; logins: number; onePassword: boolean; chats: number; routines: number }
 
 export interface OneHomeCloud {
@@ -28,6 +30,8 @@ export interface OneHomeCloud {
   homecoming?: { installationId: string; name: string };
   /** This app's sign-in (the Admin's device id), while connected. */
   signIn?: string;
+  /** The Admin answered this sign-in just now (connected), so its word on the person's Clouds counts. */
+  verified?: boolean;
 }
 type Answer = { ok: boolean; status: number; body: any };
 
@@ -60,7 +64,12 @@ export function createOneHome(deps: {
     json(route: string): Promise<any>;
     call(method: string, route: string, body?: unknown): Promise<Answer>;
     forget?(): Promise<void>;
+    /** This computer's freeze marker: the Cloud it names (`cloud`), or the server of the person's own (`place`). */
+    marker?(): Promise<{ frozen: boolean; cloud?: string; place?: string }>;
   };
+  /** The Admin's word that this account's Cloud at `origin` is gone: deleted, or ended (stopped and kept only until it is
+   * deleted); null for anything else, and while it can't be asked. */
+  gone?(origin: string): Promise<"deleted" | "ended" | null>;
   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<Answer>; close(): Promise<void> }>;
   /** My Cloud's session is no longer needed: the move is done, paused, or not this account's. */
   release?(): Promise<void>;

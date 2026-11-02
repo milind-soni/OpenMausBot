@@ -10,6 +10,8 @@ import { parseToolScope } from "../shared/tool-scope.ts";
 
 import { bridgedCallName } from "./agents-bridge-names.ts";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
+import { decodeInjectId } from "./drivers/local-inject.ts";
+import { onThisNetwork } from "./drivers/openai-compat.ts";
 import { claudeCliSupports, parseClaudeCliVersion } from "./drivers/claude.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
 
@@ -31,6 +33,15 @@ export function agentsToolBridgeEnabled(cfg: BridgeConfig, env: NodeJS.ProcessEn
   if (override === "1") return true;
   if (override === "0") return false;
   return cfg.features?.agentsToolBridge === true;
+}
+
+/** A model on this machine or network reads the whole list on every turn, out of a small window and at laptop speed:
+ * about 15,000 tokens before the person has said anything. OMB_AGENTS_TOOL_BRIDGE=0 still wins. */
+function runsLocalModel(bot: { modelSelection?: { model?: unknown } } | null | undefined, engine: BridgeEngine | null | undefined): boolean {
+  const model = bot?.modelSelection?.model;
+  if (typeof model === "string" && decodeInjectId(model)) return true;
+  const url = (engine?.config as { url?: unknown } | undefined)?.url;
+  return engine?.driverKind === "openai-compat" && typeof url === "string" && onThisNetwork(url);
 }
 
 /** The engine a turn runs on, as far as the decision reads it. */
@@ -265,13 +276,13 @@ export function engineBridgeRefusal(
  * path or file content). */
 export function agentsToolBridgeRefusal(
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
   host?: EngineHost,
 ): string | null {
   try {
-    if (!agentsToolBridgeEnabled(cfg, env)) return "the switch is off";
+    if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !runsLocalModel(bot, engine))) return "the switch is off";
     // Security: selection gates match the name in the call, so any selection, even one that permits
     // everything or cannot be read, means no bridge.
     const selection = bot ? parseToolScope(bot.toolScope) : undefined;
@@ -299,7 +310,7 @@ function logWord(read: () => unknown, absent = false): string | null {
 /** The decision as the agents proxy's environment entry: "1" or "0", never left out. */
 export function agentsToolBridgeEnv(
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
   host?: EngineHost,
@@ -319,7 +330,7 @@ export function bridgedAgents<Agents extends { env: Record<string, string> }>(
   threadId: string,
   agents: Agents | undefined,
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env?: NodeJS.ProcessEnv,
   host?: EngineHost,
@@ -340,7 +351,7 @@ export function applyAgentsBridge<Agents extends { env: Record<string, string> }
   threadId: string,
   integrations: { agents?: Agents },
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env?: NodeJS.ProcessEnv,
   host?: EngineHost,

@@ -131,7 +131,7 @@ describe("Settings in Simple mode", () => {
   it("draws five pages on the desktop, General, AI, Computer, Usage & billing and Updates, and none of the Advanced-only ones", () => {
     const html = render();
     expect(pages(html)).toEqual(["general", "ai", "computer", "billing", "updates"]);
-    expect(SIMPLE_PAGES.map((page) => page.id)).toEqual(["general", "ai", "computer", "billing", "updates"]);
+    expect(SIMPLE_PAGES.map((page) => page.id)).toEqual(["general", "botAccess", "ai", "computer", "billing", "updates"]);
     expect(html).toMatch(/General<\/span>[\s\S]*AI<\/span>[\s\S]*Computer<\/span>[\s\S]*Usage &amp; billing<\/span>[\s\S]*Updates<\/span>/);
     expect(html).not.toContain("data-settings-group=");
     expect(html).not.toContain("data-settings-section=");
@@ -140,6 +140,19 @@ describe("Settings in Simple mode", () => {
     const picker = html.match(/<select aria-label="Settings"[\s\S]*?<\/select>/)![0];
     expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "ai", "computer", "billing", "updates"]);
     expect(html).toContain('data-settings-look="simple"');
+  });
+
+  it("gives a team's admins Bot access as its own page, found by its search words, and nobody else", () => {
+    fixture.config = { ...fixture.config, team: { id: "team-acme", name: "Acme" }, cloudHome: true };
+    fixture.ownerOrAdmin = true;
+    expect(pages(render())).toContain("botAccess");
+    expect(pages(render())[1]).toBe("botAccess");
+    expect(blocks(render())).not.toContain("botAccess");
+    fixture.section = "botAccess";
+    expect(currentPage(render())).toBe("botAccess");
+    fixture.section = "general";
+    fixture.ownerOrAdmin = false;
+    expect(pages(render())).not.toContain("botAccess");
   });
 
   it("files every Advanced page under one Simple page, or hides it", () => {

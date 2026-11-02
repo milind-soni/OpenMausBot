@@ -123,23 +123,33 @@ export function keepInBotFolder(server: StoredStdioMcpServer, use: BotFolderUse,
 
 export type BotMcpServerAdd = DisabledMcpServerAdd & { moved?: Array<{ from: string; to: string }> };
 
-/** A bot's add_mcp_server: saved off as always, with files from one of its conversation folders kept in its own folder.
+export type BotKept =
+  | { ok: true; server: StoredStdioMcpServer; moved: Array<{ from: string; to: string }> }
+  | { ok: false; status: number; error: string };
+
+/** A command server a bot adds or changes, with files from one of its conversation folders kept in its own folder.
  * `boxed`: no bot reaches another's folders, so a server using this bot's files becomes its own, and one using another
  * bot's files is refused; unboxed, every bot reaches them and the server stays every bot's. */
-export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string, boxed: boolean): BotMcpServerAdd {
-  const added = addDisabledMcpServer(current, body);
-  if (!added.ok || isRemoteMcpServer(added.server)) return added;
-  const use = botFolderUse(added.server, dataDir);
-  if (!use) return added;
-  const theirs = use === "several" || use.botId !== botId;
+export function keepForBot(server: StoredStdioMcpServer, botId: string, dataDir: string, boxed: boolean): BotKept {
+  const use = botFolderUse(server, dataDir);
+  const theirs = use !== null && (use === "several" || use.botId !== botId);
   if (theirs && boxed) {
     return { ok: false, status: 400, error: "That command uses files in another bot's folder, which only that bot can reach. Use files in your own folder." };
   }
-  if (theirs) return added;
-  const kept = keepInBotFolder(added.server, use, dataDir);
+  if (!use || theirs) return { ok: true, server, moved: [] };
+  const kept = keepInBotFolder(server, use, dataDir);
   if (!kept.ok) return { ok: false, status: 400, error: `This server could not be kept: ${kept.error}` };
-  const server = boxed ? { ...kept.server, bot: botId } : kept.server;
-  return { ...added, server, next: { ...current, [added.name]: server }, moved: kept.moved };
+  return { ok: true, server: boxed ? { ...kept.server, bot: botId } : kept.server, moved: kept.moved };
+}
+
+/** A bot's mcp_server add: saved off first, its files kept as keepForBot says. */
+export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string, boxed: boolean): BotMcpServerAdd {
+  const added = addDisabledMcpServer(current, body);
+  if (!added.ok || isRemoteMcpServer(added.server)) return added;
+  const kept = keepForBot(added.server, botId, dataDir, boxed);
+  if (!kept.ok) return kept;
+  if (kept.server === added.server) return added;
+  return { ...added, server: kept.server, next: { ...current, [added.name]: kept.server }, moved: kept.moved };
 }
 
 export interface ClaimedMcpServers {

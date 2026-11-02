@@ -97,7 +97,13 @@ export function useSidebarWidth({ simple, sidePanelOpen, sidebarRef }: {
   };
 }
 
-/** The sidebar's edge: dragged, it resizes the sidebar, and past AVATARS_BELOW it leaves the column of avatars or opens
+/** While the edge is dragged the whole page shows the resize cursor and selects no text, wherever the pointer is. */
+function holdPageCursor(held: boolean) {
+  document.body.style.cursor = held ? "col-resize" : "";
+  document.body.style.userSelect = held ? "none" : "";
+}
+
+/** The sidebar's edge: a 12px strip centred on the sidebar's hairline that draws nothing of its own. Dragged, it resizes the sidebar, and past AVATARS_BELOW it leaves the column of avatars or opens
  * the sidebar again at its last width. The arrow keys do the same, a step at a time. */
 export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth, onAvatars, style }: {
   sizing: SidebarSizing;
@@ -109,10 +115,12 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
 }) {
   const drag = useRef<{ state: EdgeDrag; from: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  useEffect(() => () => holdPageCursor(false), []);
   const end = () => {
     const ended = drag.current;
     drag.current = null;
     setDragging(false);
+    holdPageCursor(false);
     if (ended) sizing.finishResize();
   };
   return (
@@ -125,9 +133,8 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
       aria-valuenow={avatars ? avatarsWidth : sizing.valueNow}
       tabIndex={0}
       data-sidebar-resize={dragging ? "dragging" : ""}
-      className={cn("absolute inset-y-0 -right-1 z-20 hidden w-2 cursor-col-resize touch-none md:block",
-        "after:absolute after:inset-y-0 after:left-[3px] after:w-0.5 after:transition-colors after:duration-150 hover:after:bg-accent/50 focus-visible:after:bg-accent",
-        dragging && "after:bg-accent")}
+      className={cn("absolute inset-y-0 -right-1.5 z-20 hidden w-3 cursor-col-resize touch-none outline-none md:block",
+        "after:absolute after:inset-y-0 after:left-[5px] after:w-0.5 focus-visible:after:bg-focus")}
       style={style}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
@@ -135,6 +142,7 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
         event.currentTarget.setPointerCapture(event.pointerId);
         drag.current = { state: { avatars, following: !avatars }, from: sizing.startResize() };
         setDragging(true);
+        holdPageCursor(true);
       }}
       onPointerMove={(event) => {
         const current = drag.current;

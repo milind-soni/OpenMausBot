@@ -14,6 +14,8 @@ export interface SidebarMenuItem {
   note?: string;
   icon?: React.ReactNode;
   active?: boolean;
+  /** one choice of several: announced as chosen or not; the row draws its own mark */
+  checked?: boolean;
   attention?: boolean;
   attentionTone?: "danger" | "accent";
   disabled?: boolean;
@@ -42,11 +44,15 @@ const ANCHOR_GAP = 6;
 type Box = { left: number; right: number; top: number; bottom: number };
 type Size = { width: number; height: number };
 
-export function anchoredMenuPosition(anchor: Box, menu: Size, viewport: Size, rtl = false): { left: number; top: number } {
+/** `start`: above the trigger on its start edge. `end`: below it on its end edge, for a choice at the end of a row. */
+export function anchoredMenuPosition(anchor: Box, menu: Size, viewport: Size, rtl = false, align: "start" | "end" = "start"): { left: number; top: number } {
   const maxLeft = Math.max(EDGE_MARGIN, viewport.width - menu.width - EDGE_MARGIN);
-  const left = Math.min(Math.max(rtl ? anchor.right - menu.width : anchor.left, EDGE_MARGIN), maxLeft);
+  const startsOnRight = align === "end" ? !rtl : rtl;
+  const left = Math.min(Math.max(startsOnRight ? anchor.right - menu.width : anchor.left, EDGE_MARGIN), maxLeft);
   const above = anchor.top - ANCHOR_GAP - menu.height;
-  const top = above >= EDGE_MARGIN ? above : anchor.bottom + ANCHOR_GAP;
+  const below = anchor.bottom + ANCHOR_GAP;
+  const fitsBelow = below + menu.height <= viewport.height - EDGE_MARGIN;
+  const top = align === "end" ? (fitsBelow || above < EDGE_MARGIN ? below : above) : above >= EDGE_MARGIN ? above : below;
   const maxTop = Math.max(EDGE_MARGIN, viewport.height - menu.height - EDGE_MARGIN);
   return { left, top: Math.min(Math.max(top, EDGE_MARGIN), maxTop) };
 }
@@ -69,7 +75,7 @@ const isRtl = (element: Element | null) =>
   typeof getComputedStyle === "function" && element ? getComputedStyle(element).direction === "rtl" : false;
 
 const menuItems = (menu: HTMLElement | null) =>
-  menu ? [...menu.querySelectorAll<HTMLElement>(':scope > div > [role="menuitem"]:not(:disabled)')] : [];
+  menu ? [...menu.querySelectorAll<HTMLElement>(':scope > div > [role^="menuitem"]:not(:disabled)')] : [];
 
 export function nextMenuIndex(key: string, current: number, count: number): number | null {
   if (count === 0) return null;
@@ -105,7 +111,8 @@ function MenuRows({
           {item.heading && <div className={MENU_HEADING}>{item.heading}</div>}
           <button
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
             data-tour={item.tourId}
             data-menu-key={item.key}
             title={item.title}
@@ -162,6 +169,7 @@ export function SidebarPopoverMenu({
   ariaLabel,
   openOnHover = false,
   placement = "above",
+  align = "start",
   triggerClassName = "w-full",
   triggerTitle,
   triggerLabel,
@@ -170,6 +178,7 @@ export function SidebarPopoverMenu({
   renderTrigger,
 }: {
   placement?: "above" | "below";
+  align?: "start" | "end";
   items: SidebarMenuItem[];
   ariaLabel: string;
   openOnHover?: boolean;
@@ -254,7 +263,7 @@ export function SidebarPopoverMenu({
       const trigger = triggerRef.current, menu = menuRef.current;
       if (!trigger || !menu) return;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      if (anchored) setPosition(anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger)));
+      if (anchored) setPosition(anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger), align));
       const sub = subRef.current, row = subRowRef.current;
       if (sub && row) {
         setSubPosition(submenuPosition(menu.getBoundingClientRect(), row.getBoundingClientRect(), { width: sub.offsetWidth, height: sub.offsetHeight }, viewport, isRtl(trigger)));
@@ -267,7 +276,7 @@ export function SidebarPopoverMenu({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [anchored, motion.shown, submenu, items.length]);
+  }, [anchored, align, motion.shown, submenu, items.length]);
 
   // Focus waits until the anchored sheet is placed: a hidden sheet cannot take focus.
   useEffect(() => {
