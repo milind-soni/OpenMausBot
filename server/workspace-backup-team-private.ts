@@ -53,16 +53,16 @@ export function teamPrivateThreads(files: { starters: string; groups: string; bo
 
 const memberLayer = (id: string): boolean => isLayerId(id) && layerAudience(id).startsWith("member:");
 
-/** A path in the data folder that is one member's: their folder under people/, their inbox, their layers of every bot,
- * their own bot's folders, and the work folders of their private conversations. */
+/** A path in the data folder that is one member's: their folder under people/, their inbox, a file only their chats use,
+ * or anything named for one of their conversations, their layers or their own bot, wherever it is kept. */
 export function omittedAsTeamPrivate(path: string, privacy: TeamPrivacy): boolean {
   if (/^(?:people(?:\/|$)|person-inbox\.json)/.test(path)) return true;
   const attachment = /^attachments\/([^/]+)$/.exec(path)?.[1];
   if (attachment && privacy.attachments.has(attachment)) return true;
-  const folder = /^(?:workspaces|task-workspaces|bots)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
-  if (folder && (memberLayer(folder) || privacy.bots.has(folder))) return true;
-  const work = /^task-workspaces\/[^/]+\/([^/]+)(?:\/|$)/.exec(path);
-  return work !== null && privacy.threads.has(work[1]!);
+  return path.split("/").some((part) => {
+    const name = part.replace(/\.[^-]*$/, "");
+    return memberLayer(name) || privacy.bots.has(name) || privacy.threads.has(name);
+  });
 }
 
 /** bots.json without members' own bots and without the private conversations' tasks. */
@@ -149,6 +149,8 @@ export function stripTeamPrivate(snapshot: { messages: string; runtime: string }
   const threads = [...privacy.threads];
   strip(snapshot.messages, (db) => {
     for (const table of ["messages", "thread_state", "chat_followups", "notification_log"]) deleteWhereIn(db, table, "thread_id", threads);
+    // A tool's saved answer, kept only so a retried call repeats it: nothing says whose chat it came from.
+    if (hasTable(db, "command_receipts")) db.exec("DELETE FROM command_receipts");
     if (!hasTable(db, "memory_files")) return;
     const indexed = db.prepare("SELECT DISTINCT bot_id AS id FROM memory_files").all().map((row) => String(row.id));
     deleteWhereIn(db, "memory_files", "bot_id", indexed.filter((id) => memberLayer(id) || privacy.bots.has(id)));

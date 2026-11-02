@@ -437,7 +437,7 @@ describe("bot visibility between teammates", () => {
     expect(canReach(hr, hr2)).toBe(true);
     expect(reachablePeers([...fleet, hr, hr2, admins], self).map((bot) => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
     expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["hr2"]);
-    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toEqual({ error: reachRefusal(self, hr) });
     expect(peerAllowed(self, "hr")).toBe(true);
   });
 });

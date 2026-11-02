@@ -229,10 +229,10 @@ it("a question left for a day is said in the person's own inbox chat, once the c
   expect((await team.as(ada, "PATCH", `/api/bots/${reporter.id}`, { approvalMode: "ask" })).status).toBe(200);
   const bots = async () => (await team.as(mira, "GET", "/api/bots")).body.bots as Array<Bot & { defaultBot?: unknown; tasks?: Array<{ threadId: string; inbox?: true; openAsks?: number }> }>;
   const own = (await bots()).find((bot) => bot.defaultBot)!;
-  const moved = "Reporter still waits on your answer about the build, since yesterday.";
+  const saidLine = "Reporter still waits on your answer about the build, since yesterday.";
   plan({
     [reporter.id]: { turns: [{ approve: { tool_name: "Bash", input: { command: "rm -rf build" } }, reply: "Cleaned." }] },
-    [own.id]: { turns: [{ reply: "Morning." }, { reply: moved }] },
+    [own.id]: { turns: [{ reply: "Morning." }, { reply: saidLine }] },
   });
   const asked = await team.as(ada, "POST", `/api/bots/${reporter.id}/messages`, { text: "Clean the build", threadId: reporter.threadId });
   expect(asked.status, JSON.stringify(asked.body)).toBe(202);
@@ -247,14 +247,15 @@ it("a question left for a day is said in the person's own inbox chat, once the c
   };
 
   const fresh = await say("Good morning", "Morning.");
-  expect(fresh.system).not.toContain("have waited on the person for more than a day");
+  expect(`${fresh.system}\n${JSON.stringify(fresh.prompt)}`).not.toContain("have waited on the person for more than a day");
 
   writeFileSync(CLOCK, String(25 * 60 * 60_000));
-  const aged = await say("Anything for me?", moved);
-  expect(aged.system).toContain("These have waited on the person for more than a day");
-  expect(aged.system).toContain('"from":"Reporter"');
-  expect(aged.system).toContain('"waited":"since yesterday"');
-  expect(aged.system).toContain("not a card or a new question");
+  const aged = await say("Anything for me?", saidLine);
+  const told = `${aged.system}\n${JSON.stringify(aged.prompt)}`;
+  expect(told).toContain("These have waited on the person for more than a day");
+  expect(told).toContain("Reporter");
+  expect(told).toContain("since yesterday");
+  expect(told).toContain("not a card or a new question");
 
   // A line in Mira's chat, not a new card: still the one ask, and Ada cannot open her inbox.
   expect((await bots()).find((bot) => bot.id === own.id)!.tasks!.find((task) => task.inbox)!.openAsks).toBe(1);

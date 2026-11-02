@@ -51,6 +51,8 @@ function teamData(root: string): void {
     + " CREATE TABLE chat_followups(id TEXT PRIMARY KEY, kind TEXT, owner_id TEXT, thread_id TEXT, send_id TEXT, status TEXT, payload TEXT);"
     + " CREATE TABLE notification_log(id TEXT PRIMARY KEY, at INTEGER, kind TEXT, bot_id TEXT, bot_name TEXT, thread_id TEXT, group_id TEXT, title TEXT, body TEXT, avatar_url TEXT, for_person TEXT, read INTEGER);");
   ensureMemoryIndex(db);
+  db.exec("CREATE TABLE command_receipts(kind TEXT, key TEXT, at INTEGER, result TEXT, PRIMARY KEY (kind, key))");
+  db.prepare("INSERT INTO command_receipts VALUES ('memory', 'k', 1, ?)").run("Bob's receipted secret");
   for (const [bot, text] of [["bot", "team notes"], [`bot--member-${BOB}`, "Bob's noted secret"], ["bobs-own", "Bob's own noted secret"]]) {
     db.prepare("INSERT INTO memory_files(bot_id, path, text, mtime_ms, bytes) VALUES (?, 'MEMORY.md', ?, 1, 1)").run(bot!, text!);
   }
@@ -101,6 +103,8 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     expect(omittedAsTeamPrivate("task-workspaces/bot/main/plan.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate(`people/${BOB}/about.json`, privacy)).toBe(true);
     expect(omittedAsTeamPrivate("peoplesoft/x", privacy)).toBe(false);
+    for (const kept of ["events/bob-chat.ndjson", "native/bob-chat.ndjson", `memory-journal/bot--member-${BOB}.ndjson`]) expect(omittedAsTeamPrivate(kept, privacy), kept).toBe(true);
+    for (const shared of ["events/main.ndjson", "native/main.ndjson", "memory-journal/bot.ndjson", "memory-journal/bot--room-room.ndjson"]) expect(omittedAsTeamPrivate(shared, privacy), shared).toBe(false);
     expect(withoutTeamPrivate([{ id: "bot", tasks: [{ threadId: "main" }, { threadId: "bob-chat" }] }, { id: "bobs-own", tasks: [] }], privacy)).toEqual([{ id: "bot", tasks: [{ threadId: "main" }] }]);
   });
 
