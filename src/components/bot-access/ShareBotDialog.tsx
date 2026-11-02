@@ -65,6 +65,11 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }
     setNewOwner(null);
   });
 
+  const keepOwner = () => {
+    setError("");
+    setNewOwner(null);
+  };
+
   const yourRow = !editable && team?.me && bot.yourAccess && bot.yourAccess !== "none"
     ? <PersonRow person={team.me} you data-share-yours trailing={<span className="px-2 text-[13px] text-ink-secondary">{levelLabel(bot.yourAccess)}</span>} /> : null;
 
@@ -77,12 +82,12 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }
         onKeyDown={(event) => {
           event.stopPropagation();
           if (event.key === "Escape" && !event.defaultPrevented) {
-            if (newOwner) setNewOwner(null); else onClose();
+            if (newOwner) keepOwner(); else onClose();
           }
           if (event.key === "Tab") trapTab(event, dialogRef.current);
         }}>
         {newOwner ? (
-          <MakeOwner person={newOwner} bot={bot} busy={busy} error={error} onCancel={() => { setError(""); setNewOwner(null); }} onConfirm={() => void handOver(newOwner)} />
+          <MakeOwner person={newOwner} bot={bot} busy={busy} error={error} onCancel={keepOwner} onConfirm={() => void handOver(newOwner)} />
         ) : <>
           <header className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
             <h2 id="share-bot-title" className="min-w-0 truncate text-[17px] font-semibold">{t("botAccess.title", { bot: bot.name })}</h2>

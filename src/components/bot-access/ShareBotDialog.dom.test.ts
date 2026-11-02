@@ -220,6 +220,10 @@ it("stays on the confirmation and says why when the handover is refused", async 
   [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Make owner")!.click();
   await settle();
   expect(dialog()!.querySelector("[data-share-make-owner]")!.querySelector('[role="alert"]')!.textContent).toBe("Bob already has a Chief of Staff");
+  dialog()!.focus();
+  await press("Escape");
+  expect(dialog()!.querySelector("[data-share-make-owner]")).toBeNull();
+  expect(dialog()!.querySelector('[role="alert"]')).toBeNull();
 });
 
 it("offers Make owner only to whoever may hand it on, and never for an address nobody on the team has", async () => {
