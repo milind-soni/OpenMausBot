@@ -337,11 +337,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         />
       )}
       {!calendarFocus && <PlacesRail />}
-      {/* A framed window shows the app, its sidebar and the chat or page, in a rounded card on the frame beside the
-          window's rail: its top corners and its bottom-left corner are round, and it runs to the window's right and
-          bottom edges. */}
+      {/* A framed window shows the app, its sidebar and the chat or page, as one square pane under the top bar and beside
+          the window's rail, running to the window's right and bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
-        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app ring-1 ring-ink/[0.06]" : "contents"}>
+        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden bg-app" : "contents"}>
       {framed && strips}
       <div className={framed ? "relative flex min-h-0 flex-1" : "contents"}>
       {!calendarFocus && <Sidebar
