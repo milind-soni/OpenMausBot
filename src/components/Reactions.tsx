@@ -7,7 +7,8 @@ import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { api, useStore, type Bot, type Message } from "@/state/store";
+import { api, type Bot, type Message } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
 
 const LABEL: Record<Reaction, LocaleKey> = {
   "👍": "chat.reaction.yes",
@@ -33,7 +34,7 @@ const newestTap = new Map<string, number>();
 let taps = 0;
 
 function useReaction(threadId: string, message: Message) {
-  const { dispatch } = useStore();
+  const { dispatch } = useStoreRef();
   const me = useReactor();
   const latest = useRef(message);
   useLayoutEffect(() => { latest.current = message; });

@@ -67,6 +67,8 @@ export function world({ journal = done(), marker = null, state = connected(), po
     },
     signInAgain: async () => { w.signIns.push("again"); },
     begin: async () => { w.signIns.push("begin"); },
+    signOut: async () => { w.signIns.push("out"); w.state = { status: "signed-out" }; },
+    reopen: async () => { w.signIns.push("reopen"); },
     async hideCloud(cloudId) {
       w.hides.push(cloudId);
       if (w.removeAnswer === "removed") w.state = { ...w.state, clouds: (w.state?.clouds ?? []).filter((cloud) => cloud.id !== cloudId) };

@@ -88,3 +88,11 @@ describe("the line on a computer whose bots come home because the person keeps t
     expect(moveLine({ phase: "back", kept: true }, "cloud")).toBeNull();
   });
 });
+
+describe("the line on a computer whose Cloud is gone while My Cloud is another", () => {
+  it("says once, on this computer only, that the bots are back as they were at the move, with their automations off", () => {
+    expect(moveLine({ phase: "back", gone: true }, "local")).toEqual({ kind: "done", extra: [],
+      text: "The Cloud your bots moved to has ended, so they're back on this computer as they were when they moved. Their automations are off: switch on the ones you want." });
+    expect(moveLine({ phase: "back", gone: true }, "cloud")).toBeNull();
+  });
+});
