@@ -97,6 +97,7 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   const requests: ChatRequest[] = [];
   const rpcStarted = deferred<{ name: string; args: Record<string, unknown> }>();
   const server = createServer(async (request, response) => {
+    if (request.url === "/api/version") { response.writeHead(404).end(); return; }
     if (request.url === "/v1/models") {
       response.setHeader("content-type", "application/json");
       response.end('{"data":[]}');
