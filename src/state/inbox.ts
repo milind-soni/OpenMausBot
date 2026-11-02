@@ -29,11 +29,27 @@ function store<T>(initial: T) {
 const list = store<InboxView | null>(null);
 export const currentInbox = list.get;
 export const useInboxView = (): InboxView | null => useSyncExternalStore(list.subscribe, list.get, list.get);
-/** Tests and previews show a list of their own. */
-export const setInboxView = list.set;
 
 let reading: Promise<void> | null = null;
 let readAgain = false;
+let revision = 0;
+let generation = 0;
+let confirmed: InboxView | null = null;
+const pending = new Map<number, { id: string; patch: Partial<InboxRow> }>();
+const publishList = () => {
+  const view = confirmed;
+  if (!view) { list.set(null); return; }
+  const rows = view.rows.map((row) => {
+    for (const change of pending.values()) {
+      if (change.id === row.id) row = { ...row, ...change.patch };
+    }
+    return row;
+  });
+  list.set({ ...view, rows });
+};
+const replaceList = (view: InboxView | null) => { confirmed = view; publishList(); };
+/** Tests and previews show a list of their own. */
+export const setInboxView = replaceList;
 /** Reads the list now, or once more after the read on its way, so the newest answer always lands last. */
 export function refreshInbox(): Promise<void> {
   if (reading) { readAgain = true; return reading; }
@@ -41,8 +57,12 @@ export function refreshInbox(): Promise<void> {
     try {
       do {
         readAgain = false;
+        const era = generation;
+        const request = ++revision;
         const view = await api<InboxView>("/api/inbox", { background: true }).catch(() => null);
-        if (view && Array.isArray(view.rows)) list.set(view);
+        if (era !== generation) continue;
+        if (request !== revision) { readAgain = true; continue; }
+        if (view && Array.isArray(view.rows)) replaceList(view);
       } while (readAgain);
     } finally {
       reading = null;
@@ -51,42 +71,64 @@ export function refreshInbox(): Promise<void> {
   return reading;
 }
 
+/** Off a team or signed out: the list goes, and no answer still on its way can bring it back. */
+export function forgetInbox(): void {
+  generation++;
+  pending.clear();
+  replaceList(null);
+}
+
 /** Keeps the list in step with the person's inbox task; nothing off a team. */
 export function useInboxLoader(version: string | null): void {
   useEffect(() => {
-    if (version === null) { list.set(null); return; }
+    if (version === null) { forgetInbox(); return; }
     void refreshInbox();
   }, [version]);
 }
 
 const patchRow = (id: string, patch: Partial<InboxRow>) => {
-  const view = list.get();
-  if (view) list.set({ ...view, rows: view.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+  if (confirmed) confirmed = { ...confirmed, rows: confirmed.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)) };
 };
 
-async function mark(id: string, what: "read" | "done"): Promise<void> {
+async function mark(id: string, what: "read" | "done", patch: Partial<InboxRow>): Promise<void> {
+  const era = generation;
+  const request = ++revision;
+  pending.set(request, { id, patch });
+  publishList();
   const view = await api<InboxView>(`/api/inbox/${id}/${what}`, { method: "POST", background: true }).catch(() => null);
-  if (view && Array.isArray(view.rows)) list.set(view);
-  else void refreshInbox();
+  const current = request === revision;
+  ++revision;
+  pending.delete(request);
+  if (era !== generation) return;
+  if (current && view && Array.isArray(view.rows)) replaceList(view);
+  else {
+    if (view && Array.isArray(view.rows)) patchRow(id, patch);
+    publishList();
+    void refreshInbox();
+  }
 }
 
 /** The person read a line: it is no longer bold. */
 export function readInboxRow(row: Pick<InboxRow, "id" | "unread">): void {
   if (!row.unread) return;
-  patchRow(row.id, { unread: false });
-  void mark(row.id, "read");
+  void mark(row.id, "read", { unread: false });
 }
 
 /** The person is done with a line of news: it moves to Done. */
 export function doneInboxRow(row: Pick<InboxRow, "id">): void {
-  patchRow(row.id, { tab: "done", unread: false });
-  void mark(row.id, "done");
+  void mark(row.id, "done", { tab: "done", unread: false });
 }
 
 /** A reply to a line of news that waits on one: it goes back where the line came from, as a Reply in the chat does. */
 export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId">, row: Pick<InboxRow, "id">, text: string): Promise<void> {
-  await api(`/api/bots/${view.botId}/messages`, { method: "POST", body: JSON.stringify({ text, threadId: view.threadId, replyToId: row.id, sendId: crypto.randomUUID() }) });
-  void refreshInbox();
+  const era = generation;
+  ++revision;
+  try {
+    await api(`/api/bots/${view.botId}/messages`, { method: "POST", body: JSON.stringify({ text, threadId: view.threadId, replyToId: row.id, sendId: crypto.randomUUID() }) });
+  } finally {
+    ++revision;
+    if (era === generation) void refreshInbox();
+  }
 }
 
 export interface InboxPanelState { open: boolean; tab: InboxTab; reading: string | null }
