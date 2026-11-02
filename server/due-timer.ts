@@ -25,7 +25,7 @@ let clock: ReturnType<typeof setInterval> | null = null;
 
 function watchClock(look: () => void): () => void {
   watchers.add(look);
-  clock ??= setInterval(() => { for (const watcher of [...watchers]) watcher(); }, DUE_CLOCK_MS);
+  clock ??= setInterval(() => { for (const watcher of watchers) watcher(); }, DUE_CLOCK_MS);
   clock.unref?.();
   return () => {
     watchers.delete(look);
