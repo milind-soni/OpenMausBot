@@ -498,7 +498,7 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   call?: LiveCallRecord;
   /** activity messages: tool name + outcome. */
   tool?: {
-    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
+    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string; clipped?: boolean;
     /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
     step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
     /** Words the harness wrote for what the call did, shown in place of `name`; `name` stays the tool's own. */
