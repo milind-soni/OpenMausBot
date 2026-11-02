@@ -3,6 +3,9 @@ import { t } from "@/lib/i18n";
 import { threadApprovalModes, type Bot, type InstanceInfo } from "@/state/store";
 import type { BotUpdatePatch } from "@/state/bot-patch-queue";
 import { approvalModeFor, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
+import { sameAccess, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../shared/bot-access";
+import { botOwner } from "../../shared/bot-owner";
+import { accessOfBot, withPerson } from "@/components/bot-access/access";
 import type { EffortLevel, ModelSelection } from "../../shared/wire";
 
 /** Custom is per bot: it can only be granted through the desktop's confirmation for that one bot. */
@@ -11,10 +14,13 @@ export type TeamApprovalMode = (typeof TEAM_APPROVAL_MODES)[number];
 
 export type TeamChange =
   | { kind: "approval"; mode: TeamApprovalMode }
-  | { kind: "model"; model?: string; effort?: EffortLevel | null };
+  | { kind: "model"; model?: string; effort?: EffortLevel | null }
+  /** A person's level null takes them off; the bot's owner is never listed, so they are left out for the bot they own. */
+  | { kind: "access"; everyone?: BotAccessLevel; person?: { email: string; level: GrantedLevel | null } };
 
 export type TeamPlanRow =
   | { bot: Bot; status: "apply"; patch: BotUpdatePatch }
+  | { bot: Bot; status: "apply"; access: BotAccess }
   | { bot: Bot; status: "unchanged" }
   | { bot: Bot; status: "skip"; reason: string };
 
@@ -63,8 +69,18 @@ export function teamEffortChoices(bots: readonly Bot[], instances: readonly Inst
   return order.filter((level) => offered.has(level));
 }
 
+function planAccess(bot: Bot, change: Extract<TeamChange, { kind: "access" }>): TeamPlanRow {
+  if (bot.defaultBot?.person) return { bot, status: "skip", reason: t("teamSettings.skip.ownMausBot") };
+  if (bot.yourAccess !== "edit") return { bot, status: "skip", reason: t("teamSettings.skip.cantShare") };
+  const before = accessOfBot(bot);
+  let access: BotAccess = change.everyone ? { everyone: change.everyone, people: before.people } : before;
+  if (change.person && change.person.email !== botOwner(bot)) access = withPerson(access, change.person.email, change.person.level);
+  return sameAccess(before, access) ? { bot, status: "unchanged" } : { bot, status: "apply", access };
+}
+
 export function planTeamChange(bots: readonly Bot[], instances: readonly InstanceInfo[], change: TeamChange): TeamPlanRow[] {
   return bots.map((bot): TeamPlanRow => {
+    if (change.kind === "access") return planAccess(bot, change);
     const engine = engineOf(bot, instances);
     const engineName = engine?.displayName ?? bot.modelSelection.instanceId;
     if (change.kind === "approval") {
@@ -102,24 +118,26 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
 }
 
 export function planNeedsLocalAutoConsent(plan: readonly TeamPlanRow[]): boolean {
-  return plan.some((row) => row.status === "apply" && row.patch.approvalMode === "auto" && row.bot.computer === "local");
+  return plan.some((row) => row.status === "apply" && "patch" in row && row.patch.approvalMode === "auto" && row.bot.computer === "local");
 }
 
 /** One bot at a time, never in parallel: a refusal on one must not race the next. */
 export async function applyTeamPlan(
   plan: readonly TeamPlanRow[],
   persist: (bot: Bot, patch: BotUpdatePatch) => Promise<unknown>,
-  options: { acknowledgeLocalAuto?: boolean; onProgress?: (done: number) => void } = {},
+  options: { acknowledgeLocalAuto?: boolean; onProgress?: (done: number) => void; share?: (bot: Bot, access: BotAccess) => Promise<unknown> } = {},
 ): Promise<TeamResultRow[]> {
   const results: TeamResultRow[] = [];
   for (const row of plan) {
     if (row.status === "unchanged") results.push({ bot: row.bot, status: "unchanged" });
     else if (row.status === "skip") results.push({ bot: row.bot, status: "skipped", reason: row.reason });
     else {
-      const patch = options.acknowledgeLocalAuto && row.patch.approvalMode === "auto" && row.bot.computer === "local"
+      const patch = "access" in row ? null : options.acknowledgeLocalAuto && row.patch.approvalMode === "auto" && row.bot.computer === "local"
         ? { ...row.patch, acknowledgeLocalAuto: true } : row.patch;
       try {
-        await persist(row.bot, patch);
+        if (patch) await persist(row.bot, patch);
+        else if ("access" in row && options.share) await options.share(row.bot, row.access);
+        else throw new Error(t("teamSettings.skip.cantShare"));
         results.push({ bot: row.bot, status: "applied" });
       } catch (cause) {
         results.push({ bot: row.bot, status: "skipped", reason: cause instanceof Error ? cause.message : String(cause) });

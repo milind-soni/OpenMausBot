@@ -19,15 +19,20 @@ import {
   type TeamResultRow,
 } from "@/lib/team-bulk-settings";
 import { api, desktopApprovalBridge, persistBotUpdate, useStore } from "@/state/store";
+import { useTeamPeople } from "@/state/team-people";
+import { BOT_ACCESS_LEVELS, GRANTED_LEVELS, type BotAccessLevel, type GrantedLevel } from "../../shared/bot-access";
 import { EFFORT_LEVELS, type EffortLevel } from "../../shared/wire";
+import { levelLabel, saveAccess } from "./bot-access/access";
+import { useTeamName } from "./bot-access/ShareBotButton";
 import { approvalModeOptions } from "./ApprovalModeSelector";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { effortLabel } from "./ModelPicker";
 import { Select } from "./Select";
 
-type Tab = "approval" | "model";
+type Tab = "approval" | "model" | "access";
 const KEEP = "";
 const ENGINE_DEFAULT = "default";
+const REMOVE = "remove";
 
 export function TeamSettingsRows({ rows }: { rows: ReadonlyArray<TeamPlanRow | TeamResultRow> }) {
   return (
@@ -54,6 +59,13 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
   const [mode, setMode] = useState<TeamApprovalMode | null>(null);
   const [model, setModel] = useState<string>(KEEP);
   const [effort, setEffort] = useState<string>(KEEP);
+  const [everyone, setEveryone] = useState<string>(KEEP);
+  const [person, setPerson] = useState<string>(KEEP);
+  const [personLevel, setPersonLevel] = useState<string>("chat");
+  const teamName = useTeamName();
+  const teamPeople = useTeamPeople();
+  // Admins and owners always edit every bot, so only Users are offered.
+  const members = useMemo(() => (teamPeople?.people ?? []).filter((one) => one.role === "member").sort((a, b) => a.name.localeCompare(b.name)), [teamPeople]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<TeamResultRow[] | null>(null);
@@ -65,6 +77,12 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
   const efforts = useMemo(() => teamEffortChoices(bots, state.instances, EFFORT_LEVELS), [bots, state.instances]);
   const change: TeamChange | null = tab === "approval"
     ? mode ? { kind: "approval", mode } : null
+    : tab === "access" ? everyone === KEEP && person === KEEP ? null
+      : {
+        kind: "access",
+        ...(everyone === KEEP ? {} : { everyone: everyone as BotAccessLevel }),
+        ...(person === KEEP ? {} : { person: { email: person, level: personLevel === REMOVE ? null : personLevel as GrantedLevel } }),
+      }
     : model === KEEP && effort === KEEP ? null
       : {
         kind: "model",
@@ -87,7 +105,10 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
     const outcome = await applyTeamPlan(plan, async (bot, patch) => {
       const saved = await persistBotUpdate(bot.id, patch, new AbortController().signal, api, desktopApprovalBridge(), bot);
       dispatch({ type: "botPatched", bot: saved });
-    }, { acknowledgeLocalAuto, onProgress: setProgress });
+    }, {
+      acknowledgeLocalAuto, onProgress: setProgress,
+      share: async (bot, access) => dispatch({ type: "botPatched", bot: await saveAccess(bot.id, access) }),
+    });
     setResults(outcome);
     setRunning(false);
   };
@@ -127,6 +148,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
             <div className="mb-3 flex gap-1 rounded-lg bg-inset p-0.5" role="tablist">
               <button type="button" role="tab" aria-selected={tab === "approval"} disabled={running} className={tabClass(tab === "approval")} onClick={() => setTab("approval")}>{t("teamSettings.tab.approval")}</button>
               <button type="button" role="tab" aria-selected={tab === "model"} disabled={running} className={tabClass(tab === "model")} onClick={() => setTab("model")}>{t("teamSettings.tab.model")}</button>
+              {teamName && <button type="button" role="tab" aria-selected={tab === "access"} disabled={running} className={tabClass(tab === "access")} onClick={() => setTab("access")}>{t("teamSettings.tab.access")}</button>}
             </div>
             {tab === "approval" ? (
               <fieldset disabled={running} className="flex flex-col gap-1">
@@ -142,6 +164,30 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
                   </label>
                 ))}
                 <p className="mt-1 text-[12px] text-ink-secondary">{t("teamSettings.allThreads")} {t("teamSettings.customPerBot")}</p>
+              </fieldset>
+            ) : tab === "access" && teamName ? (
+              <fieldset disabled={running} className="flex flex-col gap-3">
+                <label className="text-[13px] text-ink-secondary">{t("botAccess.everyone", { team: teamName })}
+                  <Select className="mt-1 w-full" aria-label={t("botAccess.everyone", { team: teamName })} value={everyone} onChange={(event) => setEveryone(event.target.value)}>
+                    <option value={KEEP}>{t("teamSettings.keepEveryone")}</option>
+                    {BOT_ACCESS_LEVELS.map((level) => <option key={level} value={level}>{levelLabel(level)}</option>)}
+                  </Select>
+                </label>
+                <div className="flex gap-2">
+                  <label className="min-w-0 flex-1 text-[13px] text-ink-secondary">{t("teamSettings.person")}
+                    <Select className="mt-1 w-full" aria-label={t("teamSettings.person")} value={person} onChange={(event) => setPerson(event.target.value)}>
+                      <option value={KEEP}>{t("teamSettings.noPerson")}</option>
+                      {members.map((one) => <option key={one.email} value={one.email}>{one.name === one.email ? one.email : `${one.name} · ${one.email}`}</option>)}
+                    </Select>
+                  </label>
+                  <label className="w-[40%] text-[13px] text-ink-secondary">{t("teamSettings.personLevel")}
+                    <Select className="mt-1 w-full" aria-label={t("teamSettings.personLevel")} value={personLevel} disabled={person === KEEP} onChange={(event) => setPersonLevel(event.target.value)}>
+                      {GRANTED_LEVELS.map((level) => <option key={level} value={level}>{levelLabel(level)}</option>)}
+                      <option value={REMOVE}>{t("teamSettings.removePerson")}</option>
+                    </Select>
+                  </label>
+                </div>
+                <p className="text-[12px] text-ink-secondary">{t("teamSettings.accessHint")}</p>
               </fieldset>
             ) : (
               <fieldset disabled={running} className="flex flex-col gap-3">

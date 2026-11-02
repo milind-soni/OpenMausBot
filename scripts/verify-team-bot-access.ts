@@ -112,7 +112,7 @@ try {
     return answer.body;
   };
   const payroll = (await as("ada", "POST", "/api/bots", { name: "Payroll", title: "Answers pay questions", color: "teal" })).bot as { id: string; threadId: string };
-  await as("ada", "POST", "/api/bots", { name: "Helpdesk", title: "IT questions", color: "blue" });
+  const helpdesk = (await as("ada", "POST", "/api/bots", { name: "Helpdesk", title: "IT questions", color: "blue" })).bot as { id: string };
   if (before) await as("ada", "PATCH", `/api/bots/${payroll.id}`, { visibility: { people: [PEOPLE.bob.email, PEOPLE.cara.email, PEOPLE.dan.email] } });
   else await as("ada", "PUT", `/api/bots/${payroll.id}/access`, { everyone: "none", people: { [PEOPLE.bob.email]: "view", [PEOPLE.cara.email]: "chat", [PEOPLE.dan.email]: "edit" } });
   await as("ada", "POST", `/api/bots/${payroll.id}/messages`, { text: "When does payroll run this month?" });
@@ -224,6 +224,29 @@ try {
     { name: "ask-allowed-bob", who: "bob", query: "mode=simple", act: async () => {
       await openPayroll();
       await page.until("!document.querySelector('[data-testid=view-only-composer]') && Boolean(document.querySelector('textarea'))", "Bob's composer");
+    } },
+    { name: "department-access-preview", who: "ada", query: "mode=simple", act: async () => {
+      for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
+      await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Set for all bots")); item?.click(); return Boolean(item); })()`, "Set for all bots");
+      await page.until(`(() => { const tab = [...document.querySelectorAll('[data-testid=team-settings-dialog] [role=tab]')].find((entry) => entry.textContent.trim() === "Access"); tab?.click(); return Boolean(tab); })()`, "the Access tab");
+      const pick = (label: string, value: string) => page.evaluate(`(() => { const field = document.querySelector('[data-testid=team-settings-dialog] select[aria-label="${label}"]'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+      await pick("Everyone in Acme", "view");
+      await pick("A person", PEOPLE.eve.email);
+      await page.until("Boolean(document.querySelector('[data-testid=team-settings-rows]'))", "the preview");
+    } },
+    { name: "department-access-applied", who: "ada", query: "mode=simple", act: async () => {
+      for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
+      await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Set for all bots")); item?.click(); return Boolean(item); })()`, "Set for all bots");
+      await page.until(`(() => { const tab = [...document.querySelectorAll('[data-testid=team-settings-dialog] [role=tab]')].find((entry) => entry.textContent.trim() === "Access"); tab?.click(); return Boolean(tab); })()`, "the Access tab");
+      const pick = (label: string, value: string) => page.evaluate(`(() => { const field = document.querySelector('[data-testid=team-settings-dialog] select[aria-label="${label}"]'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+      await pick("Everyone in Acme", "view");
+      await pick("A person", PEOPLE.eve.email);
+      await page.until(`(() => { const apply = [...document.querySelectorAll('[data-testid=team-settings-dialog] button')].find((entry) => entry.textContent.startsWith("Apply to")); apply?.click(); return Boolean(apply); })()`, "Apply");
+      await page.until("Boolean(document.querySelector('[data-testid=team-settings-dialog] [role=status]')?.textContent.includes('applied'))", "the results");
+      const shared = ((await as("ada", "GET", "/api/bots")).bots as Array<{ id: string; access?: { everyone: string; people: Record<string, string> } }>).filter((bot) => bot.id === payroll.id || bot.id === helpdesk.id);
+      if (shared.length !== 2 || !shared.every((bot) => bot.access?.everyone === "view" && bot.access.people[PEOPLE.eve.email] === "chat")) throw new Error(`department access not applied: ${JSON.stringify(shared)}`);
     } },
   ];
   let serving: Who | null = null;
