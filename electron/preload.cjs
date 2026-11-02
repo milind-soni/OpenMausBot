@@ -1,5 +1,6 @@
 // contextIsolation stays on: the renderer sees only window.ogb, never Node or ipcRenderer.
 const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
+globalThis.addEventListener?.("online", () => ipcRenderer.send("desktop:network-online"));
 
 // Sandboxed preloads get Electron's restricted `require`, which cannot load sibling CommonJS files.
 const desktopRemoteClient = process.argv.includes("--openmausbot-remote-client");

@@ -4,6 +4,7 @@ import type { LookupAddress } from "node:dns";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 import { networkInterfaces } from "node:os";
+import { desktopRequestAgent } from "./desktop-proxy-tunnel.ts";
 
 const CHECK_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 16_384;
@@ -93,7 +94,8 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Promise<unknown> {
+async function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Promise<unknown> {
+  const agent = await desktopRequestAgent(url, [address]);
   return new Promise((resolve, reject) => {
     // Pin the validated DNS result for both requests; TLS/SNI and Host keep the domain, so a DNS rebind cannot reach a private IP.
     const lookup: LookupFunction = (_hostname, options, callback) => {
@@ -101,7 +103,7 @@ function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Pro
       else callback(null, address.address, address.family);
     };
     const request = httpsRequest(url, {
-      method: "GET", agent: false, lookup, signal, rejectUnauthorized: true,
+      method: "GET", agent, lookup, signal, rejectUnauthorized: true,
       headers: { Accept: "application/json", "User-Agent": "OpenMausBot-domain-check" },
     }, (response) => {
       // Node's HTTPS client does not follow Location redirects.

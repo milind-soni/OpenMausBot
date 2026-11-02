@@ -8,6 +8,8 @@ external MCP clients and scripts.
 
 ## Launch
 
+Desktop proxy routing has a separate [isolated system-proxy fixture](system-proxy.md).
+
 Start a fixture in one terminal:
 
 ```sh

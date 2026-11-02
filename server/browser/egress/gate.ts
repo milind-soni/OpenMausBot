@@ -12,6 +12,7 @@ import { connect, createServer, isIP, type BlockList, type Socket } from "node:n
 
 import type { LinkOpened } from "../../../electron/device-link-protocol.mjs";
 import { addressClass, namesThisMachine, ownAddresses } from "./policy.ts";
+import { openDesktopProxyTunnel } from "../../desktop-proxy-tunnel.ts";
 
 export interface ResolvedAddress { address: string; family: number }
 export interface GateTarget { host: string; port: number }
@@ -181,6 +182,20 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
         }
         if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
         client.pause();
+        if (process.env.OMB_DESKTOP_PROXY && !staysHere(target.host, options.own?.())) {
+          const upstream = await openDesktopProxyTunnel(target, addresses).then(track, () => null);
+          if (!upstream) return refuse(client, CONNECTION_REFUSED);
+          if (client.destroyed) return void upstream.destroy();
+          client.write(reply(SUCCEEDED));
+          for (const chunk of early) upstream.write(chunk);
+          upstream.pipe(client);
+          client.pipe(upstream);
+          client.on("close", () => upstream.destroy());
+          upstream.on("close", () => client.destroy());
+          upstream.resume();
+          client.resume();
+          return;
+        }
         // Every checked address, IPv6 and IPv4 alike, so a host is still reached where one family is broken; the
         // lookup hands back only checked addresses, so a name that now resolves elsewhere changes nothing.
         const upstream = track(connect({
