@@ -12,6 +12,14 @@ export function modelIds(text: string): string[] {
   return [...new Set(text.split(/[,，、\s]+/).map((id) => id.trim()).filter(Boolean))];
 }
 
+/** The same limits the settings route applies, so a bad entry never leaves the panel. */
+function modelIdFrom(text: string): string | null {
+  const id = text.trim();
+  return id.length > 0 && id.length <= 200 && !/\p{Cc}/u.test(id) ? id : null;
+}
+
+const CUSTOM_MODEL = "__custom__";
+
 const INPUT = cn(KEY_FIELD, "font-sans");
 /** A slow computer can take minutes before a local model's first words, so the wait is the person's call. */
 export const REPLY_WAIT_CHOICES = [5, 10, 20, 30, 60] as const;
@@ -28,6 +36,7 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
   const [url, setUrl] = useState("");
   const [key, setKey] = useState("");
   const [models, setModels] = useState("");
+  const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<"add" | "other" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ready = Boolean(name.trim() && url.trim() && key.trim());
@@ -44,6 +53,25 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
       })
       .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
       .finally(() => setBusy(null));
+  };
+
+  const setModelDraft = (instanceId: string, value: string | null) => {
+    const next = { ...modelDrafts };
+    if (value === null) delete next[instanceId];
+    else next[instanceId] = value;
+    setModelDrafts(next);
+  };
+
+  const saveModel = (server: InstanceInfo & { url?: string }, text: string) => {
+    if (!text.trim()) return setModelDraft(server.instanceId, null);
+    const id = modelIdFrom(text);
+    if (!id) return setError(t("apiInstances.modelInvalid"));
+    if (id === server.models.default) return setModelDraft(server.instanceId, null);
+    run(
+      "other",
+      () => api(`/api/instances/${encodeURIComponent(server.instanceId)}`, { method: "PATCH", body: JSON.stringify({ model: id }) }),
+      () => { if (server.models.options.length > 0) setModelDraft(server.instanceId, null); },
+    );
   };
 
   const add = () => ready && run(
@@ -69,6 +97,38 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
             <div className="truncate text-[12px] text-ink">{server.displayName}</div>
             {server.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{server.url}</div>}
           </div>
+          {modelDrafts[server.instanceId] !== undefined || server.models.options.length === 0 ? (
+            <input
+              value={modelDrafts[server.instanceId] ?? server.models.default}
+              onChange={(event) => setModelDraft(server.instanceId, event.target.value)}
+              onBlur={(event) => saveModel(server, event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); saveModel(server, event.currentTarget.value); }
+                if (event.key === "Escape") setModelDraft(server.instanceId, null);
+              }}
+              placeholder={t("apiInstances.modelId")}
+              aria-label={t("apiInstances.modelFor", { name: server.displayName })}
+              title={t("apiInstances.modelHint")}
+              spellCheck={false}
+              disabled={busy !== null}
+              className={cn(INPUT, "max-w-[12rem] shrink-0 font-mono")}
+            />
+          ) : (
+            <Select
+              size="sm"
+              className="max-w-[12rem]"
+              value={server.models.default}
+              onChange={(event) => event.target.value === CUSTOM_MODEL
+                ? setModelDraft(server.instanceId, server.models.default)
+                : run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}`, { method: "PATCH", body: JSON.stringify({ model: event.target.value }) }))}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.modelFor", { name: server.displayName })}
+              title={t("apiInstances.modelHint")}
+            >
+              {server.models.options.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+              {!server.models.fixed && <option value={CUSTOM_MODEL}>{t("apiInstances.modelCustom")}</option>}
+            </Select>
+          )}
           <Select
             size="sm"
             className="shrink-0"

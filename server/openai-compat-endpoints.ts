@@ -52,11 +52,16 @@ export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { 
   return { instanceId };
 }
 
+/** What the list adds for an added endpoint: the URL it can show, and whether its model list is the one config declares
+ * (a model outside it is refused) rather than one the server lists. */
 export function withEndpointUrls(described: unknown, configs: InstanceConfigMap): unknown {
   if (!Array.isArray(described)) return described;
-  return described.map((instance: { instanceId?: string }) => {
+  return described.map((instance: { instanceId?: string; models?: Record<string, unknown> }) => {
     const entry = instance.instanceId ? configs[instance.instanceId] : undefined;
-    const url = entry && isAddedEndpoint(instance.instanceId!, entry) ? endpointDisplayUrl(entry.config) : undefined;
-    return url ? { ...instance, url } : instance;
+    if (!entry || !isAddedEndpoint(instance.instanceId!, entry)) return instance;
+    const url = endpointDisplayUrl(entry.config);
+    const fixed = Array.isArray((entry.config as { managedModels?: unknown } | undefined)?.managedModels);
+    const models = fixed && instance.models ? { ...instance.models, fixed: true } : undefined;
+    return url || models ? { ...instance, ...(url ? { url } : {}), ...(models ? { models } : {}) } : instance;
   });
 }

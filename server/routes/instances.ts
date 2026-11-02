@@ -306,7 +306,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes." });
+      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory, boolean tools setting, model ID or a reply wait of 1 to 60 minutes." });
       const body = parsed.data;
       const instanceId = instancePatch[1];
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
@@ -333,6 +333,12 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if (entry.driver !== "openai-compat") return json(res, 400, { error: "The reply wait is available for OpenAI-compatible servers only." });
           const { replyWaitMinutes: _previous, ...rest } = entry.config as Record<string, unknown>;
           entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
+        }
+        if (body.model !== undefined) {
+          if (entry.driver !== "openai-compat") return json(res, 400, { error: "The default model is available for OpenAI-compatible servers only." });
+          const managed = (entry.config as { managedModels?: unknown } | undefined)?.managedModels;
+          if (Array.isArray(managed) && !managed.includes(body.model)) return json(res, 400, { error: "Choose one of this server's model IDs." });
+          entry.config = { ...entry.config as Record<string, unknown>, model: body.model };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {

@@ -135,6 +135,24 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("defaults to the chosen model when it is one of the managed models, else the first", async () => {
+    const managed = async (model?: string) => {
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "openai-compat-1", displayName: "Zhipu", enabled: true,
+        config: { url: "https://open.bigmodel.cn/api/paas/v4", apiKeyEnv: "OPENAI_COMPAT_API_KEY", key: "k", managedModels: ["glm-4.6", "glm-5"], model },
+        environment: {},
+      });
+      await inst.dispose();
+      return inst.models.default;
+    };
+    expect(await managed("glm-5")).toBe("glm-5");
+    expect(await managed("gone")).toBe("glm-4.6");
+    expect(await managed()).toBe("glm-4.6");
+    vi.stubEnv("OPENAI_COMPAT_MODEL", "glm-5");
+    expect(OpenAICompatDriver.decodeConfig({ url: "https://open.bigmodel.cn/api/paas/v4", key: "k", managedModels: ["glm-4.6", "glm-5"] }).model).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
   it("reports unavailable without an API key", async () => {
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-1",
