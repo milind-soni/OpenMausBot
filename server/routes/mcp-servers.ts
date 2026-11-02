@@ -8,6 +8,7 @@ import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
 import { probeMcpServer, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
 import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
+import { toolBudgetOf } from "../tool-budgets.ts";
 import { postizKeyHeaders } from "../postiz/connection.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
@@ -51,6 +52,8 @@ export interface McpServerRouteDeps {
   connectionsChanged?(change: "added" | "removed"): void;
   /** How bots' turns reach a URL server here: through the credential broker where turns are boxed (null: directly). */
   botsPath?(): BrokerPath | null;
+  /** How Test starts a command server: as a bot's turn would (server/mcp-probe.ts `asBot`). */
+  probeAs?(server: { bot?: string }): NonNullable<McpProbeOptions["asBot"]>;
 }
 
 /** Where turns are boxed, a URL server is tested the way bots reach it: through the broker. If that fails but the server
@@ -103,6 +106,12 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       return json(res, 200, withServerDetails(mcpServerResponse()));
     }
 
+    const budgetOf = /^\/api\/bots\/([\w-]+)\/tool-budget$/.exec(path);
+    if (method === "GET" && budgetOf) {
+      if (!deps.bot(budgetOf[1]!)) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { budget: toolBudgetOf(budgetOf[1]!) ?? null });
+    }
+
     const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
     if (method === "GET" && ofBot) {
       const bot = deps.bot(ofBot[1]!);
@@ -149,7 +158,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const viaBots = isRemoteMcpServer(target) ? deps.botsPath?.() ?? null : null;
         const result = viaBots && isRemoteMcpServer(target)
           ? await probeAsBots(viaBots, name, target, controller.signal, options)
-          : await probeMcpServer(target, undefined, controller.signal, options);
+          : await probeMcpServer(target, undefined, controller.signal, isRemoteMcpServer(target) ? options : { ...options, asBot: deps.probeAs?.(target) ?? {} });
         if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) oauth.markNeedsSignIn(name, target.url);
         return json(res, 200, result);
       } finally {
