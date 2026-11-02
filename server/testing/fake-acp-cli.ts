@@ -701,7 +701,14 @@ function handle(msg: any) {
     }
     case "session/close":
       if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
-      else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
+      else if (process.env.FAKE_ACP_SESSION_CLOSE_GATE) {
+        const gate = process.env.FAKE_ACP_SESSION_CLOSE_GATE;
+        const timer = setInterval(() => {
+          if (!existsSync(gate)) return;
+          clearInterval(timer);
+          result(msg.id, {});
+        }, 20);
+      } else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
       else result(msg.id, {});
       break;
     case "session/load": {

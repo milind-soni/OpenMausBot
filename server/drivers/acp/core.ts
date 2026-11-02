@@ -58,7 +58,7 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
-import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
+import { awaitAcpTeardown, confirmAcpTermination } from "./termination.ts"; import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
@@ -372,9 +372,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (disposing) throw new Error(`${support.displayName} is shutting down`);
       };
       interface Turn {
-        stop: () => void;
+        stop: () => Promise<void>;
         interrupt: () => void;
         turnId: string;
+        enginePid: () => number | undefined;
         asks: Map<string, AcpAskFinish>;
       }
       const active = new Map<string, Turn>();
@@ -408,7 +409,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           host.retired += 1;
           recycleWhenIdle(host);
           if (sessionId && host.initResult?.agentCapabilities?.sessionCapabilities?.close) {
-            session.closeConfirmed = host.request(null, "session/close", { sessionId }, why === "cancel-timeout" ? 5_000 : 30_000).then(() => true, () => false);
+            session.closeConfirmed = host.request(null, "session/close", { sessionId }, ["cancel-timeout", "stop", "stopAll", "dispose"].includes(why) ? 5_000 : 30_000).then(() => true, () => false);
           }
           return;
         }
@@ -427,25 +428,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
       // A session that ignores session/cancel goes on working, and EOF on stdin does not stop it either. Only a confirmed
       // session/close or the end of its process stops it, and ending a shared process ends the other sessions' turns too.
-      const endUncancelled = async (threadId: string, session: AcpSession): Promise<boolean> => {
-        const { host } = session;
-        closeSession(threadId, "cancel-timeout");
-        if (host.links.size && await session.closeConfirmed) return true;
-        for (const link of host.links) {
-          const other = sessions.get(link.threadId);
-          if (other?.host !== host) continue;
-          const running = other.current;
-          closeSession(link.threadId, "cancel-timeout");
-          if (running) {
-            emit({ ...base(link.threadId, running.turnId), type: "runtime.error",
-              message: `${support.displayName} was restarted because a session sharing its process ignored Stop` });
-            settle(link.threadId, other, false, "exit_before_result");
-          }
-        }
-        if (await killCliTree(host.child)) return true;
-        if (session.current) emit({ ...base(threadId, session.current.turnId), type: "runtime.error",
-          message: `${support.displayName} ignored Stop and its process could not be ended` });
-        return false;
+      const endUnconfirmed = async (threadId: string, session: AcpSession, why = "cancel-timeout"): Promise<boolean> => {
+        const { current } = session;
+        if (current) { current.state.cancelling = true; if (current.interruptTimer) clearTimeout(current.interruptTimer); }
+        return confirmAcpTermination(session, () => {
+          void closeSession(threadId, why);
+          return session.closeConfirmed ?? Promise.resolve(false);
+        }, () => {
+          if (current) emit({ ...base(threadId, current.turnId), type: "runtime.error",
+            message: `${support.displayName} session process could not be ended` });
+        }, why === "stop" || why === "cancel-timeout" ? 5_000 : undefined);
       };
       // A shared process holding closed sessions gives their memory back only by exiting: once none of its sessions has
       // run a turn for a while, it ends and each thread's next turn loads its session in a new one.
@@ -1017,7 +1009,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 type: "runtime.error",
                 message: `${support.displayName} exited ${code} before the prompt result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
               });
-              settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result");
+              current.state.cancelling = true;
+              void endUnconfirmed(threadId, session, "host-exit").then(() =>
+                settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result"));
             } else if (sessions.get(threadId) === session) {
               // The identity check keeps an old child's exit from unlinking its replacement.
               sessions.delete(threadId);
@@ -1200,21 +1194,23 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           receiveModelVariants,
         };
 
+        const stop = async () => {
+          state.stopped = true; const ended = await endUnconfirmed(threadId, session, "stop"); settle(threadId, session, ended, ended ? "cancelled" : "stop_failed");
+        };
         const interrupt = () => {
           state.stopped = true;
           if (session.sessionId) {
             session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
             if (current.interruptTimer) clearTimeout(current.interruptTimer);
             current.interruptTimer = setTimeout(() => {
-              state.cancelling = true;
-              void endUncancelled(threadId, session).then((ended) => settle(threadId, session, ended, ended ? "cancelled" : "stop_failed"));
+              void endUnconfirmed(threadId, session).then((ended) => settle(threadId, session, ended, ended ? "cancelled" : "stop_failed"));
             }, 5_000);
             current.interruptTimer.unref?.();
           } else {
-            closeSession(threadId, "stop");
+            void stop();
           }
         };
-        active.set(threadId, { stop: () => { state.stopped = true; closeSession(threadId, "stop"); }, interrupt, turnId, asks });
+        active.set(threadId, { stop, interrupt, turnId, asks, enginePid: () => session.child.pid });
         if (retryOf === undefined) emit({ ...base(threadId, turnId), type: "turn.started" });
         session.current = current;
 
@@ -1587,8 +1583,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.
               if (!needsAuth && !accountError && ((e as any)?.acpPromptStall === true || (e as any)?.acpUsageLimit === true || (e as any)?.acpSessionFailure === true
-                  || code === "upstream_outage") && session.child.exitCode === null && !session.closing) {
-                closeSession(threadId, (e as any)?.acpPromptStall === true ? "prompt-stall" : "rpc-failure");
+                  || code === "upstream_outage") && !session.closing) {
+                await endUnconfirmed(threadId, session, (e as any)?.acpPromptStall === true ? "prompt-stall" : "rpc-failure");
               } else if (approvalUnconfirmed && session.child.exitCode === null && !session.closing) {
                 closeSession(threadId, "approval-unconfirmed");
               } else if (staleProcess && !state.promptSent && session.child.exitCode === null && !session.closing) {
@@ -1602,6 +1598,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         return startupAck ?? { turnId };
       };
 
+      const teardownFailed = () => {
+        const error = new Error(`${support.displayName} teardown failed: session process could not be ended; execution remains owned`);
+        for (const [threadId, turn] of active) emit({ ...base(threadId, turn.turnId), type: "runtime.error", message: error.message });
+        return error;
+      };
       const snapshot = async (): Promise<ProviderSnapshot> => {
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
@@ -1722,13 +1723,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return finish(decision.behavior, "user", decision.message, decision.always === true);
           },
           hasSession: (threadId) => active.has(threadId),
-          enginePid: (threadId) => (active.has(threadId) ? sessions.get(threadId)?.child.pid : undefined),
+          enginePid: (threadId) => active.get(threadId)?.enginePid(),
           stopAll: async () => {
-            for (const { stop } of active.values()) stop();
+            const pending = Array.from(active.values(), ({ stop }) => stop());
             for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "stopAll");
             for (const [threadId, children] of retiring) {
               for (const child of children) void retireChild(threadId, child);
             }
+            await awaitAcpTeardown(pending, teardownFailed);
           },
           onEvent: (listener) => {
             listeners.add(listener);
@@ -1739,14 +1741,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           disposing = true;
           await deviceSignIn?.dispose();
           const disposingSessions = Array.from(sessions);
-          for (const { stop } of active.values()) stop();
-          for (const [threadId, session] of disposingSessions) {
-            closeSession(threadId, "dispose");
-            settle(threadId, session, true, "cancelled");
-          }
+          const pending = Array.from(active.values(), ({ stop }) => stop());
+          for (const [threadId] of disposingSessions) closeSession(threadId, "dispose");
           for (const [threadId, children] of retiring) {
             for (const child of children) void retireChild(threadId, child);
           }
+          await awaitAcpTeardown(pending, teardownFailed);
           listeners.clear();
         },
       };

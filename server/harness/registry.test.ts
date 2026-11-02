@@ -430,6 +430,47 @@ describe("ProviderRegistry", () => {
     expect(fake.probes).toEqual(["a", "a", "a", "a"]);
   });
 
+  it.each(["dispose", "disposeAll"] as const)("keeps a failed %s owner until a later disposal succeeds", async (action) => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    const configs = { a: { driver: "fake" } };
+    await registry.load(configs);
+    const owner = registry.get("a")!;
+    const dispose = vi.spyOn(owner, "dispose").mockRejectedValue(new Error("tree still running"));
+    if (action === "dispose") await expect(registry.dispose("a")).rejects.toThrow("tree still running");
+    else await registry.disposeAll();
+    expect(registry.get("a")).toBe(owner);
+    await expect(registry.load(configs)).rejects.toThrow("tree still running");
+    expect(registry.get("a")).toBe(owner);
+    dispose.mockResolvedValue();
+    await registry.load(configs);
+    expect(registry.get("a")).not.toBe(owner);
+    await registry.disposeAll();
+  });
+
+  it("blocks a concurrent load while the same key is being replaced", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    const configs = { a: { driver: "fake" } };
+    await registry.load(configs);
+    const owner = registry.get("a")!;
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(owner, "dispose").mockImplementation(async () => { entered(); await held; });
+    const replacing = registry.load(configs);
+    await started;
+    try {
+      await expect(registry.load(configs)).rejects.toThrow(/a.*already.*(changing|replaced)/i);
+      expect(registry.get("a")).toBe(owner);
+    } finally {
+      release();
+      await replacing;
+      await registry.disposeAll();
+    }
+  });
+
   it("disposeAll disposes every live instance and empties the registry", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);

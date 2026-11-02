@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -221,6 +221,84 @@ describe("ACP threads sharing one agent process", () => {
     }
   });
 
+  it.each([
+    ["owns its process", false, ""],
+    ["shares a process without session/close", true, ""],
+    ["shares a process that rejects session/close", true, "error"],
+  ])("ends execution before reporting a prompt timeout when the session %s", async (_, shareProcess, close) => {
+    const previous = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100";
+    try {
+      const f = await fixture({ shareProcess }, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_SESSION_CLOSE: close });
+      if (shareProcess) await f.run("thread-b");
+      let endedAtCompletion = false;
+      f.instance.adapter.onEvent((event) => {
+        if (event.type === "turn.completed" && event.threadId === "thread-a") {
+          const [child] = f.spawned;
+          endedAtCompletion = child!.exitCode !== null || child!.signalCode !== null;
+        }
+      });
+      expect((await f.run("thread-a", { text: "HANG" })).done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(endedAtCompletion).toBe(true);
+      expect((await f.run("thread-a")).done).toMatchObject({ ok: true });
+      expect(f.spawned).toHaveLength(2);
+    } finally {
+      if (previous === undefined) delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+      else process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = previous;
+    }
+  });
+
+  it("holds a timed-out turn until session/close is confirmed without ending the other sessions", async () => {
+    const previous = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100";
+    try {
+      const gateDir = mkdtempSync(join(tmpdir(), "omb-acp-close-"));
+      scratches.push(gateDir);
+      const gate = join(gateDir, "release");
+      const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_SESSION_CLOSE_GATE: gate });
+      await f.run("thread-b");
+      const running = f.run("thread-a", { text: "HANG" });
+      await vi.waitFor(() => expect(f.methods()).toContain("session/close"));
+      expect(f.recorder.events.some((event) => event.type === "turn.completed" && event.threadId === "thread-a")).toBe(false);
+      expect(f.instance.adapter.hasSession("thread-a")).toBe(true);
+      writeFileSync(gate, "close");
+      expect((await running).done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(f.spawned[0]!.exitCode).toBeNull();
+      expect(f.spawned[0]!.signalCode).toBeNull();
+      expect((await f.run("thread-b")).done).toMatchObject({ ok: true });
+    } finally {
+      if (previous === undefined) delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+      else process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = previous;
+    }
+  });
+
+  it.each(["dispose", "stopAll"] as const)("keeps turns active until %s has ended their shared process", async (action) => {
+    const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG" });
+    const running = f.run("thread-a", { text: "HANG" });
+    await vi.waitFor(() => expect(f.methods()).toContain("session/prompt"));
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const killing = new Promise<void>((resolve) => { entered = resolve; });
+    const kill = procs.killCliTree;
+    vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      entered();
+      await gate;
+      return kill(child, 0);
+    });
+    const closing = action === "dispose" ? f.instance.dispose() : f.instance.adapter.stopAll();
+    try {
+      await killing;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.recorder.events.some((event) => event.type === "turn.completed")).toBe(false);
+      expect(f.instance.adapter.hasSession("thread-a")).toBe(true);
+    } finally {
+      release();
+      await closing;
+      await running;
+    }
+  });
+
   it("fails every running turn when the shared process dies", async () => {
     const f = await fixture({}, { FAKE_ACP_MODE: "crash-in-prompt" });
     const results = await Promise.all([f.run("thread-a"), f.run("thread-b")]);
@@ -249,14 +327,17 @@ describe("ACP threads sharing one agent process", () => {
       const [child] = f.spawned;
       // A listener may start the next turn synchronously on the turn.completed of the turn this Stop ends.
       let next: Promise<{ turnId: string }> | undefined;
+      let endedAtCompletion = false;
       f.instance.adapter.onEvent((event) => {
         if (event.type !== "turn.completed" || event.threadId !== "thread-a" || next) return;
+        endedAtCompletion = child!.exitCode !== null || child!.signalCode !== null;
         next = f.instance.adapter.sendTurn({ threadId: "thread-a", text: "fixture", cwd: join(f.scratch, "thread-a"), approvalMode: "full" });
       });
       await f.instance.adapter.interruptTurn("thread-b");
       expect((await stopped).done).toMatchObject({ ok: true, stopReason: "cancelled" });
       expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
       expect((await other).done).toMatchObject({ ok: false });
+      expect(endedAtCompletion).toBe(true);
       const { turnId } = await next!;
       expect(await f.recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
       expect(f.spawned).toHaveLength(2);
@@ -304,7 +385,7 @@ describe("ACP threads sharing one agent process", () => {
       expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
     });
 
-    it("fails the turn when Stop could not end the process", async () => {
+    it("keeps the turn active after a failed kill until the process exits", async () => {
       const f = await fixture({ shareProcess: false }, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1" });
       const stopped = f.run("thread-a", { text: "HANG" });
       await promptsSent(f, 1);
@@ -317,10 +398,306 @@ describe("ACP threads sharing one agent process", () => {
         return false;
       });
       await f.instance.adapter.interruptTurn("thread-a");
-      const { done, events } = await stopped;
-      expect(done).toMatchObject({ ok: false });
-      expect(events.some((event) => event.type === "runtime.error" && /could not be ended/.test(event.message))).toBe(true);
+      await f.recorder.until((event) => event.type === "runtime.error" && /could not be ended/.test(event.message));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.instance.adapter.hasSession("thread-a")).toBe(true);
+      expect(f.recorder.events.some((event) => event.type === "turn.completed")).toBe(false);
+      await kill(child!, 0);
+      expect((await stopped).done).toMatchObject({ ok: false });
     });
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    { label: "same group", detached: false, exitOnPrompt: false },
+    ...(process.platform === "linux" ? [{ label: "detached Linux helper", detached: true, exitOnPrompt: false }] : []),
+    { label: "root exit with inherited pipe", detached: false, exitOnPrompt: true },
+  ])(
+    "confirms descendants before timeout and collateral host-exit completions ($label)", async ({ detached, exitOnPrompt }) => {
+      const root = mkdtempSync(join(tmpdir(), "omb-acp-tree-"));
+      scratches.push(root);
+      const previous = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+      let descendant: number | undefined;
+      const running = () => {
+        if (!descendant) return false;
+        if (process.platform === "linux") {
+          try {
+            const stat = readFileSync(`/proc/${descendant}/stat`, "utf8");
+            return !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]!);
+          } catch { return false; }
+        }
+        try { process.kill(descendant, 0); return true; } catch { return false; }
+      };
+      try {
+        process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100";
+        const cli = join(dirname(FAKE_CLI), "fake-acp-tree-cli.mjs");
+        const f = await fixture({ resolveCommand: async () => ({ command: process.execPath, args: [cli] }) }, {
+          FAKE_ACP_TREE: root, FAKE_ACP_TREE_DETACHED: detached ? "1" : "0", FAKE_ACP_TREE_EXIT_PROMPT: exitOnPrompt ? "1" : "0",
+        });
+        const other = f.run("thread-b");
+        await vi.waitFor(() => expect(existsSync(join(root, "prompt-s1"))).toBe(true));
+        descendant = Number(readFileSync(join(root, "descendant"), "utf8"));
+        expect(running()).toBe(true);
+        const aliveAtCompletion: boolean[] = [];
+        f.instance.adapter.onEvent((event) => {
+          if (event.type !== "turn.completed") return;
+          aliveAtCompletion.push(running());
+          writeFileSync(join(root, "release"), "1");
+        });
+        const result = await f.run("thread-a");
+        expect(f.spawned).toHaveLength(1);
+        expect(aliveAtCompletion.length).toBeGreaterThan(0);
+        expect(aliveAtCompletion.every((alive) => !alive)).toBe(true);
+        await other;
+        expect(result.done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+        expect(aliveAtCompletion).toEqual([false, false]);
+        expect(existsSync(join(root, "effect"))).toBe(false);
+      } finally {
+        if (descendant && running()) process.kill(descendant, "SIGKILL");
+        if (previous === undefined) delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+        else process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = previous;
+      }
+    }, 20_000,
+  );
+
+  it.each(["dispose", "stopAll"] as const)("falls back from unanswered shared session/close before the %s teardown bound", async (action) => {
+    const gateDir = mkdtempSync(join(tmpdir(), "omb-acp-teardown-close-"));
+    scratches.push(gateDir);
+    const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_SESSION_CLOSE_GATE: join(gateDir, "release") });
+    await f.run("thread-idle");
+    const running = f.run("thread-active", { text: "HANG" });
+    await vi.waitFor(() => expect(f.methods().filter(method => method === "session/prompt")).toHaveLength(2));
+    const child = f.spawned[0]!;
+    const kill = procs.killCliTree;
+    let fallbackAllowed = false;
+    const killing = vi.spyOn(procs, "killCliTree").mockImplementation(target => fallbackAllowed ? kill(target, 0) : Promise.resolve(false));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const closing = (action === "dispose" ? f.instance.dispose() : f.instance.adapter.stopAll()).catch(error => error);
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(f.instance.adapter.hasSession("thread-active")).toBe(true);
+      fallbackAllowed = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(f.instance.adapter.hasSession("thread-active")).toBe(false));
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      expect((await running).done).toMatchObject({ ok: false, stopReason: "stop_failed" });
+      expect(await closing).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+      killing.mockRestore();
+      await kill(child, 0);
+      await closing;
+      await running;
+    }
+  });
+
+  it("accepts a pending prompt-stall close confirmation after Stop enters failed termination fallback", async () => {
+    const previous = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100000";
+    const gateDir = mkdtempSync(join(tmpdir(), "omb-acp-late-close-"));
+    scratches.push(gateDir);
+    const gate = join(gateDir, "release");
+    const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1", FAKE_ACP_SESSION_CLOSE_GATE: gate });
+    const kill = procs.killCliTree;
+    const killing = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
+    try {
+      await f.run("thread-idle");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await f.instance.adapter.sendTurn({ threadId: "thread-active", text: "HANG", cwd: f.scratch, approvalMode: "full" });
+      await vi.waitFor(() => expect(f.methods().filter(method => method === "session/prompt")).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(100_001);
+      await vi.waitFor(() => expect(f.methods().filter(method => method === "session/close")).toHaveLength(1));
+      await f.instance.adapter.interruptTurn("thread-active");
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(killing).toHaveBeenCalled();
+      expect(f.instance.adapter.hasSession("thread-active")).toBe(true);
+      const attempts = killing.mock.calls.length;
+      writeFileSync(gate, "1");
+      await vi.waitFor(() => expect(f.instance.adapter.hasSession("thread-active")).toBe(false));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(killing).toHaveBeenCalledTimes(attempts);
+      expect(f.spawned[0]!.exitCode === null && f.spawned[0]!.signalCode === null).toBe(true);
+      expect(f.methods().filter(method => method === "session/close")).toHaveLength(1);
+      expect(f.recorder.events.filter(event => event.type === "turn.completed" && event.threadId === "thread-active")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+      killing.mockRestore();
+      await Promise.all(f.spawned.map(child => kill(child, 0)));
+      if (previous === undefined) delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+      else process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = previous;
+    }
+  });
+
+  it("bounds Stop while a prompt-stall session/close is already pending", async () => {
+    const previous = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100000";
+    const gateDir = mkdtempSync(join(tmpdir(), "omb-acp-pending-close-"));
+    scratches.push(gateDir);
+    const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_SESSION_CLOSE_GATE: join(gateDir, "release") });
+    const kill = procs.killCliTree;
+    let running: Promise<{ turnId: string }> | undefined;
+    try {
+      await f.run("thread-idle");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      running = f.instance.adapter.sendTurn({ threadId: "thread-active", text: "HANG", cwd: f.scratch, approvalMode: "full" });
+      await vi.waitFor(() => expect(f.methods().filter(method => method === "session/prompt")).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(100_001);
+      await vi.waitFor(() => expect(f.methods().filter(method => method === "session/close")).toHaveLength(1));
+      expect(f.instance.adapter.hasSession("thread-active")).toBe(true);
+      expect(f.recorder.events.filter(event => event.type === "turn.completed" && event.threadId === "thread-active")).toHaveLength(0);
+      await f.instance.adapter.interruptTurn("thread-active");
+      await vi.advanceTimersByTimeAsync(10_001);
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(f.instance.adapter.hasSession("thread-active")).toBe(false));
+      const child = f.spawned[0]!;
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      expect(f.recorder.events.find(event => event.type === "turn.completed" && event.threadId === "thread-active")).toMatchObject({ ok: true, stopReason: "cancelled" });
+      expect(f.methods().filter(method => method === "session/close")).toHaveLength(1);
+      expect(f.recorder.events.filter(event => event.type === "turn.completed" && event.threadId === "thread-active")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+      await Promise.all(f.spawned.map(child => kill(child, 0)));
+      await running;
+      if (previous === undefined) delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+      else process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = previous;
+    }
+  });
+
+  it.each(["dispose", "stopAll"] as const)("bounds %s while a prompt-stall session/close is already pending and retries a failed kill", async (action) => {
+    const previous = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100000";
+    const gateDir = mkdtempSync(join(tmpdir(), "omb-acp-pending-close-"));
+    scratches.push(gateDir);
+    const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_SESSION_CLOSE_GATE: join(gateDir, "release") });
+    const kill = procs.killCliTree;
+    let running: Promise<{ turnId: string }> | undefined;
+    let closing: Promise<unknown> | undefined;
+    let fallbackAllowed = false;
+    const killing = vi.spyOn(procs, "killCliTree").mockImplementation(target => fallbackAllowed ? kill(target, 0) : Promise.resolve(false));
+    try {
+      await f.run("thread-idle");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      running = f.instance.adapter.sendTurn({ threadId: "thread-active", text: "HANG", cwd: f.scratch, approvalMode: "full" });
+      await vi.waitFor(() => expect(f.methods().filter(method => method === "session/prompt")).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(100_001);
+      await vi.waitFor(() => expect(f.methods().filter(method => method === "session/close")).toHaveLength(1));
+      closing = (action === "dispose" ? f.instance.dispose() : f.instance.adapter.stopAll()).catch(error => error);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(f.instance.adapter.hasSession("thread-active")).toBe(true);
+      expect(f.recorder.events.filter(event => event.type === "turn.completed" && event.threadId === "thread-active")).toHaveLength(0);
+      const child = f.spawned[0]!;
+      expect(child.exitCode === null && child.signalCode === null).toBe(true);
+      fallbackAllowed = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(f.instance.adapter.hasSession("thread-active")).toBe(false));
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      await closing;
+      expect(f.methods().filter(method => method === "session/close")).toHaveLength(1);
+      expect(f.recorder.events.filter(event => event.type === "turn.completed" && event.threadId === "thread-active")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+      killing.mockRestore();
+      await Promise.all(f.spawned.map(child => kill(child, 0)));
+      await closing;
+      await running;
+      if (previous === undefined) delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+      else process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = previous;
+    }
+  });
+
+  it.each(["dispose", "stopAll"] as const)("bounds failed %s and retains execution for a later Stop", async (action) => {
+    const f = await fixture({ shareProcess: false }, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1" });
+    const running = f.run("thread-a", { text: "HANG" });
+    await vi.waitFor(() => expect(existsSync(join(f.scratch, "methods.json"))
+      && readFileSync(join(f.scratch, "methods.json"), "utf8").includes('"session/prompt"')).toBe(true));
+    const [child] = f.spawned;
+    const kill = procs.killCliTree;
+    const killing = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let result: unknown;
+    const closing = (action === "dispose" ? f.instance.dispose() : f.instance.adapter.stopAll()).then(
+      () => { result = "resolved"; }, (error: unknown) => { result = error; },
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toMatch(/teardown.*could not be ended/i);
+      expect(f.instance.adapter.hasSession("thread-a")).toBe(true);
+      expect(f.instance.adapter.enginePid?.("thread-a")).toBe(child!.pid);
+      expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(0);
+      expect(f.recorder.events.some((event) => event.type === "runtime.error" && /teardown/.test(event.message))).toBe(true);
+      if (action === "stopAll") await expect(f.instance.adapter.sendTurn({ threadId: "thread-a", text: "next", cwd: f.scratch })).rejects.toThrow("already running");
+    } finally {
+      vi.useRealTimers();
+      killing.mockRestore();
+      await kill(child!, 0);
+      await closing;
+    }
+    await f.instance.adapter.interruptTurn("thread-a");
+    await running;
+    expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+  });
+
+  it("keeps the registry owner after bounded disposal and reloads once after confirmed exit", async () => {
+    const { ProviderRegistry } = await import("../../harness/registry.ts");
+    const { reloadProviderInstances } = await import("../../harness/provider-reload.ts");
+    const { EventBus } = await import("../../harness/bus.ts");
+    const bus = new EventBus(async () => {});
+    const delivered: RuntimeEvent[] = [];
+    bus.subscribe(event => delivered.push(event));
+    const f = await fixture({ shareProcess: false }, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1" });
+    const create = vi.fn(async () => f.instance);
+    const registry = new ProviderRegistry([{ ...createAcpDriver(SUPPORT), create }]);
+    const configs = { "shared-test": { driver: SUPPORT.driverKind } };
+    await registry.load(configs);
+    const old = registry.get("shared-test")!;
+    bus.attach([old]);
+    const running = f.run("thread-a", { text: "HANG" });
+    await vi.waitFor(() => expect(existsSync(join(f.scratch, "methods.json"))
+      && readFileSync(join(f.scratch, "methods.json"), "utf8").includes('"session/prompt"')).toBe(true));
+    const child = f.spawned[0]!;
+    const kill = procs.killCliTree;
+    const killing = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        const reload = reloadProviderInstances(registry, bus, configs, new Set(["shared-test"]));
+        await vi.advanceTimersByTimeAsync(10_001);
+        const { failed } = await reload;
+        const error = failed?.reason;
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toMatch(/teardown.*could not be ended/i);
+        expect(registry.get("shared-test")).toBe(old);
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(old.adapter.hasSession("thread-a")).toBe(true);
+        expect(old.adapter.enginePid?.("thread-a")).toBe(child.pid);
+        expect(child.exitCode === null && child.signalCode === null).toBe(true);
+        expect(f.recorder.events.filter(event => event.type === "turn.completed")).toHaveLength(0);
+        vi.useRealTimers();
+      }
+      killing.mockRestore();
+      await kill(child, 0);
+      await old.adapter.interruptTurn("thread-a");
+      await running;
+      expect(f.recorder.events.filter(event => event.type === "turn.completed")).toHaveLength(1);
+      expect(delivered.filter(event => event.type === "turn.completed")).toHaveLength(1);
+      const fresh = await fixture({ shareProcess: false });
+      create.mockResolvedValue(fresh.instance);
+      await registry.load(configs);
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(registry.get("shared-test")).toBe(fresh.instance);
+      expect((await fresh.run("thread-a")).done).toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+      killing.mockRestore();
+      await kill(child, 0);
+      await old.adapter.interruptTurn("thread-a");
+      await running;
+      await registry.disposeAll();
+      bus.detachAll();
+      await bus.flush();
+    }
   });
 
   it("asks for admission before it starts a process or adds a session, never for a thread already running", async () => {

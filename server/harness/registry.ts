@@ -99,6 +99,8 @@ export function enginesByUse(selections: ReadonlyArray<{ instanceId: InstanceId 
 type SharedRead = { generation: number; settledAt?: number; read: Promise<ProviderSnapshot> };
 
 export class ProviderRegistry {
+  private changing = new Set<InstanceId>();
+  private retiring = new Set<InstanceId>();
   private byId = new Map<InstanceId, RegistryEntry>();
   private cliByInstance = new Map<InstanceId, string>();
   private lastSnapshots = new Map<InstanceId, ProviderSnapshot>();
@@ -127,11 +129,11 @@ export class ProviderRegistry {
   async load(configs: InstanceConfigMap, decorate?: (instance: ProviderInstance) => ProviderInstance) {
     const slots = [...this.byId.keys()];
     const loaded = await Promise.all(
-      Object.entries(configs).map(async ([instanceId, entry]) => {
+      Object.entries(configs).map(([instanceId, entry]) => this.change(instanceId, async () => {
         const ready = await this.createEntry(instanceId, entry, decorate);
         this.byId.set(instanceId, ready);
         return ready;
-      }),
+      })),
     );
     // Config order, not completion order; an entry a dispose replaced meanwhile is not this load's to place.
     const placed = new Set(loaded.filter((entry) => this.byId.get(entry.instanceId) === entry).map((entry) => entry.instanceId));
@@ -148,7 +150,7 @@ export class ProviderRegistry {
     entry: InstanceConfigMap[string],
     decorate?: (instance: ProviderInstance) => ProviderInstance,
   ): Promise<RegistryEntry> {
-    await this.dispose(instanceId);
+    await this.disposeEntry(instanceId);
     const driver = this.driversByKind.get(entry.driver);
     if (!driver) {
       return {
@@ -501,19 +503,32 @@ export class ProviderRegistry {
   }
 
   async disposeAll() {
-    await Promise.allSettled(this.instances().map((i) => i.dispose()));
-    this.byId.clear();
-    this.cliByInstance.clear();
-    this.lastSnapshots.clear();
-    this.seeds.clear();
+    await Promise.allSettled([...this.byId.keys()].map((id) => this.dispose(id)));
+  }
+
+  retiringIds(): InstanceId[] {
+    return [...this.retiring];
+  }
+
+  private async change<T>(instanceId: InstanceId, work: () => Promise<T>): Promise<T> {
+    if (this.changing.has(instanceId)) throw new Error(`Provider "${instanceId}" is already being replaced or disposed. Retry after it finishes.`);
+    this.changing.add(instanceId);
+    try { return await work(); }
+    finally { this.changing.delete(instanceId); }
   }
 
   async dispose(instanceId: InstanceId) {
+    await this.change(instanceId, () => this.disposeEntry(instanceId));
+  }
+
+  private async disposeEntry(instanceId: InstanceId) {
     const entry = this.byId.get(instanceId);
+    if (entry?.live) this.retiring.add(instanceId);
+    await entry?.live?.dispose();
+    this.retiring.delete(instanceId);
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
     this.lastSnapshots.delete(instanceId);
     this.seeds.delete(instanceId);
-    await entry?.live?.dispose();
   }
 }
