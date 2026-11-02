@@ -83,7 +83,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
   const nameOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId)?.displayName ?? instanceId;
   const modelsOf = (entry: NonNullable<Bot["fallback"]>[number]) => {
     const instance = state.instances.find((candidate) => candidate.instanceId === entry.instanceId);
-    const offered = instance?.models.options.filter((model) => instance.snapshot.authenticated !== false || model.custom) ?? [];
+    const offered = instance?.models.options.filter((model) => !model.orgBlocked && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
     return offered.some((model) => model.id === entry.model) ? offered : [{ id: entry.model, label: entry.model }, ...offered];
   };
 

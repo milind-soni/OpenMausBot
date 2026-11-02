@@ -2622,6 +2622,7 @@
   "model.simple.reasoning": "추론",
   "model.simple.botsModel": "{name}의 모델",
   "model.simple.unavailable": "사용 불가",
+  "model.orgBlocked": "조직에서 꺼 둔 모델이에요",
   "model.simple.signIn": "로그인",
   "model.simple.lookingModels": "모델 찾는 중…",
   "model.simple.useDefault": "기본값 사용",
