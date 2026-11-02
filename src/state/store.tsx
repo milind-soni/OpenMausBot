@@ -75,7 +75,7 @@ import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } fr
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
 
-export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped"> {
+export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest"> {
   title: string;
   subtitle: string;
   options: string[];
@@ -531,7 +531,7 @@ export type AppSettingsSection =
   | "computer"
   | "logins"
   | "usage"
-  | "people"
+  | "people" | "botAccess"
   | "activity"
   | "backups"
   | "workspaces"

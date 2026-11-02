@@ -5141,5 +5141,21 @@
   "botAccess.yours.chat": "{bot} ile sohbet edebilir ve onunla kendi sohbetlerini başlatabilirsin. Kimin erişimi olacağını onu düzenleyebilenler seçer.",
   "botAccess.yours.other": "Kimin erişimi olacağını {bot} botunu düzenleyebilenler seçer.",
   "botAccess.viewOnly": "{bot} botunu görüntüleyebilirsin ama onunla sohbet edemezsin.",
-  "botAccess.viewOnlyRoom": "{bot} botunu yalnızca görüntüleyebildiğin için bu odayı okuyabilirsin ama yazamazsın."
+  "botAccess.viewOnlyRoom": "{bot} botunu yalnızca görüntüleyebildiğin için bu odayı okuyabilirsin ama yazamazsın.",
+  "botAccess.ask": "{name} kişisinden sohbet izni iste",
+  "botAccess.askAdmins": "Bir yöneticiden sohbet izni iste",
+  "botAccess.asked": "{name} kişisine soruldu",
+  "botAccess.theAdmins": "yöneticiler",
+  "botAccess.request.question": "{name}, {bot} ile sohbet etmek istiyor. İzin ver, onunla sohbet etmesini ve kendi sohbetlerini başlatmasını sağlar.",
+  "botAccess.request.allow": "İzin ver",
+  "botAccess.request.notNow": "Şimdi değil",
+  "settings.section.botAccess": "Bot erişimi",
+  "botAccess.overview.intro": "{team} ekibinde kimin her botu görüntüleyebileceği, onunla sohbet edebileceği ve onu düzenleyebileceği. Değişiklikler hemen geçerli olur.",
+  "botAccess.overview.noBots": "Henüz ekip botu yok.",
+  "botAccess.overview.noPeople": "Ekipte henüz yöneticilerden başka kimse yok.",
+  "botAccess.overview.bot": "Bot",
+  "botAccess.overview.setForEveryone": "Herkes için ayarla: {bot}",
+  "botAccess.overview.cell": "{name}, {bot} ile neler yapabilir",
+  "botAccess.overview.toastEveryone": "{bot}: {team} ekibindeki herkes · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

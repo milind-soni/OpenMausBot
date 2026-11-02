@@ -2958,7 +2958,8 @@ button:disabled.bg-danger {
 [data-window-drag] :has(> :is(select, input)),
 [data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
 :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
-.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
+.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])),
+[data-browser-transport] {
   -webkit-app-region: no-drag;
 }
 

@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { createCloudAccountClient } from "./cloud-account.mjs";
 import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, isCloudHomeEntry, parseCloudCredit, parseCloudOffer, parseCloudPower, parseCloudPurchase, parseCloudSummary, parseCloudTeams, teamRoleLabel, CLOUD_TEAM_ROLES, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome, withoutTrial } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
+import { homeLook, withoutOldCloudHome } from "./cloud-list.mjs";
 
 const NOW = 1_800_000_000_000;
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";
@@ -203,7 +204,7 @@ test("main lists the machine from verified states only, and connects without a d
   const context = vm.createContext({
     environmentsState: { environments: [], activeId: environments.LOCAL_ID },
     persistEnvironments: next => { persisted.push(next); context.environmentsState = next; },
-    navigateMainWindow: url => navigated.push(url), withCloudHome, withActive: environments.withActive, cloudLook: { pending: () => look },
+    navigateMainWindow: url => navigated.push(url), withCloudHome, withoutOldCloudHome, homeLook, withActive: environments.withActive, cloudLook: { pending: () => look },
     randomUUID: () => "cloud-home-id", slog: () => {}, Date: { now: () => NOW }, AbortSignal: { timeout: ms => ({ timeoutMs: ms }) },
     session: { defaultSession: { fetch: async (url, init) => { probes.push([url, init.credentials, init.signal.timeoutMs]); return { ok: false, json: async () => ({}) }; } } },
     dialog: { showMessageBox: async () => { dialogs.push(1); return { response: 1 }; } },

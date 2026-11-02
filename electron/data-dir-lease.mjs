@@ -238,8 +238,13 @@ function parseWmiDateTime(value) {
   return ms - offsetMinutes * 60 * 1000;
 }
 
+/** Windows: when a process started, in ms since the epoch; null when it has exited or neither probe can read it. */
 function processCreationTimeMs(pid) {
   if (process.platform !== "win32") return null;
+  return wmicCreationTimeMs(pid) ?? cimCreationTimeMs(pid);
+}
+
+function wmicCreationTimeMs(pid) {
   try {
     const output = execFileSync(
       "wmic",
@@ -259,6 +264,28 @@ function processCreationTimeMs(pid) {
   } catch {
   }
   return null;
+}
+
+/**
+ * Windows 11 no longer installs wmic, and without a creation time every reused pid reads as the lease's owner, so
+ * the lease can never be recovered. Windows PowerShell ships with every Windows; named by full path, never via PATH.
+ */
+function cimCreationTimeMs(pid) {
+  const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  try {
+    const output = execFileSync(
+      powershell,
+      [
+        "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+        `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }`,
+      ],
+      { encoding: "utf8", timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    const ms = Number(output.trim());
+    return output.trim() && Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Pids are reused within a boot: a process that started at another moment, or after the lease, is not its owner. */

@@ -14,6 +14,7 @@ import { ELEVATED_CARD } from "../elevated";
 import { InboxRowItem } from "./InboxRow";
 import { asMessage } from "./InboxReading";
 import { askOf, CARD_ROWS, choiceResponse, choicesOf, rowsIn, tabCounts } from "./inbox-view";
+import { accessRequestWords } from "../bot-access/access-card";
 import { useInboxActions } from "./use-inbox-actions";
 
 /** Most choices a question shows as buttons on the card; one with more opens in the inbox. */
@@ -49,7 +50,7 @@ function Answers({ row, view }: { row: InboxRow; view: InboxView }) {
   return (
     <div>
       {choices.length > 0 && choices.length <= CARD_CHOICES && (
-        <AskChoices choices={choices.map((label) => ({ label }))} label={row.card?.subtitle ?? row.text} sending={sending} tag="data-inbox-choice" onPick={pick} />
+        <AskChoices choices={choices.map((label) => ({ label }))} label={accessRequestWords(row.card)?.question ?? row.card?.subtitle ?? row.text} sending={sending} tag="data-inbox-choice" onPick={pick} />
       )}
       <div className="mt-1.5 flex justify-end">
         <button type="button" data-inbox-action="reply" onClick={reading} className={ASK_QUIET_ANSWER}><CornerUpLeft size={15} aria-hidden="true" />{t("chat.reply")}</button>

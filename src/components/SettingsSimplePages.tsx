@@ -14,6 +14,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
+import { AccessOverview } from "./bot-access/AccessOverview";
 import { BuiltInBrowserRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
@@ -91,6 +92,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
       )}
       {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><AdminOnly><ImportSettings /></AdminOnly></SettingsGroup>}
       {has("organization") && <SettingsGroup label={t("settings.section.organization")} block="organization"><OrganizationSettings /></SettingsGroup>}
+      {has("botAccess") && <SettingsGroup label={t("settings.section.botAccess")} block="botAccess"><AccessOverview /></SettingsGroup>}
       {has("activity") && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
       <div data-settings-block="advanced-mode" className="scroll-mt-4">
         <SettingsRows><AdvancedModeRow simple /></SettingsRows>

@@ -6551,5 +6551,21 @@
   "botAccess.yours.chat": "Вы можете общаться с {bot} и начинать с ним свои разговоры. Кто имеет доступ, решают те, кто может его редактировать.",
   "botAccess.yours.other": "Кто имеет доступ, решают те, кто может редактировать {bot}.",
   "botAccess.viewOnly": "Вы можете просматривать {bot}, но не общаться с ним.",
-  "botAccess.viewOnlyRoom": "Вы можете только просматривать {bot}, поэтому можете читать эту комнату, но не писать в ней."
+  "botAccess.viewOnlyRoom": "Вы можете только просматривать {bot}, поэтому можете читать эту комнату, но не писать в ней.",
+  "botAccess.ask": "Попросить {name} разрешить общение",
+  "botAccess.askAdmins": "Попросить администратора разрешить общение",
+  "botAccess.asked": "Запрос отправлен: {name}",
+  "botAccess.theAdmins": "администраторам",
+  "botAccess.request.question": "{name} просит разрешения общаться с {bot}. «Разрешить» позволит общаться с ним и начинать свои разговоры.",
+  "botAccess.request.allow": "Разрешить",
+  "botAccess.request.notNow": "Не сейчас",
+  "settings.section.botAccess": "Доступ к ботам",
+  "botAccess.overview.intro": "Кто в {team} может просматривать, общаться с каждым ботом и редактировать его. Изменения действуют сразу.",
+  "botAccess.overview.noBots": "Ботов команды пока нет.",
+  "botAccess.overview.noPeople": "В команде пока только администраторы.",
+  "botAccess.overview.bot": "Бот",
+  "botAccess.overview.setForEveryone": "Задать для всех: {bot}",
+  "botAccess.overview.cell": "Что {name} может делать с {bot}",
+  "botAccess.overview.toastEveryone": "{bot}: все в {team} · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }

@@ -1,6 +1,6 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -52,6 +52,8 @@ import {
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
+  imageSlotsLeft,
+  imagesThatFit,
   replyTargetTakesFocus,
   intakeFiles,
   isLongPaste,
@@ -62,13 +64,14 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, SIMPLE_CONTROL, slotColors } from "./composer-simple";
+import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
 import { ApprovalChip, ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
+import { useStackedField, useTallPill } from "./composer-wrap";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ComposerReplyStrip } from "./ReplyQuote";
 import { escapeCancelsReply } from "@/lib/replies";
@@ -91,8 +94,6 @@ import {
   type ComposerSlashCommand,
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
-
-const SIMPLE_COMPOSER = "bg-composer p-2 ring-[0.5px] ring-ink/10 hover:ring-ink/[0.22] focus-within:ring-ink/[0.22] shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03),0_0_0_1px_rgb(228_228_228/0.04)] [transition:border-radius_300ms,box-shadow_150ms]";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -224,13 +225,14 @@ export function Composer({
     draftId, text, onText: editText, available: capabilities.dictation.available,
   });
   const [caret, setCaret] = useState(0);
-  const [tall, setTall] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
+  const tall = useTallPill(shellRef, simpleDock);
   const multiline = simpleDock && (tall || text.includes("\n"));
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const stacked = useStackedField(inputRef, advanced && !singleRow, text);
   const draftIdRef = useRef(draftId);
   draftIdRef.current = draftId;
   const caretRef = useRef(0);
@@ -255,16 +257,6 @@ export function Composer({
     });
     return () => cancelAnimationFrame(frame);
   }, []);
-  // Anything that grows the pill past its one 44px row (a second line, a reply strip) rounds its corners in.
-  useLayoutEffect(() => {
-    const shell = shellRef.current;
-    if (!simpleDock || !shell || typeof ResizeObserver === "undefined") return;
-    const measure = () => setTall(shell.getBoundingClientRect().height > 44.5);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(shell);
-    return () => observer.disconnect();
-  }, [simpleDock]);
   const replyToId = replyTo?.id ?? null;
   const focusedReplyRef = useRef(replyToId);
   useEffect(() => {
@@ -519,6 +511,7 @@ export function Composer({
         allowImages: engineSupportsImages,
         getPath: pathForFile,
         uploadImage,
+        imageSlots: imageSlotsLeft(attachments),
       });
       if (added.length) addAttachments(added);
       if (notice) setAttachmentNotice(notice);
@@ -636,25 +629,24 @@ export function Composer({
         dispatch({ type: "error", message: t("composer.error.clipboardImage") });
         return;
       }
-      if (imageFiles.length > 0) {
-        changeDraftAttachmentPending(draftId, true);
-        void (async () => {
-          try {
-            const results = await Promise.allSettled(imageFiles.map(uploadImage));
-            for (const result of results) {
-              if (result.status === "rejected") {
-                dispatch({
-                  type: "error",
-                  message: result.reason instanceof Error ? result.reason.message : "image upload failed",
-                });
-              }
+      const kept = imagesThatFit(imageFiles, imageSlotsLeft(attachments), setAttachmentNotice);
+      changeDraftAttachmentPending(draftId, true);
+      void (async () => {
+        try {
+          const results = await Promise.allSettled(kept.map(uploadImage));
+          for (const result of results) {
+            if (result.status === "rejected") {
+              dispatch({
+                type: "error",
+                message: result.reason instanceof Error ? result.reason.message : "image upload failed",
+              });
             }
-          } finally {
-            changeDraftAttachmentPending(draftId, false);
           }
-        })();
-        return;
-      }
+        } finally {
+          changeDraftAttachmentPending(draftId, false);
+        }
+      })();
+      return;
     }
     const pasted = e.clipboardData.getData("text/plain");
     const reference = threadTokenFromPaste(pasted, threads, currentBotId);
@@ -808,7 +800,7 @@ export function Composer({
         )}
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
-        <div data-composer-row className={cn("flex items-end", simpleDock ? "gap-1.5" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:flex-wrap")}>
+        <div data-composer-row className={cn("flex items-end", simpleDock ? "gap-1.5" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
           <input
             ref={fileInput}
             type="file"
@@ -848,7 +840,7 @@ export function Composer({
             </div>
           )}
           <MentionTextarea
-          wrapperClassName={singleRow || simpleDock ? undefined : "@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"}
+          wrapperClassName={singleRow || simpleDock ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}
           peers={[...(group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
@@ -947,7 +939,7 @@ export function Composer({
               simpleDock ? "min-h-7 px-0.5 py-1 text-[14px] leading-5" : "min-h-6 py-1 leading-6",
             )}
           />
-          <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto")}>
+          <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
           {(simpleDock ? stoppable : busy) && !locked && (
           <button
             onClick={interruptTurn}

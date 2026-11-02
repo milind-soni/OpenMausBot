@@ -5141,5 +5141,21 @@
   "botAccess.yours.chat": "Bạn có thể trò chuyện với {bot} và bắt đầu cuộc trò chuyện riêng với nó. Người có thể chỉnh sửa nó sẽ chọn ai có quyền truy cập.",
   "botAccess.yours.other": "Người có thể chỉnh sửa {bot} sẽ chọn ai có quyền truy cập.",
   "botAccess.viewOnly": "Bạn có thể xem {bot}, nhưng không thể trò chuyện với nó.",
-  "botAccess.viewOnlyRoom": "Bạn chỉ có thể xem {bot}, nên bạn đọc được phòng này nhưng không thể viết vào đó."
+  "botAccess.viewOnlyRoom": "Bạn chỉ có thể xem {bot}, nên bạn đọc được phòng này nhưng không thể viết vào đó.",
+  "botAccess.ask": "Xin {name} cho trò chuyện",
+  "botAccess.askAdmins": "Xin quản trị viên cho trò chuyện",
+  "botAccess.asked": "Đã xin {name}",
+  "botAccess.theAdmins": "các quản trị viên",
+  "botAccess.request.question": "{name} xin được trò chuyện với {bot}. Cho phép để họ trò chuyện với nó và bắt đầu cuộc trò chuyện riêng.",
+  "botAccess.request.allow": "Cho phép",
+  "botAccess.request.notNow": "Để sau",
+  "settings.section.botAccess": "Quyền truy cập bot",
+  "botAccess.overview.intro": "Ai trong {team} có thể xem, trò chuyện và chỉnh sửa từng bot. Thay đổi có hiệu lực ngay.",
+  "botAccess.overview.noBots": "Chưa có bot nào của nhóm.",
+  "botAccess.overview.noPeople": "Trong nhóm chưa có ai ngoài quản trị viên.",
+  "botAccess.overview.bot": "Bot",
+  "botAccess.overview.setForEveryone": "Đặt cho mọi người: {bot}",
+  "botAccess.overview.cell": "{name} có thể làm gì với {bot}",
+  "botAccess.overview.toastEveryone": "{bot}: mọi người trong {team} · {level}",
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
 }
