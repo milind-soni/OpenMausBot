@@ -680,8 +680,8 @@ const sessions = new SessionRegistry({
     const membership = signInAllowList();
     return (email) => allowedScopes(email, membership);
   },
-  portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
-});
+  portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true, recheckMs: 1_000,
+}); onConfigSaved(() => sessions.membershipChanged());
 const deviceLinks = new DeviceLinks(); const sharedComputers = new SharedComputers(id => sessions.isLive(id), new LentComputers(join(DATA_DIR, "lent-computers.json")), deviceLinks, lentCopies);
 // A Cloud home's secrets come over the launcher's pipe, never this process's environment.
 const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
@@ -4809,7 +4809,7 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
 /** `adminOnly` frames are withheld from client sessions, live and on replay; a `person`'s frames reach only their streams. */
 function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string } = {}) {
   // Close stale email streams before any further workspace data is delivered.
-  sessions.revalidateEmailSessions();
+  sessions.recheckMembership();
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
