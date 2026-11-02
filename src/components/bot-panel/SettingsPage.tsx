@@ -3,6 +3,7 @@ import { AppWindow, AudioLines, ChevronRight, FileText, ShieldCheck, Tag } from 
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { CALL_MODES, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
 import { firstSentence } from "@/lib/soul";
@@ -40,6 +41,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   const { dispatch, flushBotPatches } = useStore();
   const { capabilities, ready } = useDesktopCapabilities();
   const apps = useBotApps(bot);
+  const { servers: allServers } = useMcpServers();
   const approval = useThreadApproval(currentTaskBot(bot));
   const storedCallMode = useCallMode();
   const [jobDraft, setJobDraft] = useState<string | null>(null);
@@ -76,7 +78,10 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   }));
 
   const soulOpen = editingInstructions || Boolean(bot.soulDrift);
-  const enabledApps = apps.apps.filter((app) => app.scope !== null).map((app) => app.label);
+  const enabledApps = [
+    ...apps.apps.filter((app) => app.scope !== null).map((app) => app.label),
+    ...(allServers ? mcpServersForBot(allServers, bot.mcpServers, bot.id).map((server) => server.name) : []),
+  ];
 
   return (
     <div data-panel-settings>
