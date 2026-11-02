@@ -9,6 +9,7 @@ import { UpdatesConsentRow } from "./UpdatesConsent";
 import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { TalkShortcutRow } from "./TalkShortcutRow";
+import { AttachmentStorageSettings } from "./AttachmentStorageSettings";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -86,6 +87,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <OpenAtLoginRow simple />
             <DefaultBotSidebarRow simple />
             <TalkShortcutRow />
+            <AttachmentStorageSettings />
             <AnalyticsRow simple />
           </SettingsRows>
         </SettingsGroup>

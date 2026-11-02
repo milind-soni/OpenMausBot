@@ -53,6 +53,7 @@ const {
   attachmentsMaxBytes,
   clearAttachments,
   keptAttachmentNames,
+  offerAttachmentClear,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
   extensionForFileMime,
@@ -678,12 +679,36 @@ describe("clearing attachments from Settings", () => {
 
     const cleared = clearAttachments(new Set([nameOf(picture.path)]));
 
-    expect(cleared).toEqual({ removed: 1, freedBytes: ATTACHMENTS_MAX_BYTES - 64 });
+    expect(cleared).toEqual({ removed: 1, freedBytes: ATTACHMENTS_MAX_BYTES - 64, failed: 0 });
     expect(existsSync(old.path)).toBe(false);
     expect(existsSync(picture.path)).toBe(true);
     expect(existsSync(fresh.path)).toBe(true);
     expect(attachmentStorageUsage()).toEqual({ usedBytes: "avatar".length + "fresh".length, maxBytes: ATTACHMENTS_MAX_BYTES });
     expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).not.toThrow();
+  });
+
+  it("does not point a Team Cloud, which has no clear, to Settings", () => {
+    const full = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(full.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+    offerAttachmentClear(false);
+    try {
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/^attachments storage is full \(512 MB limit\)$/);
+    } finally {
+      offerAttachmentClear(true);
+    }
+  });
+
+  it("counts files it could not remove instead of hiding them", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const gone = saveImage(Buffer.from("gone"), "image/png");
+    age(busy.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(gone.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    vi.mocked(unlinkSync).mockImplementation((path) => {
+      throw Object.assign(new Error("failed"), { code: String(path) === busy.path ? "EBUSY" : "ENOENT" });
+    });
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 1 });
   });
 
   it("leaves upload partials to their own cleanup", () => {
@@ -692,7 +717,7 @@ describe("clearing attachments from Settings", () => {
     writeFileSync(partial, "part");
     age(partial, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
 
-    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0 });
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 0 });
     expect(existsSync(partial)).toBe(true);
   });
 });

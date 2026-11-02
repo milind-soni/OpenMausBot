@@ -62,7 +62,7 @@ import { commandReceipt } from "./commands.ts";
 import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
 import { appendDecision, bindDecisionRetention, decisionRetentionDays, flushDecisionLog, pruneDecisions, withDecisionActor, type DecisionActor, type DecisionVia } from "./decision-log.ts";
 import { folderToFollow, inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
-import { ATTACHMENTS_DIR, attachmentExists, deleteAttachment, keptAttachmentNames, saveAudio, saveImage } from "./attachments.ts";
+import { ATTACHMENTS_DIR, attachmentExists, deleteAttachment, keptAttachmentNames, offerAttachmentClear, saveAudio, saveImage } from "./attachments.ts";
 import {
   messageAttachmentName,
   messageFileRoots,
@@ -12269,8 +12269,8 @@ ROUTES.push(createThreadRoutes({
   botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, memberDefaultBot: CLOUD_TEAM ? (email) => ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name }) : undefined,
   uploads: uploadsFor(createUploadOwners(DATA_DIR), Boolean(CLOUD_TEAM)),
   attachmentInUse: (name) => threadsReferencing(name).length > 0 || store.bots.some((bot) => bot.avatarUrl === `/api/attachments/${name}`),
-  keptAttachments: CLOUD_TEAM ? undefined : () => routines && keptAttachmentNames([...store.bots.map((bot) => bot.avatarUrl), cfg.profile?.avatarUrl], [workspaceBannerStore.current()?.name, ...[...routines.listRoutines(), ...routines.listRuns()].flatMap((owner) => owner.attachments?.map((file) => file.path) ?? [])]),
-}));
+  keptAttachments: CLOUD_TEAM ? undefined : () => routines && calendarCalls && keptAttachmentNames([...store.bots.map((bot) => bot.avatarUrl), cfg.profile?.avatarUrl], [workspaceBannerStore.current()?.name, ...[...routines.listRoutines(), ...routines.listRuns(), ...calendarCalls.list()].flatMap((owner) => owner.attachments?.map((file) => file.path) ?? [])]),
+})); offerAttachmentClear(!CLOUD_TEAM);
 ROUTES.push(createBotCreateRoutes({
   store, cfg, presetStore, orgInstallStatuses,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,

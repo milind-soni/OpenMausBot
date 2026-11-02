@@ -63,7 +63,7 @@ export interface ThreadRouteDeps {
   /** Who uploaded each file: only its uploader discards it, and only while nothing uses it. */
   uploads: { note(auth: RequestAuth, name: string): void; owns(auth: RequestAuth, name: string): boolean };
   attachmentInUse(name: string): boolean;
-  /** The stored files a Settings clear must leave (pictures, banner, routine files), null until routines load; absent on a Team Cloud, which has no clear. */
+  /** The stored files a Settings clear must leave (pictures, banner, routine and calendar-call files), null until those load; absent on a Team Cloud, which has no clear. */
   keptAttachments?(): ReadonlySet<string> | null;
 }
 
