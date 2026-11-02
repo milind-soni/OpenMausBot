@@ -9306,7 +9306,7 @@ const chiefPeerTargetRule = (noun: string) => (proposerBotId: string, targetBotI
 };
 const validateModelProposal = (selection: ModelSelection, current?: BotRecord): string | null => {
   const checked = checkedModelSelection(selection, undefined, true);
-  if (!checked.ok) return checked.error;
+  if (!checked.ok) return checked.error; if (registry.get(selection.instanceId)?.models.options.some((option) => option.id === selection.model && option.orgBlocked)) return "This account's organization turned that model off. Propose another one.";
   if (current?.approvalGrant) return "Wait for the approval-level confirmation before changing this bot's model";
   if (current) {
     const mode = approvalModeFor(current);

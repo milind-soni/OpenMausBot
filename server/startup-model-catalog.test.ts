@@ -8,7 +8,7 @@ import { createAcpDriver, type AcpSupport } from "./drivers/acp/core.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import * as procs from "./procs.ts";
 import { holdUntilFirstEngineRead } from "./first-engine-read.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "./startup-model-catalog.ts";
+import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "./startup-model-catalog.ts";
 
 const CACHED: ModelCatalog = {
   default: "cached-model",
@@ -108,6 +108,11 @@ describe("startup model catalogs", () => {
     vi.restoreAllMocks();
     rmSync(join(DATA_DIR, "bots.json"), { force: true });
     rmSync(join(DATA_DIR, "providers", "engine-models"), { recursive: true, force: true });
+  });
+
+  it("keeps a model the organization turned off marked in the saved list, so no start offers it while its refresh waits", () => {
+    writeStartupModelCache("org-blocked", { default: "a", options: [{ id: "a", label: "A" }, { id: "b", label: "B", orgBlocked: true }] });
+    expect(readStartupModelCache("org-blocked")?.options[1]).toEqual({ id: "b", label: "B", orgBlocked: true });
   });
 
   it("does not wait for a slow refresh when a later start already has a catalog", async () => {
