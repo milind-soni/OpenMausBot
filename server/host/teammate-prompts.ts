@@ -14,6 +14,7 @@ export interface TeammatePromptDeps {
   openPersonCard(threadId: string): { kind: "approval" | "question" | "review"; question?: string } | undefined;
   queuedStatus(node: HandoffView): string;
   isUnattended(botId: string, threadId: string): boolean;
+  fullAccess(botId: string, threadId: string): boolean;
   /** The work in this thread was started by an outside event. */
   startedOutside(threadId: string): boolean;
   guestDriven(threadId: string): boolean;
@@ -53,7 +54,7 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
     const waiting = deps.waitingForPerson(bot, teammates, deps.readableFrom(threadId))
       .map((one) => ({ ...one, thread: escapeNotes(one.thread).slice(0, 120), question: escapeNotes(one.question).slice(0, 400) }));
     if (!waiting.length) return "";
-    return ` Teammates you manage wait on the person's answer to these questions: ${JSON.stringify(waiting)}. When the person gives you an answer or asks you to answer one, or you know the answer for certain, send it to that teammate with coordinate_bots with its threadId as thread: it answers the question there for the person, who can still change it. Otherwise tell the person which thread asks; never guess an answer.`;
+    return ` Teammates you manage wait on the person's answer to these questions: ${JSON.stringify(waiting)}. When the person gives you an answer or asks you to answer one${deps.fullAccess(bot.id, threadId) ? ", or you know the answer for certain" : ""}, send it to that teammate with coordinate_bots with its threadId as thread: it answers the question there for the person, who can still change it. Otherwise tell the person which thread asks; never guess an answer.`;
   }
 
   return { outstanding, unattendedWork, actsForPerson, questions };
