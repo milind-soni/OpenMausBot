@@ -1434,6 +1434,8 @@
   "policy.mcpRestricted": "Managed by {organization}: only MCP servers your organization has approved reach bots.",
   "policy.mcpBlocked": "Not approved by {organization}; bots do not get this server.",
   "policy.remoteBlocked": "Managed by {organization}: remote access to this computer is turned off.",
+  "policy.teamModelBlocked": "{organization} doesn't let bots use this AI. Choose another, or ask a team admin.",
+  "policy.teamRemoteBlocked": "Managed by {organization}: opening this Cloud on a phone is turned off. Ask a team admin.",
   "organization.licenseExpired": "Your organization's OpenMaus Admin license has expired. Contact your admin.",
   "organization.companyModelsUnavailable": "Unavailable until the licence is renewed",
   "organization.reopen": "Open the sign-in page again",

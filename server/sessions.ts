@@ -589,6 +589,12 @@ export class SessionRegistry {
     return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
   }
 
+  /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */
+  closeMemberPhones(): number {
+    this.pairings = this.pairings.filter((pairing) => !(pairing.member && pairing.memberCheckedAt !== undefined));
+    return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
+  }
+
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
    * can open another. With `keepRole` (the Admin vouched for them at that role), only those at another role end. Returns
    * how many sessions ended. */
