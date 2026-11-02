@@ -6,6 +6,7 @@ import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withWslNotice } from "./wsl-launch.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -471,7 +472,7 @@ export class ProviderRegistry {
           };
         }
         const inst = entry.live;
-        const snapshot = await statusOf(inst);
+        const snapshot = withWslNotice(await statusOf(inst), this.cliByInstance.get(inst.instanceId));
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
