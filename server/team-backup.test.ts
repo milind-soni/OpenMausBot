@@ -5,6 +5,7 @@ import { createAgentCard } from "./chat-widgets.ts";
 import { DATA_DIR } from "./config.ts";
 import { Store, UNTITLED_TASK } from "./store.ts";
 import { RoutineManager } from "./routines.ts";
+import { ensureDefaultBot } from "./default-bot.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
 import { approvalModeFor } from "../shared/approval-mode.ts";
@@ -59,6 +60,15 @@ function fixture() {
 
 describe("additive portable team backups", () => {
   beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  it("stays valid on a Team Cloud with several members' crowned MausBots, none of them a Chief in the backup", () => {
+    const store = new Store(selection);
+    const department = store.createBot({ name: "Clive" });
+    store.setChiefOfStaff(department.id);
+    for (const person of ["ada@acme.test", "ben@acme.test"]) expect(ensureDefaultBot(store, { dataDir: DATA_DIR, person })?.chiefOfStaff).toBe(true);
+    const backup = createTeamBackup(store, [], "Acme");
+    expect(backup.bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.name)).toEqual(["Clive"]);
+  });
 
   it("carries tool restrictions through backup and import without restoring execution grants", () => {
     const { store, routines, chief, scout } = fixture();
