@@ -250,7 +250,7 @@ import { promptWithDataContext } from "../shared/data-context.ts";
 import { admit, roomTurnHolds } from "./admission.ts";
 import {
   drainSteeredMessages,
-  hasQueuedSteeredMessages,
+  hasQueuedPersonMessage, hasQueuedSteeredMessages,
   isSteeredMessageQueued,
   onSteeredQueueChange,
   queuedSteerSnapshot,
@@ -258,7 +258,7 @@ import {
   queuedThreadPosition,
   queueSteeredMessage,
   restoreSteeredMessages,
-} from "./steer-queue.ts";
+} from "./steer-queue.ts"; import { createDoneNotice } from "./done-notice.ts";
 import {
   drainChannelMessages,
   restoreChannelMessages,
@@ -301,7 +301,7 @@ import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, escapeNotes, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
-import { pageSize, slimMessage } from "./host/message-pages.ts";
+import { pageMessage, pageSize, slimMessage } from "./host/message-pages.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
 import {
   mentionedBots,
@@ -4621,14 +4621,14 @@ function messagePage(threadId: string, limit: number | undefined, before?: strin
   }
   if (!before) {
     const tail = store.messagesTail(threadId, limit);
-    return { messages: tail.messages.map(slimMessage), hasMore: tail.hasMore, activeLeafId: tail.activeLeafId };
+    return { messages: tail.messages.map(pageMessage), hasMore: tail.hasMore, activeLeafId: tail.activeLeafId };
   }
   const all = store.messagesFor(threadId);
   const end = all.findIndex((msg) => msg.id === before);
   const stop = end === -1 ? all.length : end;
   const start = Math.max(0, stop - limit);
   return {
-    messages: all.slice(start, stop).map(slimMessage),
+    messages: all.slice(start, stop).map(pageMessage),
     hasMore: start > 0,
     activeLeafId: store.activeLeaf(threadId),
   };
@@ -4690,7 +4690,7 @@ function messageWindow(threadId: string, messageId: string, limit: number) {
   const before = Math.floor((limit - 1) / 2);
   const start = Math.max(0, Math.min(index - before, all.length - limit));
   const stop = Math.min(all.length, start + limit);
-  return { messages: all.slice(start, stop).map(slimMessage), hasMore: start > 0 };
+  return { messages: all.slice(start, stop).map(pageMessage), hasMore: start > 0 };
 }
 
 interface SseClient {
@@ -5030,7 +5030,7 @@ const providerLabel = (provider: string): string => {
 };
 
 // Rewritten by every dispatch, so a quiet turn never silences the next one.
-const quietTurnThreads = new Set<string>();
+const quietTurnThreads = new Set<string>(); const doneNotice = createDoneNotice({ awaitingTeammates: (threadId) => coordinator.awaitingTeammateThreads().has(threadId), queuedFollowUp: hasQueuedPersonMessage });
 const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
 
 function notify(notification: Notification | null, how?: { routine?: boolean }) {
@@ -6938,7 +6938,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
         if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
         if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, completedTurnId);
-        else if ((!routineRun || routineRun.status === "completed") && !internal && !computerSelectionTurns.get(event.threadId)?.selected) {
+        else if ((!routineRun || routineRun.status === "completed") && (!internal || reviewAnswer) && !computerSelectionTurns.get(event.threadId)?.selected && doneNotice.atTurnEnd({ botId: bot.id, threadId: event.threadId, review: reviewAnswer, ok: event.ok, routine: Boolean(routineRun) }) === "notify") {
           notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }), routineRun ? { routine: true } : undefined);
         }
         if (screenPollers.has(event.threadId)) {
@@ -7758,7 +7758,7 @@ async function startTurn(
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
   if (commsDepth > 0) markInternalTurn(threadId);
-  else clearInternalTurn(threadId);
+  else { clearInternalTurn(threadId); doneNotice.personTurnStarted(threadId); }
   if (answer.quiet) quietTurnThreads.add(threadId);
   else quietTurnThreads.delete(threadId);
   if (resolvedImages.text.trim() && !opts?.cardContinuation && !opts?.replyTo?.reactedWith) {
