@@ -1398,7 +1398,7 @@ function operatorPrices(): PriceList | null {
   return entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
 }
 
-const attributeUsage = createUsageAttribution({ section: (botId) => store.bot(botId)?.section, routineWriter: (id) => { const key = cloudRoutineAuthors?.writer(id); return key ? teamOwners.people?.list().find((one) => personKey({ id: "", email: one.email }) === key)?.email : undefined; } }); function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported = true, notificationThreadId = row.threadId): void {
+const attributeUsage = createUsageAttribution({ section: (botId) => store.bot(botId)?.section, threadTrigger: (threadId) => turnTriggers.get(threadId), routineWriter: (id) => { const key = cloudRoutineAuthors?.writer(id); return key ? teamOwners.people?.list().find((one) => personKey({ id: "", email: one.email }) === key)?.email : undefined; } }); function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported = true, notificationThreadId = row.threadId): void {
   const cost = tokensReported || row.costUsd !== null ? ledgerCost(row, operatorPrices()) : { costUsd: null };
   const booked = attributeUsage({ ...row, ...cost, ...usageTrace.settle(row.threadId), at: new Date().toISOString() });
   // The append is async; noteSpend counts the row from memory until it lands, so the cap check sees it.

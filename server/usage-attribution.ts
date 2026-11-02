@@ -11,6 +11,8 @@ export interface UsageAttributionDeps {
   section(botId: string): string | undefined;
   /** The email of the person who wrote the routine, when known. */
   routineWriter(routineId: string): string | undefined;
+  /** What started the conversation's current turn: a parent still running has no row yet. */
+  threadTrigger?(threadId: string): UsageRow["trigger"] | undefined;
 }
 
 export function createUsageAttribution(deps: UsageAttributionDeps) {
@@ -27,8 +29,10 @@ export function createUsageAttribution(deps: UsageAttributionDeps) {
     if (trigger.kind === "routine" && !trigger.email && trigger.routineId) {
       const email = deps.routineWriter(trigger.routineId);
       if (email) trigger = { ...trigger, email };
-    } else if ((trigger.kind === "bot" || trigger.kind === "helper") && !trigger.email && row.parent) {
-      const email = turnPerson.get(row.parent.turnId);
+    } else if (trigger.kind !== "user" && trigger.kind !== "routine" && !trigger.email && row.parent) {
+      // A teammate can finish before the turn that delegated to it is booked.
+      const parentTrigger = deps.threadTrigger?.(row.parent.threadId);
+      const email = turnPerson.get(row.parent.turnId) ?? (parentTrigger ? personOf(parentTrigger) : undefined);
       if (email) trigger = { ...trigger, email };
     }
     remember(row.turnId, personOf(trigger));
@@ -38,5 +42,5 @@ export function createUsageAttribution(deps: UsageAttributionDeps) {
 
 /** The person a row was spent for, if any. */
 export function personOf(trigger: UsageRow["trigger"]): string | undefined {
-  return trigger.kind === "owner" ? undefined : trigger.email;
+  return trigger.email;
 }

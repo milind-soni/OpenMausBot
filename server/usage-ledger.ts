@@ -10,10 +10,11 @@ import { billableFor, type PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
 /** `helper`: a job the helper model wrote for `botId`, kept apart from `bot` so its cost reads on its own. */
-/** `email` on a routine, bot or helper row: the person it was spent for (`usage-attribution.ts`). */
+/** `email` on an owner, routine, bot or helper row: the person it was spent for (`usage-attribution.ts`), such as the
+ * person whose turn delegated to it. */
 export type UsageTrigger =
   | { kind: "user"; email?: string; label?: string }
-  | { kind: "owner" }
+  | { kind: "owner"; email?: string }
   | { kind: "routine"; routineId?: string; label?: string; runId?: string; email?: string }
   | { kind: "bot"; botId?: string; email?: string }
   | { kind: "helper"; botId?: string; job?: string; email?: string };
