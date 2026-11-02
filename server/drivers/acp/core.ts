@@ -10,7 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
-import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "../../startup-model-catalog.ts";
+import { openStartupModelCatalog, readStartupModelCache, unconfirmedModelCatalog, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
@@ -348,8 +348,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (resolved.options.length) {
             models = resolved;
             accountModels = new Set(resolved.options.map((option) => option.id));
-          }
-        } catch {}
+          } else unconfirmedModelCatalog(models);
+        } catch { unconfirmedModelCatalog(models); }
         try { writeStartupModelCache(instanceId, models); } catch {}
       };
       let startupModelRefresh: Promise<void> | null = null;

@@ -71,6 +71,13 @@ function catalogFrom(value: unknown): ModelCatalog | null {
   return { default: raw.default, options };
 }
 
+const unconfirmed = new WeakSet<ModelCatalog>();
+
+/** The engine did not give this list (its CLI timed out, or answered nothing): it is saved, but read again at the next start. */
+export function unconfirmedModelCatalog(catalog: ModelCatalog): void {
+  unconfirmed.add(catalog);
+}
+
 export interface StartupModelCacheEntry {
   catalog: ModelCatalog;
   checkedAt: number | null;
@@ -104,7 +111,7 @@ export function writeStartupModelCache(instanceId: string, catalog: ModelCatalog
   const stored = catalogFrom(catalog);
   if (!stored) return;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileAtomic(path, JSON.stringify({ ...stored, checkedAt: read.checkedAt ?? Date.now(), build: read.build ?? buildStamp() }), { durable: false });
+  writeFileAtomic(path, JSON.stringify({ ...stored, checkedAt: read.checkedAt ?? (unconfirmed.has(catalog) ? 0 : Date.now()), build: read.build ?? buildStamp() }), { durable: false });
 }
 
 /** An object, not a promise: an async function cannot hand back a promise without `await` following it. */

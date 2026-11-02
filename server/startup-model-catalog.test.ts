@@ -8,7 +8,8 @@ import { createAcpDriver, type AcpSupport } from "./drivers/acp/core.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import * as procs from "./procs.ts";
 import { holdUntilFirstEngineRead } from "./first-engine-read.ts";
-import { openStartupModelCatalog, readStartupModelCacheEntry, STARTUP_MODEL_CACHE_FRESH_MS, writeStartupModelCache } from "./startup-model-catalog.ts";
+import { CodexDriver } from "./drivers/codex.ts";
+import { openStartupModelCatalog, readStartupModelCacheEntry, STARTUP_MODEL_CACHE_FRESH_MS, unconfirmedModelCatalog, writeStartupModelCache } from "./startup-model-catalog.ts";
 
 const CACHED: ModelCatalog = {
   default: "cached-model",
@@ -178,6 +179,36 @@ describe("startup model catalogs", () => {
     await (openStartupModelCatalog({ instanceId: "timed", use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; }, now }) as { pending: Promise<void> }).pending;
     expect(refreshes).toBe(3);
     expect(readStartupModelCacheEntry("timed")).toMatchObject({ catalog: CACHED, checkedAt: expect.any(Number), build: expect.any(String) });
+  });
+
+  it("reads a list the engine did not confirm again at the next start", async () => {
+    seedBots();
+    const standIn = { ...CACHED };
+    unconfirmedModelCatalog(standIn);
+    writeStartupModelCache("timed", standIn);
+    expect(readStartupModelCacheEntry("timed")?.checkedAt).toBe(0);
+    let refreshes = 0;
+    const opened = openStartupModelCatalog({ instanceId: "timed", use: () => {}, current: () => standIn, refresh: async () => { refreshes += 1; } }) as { pending: Promise<void> };
+    await opened.pending;
+    expect(refreshes).toBe(1);
+  });
+
+  it("a later start of Codex on a fresh list starts no app-server; on an older one it does, once the first engine is read", async () => {
+    seedBots();
+    const appServers = () => spawn.mock.calls.filter(([, args]) => (args as string[] | undefined)?.[0] === "app-server").length;
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => { throw new Error("spawned"); });
+    const start = () => CodexDriver.create({ instanceId: "codex-later", displayName: "Codex", environment: {}, enabled: true, config: CodexDriver.defaultConfig() });
+    writeStartupModelCache("codex-later", CACHED);
+    const fresh = await start();
+    expect(fresh.models).toEqual(CACHED);
+    expect(fresh.startupModelRefresh).toBeUndefined();
+    expect(appServers()).toBe(0);
+    await fresh.dispose();
+    writeStartupModelCache("codex-later", CACHED, STALE);
+    const stale = await start();
+    await stale.startupModelRefresh;
+    expect(appServers()).toBe(1);
+    await stale.dispose();
   });
 
   it("still waits for discovery on the first run, when nothing is cached", async () => {
