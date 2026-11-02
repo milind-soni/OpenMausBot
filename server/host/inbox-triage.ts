@@ -10,10 +10,11 @@ import { inboxTriageRequest, INBOX_TRIAGE_TIMEOUT_MS, type InboxDetails } from "
 import { INBOX_FIELDS, INBOX_TEXT_MAX } from "../extractor/contract.ts";
 import { extractorReady, type Extractor } from "../extractor/index.ts";
 import { clean, defuse } from "../records-block.ts";
-import { PICKS_PER_TRIAGE } from "./check-plan.ts";
+import { PICKS_PER_TRIAGE, TRIAGE_BATCH } from "./check-plan.ts";
 
 const EXTRACT_TIMEOUT_MS = 6_000;
 const AT_ONCE = 4;
+export const INBOX_TRIAGE_BUDGET_MS = Math.ceil(TRIAGE_BATCH / AT_ONCE) * (EXTRACT_TIMEOUT_MS + INBOX_TRIAGE_TIMEOUT_MS);
 
 export interface InboxPick { id: string; why: string; needsReply: boolean }
 
@@ -41,9 +42,12 @@ export function pickWhy(details: InboxDetails | undefined): string {
   return parts.length ? clean(`${parts.join(", ")}.`, 240) : "";
 }
 
-async function inBatches<T, R>(items: readonly T[], size: number, work: (item: T) => Promise<R>): Promise<R[]> {
+async function inBatches<T, R>(items: readonly T[], size: number, work: (item: T) => Promise<R>, signal?: AbortSignal): Promise<R[]> {
   const out: R[] = [];
-  for (let start = 0; start < items.length; start += size) out.push(...await Promise.all(items.slice(start, start + size).map(work)));
+  for (let start = 0; start < items.length; start += size) {
+    signal?.throwIfAborted();
+    out.push(...await Promise.all(items.slice(start, start + size).map(work)));
+  }
   return out;
 }
 
@@ -52,17 +56,21 @@ export function createInboxTriage(deps: InboxTriageDeps) {
     /** Decisions are on and their inbox job too: the helper models sort the mail, not an AI turn. */
     ready: (): boolean => deciderReady(deps.config(), "inboxTriage"),
     /** The picks among `emails`, most likely first; null when any decision failed, so the batch waits. */
-    async triage(emails: readonly EmailHeader[], dismissedFrom: readonly string[]): Promise<InboxPick[] | null> {
+    async triage(emails: readonly EmailHeader[], dismissedFrom: readonly string[], signal?: AbortSignal): Promise<InboxPick[] | null> {
+      signal?.throwIfAborted();
       const reads = extractorReady(deps.config());
       const judged = await inBatches(emails, AT_ONCE, async (email) => {
-        const read = reads ? await deps.extractor.extract("inboxTriage", INBOX_FIELDS, { text: inboxText(email) }, { timeoutMs: EXTRACT_TIMEOUT_MS }) : null;
+        const read = reads ? await deps.extractor.extract("inboxTriage", INBOX_FIELDS, { text: inboxText(email) }, { timeoutMs: EXTRACT_TIMEOUT_MS, signal }) : null;
+        signal?.throwIfAborted();
         const details = read?.ok ? Object.fromEntries(Object.entries(read.values).filter(([, value]) => value !== null)) as InboxDetails : undefined;
         const { state, question } = inboxTriageRequest({ email, ...(details ? { details } : {}), dismissedFrom });
-        const decided = await deps.decider.choose("inboxTriage", state, question, { timeoutMs: INBOX_TRIAGE_TIMEOUT_MS });
+        const decided = await deps.decider.choose("inboxTriage", state, question, { timeoutMs: INBOX_TRIAGE_TIMEOUT_MS, signal });
+        signal?.throwIfAborted();
         // Too large for the relay is too large every time: that email is skipped, never asked about again.
         if (!decided.ok && decided.reason === "too_large") return { email, details, verdict: "skip" as const, keep: 0 };
         return decided.ok ? { email, details, verdict: decided.answers.choice, keep: 1 - (decided.answers.probabilities.skip ?? 0) } : null;
-      });
+      }, signal);
+      signal?.throwIfAborted();
       if (judged.some((one) => one === null)) return null;
       return judged
         .flatMap((one) => (one && one.verdict !== "skip" ? [one] : []))

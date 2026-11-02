@@ -14,9 +14,10 @@ import { createAgentCard } from "../chat-widgets.ts";
 import type { CalendarEvent, EmailHeader, ReadSession } from "../connected-reads.ts";
 import { recordsBlock, clean } from "../records-block.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
+import { awaitRoutineCheck } from "../routine-check-task.ts";
 import type { RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
+import { answered, BRIEF_HEADER_READ_LIMIT, BRIEF_REPLY_READ_LIMIT, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
 import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
@@ -304,14 +305,15 @@ export function createBrief(deps: BriefDeps) {
   ];
 
   /** Headers of the rows this process has not seen, read back from Gmail by id. */
-  async function rereadHeaders(): Promise<void> {
+  async function rereadHeaders(signal?: AbortSignal): Promise<void> {
     const missing = liveImportant(now()).filter((row) => !headers.has(row.messageId));
     if (!missing.length) return;
     const session = deps.session();
     if (!session) return;
-    for (const row of missing.slice(0, 12)) {
+    for (const row of missing.slice(0, BRIEF_HEADER_READ_LIMIT)) {
       try {
-        const header = await session.message(row.messageId);
+        const header = await awaitRoutineCheck(session.message(row.messageId, signal), signal);
+        signal?.throwIfAborted();
         if (header) headers.set(row.messageId, header);
         else state.important = state.important.filter((one) => one.messageId !== row.messageId);
       } catch {
@@ -322,7 +324,8 @@ export function createBrief(deps: BriefDeps) {
 
   /** Posts today's brief, or edits it in place. `create`: post one when it has anything to show, not only what needs the
    * person. `worth`: the card has something in it, so an arrival may open it. */
-  async function render(options: { create: boolean; notify: boolean; morning?: boolean }): Promise<{ botId: string; threadId: string; worth: boolean } | null> {
+  async function render(options: { create: boolean; notify: boolean; morning?: boolean; signal?: AbortSignal }): Promise<{ botId: string; threadId: string; worth: boolean } | null> {
+    options.signal?.throwIfAborted();
     if (deps.hosted || !deps.watching()) return null;
     const bot = chief();
     if (!bot) return null;
@@ -332,7 +335,8 @@ export function createBrief(deps: BriefDeps) {
     }
     rendering = true;
     try {
-      await rereadHeaders();
+      await rereadHeaders(options.signal);
+      options.signal?.throwIfAborted();
       const existing = currentCard(bot);
       const built = facts(bot);
       const threadId = existing?.card.threadId ?? home(bot);
@@ -406,6 +410,7 @@ export function createBrief(deps: BriefDeps) {
   /** What the checks found that needs no AI: today's meetings, clashes, reminders, other routines, trouble, and the
    * emails the helper models picked. */
   async function report(found: CheckReport): Promise<void> {
+    found.signal?.throwIfAborted();
     if (deps.hosted) return;
     if (found.meetings) calendar = { meetings: found.meetings, clashes: found.clashes ?? [] };
     trouble = found.trouble ?? [];
@@ -416,19 +421,22 @@ export function createBrief(deps: BriefDeps) {
     const picked = found.picked ?? [];
     for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at);
     if (picked.length) save();
-    await followUpReplies(found.session);
-    if (picked.length) await render({ create: true, notify: true });
-    else if (state.lastActiveAt !== undefined) await render({ create: false, notify: true });
+    await followUpReplies(found.session, found.signal);
+    found.signal?.throwIfAborted();
+    if (picked.length) await render({ create: true, notify: true, signal: found.signal });
+    else if (state.lastActiveAt !== undefined) await render({ create: false, notify: true, signal: found.signal });
   }
 
   /** An email waiting on a reply leaves the brief once the person has replied in its thread. */
-  async function followUpReplies(session: ReadSession | undefined): Promise<void> {
+  async function followUpReplies(session: ReadSession | undefined, signal?: AbortSignal): Promise<void> {
     const address = deps.address();
     const open = liveImportant(now()).filter((row) => row.needsReply);
     if (!session || !address || !open.length) return;
-    for (const row of open.slice(0, 10)) {
+    for (const row of open.slice(0, BRIEF_REPLY_READ_LIMIT)) {
       try {
-        if (answered({ at: row.at }, await session.thread(row.threadId), address)) state.important = state.important.filter((one) => one.messageId !== row.messageId);
+        const messages = await awaitRoutineCheck(session.thread(row.threadId, signal), signal);
+        signal?.throwIfAborted();
+        if (answered({ at: row.at }, messages, address)) state.important = state.important.filter((one) => one.messageId !== row.messageId);
       } catch {
         return;
       }

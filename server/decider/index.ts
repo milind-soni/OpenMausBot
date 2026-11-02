@@ -251,7 +251,7 @@ export function createDecider(deps: DeciderDeps): Decider {
     let outcome: BackendResult;
     try {
       const decided = Promise.resolve()
-        .then(() => backend.decide({
+        .then(() => controller.signal.aborted ? { ok: false, reason: "cancelled" } as BackendResult : backend.decide({
           key: account.token,
           baseUrl: account.api,
           ...(account.accountId ? { accountId: account.accountId } : {}),
@@ -268,7 +268,7 @@ export function createDecider(deps: DeciderDeps): Decider {
       options.signal?.removeEventListener("abort", onAbort);
     }
     const latencyMs = Math.max(0, Math.round(now() - started));
-    if (!outcome.ok && outcome.reason !== "timeout" && options.signal?.aborted) outcome = { ok: false, reason: "cancelled" };
+    if (options.signal?.aborted) return { ok: false, provider, reason: "cancelled", latencyMs };
     if (deps.dataDir) {
       const first = outcome.ok ? Object.values(outcome.answers).find((answer) => answer.type === "choice") as ChoiceAnswer | undefined : undefined;
       const model = request.model ?? (outcome.ok ? outcome.model : undefined);

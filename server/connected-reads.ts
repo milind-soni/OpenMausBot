@@ -319,14 +319,14 @@ export interface ConnectedReadDeps {
 
 /** The reads one check makes, over one connected-apps session. */
 export interface ReadSession {
-  events(fromMs: number, toMs: number): Promise<CalendarEvent[]>;
+  events(fromMs: number, toMs: number, signal?: AbortSignal): Promise<CalendarEvent[]>;
   /** Inbox mail since `sinceMs`, newest first, at most `limit`; `more` when there was more than that. */
-  emails(sinceMs: number, limit: number): Promise<{ emails: EmailHeader[]; more: boolean }>;
+  emails(sinceMs: number, limit: number, signal?: AbortSignal): Promise<{ emails: EmailHeader[]; more: boolean }>;
   /** Null only when Gmail says the message is gone. */
-  message(messageId: string): Promise<EmailHeader | null>;
-  thread(threadId: string): Promise<ThreadMessage[]>;
+  message(messageId: string, signal?: AbortSignal): Promise<EmailHeader | null>;
+  thread(threadId: string, signal?: AbortSignal): Promise<ThreadMessage[]>;
   /** The connected Gmail account's own address. */
-  address(): Promise<string>;
+  address(signal?: AbortSignal): Promise<string>;
 }
 
 export interface ConnectedReads {
@@ -335,7 +335,7 @@ export interface ConnectedReads {
 }
 
 const GMAIL_PAGE = 50;
-const GMAIL_PAGES = 6;
+export const GMAIL_PAGES = 6;
 
 const appOf = (slug: string): ReadApp => (slug.startsWith("GMAIL_") ? "gmail" : "googlecalendar");
 
@@ -358,7 +358,9 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
 
     /** One tool's data, or GONE when `gone` says the tool's own failure means the thing asked for is missing. */
     async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean } = {}): Promise<unknown> {
-      const { gone, signal = AbortSignal.timeout(readTimeoutMs) } = options;
+      const { gone } = options;
+      const timeout = AbortSignal.timeout(readTimeoutMs);
+      const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
       const app = appOf(slug);
       try {
         signal.throwIfAborted();
@@ -399,10 +401,10 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
     }
 
     return {
-      async events(fromMs, toMs) {
+      async events(fromMs, toMs, callerSignal) {
         requireFinite("googlecalendar", fromMs, toMs);
         const failed = new AbortController();
-        const signal = AbortSignal.any([AbortSignal.timeout(readTimeoutMs), failed.signal]);
+        const signal = AbortSignal.any([AbortSignal.timeout(readTimeoutMs), failed.signal, ...(callerSignal ? [callerSignal] : [])]);
         const listed = await calendars(signal);
         const read = [...(listed.some((calendar) => calendar.primary) ? [] : [PRIMARY_CALENDAR]), ...listed.filter((calendar) => calendar.read)];
         const perCalendar = await inParallel(read, CALENDAR_READS_AT_ONCE, async (calendar) => {
@@ -419,7 +421,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
         });
         return perCalendar.flat();
       },
-      async emails(sinceMs, limit) {
+      async emails(sinceMs, limit, signal) {
         requireFinite("gmail", sinceMs);
         const found: EmailHeader[] = [];
         let page: string | undefined;
@@ -427,7 +429,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
           const data = await call(GMAIL_FETCH_TOOL, {
             user_id: "me", query: `in:inbox after:${seconds(sinceMs)} -category:promotions -category:social`,
             max_results: GMAIL_PAGE, include_payload: false, verbose: false, ...(page ? { page_token: page } : {}),
-          });
+          }, { signal });
           found.push(...parsed("gmail", () => emailsFromData(data)));
           page = nextPageOf(data);
           if (!page) break;
@@ -435,16 +437,16 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
         const newest = [...new Map(found.map((email) => [email.id, email])).values()].sort((a, b) => b.at - a.at);
         return { emails: newest.slice(0, limit), more: newest.length > limit || page !== undefined };
       },
-      async message(id) {
-        const data = await call(GMAIL_MESSAGE_TOOL, { user_id: "me", message_id: id, format: "metadata" }, { gone: messageGone });
+      async message(id, signal) {
+        const data = await call(GMAIL_MESSAGE_TOOL, { user_id: "me", message_id: id, format: "metadata" }, { gone: messageGone, signal });
         return data === GONE ? null : parsed("gmail", () => messageFromData(data));
       },
-      async thread(threadId) {
-        const data = await call(GMAIL_THREAD_TOOL, { user_id: "me", thread_id: threadId });
+      async thread(threadId, signal) {
+        const data = await call(GMAIL_THREAD_TOOL, { user_id: "me", thread_id: threadId }, { signal });
         return parsed("gmail", () => threadFromData(data));
       },
-      async address() {
-        const data = await call(GMAIL_PROFILE_TOOL, { user_id: "me" });
+      async address(signal) {
+        const data = await call(GMAIL_PROFILE_TOOL, { user_id: "me" }, { signal });
         return parsed("gmail", () => profileFromData(data));
       },
     };
