@@ -1185,7 +1185,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
 }
 
 const { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, settleRoomFloor } = createVisibilityHost({ store: () => store, routines: () => routines,
-  team: Boolean(CLOUD_TEAM), audiencesFor: (viewer) => teamHost.audiencesFor(viewer), threadsReferencing }); if (CLOUD_TEAM) hideOthersSyncFolders(() => store.bots, threadShown); const botAccess = createBotAccessHost({ visibleFor: (auth) => visibleTo(viewerFor(auth)), store: () => store, routines: () => routines, threadOwner, routineWriter: (id) => cloudRoutineAuthors?.writer(id) }), { levelOf } = botAccess; const accessRequests = createAccessRequests({ team: CLOUD_TEAM, store: () => store, people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, inbox: () => teamMessages.inbox, visibleTo, levelOf, writeAccess: (bot, access) => writeAccess({ store, publicGroupState, broadcast, audienceChanged }, bot, access) });
+  team: Boolean(CLOUD_TEAM), audiencesFor: (viewer) => teamHost.audiencesFor(viewer), threadsReferencing }); if (CLOUD_TEAM) hideOthersSyncFolders(() => store.bots, threadShown); const botAccess = createBotAccessHost({ visibleFor: (auth) => visibleTo(viewerFor(auth)), store: () => store, routines: () => routines, threadOwner, routineWriter: (id) => cloudRoutineAuthors?.writer(id) }), { levelOf } = botAccess; const accessRequests = createAccessRequests({ team: CLOUD_TEAM, store: () => store, people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, inbox: () => teamMessages.inbox, visibleTo, levelOf, writeAccess: (bot, access) => writeAccess({ store, publicGroupState, broadcast, audienceChanged }, bot, access), record: (row, by) => appendAdminAction(DATA_DIR, { ...row, actor: { kind: "session", sessionId: "", label: by, email: by } }) });
 
 function recentWorkFilter(threadId: string): { include?: (threadId: string) => boolean; privateThread?: (threadId: string) => boolean } {
   return CLOUD_TEAM ? { include: teamHost.readableFrom(threadId), privateThread: (id) => teamHost.privateTo(id) !== null } : CLOUD_HOME ? { include: cloudOwnerOnlyThread } : {};
@@ -12284,7 +12284,7 @@ ROUTES.push(createBotCreateRoutes({
   routines: () => routines,
   storedAvatarExists, defaultSelection, checkedModelSelection, cloudOwnerSession, wireBot, team: CLOUD_TEAM && teamOwners.people ? { name: CLOUD_TEAM.name, people: teamOwners.people } : null,
   personaliseSetupCard: (bot) => setupSuggestions.personalise(bot.id),
-}), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot,
+}), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }), sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot,
   profileOf: (email) => teamHost.people.profile(personKey({ id: "", email })) }));
 ROUTES.push(createBotSettingsRoutes({
   store, cfg, registry, commandAllowlist, commandAllowlistDrivers: COMMAND_ALLOWLIST_DRIVERS,
@@ -12293,7 +12293,7 @@ ROUTES.push(createBotSettingsRoutes({
   requestedTaskBot, threadBusy, activeGroupTurnForBot, checkedModelSelection, engineSwitchNeedsAsk, readCursor,
   canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal, threadRead: teamMessages.seen, levelOf,
 }));
-ROUTES.push(createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged }), accessRequests.routes);
+ROUTES.push(createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), accessRequests.routes);
 ROUTES.push(createBotPatchRoutes({
   store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
