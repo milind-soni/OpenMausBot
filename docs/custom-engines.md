@@ -71,8 +71,8 @@ own sign-in, not a Mistral API key saved in OpenMausBot.
    This puts `vibe` and `vibe-acp` in `~/.local/bin`.
 2. Sign in once from a terminal: run `vibe --setup` and sign in with your
    Mistral account (Vibe offers a browser sign-in through Mistral AI Studio, or
-   an API key). Vibe saves the result in `~/.vibe/.env`, where `vibe-acp`
-   reads it.
+   an API key). Vibe uses the first credential it finds in the shell
+   environment, `~/.vibe/.env`, or the OS keyring, and `vibe-acp` uses it too.
 3. Add the instance and restart OpenMausBot:
 
    ```json
