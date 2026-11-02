@@ -11,6 +11,7 @@ const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; body: unkn
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === "/api/team/groups") return { groups: [] };
     server.calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     return server.answer;
   }),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { accessFromVisibility, atLeast, sharedLevel, visibilityFromAccess } from "../shared/bot-access.ts";
-import { accessOf, memberBot, memberLevel, parseBotAccess, VisibleSet } from "./bot-visibility.ts";
+import { accessOf, MAX_VISIBILITY_PEOPLE, memberBot, memberLevel, parseBotAccess, setTeamGroupMembers, VisibleSet } from "./bot-visibility.ts";
 import { levelNeeded, relayedSendRefusal, setupCardRefusal } from "./host/bot-access-gate.ts";
 import { memberBotPatchViolation } from "./request-auth.ts";
 import { settledAccess } from "./routes/bot-access.ts";
@@ -138,3 +138,54 @@ describe("setting a bot's sharing", () => {
     expect(atLeast("view", "chat")).toBe(false);
   });
 });
+
+describe("groups of people", () => {
+  const FINANCE = ["bob@acme.test", "eve@acme.test"];
+  const members = (id: string) => (id === "finance" ? FINANCE : undefined);
+
+  it("gives each member the group's level while they are in it, the highest grant winning, and nothing for a group gone", () => {
+    const access = { everyone: "none" as const, people: { [BOB]: "edit" as const }, groups: { finance: "chat" as const, gone: "edit" as const } };
+    expect(sharedLevel(access, "eve@acme.test", members)).toBe("chat");
+    expect(sharedLevel(access, BOB, members)).toBe("edit");
+    expect(sharedLevel(access, CARA, members)).toBe("none");
+    expect(sharedLevel(access, "eve@acme.test")).toBe("none");
+    expect(visibilityFromAccess(access, DAN, members)).toEqual({ people: [DAN, BOB, "eve@acme.test"] });
+    expect(visibilityFromAccess({ ...access, everyone: "view" }, DAN, members)).toBe("everyone");
+  });
+
+  it("reads membership now for a member's level", () => {
+    const bot = { visibility: { people: ["eve@acme.test"] }, access: { everyone: "none", people: {}, groups: { finance: "chat" } } };
+    setTeamGroupMembers(members);
+    try {
+      expect(memberLevel(bot, "eve@acme.test")).toBe("chat");
+      setTeamGroupMembers(() => []);
+      expect(memberLevel(bot, "eve@acme.test"), "seen by its stored visibility, but no longer in the group").toBe("view");
+    } finally {
+      setTeamGroupMembers(() => undefined);
+    }
+  });
+
+  it("parses group grants by id, and adds only the team's groups", () => {
+    expect(parseBotAccess({ everyone: "none", people: {}, groups: { finance: "chat" } })).toEqual({ ok: true, access: { everyone: "none", people: {}, groups: { finance: "chat" } } });
+    expect(parseBotAccess({ everyone: "none", people: {}, groups: {} })).toEqual({ ok: true, access: { everyone: "none", people: {} } });
+    expect(parseBotAccess({ everyone: "none", people: {}, groups: { "Bad Id": "chat" } }).ok).toBe(false);
+    expect(parseBotAccess({ everyone: "none", people: {}, groups: { finance: "none" } }).ok).toBe(false);
+    const bot = { id: "pay", name: "Payroll", reportsTo: DAN, access: { everyone: "none", people: {} } } as unknown as BotRecord;
+    expect(settledAccess(bot, { everyone: "none", people: {}, groups: { finance: "chat" } }, () => true, (id) => id === "finance"))
+      .toEqual({ ok: true, access: { everyone: "none", people: {}, groups: { finance: "chat" } } });
+    expect(settledAccess(bot, { everyone: "none", people: {}, groups: { other: "chat" } }, () => true, (id) => id === "finance")).toMatchObject({ ok: false });
+  });
+
+  it("refuses sharing that would list more people than visibility holds", () => {
+    const crowd = Array.from({ length: MAX_VISIBILITY_PEOPLE }, (_, i) => `p${i}@acme.test`);
+    setTeamGroupMembers((id) => (id === "all" ? crowd : undefined));
+    try {
+      const bot = { id: "pay", name: "Payroll", reportsTo: DAN, access: { everyone: "none", people: {} } } as unknown as BotRecord;
+      expect(settledAccess(bot, { everyone: "none", people: {}, groups: { all: "chat" } }, () => true, () => true)).toMatchObject({ ok: false, error: expect.stringContaining("Give everyone") });
+      expect(settledAccess(bot, { everyone: "chat", people: {}, groups: { all: "edit" } }, () => true, () => true)).toMatchObject({ ok: true });
+    } finally {
+      setTeamGroupMembers(() => undefined);
+    }
+  });
+});
+

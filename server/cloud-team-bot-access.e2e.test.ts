@@ -357,6 +357,34 @@ describe("asking to chat", () => {
     expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).status).toBe(409);
   });
 
+  it("gives a group's members its level on a bot, and takes it away when they leave the group or it is deleted", async () => {
+    const made = await as("ada", "POST", "/api/bots", { name: "Vault", reportsTo: CARA.email });
+    const vault = made.body.bot as Bot;
+    expect((await as("bob", "POST", "/api/team/groups", { name: "Finance", members: [EVE.email] })).status, "a User can't make one").toBe(403);
+    const created = await as("ada", "POST", "/api/team/groups", { name: "Finance", members: [EVE.email, DAN.email] });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const finance = created.body.group as { id: string; members: string[] };
+    expect(finance.members).toEqual([DAN.email, EVE.email]);
+    expect((await as("ada", "POST", "/api/team/groups", { name: "Strangers", members: ["stranger@elsewhere.test"] })).status).toBe(400);
+    const listing = await as("bob", "GET", "/api/team/groups"); expect(listing.status, JSON.stringify(listing.body)).toBe(200);
+    expect((listing.body.groups as Array<{ name: string }>).map((group) => group.name)).toContain("Finance");
+
+    expect((await share("cara", vault.id, { everyone: "none", people: {}, groups: { [finance.id]: "chat" } } as never)).status).toBe(200);
+    expect(await botOf("eve", vault.id)).toMatchObject({ yourAccess: "chat" });
+    expect(await botOf("bob", vault.id)).toBeUndefined();
+    expect((await as("eve", "POST", `/api/bots/${vault.id}/messages`, { text: "hello from finance" })).status).toBe(202);
+    await until(idle);
+
+    expect((await as("ada", "PUT", `/api/team/groups/${finance.id}`, { name: "Finance", members: [DAN.email] })).status).toBe(200);
+    expect(await botOf("eve", vault.id), "Eve left the group").toBeUndefined();
+    expect(await botOf("dan", vault.id)).toMatchObject({ yourAccess: "chat" });
+
+    expect((await as("ada", "DELETE", `/api/team/groups/${finance.id}`)).status).toBe(200);
+    expect(await botOf("dan", vault.id), "the group is gone").toBeUndefined();
+    expect((await botOf("cara", vault.id))?.access).toEqual({ everyone: "none", people: {} });
+    await until(async () => ((await as("ada", "GET", "/api/admin-activity?what=people")).body.entries as Array<{ action: string }>).some((entry) => entry.action === "group.delete"));
+  });
+
   it("lets only someone who can edit the bot allow it", async () => {
     const made = await as("ada", "POST", "/api/bots", { name: "Atlas", reportsTo: CARA.email });
     const atlas = made.body.bot as Bot;

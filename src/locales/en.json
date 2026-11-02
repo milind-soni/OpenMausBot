@@ -7299,5 +7299,15 @@
   "botAccess.overview.setForEveryone": "Set for everyone: {bot}",
   "botAccess.overview.cell": "What {name} can do with {bot}",
   "botAccess.overview.toastEveryone": "{bot}: everyone in {team} · {level}",
-  "botAccess.overview.toastPerson": "{bot}: {name} · {level}"
+  "botAccess.overview.toastPerson": "{bot}: {name} · {level}",
+  "botAccess.groups": "Groups of people",
+  "botAccess.groupsIntro": "Make a group once, then give it a level in any bot's Share dialog. Everyone in the group has that level while they're in it.",
+  "botAccess.groupMembers": "Members: {count}",
+  "botAccess.addGroup": "Add a group…",
+  "botAccess.newGroup": "New group name, like Finance",
+  "botAccess.createGroup": "Create group",
+  "botAccess.groupName": "Name of {name}",
+  "botAccess.deleteGroup": "Delete {name}",
+  "botAccess.removeFromGroup": "Remove {name} from {group}",
+  "botAccess.addToGroup": "Add someone to {group}…"
 }

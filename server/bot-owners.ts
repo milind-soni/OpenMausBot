@@ -1,7 +1,7 @@
 // Who a Team Cloud bot reports to, kept on its record: `reportsTo`, and `createdBy`, recorded once.
 import { visibilityFromAccess, type BotAccess } from "../shared/bot-access.ts";
 import { botOwner, chiefConflict, ownerEmail } from "../shared/bot-owner.ts";
-import { accessOf } from "./bot-visibility.ts";
+import { accessOf, groupMembersNow } from "./bot-visibility.ts";
 import type { BotRecord, Store } from "./store.ts";
 
 type Owners = Pick<Store, "bots" | "bot" | "patchBot">;
@@ -27,8 +27,8 @@ function handedOver(bot: BotRecord, next: string | null): Pick<BotRecord, "acces
   const before = botOwner(bot), shared = accessOf(bot);
   const people: BotAccess["people"] = { ...shared.people, ...(before && before !== next ? { [before]: "edit" as const } : {}) };
   if (next) delete people[next];
-  const access = { everyone: shared.everyone, people };
-  return { access, visibility: visibilityFromAccess(access, next) };
+  const access = { ...shared, people };
+  return { access, visibility: visibilityFromAccess(access, next, groupMembersNow) };
 }
 
 export function setCreatedBy(store: Owners, botId: string, email: string): void {

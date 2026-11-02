@@ -225,6 +225,24 @@ try {
       await openPayroll();
       await page.until("!document.querySelector('[data-testid=view-only-composer]') && Boolean(document.querySelector('textarea'))", "Bob's composer");
     } },
+    { name: "groups-editor-admin", who: "ada", query: "mode=simple", act: async () => {
+      const listed = (await as("ada", "GET", "/api/team/groups")).groups as Array<{ id: string; name: string }>;
+      const finance = listed.find((group) => group.name === "Finance") ?? (await as("ada", "POST", "/api/team/groups", { name: "Finance", members: [PEOPLE.eve.email, PEOPLE.cara.email] })).group as { id: string };
+      const access = ((await as("ada", "GET", "/api/bots")).bots as Array<{ id: string; access?: Record<string, unknown> }>).find((bot) => bot.id === payroll.id)!.access!;
+      await as("ada", "PUT", `/api/bots/${payroll.id}/access`, { ...access, groups: { [finance.id]: "chat" } });
+      await page.click("[data-sidebar-account]", "the account menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.trim() === "Settings"); item?.click(); return Boolean(item); })()`, "Settings in the menu");
+      await page.until("Boolean(document.querySelector('[data-people-groups] [data-people-group]'))", "the groups editor");
+      await page.evaluate("document.querySelector('[data-people-groups]').scrollIntoView({ block: 'center' }); true");
+    } },
+    { name: "share-dialog-group", who: "ada", query: "mode=simple", act: async () => {
+      await openPayroll(); await openPanel(); await page.click("[data-share-bot-button]");
+      await page.until("Boolean(document.querySelector('[data-share-group]'))", "Finance in the Share dialog");
+    } },
+    { name: "group-member-eve", who: "eve", query: "mode=simple", act: async () => {
+      await openPayroll();
+      await page.until("!document.querySelector('[data-testid=view-only-composer]') && Boolean(document.querySelector('textarea'))", "Eve's composer, through Finance");
+    } },
   ];
   let serving: Who | null = null;
   for (const shot of SHOTS.filter((entry) => !only || only.has(entry.name))) {

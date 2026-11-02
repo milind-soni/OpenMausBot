@@ -13,7 +13,12 @@ export const GRANTED_LEVELS: readonly GrantedLevel[] = ["view", "chat", "edit"];
 export interface BotAccess {
   everyone: BotAccessLevel;
   people: Record<string, GrantedLevel>;
+  /** A level for each of the team's groups of people, by group id: each member gets it while they are in the group. */
+  groups?: Record<string, GrantedLevel>;
 }
+
+/** The addresses in one of the team's groups; undefined for a group that no longer exists. */
+export type GroupMembers = (groupId: string) => readonly string[] | undefined;
 
 export interface BotAccessFields {
   /** Team Cloud only, and only on the copy sent to someone who can edit the bot: who may see, chat with and change it. */
@@ -37,9 +42,10 @@ export function accessFromVisibility(visibility: BotVisibility | undefined): Bot
 
 /** Who sees the bot at all: everyone when every member may at least view it, else its owner and the people added, else
  * admins only. */
-export function visibilityFromAccess(access: BotAccess, owner: string | null): BotVisibility {
+export function visibilityFromAccess(access: BotAccess, owner: string | null, members: GroupMembers = () => undefined): BotVisibility {
   if (access.everyone !== "none") return "everyone";
-  const people = [...new Set([...(owner ? [owner] : []), ...Object.keys(access.people)])];
+  const grouped = Object.keys(access.groups ?? {}).flatMap((id) => members(id) ?? []);
+  const people = [...new Set([...(owner ? [owner] : []), ...Object.keys(access.people), ...grouped])];
   return people.length ? { people } : "admins";
 }
 
@@ -48,17 +54,20 @@ export function entryMatches(entry: string, email: string): boolean {
 }
 
 /** What this address may do by the bot's sharing alone, before admins and the owner. */
-export function sharedLevel(access: BotAccess, email: string): BotAccessLevel {
+export function sharedLevel(access: BotAccess, email: string, members: GroupMembers = () => undefined): BotAccessLevel {
   const address = email.trim().toLowerCase();
   let level = access.everyone;
   if (!address) return level;
   for (const [entry, granted] of Object.entries(access.people)) if (entryMatches(entry, address)) level = higherLevel(level, granted);
+  for (const [id, granted] of Object.entries(access.groups ?? {})) if (members(id)?.includes(address)) level = higherLevel(level, granted);
   return level;
 }
 
+const sameLevels = (a: Record<string, GrantedLevel>, b: Record<string, GrantedLevel>): boolean =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([key, level]) => b[key] === level);
+
 export function sameAccess(a: BotAccess, b: BotAccess): boolean {
-  const left = Object.entries(a.people), right = b.people;
-  return a.everyone === b.everyone && left.length === Object.keys(right).length && left.every(([entry, level]) => right[entry] === level);
+  return a.everyone === b.everyone && sameLevels(a.people, b.people) && sameLevels(a.groups ?? {}, b.groups ?? {});
 }
 
 export interface AccessRequestCardField {

@@ -6,11 +6,12 @@ import type { BotAccess } from "../../shared/bot-access.ts";
 import { visibilityFromAccess } from "../../shared/bot-access.ts";
 import { botOwner } from "../../shared/bot-owner.ts";
 import type { WireBot } from "../../shared/wire.ts";
-import { accessOf, parseBotAccess, sameAudience } from "../bot-visibility.ts";
+import { accessOf, groupMembersNow, MAX_VISIBILITY_PEOPLE, parseBotAccess, sameAudience } from "../bot-visibility.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import { refusalFor } from "../host/bot-access-gate.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
+import type { TeamGroups } from "../team-groups.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -19,6 +20,7 @@ const ONE_BOT = /^\/api\/bots\/([\w-]{1,128})\/access$/;
 export interface BotAccessRouteDeps {
   team: CloudTeam | null;
   people: Pick<TeamPeople, "has"> | null;
+  groups?: Pick<TeamGroups, "get"> | null;
   store: Pick<Store, "bot" | "patchBot" | "groups" | "sections">;
   levelOf(auth: RequestAuth, botId: string): string;
   wireBot(bot: BotRecord): WireBot;
@@ -28,8 +30,10 @@ export interface BotAccessRouteDeps {
 }
 
 /** The bot's sharing with `next` applied: the owner is never listed (they always edit), and nobody new comes in from
- * outside the team. An entry the bot already had (an older list's address or @domain) may stay. */
-export function settledAccess(bot: BotRecord, next: BotAccess, member: (email: string) => boolean): { ok: true; access: BotAccess } | { ok: false; error: string } {
+ * outside the team. An entry the bot already had (an older list's address or @domain) may stay; a group must be one of
+ * the team's. */
+export function settledAccess(bot: BotRecord, next: BotAccess, member: (email: string) => boolean, group: (id: string) => boolean = () => false):
+  { ok: true; access: BotAccess } | { ok: false; error: string } {
   const before = accessOf(bot).people;
   const owner = botOwner(bot);
   const people: BotAccess["people"] = {};
@@ -38,12 +42,20 @@ export function settledAccess(bot: BotRecord, next: BotAccess, member: (email: s
     if (!Object.hasOwn(before, entry) && !member(entry)) return { ok: false, error: `${entry} isn't in this team. Add people from the team.` };
     people[entry] = level;
   }
-  return { ok: true, access: { everyone: next.everyone, people } };
+  for (const id of Object.keys(next.groups ?? {})) if (!group(id)) return { ok: false, error: "That group isn't in this team any more." };
+  const access: BotAccess = { everyone: next.everyone, people, ...(next.groups && Object.keys(next.groups).length ? { groups: next.groups } : {}) };
+  return tooWide(access, owner) ? { ok: false, error: `Shared this way, more than ${MAX_VISIBILITY_PEOPLE} people would see it. Give everyone in the team a level instead.` } : { ok: true, access };
+}
+
+/** Visibility lists each person who sees the bot, at most MAX_VISIBILITY_PEOPLE; a longer one would read as admins only. */
+export function tooWide(access: BotAccess, owner: string | null): boolean {
+  const visibility = visibilityFromAccess(access, owner, groupMembersNow);
+  return typeof visibility === "object" && visibility.people.length > MAX_VISIBILITY_PEOPLE;
 }
 
 /** Stores a bot's sharing with its visibility in the same write, and tells everyone whose view of it changed. */
 export function writeAccess(deps: Pick<BotAccessRouteDeps, "store" | "publicGroupState" | "broadcast" | "audienceChanged">, bot: BotRecord, access: BotAccess): BotRecord | null {
-  const visibility = visibilityFromAccess(access, botOwner(bot));
+  const visibility = visibilityFromAccess(access, botOwner(bot), groupMembersNow);
   const audienceMoved = !sameAudience(bot.visibility, visibility);
   const updated = deps.store.patchBot(bot.id, { access, visibility });
   if (updated && audienceMoved) {
@@ -69,7 +81,7 @@ export function createBotAccessRoutes(deps: BotAccessRouteDeps): RouteHandler {
     if (!parsed.ok) return json(res, 400, { error: parsed.error });
     const current = store.bot(bot.id);
     if (!current) return json(res, 404, { error: "no such bot" });
-    const settled = settledAccess(current, parsed.access, (email) => people.has(email));
+    const settled = settledAccess(current, parsed.access, (email) => people.has(email), (id) => Boolean(deps.groups?.get(id)));
     if (!settled.ok) return json(res, 400, { error: settled.error });
     const updated = writeAccess(deps, current, settled.access);
     return updated ? json(res, 200, { bot: deps.wireBot(updated) }) : json(res, 404, { error: "no such bot" });

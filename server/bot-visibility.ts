@@ -5,7 +5,7 @@
 // transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
 import { z } from "zod";
 
-import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotAccess, type BotAccessLevel } from "../shared/bot-access.ts";
+import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotAccess, type BotAccessLevel, type GroupMembers } from "../shared/bot-access.ts";
 import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
 import type { BotVisibility } from "../shared/wire.ts";
 import { audienceIncludes, type Audience } from "./audience.ts";
@@ -70,10 +70,20 @@ export function viewerSees(viewer: Viewer, visibility: unknown): boolean {
   return Boolean(email && email.includes("@") && stored.people.some((entry) => entryMatches(entry, email)));
 }
 
+export const MAX_TEAM_GROUPS = 100;
+export const GROUP_ID = /^[a-z0-9][\w-]{0,63}$/;
 const accessSchema = z.object({
   everyone: z.enum(["none", "view", "chat", "edit"]),
   people: z.record(z.string().max(320), z.enum(["view", "chat", "edit"])),
+  groups: z.record(z.string().regex(GROUP_ID), z.enum(["view", "chat", "edit"])).optional(),
 }).strict();
+
+let teamGroupMembers: GroupMembers = () => undefined;
+/** The team's groups of people (`team-groups.ts`), set once at start: every level check reads membership now. */
+export function setTeamGroupMembers(members: GroupMembers): void {
+  teamGroupMembers = members;
+}
+export const groupMembersNow: GroupMembers = (id) => teamGroupMembers(id);
 
 /** A bot's sharing as a request sends it: every entry an address or @domain, at most MAX_VISIBILITY_PEOPLE of them. */
 export function parseBotAccess(value: unknown): { ok: true; access: BotAccess } | { ok: false; error: string } {
@@ -86,7 +96,9 @@ export function parseBotAccess(value: unknown): { ok: true; access: BotAccess } 
     people[entry] = level;
   }
   if (Object.keys(people).length > MAX_VISIBILITY_PEOPLE) return { ok: false, error: `at most ${MAX_VISIBILITY_PEOPLE} people` };
-  return { ok: true, access: { everyone: parsed.data.everyone, people } };
+  const groups = parsed.data.groups ?? {};
+  if (Object.keys(groups).length > MAX_TEAM_GROUPS) return { ok: false, error: `at most ${MAX_TEAM_GROUPS} groups` };
+  return { ok: true, access: { everyone: parsed.data.everyone, people, ...(Object.keys(groups).length ? { groups } : {}) } };
 }
 
 export type AccessBot = OwnedBot & { visibility?: unknown; access?: unknown };
@@ -105,7 +117,7 @@ export function memberLevel(bot: AccessBot, email: string | undefined): BotAcces
   const address = email?.trim().toLowerCase() ?? "";
   if (!viewerSees({ kind: "member", email: address }, bot.visibility)) return "none";
   if (address && botOwner(bot) === address) return "edit";
-  return higherLevel(sharedLevel(accessOf(bot), address), "view");
+  return higherLevel(sharedLevel(accessOf(bot), address, groupMembersNow), "view");
 }
 
 export function sameAudience(a: unknown, b: unknown): boolean {

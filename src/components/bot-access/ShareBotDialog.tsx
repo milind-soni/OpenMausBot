@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AtSign, Lock, Users, X } from "lucide-react";
+import { AtSign, Lock, Users, UsersRound, X } from "lucide-react";
 
 import { atLeast, GRANTED_LEVELS, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../../shared/bot-access";
 import { botOwner } from "../../../shared/bot-owner";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
+import { useTeamGroups, type TeamGroup } from "@/state/team-groups";
 import { ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import { Select } from "../Select";
 import { PersonFace } from "../TeamOwner";
-import { accessOfBot, addablePeople, canShare, levelLabel, levelWhenAdded, saveAccess, withPerson } from "./access";
+import { accessOfBot, addablePeople, canShare, levelLabel, levelWhenAdded, saveAccess, withGroup, withPerson } from "./access";
 
 export interface AccessChange { before: BotAccess; after: BotAccess; text: string }
 
@@ -26,6 +27,7 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, footer }: {
   footer?: ReactNode;
 }) {
   const team = useTeamPeople();
+  const groups = useTeamGroups(Boolean(team));
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,10 +87,14 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, footer }: {
           </ul>
           <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("botAccess.admins")}</p>
 
+          {editable && groups && groups.length > 0 && <GroupAccess access={access} groups={groups} disabled={busy} onChange={(group, level) => void apply(withGroup(access, group.id, level), level
+            ? t("botAccess.toast.changed", { name: group.name, level: levelLabel(level) })
+            : t("botAccess.toast.removed", { name: group.name }))} />}
+
           {editable && <>
             <h3 className="mb-1.5 mt-4 text-[13px] font-semibold">{t("botAccess.general")}</h3>
             <GeneralAccess access={access} teamName={teamName} disabled={busy}
-              onChange={(everyone) => void apply({ everyone, people: access.people }, everyone === "none"
+              onChange={(everyone) => void apply({ ...access, everyone }, everyone === "none"
                 ? t("botAccess.toast.onlyAdded")
                 : t("botAccess.toast.everyone", { team: teamName, level: levelLabel(everyone) }))} />
           </>}
@@ -148,6 +154,40 @@ function LevelSelect({ value, floor, disabled, label, onChange }: {
       {GRANTED_LEVELS.map((level) => <option key={level} value={level} disabled={!atLeast(level, floor)}>{levelLabel(level)}</option>)}
       <option value={REMOVE}>{t("botAccess.remove")}</option>
     </Select>
+  );
+}
+
+/** The team's groups this bot gives a level, and one more to add. */
+function GroupAccess({ access, groups, disabled, onChange }: {
+  access: BotAccess; groups: readonly TeamGroup[]; disabled: boolean; onChange: (group: TeamGroup, level: GrantedLevel | null) => void;
+}) {
+  const granted = groups.filter((group) => access.groups?.[group.id]);
+  const addable = groups.filter((group) => !access.groups?.[group.id]);
+  const level = levelWhenAdded(access.everyone);
+  return (
+    <div data-share-groups>
+      <h3 className="mb-1 mt-4 text-[13px] font-semibold">{t("botAccess.groups")}</h3>
+      <ul className="flex flex-col">
+        {granted.map((group) => (
+          <li key={group.id} className="flex min-h-[44px] items-center gap-3 py-1" data-share-group={group.id}>
+            <span aria-hidden="true" className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary"><UsersRound size={14} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[14px] text-ink">{group.name}</span>
+              <span className="block truncate text-[12px] text-ink-secondary">{t("botAccess.groupMembers", { count: group.members.length })}</span>
+            </span>
+            <LevelSelect value={access.groups![group.id]!} floor={access.everyone} disabled={disabled} label={t("botAccess.levelFor", { name: group.name })}
+              onChange={(next) => onChange(group, next)} />
+          </li>
+        ))}
+      </ul>
+      {level && addable.length > 0 && (
+        <Select variant="ghost" aria-label={t("botAccess.addGroup")} value="" disabled={disabled}
+          onChange={(event) => { const group = addable.find((one) => one.id === event.target.value); if (group) onChange(group, level); }}>
+          <option value="">{t("botAccess.addGroup")}</option>
+          {addable.map((group) => <option key={group.id} value={group.id}>{`${group.name} · ${t("botAccess.groupMembers", { count: group.members.length })}`}</option>)}
+        </Select>
+      )}
+    </div>
   );
 }
 

@@ -38,7 +38,15 @@ export function withPerson(access: BotAccess, email: string, level: GrantedLevel
   const people = { ...access.people };
   if (level) people[email] = level;
   else delete people[email];
-  return { everyone: access.everyone, people };
+  return { ...access, people };
+}
+
+export function withGroup(access: BotAccess, id: string, level: GrantedLevel | null): BotAccess {
+  const groups = { ...access.groups };
+  if (level) groups[id] = level;
+  else delete groups[id];
+  const { groups: _previous, ...rest } = access;
+  return Object.keys(groups).length ? { ...rest, groups } : rest;
 }
 
 export async function saveAccess(botId: string, access: BotAccess): Promise<Bot> {
