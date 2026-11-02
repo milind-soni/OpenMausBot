@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot, CloudRenewalResult } from "../electron/cloud-account.mjs";
 import type { CloudRenewal } from "../electron/cloud-list.mjs";
 import { CloudAccountSettings, CloudPlanOnCloud } from "@/components/CloudAccountSettings";
-import { setLocale } from "@/lib/i18n";
+import { loadLocale } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
 import "./styles.css";
 
@@ -39,7 +39,6 @@ const plan = { state: async (): Promise<CloudPlanSnapshot> => ({ status: "paid",
 function Preview() {
   const skin = (SKIN_IDS as readonly string[]).includes(params.get("skin") ?? "") ? params.get("skin") as SkinId : "midnight";
   document.documentElement.dataset.skin = skin;
-  setLocale(params.get("lang") ?? "en");
   const cloudPage = params.get("view") === "cloud";
   return <div className="flex min-h-screen justify-center bg-app p-6 text-ink sm:p-10">
     <div className="flex w-full max-w-[680px] flex-col gap-4">
@@ -50,4 +49,5 @@ function Preview() {
 }
 
 window.ogb = { ...window.ogb, cloudAccount: account } as typeof window.ogb;
+await loadLocale(params.get("lang") ?? "en");
 createRoot(document.getElementById("root")!).render(<StrictMode><Preview /></StrictMode>);
