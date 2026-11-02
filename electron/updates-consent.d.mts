@@ -3,7 +3,9 @@ export declare const UPDATES_CONSENT_VERSION: string;
 export declare const UPDATES_CONSENT_STATUSES: readonly UpdatesConsentStatus[];
 export interface UpdatesConsentRecord {
   status: UpdatesConsentStatus; version: string; at: number;
-  account?: string; email?: string; receipt?: string; pending?: true;
+  account?: string; email?: string; receipt?: string; replacedReceipts?: string[]; pending?: true;
+  receiptEmails?: Record<string, string>;
+  pendingAccounts?: { status: UpdatesConsentStatus; version: string; at: number; account: string }[];
 }
 export declare function parseUpdatesConsent(value: unknown): UpdatesConsentRecord | null;
 export declare function parseAccountConsent(result: unknown): { status: UpdatesConsentStatus; textVersion: string } | null;
