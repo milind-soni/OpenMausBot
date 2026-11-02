@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { approvalModeFor } from "../../shared/approval-mode.ts";
@@ -90,6 +90,7 @@ export interface BotMessageRouteDeps {
   answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>): Promise<void>;
   resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: Behavior): boolean;
   resolveAndSendTeamSetup(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean>;
+  resolveAndSendMcp(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean>;
   resolveAndSendRoutine(res: ServerResponse, args: CardAnswer): boolean;
   resolveAndSendProfile(res: ServerResponse, args: CardAnswer): boolean;
   resolveAndSendModel(res: ServerResponse, args: CardAnswer): boolean;
@@ -156,12 +157,17 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal,
     cardAnswerRefusal, commandRememberRefusal, requestBehavior, requestedTaskBot, botForThread, threadBusy,
     botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,
-    turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
+    turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup, resolveAndSendMcp,
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
     deliverLateQuestionAnswer, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
     cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn, fromPhone, notePhoneSend, goals,
   } = deps;
   const pinnedClientThread = pinnedClientThreadGuard(store);
+  /** Security: a bot's own shell must never approve its own card, so a local request counts only from the desktop app, or
+   * from a browser while every bot is idle. */
+  const ownerReview = (auth: RequestAuth, req: IncomingMessage) => auth.kind === "loopback"
+    ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id))
+    : auth.scopes.includes("admin");
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
   const pressesInFlight = new Map<string, string | undefined>();
   const appMessageRate = new AppMessageRate();
@@ -528,9 +534,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         const access = deps.resolveAccessRequest?.(bot.threadId, String(body.requestId), behavior, body.message);
         if (access) return json(res, access.status, access.body);
         if (resolveAndSendTrust(res, bot.threadId, String(body.requestId), behavior)) return;
-        if (await resolveAndSendTeamSetup(res, {
-          botId: bot.id, threadId: bot.threadId, requestId: String(body.requestId), behavior,
-        }, auth.kind === "loopback" ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id)) : auth.scopes.includes("admin"))) return;
+        const answer = { botId: bot.id, threadId: bot.threadId, requestId: String(body.requestId), behavior };
+        if (await resolveAndSendTeamSetup(res, answer, ownerReview(auth, req))) return;
+        if (await resolveAndSendMcp(res, answer, ownerReview(auth, req))) return;
         if (resolveAndSendRoutine(res, {
           botId: bot.id,
           botName: bot.name,
@@ -635,8 +641,13 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (setupCard) {
           const setupBotId = setupCard.from?.botId ?? store.botByThread(threadId)?.id;
           if (!setupBotId) return json(res, 400, { error: "This team setup has no valid owner" });
-          if (await resolveAndSendTeamSetup(res, { botId: setupBotId, threadId, requestId, behavior },
-            auth.kind === "loopback" ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id)) : auth.scopes.includes("admin"))) return;
+          if (await resolveAndSendTeamSetup(res, { botId: setupBotId, threadId, requestId, behavior }, ownerReview(auth, req))) return;
+        }
+        const mcpCard = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId && message.card.mcpRequest);
+        if (mcpCard) {
+          const mcpBotId = mcpCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!mcpBotId) return json(res, 400, { error: "This MCP server card has no valid owner" });
+          if (await resolveAndSendMcp(res, { botId: mcpBotId, threadId, requestId, behavior }, ownerReview(auth, req))) return;
         }
         const profileCard = store.messagesFor(threadId).find(
           (message) => message.card?.requestId === requestId && message.card.profileRequest,
