@@ -100,6 +100,8 @@ beforeAll(async () => {
   upstream = createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "fixture-model" }] }));
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not.
+    if (req.method === "GET") { res.statusCode = 404; return res.end(); }
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const request = JSON.parse(raw || "{}") as ChatRequest;
@@ -147,6 +149,7 @@ beforeAll(async () => {
     env: {
       PATH: [fakebin, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
       HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
+      OMB_AGENTS_TOOL_BRIDGE: "0",
       APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui,
