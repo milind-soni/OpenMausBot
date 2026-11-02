@@ -114,6 +114,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
         const latest = latestBots.current.find((one) => one.id === bot.id) ?? bot;
         const row = change?.kind === "access" ? planAccess(latest, change) : null;
         if (row?.status === "skip") throw new Error(row.reason);
+        if (row?.status === "unchanged") return "unchanged";
         if (row?.status === "apply" && "access" in row) dispatch({ type: "botPatched", bot: await saveAccess(bot.id, row.access) });
       },
     });

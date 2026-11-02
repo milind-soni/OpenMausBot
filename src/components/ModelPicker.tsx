@@ -300,7 +300,7 @@ export function ModelPicker({
     focusOnPlace.current = null;
     const find = (selector: string) => (selector ? menu?.querySelector<HTMLElement>(selector) : null);
     const target = wanted === MENU_ITSELF ? menu
-      : find(wanted) ?? find("[data-menu-search]") ?? find("[data-current-model]") ?? find("[data-menu-row]:not(:disabled)") ?? menu;
+      : find(wanted) ?? find("[data-menu-search]") ?? find("[data-current-model]:not(:disabled)") ?? find("[data-menu-row]:not(:disabled)") ?? menu;
     target?.focus({ preventScroll: true });
     target?.scrollIntoView?.({ block: "nearest" });
   }, [open, placement]);
@@ -337,7 +337,7 @@ export function ModelPicker({
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setLoadingInstances(true);
-    void refreshInstances()
+    void refreshInstances({ cached: true })
       .catch(() => {})
       .finally(() => {
         refreshingRef.current = false;
@@ -580,7 +580,7 @@ export function ModelPicker({
   const attention = !active ? undefined
     : active.policy ? t("policy.managedBy", { organization: active.policy.organizationName })
       : needsCli(active) ? t("model.setupRequired")
-        : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : undefined;
+        : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : undefined;
   const summary = active
     ? `${active.displayName} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
@@ -799,7 +799,7 @@ export function ModelPicker({
               {railInstance.policy ? (
                 <div data-policy-blocked className="min-h-0 flex-1 overflow-y-auto px-3.5 pb-3 pt-1 text-[13px] leading-[18px] text-ink-secondary">
                   <p className="font-medium text-ink">{t("policy.managedBy", { organization: railInstance.policy.organizationName })}</p>
-                  <p className="mt-1">{t("policy.modelBlocked", { organization: railInstance.policy.organizationName })}</p>
+                  <p className="mt-1">{t(railInstance.policy.team ? "policy.teamModelBlocked" : "policy.modelBlocked", { organization: railInstance.policy.organizationName })}</p>
                 </div>
               ) : blocked ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-1">

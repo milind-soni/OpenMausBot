@@ -3,7 +3,7 @@
 // and the broker adds the headers and forwards. So the test asks the broker too, through its socket, with a grant made
 // the same way and revoked as soon as the test ends. Where turns aren't boxed, bots and the test both go direct.
 import { randomUUID } from "node:crypto";
-import { Agent, fetch as fetchVia } from "undici";
+import type { Agent } from "undici";
 
 import type { BoxBroker } from "./box.ts";
 import { brokerUrl } from "./broker.ts";
@@ -27,8 +27,10 @@ export function brokeredServer(path: BrokerPath, name: string, server: { url: st
   const threadId = `mcp-test-${randomUUID()}`;
   const grant = mcpGrantName(name);
   const { token } = path.broker.mintForThread({ threadId, grants: { [grant]: { upstream: server.url, headers: { ...server.headers } } }, ttlMs: PROBE_GRANT_TTL_MS });
-  const agent = new Agent({ connect: { socketPath: path.socketPath } });
+  let agent: Agent | undefined;
   const brokered: typeof fetch = async (input, init) => {
+    const { Agent: UndiciAgent, fetch: fetchVia } = await import("undici");
+    agent ??= new UndiciAgent({ connect: { socketPath: path.socketPath } });
     const response = await fetchVia(String(input instanceof Request ? input.url : input), { ...init, dispatcher: agent } as Parameters<typeof fetchVia>[1]) as unknown as Response;
     if (response.status !== 502 || !(response.headers.get("content-type") ?? "").startsWith("application/json")) return response;
     const text = await response.text().catch(() => "");
@@ -40,7 +42,7 @@ export function brokeredServer(path: BrokerPath, name: string, server: { url: st
     fetch: brokered,
     done: async () => {
       path.broker.revokeThread(threadId);
-      await agent.close().catch(() => {});
+      await agent?.close().catch(() => {});
     },
   };
 }

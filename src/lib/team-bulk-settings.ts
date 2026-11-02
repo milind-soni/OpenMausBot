@@ -48,7 +48,7 @@ export function teamModelChoices(bots: readonly Bot[], instances: readonly Insta
     const engine = engineOf(bot, instances);
     if (!engine || seen.has(engine.instanceId)) continue;
     seen.add(engine.instanceId);
-    const ids = [engine.models.default, ...engine.models.options.map((option) => option.id)].filter((id) => id.trim());
+    const ids = [engine.models.default, ...engine.models.options.filter((option) => !option.orgBlocked).map((option) => option.id)].filter((id) => id.trim());
     for (const id of new Set(ids)) {
       const label = engine.models.options.find((option) => option.id === id)?.label ?? id;
       const entry = choices.get(id) ?? { id, label, engines: [] };
@@ -95,7 +95,7 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     const current = bot.modelSelection;
     if (!engine) return { bot, status: "skip", reason: t("teamSettings.skip.engineMissing") };
     const model = change.model ?? current.model;
-    const offered = model === engine.models.default || engine.models.options.some((option) => option.id === model);
+    const offered = model === engine.models.default || engine.models.options.some((option) => option.id === model && !option.orgBlocked);
     if (!offered) return { bot, status: "skip", reason: t("teamSettings.skip.modelUnsupported", { engine: engineName, model }) };
     const next: ModelSelection = { instanceId: current.instanceId, model };
     if (current.variant && model === current.model) next.variant = current.variant;
@@ -127,7 +127,7 @@ export function planNeedsLocalAutoConsent(plan: readonly TeamPlanRow[]): boolean
 export async function applyTeamPlan(
   plan: readonly TeamPlanRow[],
   persist: (bot: Bot, patch: BotUpdatePatch) => Promise<unknown>,
-  options: { acknowledgeLocalAuto?: boolean; onProgress?: (done: number) => void; share?: (bot: Bot, access: BotAccess) => Promise<unknown> } = {},
+  options: { acknowledgeLocalAuto?: boolean; onProgress?: (done: number) => void; share?: (bot: Bot, access: BotAccess) => Promise<"unchanged" | void> } = {},
 ): Promise<TeamResultRow[]> {
   const results: TeamResultRow[] = [];
   for (const row of plan) {
@@ -137,10 +137,11 @@ export async function applyTeamPlan(
       const patch = "access" in row ? null : options.acknowledgeLocalAuto && row.patch.approvalMode === "auto" && row.bot.computer === "local"
         ? { ...row.patch, acknowledgeLocalAuto: true } : row.patch;
       try {
+        let outcome: "unchanged" | void = undefined;
         if (patch) await persist(row.bot, patch);
-        else if ("access" in row && options.share) await options.share(row.bot, row.access);
+        else if ("access" in row && options.share) outcome = await options.share(row.bot, row.access);
         else throw new Error(t("teamSettings.skip.cantShare"));
-        results.push({ bot: row.bot, status: "applied" });
+        results.push({ bot: row.bot, status: outcome === "unchanged" ? "unchanged" : "applied" });
       } catch (cause) {
         results.push({ bot: row.bot, status: "skipped", reason: cause instanceof Error ? cause.message : String(cause) });
       }

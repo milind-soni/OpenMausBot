@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FilePreviewButton } from "./FilePreviewButton";
+import { ImageLoading } from "./ImageLoading";
 
 export interface PreviewImage {
   src: string;
@@ -676,12 +677,7 @@ export function AttachmentThumbnail({
       style={ratio ? { aspectRatio: String(ratio) } : undefined}
       className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
     >
-      {state === "loading" && (
-        <span className="absolute inset-0 flex animate-pulse items-center justify-center bg-raised/65" role="status">
-          <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
-          <span className="sr-only">Loading {image.name}</span>
-        </span>
-      )}
+      {state === "loading" && <ImageLoading name={image.name} className="absolute inset-0 bg-raised/65" />}
       {state === "failed" ? (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-ink-secondary" role="alert">
           <ImageOff size={22} />
@@ -879,10 +875,7 @@ export function MarkdownImagePreview({
         ) : visibleSource ? (
           <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager explainRefusal={localMessageImage} />
         ) : (
-          <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
-            <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
-            <span className="sr-only">Loading {name}</span>
-          </span>
+          <ImageLoading name={name} className="aspect-[4/3] max-h-96 rounded-xl border border-hairline/40 bg-inset" />
         )}
         {openUrl && (
           <a href={openUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] text-accent hover:underline">

@@ -394,4 +394,29 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     writeFileSync(finishFile, "finish");
     await idle(bot.id, task.threadId);
   }, 60_000);
+
+  // Like the tests above, this needs the desktop driver fixture, which only macOS and Windows have here.
+  itAutoHost("never asks in a thread the app pinned to this computer once the bot works on this computer", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Works On Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
+    await stop();
+    // The pin an Auto turn left before the person set Works on to This computer, as bots.json keeps it.
+    const bots = JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as any[];
+    Object.assign(bots.find((one: any) => one.id === bot.id).tasks.find((one: any) => one.threadId === task.threadId),
+      { surface: "local", surfaceSource: "auto" });
+    writeFileSync(join(data, "bots.json"), JSON.stringify(bots, null, 2));
+    await start();
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "local", surfaceSource: "auto" });
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Move the mouse slowly.", threadId: task.threadId });
+    await busy(bot.id, task.threadId);
+    expect(await gate(mountedComputer(await dumpFor(bot.id)))).toEqual({ held: false, helpOpen: false });
+    const cards = ((await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=200`)).messages as any[])
+      .filter((message) => message.card?.tool === "use_your_computer");
+    expect(cards).toHaveLength(0);
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+  }, 60_000);
 });

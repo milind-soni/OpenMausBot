@@ -20,6 +20,7 @@ describe("toolStepLabel", () => {
     [{ name: "mcp__notes__query_database" }, "Query database"],
     [{ name: "NotebookRead" }, "Notebook read"],
     [{ name: "tool" }, "Use a tool"],
+    [{ name: "mcp__agents__mcp_server", label: "Removed MCP server linear" }, "Removed MCP server linear"],
   ])("names %o as %s", (tool, label) => {
     expect(toolStepLabel(tool)).toBe(label);
   });

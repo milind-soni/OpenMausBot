@@ -36,6 +36,16 @@ describe("engine homes at run time", () => {
     expect(withEngineHomes(instance, homes).adapter).toBe(adapter);
   });
 
+  it("name every place an engine can run from: the server's HOME alone off a Team Cloud, each audience's home on one", () => {
+    const homes = new EngineHomes();
+    const env = { HOME: home };
+    expect(homes.everyHome(env)).toEqual([env]);
+    homes.start(setup());
+    const memberHome = audienceHome(dataDir, "member:p_bob");
+    mkdirSync(memberHome, { recursive: true });
+    expect(homes.everyHome(env)).toEqual([env, expect.objectContaining({ HOME: memberHome })]);
+  });
+
   it("on a Team Cloud give a conversation's spawns its audience's home, made private, with the team's sign-in in it", () => {
     const homes = new EngineHomes();
     homes.start(setup());

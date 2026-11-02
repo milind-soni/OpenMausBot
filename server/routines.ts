@@ -4,9 +4,10 @@ import { dirname, join } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import { writeFileAtomic } from "./atomic.ts";
+import { OwnedFile } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { activeRunsOf, nextDueOf, wakeHoldOf } from "./routine-due.ts";
+import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-due.ts";
+import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
@@ -293,7 +294,7 @@ function cloneRun(run: RoutineRun): RoutineRun {
 }
 
 export class RoutineManager {
-  private readonly file: string;
+  private readonly file: string; private readonly disk: OwnedFile;
   private readonly now: () => number;
   private readonly options: RoutineManagerOptions;
   private routines: Routine[] = [];
@@ -302,7 +303,7 @@ export class RoutineManager {
   private runs: RoutineRun[] = [];
   private routineRequestReceipts: RoutineRequestReceipt[] = [];
   private webhookRunReceipts: EventRunReceipt[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: DueTimer | null = null;
   private startupRunsQueued = false;
   private startupLaunchId: string | undefined;
   private ticking = false;
@@ -319,11 +320,11 @@ export class RoutineManager {
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
-    this.file = options.file ?? join(DATA_DIR, "routines.json");
+    this.file = options.file ?? join(DATA_DIR, "routines.json"); this.disk = new OwnedFile(this.file, { mode: 0o600 });
     this.now = options.now ?? Date.now;
     this.bootedAt = this.now();
     try {
-      const disk = JSON.parse(readFileSync(this.file, "utf8")) as Partial<RoutineFile>;
+      const text = readFileSync(this.file, "utf8"), disk = JSON.parse(text) as Partial<RoutineFile>; this.disk.loaded(text);
       if (disk === null || typeof disk !== "object" || Array.isArray(disk)) throw new Error("Invalid routines file");
       for (const key of ["routines", "runs", "routineRequestReceipts", "webhookRunReceipts"] as const) {
         if (key in disk && !Array.isArray(disk[key])) throw new Error(`Invalid routines file: ${key} is not a list`);
@@ -370,7 +371,7 @@ export class RoutineManager {
       }
       cut.push(cloneRun(run));
     }
-    if (cut.length > 0) this.save();
+    if (cut.length > 0) this.saveLater();
     for (const run of cut) {
       if (run.threadId) this.options.onRunCut?.(run);
       this.notifyRunChanged(run);
@@ -389,7 +390,7 @@ export class RoutineManager {
         this.options.frozenResultsThread?.(routine.botId, routine.resultsThreadId)) delete routine.resultsThreadId;
     }
     this.frozenPending = false;
-    this.save();
+    this.saveLater();
   }
 
   private routineWithHealth(routine: Routine): Routine {
@@ -509,7 +510,7 @@ export class RoutineManager {
     if (!run) return null;
     if (report) run.report = report;
     else delete run.report;
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     return cloneRun(run);
   }
@@ -710,7 +711,7 @@ export class RoutineManager {
       }
       changed = true;
     }
-    if (changed) this.save();
+    if (changed) this.saveLater();
   }
 
   runNow(id: string, request?: RoutineRequestCommitFor<"run_now">): RoutineRun | null {
@@ -822,7 +823,7 @@ export class RoutineManager {
       this.emitRun(run);
       changed = true;
     }
-    if (changed) this.save();
+    if (changed) this.saveLater();
   }
 
   async cancelRun(id: string, reason?: string): Promise<RoutineRun | null> {
@@ -833,7 +834,7 @@ export class RoutineManager {
     run.attention = undefined;
     run.finishedAt = this.now();
     if (reason) run.error = reason;
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     if (run.threadId) {
       if (run.target === "room-goal") {
@@ -851,7 +852,7 @@ export class RoutineManager {
     if (!run) return null;
     if (!run.seenAt) {
       run.seenAt = this.now();
-      this.save();
+      this.saveLater();
       this.emitRun(run);
     }
     return cloneRun(run);
@@ -885,7 +886,7 @@ export class RoutineManager {
       routine.nextRunAt = next;
       return true;
     });
-    if (moved.length) this.save();
+    if (moved.length) this.saveLater();
     for (const routine of moved) this.emitRoutine(routine);
     return moved.length;
   }
@@ -900,7 +901,7 @@ export class RoutineManager {
       routine.nextRunAt = schedule.at;
       return true;
     });
-    if (moved.length) this.save();
+    if (moved.length) this.saveLater();
     for (const routine of moved) this.emitRoutine(routine);
     return moved.length;
   }
@@ -941,13 +942,12 @@ export class RoutineManager {
   start() {
     if (this.closing || this.timer) return;
     if (!this.startupRunsQueued) this.startupRunsQueued = this.queueStartupRuns();
-    this.tickInBackground();
-    this.timer = setInterval(() => this.tickInBackground(), 10_000);
-    this.timer.unref?.();
+    this.timer = startDueTimer({ run: () => this.tick(), now: this.now, onError: (error) => console.error("routines: a scheduler pass failed", error),
+      next: () => schedulerDueOf(this.routines, this.runs, this.now(), this.bootedAt + CHECK_BOOT_HOLD_MS, (routine) => this.targetState(routine) === "missing") });
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 
@@ -1071,10 +1071,12 @@ export class RoutineManager {
       }
       for (const { id, hold } of checks) this.runChecks(id, hold).catch((error) => console.error(`routines: the checks of ${id} failed`, error));
 
-      // Oldest first, by id: a rollback across awaits can replace the run objects.
+      // Oldest first, by id: a rollback across awaits can replace the run objects, and the array with them.
+      let indexed: RoutineRun[] | null = null, byId = new Map<string, RoutineRun>();
       for (const id of this.runs.map((run) => run.id)) {
         if (this.closing) return;
-        const run = this.runs.find((candidate) => candidate.id === id);
+        if (indexed !== this.runs) [indexed, byId] = [this.runs, new Map(this.runs.map((run) => [run.id, run]))];
+        const run = byId.get(id);
         if (!run || run.status !== "queued" || (run.retryAt ?? 0) > now) continue;
         const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
         const definition = triggerSource === "schedule"
@@ -1084,7 +1086,7 @@ export class RoutineManager {
           const latest = latestIntervalOccurrence(definition.schedule, now);
           if (latest !== null && latest > run.scheduledFor) {
             run.scheduledFor = latest;
-            this.save();
+            this.saveLater();
             this.emitRun(run);
           }
           const requiresCurrentDayOccurrence =
@@ -1109,12 +1111,12 @@ export class RoutineManager {
         if (state === "busy") {
           if (run.deferredAt == null) {
             run.deferredAt = now;
-            this.save();
+            this.saveLater();
             this.emitRun(run);
           }
           if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt >= ROUTINE_DEFERRAL_NOTICE_MS) {
             run.deferredNoticeAt = now;
-            this.save();
+            this.saveLater();
             this.emitRun(run);
             this.options.onRunDeferred?.(cloneRun(run));
           }
@@ -1287,7 +1289,7 @@ export class RoutineManager {
     } else {
       return null;
     }
-    this.save();
+    this.saveLater();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
@@ -1311,7 +1313,7 @@ export class RoutineManager {
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert);
     else {
-      this.save();
+      this.saveLater();
       this.emitRun(run);
       if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
     }
@@ -1336,7 +1338,7 @@ export class RoutineManager {
     } else if (status === "needs-input" || status === "paused") {
       this.wait(run, safeDetail.slice(0, 500) || (status === "paused" ? "The room goal is paused" : "The team needs your input"));
       run.error = undefined;
-      this.save();
+      this.saveLater();
       this.emitRun(run);
     } else {
       run.status = status === "stopped" ? "cancelled" : "completed";
@@ -1344,7 +1346,7 @@ export class RoutineManager {
       run.finishedAt = this.now();
       run.error = undefined;
       if (status !== "stopped") run.output = safeDetail.slice(0, 2_000) || undefined;
-      this.save();
+      this.saveLater();
       this.emitRun(run);
     }
     queueMicrotask(() => this.tickInBackground());
@@ -1354,8 +1356,7 @@ export class RoutineManager {
   /** Timed from when it began, so a later occurrence can tell a wait that went unanswered. */
   private wait(run: RoutineRun, attention: string | undefined) {
     if (run.status !== "waiting" || run.waitingSince === undefined) run.waitingSince = this.now();
-    run.status = "waiting";
-    run.attention = attention;
+    Object.assign(run, { status: "waiting", attention } satisfies Partial<RoutineRun>);
   }
 
   private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
@@ -1367,11 +1368,8 @@ export class RoutineManager {
   }
 
   private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
-    run.status = status;
-    run.attention = undefined;
-    run.error = redactSecretsInText(message).slice(0, 500);
-    run.finishedAt = this.now();
-    this.save();
+    Object.assign(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() } satisfies Partial<RoutineRun>);
+    this.saveLater();
     this.emitRun(run);
     const repeat = failsLikeLastOutcome(this.runs, run) || (run.checkKey !== undefined && outcomesNewestFirst(this.runs, run.routineId, run.id)[0]?.status === "failed");
     this.options.onRunFailed?.(cloneRun(run), alert === undefined && repeat ? null : alert);
@@ -1468,11 +1466,11 @@ export class RoutineManager {
   }
 
   private emitRoutine(routine: Routine) {
-    this.options.emit?.({ kind: "routine", routine: this.routineWithHealth(routine) });
+    this.timer?.poke(); this.options.emit?.({ kind: "routine", routine: this.routineWithHealth(routine) });
   }
 
   private emitRun(run: RoutineRun) {
-    this.options.emit?.({ kind: "routine.run", run: cloneRun(run) });
+    this.timer?.poke(); this.options.emit?.({ kind: "routine.run", run: cloneRun(run) });
     this.notifyRunChanged(run);
     if (run.checkKey && !["queued", "running", "waiting"].includes(run.status)) this.options.checks?.settled(cloneRun(run));
     if (run.status === "completed" || run.status === "failed") {
@@ -1542,6 +1540,8 @@ export class RoutineManager {
     }
   }
 
+  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses save. */
+  private saveLater() { saveSoon(this, () => this.save()); }
   private save() {
     if (this.unreadable) return;
     // Evict only terminal receipts: an active one owns cancellation, timeout and event routing.
@@ -1555,7 +1555,7 @@ export class RoutineManager {
       excess -= 1;
     }
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileAtomic(this.file, JSON.stringify({
+    this.disk.write(JSON.stringify({
       version: 1,
       ...(this.frozenPending ? {} : { frozenResultsCleared: true }),
       routines: [...this.routines, ...this.unloadedRoutines],
@@ -1565,6 +1565,6 @@ export class RoutineManager {
       ...(this.startupLaunchId === undefined ? {} : { startupLaunchId: this.startupLaunchId }),
       ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
       ...(this.holds.length ? { holds: this.holds } : {}),
-    } satisfies RoutineFile, null, 2), { mode: 0o600 });
+    } satisfies RoutineFile));
   }
 }
