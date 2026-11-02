@@ -19,6 +19,7 @@ import {
 
 import {
   createPreviewFramePainter,
+  browserRestartNoticeText,
   previewStreamHostSetupMessage,
   previewStreamModifiers,
   uploadPreviewStreamFiles,
@@ -37,6 +38,8 @@ import { copyText } from "@/lib/copy-text";
 import { AgentCursor } from "./AgentCursor";
 import { AuthPrompt } from "./AuthPrompt";
 import { SelectPopup, type SelectPopupOption } from "./SelectPopup";
+import { t } from "@/lib/i18n";
+
 
 export interface StreamSurfaceHandle {
   /** The canvas once it shows a frame, to seed picture in picture. */
@@ -642,7 +645,7 @@ export function StreamSurface(props: {
           iOS from zooming the app on focus. */}
         <textarea
           ref={inputRef}
-          aria-label={props.label ?? "Browser page"}
+          aria-label={props.label ?? t("ui.streamSurface.browserPage")}
           aria-description="Your keys go to the page. Press Shift+Escape to return to the browser address bar."
           aria-keyshortcuts="Shift+Escape"
           autoCapitalize="off"
@@ -693,8 +696,8 @@ export function StreamSurface(props: {
           />
         ) : null}
         {fileChooser && you ? (
-          <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label="Choose files for the page">
-            <p className="flex items-center gap-2 text-[13px]"><FileUp size={14} aria-hidden="true" />The page asks for {fileChooser.multiple ? "files" : "a file"}.</p>
+          <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label={t("ui.streamSurface.chooseFilesForThePage")}>
+            <p className="flex items-center gap-2 text-[13px]"><FileUp size={14} aria-hidden="true" />{t(fileChooser.multiple ? "ui.streamSurface.thePageAsksForFiles" : "ui.streamSurface.thePageAsksForAFile")}</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -708,23 +711,23 @@ export function StreamSurface(props: {
               }}
             />
             <div className="flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => answerFileChooser([])}>Cancel</button>
-              <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => fileInputRef.current?.click()}>Choose {fileChooser.multiple ? "files" : "file"}</button>
+              <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => answerFileChooser([])}>{t("connectedWorkspaces.cancel")}</button>
+              <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => fileInputRef.current?.click()}>{t(fileChooser.multiple ? "ui.streamSurface.chooseFiles" : "ui.streamSurface.chooseFile")}</button>
             </div>
           </div>
         ) : null}
         {control?.dialog && control.controller !== "another-viewer" ? (
-          <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label="Browser dialog">
+          <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label={t("ui.streamSurface.browserDialog")}>
             <p className="break-words text-[13px]">{control.dialog.message}</p>
             {you ? (
               <>
-                {control.dialog.type === "prompt" ? <input aria-label="Dialog response" value={promptText} onChange={(event) => setPromptText(event.target.value)} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" /> : null}
+                {control.dialog.type === "prompt" ? <input aria-label={t("ui.streamSurface.dialogResponse")} value={promptText} onChange={(event) => setPromptText(event.target.value)} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" /> : null}
                 <div className="flex justify-end gap-2">
-                  <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => direct({ type: "dialog", accept: false })}>Dismiss</button>
-                  <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => direct({ type: "dialog", accept: true, ...(control.dialog?.type === "prompt" ? { promptText } : {}) })}>Accept</button>
+                  <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => direct({ type: "dialog", accept: false })}>{t("ui.composerAttachments.dismiss")}</button>
+                  <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => direct({ type: "dialog", accept: true, ...(control.dialog?.type === "prompt" ? { promptText } : {}) })}>{t("ui.streamSurface.accept")}</button>
                 </div>
               </>
-            ) : <p className="text-[12px] text-ink-secondary">Take control to respond.</p>}
+            ) : <p className="text-[12px] text-ink-secondary">{t("ui.streamSurface.takeControlToRespond")}</p>}
           </div>
         ) : null}
         {authPrompt && you ? (
@@ -745,16 +748,16 @@ export function StreamSurface(props: {
                 {notice.kind === "download" ? (
                   <>
                     <Download size={13} aria-hidden="true" className="shrink-0" />
-                    <span className="min-w-0 truncate">Downloaded {notice.download.fileName}</span>
-                    <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-ink" onClick={() => { save(notice.download); dismiss(notice.id); }}>Save</button>
+                    <span className="min-w-0 truncate">{t("attach.downloaded")} {notice.download.fileName}</span>
+                    <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-ink" onClick={() => { save(notice.download); dismiss(notice.id); }}>{t("code.save")}</button>
                   </>
                 ) : notice.kind === "clipboard" ? (
                   <>
-                    <span className="min-w-0 truncate">The page copied text</span>
-                    <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-ink" onClick={() => { void copyText(notice.text); dismiss(notice.id); }}>Copy</button>
+                    <span className="min-w-0 truncate">{t("ui.streamSurface.thePageCopiedText")}</span>
+                    <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-ink" onClick={() => { void copyText(notice.text); dismiss(notice.id); }}>{t("code.copy")}</button>
                   </>
-                ) : <span role="alert" className="min-w-0 text-danger">{notice.message}</span>}
-                <button type="button" aria-label="Dismiss" className="shrink-0 rounded-md p-0.5 text-ink-secondary hover:bg-inset" onClick={() => dismiss(notice.id)}><X size={12} /></button>
+                ) : <span role="alert" className="min-w-0 text-danger">{browserRestartNoticeText(notice.message)}</span>}
+                <button type="button" aria-label={t("ui.composerAttachments.dismiss")} className="shrink-0 rounded-md p-0.5 text-ink-secondary hover:bg-inset" onClick={() => dismiss(notice.id)}><X size={12} /></button>
               </div>
             ))}
           </div>
@@ -764,7 +767,7 @@ export function StreamSurface(props: {
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-card p-4 text-center">
           <p role="alert" className="max-w-sm text-[13px] text-ink-secondary">{previewStreamHostSetupMessage(hostSetup)}</p>
           <code className="max-w-md select-all break-all rounded-lg bg-inset px-3 py-2 text-left text-[12px] text-ink">{hostSetup.command}</code>
-          <button type="button" className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink hover:bg-inset" onClick={() => setHostSetup(null)}>Try again</button>
+          <button type="button" className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink hover:bg-inset" onClick={() => setHostSetup(null)}>{t("cloudAdd.tryAgain")}</button>
         </div>
       ) : null}
     </div>

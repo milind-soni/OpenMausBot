@@ -201,7 +201,7 @@ const ko: FirstHourWords = {
 };
 
 const zh: FirstHourWords = {
-  greeting: (name, bot) => `你好${name ? `，${name}` : ""}！我是 ${bot}，你的幕僚长。我在你的 Cloud 上，所以电脑关机时我也在工作。你想让我帮你分担什么？`,
+  greeting: (name, bot) => `你好${name ? `，${name}` : ""}！我是 ${bot}，你的总协调助手。我在你的 Cloud 上，所以电脑关机时我也在工作。你想让我帮你分担什么？`,
   connect: "为了看清今天有哪些事需要你，请连接 Gmail 和 Google 日历。各登录一次即可。我只读取内容并写草稿：没有你的同意，不会发送、接受或删除任何东西。",
   connected: "已连接。我刚才没能完成第一份概览；我会继续留意，有需要你处理的事会告诉你。",
   briefOn: "每天早上 8 点，我会给你发一份需要你处理的事项简报。",
@@ -213,7 +213,7 @@ const zh: FirstHourWords = {
   sorted: (n) => `整理了 ${n} 封邮件`,
   drafted: (n) => `起草了 ${n} 封回复`,
   prepped: (n) => `准备了 ${n} 场会议`,
-  routines: (n) => `运行了 ${n} 个例行任务`,
+  routines: (n) => `运行了 ${n} 个自动化任务`,
   list: (items) => items.join("，"),
   time: (minutes) => { const { unit, n } = roundedTime(minutes); return unit === "minutes" ? `大约 ${n} 分钟` : `大约 ${n} 小时`; },
   recap: (done, time) => `到目前为止，我${done}：为你省下${time}。`,
@@ -233,7 +233,7 @@ const zhTw: FirstHourWords = {
   sorted: (n) => `整理了 ${n} 封郵件`,
   drafted: (n) => `擬好了 ${n} 封回覆`,
   prepped: (n) => `準備了 ${n} 場會議`,
-  routines: (n) => `執行了 ${n} 個例行工作`,
+  routines: (n) => `執行了 ${n} 個自動化工作`,
   list: (items) => items.join("，"),
   time: (minutes) => { const { unit, n } = roundedTime(minutes); return unit === "minutes" ? `大約 ${n} 分鐘` : `大約 ${n} 小時`; },
   recap: (done, time) => `到目前為止，我${done}：幫你省下${time}。`,

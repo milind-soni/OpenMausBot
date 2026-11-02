@@ -12,6 +12,7 @@ import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableText, machineSetup, 
 import { cloudMachine, cloudState, otherOwnClouds } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import { awayIn, parseJournal } from "./one-home.mjs";
+import { desktopText } from "./i18n.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
@@ -37,7 +38,10 @@ export const VERSION_EVERY_MS = 60_000;
 export const UPDATING_MS = 30_000;
 /** While the startup screen is up, a wake that takes longer hands over to this computer's screen, which says the same. */
 export const SPLASH_HANDOFF_MS = 6_000;
-export const SPLASH_TEXT = Object.freeze({ opening: "Opening My Cloud…", waking: "Waking My Cloud…" });
+export const SPLASH_TEXT = Object.freeze({
+  get opening() { return desktopText("desktop.extra.home.opening"); },
+  get waking() { return desktopText("desktop.extra.home.waking"); },
+});
 /** A team's Cloud ends each session within an hour of its pairing (T2), so the window signs in again before that, without
  * moving the page: every TEAM_RENEW_MS after a pairing, or TEAM_RENEW_EARLY_MS before the end its session reports. The
  * Admin refusing that pairing (404) means the person is no longer in the team. */
@@ -46,7 +50,7 @@ export const TEAM_RENEW_EARLY_MS = 10 * 60_000;
 export const TEAM_RENEW_RETRY_MS = 5 * 60_000;
 /** The startup screen's line: My Cloud's words, or the team's name. */
 export function splashText(status, name = null) {
-  return name ? `${status === "waking" ? "Waking" : "Opening"} ${name}…` : SPLASH_TEXT[status];
+  return name ? desktopText(status === "waking" ? "desktop.extra.home.wakingNamed" : "desktop.extra.home.openingNamed", { name }) : SPLASH_TEXT[status];
 }
 const PLAN_PROBLEMS = new Set(["stopped", "payment-problem", "failed"]);
 /** The screens of a listed Cloud that isn't running (`cloudScreen`): nothing to look again for, the session's word moves them. */
@@ -576,7 +580,7 @@ export function createHomeWindow(deps) {
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
       if ((await refresh()).kind !== "computer") return show({ place: "cloud", open });
-      if (!cloudSetupOf(state()) && !readyCloudOrigin(state()) && !notRunning()) throw new Error("My Cloud is not ready to connect yet.");
+      if (!cloudSetupOf(state()) && !readyCloudOrigin(state()) && !notRunning()) throw new Error(desktopText("desktop.extra.home.notReady"));
       asked = { open };
       return show({ place: "cloud", open });
     },

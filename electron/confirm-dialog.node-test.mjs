@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { desktopText } from "./i18n.mjs";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -18,7 +19,7 @@ function fixture(response = 0) {
   const frame = { url: `${ORIGIN}/` }, contents = { mainFrame: frame };
   const mainWindow = { webContents: contents, isDestroyed: () => false };
   localOrigin.setLocalOrigin(ORIGIN);
-  const context = vm.createContext({
+  const context = vm.createContext({ desktopText,
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow, rendererOrigin: () => ORIGIN, environmentsState: { activeId: "local", environments: [] },

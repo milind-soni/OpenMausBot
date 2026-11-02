@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { DesktopWorkspaceSwitcher } from "../components/DesktopWorkspaceSwitcher";
-import { productName } from "../lib/brand";
 
 import {
   defaultDeviceLabel,
@@ -15,6 +14,8 @@ import {
   type SessionState,
 } from "../lib/session";
 import { pairedDestination } from "../lib/phone-pairing";
+import { t } from "@/lib/i18n";
+
 
 const input = "mt-1 w-full rounded-md border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
 const button = "mt-5 w-full rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink disabled:opacity-50";
@@ -26,15 +27,15 @@ export function pairsAutomatically(initialCode: string | null, desktop = typeof 
 }
 
 export function pairIntro({ mode, sent, email, cloudHome }: { mode: "email" | "code" | null; sent: boolean; email: string; cloudHome: boolean }): string {
-  if (mode === "email") return sent ? `We emailed an 8-digit code to ${email}. It works once and expires in ten minutes.` : "Enter your email and we will send you a one-time code.";
-  if (cloudHome) return `To open the Cloud, choose Open the Cloud in the ${productName()} app on your computer (Settings → MausBot Cloud), or Use in your browser on your Plan page. Have a pairing code? Enter it below.`;
-  return "Enter the pairing code shown on the server. Codes work once and expire after five minutes.";
+  if (mode === "email") return sent ? t("ui.pairPage.weEmailedAn8DigitCodeToEmailItWorks", { email }) : t("ui.pairPage.enterYourEmailAndWeWillSendYouAOne");
+  if (cloudHome) return t("ui.pairPage.toOpenTheCloudChooseOpenTheCloudInThe");
+  return t("ui.pairPage.enterThePairingCodeShownOnTheServerCodesWork");
 }
 
 export function pairTitle(environment: EnvironmentDescriptor | null, mode: "email" | "code" | null): string {
   if (environment?.capabilities.cloudTeam) return environment.label;
-  if (environment?.capabilities.cloudHome) return "My Cloud";
-  return `${mode === "email" ? "Sign in to" : "Connect to"} ${environment?.label ?? `this ${productName()}`}`;
+  if (environment?.capabilities.cloudHome) return t("cloudSetup.myCloud");
+  return t(mode === "email" ? "engineSetup.signInTitle" : "ui.pairPage.connectToName", { name: environment?.label ?? t("ui.pairPage.thisApp") });
 }
 
 export function PairPage({ initialCode, initialEmail = null, reason }: { initialCode: string | null; initialEmail?: string | null; reason?: string }) {
@@ -122,27 +123,27 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
       <div className="absolute left-3 top-12 max-w-[280px]"><DesktopWorkspaceSwitcher /></div>
       <div className="w-full max-w-[420px]">
         {opening ? (
-          <p role="status" className="text-[20px] font-semibold">{cloudHome ? "Opening the Cloud…" : `Connecting to ${environment?.label ?? `this ${productName()}`}…`}</p>
+          <p role="status" className="text-[20px] font-semibold">{cloudHome ? t("ui.pairPage.openingTheCloud") : t("ui.pairPage.connectingToName", { name: environment?.label ?? t("ui.pairPage.thisApp") })}</p>
         ) : <>
         <h1 className="text-[20px] font-semibold">{pairTitle(environment, mode)}</h1>
         <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">
-          {environment && !cloudHome ? `Version ${environment.version} on ${environment.platform}. ` : ""}
+          {environment && !cloudHome ? t("ui.pairPage.versionVersionOnPlatform", { version: environment.version, platform: environment.platform }) : ""}
           {pairIntro({ mode, sent, email, cloudHome })}
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
-        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">This link has expired or was already used. In the {productName()} app on your computer, open Settings → MausBot Cloud and choose Open the Cloud.</p> : null}
+        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("ui.pairPage.thisLinkHasExpiredOrWasAlreadyUsedInThe")}</p> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[14px]">
-            This browser is already connected.{" "}
+            {t("ui.pairPage.thisBrowserIsAlreadyConnected")}{" "}
             <a href="/" className="text-accent underline">
-              Open the app
+              {t("ui.pairPage.openTheApp")}
             </a>
           </p>
         ) : mode === "email" ? (
           <form onSubmit={submitEmail}>
             <label className={fieldLabel} htmlFor="signin-email">
-              Email
+              {t("cloudBuy.signIn.email")}
             </label>
             <input
               id="signin-email"
@@ -161,7 +162,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
             {sent ? (
               <>
                 <label className={fieldLabel} htmlFor="signin-code">
-                  Code from the email
+                  {t("ui.pairPage.codeFromTheEmail")}
                 </label>
                 <input
                   id="signin-code"
@@ -174,28 +175,28 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
                   className={`${input} font-mono text-[15px] tracking-[0.12em]`}
                 />
                 <label className={fieldLabel} htmlFor="signin-label">
-                  This device
+                  {t("ui.pairPage.thisDevice")}
                 </label>
                 <input id="signin-label" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={input} />
               </>
             ) : null}
             {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
             <button type="submit" disabled={busy || !email.includes("@") || (sent && otp.replace(/\D/g, "").length < 8)} className={button}>
-              {busy ? (sent ? "Signing in…" : "Sending…") : sent ? "Sign in" : "Send code"}
+              {busy ? (sent ? t("ui.browserSignInPage.signingIn") : t("ui.pairPage.sending")) : sent ? t("chat.notice.signIn") : t("cloudBuy.signIn.send")}
             </button>
             {sent ? (
               <button type="button" onClick={() => setSent(false)} className="mt-3 w-full text-[13px] text-ink-secondary underline">
-                Send a new code
+                {t("cloudBuy.signIn.newCode")}
               </button>
             ) : null}
             <button type="button" onClick={() => switchMode("code")} className="mt-3 w-full text-[13px] text-ink-secondary underline">
-              Have a pairing code instead?
+              {t("ui.pairPage.haveAPairingCodeInstead")}
             </button>
           </form>
         ) : (
           <form onSubmit={submitCode}>
             <label className={fieldLabel} htmlFor="pair-code">
-              Pairing code
+              {t("remote.client.pairingCode")}
             </label>
             <input
               id="pair-code"
@@ -211,16 +212,16 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
               className={`${input} font-mono text-[15px] tracking-[0.12em]`}
             />
             <label className={fieldLabel} htmlFor="pair-label">
-              This device
+              {t("ui.pairPage.thisDevice")}
             </label>
             <input id="pair-label" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={input} />
             {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
             <button type="submit" disabled={busy || code.replace(/[^a-z0-9]/gi, "").length < 12} className={button}>
-              {busy ? "Connecting…" : "Connect"}
+              {busy ? t("browser.panel.connecting") : t("rail.connect")}
             </button>
             {emailOffered ? (
               <button type="button" onClick={() => switchMode("email")} className="mt-3 w-full text-[13px] text-ink-secondary underline">
-                Sign in with your email instead
+                {t("ui.pairPage.signInWithYourEmailInstead")}
               </button>
             ) : null}
           </form>

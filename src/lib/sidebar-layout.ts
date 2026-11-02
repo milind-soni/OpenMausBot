@@ -2,6 +2,8 @@ import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 import type { ConnectorCardData } from "../../shared/wire";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar } from "./default-bot";
+import { t } from "./i18n";
+import type { LocaleKey } from "@/locales";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
@@ -18,15 +20,15 @@ export type SectionDropPlace = "before" | "after";
 export type SidebarDensityMode = "comfortable" | "icons";
 
 const GOAL_RUN_PREVIEW_LABEL = {
-  working: "Working",
-  completed: "Completed",
-  "needs-input": "Needs your input",
-  blocked: "Blocked",
-  "limit-reached": "Turn limit reached",
-  paused: "Paused",
-  stopped: "Stopped",
-  failed: "Failed",
-} satisfies Record<GroupGoalRunCardData["status"], string>;
+  working: "ui.final.goal.working",
+  completed: "ui.final.goal.completed",
+  "needs-input": "ui.final.goal.needsInput",
+  blocked: "ui.final.goal.blocked",
+  "limit-reached": "ui.final.goal.limitReached",
+  paused: "ui.final.goal.paused",
+  stopped: "ui.final.goal.stopped",
+  failed: "ui.final.goal.failed",
+} as const satisfies Record<GroupGoalRunCardData["status"], LocaleKey>;
 
 export type SidebarBot = DefaultBotFields & {
   id: string;
@@ -67,7 +69,7 @@ export function sidebarGoalRunPreview(run: GroupGoalRunCardData): string {
   const detail = run.detail?.replace(/\s+/g, " ").trim();
   const goal = run.goal.replace(/\s+/g, " ").trim();
   const summary = detail || goal;
-  const label = GOAL_RUN_PREVIEW_LABEL[run.status];
+  const label = t(GOAL_RUN_PREVIEW_LABEL[run.status]);
   return summary ? `${label}: ${summary}` : label;
 }
 

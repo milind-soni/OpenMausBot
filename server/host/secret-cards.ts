@@ -36,7 +36,7 @@ import {
 } from "../phone-secret.ts";
 import type { BotLogins } from "../bot-logins.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
-import { serverLine } from "../server-lines.ts";
+import { serverLine, type ServerLineKey } from "../server-lines.ts";
 
 export const phoneSecretEnvelopeSchema = z.object({
   version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
@@ -71,6 +71,66 @@ export interface SecretCardsDeps {
 export type SecretCards = ReturnType<typeof createSecretCards>;
 
 const SWEEP_MS = 10 * 60 * 1000;
+const CREDENTIAL_LABEL_KEYS: Partial<Record<CredentialTargetId, ServerLineKey>> = {
+  xaiApiKey: "server.localeCoverage.finalCredential.xaiApiKey.label",
+  boxToken: "server.localeCoverage.finalCredential.boxToken.label",
+  opencodeGoApiKey: "server.localeCoverage.finalCredential.opencodeGoApiKey.label",
+  ttsKey: "server.localeCoverage.finalCredential.ttsKey.label",
+  fishAudioKey: "server.localeCoverage.finalCredential.fishAudioKey.label",
+  openaiImageApiKey: "server.localeCoverage.finalCredential.openaiImageApiKey.label",
+  onePasswordToken: "server.localeCoverage.finalCredential.onePasswordToken.label",
+  composioApiKey: "server.localeCoverage.finalCredential.composioApiKey.label",
+  openaiApiKey: "server.localeCoverage.finalCredential.openaiApiKey.label",
+  anthropicApiKey: "server.localeCoverage.finalCredential.anthropicApiKey.label",
+  openrouterApiKey: "server.localeCoverage.finalCredential.openrouterApiKey.label",
+  mistralApiKey: "server.localeCoverage.finalCredential.mistralApiKey.label",
+  cerebrasApiKey: "server.localeCoverage.finalCredential.cerebrasApiKey.label",
+  groqApiKey: "server.localeCoverage.finalCredential.groqApiKey.label",
+  greenferenceApiKey: "server.localeCoverage.finalCredential.greenferenceApiKey.label",
+  metaApiKey: "server.localeCoverage.finalCredential.metaApiKey.label",
+  deepseekApiKey: "server.localeCoverage.finalCredential.deepseekApiKey.label",
+};
+
+const CREDENTIAL_DESCRIPTION_KEYS: Partial<Record<CredentialTargetId, ServerLineKey>> = {
+  xaiApiKey: "server.localeCoverage.finalCredential.xaiApiKey.description",
+  boxToken: "server.localeCoverage.finalCredential.boxToken.description",
+  opencodeGoApiKey: "server.localeCoverage.finalCredential.opencodeGoApiKey.description",
+  ttsKey: "server.localeCoverage.finalCredential.ttsKey.description",
+  fishAudioKey: "server.localeCoverage.finalCredential.fishAudioKey.description",
+  openaiImageApiKey: "server.localeCoverage.finalCredential.openaiImageApiKey.description",
+  onePasswordToken: "server.localeCoverage.finalCredential.onePasswordToken.description",
+  composioApiKey: "server.localeCoverage.finalCredential.composioApiKey.description",
+  openaiApiKey: "server.localeCoverage.finalCredential.openaiApiKey.description",
+  anthropicApiKey: "server.localeCoverage.finalCredential.anthropicApiKey.description",
+  openrouterApiKey: "server.localeCoverage.finalCredential.openrouterApiKey.description",
+  mistralApiKey: "server.localeCoverage.finalCredential.mistralApiKey.description",
+  cerebrasApiKey: "server.localeCoverage.finalCredential.cerebrasApiKey.description",
+  groqApiKey: "server.localeCoverage.finalCredential.groqApiKey.description",
+  greenferenceApiKey: "server.localeCoverage.finalCredential.greenferenceApiKey.description",
+  metaApiKey: "server.localeCoverage.finalCredential.metaApiKey.description",
+  deepseekApiKey: "server.localeCoverage.finalCredential.deepseekApiKey.description",
+};
+
+const CREDENTIAL_PLACEHOLDER_KEYS: Partial<Record<CredentialTargetId, ServerLineKey>> = {
+  boxToken: "server.localeCoverage.finalCredential.boxToken.placeholder",
+  opencodeGoApiKey: "server.localeCoverage.finalCredential.opencodeGoApiKey.placeholder",
+  ttsKey: "server.localeCoverage.finalCredential.ttsKey.placeholder",
+  fishAudioKey: "server.localeCoverage.finalCredential.fishAudioKey.placeholder",
+  mistralApiKey: "server.localeCoverage.finalCredential.mistralApiKey.placeholder",
+  greenferenceApiKey: "server.localeCoverage.finalCredential.greenferenceApiKey.placeholder",
+};
+
+function credentialDisplay(credentialId: CredentialTargetId, language: string | undefined) {
+  const target = CREDENTIAL_TARGETS[credentialId];
+  const labelKey = CREDENTIAL_LABEL_KEYS[credentialId];
+  const descriptionKey = CREDENTIAL_DESCRIPTION_KEYS[credentialId];
+  const placeholderKey = CREDENTIAL_PLACEHOLDER_KEYS[credentialId];
+  return {
+    label: labelKey ? serverLine(language, labelKey) : target.label,
+    description: descriptionKey ? serverLine(language, descriptionKey) : target.description,
+    placeholder: placeholderKey ? serverLine(language, placeholderKey) : CREDENTIAL_TARGETS[credentialId].placeholder,
+  };
+}
 
 const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"): string => outcome === "provided"
   ? `OpenMausBot credential update: the user securely provided ${label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
@@ -359,16 +419,17 @@ export function createSecretCards(deps: SecretCardsDeps) {
     // A later request supersedes pending cards; the fresh card is appended FIRST, so a failed save leaves the prior cards actionable.
     const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 240) : "";
     const language = deps.threadLanguage?.(fromThreadId);
+    const display = credentialDisplay(credentialId, language);
     const message = store.appendMessage(fromThreadId, {
       role: "bot",
       kind: "secret",
-      text: credentialDesktopHandoff(target.label, language),
+      text: credentialDesktopHandoff(display.label, language),
       ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
       secret: {
         target: credentialId,
-        label: target.label,
-        description: `${reason ? `${target.description} ${reason}` : target.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
-        placeholder: target.placeholder,
+        label: display.label,
+        description: `${reason ? `${display.description} ${reason}` : display.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
+        placeholder: display.placeholder,
         helpUrl: target.helpUrl,
         requestKey: randomUUID(),
       },

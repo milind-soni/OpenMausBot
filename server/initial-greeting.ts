@@ -9,6 +9,8 @@ const GREETINGS: { en: Greeting } & Record<string, Greeting> = {
   es: (name, person) => `Hola${person ? ` ${person}` : ""}, soy ${name}. ¿Qué te gustaría que hiciera?`,
   "pt-br": (name, person) => `Oi${person ? ` ${person}` : ""}, eu sou ${name}. O que você gostaria que eu fizesse?`,
   ko: (name, person) => `안녕하세요${person ? `, ${person}님` : ""}. 저는 ${name}입니다. 무엇을 도와드릴까요?`,
+  zh: (name, person) => `你好${person ? `，${person}` : ""}，我是 ${name}。你想让我做什么？`,
+  "zh-tw": (name, person) => `你好${person ? `，${person}` : ""}，我是 ${name}。你想請我做什麼？`,
 };
 
 /** What the bot says the moment Set me up is pressed: no model is asked, so it is written here. */
@@ -17,6 +19,8 @@ const SETUP_REQUEST_LINES: { en: string } & Record<string, string> = {
   es: "Genial. Cuéntame con tus propias palabras en qué te gustaría que te ayude y me prepararé para ello. Por ejemplo: \"ordena mi bandeja de entrada cada mañana\" o \"investiga a nuestros competidores cada semana\".",
   "pt-br": "Ótimo. Me conte com suas palavras em que você gostaria de ajuda e eu me preparo para isso. Por exemplo: \"organize minha caixa de entrada toda manhã\" ou \"pesquise nossos concorrentes toda semana\".",
   ko: "좋아요. 도움이 필요한 일을 편하게 말씀해 주시면 거기에 맞게 제가 설정할게요. 예: \"매일 아침 받은편지함 정리해 줘\", \"매주 경쟁사 조사해 줘\".",
+  zh: "好的。用你自己的话告诉我需要什么帮助，我会据此设置自己。例如：“每天早上整理收件箱”或“每周调研竞争对手”。",
+  "zh-tw": "好的。用你自己的話告訴我需要什麼協助，我會據此設定自己。例如：「每天早上整理收件匣」或「每週研究競爭對手」。",
 };
 
 /** The answers a blank bot's greeting offers on its setup card. Picking one sets the bot up for its words, as
@@ -30,6 +34,10 @@ const SETUP_CHOICES: { en: readonly string[] } & Record<string, readonly string[
     "Reservas, compras e tarefas", "Dados, planilhas e relatórios"],
   ko: ["리서치와 주제 깊이 파고들기", "이것저것 지켜보기", "이메일, 캘린더, 메시지",
     "예약, 쇼핑, 심부름", "데이터, 스프레드시트, 보고서"],
+  zh: ["主题调研与深入研究", "替我留意各项事务", "邮件、日历与消息",
+    "预订、购物和跑腿", "数据、电子表格与报告"],
+  "zh-tw": ["主題研究與深入探索", "替我留意各項事務", "電子郵件、行事曆與訊息",
+    "預訂、購物與代辦事項", "資料、試算表與報告"],
 };
 
 export function setupChoices(language?: string): string[] {

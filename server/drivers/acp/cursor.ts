@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine } from "../../server-lines.ts";
 // Cursor Agent (`cursor-agent acp`) on the Cursor subscription (`cursor-agent login`, CURSOR_API_KEY or
 // CURSOR_AUTH_TOKEN). Per cursor.com/docs/cli/acp it advertises `cursor_login` and takes `--force` /
 // `--model` as global flags before `acp`.
@@ -487,7 +488,7 @@ const support = (run: typeof execCli): AcpSupport => ({
     try {
       await request("session/set_model", { sessionId, modelId });
       if (match && !match.exact) {
-        notice(`Cursor offers ${modelId} rather than ${turn.model} in this session, so this conversation uses ${modelId}.`);
+        notice(serverLine(conversationLanguage(turn.threadId), "server.localeCoverage.cursorOffers", { offered: modelId, requested: turn.model }));
       }
     } catch (e) {
       const err = e as Error & { code?: unknown };
@@ -498,8 +499,7 @@ const support = (run: typeof execCli): AcpSupport => ({
         const current = sessionModels?.find((m) => m.modelId === currentModelId);
         const running = current?.name ?? currentModelId;
         notice(
-          `Cursor did not accept ${turn.model} in this session, so it runs ${running ?? "its default model"}. ` +
-            "Choose another model for this bot to stop seeing this.",
+          serverLine(conversationLanguage(turn.threadId), "server.localeCoverage.cursorRejected", { requested: turn.model, running: running ?? serverLine(conversationLanguage(turn.threadId), "server.localeCoverage.cursorDefaultModel") }),
         );
         return;
       }

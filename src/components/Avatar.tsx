@@ -17,6 +17,8 @@ import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
+import { t } from "@/lib/i18n";
+
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -283,7 +285,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
     >
       <img
         src={profile.avatarUrl}
-        alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
+        alt={label ?? (bot.name ? t("ui.avatar.nameAvatar", { name: bot.name }) : t("ui.avatar.botAvatar"))}
         width={size}
         height={size}
         draggable={false}

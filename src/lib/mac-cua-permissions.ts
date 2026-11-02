@@ -16,6 +16,6 @@ export function macCuaPermissionMessage(permissions: MacCuaPermission[]): string
   if (!permissions.length) return null;
   if (permissions.length > 1) return t("computer.mac.permission.requiredBoth");
   return t("computer.mac.permission.requiredOne", {
-    permission: permissions[0] === "screen" ? "Screen Recording" : "Accessibility",
+    permission: t(permissions[0] === "screen" ? "ui.final.mac.screen" : "ui.final.mac.accessibility"),
   });
 }

@@ -10,6 +10,8 @@ import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
 import { toolFailureMessage } from "./drivers/tool-failure.ts";
+import "./server-line-packs.ts";
+import { setConversationLanguage } from "./server-lines.ts";
 
 const QUOTA = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
 const defaultSelection = (): ModelSelection => ({ instanceId: "claude", model: "claude-default" });
@@ -169,8 +171,21 @@ describe("quota switch", () => {
   });
 
   afterEach(() => {
+    setConversationLanguage(() => undefined);
     closeMessageDb();
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it.each([
+    ["zh-CN", "正在使用 Codex 继续"],
+    ["zh-Hant", "正在使用 Codex 繼續"],
+  ])("continues the original request once, with a status in %s", async (language, status) => {
+    setConversationLanguage((threadId) => threadId === bot.threadId ? language : undefined);
+    const card = await failed(QUOTA, { messageId: said("Please continue") });
+    expect(await answer(card!, "Codex")).toBe("answered");
+    expect(thread().modelSelection.instanceId).toBe("codex");
+    expect(resend).toHaveBeenCalledTimes(1);
+    expect(notices().at(-1)?.name).toContain(status);
   });
 
   describe("carrying on by itself", () => {

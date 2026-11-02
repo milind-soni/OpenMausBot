@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { desktopText } from "./i18n.mjs";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -49,6 +50,7 @@ function fixture() {
     disconnect: async () => { f.generation++; f.connection = null; f.state = { status: "signed-out" }; f.onState(f.state); return f.state; } };
   localOrigin.setLocalOrigin(ORIGIN);
   const context = vm.createContext({
+    desktopText,
     AbortController, AbortSignal, Date, Headers, setTimeout, clearTimeout, path, randomUUID, Buffer,
     app: { isPackaged: true, getPath: () => "/unused-synthetic-backup-fixture", getVersion: () => "fixture" },
     os: { hostname: () => "Fixture computer" }, process: { platform: "fixture" },

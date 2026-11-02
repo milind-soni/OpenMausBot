@@ -32,6 +32,15 @@ describe("buildApplicationMenu", () => {
       }),
     );
 
+  it.each([["zh", "服务器", "这台电脑"], ["zh-tw", "伺服器", "這台電腦"]])("uses %s for native labels while preserving server actions", (language, serverLabel, computerLabel) => {
+    const onSwitch = vi.fn();
+    const template = build("darwin", { language, onSwitch });
+    const server = template.find((entry) => entry.label === serverLabel);
+    expect(server).toBeDefined();
+    server.submenu.find((entry) => entry.label === computerLabel).click();
+    expect(onSwitch).toHaveBeenCalledWith("local");
+  });
+
   it.each(["darwin", "linux", "win32"])("lists a saved local environment by its folder, so switching servers never fails on %s", platform => {
     const onSwitch = vi.fn();
     const local = { id: "e1", kind: "local", name: "Work", dataDir: "/Users/me/.openmausbot-work" };

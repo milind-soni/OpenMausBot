@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine, type ServerLineKey } from "../server-lines.ts";
 // A Chief of Staff's level flows down every hop of the work it hands out, a teammate's teammate too, in threads and in
 // rooms alike: each hand-off resolves the nearest Chief conversation up its chain (docs/approval-levels.md).
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
@@ -21,7 +22,7 @@ export interface DelegatedLevelDeps {
   guestDriven: (threadId: string) => boolean;
 }
 
-const NAMES: Partial<Record<ApprovalMode, string>> = { edits: "Auto-accept edits", auto: "Approve for me", full: "Full access" };
+const NAMES: Partial<Record<ApprovalMode, ServerLineKey>> = { edits: "server.localeCoverage.approvalEdits", auto: "server.localeCoverage.approvalAuto", full: "server.localeCoverage.approvalFull" };
 const MAX_HOPS = 32;
 
 export function createDelegatedLevel(deps: DelegatedLevelDeps) {
@@ -57,12 +58,12 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
     const passed = handedDown({ botId: from.id, threadId: fromThreadId, ...(parentId ? { parentId } : {}) }, target, own);
     if (!passed || store.taskByThread(target.id, threadId)?.approvalMode === passed.level) return;
     store.patchTask(target.id, threadId, { approvalMode: passed.level, autoApprove: false, alwaysAllow: [] });
-    const name = NAMES[passed.level] ?? passed.level;
-    const via = passed.chief.id === from.id ? "" : `from ${passed.chief.name}, `;
+    const language = conversationLanguage(threadId);
+    const mode = NAMES[passed.level] ? serverLine(language, NAMES[passed.level]!) : passed.level;
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: `${name} — delegated by ${from.name}, ${via}a Chief of Staff on ${name}`, ok: true },
+      tool: { name: serverLine(language, passed.chief.id === from.id ? "server.localeCoverage.delegatedLevel" : "server.localeCoverage.delegatedLevelVia", { mode, from: from.name, chief: passed.chief.name }), ok: true },
     });
   }
 

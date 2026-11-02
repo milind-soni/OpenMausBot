@@ -1,3 +1,4 @@
+import { serverLine } from "./server-lines.ts";
 // Nothing here decides whether an action is safe: each level is the provider's own permission mode passed through, and a
 // request reaching this process is one the provider left for a person. The app's own grants are Full access, the person's
 // exact saved commands and remembered MCP read tools, Approve for me's web search, and a bot's plain reads of its own files
@@ -125,11 +126,12 @@ export function autoVerdict(
 export function undeliveredApprovalTool(
   outcome: Exclude<RequestOutcome, "allowed-once" | "unavailable"> | "failed",
   source: AutoVerdictSource,
+  language?: string,
 ): FailedTurnTool | { name: string; ok: false } {
   if (outcome !== "rejected") return failedTurnTool("could not deliver approval to the provider; retry the task after reconnecting.");
-  const grant = source === "command-allowlist" ? "the saved command permission"
-    : source === "tool-allowlist" ? "the saved tool permission" : "Full access";
-  return { name: `The provider rejected this action despite ${grant}.`, ok: false };
+  const grant = serverLine(language, source === "command-allowlist" ? "server.localeCoverage.approvalSavedCommand"
+    : source === "tool-allowlist" ? "server.localeCoverage.approvalSavedTool" : "server.localeCoverage.approvalFull");
+  return { name: serverLine(language, "server.localeCoverage.providerRejectedGrant", { grant }), ok: false };
 }
 
 /** The client translates by key and falls back to this text, which the server keeps sending for older cards. */

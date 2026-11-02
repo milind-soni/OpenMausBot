@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { desktopText } from "./i18n.mjs";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -426,6 +427,7 @@ function pageIpc(overrides = {}) {
   const account = { status: "connected", account: { id: "a1", email: "person@example.test" }, deviceId: "d1",
     entitlement: { plan: "pro", tier: "max", status: "active", expiresAt: 1, version: 1 }, machine: { status: "ready", origin: CLOUD } };
   const context = vm.createContext({
+    desktopText,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, otherOwnClouds,
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,

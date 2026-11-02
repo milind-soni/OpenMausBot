@@ -10,6 +10,7 @@ import { readyToRun, selectDefaultModelSelection, type SelectableInstance } from
 import { classifyError } from "./drivers/retry.ts";
 import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { spokenLineFields } from "./live-call-record.ts";
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { BotRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { TurnStops } from "./turn-outcome.ts";
@@ -152,6 +153,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
    * and the resend see one state. */
   const continueOn = async (botId: string, threadId: string, selection: ModelSelection, request: QuotaRequest, build: { stale: boolean }, resetsAt?: number,
     scope: TakeoverScope = "engine"): Promise<boolean> => {
+    const language = conversationLanguage(threadId);
     const engines = deps.registry.instances();
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);
     const before = store.projectBotForTask(botId, threadId);
@@ -169,22 +171,23 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     }
     deps.takeover?.moved(botId, threadId, before.modelSelection, checked.selection, resetsAt, scope);
     const name = engine.instanceId === current.instanceId ? `${nameOf(engine)} ${checked.selection.model}` : nameOf(engine);
-    const why = scope === "signed-out" ? `while ${nameOf(current)} is signed out` : "after hitting the usage limit";
+    const why = serverLine(language, scope === "signed-out" ? "server.localeCoverage.quotaReasonSignedOut" : "server.localeCoverage.quotaReasonLimit", { name: nameOf(current) });
+    const state = serverLine(language, "server.localeCoverage.quotaSwitched", { name });
     const held = heldBy(botId, threadId, rootOf(threadId, request));
     const original = held ? undefined : resendable(store, threadId, request.messageId);
-    if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true);
-    else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true);
-    else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true);
+    if (held === "card") notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldCard", { state, name }), true);
+    else if (held === "runtime") notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldRuntime", { state, name }), true);
+    else if (held === "busy") notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldBusy", { state }), true);
     else if (held === "question") {
-      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false);
+      notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldQuestion", { state }), false);
     } else if (!original) {
-      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false);
+      notice(threadId, serverLine(language, "server.localeCoverage.quotaMissingMessage", { state }), false);
     } else {
-      notice(threadId, `continuing on ${name} ${why}`, true);
+      notice(threadId, serverLine(language, "server.localeCoverage.quotaContinuing", { name, why }), true);
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
-        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+        if (store.taskByThread(botId, threadId)) notice(threadId, serverLine(language, "server.localeCoverage.quotaContinueFailed", { name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) }), false);
       }
     }
     return true;
@@ -269,6 +272,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
 
   /** True once the thread runs on the engine; only then is the offer spent. */
   const decide = async (botId: string, threadId: string, cardId: string, chosen: QuotaSwitchCardData["engines"][number]): Promise<boolean> => {
+    const language = conversationLanguage(threadId);
     const offer = () => {
       const card = store.messagesFor(threadId).find((message) => message.id === cardId)?.card;
       return card?.quotaSwitch && !card.answered && !card.dismissed ? card : undefined;
@@ -282,54 +286,54 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       return false;
     };
     const closed = () => ({ answered: "unavailable", dismissed: true });
-    if (!enabled()) return refuse("continuing with another AI is switched off — nothing switched.", closed);
+    if (!enabled()) return refuse(serverLine(language, "server.localeCoverage.quotaDisabled"), closed);
     const engines = deps.registry.instances();
     const engine = engines.find((candidate) => candidate.instanceId === chosen.instanceId);
     if (!engine) {
       const rest = (offer()?.quotaSwitch!.engines ?? []).filter((other) => other.instanceId !== chosen.instanceId);
-      if (!rest.length) return refuse(`${chosen.name} is no longer configured, and the card offered no other AI — nothing switched.`, closed);
-      return refuse(`${chosen.name} is no longer configured — nothing switched.`,
+      if (!rest.length) return refuse(serverLine(language, "server.localeCoverage.quotaEngineRemovedLast", { name: chosen.name }), closed);
+      return refuse(serverLine(language, "server.localeCoverage.quotaEngineRemoved", { name: chosen.name }),
         (card) => ({ options: [...rest.map((other) => other.name), NOT_NOW], quotaSwitch: { ...card.quotaSwitch!, engines: rest } }));
     }
     const before = store.projectBotForTask(botId, threadId);
     if (!before) return false;
     const current = engines.find((candidate) => candidate.instanceId === before.modelSelection.instanceId);
-    if (!current) return refuse("this conversation's own AI is no longer configured here, so no other AI can be checked against it — nothing switched. Choose a model for this conversation instead.", closed);
+    if (!current) return refuse(serverLine(language, "server.localeCoverage.quotaCurrentRemoved"), closed);
     const selection = await takeover(engine, before, current);
     // No await from here to the resend: the gate, the switch and the resend must see one state.
     const card = offer();
     const bot = store.projectBotForTask(botId, threadId);
     if (!card || !bot) return false;
-    if (selection === "timed-out") return refuse(`${chosen.name} did not answer in time — nothing switched. Try again in a moment.`);
-    if (!selection) return refuse(`${chosen.name} is no longer available — nothing switched.`);
+    if (selection === "timed-out") return refuse(serverLine(language, "server.localeCoverage.quotaProbeTimedOut", { name: chosen.name }));
+    if (!selection) return refuse(serverLine(language, "server.localeCoverage.quotaEngineUnavailable", { name: chosen.name }));
     const already = bot.modelSelection.instanceId === selection.instanceId;
     if (!already) {
       const checked = deps.gate(bot, selection);
-      if (!checked.ok) return refuse(`could not switch to ${chosen.name} — ${checked.error}`);
+      if (!checked.ok) return refuse(serverLine(language, "server.localeCoverage.quotaSwitchRefused", { name: chosen.name, error: checked.error }));
       try {
         store.switchTaskModel(botId, threadId, checked.selection, false, false, deps.reset?.(bot.modelSelection, checked.selection));
       } catch {
-        return refuse(`could not switch to ${chosen.name} — the model switch could not be saved.`);
+        return refuse(serverLine(language, "server.localeCoverage.quotaSwitchSaveFailed", { name: chosen.name }));
       }
     }
     store.patchMessage(threadId, cardId, { card: { ...card, answered: "answer", answeredText: chosen.name } });
-    const now = `${already ? "already on" : "switched to"} ${chosen.name}`;
+    const now = serverLine(language, already ? "server.localeCoverage.quotaAlready" : "server.localeCoverage.quotaSwitched", { name: chosen.name });
     const held = heldBy(botId, threadId, card.quotaSwitch!.rootId);
     const original = held ? undefined : resendable(store, threadId, card.quotaSwitch!.messageId);
-    if (held === "card") notice(threadId, `${now}. Your request waits on a card above and continues on ${chosen.name} once you act on it.`, true);
-    else if (held === "runtime") notice(threadId, `${now}. Your request is still under way here and continues on ${chosen.name}.`, true);
-    else if (held === "busy") notice(threadId, `${now}. This conversation is working, so your message was not sent again.`, true);
+    if (held === "card") notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldCard", { state: now, name: chosen.name }), true);
+    else if (held === "runtime") notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldRuntime", { state: now, name: chosen.name }), true);
+    else if (held === "busy") notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldBusy", { state: now }), true);
     else if (held === "question") {
-      notice(threadId, `${now}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again — answer it, then send your message again.`, false);
+      notice(threadId, serverLine(language, "server.localeCoverage.quotaHeldQuestionLegacy", { state: now }), false);
     } else if (!original) {
-      notice(threadId, `${now}, but the message that hit quota could not be found to resend — send it again.`, false);
+      notice(threadId, serverLine(language, "server.localeCoverage.quotaMissingMessageLegacy", { state: now }), false);
     } else {
-      notice(threadId, `continuing on ${chosen.name} after hitting quota`, true);
+      notice(threadId, serverLine(language, "server.localeCoverage.quotaContinuing", { name: chosen.name, why: serverLine(language, "server.localeCoverage.quotaReasonLegacyLimit") }), true);
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
         if (store.taskByThread(botId, threadId)) {
-          notice(threadId, `could not continue on ${chosen.name} — ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+          notice(threadId, serverLine(language, "server.localeCoverage.quotaContinueFailedLegacy", { name: chosen.name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) }), false);
         }
       }
     }

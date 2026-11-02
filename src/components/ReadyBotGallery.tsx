@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import { MausAvatar } from "./Avatar";
 import { NewBotDialog } from "./lazy-screens";
-import { READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, type ReadyBotCategory } from "@/lib/ready-bots";
+import { READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBotDisplay, type ReadyBotCategory } from "@/lib/ready-bots";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -33,7 +33,8 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
     if (id !== null && window.ogb?.remoteClient?.active) { dispatch({ type: "newBot", onCreated: onAdded }); return; }
     setAdding(id); onDialog(id !== null);
   };
-  const visible = READY_BOTS.filter((bot) => (!category || bot.category === category) && matchesReadyBot(bot, search));
+  const visible = READY_BOTS.map((bot) => ({ bot, display: readyBotDisplay(bot) }))
+    .filter(({ bot, display }) => (!category || bot.category === category) && (matchesReadyBot(bot, search) || matchesReadyBot({ ...bot, ...display }, search)));
   if (search.trim() && visible.length === 0) return null;
   return <section className="mb-8" aria-labelledby="ready-bots-title">
     <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
@@ -49,20 +50,20 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
       </button>)}
     </div>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-      {visible.map((bot) => <article key={bot.id} data-ready-bot={bot.id} className="flex flex-col rounded-2xl border border-hairline/40 bg-card p-4">
+      {visible.map(({ bot, display }) => <article key={bot.id} data-ready-bot={bot.id} className="flex flex-col rounded-2xl border border-hairline/40 bg-card p-4">
         <div className="flex items-center gap-3">
-          <MausAvatar color={bot.look.color} bodyId={bot.look.mascotBody} size={40} animated={false} label={bot.name} />
+          <MausAvatar color={bot.look.color} bodyId={bot.look.mascotBody} size={40} animated={false} label={display.name} />
           <div className="min-w-0 flex-1">
-            <h4 className="truncate text-[14px] font-medium text-ink">{bot.name}</h4>
-            <p className="truncate text-[12px] text-ink-secondary">{bot.title} · {t(CATEGORY_KEYS[bot.category])}</p>
+            <h4 className="truncate text-[14px] font-medium text-ink">{display.name}</h4>
+            <p className="truncate text-[12px] text-ink-secondary">{display.title} · {t(CATEGORY_KEYS[bot.category])}</p>
           </div>
-          <button type="button" onClick={() => open(bot.id)} aria-label={t("readyBots.addAria", { name: bot.name, title: bot.title })}
+          <button type="button" onClick={() => open(bot.id)} aria-label={t("readyBots.addAria", { name: display.name, title: display.title })}
             className="flex h-8 shrink-0 items-center gap-1 rounded-full bg-raised px-3 text-[13px] font-medium text-ink hover:bg-raised-hover focus-visible:outline-2 focus-visible:outline-accent">
             <Plus size={14} aria-hidden="true" />{t("readyBots.add")}
           </button>
         </div>
-        <p className="mt-3 text-[13px] leading-[1.45] text-ink-secondary">{bot.description}</p>
-        <p className="mt-2 text-[12px] italic text-ink-tertiary">{t("readyBots.try", { prompt: bot.tryAsking[0]! })}</p>
+        <p className="mt-3 text-[13px] leading-[1.45] text-ink-secondary">{display.description}</p>
+        <p className="mt-2 text-[12px] italic text-ink-tertiary">{t("readyBots.try", { prompt: display.prompt })}</p>
         {(bot.apps.length > 0 || bot.routines?.length) && <p className="mt-auto pt-2 text-[12px] text-ink-tertiary">
           {[bot.apps.length > 0 && t("readyBots.worksWith", { apps: bot.apps.map((app) => APP_LABELS[app] ?? app).join(", ") }),
             bot.routines?.length && t("readyBots.pausedRoutine")].filter(Boolean).join(" · ")}

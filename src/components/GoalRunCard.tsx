@@ -9,23 +9,24 @@ import {
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { useStore, type Message } from "@/state/store";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 
 const DETAIL_LIMIT = 280;
 
 const COPY = {
-  working: { label: "Working", tone: "text-accent", border: "border-accent/30" },
-  completed: { label: "Completed", tone: "text-success", border: "border-success/30" },
-  "needs-input": { label: "Needs your input", tone: "text-warning", border: "border-warning/35" },
-  blocked: { label: "Blocked", tone: "text-warning", border: "border-warning/35" },
-  "limit-reached": { label: "Turn limit reached", tone: "text-warning", border: "border-warning/35" },
-  paused: { label: "Paused", tone: "text-warning", border: "border-warning/35" },
-  stopped: { label: "Stopped", tone: "text-ink-secondary", border: "border-hairline/45" },
-  failed: { label: "Failed", tone: "text-danger", border: "border-danger/35" },
+  working: { labelKey: "chat.activity.working", tone: "text-accent", border: "border-accent/30" },
+  completed: { labelKey: "toolDetail.completed", tone: "text-success", border: "border-success/30" },
+  "needs-input": { labelKey: "routines.goal.needs-input", tone: "text-warning", border: "border-warning/35" },
+  blocked: { labelKey: "routines.goal.blocked", tone: "text-warning", border: "border-warning/35" },
+  "limit-reached": { labelKey: "routines.goal.limit-reached", tone: "text-warning", border: "border-warning/35" },
+  paused: { labelKey: "vm.state.paused", tone: "text-warning", border: "border-warning/35" },
+  stopped: { labelKey: "chat.turnStopped", tone: "text-ink-secondary", border: "border-hairline/45" },
+  failed: { labelKey: "toolDetail.failed", tone: "text-danger", border: "border-danger/35" },
 } satisfies Record<
   GroupGoalRunCardData["status"],
-  { label: string; tone: string; border: string }
+  { labelKey: LocaleKey; tone: string; border: string }
 >;
 
 function compact(value: string | undefined, limit: number): string {
@@ -69,12 +70,12 @@ export function GoalRunCard({ message, solo = false, onStop }: { message: Messag
   const goal = compact(run.goal, 180);
   const detail = compact(run.detail, DETAIL_LIMIT);
   const turns = run.status === "working"
-    ? `Turn ${Math.min(run.turnCount + 1, run.maxTurns)} of ${run.maxTurns}`
-    : `${run.turnCount} ${run.turnCount === 1 ? "turn" : "turns"}`;
+    ? t("ui.goalRunCard.turnTurnOfMax", { turn: Math.min(run.turnCount + 1, run.maxTurns), max: run.maxTurns })
+    : t(run.turnCount === 1 ? "ui.goalRunCard.countTurn" : "ui.goalRunCard.countTurns", { count: run.turnCount });
 
   return (
     <section
-      aria-label={`Goal run: ${copy.label}`}
+      aria-label={t("ui.goalRunCard.goalRunStatus", { status: t(copy.labelKey) })}
       className={cn("w-full max-w-[680px] rounded-2xl border bg-card px-3.5 py-3 shadow-sm", copy.border)}
     >
       <div className="flex items-start gap-3">
@@ -83,14 +84,14 @@ export function GoalRunCard({ message, solo = false, onStop }: { message: Messag
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="truncate text-[14px] font-semibold text-ink">{goal || "Group goal"}</h3>
+            <h3 className="truncate text-[14px] font-semibold text-ink">{goal || t("ui.goalRunCard.groupGoal")}</h3>
             <span aria-live="polite" className={cn("text-[12px] font-medium", copy.tone)}>
-              {copy.label}
+              {t(copy.labelKey)}
             </span>
           </div>
           {detail && <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-secondary">{detail}</p>}
           <p className="mt-1 text-[12px] text-ink-tertiary">
-            {run.coordinatorName}{solo ? "" : " coordinating"} · {turns}
+            {run.coordinatorName}{solo ? "" : t("ui.goalRunCard.coordinating")} · {turns}
           </p>
         </div>
         {onStop && run.status === "working" && (

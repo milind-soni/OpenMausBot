@@ -33,7 +33,11 @@ export const plainClock = (time: string) => time.replace(/^0(\d):/, "$1:");
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /** Local weekdays (Sunday = 0) as people say them: "every day", "weekdays", "Monday, Wednesday". */
-export function plainWeekdays(weekdays: readonly number[]): string {
+export function plainWeekdays(weekdays: readonly number[], locale = "en", words = { everyDay: "every day", weekdays: "weekdays" }): string {
   const days = [...weekdays].sort((a, b) => a - b).join(",");
-  return days === "0,1,2,3,4,5,6" ? "every day" : days === "1,2,3,4,5" ? "weekdays" : weekdays.map((day) => WEEKDAYS[day]).join(", ");
+  if (days === "0,1,2,3,4,5,6") return words.everyDay;
+  if (days === "1,2,3,4,5") return words.weekdays;
+  if (locale.toLowerCase().startsWith("en")) return weekdays.map((day) => WEEKDAYS[day]).join(", ");
+  const names = weekdays.map((day) => new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 7 + day))));
+  return new Intl.ListFormat(locale, { type: "conjunction" }).format(names);
 }

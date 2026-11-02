@@ -1,3 +1,4 @@
+import { serverLine } from "./server-lines.ts";
 import type { PeerAction } from "./peer-approval-key.ts";
 import { hasAuthority, peerAllowed, peerName } from "./peer-roster.ts";
 
@@ -81,13 +82,13 @@ export function peerApprovalGate(action: PeerAction, targetName: string): string
 export const NEEDS_INPUT_GATE = "its turn ended on a question the person has not answered";
 export const RAISED_GATE = "it raised this flag itself";
 
-function atGate(escalation: Escalation): string {
-  const where = escalation.room ? `in the room "${escalation.room}"` : escalation.title ? `in its thread #${fold(escalation.title, 60)}` : "in its main conversation";
-  return `${peerName(escalation.bot.name)}'s work ${where} is parked at a gate: ${escalation.gate}.`;
+function atGate(escalation: Escalation, language?: string): string {
+  const where = escalation.room ? serverLine(language, "server.incidents.where.room", { room: escalation.room }) : escalation.title ? serverLine(language, "server.incidents.where.thread", { title: fold(escalation.title, 60) }) : serverLine(language, "server.incidents.where.main");
+  return serverLine(language, "server.localeCoverage.escalationGate", { bot: peerName(escalation.bot.name), where, gate: escalation.gate });
 }
 
-export function escalationChip(escalation: Escalation): string {
-  return `Escalation: ${atGate(escalation)}`;
+export function escalationChip(escalation: Escalation, language?: string): string {
+  return serverLine(language, "server.localeCoverage.escalationChip", { detail: atGate(escalation, language) });
 }
 
 export function escalationText(escalation: Escalation, count: EscalationCount): string {

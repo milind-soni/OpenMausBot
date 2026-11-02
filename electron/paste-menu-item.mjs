@@ -1,3 +1,5 @@
+import { desktopText } from "./i18n.mjs";
+
 export function pasteMenuItem(params, clipboard, webContents) {
   let attachment = false;
   if (params.isEditable && !params.editFlags.canPaste) {
@@ -9,7 +11,7 @@ export function pasteMenuItem(params, clipboard, webContents) {
     } catch {}
   }
   return {
-    label: "Paste",
+    label: desktopText("desktop.role.paste"),
     enabled: params.isEditable && (params.editFlags.canPaste || attachment),
     // macOS controls enabled state for native roles, so only the attachment fallback invokes paste explicitly.
     ...(attachment ? { click: () => webContents.paste() } : { role: "paste" }),

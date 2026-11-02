@@ -3,11 +3,16 @@
 import capabilitiesModule from "./capabilities.cjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
 import { sharedCuaConnection } from "./shared-cua-connection.mjs";
+import { desktopText } from "./i18n.mjs";
 
 const { driverBlocked, localComputerReady } = capabilitiesModule;
 
 /** A Linux session computer control refuses to drive (Wayland, no desktop, a driver that failed its check). */
 const LINUX_UNSUPPORTED = new Set(["linux-wayland-seat-safety-blocked", "headless-session", "unsupported-platform", "bundled-driver-invalid"]);
+const POLICY_TEXT = Object.freeze({
+  get "linux-wayland-seat-safety-blocked"() { return desktopText("desktop.extra.screen.wayland"); },
+  get "headless-session"() { return desktopText("desktop.extra.screen.headless"); },
+});
 
 /**
  * `ready`: computer control works, so apps and screen are lent and used. `lent`: they are lent, which a Mac lacking only
@@ -27,7 +32,7 @@ export function screenStatus({ platform = process.platform, connection = null, r
   if (platform === "linux") {
     if (connection?.status === "disabled" || connection?.reasonCode === "opt-in-required") return off("off", "start");
     if (connection?.status === "checking" || connection?.status === "starting") return off("starting", null);
-    if (LINUX_UNSUPPORTED.has(connection?.reasonCode)) return off("unsupported", null, connection?.message);
+    if (LINUX_UNSUPPORTED.has(connection?.reasonCode)) return off("unsupported", null, POLICY_TEXT[connection.reasonCode] ?? connection?.message);
     return off("not-running", "start");
   }
   if (platform !== "darwin" && platform !== "win32") return off("unsupported", null);

@@ -541,7 +541,7 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
       <div className="flex items-center justify-between gap-3 text-[13px]">
         <span className="font-medium text-ink">{t("memory.capacity.title")}</span>
         <span className={cn("text-[12px]", status.level === "over" ? "text-danger" : "text-ink-secondary")}>
-          {index.lines} / {index.maxLines} lines · {formatBytes(index.bytes)} / {formatBytes(index.maxBytes)}
+          {index.lines} / {index.maxLines} {t("ui.memorySection.lines")} {formatBytes(index.bytes)} / {formatBytes(index.maxBytes)}
         </span>
       </div>
       <GaugeBar label={t("memory.capacity.lines")} share={status.lineShare} fill={fill} />

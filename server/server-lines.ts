@@ -11,6 +11,8 @@ type Pack = Partial<Record<string, string>>;
 
 const ENGLISH: Pack = en;
 const packs: { en: Pack } & Record<string, Pack> = { en: ENGLISH };
+const fillLine = (template: string, params: Readonly<Record<string, string | number>>): string =>
+  template.replace(/\{(\w+)\}/g, (match, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : match));
 
 /** The other languages' packs, by code ("de", "pt-br", "zh-tw"); server-line-packs.ts adds them once, at start. */
 export function addServerLinePacks(more: Readonly<Record<string, Pack>>): void {
@@ -21,7 +23,7 @@ export function addServerLinePacks(more: Readonly<Record<string, Pack>>): void {
  * the language has no words for yet reads in English, as the app's own screens do. */
 export function serverLine(language: string | undefined, key: ServerLineKey, params?: Readonly<Record<string, string | number>>): string {
   const template = byLanguage(packs, language)[key] ?? ENGLISH[key] ?? key;
-  return params ? template.replace(/\{(\w+)\}/g, (match, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : match)) : template;
+  return params ? fillLine(template, params) : template;
 }
 
 const escaped = (text: string) => text.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
@@ -37,11 +39,12 @@ function matcherOf(template: string): RegExp {
 }
 
 /** Whether `text` is this line in any language the server has, whatever its `{names}` were filled with: code that reads
- * a line back (a monitor skipping its own notes) matches every language, never the English alone. */
-export function isServerLine(key: ServerLineKey, text: string): boolean {
+ * a line back (a monitor skipping its own notes) matches every language, never the English alone. With `params`, only
+ * the line filled with those exact values matches. */
+export function isServerLine(key: ServerLineKey, text: string, params?: Readonly<Record<string, string | number>>): boolean {
   return Object.values(packs).some((pack) => {
     const template = pack[key];
-    return template !== undefined && matcherOf(template).test(text);
+    return template !== undefined && (params ? fillLine(template, params) === text : matcherOf(template).test(text));
   });
 }
 

@@ -2,14 +2,15 @@
 // person. These are main's own dialogs, which no page (this computer's or a server's) can draw or answer, and each one
 // defaults to Cancel.
 import { randomUUID } from "node:crypto";
+import { desktopText as text } from "./i18n.mjs";
 
 export function serverAccessDetail(env, { folders, terminal, computer }) {
   return [
-    `Server: ${env.origin}`,
-    ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}${folder.home ? " (your whole home folder)" : ""}`),
-    terminal === true ? "Terminal: UNRESTRICTED commands as your user. Can access files outside the folders above, including credentials." : "Terminal: off",
-    computer === true ? "Computer control: can view your screen and operate logged-in apps. Can access information outside the folders above." : "Computer control: off",
-    "Shared content is sent to this server and may reach its model provider. Bots on this server can use these permissions until you revoke them. Closing the desktop stops access.",
+    text("desktop.sharing.server", { origin: env.origin }),
+    ...folders.map(folder => text("desktop.sharing.folder", { mode: text(folder.write ? "desktop.sharing.readWrite" : "desktop.sharing.readOnly"), path: folder.path, home: folder.home ? text("desktop.sharing.homeSuffix") : "" })),
+    text(terminal === true ? "desktop.sharing.terminalOn" : "desktop.sharing.terminalOff"),
+    text(computer === true ? "desktop.sharing.computerOn" : "desktop.sharing.computerOff"),
+    text("desktop.sharing.disclosure"),
   ].join("\n\n");
 }
 
@@ -32,9 +33,9 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         askingTerminal = true;
         try {
           const { response } = await dialog.showMessageBox({
-            type: "warning", buttons: ["Let them run commands", "Cancel"], defaultId: 1, cancelId: 1,
-            message: "Let your Clouds run commands on this computer?",
-            detail: "Bots on your own Clouds could run any command on this computer as you, including reading and changing any file you can. You can turn this off from the OpenMausBot icon's menu.",
+            type: "warning", buttons: [text("desktop.sharing.allowTerminal"), text("desktop.common.cancel")], defaultId: 1, cancelId: 1,
+            message: text("desktop.sharing.terminalTitle"),
+            detail: text("desktop.sharing.terminalDetail"),
           });
           if (response !== 0) return false;
         } finally { askingTerminal = false; }
@@ -51,16 +52,16 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       if (await isHome(folder.path)) {
         // What stays private is `personalSecretPaths` and this app's own data (computer-sharing.mjs `protectedRoots`),
         // refused inside any lent folder, the home folder included.
-        const { response } = await dialog.showMessageBox(window(), { type: "warning", message: "Share your whole home folder?",
-          detail: "Everything in your home folder becomes readable by the bots you allow. The places that hold keys, passwords and browser data, like .ssh and your browsers' profiles, always stay private.",
-          buttons: ["Share home folder", "Cancel"], defaultId: 1, cancelId: 1 });
+        const { response } = await dialog.showMessageBox(window(), { type: "warning", message: text("desktop.sharing.homeTitle"),
+          detail: text("desktop.sharing.homeDetail"),
+          buttons: [text("desktop.sharing.allowHome"), text("desktop.common.cancel")], defaultId: 1, cancelId: 1 });
         if (response !== 0) return null;
         folder.home = true;
       }
       return (await validate([folder]))[0];
     },
     async confirmServerAccess(env, grant) {
-      const { response } = await dialog.showMessageBox(window(), { type: "warning", message: `Allow computer access for ${env.name}?`, detail: serverAccessDetail(env, grant), buttons: ["Allow access", "Cancel"], defaultId: 1, cancelId: 1 });
+      const { response } = await dialog.showMessageBox(window(), { type: "warning", message: text("desktop.sharing.allowComputer", { name: env.name }), detail: serverAccessDetail(env, grant), buttons: [text("desktop.common.allow"), text("desktop.common.cancel")], defaultId: 1, cancelId: 1 });
       return response === 0;
     },
   };

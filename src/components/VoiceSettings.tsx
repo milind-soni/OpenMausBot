@@ -354,8 +354,8 @@ export function VoiceSettings({
             value={key}
             onChange={(e) => setKeyDraft({ provider: cloudProvider.id, value: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && key.trim() && void saveKey()}
-            placeholder={configured && !included ? "••••••••  (paste to replace)" : cloudProvider.placeholder}
-            aria-label={`${cloudProvider.name} key`}
+            placeholder={configured && !included ? t("ui.voiceSettings.pasteToReplace") : cloudProvider.placeholder}
+            aria-label={t("voice.providerKey", { provider: cloudProvider.name })}
             autoComplete="off"
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
@@ -473,7 +473,7 @@ export function VoiceSettings({
                 onPick={pickVoice}
                 pending={addingVoice ?? undefined}
                 defaultLabel={tts.voice ? t("voice.installDefault") : t("voice.pick")}
-                ariaLabel={`${bot.name}'s voice`}
+                ariaLabel={t("ui.voiceSettings.nameSVoice", { name: bot.name })}
               />
             ) : (
               <Select

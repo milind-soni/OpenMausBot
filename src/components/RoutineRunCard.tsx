@@ -3,6 +3,7 @@ import { ArrowRight, Loader2, Zap } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { routineDateTime } from "@/lib/routine-display";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { liveCardKind } from "../../shared/live-approval";
 import type { AutomationLine, RoutineRunCardData } from "../../shared/routine-run";
@@ -11,29 +12,29 @@ import { formatTime, openNotificationTarget, useStore, type Message } from "@/st
 const DETAIL_LIMIT = 280;
 
 const COPY = {
-  queued: { label: "Queued", tone: "text-ink-secondary" },
-  running: { label: "Running", tone: "text-accent" },
-  waiting: { label: "Waiting", tone: "text-warning" },
-  completed: { label: "Completed", tone: "text-ink-secondary" },
-  failed: { label: "Failed", tone: "text-danger" },
-  cancelled: { label: "Cancelled", tone: "text-ink-secondary" },
-  missed: { label: "Missed", tone: "text-danger" },
+  queued: { labelKey: "ui.routineRunCard.queued", tone: "text-ink-secondary" },
+  running: { labelKey: "toolDetail.running", tone: "text-accent" },
+  waiting: { labelKey: "ui.routineRunCard.waiting", tone: "text-warning" },
+  completed: { labelKey: "toolDetail.completed", tone: "text-ink-secondary" },
+  failed: { labelKey: "toolDetail.failed", tone: "text-danger" },
+  cancelled: { labelKey: "approval.status.cancelled", tone: "text-ink-secondary" },
+  missed: { labelKey: "routines.status.missed", tone: "text-danger" },
 } satisfies Record<
   RoutineRunCardData["status"],
-  { label: string; tone: string }
+  { labelKey: LocaleKey; tone: string }
 >;
 
 const GOAL_COPY = {
   completed: COPY.completed,
-  "needs-input": { label: "Needs your input", tone: "text-warning" },
-  blocked: { label: "Blocked", tone: "text-danger" },
-  "limit-reached": { label: "Turn limit reached", tone: "text-warning" },
-  paused: { label: "Paused", tone: "text-warning" },
-  stopped: { label: "Stopped", tone: "text-ink-secondary" },
+  "needs-input": { labelKey: "routines.goal.needs-input", tone: "text-warning" },
+  blocked: { labelKey: "routines.goal.blocked", tone: "text-danger" },
+  "limit-reached": { labelKey: "routines.goal.limit-reached", tone: "text-warning" },
+  paused: { labelKey: "vm.state.paused", tone: "text-warning" },
+  stopped: { labelKey: "chat.turnStopped", tone: "text-ink-secondary" },
   failed: COPY.failed,
 } satisfies Record<
   NonNullable<RoutineRunCardData["goalStatus"]>,
-  { label: string; tone: string }
+  { labelKey: LocaleKey; tone: string }
 >;
 
 function compactDetail(value: string | undefined): string {
@@ -70,18 +71,18 @@ export function RoutineRunCard({
   const copy = run.goalStatus
     ? GOAL_COPY[run.goalStatus]
     : run.status === "queued" && run.deferredAt != null
-      ? { label: "Deferred: target busy", tone: "text-warning" }
+      ? { labelKey: "ui.routineRunCard.deferredTargetBusy" as const, tone: "text-warning" }
       : COPY[run.status];
   const detail = compactDetail(
     run.status === "failed" || run.status === "missed"
       ? (run.error ?? run.summary)
       : (run.summary ?? run.error),
   );
-  const actionLabel = run.goalStatus === "needs-input" ? "Review" : "Open run";
+  const actionLabel = t(run.goalStatus === "needs-input" ? "ui.routineRunCard.review" : "ui.routineRunCard.openRun");
 
   return (
     <section
-      aria-label={`${run.routineName} routine run: ${copy.label}`}
+      aria-label={t("ui.routineRunCard.nameRoutineRunStatus", { name: run.routineName, status: t(copy.labelKey) })}
       className="w-full max-w-[680px] rounded-xl border border-hairline/45 bg-card px-4 py-3"
     >
       <div className="flex items-start gap-3">
@@ -90,7 +91,7 @@ export function RoutineRunCard({
             <h3 className="truncate text-[14px] font-semibold text-ink">{run.routineName}</h3>
             <span aria-live="polite" className={cn("inline-flex items-center gap-1 text-[12px] font-semibold", copy.tone)}>
               {run.status === "running" && !run.goalStatus && <Loader2 aria-hidden="true" className="size-3 animate-spin" />}
-              {copy.label}
+              {t(copy.labelKey)}
             </span>
           </div>
           <time dateTime={new Date(run.scheduledFor ?? message.at).toISOString()} className="mt-0.5 block text-[12px] text-ink-secondary">
@@ -106,7 +107,7 @@ export function RoutineRunCard({
           <button
             type="button"
             onClick={onOpen}
-            aria-label={`${actionLabel} for ${run.routineName}`}
+            aria-label={t("ui.routineRunCard.actionForName", { action: actionLabel, name: run.routineName })}
             className={cn(
               "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
               run.goalStatus === "needs-input"

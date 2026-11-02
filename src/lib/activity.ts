@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { activeLocale, t } from "./i18n";
 import { en, type LocaleKey } from "@/locales";
 
 export const ACTIVITY_WHATS = ["all", "approvals", "decisions", "config", "people", "session", "webhook", "mcp", "engine", "bot", "budget", "visibility"] as const;
@@ -93,24 +93,29 @@ const localDayKey = (date: Date): string =>
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function dayLabel(date: Date, now: Date): string {
+function dayLabel(date: Date, now: Date, locale: string): string {
+  if (!Number.isFinite(date.getTime())) return "—";
   const key = localDayKey(date);
-  if (key === localDayKey(now)) return "Today";
+  if (key === localDayKey(now)) return t("chat.day.today");
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (key === localDayKey(yesterday)) return "Yesterday";
+  if (key === localDayKey(yesterday)) return t("chat.day.yesterday");
+  if (!locale.startsWith("en")) return new Intl.DateTimeFormat(locale, {
+    weekday: "short", day: "numeric", month: "short",
+    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  }).format(date);
   const base = `${DAY_NAMES[date.getDay()]} ${date.getDate()} ${MONTH_NAMES[date.getMonth()]}`;
   return date.getFullYear() === now.getFullYear() ? base : `${base} ${date.getFullYear()}`;
 }
 
-export function groupActivityByDay(rows: ActivityRow[], now: Date): ActivityDay[] {
+export function groupActivityByDay(rows: ActivityRow[], now: Date, locale = activeLocale()): ActivityDay[] {
   const days: ActivityDay[] = [];
   for (const row of rows) {
     const date = new Date(row.at);
     const key = localDayKey(date);
     const last = days[days.length - 1];
     if (last && last.key === key) last.rows.push(row);
-    else days.push({ key, label: dayLabel(date, now), rows: [row] });
+    else days.push({ key, label: dayLabel(date, now, locale), rows: [row] });
   }
   return days;
 }
@@ -120,17 +125,17 @@ export type ChipTone = "ok" | "danger" | "accent" | "warn";
 export function outcomeChip(outcome: ActivityOutcome): { text: string; tone: ChipTone } {
   switch (outcome) {
     case "ran":
-      return { text: "Ran", tone: "ok" };
+      return { text: t("ui.dynamic.activity.ran"), tone: "ok" };
     case "failed":
-      return { text: "Failed", tone: "danger" };
+      return { text: t("ui.dynamic.activity.failed"), tone: "danger" };
     case "running":
-      return { text: "Running", tone: "accent" };
+      return { text: t("ui.dynamic.activity.running"), tone: "accent" };
     case "allowed":
-      return { text: "Allowed", tone: "ok" };
+      return { text: t("ui.dynamic.activity.allowed"), tone: "ok" };
     case "denied":
-      return { text: "Denied", tone: "danger" };
+      return { text: t("ui.dynamic.activity.denied"), tone: "danger" };
     case "waiting":
-      return { text: "Needs you", tone: "warn" };
+      return { text: t("ui.dynamic.activity.waiting"), tone: "warn" };
   }
 }
 

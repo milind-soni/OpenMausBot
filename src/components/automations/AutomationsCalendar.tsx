@@ -71,7 +71,7 @@ export function AutomationsCalendar({ botFilter, selectedAutomationId, onOpenAut
       if (dragged.kind === "routine") {
         const routine = state.routines.find((candidate) => candidate.id === dragged.id);
         if (!routine) return;
-        if (routine.schedule.type === "cron") throw new Error("Open this automation to change its repeating schedule.");
+        if (routine.schedule.type === "cron") throw new Error(t("ui.automationsCalendar.openThisAutomationToChangeItsRepeatingSchedule"));
         if (routine.schedule.type !== "once" && !window.confirm("Move every time it repeats?")) return;
         const response = await api(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ schedule: scheduleAt(routine.schedule, dragged.at, nextAt) }) });
         dispatch({ type: "routinePatched", routine: response.routine });

@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 import type { ModelRequestCardData } from "../shared/model-request.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
@@ -115,18 +116,18 @@ export function modelCardCopy(args: {
   selection: ModelSelection;
   reason: string;
   capabilityLines: string[];
-}): { title: string; summary: string; detail: string } {
+}, language?: string): { title: string; summary: string; detail: string } {
   const title = args.crossBot
-    ? "Change @" + args.targetName + "'s default AI and model?"
-    : "Change " + args.targetName + "'s default AI and model?";
+    ? serverLine(language, "server.localeCoverage.modelCrossTitle", { name: args.targetName })
+    : serverLine(language, "server.localeCoverage.modelOwnTitle", { name: args.targetName });
   const lines: string[] = args.crossBot
-    ? ["Whose default model: @" + args.targetName, "Why: " + args.reason]
-    : ["Why: " + args.reason];
-  lines.push("Default AI and model: " + JSON.stringify(args.before) + " → " + JSON.stringify(args.selection));
+    ? [serverLine(language, "server.localeCoverage.whoseDefaultModel", { name: args.targetName }), serverLine(language, "server.localeCoverage.why", { reason: args.reason })]
+    : [serverLine(language, "server.localeCoverage.why", { reason: args.reason })];
+  lines.push(serverLine(language, "server.localeCoverage.defaultModelChange", { before: JSON.stringify(args.before), after: JSON.stringify(args.selection) }));
   lines.push(...args.capabilityLines);
-  lines.push("Default models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
-  lines.push("Nothing runs.");
-  return { title, summary: title + " · default AI and model", detail: lines.join("\n") };
+  lines.push(serverLine(language, "server.localeCoverage.defaultModelScope"));
+  lines.push(serverLine(language, "server.localeCoverage.nothingRuns"));
+  return { title, summary: title + " · " + serverLine(language, "server.localeCoverage.defaultModelLabel"), detail: lines.join("\n") };
 }
 
 export class ModelRequestService {
@@ -189,9 +190,9 @@ export class ModelRequestService {
     const requestId = newId();
     const targetName = redactSecretsInText(target.name);
     const before = structuredClone(target.modelSelection);
-    const capabilityLines = this.driverCapabilities
-      ? harnessCapabilityLines(this.driverCapabilities(before.instanceId), this.driverCapabilities(selection.instanceId))
-      : [];
+    const beforeCapabilities = this.driverCapabilities?.(before.instanceId);
+    const afterCapabilities = this.driverCapabilities?.(selection.instanceId);
+    const capabilityLines = harnessCapabilityLines(beforeCapabilities, afterCapabilities);
     const payload: ModelRequestCardData = {
       version: 1,
       requestId,
@@ -205,6 +206,8 @@ export class ModelRequestService {
       before,
     };
     const copy = modelCardCopy({ targetName, crossBot, before, selection, reason, capabilityLines });
+    const language = conversationLanguage(args.threadId);
+    const shown = modelCardCopy({ targetName, crossBot, before, selection, reason, capabilityLines: harnessCapabilityLines(beforeCapabilities, afterCapabilities, language) }, language);
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
     const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);
@@ -213,8 +216,8 @@ export class ModelRequestService {
       role: "bot",
       kind: "options",
       card: {
-        title: copy.title,
-        subtitle: copy.detail,
+        title: shown.title,
+        subtitle: shown.detail,
         options: automatic ? [] : ["Confirm", "Cancel"],
         ...(automatic ? { dismissed: true } : {}),
         requestId,

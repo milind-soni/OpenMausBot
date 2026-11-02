@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { desktopText } from "./i18n.mjs";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -59,6 +60,7 @@ test("desktop relaunch accepts every platform once, guards its sender, and prese
     const frame = { url: `${origin}/` }, contents = { mainFrame: frame, getURL: () => `${origin}/` };
     const mainWindow = { webContents: contents, isDestroyed: () => false };
     runInNewContext(source, {
+      desktopText,
       localOnly: localOrigin.localOnly, mainWindow, desktopShutdownStarted: false,
       ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
       BrowserWindow: { fromWebContents: sender => sender === contents ? mainWindow : null },

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: OpenMausBot's routes and
 // access, a viewer that may operate sizes the page while it only watches, a larger frame cap is sent in place and a
 // reconnect opens with the newest size and cap, and OpenMausBot's own messages are passed on.
+import { t } from "./i18n";
 
 /** The browser's host cannot run Chrome until it is set up; the close reason names the fix. */
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
@@ -549,5 +550,10 @@ const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
 /** What a viewer tells the person; `command` is shown beside it, ready to copy. */
 export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
   setup.need === "sandbox"
-    ? "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:"
-    : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";
+    ? t("ui.final.browser.sandbox")
+    : t("ui.final.browser.libraries");
+
+export function browserRestartNoticeText(message: string): string {
+  return message === "The browser could not restart. Wait for active work to finish and try again."
+    ? t("ui.final.browser.restartFailure") : message;
+}

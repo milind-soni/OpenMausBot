@@ -1,5 +1,6 @@
 // A pairing code lives in main-process memory for one navigation: never persisted, never sent to a renderer, only in a link's hash.
 import environments from "./environments.cjs";
+import { desktopText } from "./i18n.mjs";
 
 export { createCloudPowerGate, openSleepingCloud } from "./cloud-power.mjs";
 
@@ -69,8 +70,8 @@ export function parseCloudSummary(input) {
 }
 
 const UNREACHABLE_TEXT = Object.freeze({
-  host: "The server My Cloud runs on is being restarted by our hosting provider. My Cloud and its files are safe, and it comes back on its own, usually within about 20 minutes.",
-  no_answer: "My Cloud hasn't answered for a few minutes. Nothing was lost, and we've been told.",
+  get host() { return desktopText("desktop.extra.cloud.hostRestart"); },
+  get no_answer() { return desktopText("desktop.extra.cloud.noAnswer"); },
 });
 /** Why My Cloud can't be reached when the Admin says so, for main's dialogs; with `origin`, only for that server. */
 export function cloudUnreachableText(state, origin = null) {

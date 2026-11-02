@@ -12,7 +12,7 @@ import {
 } from "@/lib/activity";
 import { listenLiveFrames } from "@/lib/live-events";
 import { useActivityFocus } from "@/lib/activity-focus";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 
 const LIMIT = 300;
 
@@ -84,7 +84,8 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
     };
   }, [threadIds, load]);
 
-  const days = useMemo(() => (rows ? groupActivityByDay(rows, new Date()) : []), [rows]);
+  const locale = activeLocale();
+  const days = useMemo(() => (rows ? groupActivityByDay(rows, new Date(), locale) : []), [rows, locale]);
   const focus = useActivityFocus(bot.id);
   const list = useRef<HTMLDivElement>(null);
   const focused = (row: ActivityRow) => Boolean(focus?.turnId && row.turnId === focus.turnId && row.threadId === focus.threadId);

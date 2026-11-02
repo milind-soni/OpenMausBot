@@ -64,7 +64,7 @@ export function XCard({ refreshKey = 0, onConnection }: {
     try {
       const response = await api(`/api/x/status${refresh ? "?refresh=1" : ""}`);
       if (!mounted.current) return;
-      if (!isXConnectorStatus(response)) throw new Error("unexpected X status");
+      if (!isXConnectorStatus(response)) throw new Error(t("ui.xCard.unexpectedXStatus"));
       setStatus(response);
       setLoadFailed(false);
     } catch {

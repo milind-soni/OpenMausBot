@@ -5,12 +5,11 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { normalizeImageGenerationUrl, type AvatarImageProvider } from "../../shared/image-generation";
 import { Select } from "./Select";
 import { t } from "@/lib/i18n";
-import { productName } from "@/lib/brand";
 
 const PROVIDERS = {
   openai: { label: "OpenAI", keyLabel: "OpenAI image API key", credential: "openaiImageApiKey" },
   xai: { label: "Grok (xAI)", keyLabel: "Grok API key", credential: "xaiApiKey" },
-  custom: { label: "Custom", keyLabel: "Custom image API key", credential: "customImageApiKey" },
+  custom: { labelKey: "approvalMode.custom.chip", keyLabel: "Custom image API key", credential: "customImageApiKey" },
 } as const;
 
 const INPUT_CLASS = "w-full min-w-0 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50";
@@ -115,7 +114,7 @@ export function AvatarImageGenerator({
       const url = provider === "custom" ? normalizeImageGenerationUrl(customUrl.trim()) : "";
       const model = customModel.trim();
       if (provider === "custom" && (model.length > 200 || ["\r", "\n", "\0"].some((character) => model.includes(character)))) {
-        throw new Error("Use a model ID of at most 200 characters without control characters");
+        throw new Error(t("ui.avatarImageGenerator.useAModelIDOfAtMost200CharactersWithout"));
       }
       if (imageKey.trim()) await saveCredential(imageKey.trim());
       if (provider === "custom") {
@@ -170,13 +169,13 @@ export function AvatarImageGenerator({
               value={customModel}
               disabled={busy}
               onChange={(event) => setModelDraft(event.target.value)}
-              placeholder="Model ID from your image provider"
+              placeholder={t("ui.avatarImageGenerator.modelIDFromYourImageProvider")}
               autoComplete="off"
               className={`${INPUT_CLASS} mt-1`}
             />
           </label>
           <p className="text-[11px] leading-relaxed text-ink-secondary">
-            OpenAI-compatible Images API. localhost refers to the {productName()} server, including when you open this page remotely.
+            {t("ui.avatarImageGenerator.openAICompatibleImagesAPILocalhostRefersToTheAppServer")}
           </p>
         </>
       )}
@@ -199,10 +198,10 @@ export function AvatarImageGenerator({
         />
       </label>
       {provider === "xai" && (
-        <p className="text-[11px] leading-relaxed text-ink-secondary">Shares the Grok API key in Settings. Changing or removing it also affects other Grok features.</p>
+        <p className="text-[11px] leading-relaxed text-ink-secondary">{t("ui.avatarImageGenerator.sharesTheGrokAPIKeyInSettingsChangingOrRemoving")}</p>
       )}
       {provider === "custom" && keyConfigured && (
-        <p className="text-[11px] leading-relaxed text-ink-secondary">The saved custom key will be used. Remove it for a keyless connection.</p>
+        <p className="text-[11px] leading-relaxed text-ink-secondary">{t("ui.avatarImageGenerator.theSavedCustomKeyWillBeUsedRemoveItFor")}</p>
       )}
       <div className="flex items-center justify-end gap-2">
         {keyConfigured && (
@@ -231,7 +230,7 @@ export function AvatarImageGenerator({
       <label className="mt-3 block text-[12px] text-ink-secondary">
         {t("botIdentity.ai.provider")}
         <Select value={provider} onChange={(event) => void chooseProvider(event.target.value as AvatarImageProvider)} disabled={busy || !state.config} className="mt-1 w-full">
-          {Object.entries(PROVIDERS).map(([value, info]) => <option key={value} value={value}>{info.label}</option>)}
+          {Object.entries(PROVIDERS).map(([value, info]) => <option key={value} value={value}>{"labelKey" in info ? t(info.labelKey) : info.label}</option>)}
         </Select>
       </label>
       <p className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary">

@@ -109,7 +109,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
           <button
             onClick={() => setDismissed(key)}
             className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-            title="Dismiss"
+            title={t("ui.composerAttachments.dismiss")}
           >
             <X size={14} />
           </button>
@@ -128,7 +128,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
             disabled
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] font-medium text-ink-secondary"
           >
-            <Loader2 size={13} className="animate-spin" /> {handoff ? "Opening…" : "Restarting…"}
+            <Loader2 size={13} className="animate-spin" /> {handoff ? t("browser.panel.waking") : t("ui.updateBanner.restarting")}
           </button>
         </div>
       )}
@@ -146,15 +146,15 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
             >
               {pending === "install" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> {handoff ? "Opening…" : "Restarting…"}
+                  <Loader2 size={13} className="animate-spin" /> {handoff ? t("browser.panel.waking") : t("ui.updateBanner.restarting")}
                 </>
               ) : handoff ? (
                 <>
-                  <PackageOpen size={13} /> Install
+                  <PackageOpen size={13} /> {t("settings.updates.install")}
                 </>
               ) : (
                 <>
-                  <RefreshCw size={13} /> Restart to update
+                  <RefreshCw size={13} /> {t("ui.updateBanner.restartToUpdate")}
                 </>
               )}
             </button>
@@ -170,10 +170,10 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
             >
               {pending === "check" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Checking…
+                  <Loader2 size={13} className="animate-spin" /> {t("settings.sites.loading")}
                 </>
               ) : (
-                "Try again"
+                t("cloudAdd.tryAgain")
               )}
             </button>
           )}
@@ -182,7 +182,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
             disabled={pending !== null}
             className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
           >
-            {s.status === "handed-off" || s.retryable === false ? "Dismiss" : "Later"}
+            {s.status === "handed-off" || s.retryable === false ? t("ui.composerAttachments.dismiss") : t("update.card.later")}
           </button>
         </div>
       )}

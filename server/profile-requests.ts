@@ -9,21 +9,21 @@ import { UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-ap
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { recordProfileChange } from "./profile-versions.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 import type { BotRecord } from "./store.ts";
 
 const MAX_REASON = 500;
 const STALE = "This bot's profile changed after this card was prepared. Ask the bot to review it and propose again.";
 const NO_SUCH_BOT = "That bot no longer exists";
-const LABELS: Record<Exclude<(typeof PROFILE_REQUEST_FIELDS)[number], "soul" | "cwd">, string> = {
-  name: "Name",
-  title: "Title",
-  description: "Description",
-  notifications: "Notifications",
-  speakReplies: "Speak replies",
+const LABELS: Record<Exclude<(typeof PROFILE_REQUEST_FIELDS)[number], "soul" | "cwd">, ServerLineKey> = {
+  name: "server.localeCoverage.fieldName",
+  title: "server.localeCoverage.fieldTitle",
+  description: "server.localeCoverage.fieldDescription",
+  notifications: "server.localeCoverage.fieldNotifications",
+  speakReplies: "server.localeCoverage.fieldSpokenReplies",
 };
-const PRIVATE_WORKSPACE = "its private workspace";
 const CHOOSE_ONE = "Choose at least one of name, title, description, soul, cwd, notifications, speakReplies";
-const toggleText = (value: boolean | undefined): string => (value ? "on" : "off");
+const toggleText = (value: boolean | undefined, language?: string): string => serverLine(language, value ? "server.localeCoverage.toggleOn" : "server.localeCoverage.toggleOff");
 const TEXT_FIELDS = ["name", "title", "description", "soul"] as const;
 
 export interface OptionCardLike {
@@ -167,33 +167,34 @@ export function profileCardCopy(
   before: ProfileRequestChanges,
   changes: ProfileRequestChanges,
   reason: string,
+  language?: string,
 ): ProfileCardCopy {
   const isSetup = !fullProfile.title && !fullProfile.description && !fullProfile.soul;
   const title = target.crossBot
-    ? `Update @${target.name}'s profile?`
+    ? serverLine(language, "server.localeCoverage.profileCrossTitle", { name: target.name })
     : isSetup
-      ? `Set up ${target.name}?`
-      : `Update ${target.name}'s profile?`;
+      ? serverLine(language, "server.localeCoverage.profileSetupTitle", { name: target.name })
+      : serverLine(language, "server.localeCoverage.profileOwnTitle", { name: target.name });
 
-  const lines: string[] = target.crossBot ? [`Whose profile: @${target.name}`, `Why: ${reason}`] : [`Why: ${reason}`];
+  const lines: string[] = target.crossBot ? [serverLine(language, "server.localeCoverage.whoseProfile", { name: target.name }), serverLine(language, "server.localeCoverage.why", { reason })] : [serverLine(language, "server.localeCoverage.why", { reason })];
   for (const field of PROFILE_REQUEST_FIELDS) {
     if (field === "soul" || field === "cwd") continue;
     if (changes[field] === undefined) continue;
     if (field === "notifications" || field === "speakReplies") {
-      lines.push(`${LABELS[field]}: ${toggleText(before[field] as boolean | undefined)} → ${toggleText(changes[field] as boolean | undefined)}`);
+      lines.push(`${serverLine(language, LABELS[field])}: ${toggleText(before[field] as boolean | undefined, language)} → ${toggleText(changes[field] as boolean | undefined, language)}`);
       continue;
     }
-    lines.push(`${LABELS[field]}: "${before[field] ?? ""}" → "${changes[field]}"`);
+    lines.push(`${serverLine(language, LABELS[field])}: "${before[field] ?? ""}" → "${changes[field]}"`);
   }
   if (changes.cwd !== undefined) {
-    lines.push(`Working folder: ${before.cwd || PRIVATE_WORKSPACE} → ${changes.cwd || PRIVATE_WORKSPACE}`);
+    lines.push(`${serverLine(language, "server.localeCoverage.fieldWorkingFolder")}: ${before.cwd || serverLine(language, "server.localeCoverage.privateWorkspace")} → ${changes.cwd || serverLine(language, "server.localeCoverage.privateWorkspace")}`);
   }
   if (changes.soul !== undefined) {
-    lines.push(...soulDiffLines(before.soul ?? "", changes.soul));
+    lines.push(...soulDiffLines(before.soul ?? "", changes.soul, language ? { heading: (before, after) => serverLine(language, "server.localeCoverage.soulDiffHeading", { before, after }), largeChange: serverLine(language, "server.localeCoverage.soulDiffLarge"), empty: serverLine(language, "server.localeCoverage.soulDiffEmpty") } : undefined));
   }
   const changesText = TEXT_FIELDS.some((field) => changes[field] !== undefined);
-  if (changes.cwd !== undefined) lines.push(`${target.name}'s tools will read and write files in that folder.`);
-  lines.push(changesText ? `Changes what ${target.name} is told on every turn. Nothing runs.` : "Nothing runs.");
+  if (changes.cwd !== undefined) lines.push(serverLine(language, "server.localeCoverage.profileToolsFolder", { name: target.name }));
+  lines.push(changesText ? serverLine(language, "server.localeCoverage.profileInstructionsChange", { name: target.name }) : serverLine(language, "server.localeCoverage.nothingRuns"));
   const detail = lines.join("\n");
 
   const fields = PROFILE_REQUEST_FIELDS.filter((field) => changes[field] !== undefined);
@@ -288,6 +289,7 @@ export class ProfileRequestService {
     };
 
     const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason);
+    const shown = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason, conversationLanguage(args.threadId));
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
     const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);
@@ -298,8 +300,8 @@ export class ProfileRequestService {
       role: "bot",
       kind: "options",
       card: {
-        title: copy.title,
-        subtitle: copy.detail,
+        title: shown.title,
+        subtitle: shown.detail,
         options: automatic ? [] : ["Confirm", "Cancel"],
         ...(automatic ? { dismissed: true } : {}),
         requestId,

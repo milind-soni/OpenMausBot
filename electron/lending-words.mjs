@@ -1,6 +1,3 @@
-// The activity log's words in each language the app speaks, for main's own window of it. The packaged app ships the
-// renderer's catalog only inside its page bundle, so main keeps these keys itself; a test holds them equal to src/locales.
-
 export const WORDS = Object.freeze({
   "en": Object.freeze({
     "lending.activity.title": "Activity on this computer",
@@ -228,7 +225,7 @@ export const WORDS = Object.freeze({
   }),
   "zh-tw": Object.freeze({
     "lending.activity.title": "這台電腦上的活動",
-    "lending.activity.empty": "尚無活動。那裡的機器人提出的每項要求都會列在這裡，包括被拒絕的要求。",
+    "lending.activity.empty": "尚無活動。那裡的助理提出的每項要求都會列在這裡，包括被拒絕的要求。",
     "lending.activity.refused": "已拒絕",
     "lending.action.listFiles": "列出資料夾內容",
     "lending.action.readFile": "讀取檔案",
@@ -238,15 +235,15 @@ export const WORDS = Object.freeze({
     "lending.action.screenTools": "檢查應用程式與螢幕控制",
     "lending.action.screen": "使用應用程式與螢幕",
     "lending.action.website": "開啟網站",
-    "lending.action.chrome": "Used your Chrome",
+    "lending.action.chrome": "使用了你的 Chrome",
     "lending.action.invalid": "格式錯誤的要求",
     "lending.action.other": "其他要求",
   }),
   "zh": Object.freeze({
     "lending.activity.title": "这台电脑上的活动",
-    "lending.activity.empty": "暂无活动。那里的机器人发出的每个请求都会列在这里，包括被拒绝的请求。",
+    "lending.activity.empty": "暂无活动。那里的助手发出的每个请求都会列在这里，包括被拒绝的请求。",
     "lending.activity.refused": "已拒绝",
-    "lending.action.listFiles": "列出了一个文件夹",
+    "lending.action.listFiles": "列出了文件夹内容",
     "lending.action.readFile": "读取了一个文件",
     "lending.action.writeFile": "保存了一个文件",
     "lending.action.deleteFile": "删除了一个文件",
@@ -254,7 +251,7 @@ export const WORDS = Object.freeze({
     "lending.action.screenTools": "检查了应用和屏幕控制",
     "lending.action.screen": "使用了应用和屏幕",
     "lending.action.website": "打开了一个网站",
-    "lending.action.chrome": "Used your Chrome",
+    "lending.action.chrome": "使用了你的 Chrome",
     "lending.action.invalid": "格式错误的请求",
     "lending.action.other": "其他请求",
   }),

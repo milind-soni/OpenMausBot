@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-
-const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+import { activeLocale, t } from "@/lib/i18n";
 
 function startOfMonth(value: number | Date) {
   const date = new Date(value);
@@ -25,6 +24,10 @@ export interface MiniMonthProps {
 }
 
 export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
+  const locale = activeLocale();
+  const weekdayLabels = Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(locale, {
+    weekday: "narrow", timeZone: "UTC",
+  }).format(new Date(Date.UTC(2024, 0, 8 + index))));
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(anchor));
 
   useEffect(() => {
@@ -46,13 +49,13 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
 
   const selected = new Date(anchor);
   const today = new Date();
-  const monthLabel = visibleMonth.toLocaleDateString(undefined, {
+  const monthLabel = visibleMonth.toLocaleDateString(locale, {
     month: "long",
     year: "numeric",
   });
 
   return (
-    <section aria-label="Mini calendar" className="select-none px-3 py-3">
+    <section aria-label={t("ui.miniMonth.miniCalendar")} className="select-none px-3 py-3">
       <div className="mb-2 flex items-center justify-between px-1">
         <div className="text-[13px] font-semibold text-ink">{monthLabel}</div>
         <div className="flex items-center gap-0.5">
@@ -60,7 +63,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
             type="button"
             onClick={() => setVisibleMonth((month) => moveMonth(month, -1))}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-            aria-label="Previous month"
+            aria-label={t("ui.miniMonth.previousMonth")}
           >
             <ChevronLeft size={15} aria-hidden="true" />
           </button>
@@ -68,7 +71,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
             type="button"
             onClick={() => setVisibleMonth((month) => moveMonth(month, 1))}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-            aria-label="Next month"
+            aria-label={t("ui.miniMonth.nextMonth")}
           >
             <ChevronRight size={15} aria-hidden="true" />
           </button>
@@ -76,7 +79,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
       </div>
 
       <div className="grid grid-cols-7" aria-hidden="true">
-        {WEEKDAY_LABELS.map((label, index) => (
+        {weekdayLabels.map((label, index) => (
           <div
             key={`${label}-${index}`}
             className="flex h-6 items-center justify-center text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary"
@@ -91,7 +94,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
           const isSelected = sameDay(date, selected);
           const isToday = sameDay(date, today);
           const isOutsideMonth = date.getMonth() !== visibleMonth.getMonth();
-          const label = date.toLocaleDateString(undefined, {
+          const label = date.toLocaleDateString(locale, {
             weekday: "long",
             month: "long",
             day: "numeric",

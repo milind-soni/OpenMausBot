@@ -11,6 +11,8 @@ import { WidgetTable } from "./WidgetTable";
 import {
   ALIGN, BACKGROUND, boxStyle, CAPTION_SIZE, ICON_SIZE, INK, JUSTIFY, kids, TEXT_ALIGN, TEXT_SIZE, TITLE_SIZE, WEIGHT, widthStyle,
 } from "./widget-style";
+import { activeLocale } from "@/lib/i18n";
+
 
 export interface WidgetWhere {
   axis: "row" | "col";
@@ -49,7 +51,7 @@ export function WidgetNodeView({ node, where }: { node: WidgetNode; where: Widge
     case "Label":
       return <LabelNode node={node} where={where} />;
     case "Markdown":
-      return <div className="min-w-0 text-[14px] text-ink [&_.chat-md]:leading-[21px]!"><ChatMarkdown text={widgetString(node, "value") ?? ""} /></div>;
+      return <div className="min-w-0 text-[14px] text-ink [&_.chat-md]:leading-[21px]!"><ChatMarkdown locale={activeLocale()} text={widgetString(node, "value") ?? ""} /></div>;
     case "Image":
       return <WidgetImage node={node} where={where} />;
     case "Icon": {

@@ -11,6 +11,7 @@ import { quoteInNote } from "../peer-provenance.ts";
 import { RepeatDetector, callKey, toolItemKey } from "../repeat-detector.ts";
 import { RepeatStreak, failureDigest } from "../repeat-streak.ts";
 import { COMMAND_SUMMARY_MAX, previewIsPartial } from "../tool-summary.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 
 const COUNT_MIN = 2;
 const COUNT_MAX = 1000;
@@ -215,7 +216,7 @@ export function createLoopGuard(deps: LoopGuardDeps): LoopGuard {
       const { threshold } = repeats.record(threadId, counted.key);
       if (threshold) {
         const { tool, args } = counted;
-        deps.append(threadId, { name: `Same call repeated ${threshold}× — ${tool}: ${args.slice(0, 80)}${args.length > 80 ? "…" : ""} — it may be stuck`, ok: false });
+        deps.append(threadId, { name: serverLine(conversationLanguage(threadId), "server.localeCoverage.repeatedToolCall", { count: threshold, tool, args: `${args.slice(0, 80)}${args.length > 80 ? "…" : ""}` }), ok: false });
       }
     }
 

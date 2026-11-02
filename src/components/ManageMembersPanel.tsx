@@ -3,6 +3,8 @@ import { track } from "@/lib/analytics";
 import { useStore, type Group } from "@/state/store";
 import { BotPickerList } from "./BotPickerList";
 import { nextMemberIds } from "@/lib/room-members";
+import { t } from "@/lib/i18n";
+
 
 export function ManageMembersPanel({
   group,
@@ -103,13 +105,13 @@ export function ManageMembersPanel({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`Manage members of ${group.name}`}
+        aria-label={t("ui.manageMembersPanel.manageMembersOfName", { name: group.name })}
         className="w-[340px] rounded-2xl border border-hairline/50 bg-card p-4 shadow-2xl"
       >
-        <div className="mb-1 text-[15px] font-semibold text-ink">Manage Members</div>
+        <div className="mb-1 text-[15px] font-semibold text-ink">{t("ui.manageMembersPanel.manageMembers")}</div>
         <div className="mb-3 truncate text-[13px] text-ink-secondary">{group.name}</div>
         <BotPickerList bots={bots} picked={picked} onToggle={toggle} emptyHint="Create a bot first — groups are made of bots." />
-        {!memberIds.length && <div className="mt-2 text-[12px] text-ink-secondary">A group needs at least one bot.</div>}
+        {!memberIds.length && <div className="mt-2 text-[12px] text-ink-secondary">{t("ui.manageMembersPanel.aGroupNeedsAtLeastOneBot")}</div>}
         {saveError && (
           <div role="alert" className="mt-2 text-[12px] text-danger">
             {saveError}
@@ -120,14 +122,14 @@ export function ManageMembersPanel({
             onClick={onClose}
             className="flex-1 rounded-lg bg-raised py-2 text-[14px] font-medium text-ink hover:brightness-110"
           >
-            Cancel
+            {t("connectedWorkspaces.cancel")}
           </button>
           <button
             onClick={save}
             disabled={!memberIds.length}
             className="flex-1 rounded-lg bg-accent py-2 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40"
           >
-            Save{memberIds.length ? ` · ${memberIds.length} ${memberIds.length === 1 ? "bot" : "bots"}` : ""}
+            {t("code.save")}{memberIds.length ? ` · ${memberIds.length} ${memberIds.length === 1 ? "bot" : "bots"}` : ""}
           </button>
         </div>
       </div>

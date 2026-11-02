@@ -1,4 +1,5 @@
 import { ApiError, api } from "@/state/store";
+import { t } from "./i18n";
 
 export const MEMORY_INDEX = "MEMORY.md";
 
@@ -213,8 +214,8 @@ export function capacityStatus(index: MemoryCapacity): CapacityStatus {
   if (index.truncated) {
     const missingLines = index.lines - index.loadedLines;
     warning = missingLines > 0
-      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation. ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
-      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation. The rest is not being loaded. Trim this file or move notes into a topic file.`;
+      ? t(missingLines === 1 ? "ui.final.memory.linesOne" : "ui.final.memory.linesMany", { lines: index.lines, loadedLines: index.loadedLines, missingLines })
+      : t("ui.final.memory.bytes", { saved: formatBytes(index.bytes), loaded: formatBytes(index.loadedBytes) });
   }
   return { level, lineShare, byteShare, sentence, warning };
 }

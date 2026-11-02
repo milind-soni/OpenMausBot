@@ -5,6 +5,8 @@ import type { BotOverview } from "@/lib/bot-overview-types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { HistoryRow } from "./HistorySection";
 import type { PromptPreviewData } from "./PromptPreview";
+import { t } from "@/lib/i18n";
+
 
 /**
  * Reads the bot's overview and prompt preview while `want` asks for them. By default every change to the bot's facts
@@ -169,7 +171,7 @@ export function HistoryRollbackDialog({ history, returnFocusRef }: {
   return (
     <ConfirmDialog
       open={rollbackTarget !== null}
-      title="Restore previous instructions?"
+      title={t("ui.useBotOverview.restorePreviousInstructions")}
       body="Replaces current SOUL with the version before this change. Current version stays in History."
       confirmLabel="Restore instructions"
       tone="neutral"

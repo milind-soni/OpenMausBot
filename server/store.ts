@@ -1,3 +1,4 @@
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
@@ -965,7 +966,7 @@ export class Store {
       detail: string;
       finishedAt: number;
     } | null,
-    fallbackDetail = "OpenMausBot restarted before this goal finished.",
+    fallbackDetail?: string,
     fallbackFinishedAt = Date.now(),
   ): number {
     const ownedThreadIds = new Set<string>(this.bots.flatMap((bot) => (bot.tasks ?? []).map((task) => task.threadId)));
@@ -976,18 +977,14 @@ export class Store {
     let recovered = 0;
     for (const hit of mdb.workingGoalRunMessages()) {
       if (!ownedThreadIds.has(hit.threadId) || !hit.message.goalRun) continue;
+      const language = conversationLanguage(hit.threadId) ?? (typeof this.initialLanguage === "function" ? this.initialLanguage() : this.initialLanguage);
       const resolution = resolve?.(hit.message.goalRun.runId, hit.threadId) ?? {
         status: "failed" as const,
-        detail: fallbackDetail,
+        detail: fallbackDetail ?? serverLine(language, "server.localeCoverage.goalInterrupted"),
         finishedAt: fallbackFinishedAt,
       };
-      const state = resolution.status === "needs-input"
-        ? "needs your input"
-        : resolution.status === "limit-reached"
-          ? "reached its turn limit"
-          : resolution.status;
       this.patchMessage(hit.threadId, hit.message.id, {
-        text: `Goal ${state}: ${resolution.detail}`,
+        text: serverLine(language, resolution.status === "limit-reached" ? "server.localeCoverage.goalTurnLimit" : ({ completed: "server.teammates.goal.completed", "needs-input": "server.teammates.goal.needsInput", blocked: "server.teammates.goal.blocked", paused: "server.teammates.goal.paused", stopped: "server.teammates.goal.stopped", failed: "server.teammates.goal.failed" } as const)[resolution.status], { detail: resolution.detail }),
         goalRun: {
           ...hit.message.goalRun,
           status: resolution.status,

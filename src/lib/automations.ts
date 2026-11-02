@@ -132,7 +132,7 @@ export function plainWhen(schedule: RoutineSchedule): string {
     // "Every 2 minutes" is a cron step: an interval runs at most every 5 minutes, so a bot asked for less writes this.
     const minutes = /^\*\/([1-5]?\d) \* \* \* \*$/.exec(schedule.expression.trim())?.[1];
     if (minutes && Number(minutes) >= 2) return t("automations.when.everyMinutes", { count: Number(minutes) });
-    const label = cronScheduleLabel(schedule);
+    const label = cronScheduleLabel(schedule, { locale: activeLocale(), format: t });
     return label.startsWith("Cron ") ? t("automations.when.custom") : label;
   }
   if (schedule.type === "interval") {

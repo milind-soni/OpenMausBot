@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import {
   computerFreeAfterText,
   computerParkedText,
@@ -9,6 +10,20 @@ import {
 } from "./computer-wait.ts";
 
 describe("computer wait wording", () => {
+  it.each([
+    ["zh-CN", "排队第 2 位", "2 分钟", "仍在使用"],
+    ["zh-Hant", "佇列第 2 位", "2 分鐘", "仍在使用"],
+  ])("keeps holder names and numeric queue facts in %s", (language, position, duration, stillUsing) => {
+    const waiting = computerWaitingText({ name: "Ada", task: "Refill" }, { position: 2, estimateMs: 90_000 }, language);
+    expect(waiting).toContain(position);
+    expect(waiting).toContain(duration);
+    expect(waiting).toContain("Ada");
+    expect(waiting).toContain("Refill");
+    expect(waiting).not.toContain("2nd");
+    expect(computerParkedText({ name: "Ada" }, 60_000, language)).toContain(stillUsing);
+    expect(computerFreeAfterText(undefined, 90_000, language)).toContain(duration);
+  });
+
   it("reads as a queue position behind a named turn, never as an error", () => {
     expect(computerWaitingText({ name: "TCPR operator", task: "TCPR 3 hour capacity refill" })).toBe(
       "Waiting for its turn on this computer — TCPR operator is running TCPR 3 hour capacity refill. Starts automatically when that finishes.",

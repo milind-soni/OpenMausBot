@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import "./server-line-packs.ts";
-import { serverLine } from "./server-lines.ts";
+import { isServerLine, serverLine } from "./server-lines.ts";
 
 describe("serverLine", () => {
+  it("matches an old line with exact values without accepting a different account", () => {
+    const text = "Connect Gmail as “Sales” to continue.";
+    expect(isServerLine("server.connect.cardAs", text, { app: "Gmail", account: "Sales" })).toBe(true);
+    expect(isServerLine("server.connect.cardAs", text, { app: "Gmail", account: "Personal" })).toBe(false);
+  });
+
   it("writes the line in the language given, with its values filled in", () => {
     expect(serverLine("de", "server.reports.sent", { report: "r-1" })).toBe("An das MausBot-Team gesendet (Bericht r-1). Milind und Omkar bekommen ihn per E-Mail.");
     expect(serverLine(undefined, "server.reports.sent", { report: "r-1" })).toBe("Sent to the MausBot team (report r-1). Milind and Omkar get it by email.");

@@ -2,9 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 import type { LoginBots, LoginSummary, OnePasswordStatus, OnePasswordVault } from "../../shared/logins";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantVault, listLogins, refreshOnePassword } from "@/lib/logins";
-import { relativeTime } from "@/lib/memory";
+import { localizedRelativeTime } from "@/lib/memory";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore } from "@/state/store";
 import { LoginBotPicker, LoginForm } from "./LoginForm";
@@ -99,7 +99,7 @@ export function LoginsSettings() {
                     {signInHostsLine(login) && <div dir="ltr" className="truncate text-[12px] text-ink-tertiary" data-login-hosts>{signInHostsLine(login)}</div>}
                     <div className="mt-0.5 text-[12px] leading-snug text-ink-tertiary">
                       {[t(SOURCE_KEYS[login.source]), botNames(login.bots),
-                        login.lastUsedAt ? t("settings.logins.used", { when: relativeTime(login.lastUsedAt) }) : t("settings.logins.neverUsed")].join(" · ")}
+                        login.lastUsedAt ? t("settings.logins.used", { when: localizedRelativeTime(login.lastUsedAt, activeLocale()) }) : t("settings.logins.neverUsed")].join(" · ")}
                     </div>
                   </div>
                   {login.source !== "1password" && (

@@ -85,7 +85,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12px] font-medium text-ink">{bot.name}</div>
                 <div className="truncate text-[10px] text-ink-tertiary">
-                  {bot.title || "BotAgent"}
+                  {bot.title || t("ui.calendarSidebar.botAgent")}
                 </div>
               </div>
               <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[9px] text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">

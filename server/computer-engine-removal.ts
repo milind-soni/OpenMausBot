@@ -1,3 +1,4 @@
+import { serverLine } from "./server-lines.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 
 export const REMOVED_COMPUTER_DRIVER = "boxAgent";
@@ -38,28 +39,22 @@ export function computerEngineMoveText(
   move: Pick<ComputerEngineMove, "scope" | "cloud" | "askNow"> & Partial<Pick<ComputerEngineMove, "noComputer">>,
   botName: string,
   engine: string,
+  language?: string,
 ): string {
-  const removed = "The Computer choice in the model list was removed.";
+  const removed = serverLine(language, "server.localeCoverage.computerChoiceRemoved");
   const bot = move.scope !== "conversation";
-  const head = move.scope === "conversation" ? `This conversation now uses ${engine}.`
-    : move.scope === "bot-only" ? `${botName} now uses ${engine}; this conversation keeps its own model.`
-    : `${botName} now uses ${engine}.`;
-  const noComputer = ` ${engine} can't use a desktop, so`;
+  const head = serverLine(language, move.scope === "conversation" ? "server.localeCoverage.computerMoveConversation"
+    : move.scope === "bot-only" ? "server.localeCoverage.computerMoveBotOnly" : "server.localeCoverage.computerMoveBot", { bot: botName, engine });
   const place = move.cloud
-    ? bot ? ` ${botName} still works on its cloud desktop.` : ` It still works on ${botName}'s cloud desktop.`
+    ? serverLine(language, bot ? "server.localeCoverage.computerMoveCloudBot" : "server.localeCoverage.computerMoveCloudConversation", { bot: botName })
     : move.noComputer === "auto"
-      ? `${noComputer} ${bot ? `${botName} no longer works on its` : `it no longer works on ${botName}'s`}` +
-        " cloud desktop. To use it again, choose a model that can use a desktop."
+      ? serverLine(language, bot ? "server.localeCoverage.computerMoveAutoBot" : "server.localeCoverage.computerMoveAutoConversation", { bot: botName, engine })
     : move.noComputer === "works-on"
-      ? `${noComputer} ${botName} can't reply on ${engine} while its Works on is Cloud desktop.` +
-        " Choose a model that can use a desktop, or set Works on to Auto."
+      ? serverLine(language, "server.localeCoverage.computerMoveWorksOn", { bot: botName, engine })
     : move.noComputer === "pin"
-      ? `${noComputer} ${botName} can't reply here while this conversation is pinned to its cloud desktop.` +
-        " Choose a model that can use a desktop, or clear this conversation's place in the composer."
+      ? serverLine(language, "server.localeCoverage.computerMovePin", { bot: botName, engine })
     : "";
-  const ask = !move.askNow ? ""
-    : move.scope === "bot-only" ? ` ${botName}'s permissions are now Ask, but this conversation's stay as they were.`
-    : " Its permissions are now Ask.";
+  const ask = !move.askNow ? "" : serverLine(language, move.scope === "bot-only" ? "server.localeCoverage.computerMoveAskBotOnly" : "server.localeCoverage.computerMoveAsk", { bot: botName });
   return `${head} ${removed}${place}${ask}`;
 }
 

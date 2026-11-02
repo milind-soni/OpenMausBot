@@ -116,14 +116,14 @@ export function AskDetail({ text, mono = false, label }: { text: string; mono?: 
   );
 }
 
-export type AskChoice = { label: string; description?: string };
+export type AskChoice = { label: string; value?: string; description?: string };
 
 /** The answers a question offers, one button each, stacked so a long label wraps instead of being cut. */
 export function AskChoices({ choices, label, onPick, sending = null, picked = [], multi = false, disabled = false, quiet = false, tag }: {
   choices: readonly AskChoice[];
   /** The question, for screen readers. */
   label: string;
-  onPick(label: string): void;
+  onPick(value: string): void;
   /** The choice on its way: it shows that it is being sent, and the others wait. */
   sending?: string | null;
   picked?: readonly string[];
@@ -137,25 +137,26 @@ export function AskChoices({ choices, label, onPick, sending = null, picked = []
   return (
     <div role={multi ? "group" : "radiogroup"} aria-label={label} onKeyDown={moveChoiceFocus} className="flex flex-col gap-1.5">
       {choices.map((choice) => {
-        const on = picked.includes(choice.label) || sending === choice.label;
+        const value = choice.value ?? choice.label;
+        const on = picked.includes(value) || sending === value;
         return (
           <button
-            key={choice.label}
+            key={value}
             type="button"
             data-ask-choice=""
-            {...(tag ? { [tag]: choice.label } : {})}
+            {...(tag ? { [tag]: value } : {})}
             role={multi ? "checkbox" : "radio"}
             aria-checked={on}
-            aria-busy={sending === choice.label || undefined}
-            disabled={disabled || (sending !== null && sending !== choice.label)}
-            onClick={() => onPick(choice.label)}
+            aria-busy={sending === value || undefined}
+            disabled={disabled || (sending !== null && sending !== value)}
+            onClick={() => onPick(value)}
             className={cn(ASK_CHOICE, on ? "bg-ink/[0.08] ring-ink/25" : "enabled:hover:bg-ink/[0.045]", quiet && !on && "text-ink-secondary")}
           >
             <span className="min-w-0 flex-1">
               <span dir="auto" className="block break-words [unicode-bidi:plaintext]">{choice.label}</span>
               {choice.description && <span dir="auto" className="mt-0.5 block break-words text-[13px] leading-[18px] text-ink-secondary [unicode-bidi:plaintext]">{choice.description}</span>}
             </span>
-            {sending === choice.label
+            {sending === value
               ? <LoaderCircle size={16} aria-hidden="true" className="shrink-0 text-ink-secondary motion-safe:animate-spin" />
               : on && <Check size={16} strokeWidth={2.4} aria-hidden="true" className="shrink-0 text-ink" />}
           </button>
