@@ -82,6 +82,32 @@ describe("reading the account config", () => {
     expect(claudeAccountFiles({ HOME: "/h", CLAUDE_CONFIG_DIR: "/c" })).toEqual([join("/c", ".config.json"), join("/c", ".claude.json")]);
   });
 
+  it("on Windows takes USERPROFILE as the home, as the CLI's os.homedir() does, not a HOME a shell left behind", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    try {
+      const shell = { HOME: "/c/shell-home", USERPROFILE: "/Users/ada" };
+      expect(claudeAccountFiles(shell)).toEqual([join("/Users/ada", ".claude", ".config.json"), join("/Users/ada", ".claude.json")]);
+      expect(claudeAccountFiles({ ...shell, CLAUDE_CONFIG_DIR: "/c" })).toEqual([join("/c", ".config.json"), join("/c", ".claude.json")]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("keeps what it knew when the file cannot be read for a moment, and reads it again next time", async () => {
+    const home = tempDir();
+    const file = join(home, ".claude.json");
+    writeFileSync(file, access({ apiName: "claude-fable-5-1", entitled: false }));
+    const seen: string[][] = [];
+    const reads = [() => Promise.resolve(access({ apiName: "claude-fable-5-1", entitled: false })), () => Promise.reject(new Error("EPERM")), () => Promise.resolve(access())];
+    const blocks = createOrgModelBlocks(() => [{ HOME: home, USERPROFILE: home }], (blocked) => seen.push([...blocked]), () => reads.shift()!());
+    await blocks.refresh();
+    utimesSync(file, new Date(), new Date(Date.now() + 5_000));
+    await blocks.refresh();
+    expect(seen).toEqual([["claude-fable-5-1"]]);
+    await blocks.refresh();
+    expect(seen).toEqual([["claude-fable-5-1"], []]);
+  });
+
   const watch = (env: Record<string, string | undefined>[]) => {
     const seen: string[][] = [];
     return { seen, blocks: createOrgModelBlocks(() => env, (blocked) => seen.push([...blocked])) };
@@ -91,7 +117,7 @@ describe("reading the account config", () => {
     const home = tempDir();
     const file = join(home, ".claude.json");
     writeFileSync(file, access({ apiName: "claude-fable-5-1", entitled: false }));
-    const { seen, blocks } = watch([{ HOME: home }]);
+    const { seen, blocks } = watch([{ HOME: home, USERPROFILE: home }]);
     await blocks.refresh();
     await blocks.refresh();
     expect(seen).toEqual([["claude-fable-5-1"]]);
@@ -104,7 +130,7 @@ describe("reading the account config", () => {
   it("on a cloud provider's backend ignores a list an earlier sign-in left", async () => {
     const home = tempDir();
     writeFileSync(join(home, ".claude.json"), access({ apiName: "claude-fable-5-1", entitled: false }));
-    const { seen, blocks } = watch([{ HOME: home, CLAUDE_CODE_USE_BEDROCK: "1" }]);
+    const { seen, blocks } = watch([{ HOME: home, USERPROFILE: home, CLAUDE_CODE_USE_BEDROCK: "1" }]);
     await blocks.refresh();
     expect(seen).toEqual([[]]);
   });
@@ -114,7 +140,7 @@ describe("reading the account config", () => {
     writeFileSync(join(older, ".claude.json"), access({ apiName: "claude-opus-5", entitled: false }));
     utimesSync(join(older, ".claude.json"), new Date(1_000), new Date(1_000));
     writeFileSync(join(newer, ".claude.json"), access({ apiName: "claude-fable-5", entitled: false }));
-    const { seen, blocks } = watch([{ HOME: older }, { HOME: newer }]);
+    const { seen, blocks } = watch([{ HOME: older, USERPROFILE: older }, { HOME: newer, USERPROFILE: newer }]);
     await blocks.refresh();
     expect(seen).toEqual([["claude-fable-5"]]);
   });
