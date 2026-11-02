@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AFTER_RESET_MS, nearLimit, type EngineLimit, type EngineLimitsReport, type LimitResetSchedule } from "../../shared/limit-reset";
 import { t } from "@/lib/i18n";
 import type { Routine } from "@/lib/routines";
+import { unlessRefused } from "@/lib/admin-scope";
 import { api } from "@/state/store";
 
 export { AFTER_RESET_MS, nearLimit, NEAR_LIMIT_PERCENT, isLimitResetSchedule, type EngineLimit, type LimitResetSchedule } from "../../shared/limit-reset";
@@ -28,12 +29,15 @@ export function rememberLimits(next: Partial<EngineLimitsReport> | null | undefi
   for (const listener of listeners) listener(report);
 }
 
+function readLimits(request: () => Promise<EngineLimitsReport>): Promise<void> {
+  return unlessRefused("/api/limit-resets", request, null)
+    .then((next) => { if (next) rememberLimits(next); }, () => undefined);
+}
+
 /** A person's refresh always asks again; a background read joins the one already on its way. */
 export function loadLimits(refresh = false): Promise<void> {
-  if (refresh) return api<EngineLimitsReport>("/api/limit-resets?refresh=1").then(rememberLimits, () => undefined);
-  loading ??= api<EngineLimitsReport>("/api/limit-resets", { background: true })
-    .then(rememberLimits, () => undefined)
-    .finally(() => { loading = null; });
+  if (refresh) return readLimits(() => api<EngineLimitsReport>("/api/limit-resets?refresh=1"));
+  loading ??= readLimits(() => api<EngineLimitsReport>("/api/limit-resets", { background: true })).finally(() => { loading = null; });
   return loading;
 }
 

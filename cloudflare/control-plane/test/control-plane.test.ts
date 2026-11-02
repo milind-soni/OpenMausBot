@@ -209,6 +209,18 @@ describe("control-plane migrations and health", () => {
     expect(accountIndex?.name).toBe("installation_endpoints_account_status_idx");
   });
 
+  it("lets Better Auth write an account row on the migrated schema", async () => {
+    const { userId } = await signIn("account-row@example.com");
+    const ctx = createExecutionContext();
+    const context = await createAuth(env, ctx, readConfig(env), crypto.randomUUID()).$context;
+    // Better Auth 1.7.3 and later never write account.issuer, which 0001 created NOT NULL.
+    await context.internalAdapter.createAccount({ userId, providerId: "credential", accountId: userId });
+    await waitOnExecutionContext(ctx);
+    const rows = await env.DB.prepare('SELECT "providerId", "accountId" FROM "account" WHERE "userId" = ?')
+      .bind(userId).all();
+    expect(rows.results).toEqual([{ providerId: "credential", accountId: userId }]);
+  });
+
   it("ties every existing endpoint to the original account and carries its capacity state over", async () => {
     const db = env.MIGRATION_DB;
     const accounts = env.TEST_MIGRATIONS.findIndex((migration) => migration.name.startsWith("0007_"));

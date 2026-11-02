@@ -56,7 +56,7 @@ describe("the shelf card", () => {
     expect(orgModeBadge(entry())).toBeNull();
     expect(orgModeBadge(entry({ mode: "required" }))).toBe("Recommended by Acme Partners");
     expect(orgCardNotes(entry({ installed: { installId: "b".repeat(32), release: "1.2.0", status: "installed" } }))).toEqual([
-      "Version 1.3.0 available. Updates arrive automatically in an upcoming OpenMausBot update.",
+      "Version 1.3.0 available. Updates arrive automatically in an upcoming MausBot update.",
     ]);
     expect(orgCardNotes(entry({ release: null, installed: { installId: "b".repeat(32), release: "1.3.0", status: "withdrawn" } }))).toEqual([
       "Withdrawn by Acme Partners",
@@ -79,7 +79,7 @@ describe("the shelf card", () => {
       busy: null, notice: "", error: "", onAdd, onDetails: vi.fn(),
     }));
     const shown = text(markup);
-    for (const line of ["Packages Customer Co shares with you", "Sales desk", "Recommended by Acme Partners", "From Acme Partners", "Added", "Update OpenMausBot to add this"]) {
+    for (const line of ["Packages Customer Co shares with you", "Sales desk", "Recommended by Acme Partners", "From Acme Partners", "Added", "Update MausBot to add this"]) {
       expect(shown).toContain(line);
     }
     expect(markup).toContain('aria-label="Add Sales desk"');
@@ -98,7 +98,7 @@ describe("the preview and the provenance line", () => {
     const preview = orgPackagePreview(team);
     expect(preview).toMatchObject({ kind: "package", version: 2, name: "Sales desk", members: expect.arrayContaining([{ name: "Scout", title: "Prospect researcher" }]) });
     const shown = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending: preview, importedNames: preview.members.map((member) => member.name), org: true })));
-    expect(shown).toContain("Included skills — switched on");
+    expect(shown).toContain("Included skills (switched on)");
     expect(shown).toContain("Skills arrive switched on and routines paused");
     expect(shown).not.toContain("added switched off");
 

@@ -36,6 +36,9 @@ const __APP_VERSION__: string;
       packaged: boolean;
     };
     windowChrome: "mac-inset" | "win-caption" | "native";
+    /** The page draws the window's frame: false once the person turned it off. Absent on an older app, whose window
+     * draws it. */
+    windowFrame?: boolean;
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";
@@ -121,6 +124,13 @@ const __APP_VERSION__: string;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       /** Either page in this app: the one-time move's line (on its way, what arrived, coming home). */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
+      /** This computer's page only: bots in two places, and the one tap that brings them together on one (electron/two-places.mjs). */
+      twoPlaces?: {
+        state(): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
+        accept(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
+        dismiss(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
+        onChanged(callback: () => void): () => void;
+      };
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
@@ -143,13 +153,14 @@ const __APP_VERSION__: string;
         cancel(): Promise<void>;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
-      /** The window's own rail of places (its page at /rail): a sheet of its own covers the window while open; the skin
-       * of the page beside it comes from main. */
-      rail?: { expand(on: boolean): Promise<void>; onSkin(callback: (skin: string) => void): () => void };
+      /** The window's own rail of places: its page at /rail (a sheet of its own covers the window while open; the skin of
+       * the page beside it comes from main), and the button on the page beside it that hides and shows it. */
+      rail?: import("../../electron/chrome-rail.mjs").ChromeRailBridge;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
-         * home is this Cloud, so there is nothing to switch to. */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string }>;
+         * home is this Cloud, so there is nothing to switch to; `localPath`: a local workspace's folder, absent for This
+         * computer's own. */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
         /** One plain line for the next page, served once: a team this person is no longer in. */
@@ -159,8 +170,9 @@ const __APP_VERSION__: string;
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
         open?: (id: string) => Promise<unknown>;
-        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), paste a server's pairing link, or type its address. */
-        add?: (choice: "cloud" | "link" | "address") => Promise<unknown>;
+        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
+         * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
+        add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
         /** The colour of the place this page is (This computer's too), and whether it can be changed here. Absent on an
          * older app. */
         look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
@@ -169,6 +181,11 @@ const __APP_VERSION__: string;
         /** The colour of a place the window's rail lists, by its circle's id, from the person's click on the rail's own
          * page (refused on any other page). */
         recolor?: (id: string, swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
+        /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
+         * the rail's own page (refused on any other page). Absent on an older app. */
+        remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
+        /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
+        makeHome?: (id: string) => Promise<{ started: true }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
       };
@@ -176,7 +193,8 @@ const __APP_VERSION__: string;
       cloudAdd?: {
         state(): Promise<import("../../electron/cloud-rail.mjs").AddCloudView>;
         /** Opens that plan's checkout in the browser, for a Cloud of this name and swatch; only from the person's click. */
-        start(tier: string, name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "opened" | "unsupported" | "failed" } | { outcome: "blocked"; blocked: import("../../electron/cloud-account.mjs").CloudAddBlock }>;
+        /** `source`: where the checkout started, one of the app's checkout sources (main ignores any other). */
+        start(tier: string, name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null, source?: string): Promise<{ outcome: "opened" | "unsupported" | "failed" } | { outcome: "blocked"; blocked: import("../../electron/cloud-account.mjs").CloudAddBlock }>;
         reopen(): Promise<boolean>;
         copyLink(): Promise<boolean>;
         /** Opens the Cloud just bought, once it is ready. */
@@ -323,6 +341,12 @@ const __APP_VERSION__: string;
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
+      /** The window's own frame, this desktop's choice (Settings → Appearance). Absent on an older app. */
+      windowFrame?: {
+        state(): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
+        /** From the person's click on another server's page. */
+        set(on: boolean): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
+      };
       /** The renderer-drawn Windows caption buttons; absent outside the
        * frameless Windows shell (macOS/Linux/browser keep native chrome). */
       windowControls?: {
@@ -338,8 +362,8 @@ const __APP_VERSION__: string;
        * opened from outside the app. */
       onChatLink?(cb: (link: string) => void): () => void;
       /** The desktop shell's app-menu Preferences… item was activated; open
-       * app Settings. Local-shell only: remote server pages never receive
-       * the channel, and the bridge is absent in the browser. "cloud" is the
+       * app Settings. Every server's page in the window receives it, and the
+       * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
       onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */

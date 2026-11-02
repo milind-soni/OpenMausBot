@@ -56,6 +56,17 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
+  it("never offers This computer on another server's page, whatever the platform", () => {
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const capabilities = {
+        host: { platform },
+        localComputer: { available: false, reasonCode: "remote-server" },
+      } as DesktopCapabilities;
+      expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
+      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.localRemoteServer"]);
+    }
+  });
+
   it("keeps This computer selectable on Windows before the driver is live", () => {
     const capabilities = {
       host: { platform: "win32" as const, label: "Windows" },
@@ -64,7 +75,7 @@ describe("local computer UI eligibility", () => {
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
     expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
-      "Bots can't use this PC right now. Restart OpenMausBot, and if that doesn't help, open Settings → Diagnostics.",
+      "Bots can't use this PC right now. Restart MausBot, and if that doesn't help, open Settings → Diagnostics.",
     );
   });
 
@@ -288,7 +299,7 @@ describe("what the person reads about using this computer", () => {
   it("says what to do in plain words, never the parts underneath", () => {
     expect(reasons.every((reason) => typeof reason === "string" && reason.length > 0)).toBe(true);
     for (const reason of reasons) expect(reason, reason!).not.toMatch(JARGON);
-    expect(reasons[3]).toBe("Only the OpenMausBot app on this computer can let a bot use it. Open the app here to use it.");
+    expect(reasons[3]).toBe("Only the MausBot app on this computer can let a bot use it. Open the app here to use it.");
   });
 
   it("keeps the same plain words in the questions and the place lines the app shows", () => {

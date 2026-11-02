@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mentionablePeople, personMentionExcerpt, personMentionRanges, personTagNames, teammateMentions } from "./person-mention.ts";
+import { mentionablePeople, personMentionExcerpt, personMentionRanges, personNameClash, personTagNames, teammateMentions, withoutPersonTags } from "./person-mention.ts";
 
 const tags = (text: string, options = {}) => personMentionRanges(text, options).map(({ start, end }) => text.slice(start, end));
 
@@ -21,9 +21,9 @@ describe("the person's tag", () => {
     expect(tags("@Ada Lovelace please", { profileName: "  Ada   Lovelace " })).toEqual(["@Ada Lovelace"]);
   });
 
-  it("gives way to a bot with the same name, or a longer one", () => {
-    expect(tags("@you", { botNames: ["You"] })).toEqual([]);
-    expect(tags("@Sam look", { profileName: "Sam", botNames: ["sam"] })).toEqual([]);
+  it("wins a tie with a bot of the same name, and gives way only to a longer one", () => {
+    expect(tags("@you", { botNames: ["You"] })).toEqual(["@you"]);
+    expect(tags("@Sam look", { profileName: "Sam", botNames: ["sam"] })).toEqual(["@Sam"]);
     expect(tags("@Sam Bot, ask @Sam", { profileName: "Sam", botNames: ["Sam Bot"] })).toEqual(["@Sam"]);
     expect(tags("@Sam Smith", { profileName: "Sam Smith", botNames: ["Sam"] })).toEqual(["@Sam Smith"]);
   });
@@ -56,7 +56,7 @@ describe("the line a mention notification quotes", () => {
     expect(personMentionExcerpt("See ``type @you here`` for the syntax.")).toBeNull();
     expect(personMentionExcerpt("Wrap `the\n@you` tag in code.")).toBeNull();
     expect(personMentionExcerpt("Use `code` and then @you decide which bucket wins")).toBe("Use `code` and then @you decide which bucket wins");
-    expect(personMentionExcerpt("@you", { botNames: ["you"] })).toBeNull();
+    expect(personMentionExcerpt("@you", { botNames: ["you"] })).toBe("@you");
   });
 });
 
@@ -74,9 +74,10 @@ describe("a teammate's tag on a Team Cloud", () => {
     expect(tagged("@Ada can you and @Ada Lovelace and @bob look? @Sam Wise too, not @Sam")).toEqual(["ada", "bob", "sam2"]);
   });
 
-  it("picks the longest name, gives way to a bot of the same name, and skips code, emails and longer words", () => {
+  it("picks the longest name, wins a tie with a bot of the same name, and skips code, emails and longer words", () => {
     expect(tagged("@Bo Diddley and @Bob")).toEqual(["bo", "bob"]);
-    expect(tagged("@Bob", ["Bob"])).toEqual([]);
+    expect(tagged("@Bob", ["Bob"])).toEqual(["bob"]);
+    expect(tagged("@ada, ask the bot", ["Ada"])).toEqual(["ada"]);
     expect(tagged("@Bob Builder", ["Bob Builder"])).toEqual([]);
     expect(tagged("mail bob@acme.test, `@Bob`, @Bobby\n```\n@Ada\n```")).toEqual([]);
   });
@@ -84,5 +85,27 @@ describe("a teammate's tag on a Team Cloud", () => {
   it("quotes the line that tags each person, once", () => {
     expect(teammateMentions("Draft is up.\n@Bob the numbers in section two need a second look.\n@Bob again", people))
       .toEqual([{ key: "bob", excerpt: "@Bob the numbers in section two need a second look." }]);
+  });
+});
+
+describe("which tags are left for bots", () => {
+  const people = mentionablePeople([{ key: "bob", name: "Bob" }, { key: "ada", name: "Ada Lovelace" }]).flatMap((person) => person.names);
+
+  it("blanks each tag a person takes, a tie with a bot's name included, and keeps the offsets", () => {
+    const text = "@Bob and @Ada, please loop in @Scout and @Bob Builder";
+    const left = withoutPersonTags(text, people, ["Bob", "Scout", "Bob Builder", "Ada"]);
+    expect(left).toHaveLength(text.length);
+    expect(left).toBe("     and     , please loop in @Scout and @Bob Builder");
+    expect(withoutPersonTags("@you check this", ["you"], ["you"])).toBe("     check this");
+    expect(withoutPersonTags("mail bob@acme.test or `@Bob`", people, ["Bob"]), "no tag at all").toBe("mail bob@acme.test or `@Bob`");
+  });
+
+  it("names the person a bot's name would collide with, in any case and spacing", () => {
+    const list = [{ name: "Bob", tags: ["Bob"] }, { name: "Ada Lovelace", tags: ["Ada Lovelace", "Ada"] }];
+    expect(personNameClash("bob", list)).toBe("Bob");
+    expect(personNameClash("  @Ada  ", list)).toBe("Ada Lovelace");
+    expect(personNameClash("Ada  Lovelace", list)).toBe("Ada Lovelace");
+    expect(personNameClash("Bob's helper", list)).toBeNull();
+    expect(personNameClash("", list)).toBeNull();
   });
 });

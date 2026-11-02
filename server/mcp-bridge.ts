@@ -5,6 +5,7 @@ import { CONTROL_ACT_WITHIN_MS, CONTROL_UNCONFIRMED, CONTROL_WAITED, controlRefu
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { textOnlyErrorResultLine } from "./mcp-error-result.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
+import { createJournalTap, postJournal } from "./saved-steps/journal-tap.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
 export const BRIDGE_INACTIVITY_MS = 45_000;
@@ -112,6 +113,7 @@ export interface BridgeOptions {
   liveness?: BridgeLiveness;
   /** `describe`: what a tools/call would open, passed to the gate so the person can be asked in plain words. */
   gate?: { url: string; token: string; describe?: (frame: unknown) => Record<string, string> };
+  journal?: { url: string; token: string };
   rewriteResponse?: (line: string) => string;
   /** A tools/call the bridge carries out itself through the child, answering the agent with what this resolves to; null
    * forwards the frame as it came. Frames after it wait, so the agent's calls still act in order. */
@@ -212,6 +214,24 @@ export function createMcpBridgeInterceptor(
   };
 }
 
+/** Without a tap, writes are synchronous. With one, a single chain keeps replies in order while each waits for its journal post; no failure in the tap may drop a reply. */
+export function createReplyQueue(
+  tap: { response(raw: string): Promise<void> } | null,
+  write: (written: string) => void,
+): (raw: string, written: string) => void {
+  let chain: Promise<void> = Promise.resolve();
+  return (raw, written) => {
+    if (!tap) {
+      write(written);
+      return;
+    }
+    chain = chain
+      .then(() => tap.response(raw))
+      .catch(() => {})
+      .then(() => write(written));
+  };
+}
+
 const OWN_ID = "omb-bridge-";
 const SERVER_INFO_META = "io.modelcontextprotocol/serverInfo";
 
@@ -304,11 +324,15 @@ export function runMcpBridge(options: BridgeOptions): void {
     ? createControlClient({ url: options.gate.url, token: options.gate.token })
     : null;
 
-  const answer = (line: string) => process.stdout.write(line + "\n");
+  const tap = options.journal
+    ? createJournalTap({ post: postJournal(options.journal.url, options.journal.token) })
+    : null;
+  const reply = createReplyQueue(tap, (written) => process.stdout.write(written + "\n"));
+  const answer = (line: string) => reply(line, line);
   const toolLists = createToolListNormalizer(toolSchemaProfileFromEnv(), (line) => process.stderr.write(`${options.label}: ${line}\n`));
   // Injected responses must never land inside one of the child's half-written frames.
   const rewrite = options.rewriteResponse ?? ((line: string) => line);
-  const respond = (line: string) => process.stdout.write(textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line))) + "\n");
+  const respond = (line: string) => reply(line, textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line))));
   const children = createChildCalls((line) => child.stdin.write(line + "\n"));
   const send = async (line: string) => {
     const frame = line.includes('"tools/call"') ? relayableCall(line) : null;
@@ -317,6 +341,9 @@ export function runMcpBridge(options: BridgeOptions): void {
       child.stdin.write(line + "\n");
       return;
     }
+    // Fail-closed: a relayed answer is the bridge's, never the driver's, so it is not journalled. The gate check the call
+    // passed is then left without an entry, which keeps its request's journal incomplete, and an incomplete one never saves.
+    tap?.leaveOut(frame.id);
     const result = await relayed.catch((error: unknown) => failed(error instanceof Error ? error.message : String(error)));
     respond(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }));
   };
@@ -337,6 +364,7 @@ export function runMcpBridge(options: BridgeOptions): void {
   let pendingInput = Promise.resolve();
   const inbound = createLineSplitter((line) => {
     toolLists.observeRequest(line);
+    tap?.request(line);
     const completion = intercept(line);
     if (completion) pendingInput = completion;
   });

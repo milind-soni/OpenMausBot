@@ -1040,7 +1040,7 @@ describe("Runtime: a teammate's question reaches the requester waiting on it", (
     invariants(third);
   });
 
-  it("an unanswered question still expires after 30 minutes, and the expiry resumes the requester with the results", async () => {
+  it("an unanswered question waits for the person however long they take, and a late answer still carries the work on", async () => {
     const w = world((a, input) => a.assignee.botId === "builder" && input.answer === undefined ? { kind: "needs_input", question: "Which region?" } : undefined);
     const root = w.runtime.begin(beginReq());
     const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
@@ -1050,15 +1050,19 @@ describe("Runtime: a teammate's question reaches the requester waiting on it", (
     w.runtime.tick();
     expect(runsOf(w, root.id).map(r => [r.input.asked?.map(a => a.id), r.input.settled?.map(a => a.id)])).toEqual([[[builder.id], [tester.id]]]);
     await flush();
-    w.clock.advance(30 * 60_000);
-    w.runtime.tick();
+    w.clock.advance(30 * 60_000 + 1);
+    w.runtime.tick(); await flush();
+    w.clock.advance(7 * 24 * 60 * 60_000);
+    w.runtime.tick(); await flush();
     expect(w.store.get(builder.id)?.status).toBe("needs_input");
-    w.clock.advance(1);
-    w.runtime.tick();
-    expect(w.store.get(builder.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer" });
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(runsOf(w, root.id)).toHaveLength(1);
+    expect(w.runtime.answer(builder.id, "eu-west")).toBe(true);
+    w.runtime.tick(); await flush();
+    expect(w.store.get(builder.id)).toMatchObject({ status: "completed", outcome: "done" });
+    w.runtime.tick(); await flush();
     expect(runsOf(w, root.id)).toHaveLength(2);
     expect(runsOf(w, root.id)[1]!.input.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
-    await flush();
     expect(w.store.get(root.id)?.status).toBe("completed");
     invariants(w);
   });
@@ -1183,6 +1187,121 @@ describe("Runtime: a teammate's question reaches the requester waiting on it", (
     expect(w.store.get(root.id)?.status).toBe("waiting");
     w.runtime.tick(); await flush();
     expect(runsOf(w, root.id)).toHaveLength(2);
+    invariants(w);
+  });
+});
+
+describe("Runtime: at Full access a question is its requester's to answer, and only what the person alone can do waits on them", () => {
+  const runsOf = (w: World, id: string) => w.runner.runs.filter(r => r.a.id === id);
+  const full = (botId: string, parentId: string, patch: Partial<EnqueueRequest> = {}) =>
+    toBot(botId, parentId, `Build it, ${botId}`, { levels: { own: "full" }, ...patch });
+  const decides: Script = (a, input) => a.assignee.botId === "builder" && input.answer === undefined
+    ? { kind: "needs_input", question: "CSV or Excel?\nDefault: CSV", decide: { default: "CSV" } } : undefined;
+
+  it("resumes the requester with the question; unanswered when that turn ends, the asker goes on with its default", async () => {
+    const w = world(decides);
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(full("builder", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    expect(w.store.get(builder.id)).toMatchObject({ status: "needs_input", level: "full", decide: { default: "CSV" } });
+    expect(w.runner.parks.map(p => p.a.decide)).toEqual([{ default: "CSV" }]);
+
+    w.runtime.tick();
+    expect(runsOf(w, root.id).map(r => r.input.asked?.map(a => a.id))).toEqual([[builder.id]]);
+    await flush();
+    expect(w.store.get(builder.id)).toMatchObject({ status: "queued", answer: "CSV", answeredBy: { kind: "default" } });
+    expect(w.store.get(builder.id)?.decide).toBeUndefined();
+    expect(w.store.events(builder.id).map(e => e.detail)).toContain("queued: answered with its default");
+
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, builder.id).at(-1)?.input).toMatchObject({ turn: "answered", answer: "CSV" });
+    expect(runsOf(w, builder.id).at(-1)?.input.envelope).toContain('Nobody was asked, at this level: go on with your default, "CSV", and say in one plain line what you chose.');
+    expect(w.store.get(builder.id)).toMatchObject({ status: "completed" });
+    expect(w.store.get(builder.id)?.answeredBy).toBeUndefined();
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id).at(-1)?.input.settled?.map(a => a.id)).toEqual([builder.id]);
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    invariants(w);
+  });
+
+  it("takes the requester's own answer, given while its turn carries the question, over the default", async () => {
+    const w = world((a, input) => a.assignee.botId === "chief" && input.asked?.length ? "hold" : decides(a, input));
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(full("builder", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    w.runtime.tick();
+    expect(w.runtime.answer(builder.id, "Excel", { kind: "bot", botId: "chief" })).toBe(true);
+    await w.runner.release(root.id, { kind: "completed", text: "Told the builder: Excel" });
+    expect(w.store.get(builder.id)).toMatchObject({ status: "queued", answer: "Excel", answeredBy: { kind: "bot", botId: "chief" } });
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, builder.id).at(-1)?.input.envelope).toContain('@chief answered: "Excel".');
+    w.runtime.tick(); await flush();
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    invariants(w);
+  });
+
+  it("goes on with the default at once when nothing would take a turn for it: a one-way notice, or a poll root", async () => {
+    const w = world(decides);
+    const root = w.runtime.begin(beginReq());
+    const notice = ok(w.runtime.enqueue(full("builder", root.id, { mode: "notify", reply: "none" })));
+    w.runtime.end(root.id, { ok: true, text: "Told the builder" });
+    w.runtime.tick(); await flush();
+    expect(w.store.get(notice.id)).toMatchObject({ answeredBy: { kind: "default" }, answer: "CSV" });
+    w.runtime.tick(); await flush();
+    expect(w.store.get(notice.id)?.status).toBe("completed");
+
+    const v = world(decides);
+    const polled = v.runtime.begin(beginReq({ reply: "poll", requester: { kind: "external_runtime", runId: "run-1" } }));
+    const child = ok(v.runtime.enqueue(full("builder", polled.id)));
+    v.runtime.end(polled.id, { ok: true, text: "" });
+    v.runtime.tick(); await flush();
+    expect(v.store.get(child.id)).toMatchObject({ status: "queued", answeredBy: { kind: "default" } });
+    invariants(w); invariants(v);
+  });
+
+  it("goes on with the default when the requester's carrying turn is cut by a restart after handing out more work", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world((a, input) => a.assignee.botId === "chief" && input.asked?.length ? "hold" : a.assignee.botId === "tester" ? "hold" : decides(a, input), {}, store);
+    const root = first.runtime.begin(beginReq());
+    const builder = ok(first.runtime.enqueue(full("builder", root.id)));
+    first.runtime.end(root.id, { ok: true, text: "Handed out" });
+    first.runtime.tick(); await flush();
+    first.runtime.tick();
+    expect(store.get(root.id)?.carrying).toEqual([builder.id]);
+    ok(first.runtime.enqueue(toBot("tester", root.id)));
+    first.runtime.close();
+
+    const second = world(() => "hold", {}, store);
+    expect(store.get(root.id)).toMatchObject({ status: "waiting", restart: "cut" });
+    expect(store.get(builder.id)).toMatchObject({ status: "queued", answeredBy: { kind: "default" }, answer: "CSV" });
+    expect(second.runner.parks.map(p => p.a.id)).toEqual([builder.id]);
+  });
+
+  it("hears at once of what only the person can do and carries on with the rest; the card's work resumes when they act", async () => {
+    const w = world((a, input) => a.assignee.botId === "builder" && input.answer === undefined
+      ? { kind: "needs_input", question: "Waiting on the person: sign in to notion.so", cards: ["msg-1"] } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(full("builder", root.id)));
+    const tester = ok(w.runtime.enqueue(full("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    expect(w.store.get(builder.id)).toMatchObject({ status: "needs_input", cards: ["msg-1"] });
+    expect(w.store.get(builder.id)?.decide).toBeUndefined();
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id).map(r => [r.input.asked?.map(a => a.id), r.input.settled?.map(a => a.id)])).toEqual([[[builder.id], [tester.id]]]);
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(w.store.get(builder.id)?.status).toBe("needs_input");
+    w.clock.advance(400 * 24 * 60 * 60_000);
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id)).toHaveLength(1);
+
+    expect(w.runtime.answer(builder.id, "The person finished signing in to notion.so.")).toBe(true);
+    w.runtime.tick(); await flush(); w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id)).toHaveLength(2);
+    expect(runsOf(w, root.id)[1]!.input.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
+    expect(w.store.get(root.id)?.status).toBe("completed");
     invariants(w);
   });
 });

@@ -8,6 +8,7 @@ import {
   createInactivityWatchdog,
   createLineSplitter,
   createMcpBridgeInterceptor,
+  createReplyQueue,
   runLivenessProbe,
 } from "./mcp-bridge.ts";
 
@@ -424,5 +425,33 @@ describe("createMcpBridgeInterceptor", () => {
     await drain();
     expect(answered).toEqual([]);
     expect(forwarded).toEqual([frame("tools/list", 1)]);
+  });
+});
+
+describe("createReplyQueue", () => {
+  it("writes synchronously without a tap", () => {
+    const written: string[] = [];
+    createReplyQueue(null, (line) => written.push(line))("raw", "out");
+    expect(written).toEqual(["out"]);
+  });
+
+  it("keeps replies in order and still writes them when the tap rejects or throws", async () => {
+    const written: string[] = [];
+    const seen: string[] = [];
+    const tap = {
+      response: (raw: string): Promise<void> => {
+        seen.push(raw);
+        if (raw === "a") return Promise.reject(new Error("tap failed"));
+        if (raw === "b") throw new Error("tap threw");
+        return new Promise((resolve) => setTimeout(resolve, 10));
+      },
+    };
+    const reply = createReplyQueue(tap, (line) => written.push(line));
+    reply("a", "A");
+    reply("b", "B");
+    reply("c", "C");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(seen).toEqual(["a", "b", "c"]);
+    expect(written).toEqual(["A", "B", "C"]);
   });
 });

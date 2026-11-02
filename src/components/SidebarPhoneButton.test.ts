@@ -63,7 +63,7 @@ describe("sidebar phone status", () => {
     }, now)).toMatchObject({ kind: "connected", label: "Device connected", connectedCount: 1 });
     expect(
       deriveSidebarPhoneStatus({ enabled: true, devices: [recent], connectedDeviceIds: [] }, now),
-    ).toMatchObject({ kind: "disconnected", label: "Device paired — not connected" });
+    ).toMatchObject({ kind: "disconnected", label: "Device paired, not connected" });
     expect(deriveSidebarPhoneStatus({
       enabled: false,
       devices: [recent],
@@ -112,7 +112,7 @@ describe("sidebar phone status", () => {
 });
 
 describe("SidebarPhoneStatusButton", () => {
-  const render = (density: "comfortable" | "compact" | "icons", status: SidebarPhoneStatus) =>
+  const render = (density: "comfortable" | "icons", status: SidebarPhoneStatus) =>
     renderToStaticMarkup(createElement(SidebarPhoneStatusButton, {
       density,
       status,
@@ -145,7 +145,7 @@ describe("SidebarPhoneStatusButton", () => {
     });
     const stale = render("icons", {
       kind: "stale",
-      label: "Device paired — not recently active",
+      label: "Device paired, not active recently",
       pairedCount: 1,
       connectedCount: 0,
     });
@@ -155,18 +155,5 @@ describe("SidebarPhoneStatusButton", () => {
     expect(unpaired).toContain("data-phone-plus");
     expect(stale).not.toContain("data-phone-plus");
     expect(stale).not.toContain("text-success");
-  });
-
-  it("uses the same fixed-size control in the compact text sidebar", () => {
-    const markup = render("compact", {
-      kind: "stale",
-      label: "Device paired — not recently active",
-      pairedCount: 1,
-      connectedCount: 0,
-    });
-
-    expect(markup).toContain('data-sidebar-density="compact"');
-    expect(markup).toContain("size-[46px]");
-    expect(markup).toContain("shrink-0");
   });
 });

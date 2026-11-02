@@ -1,8 +1,9 @@
 // GitHub Copilot CLI over ACP (`copilot --acp --stdio`), billed to the signed-in Copilot plan.
 // Copilot CLI 1.0.103 advertises its models as the `model` config option, each with `_meta.copilotUsage`
 // (the premium-request multiplier), and per-model effort as `reasoning_effort`; session/set_config_option
-// validates and confirms both. Its own `allow_all` option stays at its `off` default: the ACP broker answers
-// every permission request.
+// validates and confirms both. CLI 1.0.105 leaves that option's currentValue unset once the session is on
+// Auto (the stored id stays `auto`; the picker may show Copilot Fusion and an autoTier instead). Its own
+// `allow_all` option stays at its `off` default: the ACP broker answers every permission request.
 import { createHash } from "node:crypto";
 import { readFile, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -206,7 +207,7 @@ const SUPPORT: AcpSupport = {
   // Every fleet has this instance, and any `copilot` on PATH (VS Code's shim included) would otherwise be started
   // at launch: the catalog comes from the startup cache and refreshes when the engine is picked.
   resolveModelsOnCreate: false,
-  selectModel: { configId: "model" },
+  selectModel: { configId: "model", unsetIds: [AUTO] },
   modelVariants: true,
   fallbackModel: (sessionConfig, catalogDefault) => {
     const offered = offeredModels(sessionConfig, "model");

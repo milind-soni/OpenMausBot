@@ -7,7 +7,7 @@ import { InstanceProviderMark } from "@/components/ProviderIcons";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
 import { splitEngineRail } from "@/lib/engine-rail";
 import { t } from "@/lib/i18n";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { openKeySettings } from "./keys/key-focus";
 
 export function NoEngines() {
@@ -28,9 +28,9 @@ export function NoEngines() {
       <main className="relative flex h-full min-w-0 flex-1 items-center justify-center bg-app px-6">
         <WindowDragStrip />
         <div className="max-w-[520px] rounded-2xl border border-hairline/40 bg-card p-6 text-center">
-          <h1 className="text-[20px] font-semibold text-ink">The host needs an agent engine</h1>
+          <h1 className="text-[20px] font-semibold text-ink">The host needs an AI</h1>
           <p className="mt-2 text-[14px] leading-relaxed text-ink-secondary">
-            Configure Claude, ACP, or another supported engine in OpenMausBot on the host computer, then return here.
+            Set up Claude or another supported AI in {productName()} on the host computer, then come back here.
           </p>
           <button onClick={() => void recheck()} disabled={rechecking} className="mt-5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60">
             {rechecking ? "Checking…" : "Check again"}
@@ -54,7 +54,7 @@ export function NoEngines() {
       <div className="mx-auto w-full max-w-[560px] px-6 py-12">
         <h1 className="text-[20px] font-semibold text-ink">{t("noEngines.title")}</h1>
         <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">
-          {t("noEngines.intro", { app: brand().name })}
+          {t("noEngines.intro", { app: productName() })}
         </p>
 
         <div className="mt-6 flex flex-col gap-2.5">

@@ -40,16 +40,19 @@ const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origi
 const isLocalPage = !localOrigin || location.origin === localOrigin;
 
 // The window's own rail of places stands at its left edge (electron/chrome-rail.mjs): main says how wide, and every page
-// beside it, whatever server it comes from, moves over by that much, at any zoom (a zoom change resizes the page).
+// beside it, whatever server it comes from, moves over by that much, at any zoom (a zoom change resizes the page). The
+// page reads how far in `--rail-beside`, which changes with the move itself.
 let railBeside = 0, railRoom = null;
 function leaveRailRoom() {
   if (typeof document === "undefined" || !document.documentElement) return;
   const zoom = Number(webFrame?.getZoomFactor?.()) || 1;
   if (!railBeside) { railRoom?.remove(); railRoom = null; return; }
   railRoom ??= document.createElement("style");
-  railRoom.textContent = `html { box-sizing: border-box !important; padding-left: ${Math.round((railBeside / zoom) * 100) / 100}px !important; }`;
+  const room = `${Math.round((railBeside / zoom) * 100) / 100}px`;
+  railRoom.textContent = `html { box-sizing: border-box !important; padding-left: ${room} !important; --rail-beside: ${room}; }`;
   if (!railRoom.isConnected) (document.head ?? document.documentElement).append(railRoom);
 }
+const railState = (state) => ({ available: state?.available === true, hidden: state?.hidden === true });
 ipcRenderer.on("rail:beside", (_event, width) => { railBeside = Math.max(0, Math.min(200, Number(width) || 0)); leaveRailRoom(); });
 // The rail's own page keeps its size whatever the zoom of this app's page: Chromium gives every page of a host the same
 // zoom, the rail's included, so the rail takes it back out and stays as wide as its strip.
@@ -61,9 +64,9 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
-const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
+const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -133,8 +136,8 @@ const bridge = {
     places: () => ipcRenderer.invoke("workspaces:places"),
     open: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:open", String(id)) : Promise.reject(new Error("Choose a place to open it.")),
-    add: (choice) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("workspaces:add", String(choice)) : Promise.reject(new Error("Choose what to add.")),
+    add: (choice, link) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:add", String(choice), ...(typeof link === "string" ? [link] : [])) : Promise.reject(new Error("Choose what to add.")),
     // The colour of the place this page is (never another's): read, and changed only from the person's click.
     look: () => ipcRenderer.invoke("workspaces:look"),
     color: (swatch) => isLocalPage || navigator.userActivation?.isActive === true
@@ -142,6 +145,12 @@ const bridge = {
     // The colour of a place the window's rail lists, from a click on the rail's own page (main refuses any other page).
     recolor: (id, swatch) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:recolor", String(id), swatch === null ? null : String(swatch)) : Promise.reject(new Error("Choose a color.")),
+    // Remove from list, for a Cloud the window's rail lists as removable, from a click on the rail's own page (main refuses any other page).
+    remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:remove", String(id)) : Promise.reject(new Error("Choose Remove from list.")),
+    // Make a server of the person's own their bots' home, from a click on the rail's own page (main refuses any other page).
+    makeHome: (id) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:make-home", String(id)) : Promise.reject(new Error("Choose Make my home.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
@@ -149,21 +158,47 @@ const bridge = {
     },
   },
   // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
-  // covers the window; the skin of the page beside it comes from main.
+  // covers the window; the skin of the page beside it comes from main, and whether that page draws the window's frame.
+  // The page beside it, from whichever server, offers the button that hides and shows it, and learns only whether there
+  // is one to hide, never its places; it says when it draws the frame, so main puts the traffic lights in its top bar.
   rail: {
-    expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
-    onSkin: (cb) => {
-      const handler = (_event, skin) => cb(String(skin));
-      ipcRenderer.on("rail:skin", handler);
-      return () => ipcRenderer.removeListener("rail:skin", handler);
+    state: () => ipcRenderer.invoke("rail:offer").then(railState),
+    drawsFrame: (drawn) => ipcRenderer.invoke("rail:draws-frame", drawn !== false),
+    setHidden: (hidden) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("rail:hide", hidden === true).then(railState) : Promise.reject(new Error("Choose to hide or show your computers.")),
+    onState: (cb) => {
+      const handler = (_event, state) => cb(railState(state));
+      ipcRenderer.on("rail:state", handler);
+      return () => ipcRenderer.removeListener("rail:state", handler);
     },
+    ...(isLocalPage ? {
+      expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
+      onSkin: (cb) => {
+        const handler = (_event, skin) => cb(String(skin));
+        ipcRenderer.on("rail:skin", handler);
+        return () => ipcRenderer.removeListener("rail:skin", handler);
+      },
+      onFramed: (cb) => {
+        const handler = (_event, framed) => cb(framed === true);
+        ipcRenderer.on("rail:framed", handler);
+        return () => ipcRenderer.removeListener("rail:framed", handler);
+      },
+    } : {}),
+  },
+  // The window's own frame, this desktop's choice for every page of its window; a server's page changes it only from the
+  // person's click.
+  windowFrame: {
+    state: () => ipcRenderer.invoke("window-frame:state"),
+    set: (on) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("window-frame:set", on === true) : Promise.reject(new Error("Choose to turn the window frame on or off.")),
   },
   // Buying another Cloud from the rail's ＋, on this app's page or a hosted Cloud's: plain words in, what the sheet says
   // out; the account, the token and the checkout page stay in main. Only from the person's click where it opens anything.
   cloudAdd: {
     state: () => ipcRenderer.invoke("cloud-add:state"),
-    start: (tier, name, color) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color)) : Promise.reject(new Error("Choose Continue to checkout.")),
+    start: (tier, name, color, source) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-add:start", String(tier), String(name), color === null ? null : String(color), ...(source == null ? [] : [String(source)]))
+      : Promise.reject(new Error("Choose Continue to checkout.")),
     reopen: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-add:reopen") : Promise.reject(new Error("Choose Reopen checkout.")),
     copyLink: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -451,6 +486,17 @@ const bridge = {
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
     },
   } : undefined,
+  // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.
+  twoPlaces: {
+    state: () => ipcRenderer.invoke("two-places:state"),
+    accept: key => ipcRenderer.invoke("two-places:accept", String(key)),
+    dismiss: key => ipcRenderer.invoke("two-places:dismiss", String(key)),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("two-places:changed", handler);
+      return () => ipcRenderer.removeListener("two-places:changed", handler);
+    },
+  },
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
@@ -468,6 +514,11 @@ const bridge = {
       ? ipcRenderer.invoke("cloud-plan:cancel", survey ?? null) : Promise.reject(new Error("Choose Cancel to cancel your plan.")),
     keep: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:keep") : Promise.reject(new Error("Choose Keep my plan to keep it.")),
+    // The room card's Not now, and Restart now after its upgrade: only from the person's click.
+    roomNotNow: id => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:room-not-now", String(id)) : Promise.reject(new Error("Choose Not now.")),
+    restartNow: () => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:restart-now") : Promise.reject(new Error("Choose Restart now to restart the Cloud.")),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),
@@ -516,6 +567,7 @@ const bridge = {
       return () => ipcRenderer.removeListener("home:state-changed", handler);
     },
     retry: () => ipcRenderer.invoke("home:retry"),
+    remove: () => ipcRenderer.invoke("home:remove"),
     signIn: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     repair: () => ipcRenderer.invoke("home:repair"),
@@ -534,7 +586,9 @@ const bridge = {
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
-    shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
+    // A Cloud or server page on 0.1.135 or older calls this as its Cloud Pro popup opens, and the whole page went blank
+    // when it was missing. Nothing asks main any more: never the first showing today, so that page reports nothing.
+    shown: () => Promise.resolve(false),
   },
   desktopAnalytics: {
     enabled: () => {

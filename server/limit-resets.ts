@@ -1,8 +1,10 @@
 // When each engine's usage limit resets, from its plan usage and from the refusals its turns meet, so a limit-reset
-// automation knows when to run and the app can warn before a limit is reached.
+// automation knows when to run, the app can warn before a limit is reached, and every new turn of every bot goes
+// straight to another AI while one is held. The holds are saved: a restart or a sleep the Cloud was stopped for keeps them.
 import { readFileSync } from "node:fs";
 
 import { NEAR_LIMIT_PERCENT, type EngineLimit, type EngineLimitsReport, type LimitWindowName } from "../shared/limit-reset.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 
@@ -64,6 +66,8 @@ export interface LimitClockOptions {
   /** The known reset times changed. */
   onChange?: () => void;
   now?: () => number;
+  /** Where the refusals' holds are kept across restarts; none in tests that need no file. */
+  file?: string;
 }
 
 /** A test fixture's plan usage, read fresh each time so a test can move a reset. Never set outside tests. */
@@ -95,6 +99,7 @@ export class LimitResetClock {
   constructor(options: LimitClockOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
+    this.loadHolds();
   }
 
   /** The reset a limit-reset automation for this engine waits for: a refusal's own time unless usage shows a later
@@ -142,14 +147,15 @@ export class LimitResetClock {
     else if (event.type === "turn.completed" || event.type === "session.exited") {
       const ran = this.turnEngines.get(event.threadId) ?? engine;
       this.turnEngines.delete(event.threadId);
-      if (event.type === "turn.completed" && event.ok && ran && this.refusals.delete(ran)) { this.guessed.delete(ran); this.options.onChange?.(); }
+      if (event.type === "turn.completed" && event.ok && ran && this.refusals.delete(ran)) { this.guessed.delete(ran); this.saveHolds(); this.options.onChange?.(); }
     }
   }
 
   /** The engine's own usage limit refused a turn: held until the reset it named, or for an hour after this refusal when
-   * it named none (a guess, never shown as a reset time). */
+   * it named none (a guess, never shown as a reset time). A reset already past (a stale window, a skewed clock) names
+   * none: the refusal still holds the engine, so the next turn does not go there again at once. */
   noteLimit(engine: string | undefined, resetsAt: number | undefined): void {
-    if (resetsAt !== undefined) return this.noteRefusal(engine, resetsAt);
+    if (resetsAt !== undefined && resetsAt > this.now()) return this.noteRefusal(engine, resetsAt);
     // A reset the engine named still stands: a refusal that names none never shortens it.
     if (!engine || ((this.refusal(engine) ?? 0) > this.now() && !this.guessed.has(engine))) return;
     this.hold(engine, this.now() + UNNAMED_LIMIT_MS, true);
@@ -165,6 +171,7 @@ export class LimitResetClock {
     if (guessed) this.guessed.add(engine);
     else this.guessed.delete(engine);
     this.refusals.set(engine, until);
+    this.saveHolds();
     this.options.onChange?.();
     if (this.soon) clearTimeout(this.soon);
     this.soon = setTimeout(() => { this.soon = null; void this.refresh(true); }, SOON_AFTER_REFUSAL_MS);
@@ -229,9 +236,34 @@ export class LimitResetClock {
     if (at < this.now() - REFUSAL_GRACE_MS) {
       this.refusals.delete(engine);
       this.guessed.delete(engine);
+      this.saveHolds();
       return null;
     }
     return at;
+  }
+
+  /** The holds a restart left, without the ones already past. */
+  private loadHolds(): void {
+    if (!this.options.file) return;
+    let saved: unknown;
+    try { saved = JSON.parse(readFileSync(this.options.file, "utf8")); } catch { return; }
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
+    for (const [engine, hold] of Object.entries(saved as Record<string, { until?: unknown; guessed?: unknown } | null>)) {
+      const until = hold?.until;
+      if (typeof until !== "number" || !Number.isFinite(until) || until < this.now() - REFUSAL_GRACE_MS) continue;
+      this.refusals.set(engine, until);
+      if (hold?.guessed === true) this.guessed.add(engine);
+    }
+  }
+
+  private saveHolds(): void {
+    if (!this.options.file) return;
+    const holds = Object.fromEntries([...this.refusals].map(([engine, until]) => [engine, { until, guessed: this.guessed.has(engine) }]));
+    try {
+      writeFileAtomic(this.options.file, JSON.stringify(holds), { mode: 0o600 });
+    } catch (error) {
+      console.error(`limit holds: could not save: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private unnamed(engine: string): EngineLimit {

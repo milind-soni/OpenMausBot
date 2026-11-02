@@ -76,9 +76,10 @@ export function ownerOnlyConversation(
     (!answeredByPerson(line.card) || ownerPerson(cardAnswerer(line.card!))));
 }
 
-/** The harness's own settlements (dismissed, unavailable, or a bot's change applied on its own) carry nobody's words. */
+/** The harness's own settlements (dismissed, unavailable, a bot's change applied on its own, or a question a bot decided)
+ * carry nobody's words. */
 export function answeredByPerson(card: Card | undefined): boolean {
-  if (!card) return false;
+  if (!card || card.answeredBy?.kind === "bot") return false;
   return (Boolean(card.answered) && card.answered !== "unavailable" && card.dismissed !== true && card.autoApplied !== true) || Boolean(card.answeredText);
 }
 

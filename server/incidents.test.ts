@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident } from "./incidents.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 
@@ -112,5 +113,15 @@ describe("incident wording", () => {
     expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada's run in its main conversation could not start");
     expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada's scheduled routine in its thread #Inbox digest failed");
     expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada\'s run in the room "Standup" failed');
+  });
+
+  it("tells the person in their language, while the Chief's report stays English", () => {
+    expect(incidentChip(incident, "de")).toBe("Vorfall: Die Ausführung von Ada im Thread #Invoice reconciliation ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "stalled", detail: "" }, "de"))
+      .toBe("Vorfall: Die Ausführung von Ada im Thread #Invoice reconciliation wurde gestoppt, weil sie keine Aktivität mehr zeigte");
+    expect(incidentChip({ ...incident, kind: "routine-failed", title: null, room: "Standup" }, "de"))
+      .toBe("Vorfall: Die geplante Routine von Ada im Raum „Standup“ ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null, detail: "" }, "de")).toBe("Vorfall: Die Ausführung von Ada in der Hauptunterhaltung konnte nicht starten");
+    expect(incidentText(incident, { count: 1, mayRetry: true, muted: false })).toContain("Ada's run in its thread #Invoice reconciliation failed");
   });
 });

@@ -160,7 +160,6 @@ describe("initAnalytics while opted out", () => {
     expect(fresh.analyticsEnabled()).toBe(false);
     await fresh.initAnalytics();
     fresh.track("onboarding_step");
-    fresh.identifyEmail("someone@example.com");
 
     expect(ph.loads).toBe(0);
     expect(ph.calls).toEqual([]);
@@ -253,17 +252,10 @@ describe("loading the client", () => {
     const fresh = await freshAnalytics();
     const loading = fresh.initAnalytics();
     fresh.track("onboarding_step", { step: "hello" });
-    fresh.identifyEmail("someone@example.com");
     fresh.track("onboarding_done");
     await loading;
 
-    expect(ph.calls).toEqual([
-      ...OPENED,
-      "capture onboarding_step",
-      "identify someone@example.com",
-      // No email_submitted: nothing asks for an email on the first-run screen any more.
-      "capture onboarding_done",
-    ]);
+    expect(ph.calls).toEqual([...OPENED, "capture onboarding_step", "capture onboarding_done"]);
   });
 
   it("drops calls made before initAnalytics, as before", async () => {
@@ -273,10 +265,9 @@ describe("loading the client", () => {
     expect(ph.calls).toEqual(OPENED);
   });
 
-  it("never initialises, and drops the queued email, when switched off mid-load", async () => {
+  it("never initialises, and drops the queued events, when switched off mid-load", async () => {
     const fresh = await freshAnalytics();
     const loading = fresh.initAnalytics();
-    fresh.identifyEmail("someone@example.com");
     fresh.track("onboarding_step");
     fresh.setAnalyticsEnabled(false);
     await loading;
@@ -308,7 +299,6 @@ describe("loading the client", () => {
     await fresh.initAnalytics();
     fresh.setAnalyticsEnabled(false);
     fresh.track("after_off");
-    fresh.identifyEmail("someone@example.com");
 
     expect(ph.calls).toEqual([...OPENED, "opt_out_capturing"]);
   });
@@ -332,7 +322,7 @@ describe("loading the client", () => {
     ph.initThrows = true;
     const fresh = await freshAnalytics();
     const loading = fresh.initAnalytics();
-    fresh.identifyEmail("someone@example.com");
+    fresh.track("while_starting");
     await expect(loading).resolves.toBeUndefined();
     fresh.track("after_failure");
     expect(ph.calls).toEqual([]);

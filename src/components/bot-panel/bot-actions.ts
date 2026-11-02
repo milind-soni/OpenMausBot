@@ -6,22 +6,12 @@ import { botUnreadThreadIds, markBotRead } from "@/lib/folder-read";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { api, useStore, type Bot } from "@/state/store";
 import { announceArchiveNotice, archiveBotWithNotice } from "../bot-archive";
+import { moveBotsToSection } from "../bot-sections";
 import { currentArchivableBot, type BotConfirmKind } from "../Sidebar";
-
-export function teamNames(state: Pick<ReturnType<typeof useStore>["state"], "sections" | "bots" | "groups">): string[] {
-  return [
-    ...new Set([
-      ...(state.sections ?? []),
-      ...state.bots.filter((b) => !b.hidden && b.section).map((b) => b.section!),
-      ...state.groups.filter((g) => g.section).map((g) => g.section!),
-    ]),
-  ];
-}
 
 export function useBotActions(bot: Bot) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
-  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [confirm, setConfirm] = useState<BotConfirmKind | null>(null);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -84,17 +74,7 @@ export function useBotActions(bot: Bot) {
   };
 
   const moveToTeam = (section: string) => {
-    if ((bot.section?.trim() ?? "") === section) return;
-    if (!remoteClient) {
-      dispatch({ type: "updateBot", botId: bot.id, patch: { section } });
-      return;
-    }
-    void api("/api/sidebar-sections", {
-      method: "POST",
-      body: JSON.stringify({ name: section, botIds: [bot.id] }),
-    })
-      .then(({ bots }) => bots.forEach((updated: Bot) => dispatch({ type: "botPatched", bot: updated })))
-      .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+    if ((bot.section?.trim() ?? "") !== section) moveBotsToSection(dispatch, [bot.id], section);
   };
 
   return {

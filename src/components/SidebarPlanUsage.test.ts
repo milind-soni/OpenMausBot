@@ -138,7 +138,7 @@ describe("SidebarPlanUsageView", () => {
   it("names the account, its windows and where the button leads", () => {
     expect(sidebarPlanLabel({ state: "ok", product: "claude", name: "Claude", windows: [{ label: "5-hour", percent: 27 }, { label: "Weekly", percent: 7 }] }))
       .toBe("Claude: 5-hour 27%, Weekly 7% Plan usage");
-    expect(sidebarPlanLabel({ state: "unavailable", product: "claude", name: "Claude" })).toBe("Claude: Could not load plan usage. Plan usage");
+    expect(sidebarPlanLabel({ state: "unavailable", product: "claude", name: "Claude" })).toBe("Claude: Couldn't load plan usage. Try again in a moment. Plan usage");
   });
 });
 

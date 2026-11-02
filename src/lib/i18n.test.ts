@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { applyBrand, DEFAULT_BRAND } from "./brand";
 import { documentLanguage, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
@@ -33,6 +34,17 @@ describe("resolveLocale", () => {
 describe("t", () => {
   it("returns the English catalog value by default", () => {
     expect(t("engines.cloud")).toBe("Cloud");
+  });
+
+  it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
+    expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
+    expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/brand.json" });
+    try {
+      expect(t("routines.runsOn.localHint")).toBe("Starts while Acme Bots is open here.");
+    } finally {
+      applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    }
   });
 
   it("keeps new department lifecycle labels available in partial packs, with interpolated names and counts", () => {
@@ -157,6 +169,53 @@ describe("tFromServer", () => {
   });
 });
 
+describe("loading a language", () => {
+  afterEach(() => {
+    vi.doUnmock("@/locales");
+    vi.resetModules();
+  });
+
+  it("starts with English alone and shows another language only once its pack is here", async () => {
+    vi.resetModules();
+    const page = await import("./i18n");
+    const packs = await import("@/locales");
+    expect(Object.keys(packs.locales)).toEqual(["en"]);
+    expect(page.setLocale("de")).toBe("en");
+    expect(await page.loadLocale("de-AT")).toBe("de");
+    expect(page.t("engines.local")).toBe("Lokal");
+    expect(Object.keys(packs.locales)).toEqual(["en", "de"]);
+    expect(await page.loadLocale("pt")).toBe("pt");
+    expect(packs.locales["pt-br"]).toBe(packs.locales.pt);
+    expect(page.setLocale("de")).toBe("de");
+  });
+
+  it("shows the language asked for last, whichever pack arrives first", async () => {
+    vi.resetModules();
+    const page = await import("./i18n");
+    await Promise.all([page.loadLocale("ja"), page.loadLocale("fr"), page.loadLocale("de")]);
+    expect(page.activeLocale()).toBe("de");
+    const later = page.loadLocale("ko");
+    page.setLocale("en");
+    await later;
+    expect(page.activeLocale()).toBe("en");
+  });
+
+  it("falls back to English when a pack can't be loaded, and tries again next time", async () => {
+    vi.resetModules();
+    let offline = true;
+    vi.doMock("@/locales", async (original) => {
+      const real = await original<typeof import("@/locales")>();
+      return { ...real, loadLocalePack: (tag: string) => offline ? Promise.reject(new Error("offline")) : real.loadLocalePack(tag) };
+    });
+    const page = await import("./i18n");
+    expect(await page.loadLocale("fr")).toBe("en");
+    expect(page.t("rail.thisComputer")).toBe("This computer");
+    offline = false;
+    expect(await page.loadLocale("fr")).toBe("fr");
+    expect(page.t("rail.thisComputer")).toBe("Cet ordinateur");
+  });
+});
+
 describe("page language", () => {
   afterEach(() => {
     setLocale("en");
@@ -165,7 +224,7 @@ describe("page language", () => {
 
   it("names every picker language with a valid BCP-47 tag", () => {
     expect(localeChoices.map(({ code }) => documentLanguage(code))).toEqual([
-      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl", "ru", "it",
+      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl", "ru", "it", "ko",
     ]);
     for (const { code } of localeChoices) {
       expect(Intl.getCanonicalLocales(documentLanguage(code))).toEqual([documentLanguage(code)]);
@@ -193,13 +252,18 @@ describe("page language", () => {
     expect(root.lang).toBe("en");
   });
 
-  it("tags the page from the system language the moment the module loads", async () => {
+  it("tags the page once the language's pack has loaded, keeping the one it shows until then", async () => {
     const root = { lang: "en", dir: "" };
     vi.stubGlobal("document", { documentElement: root });
-    vi.stubGlobal("navigator", { language: "ja-JP" });
     vi.resetModules();
-    await import("./i18n");
+    const page = await import("./i18n");
+    await page.loadLocale("de");
+    const loading = page.loadLocale("ja-JP");
+    expect(root.lang).toBe("de");
+    expect(page.t("engines.local")).toBe("Lokal");
+    expect(await loading).toBe("ja");
     expect(root).toEqual({ lang: "ja", dir: "ltr" });
+    expect(page.t("engines.local")).toBe(locales.ja!["engines.local"]);
   });
 
   it("still switches language where there is no page (tests, workers)", () => {

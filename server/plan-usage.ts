@@ -9,6 +9,7 @@ import { codexHome } from "./drivers/codex-identity.ts";
 import { botBox } from "./bot-box/box.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 import { copilotUserUrl, githubHost, githubRateLimited, readGhCliToken } from "./github-token.ts";
+import { asRecord, closedWindow, extraLine, finiteNumber, isoOrNull, openWindow, planLabel, secretString, timeMs } from "./plan-usage-values.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "copilot";
 
@@ -21,6 +22,14 @@ export interface PlanWindow {
   resetsAt: string | null;
 }
 
+/** Money in the provider's minor units: 4631 with exponent 2 is 46.31. */
+export interface PlanSpend {
+  usedMinor: number;
+  limitMinor: number;
+  currency: string;
+  exponent: number;
+}
+
 export interface PlanExtra {
   label: string;
   /** Set on the window that resets each month, so clients need not match the label. */
@@ -28,6 +37,8 @@ export interface PlanExtra {
   remainingPercent: number;
   usedPercent: number;
   resetsAt: string | null;
+  /** The amounts behind the percent, on a budget in money. */
+  spend?: PlanSpend;
 }
 
 export interface PlanModelUsage {
@@ -118,6 +129,8 @@ const KEYCHAIN_TIMEOUT_MS = 5_000;
 const KEYCHAIN_MAX_BUFFER = 1_000_000;
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_MODEL_FAMILIES = ["opus", "sonnet", "haiku"];
+const MONTHLY_SPEND = "Monthly spend";
+const EXTRA_USAGE = "Extra Usage";
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -170,7 +183,7 @@ export function parseClaudeUsage(body: unknown): PlanWindows {
   const models: PlanModelUsage[] = [];
   if (root) {
     for (const [key, value] of Object.entries(root)) {
-      if (key === "five_hour" || key === "seven_day") continue;
+      if (key === "five_hour" || key === "seven_day" || key === "spend" || key === "extra_usage") continue;
       if (!/^[a-z][a-z0-9_]{0,40}$/i.test(key)) continue;
       const window = readClaudeWindow(value);
       if (!window) continue;
@@ -180,10 +193,14 @@ export function parseClaudeUsage(body: unknown): PlanWindows {
     }
   }
   sortModelWindows(models);
+  const fiveHour = (root && readClaudeWindow(root.five_hour)) ?? closedWindow();
+  const weekly = (root && readClaudeWindow(root.seven_day)) ?? closedWindow();
+  const budget = root && readClaudeBudget(root, fiveHour.available || weekly.available);
+  if (budget) extra.unshift(budget);
   return {
     plan: planLabel(root?.subscription_type ?? root?.plan ?? root?.plan_type),
-    fiveHour: (root && readClaudeWindow(root.five_hour)) ?? closedWindow(),
-    weekly: (root && readClaudeWindow(root.seven_day)) ?? closedWindow(),
+    fiveHour,
+    weekly,
     extra,
     models,
   };
@@ -324,78 +341,6 @@ export async function loadPlanUsage(input: {
   return report;
 }
 
-function closedWindow(): PlanWindow {
-  return { available: false, remainingPercent: null, usedPercent: null, resetsAt: null };
-}
-
-function openWindow(usedPercent: number, resetsAt: string | null): PlanWindow {
-  const used = clampPercent(usedPercent);
-  return {
-    available: true,
-    usedPercent: used,
-    remainingPercent: clampPercent(100 - used),
-    resetsAt,
-  };
-}
-
-function extraLine(label: string, window: PlanWindow): PlanExtra {
-  return {
-    label,
-    remainingPercent: window.remainingPercent ?? 0,
-    usedPercent: window.usedPercent ?? 0,
-    resetsAt: window.resetsAt,
-  };
-}
-
-function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, value));
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function finiteNumber(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return value;
-}
-
-function timeMs(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.abs(value) >= 1e12 ? value : value * 1000;
-  }
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 80) return null;
-  if (/^\d+(\.\d+)?$/.test(trimmed)) return timeMs(Number(trimmed));
-  const parsed = Date.parse(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isoOrNull(value: unknown): string | null {
-  const ms = timeMs(value);
-  if (ms == null) return null;
-  const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function planLabel(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 80 || /[\r\n]/.test(trimmed)) return null;
-  if (/bearer\s|access_token|refresh_token|sk-ant-|eyJ[a-zA-Z0-9_-]{8,}/i.test(trimmed)) return null;
-  return trimmed;
-}
-
-function secretString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 16_000 || /[\r\n]/.test(trimmed)) return null;
-  return trimmed;
-}
-
 function parseJson(text: string | null): unknown {
   if (!text) return null;
   try {
@@ -440,6 +385,59 @@ function readClaudeWindow(value: unknown): PlanWindow | null {
   const utilization = finiteNumber(record.utilization);
   if (utilization == null) return null;
   return openWindow(utilization, isoOrNull(record.resets_at ?? record.resetsAt));
+}
+
+const naturalNumber = (value: unknown): number | null => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+
+/** A currency code as the provider sent it, when Intl can name it: Intl.NumberFormat throws on anything else. */
+function currencyCode(value: unknown): string | null {
+  if (typeof value !== "string" || !/^[A-Za-z]{3}$/.test(value.trim())) return null;
+  return value.trim().toUpperCase();
+}
+
+function budgetLine(label: string, spend: PlanSpend): PlanExtra | null {
+  if (spend.limitMinor <= 0) return null;
+  return { ...extraLine(label, openWindow((spend.usedMinor / spend.limitMinor) * 100, null)), spend };
+}
+
+function readSpendBudget(value: unknown): PlanExtra | null {
+  const spend = asRecord(value);
+  if (spend?.enabled !== true) return null;
+  const used = asRecord(spend.used), limit = asRecord(spend.limit);
+  const currency = currencyCode(used?.currency);
+  const exponent = naturalNumber(used?.exponent), usedMinor = naturalNumber(used?.amount_minor), limitMinor = naturalNumber(limit?.amount_minor);
+  if (!currency || currency !== currencyCode(limit?.currency) || exponent === null || exponent !== limit?.exponent || usedMinor === null || limitMinor === null) return null;
+  return budgetLine(MONTHLY_SPEND, { usedMinor, limitMinor, currency, exponent });
+}
+
+/** Claude Code 2.1.312 documents `used_credits` and `monthly_limit` as minor units of `currency` ("cents for USD") and has
+ * no field saying how many digits those are, so the currency says. `is_enabled` false: this budget cannot cover a send. */
+function readExtraUsage(value: unknown, label: string): PlanExtra | null {
+  const extra = asRecord(value);
+  if (extra?.is_enabled !== true) return null;
+  const currency = currencyCode(extra.currency);
+  const usedMinor = naturalNumber(extra.used_credits), limitMinor = naturalNumber(extra.monthly_limit);
+  if (currency && usedMinor !== null && limitMinor !== null) {
+    const exponent = naturalNumber(extra.decimal_places) ?? currencyDigits(currency);
+    const line = exponent === null ? null : budgetLine(label, { usedMinor, limitMinor, currency, exponent });
+    if (line) return line;
+  }
+  const used = finiteNumber(extra.utilization);
+  return used === null ? null : extraLine(label, openWindow(used, null));
+}
+
+function currencyDigits(currency: string): number | null {
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage
+ * bought on top of them. */
+function readClaudeBudget(root: Record<string, unknown>, hasWindows: boolean): PlanExtra | null {
+  return readSpendBudget(root.spend) ?? readExtraUsage(root.extra_usage, hasWindows ? EXTRA_USAGE : MONTHLY_SPEND);
 }
 
 function claudeExtraLabel(key: string): string {

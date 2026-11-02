@@ -8,7 +8,7 @@ const claudeBash = (command: string) => ({ title: "Bash", summary: commandSummar
 describe("commandTarget", () => {
   it.each([
     ["python3 scrape.py --pages 40", "scrape.py"],
-    ["cd ~/projects/biber && python3 scrape.py --pages 40 --out leads.csv", "scrape.py"],
+    ["cd ~/projects/acme && python3 scrape.py --pages 40 --out leads.csv", "scrape.py"],
     ["pnpm test", "pnpm test"],
     ["npm run build", "npm run build"],
     ["uv run scripts/report.py", "uv run report.py"],
@@ -53,8 +53,8 @@ describe("maskAssignments", () => {
 
 describe("toolStep", () => {
   it("names a command by its program and target, with the whole command for the hover", () => {
-    expect(toolStep(claudeBash("cd ~/projects/biber && python3 scrape.py --pages 40"))).toEqual({
-      activity: "command", target: "scrape.py", detail: "cd ~/projects/biber && python3 scrape.py --pages 40",
+    expect(toolStep(claudeBash("cd ~/projects/acme && python3 scrape.py --pages 40"))).toEqual({
+      activity: "command", target: "scrape.py", detail: "cd ~/projects/acme && python3 scrape.py --pages 40",
     });
     expect(toolStep(claudeBash("pnpm test"))).toEqual({ activity: "command", target: "pnpm test" });
   });
@@ -87,11 +87,11 @@ describe("toolStep", () => {
     expect(toolStep({ title: codexCommand, summary: commandSummary({ command: codexCommand }), input: toolDetailPreview({ command: codexCommand, cwd: "/w" }) })?.target).toBe("scrape.py");
     const acp = { command: "python3 scrape.py", description: "Scrape" };
     expect(toolStep({ title: "python3 scrape.py", summary: commandSummary(acp), input: toolDetailPreview(acp) })?.target).toBe("scrape.py");
-    expect(toolStep({ title: "WebSearch", input: toolDetailPreview({ query: "Biber Dammbau" }) })).toEqual({ activity: "web", target: "Biber Dammbau" });
-    expect(toolStep({ title: "web_search", input: toolDetailPreview("Biber Dammbau") })).toEqual({ activity: "web", target: "Biber Dammbau" });
-    expect(toolStep({ title: "google_web_search", input: toolDetailPreview({ query: "Biber Dammbau" }) })?.target).toBe("Biber Dammbau");
-    expect(toolStep({ title: "WebFetch", input: toolDetailPreview({ url: "https://www.linkedin.com/company/biber/about?trk=x", prompt: "Summarise" }) }))
-      .toEqual({ activity: "fetch", target: "linkedin.com", detail: "linkedin.com/company/biber/about" });
+    expect(toolStep({ title: "WebSearch", input: toolDetailPreview({ query: "Acme construction leads" }) })).toEqual({ activity: "web", target: "Acme construction leads" });
+    expect(toolStep({ title: "web_search", input: toolDetailPreview("Acme construction leads") })).toEqual({ activity: "web", target: "Acme construction leads" });
+    expect(toolStep({ title: "google_web_search", input: toolDetailPreview({ query: "Acme construction leads" }) })?.target).toBe("Acme construction leads");
+    expect(toolStep({ title: "WebFetch", input: toolDetailPreview({ url: "https://www.linkedin.com/company/acme/about?trk=x", prompt: "Summarise" }) }))
+      .toEqual({ activity: "fetch", target: "linkedin.com", detail: "linkedin.com/company/acme/about" });
     expect(toolStep({ title: "web_fetch", input: toolDetailPreview({ url: "https://ada:pw@example.org/" }) })).toEqual({ activity: "fetch", target: "example.org" });
     expect(toolStep({ title: "Write", input: toolDetailPreview({ file_path: "/work/report.md", content: "x" }) })).toEqual({ activity: "write", target: "report.md" });
     expect(toolStep({ title: "edit", input: toolDetailPreview([{ path: "/w/web/index.html", kind: { type: "update" }, diff: "-a\n+b" }]) }))
@@ -99,7 +99,7 @@ describe("toolStep", () => {
   });
 
   it("cuts a long query to the cap and keeps the rest for the hover", () => {
-    const query = "Biber Dammbau Genehmigung Niedersachsen Landkreis Wolfsburg Bauantrag Fristen 2026";
+    const query = "Acme construction leads with building permits filed this quarter, application deadlines 2026";
     const step = toolStep({ title: "WebSearch", input: toolDetailPreview({ query }) })!;
     expect(step.target.length).toBeLessThanOrEqual(STEP_TARGET_MAX);
     expect(step.detail).toBe(query);

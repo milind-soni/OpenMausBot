@@ -1,3 +1,4 @@
+import { companionBridge } from "@/lib/companion-bridge";
 import {
   useCallback,
   useEffect,
@@ -64,7 +65,7 @@ import {
   phonePairingManualCodeMode,
 } from "../lib/companion-state";
 import { ConnectionDetail } from "./ConnectionDetail";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 
 export interface PhoneDevice {
   id: string;
@@ -125,9 +126,7 @@ interface PhonePairingRequest {
   generation: number;
 }
 
-export const companionBridge = (): CompanionBridge | null =>
-  // SAFETY: the preload owns this narrow bridge; browser builds are guarded by the optional lookup.
-  (globalThis as { ogb?: { companion?: CompanionBridge } }).ogb?.companion ?? null;
+export { companionBridge };
 
 export const companionAccountBridge = (): AccountBridge | null =>
   // SAFETY: Electron exposes only these account operations and never sends credentials to the renderer.
@@ -910,7 +909,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
           <Smartphone size={26} />
         </div>
-        <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: brand().name })}</h2>
+        <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: productName() })}</h2>
         <p className="mt-1.5 max-w-[460px] text-[14px] leading-relaxed text-ink-secondary">
           {t("phone.intro.detail")}
         </p>

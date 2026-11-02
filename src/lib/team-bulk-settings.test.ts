@@ -114,7 +114,7 @@ describe("team-wide settings", () => {
     expect(toOpus.map((row) => row.status)).toEqual(["apply", "skip", "skip", "skip"]);
     expect(toOpus[0]).toMatchObject({ patch: { modelSelection: { instanceId: "claude", model: "opus", effort: "low" }, keepThreadModels: true } });
     expect(toOpus[1]).toMatchObject({ reason: "Codex does not offer opus" });
-    expect(toOpus[3]).toMatchObject({ reason: "its engine is not available" });
+    expect(toOpus[3]).toMatchObject({ reason: "its AI isn't available" });
 
     const high = planTeamChange(bots, instances, { kind: "model", effort: "high" });
     expect(high.map((row) => row.status)).toEqual(["apply", "apply", "skip", "skip"]);
@@ -126,6 +126,14 @@ describe("team-wide settings", () => {
       .toMatchObject({ patch: { modelSelection: { instanceId: "claude", model: "sonnet" } } });
     expect(planTeamChange([bots[2]!], instances, { kind: "model", model: "local" })[0]).toMatchObject({ status: "unchanged" });
     expect(planTeamChange([bot("busy", { busy: true })], instances, { kind: "model", model: "sonnet" })[0]).toMatchObject({ status: "skip" });
+  });
+
+  it("offers no model the organization turned off, nor applies one", () => {
+    const blocked = instances.map((instance) => instance.instanceId === "claude"
+      ? { ...instance, models: { default: "sonnet", options: instance.models.options.map((option) => option.id === "opus" ? { ...option, orgBlocked: true as const } : option) } }
+      : instance);
+    expect(teamModelChoices([bot("a")], blocked).map((choice) => choice.id)).not.toContain("opus");
+    expect(planTeamChange([bot("a")], blocked, { kind: "model", model: "opus" })[0]).toMatchObject({ status: "skip" });
   });
 
   it("lists each model once with the engines offering it, and only effort levels some engine offers", () => {

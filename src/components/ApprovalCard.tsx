@@ -13,7 +13,9 @@ import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/p
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import type { SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { yourComputerAsk } from "@/lib/your-computer";
+import { computerAskWords } from "@/lib/computer-ask";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
 
@@ -44,6 +46,12 @@ const AUTOMATION_APPLIED_LINE = {
   run_now: "approval.applied.automation.runNow",
   delete: "approval.applied.automation.delete",
 } as const;
+const WAIT_APPLIED_LINE = {
+  waiting: "approval.applied.wait",
+  fired: "approval.applied.waitFired",
+  expired: "approval.applied.waitExpired",
+  cancelled: "approval.applied.waitCancelled",
+} as const;
 
 const SKILL_APPLIED_LINE = {
   create: "approval.applied.skill.create",
@@ -63,8 +71,11 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 /** A routine card no one answered is from before Triggers v2 applied changes on their own: nothing can confirm it now. */
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
+/** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
+export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
+
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
-  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
+  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
   if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
@@ -127,7 +138,7 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
   return scheduleLabel(schedule);
 }
 
-export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean } | undefined {
+export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; cancels?: boolean } | undefined {
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;
@@ -146,6 +157,8 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
             : false;
     return { line: t(AUTOMATION_APPLIED_LINE[operation.action], { name, title }), canUndo };
   }
+  const wait = card.waitRequest;
+  if (wait) return { line: t(WAIT_APPLIED_LINE[wait.settled ?? "waiting"], { name, title: wait.label }), canUndo: !wait.settled, cancels: true };
   const webhook = card.webhookRequest;
   if (webhook) {
     const target = webhook.operation.forBot ? ` · ${t("approval.applied.forBot", { target: `@${webhook.operation.forBot.name}` })}` : "";
@@ -198,7 +211,7 @@ function AppliedChangeLine({
   card: OptionCardData;
   name: string;
   threadId?: string;
-  summary: { line: string; canUndo: boolean };
+  summary: { line: string; canUndo: boolean; cancels?: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const [undoing, setUndoing] = useState(false);
@@ -207,7 +220,10 @@ function AppliedChangeLine({
   // Kept until the card's own patch arrives, so the Share button cannot come back in between.
   const [sharedNow, setSharedNow] = useState<{ requestId: string; shared: SkillShareRecord }>();
   const config = useContext(StoreContext)?.state.config ?? null;
+  const reviewsTeamMemory = useOwnerOrAdmin() !== false;
+  const canUndo = summary.canUndo && (!card.teamMemoryRequest || reviewsTeamMemory);
   const undone = card.undone === true;
+  const cancels = summary.cancels === true;
   const skill = card.skillRequest;
   const shared = skill?.shared ?? (sharedNow && sharedNow.requestId === card.requestId ? sharedNow.shared : undefined);
   const canShare = Boolean(skill && !shared && !undone && threadId && card.requestId)
@@ -232,9 +248,12 @@ function AppliedChangeLine({
     setError(undefined);
     api(`/api/threads/${threadId}/undo`, { method: "POST", body: JSON.stringify({ requestId: card.requestId }) })
       .catch((failure: unknown) => {
+        // A wait that had already ended answers 409, and its card then says how it ended.
+        if (cancels && failure instanceof ApiError && failure.status === 409) return;
         setError(failure instanceof ApiError && failure.body?.code === "changed-since"
           ? t("approval.applied.changedSince")
-          : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
+          : cancels ? t("approval.applied.cancelFailed", { name })
+            : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
       })
       .finally(() => setUndoing(false));
   };
@@ -247,16 +266,16 @@ function AppliedChangeLine({
           {shared && !undone && (
             <span> · {sharedNames.length ? t("approval.applied.sharedSkill", { names: sharedNames.join(", ") }) : t("approval.applied.sharedSkillNobody")}</span>
           )}
-          {undone && <span> · {t("approval.applied.undone")}</span>}
+          {undone && !cancels && <span> · {t("approval.applied.undone")}</span>}
         </span>
-        {!undone && summary.canUndo && threadId && (
+        {!undone && canUndo && threadId && (
           <button
             type="button"
             onClick={undo}
             disabled={undoing}
             className={cn(TEXT_ACTION, "text-accent disabled:opacity-60")}
           >
-            {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
+            {cancels ? t(undoing ? "approval.applied.cancelling" : "common.cancel") : t(undoing ? "approval.applied.undoing" : "approval.applied.undo")}
           </button>
         )}
         {canShare && (
@@ -419,7 +438,7 @@ export function ApprovalCard({
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
   const isProfileRequest = Boolean(card.profileRequest);
-  const isTeamSetup = Boolean(card.teamSetupRequest);
+  const titled = titledCard(card);
   const routineAction = card.routineRequest?.operation.action;
   const skillAction = card.skillRequest?.action;
   const heldNote = tFromServer(card.heldCode, card.held);
@@ -441,7 +460,18 @@ export function ApprovalCard({
         })
     : undefined;
 
-  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !isTeamSetup && !card.modelRequest) {
+  const turnOn = computerAskWords(card, bot?.name ?? t("approval.someone"));
+  if (turnOn) {
+    const state = card.computerAsk?.state;
+    const waiting = state === "asking" || state === "failed";
+    return (
+      <div data-computer-ask={state} className="w-full">
+        <CompactApprovalRow header={turnOn.line} summary={waiting ? turnOn.reason : undefined} detail="" showDetailInline={false} outcome={turnOn.outcome}
+          allowed={state === "on" || state === "turning-on"} byVoice={byVoice} waiting={waiting} answeredBelow={waiting && !card.dismissed} />
+      </div>
+    );
+  }
+  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !titled && !card.modelRequest) {
     const waiting = !settled && !expired;
     const ask = yourComputerAsk(card, bot?.name ?? t("approval.someone"));
     const header = ask ? ask.line : outbound
@@ -476,7 +506,7 @@ export function ApprovalCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {isTeamSetup ? card.title : outbound ? outbound.headline : profileHeader ?? (
+          {titled ? card.title : outbound ? outbound.headline : profileHeader ?? (
             <>
               {bot
                 ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
@@ -484,7 +514,7 @@ export function ApprovalCard({
             </>
           )}
         </div>
-        {displayTool && !isTeamSetup && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
+        {displayTool && !titled && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
       </div>
       {outbound?.summary && <div className="mt-0.5 text-[13px] text-ink-secondary">{outbound.summary}</div>}
 
@@ -521,7 +551,7 @@ export function ApprovalCard({
         ) : (
           <>
             <ShieldCheck size={14} className="text-accent" />
-            {isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup
+            {isRoutineRequest || isSkillRequest || isProfileRequest || titled
               ? t("approval.status.waitingConfirmation")
               : t("approval.status.waitingAnswer")}
           </>

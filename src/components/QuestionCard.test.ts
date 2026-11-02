@@ -42,8 +42,8 @@ const questionRequest: QuestionRequestCardData = {
   ],
 };
 
-const biber = { name: "Biber", color: "teal" as const };
-const CHOICES = ["Ja, nur den Abschlusstext", "Ja, auch den Einladungstext", "Nein"];
+const ledger = { name: "Ledger", color: "teal" as const };
+const CHOICES = ["Yes, only the footer text", "Yes, the welcome text too", "No"];
 
 function message(card: Partial<NonNullable<Message["card"]>> = {}, extra: Partial<Message> = {}): Message {
   return {
@@ -66,10 +66,10 @@ function message(card: Partial<NonNullable<Message["card"]>> = {}, extra: Partia
 
 /** ask_user's own shape: one question, the bot's own choices as the card's options. */
 const asked = (card: Partial<NonNullable<Message["card"]>> = {}, extra: Partial<Message> = {}) =>
-  message({ subtitle: "Soll ich den Fix für die Sondervariante umsetzen?", options: CHOICES, questionRequest: undefined, ...card }, extra);
+  message({ subtitle: "Should I apply the fix to the pricing page?", options: CHOICES, questionRequest: undefined, ...card }, extra);
 
 const render = (m: Message, props: Record<string, unknown> = {}) =>
-  renderToStaticMarkup(createElement(QuestionCard, { threadId: "thread-1", asker: biber, message: m, ...props }));
+  renderToStaticMarkup(createElement(QuestionCard, { threadId: "thread-1", asker: ledger, message: m, ...props }));
 
 describe("one card for every question", () => {
   it("is what a bot's question card is, whichever engine asked it, and nothing else", () => {
@@ -82,17 +82,17 @@ describe("one card for every question", () => {
   });
 
   it("reads ask_user's question and choices as one question", () => {
-    expect(cardQuestions(asked().card!)).toEqual([{ question: "Soll ich den Fix für die Sondervariante umsetzen?", options: CHOICES.map((label) => ({ label })) }]);
+    expect(cardQuestions(asked().card!)).toEqual([{ question: "Should I apply the fix to the pricing page?", options: CHOICES.map((label) => ({ label })) }]);
     expect(cardQuestions(asked({ fixedOptions: true }).card!)[0]!.custom).toBe(false);
-    expect(cardQuestions(asked({ options: [] }).card!)).toEqual([{ question: "Soll ich den Fix für die Sondervariante umsetzen?", options: [] }]);
+    expect(cardQuestions(asked({ options: [] }).card!)).toEqual([{ question: "Should I apply the fix to the pricing page?", options: [] }]);
   });
 });
 
 describe("QuestionCard", () => {
-  it("leads with the bot that asks, then the question in clear ink, then one button per German choice", () => {
+  it("leads with the bot that asks, then the question in clear ink, then one button per choice", () => {
     const html = render(asked());
-    expect(html).toContain("Biber asks");
-    expect(html).toMatch(/text-ink"><bdi dir="auto">Soll ich den Fix für die Sondervariante umsetzen\?</);
+    expect(html).toContain("Ledger asks");
+    expect(html).toMatch(/text-ink"><bdi dir="auto">Should I apply the fix to the pricing page\?</);
     for (const choice of CHOICES) expect(html).toContain(`>${choice}</span>`);
     expect(html.match(/data-ask-choice=""/g)).toHaveLength(3);
     expect(html).not.toContain("aria-keyshortcuts");
@@ -101,7 +101,7 @@ describe("QuestionCard", () => {
   });
 
   it("asks an open question with a reply field and a send button in the bot's colour, no choices", () => {
-    const html = render(asked({ options: [], subtitle: "Welche Formulierung soll der neue Abschlusstext bekommen?" }));
+    const html = render(asked({ options: [], subtitle: "What wording should the new footer text use?" }));
     expect(html).not.toContain("data-ask-choice");
     expect(html).toContain('placeholder="Type your answer"');
     expect(html).toMatch(/<button type="submit"[^>]*class="[^"]*bot-button/);
@@ -156,8 +156,8 @@ describe("QuestionCard", () => {
   });
 
   it("says where an inbox's copy was asked, as a link back there, in its own header", () => {
-    const copy = render(asked({}, { inbox: { kind: "ask", from: { name: "Biber", botId: "biber" }, origin: { botId: "biber", threadId: "work", title: "Sondervariante: Fix" } } }));
-    expect(copy).toMatch(/<button[^>]*aria-label="Open Sondervariante: Fix"[^>]*>· in Sondervariante: Fix<\/button>/);
+    const copy = render(asked({}, { inbox: { kind: "ask", from: { name: "Ledger", botId: "ledger" }, origin: { botId: "ledger", threadId: "work", title: "Pricing page: fix" } } }));
+    expect(copy).toMatch(/<button[^>]*aria-label="Open Pricing page: fix"[^>]*>· in Pricing page: fix<\/button>/);
   });
 });
 
@@ -171,7 +171,7 @@ describe("a settled question", () => {
   });
 
   it("says You answered for the person's own words", () => {
-    expect(render(asked({ answered: "answer", answeredText: "Erst morgen" }))).toContain("You answered:");
+    expect(render(asked({ answered: "answer", answeredText: "Not until tomorrow" }))).toContain("You answered:");
   });
 
   it("folds a set into one line, with the full answer behind Details", () => {

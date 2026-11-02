@@ -56,6 +56,8 @@ function fixture() {
     audienceChanged: () => {},
     assertTeamComputerChangeIdle: () => {},
     routines: () => null,
+    // A member's session may chat with this bot: the level that still can't move it or change what it may do.
+    levelOf: () => "chat",
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
   const patch = async (botId: string, body: Record<string, unknown>, as: { auth?: RequestAuth; headers?: Record<string, string> } = {}) => {

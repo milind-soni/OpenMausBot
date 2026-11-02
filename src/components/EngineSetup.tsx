@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare, X } from "lucide-react";
-import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/store";
+import { api, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
@@ -8,25 +8,12 @@ import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./Devic
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
 import { AppCopyNotice, AppCopySetup } from "./EngineAppCopy";
-import { noteAppCopySwitch } from "@/state/engine-install";
+import { installCommandFor, noteAppCopySwitch } from "@/state/engine-install";
+
+export { installCommandFor };
 import { keyEntry, keyForInstance, type KeyId } from "./keys/key-catalog";
 import { openKeySettings } from "./keys/key-focus";
 import { KeyRow, SavedKeyLine } from "./keys/KeyRow";
-
-type Platform = "darwin" | "win32" | "linux";
-
-function hostPlatform(): Platform {
-  const platform = window.ogb?.platform;
-  if (platform === "darwin" || platform === "win32" || platform === "linux") return platform;
-  const userAgent = navigator.userAgent;
-  if (userAgent.includes("Mac")) return "darwin";
-  if (userAgent.includes("Win")) return "win32";
-  return "linux";
-}
-
-export function installCommandFor(install: EngineInstall | undefined): string | null {
-  return install?.command?.[install.platform ?? hostPlatform()] ?? null;
-}
 
 export function needsSignIn(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state === "available" && instance.snapshot.authenticated === false;
@@ -387,6 +374,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             <input
               value={callbackUrl}
               onChange={(event) => setCallbackUrl(event.target.value)}
+              aria-label={t("engineSetup.otherComputerUrl")}
               placeholder="http://127.0.0.1:…/?code=…"
               className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
             />
@@ -596,7 +584,7 @@ export function EngineSetup({
       {deviceSignIn || browserSignIn ? (
         <>
           <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} />
-          {deviceSignIn && provider === "grok" && signInCommand && serverTerminal(cloudHome) && (
+          {deviceSignIn && provider !== "codex" && signInCommand && serverTerminal(cloudHome) && (
             <details className="mt-2 rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
               <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
               <CommandRow command={signInCommand} actionLabel={t("engineSetup.openSignIn")} compact />

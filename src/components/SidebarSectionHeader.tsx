@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Trash2 } from "lucide-react";
-import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -7,6 +7,7 @@ import {
   sidebarAttentionLabel,
   type SidebarSectionAttention,
 } from "@/lib/sidebar-attention";
+import type { SectionNaming } from "./SidebarBotDrag";
 
 export function SidebarSectionHeader({
   name,
@@ -14,7 +15,7 @@ export function SidebarSectionHeader({
   attention,
   alert,
   onToggle,
-  reorderable,
+  reorderable: canReorder,
   dragging,
   onDragStart,
   onDragEnd,
@@ -26,6 +27,8 @@ export function SidebarSectionHeader({
   menuOpen = false,
   lead,
   count,
+  naming,
+  dropInto = false,
 }: {
   name: string;
   collapsed: boolean;
@@ -46,7 +49,12 @@ export function SidebarSectionHeader({
   lead?: string;
   /** How many rows the section holds, shown at rest where the chevron shows on hover (Simple). */
   count?: number;
+  /** A name field in place of the name, for a department being made or renamed. */
+  naming?: SectionNaming;
+  /** A dragged bot would go into this department. */
+  dropInto?: boolean;
 }) {
+  const reorderable = canReorder && !naming;
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const leadLabel = lead ? <span data-department-lead={lead} title={t("owner.departmentLeadAria", { department: name, name: lead })}
     className="shrink-0 truncate text-[11px] font-normal text-ink-tertiary">{t("owner.departmentLead", { name: lead })}<span className="sr-only">{`, ${t("owner.departmentLeadAria", { department: name, name: lead })}`}</span></span> : null;
@@ -69,6 +77,8 @@ export function SidebarSectionHeader({
       ? t("sidebar.section.expand", { name })
       : t("sidebar.section.collapse", { name });
 
+  const dropMark = dropInto ? "bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70" : undefined;
+
   if (line) {
     const tail = (
       <span aria-hidden="true" className="relative flex size-4 shrink-0 items-center justify-center">
@@ -80,14 +90,15 @@ export function SidebarSectionHeader({
       <div
         data-section={name}
         data-sidebar-section-line=""
+        data-section-drop={dropInto ? "" : undefined}
         tabIndex={onContextMenu ? -1 : undefined}
-        onContextMenu={onContextMenu}
+        onContextMenu={naming ? undefined : onContextMenu}
         draggable={reorderable || undefined}
         onDragStart={reorderable ? onDragStart : undefined}
         onDragEnd={reorderable ? onDragEnd : undefined}
-        className={cn("group/section flex h-[30px] items-center gap-1.5 rounded-[6px] px-2 pb-1.5 pt-2 hover:bg-raised/50", reorderable && "cursor-grab", dragging && "opacity-40")}
+        className={cn("group/section flex h-[30px] items-center gap-1.5 rounded-[6px] px-2 pb-1.5 pt-2 hover:bg-raised/50", reorderable && "cursor-grab", dragging && "opacity-40", naming && "py-0.5", dropMark)}
       >
-        {onToggle ? (
+        {naming ? <SectionNameField {...naming} /> : onToggle ? (
           <button
             type="button"
             onClick={onToggle}
@@ -110,7 +121,7 @@ export function SidebarSectionHeader({
             {tail}
           </div>
         )}
-        {onMenu && (
+        {onMenu && !naming && (
           <button
             type="button"
             aria-label={t("team.actions", { name })}
@@ -128,8 +139,8 @@ export function SidebarSectionHeader({
   }
 
   return (
-    <div className="flex items-center gap-1 px-2 pb-1" data-section={name} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={onContextMenu}>
-      {onToggle ? (
+    <div className={cn("flex items-center gap-1 rounded-md px-2 pb-1", dropMark)} data-section={name} data-section-drop={dropInto ? "" : undefined} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={naming ? undefined : onContextMenu}>
+      {naming ? <SectionNameField {...naming} /> : onToggle ? (
         <button
           type="button"
           onClick={onToggle}
@@ -154,7 +165,7 @@ export function SidebarSectionHeader({
         </div>
       )}
       {leadLabel}
-      {onDelete && (
+      {onDelete && !naming && (
         <button
           type="button"
           onClick={onDelete}
@@ -181,6 +192,45 @@ export function SidebarSectionHeader({
         </span>
       )}
     </div>
+  );
+}
+
+function SectionNameField({ value, label, onCommit, onCancel }: SectionNaming) {
+  const [draft, setDraft] = useState(value);
+  const field = useRef<HTMLInputElement>(null);
+  const settled = useRef(false);
+  // A menu that just closed hands focus back to its opener after this field mounts.
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, []);
+  const settle = (save: boolean) => {
+    if (settled.current) return;
+    settled.current = true;
+    if (save) onCommit(draft);
+    else onCancel();
+  };
+  return (
+    <input
+      ref={field}
+      data-section-name-field=""
+      value={draft}
+      maxLength={60}
+      aria-label={label}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => settle(true)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          settle(true);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          settle(false);
+        }
+      }}
+      className="h-6 min-w-0 flex-1 rounded-md bg-ink/[0.05] px-1.5 text-[13px] leading-[18px] text-ink outline-none ring-1 ring-accent/60"
+    />
   );
 }
 

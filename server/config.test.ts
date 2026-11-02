@@ -706,6 +706,29 @@ describe("a config.json saved with a byte order mark", () => {
   });
 });
 
+describe("loadConfig between changes", () => {
+  it("hands every caller its own copy, and sees a save or an edit made outside the app", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    const settle = () => { const past = new Date(Date.now() - 60_000); utimesSync(path, past, past); };
+    writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 10, warnAtPercent: 50 } }));
+    settle();
+    try {
+      const first = loadConfig();
+      first.budgets!.monthlyUsd = 999;
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 10, warnAtPercent: 50 });
+      saveConfig({ budgets: { monthlyUsd: 20, warnAtPercent: 50 } });
+      settle();
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 20, warnAtPercent: 50 });
+      writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 30, warnAtPercent: 50 } }));
+      settle();
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 30, warnAtPercent: 50 });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+});
+
 describe("saving the newer sections", () => {
   it("persists the Anthropic key, the spend limit and the price list, section by section", () => {
     const path = join(DATA_DIR, "config.json");
@@ -2202,6 +2225,8 @@ describe("a value derived from config.json", () => {
     const derive = vi.fn(members);
     const read = cacheUntilConfigChanges(derive);
     read();
+    // Linux stamps ctime from a clock that ticks every 1 to 10 ms, so a chmod in the write's own tick keeps its ctime.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     // chmod and chown leave the size, the time and the file the same.
     chmodSync(path, 0o600);
     read();

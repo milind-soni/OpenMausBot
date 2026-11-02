@@ -14,6 +14,9 @@ import { boundedAgentResult } from "./agents-result.ts";
 import { outOfBounds } from "./agents-schema.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
+import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
+import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
+import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
@@ -100,6 +103,14 @@ function handoffIds(r: Json): string[] {
 }
 const MOVED_ENTRIES_SHOWN = 5;
 const FORGOTTEN_SHOWN = 8;
+
+/** A preference saved once in the person's About me, which every bot reads in their work. */
+function preferText(r: Json): string {
+  const whose = typeof r.person === "string" && r.person ? `${r.person}'s` : "the person's";
+  return r.preference === "saved"
+    ? `Saved in ${whose} About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too.`
+    : `Already in ${whose} About me, or they removed it before: nothing to save or pass on.`;
+}
 
 function forgetText(passage: string, r: Json): string {
   const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -209,6 +220,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
+  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context);
+  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context);
+  if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };
@@ -249,13 +263,13 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
     const usable = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === "string")
       && typeof canonical.message === "string" && canonical.message.trim().length > 0
-      && (canonical.thread === undefined || canonical.thread === "standing" || canonical.thread === "new")
+      && (canonical.thread === undefined || (typeof canonical.thread === "string" && /^[\w-]{1,128}$/.test(canonical.thread)))
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string");
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string");
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
@@ -266,6 +280,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       thread: canonical.thread, reply: canonical.reply,
       title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
+      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }
@@ -640,10 +655,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (member === "memory_update") {
     const passageOnly = args.action === "remove" || args.action === "forget";
-    if (!["append", "replace", "remove", "supersede", "forget"].includes(String(args.action))
+    if (!["append", "replace", "remove", "supersede", "forget", "prefer"].includes(String(args.action))
       || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
-      || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
-      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, or forget with old_text naming what to forget.", isError: true };
+      || (args.action !== "append" && args.action !== "prefer" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
+      return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, forget with old_text naming what to forget, or prefer with text: one standing preference of the person.", isError: true };
     }
     const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
@@ -658,6 +673,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
+    if (args.action === "prefer") return { text: preferText(r) };
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
     const full = r.truncated
@@ -845,34 +861,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       text: `A confirmation card is now visible to the user for ${proposal}.${warningText}\n\n${status} End this turn and wait for the decision.`,
     };
   }
-  if (name === "add_mcp_server") {
-    let saved: Json;
-    try {
-      saved = await api("/api/internal/mcp-servers", {
-        method: "POST",
-        body: JSON.stringify(args),
-      });
-    } catch (error) {
-      return { text: error instanceof Error ? error.message : String(error), isError: true };
-    }
-    const serverName = typeof saved.name === "string" && saved.name ? saved.name : "the MCP server";
-    const transport = saved.transport === "command" || saved.transport === "http" || saved.transport === "sse" ? saved.transport : "";
-    const target = typeof saved.target === "string" ? saved.target : "";
-    const keyNames = (value: unknown) => Array.isArray(value) && value.every((key) => typeof key === "string") ? value.join(", ") : "";
-    const envKeys = keyNames(saved.envKeys);
-    const headerKeys = keyNames(saved.headerKeys);
-    const where = transport && target ? ` (${transport} ${target})` : "";
-    const named = [
-      envKeys ? `Environment names on file: ${envKeys}.` : "",
-      headerKeys ? `Header names on file: ${headerKeys}.` : "",
-    ].filter(Boolean).join(" ");
-    const local = transport === "command" ? " Enabling a local command runs that command on their computer." : "";
-    const keptIn = Array.isArray(saved.keptIn) ? saved.keptIn.filter((path): path is string => typeof path === "string") : [];
-    const own = (saved.own === true ? " It uses files in your own folder, so it works only for you, not for other bots." : "")
-      + (keptIn.length ? ` Its files were in this conversation's temporary folder, so they were copied to ${keptIn.join(", ")} in your own folder, and it runs from there: change them there.` : "");
-    return {
-      text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${own}${named ? ` ${named}` : ""}`,
-    };
+  if (name === "mcp_server") {
+    const r = await apiResponse("/api/internal/mcp-servers", { method: "POST", body: JSON.stringify(args) });
+    if (!r.ok) return { text: String(r.body.error ?? `mcp_server failed (HTTP ${r.status}).`), isError: true };
+    return { text: String(r.body.text ?? "") };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

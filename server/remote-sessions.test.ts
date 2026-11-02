@@ -189,6 +189,8 @@ describe("before pairing", () => {
       selfUpdate: "operator",
       emailSignIn: false,
       jobs: true,
+      // A server nobody else signs in to can be its owner's bots' home: it takes their move once they pair.
+      move: 1,
     });
     const refused = await call("/api/bots", { headers: remote("10.0.0.1") });
     expect(refused.status).toBe(403);

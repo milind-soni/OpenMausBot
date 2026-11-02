@@ -438,6 +438,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       const browser = threadBrowser(threadId);
       return browser !== null && (browser.session === undefined || !browserRunning(browser.session, browser.spec));
     },
+    running: (threadId) => {
+      const browser = threadBrowser(threadId);
+      return browser?.session !== undefined && browserRunning(browser.session, browser.spec);
+    },
     stopped: (threadId) => {
       const browser = threadBrowser(threadId);
       if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);

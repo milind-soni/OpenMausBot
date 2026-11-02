@@ -49,6 +49,7 @@ export function RoomBulletin({ group, remoteClient }: { group: Group; remoteClie
             onChange={(e) => bulletin.setDraft(e.target.value)}
             onBlur={bulletin.save}
             onKeyDown={bulletin.onKeyDown}
+            aria-label={t("room.bulletin.label")}
             placeholder={t("room.bulletin.placeholder")}
             rows={4}
             className="w-full resize-none bg-transparent text-[13px] leading-relaxed text-ink placeholder:text-ink-secondary focus:outline-none"

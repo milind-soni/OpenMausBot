@@ -45,7 +45,7 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
     return field.getBoundingClientRect().height > 0;
   })()`);
 
-  const startupBox = `document.querySelector('input[aria-label="Also run when OpenMausBot starts"]')`;
+  const startupBox = `document.querySelector('input[aria-label="Also run when MausBot starts"]')`;
 
   const title = 'input[placeholder="What should happen?"]';
   const newButton = "[...document.querySelectorAll('main header button')].find(button => button.textContent === 'New')";

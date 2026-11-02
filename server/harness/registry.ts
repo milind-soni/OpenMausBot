@@ -4,6 +4,7 @@ import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath 
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
+import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
 export { engineMemory } from "../engine-memory.ts";
@@ -65,6 +66,8 @@ function cliOfRaw(raw: unknown): string | undefined {
 export const SNAPSHOT_DEADLINE_MS = 60_000;
 /** How long a finished status read answers later reads, so a start-up's model lists and engine-list reads probe each CLI once. */
 export const SNAPSHOT_REUSE_MS = 3_000;
+/** How long the engine list people see answers from earlier reads before one is read again in the background. */
+export const ENGINE_LIST_REUSE_MS = 60_000;
 const SNAPSHOT_DEADLINE_REASON = "This engine did not report its status within a minute. Check that its CLI starts in a terminal.";
 
 function withinDeadline(read: () => Promise<ProviderSnapshot>): Promise<ProviderSnapshot> {
@@ -107,6 +110,8 @@ export class ProviderRegistry {
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
+  /** Per instance object: settings that reload an engine make a new one, so its status is read afresh. */
+  private readsOf = new WeakMap<ProviderInstance, { snapshot: ProviderSnapshot; at: number; generation: number }>();
   private driversByKind: Map<string, AnyProviderDriver>;
   private readonly enginesBaseDir: string | undefined;
   private readonly npmPresent: () => boolean;
@@ -168,13 +173,13 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      const live = withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+      const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
-      }))));
+      })))));
       this.shareSnapshot(live);
       return { instanceId, live: decorate ? decorate(live) : live };
     } catch (e) {
@@ -395,17 +400,28 @@ export class ProviderRegistry {
     return isAppStandaloneCopy(cli, this.enginesBaseDir, standaloneLookupPath(this.enginesBaseDir));
   }
 
-  describe(options: { known?: boolean } = {}) {
+  /** `reuse`: answer from a status read since the last forgetSnapshots(); one older than `ms` is read again in the background
+   * and `changed` runs when that read differs. */
+  describe(options: { known?: boolean; reuse?: { ms: number; changed(): void } } = {}) {
     return this.describeWith((instance) => {
       const seed = options.known && this.unread?.has(instance.instanceId) ? this.seeds.get(instance.instanceId) : undefined;
-      return seed ? Promise.resolve(seed) : this.read(instance);
+      if (seed) return Promise.resolve(seed);
+      const last = options.reuse && this.readsOf.get(instance);
+      if (!options.reuse || !last || last.generation !== this.snapshotGeneration) return this.read(instance);
+      if (Date.now() - last.at >= options.reuse.ms) {
+        const { changed } = options.reuse;
+        void this.read(instance).then((snapshot) => { if (JSON.stringify(snapshot) !== JSON.stringify(last.snapshot)) changed(); });
+      }
+      return Promise.resolve(last.snapshot);
     });
   }
 
   private async read(instance: ProviderInstance): Promise<ProviderSnapshot> {
     let snapshot: ProviderSnapshot;
+    const generation = this.snapshotGeneration;
     try {
       snapshot = await instance.snapshot();
+      this.readsOf.set(instance, { snapshot, at: Date.now(), generation });
     } catch (e) {
       snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
     }

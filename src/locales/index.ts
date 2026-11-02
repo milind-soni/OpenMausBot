@@ -1,44 +1,63 @@
 import en from "./en.json";
-import de from "./de.json";
-import es from "./es.json";
-import fr from "./fr.json";
-import hi from "./hi.json";
-import ja from "./ja.json";
-import ptBr from "./pt-br.json";
-import zh from "./zh.json";
-import zhTw from "./zh-tw.json";
-import uk from "./uk.json";
-import vi from "./vi.json";
-import tr from "./tr.json";
-import pl from "./pl.json";
-import ru from "./ru.json";
-import it from "./it.json";
 
 export { en };
 export type LocaleKey = keyof typeof en;
 export type LocalePack = Partial<Record<LocaleKey, string>>;
 
-export const locales: Record<string, LocalePack> = {
-  en,
-  de,
-  es,
-  fr,
-  hi,
-  ja,
-  pt: ptBr,
-  "pt-br": ptBr,
-  zh,
-  "zh-hant": zhTw,
-  "zh-hk": zhTw,
-  "zh-mo": zhTw,
-  "zh-tw": zhTw,
-  uk,
-  vi,
-  tr,
-  pl,
-  ru,
-  it,
+const packLoaders = {
+  de: () => import("./de.json"),
+  es: () => import("./es.json"),
+  fr: () => import("./fr.json"),
+  hi: () => import("./hi.json"),
+  ja: () => import("./ja.json"),
+  "pt-br": () => import("./pt-br.json"),
+  zh: () => import("./zh.json"),
+  "zh-tw": () => import("./zh-tw.json"),
+  uk: () => import("./uk.json"),
+  vi: () => import("./vi.json"),
+  tr: () => import("./tr.json"),
+  pl: () => import("./pl.json"),
+  ru: () => import("./ru.json"),
+  it: () => import("./it.json"),
+  ko: () => import("./ko.json"),
+} satisfies Record<string, () => Promise<{ default: LocalePack }>>;
+
+export type PackName = "en" | keyof typeof packLoaders;
+
+/** Every language tag the app answers to, and the pack it shows. */
+export const localePacks: Readonly<Record<string, PackName>> = {
+  en: "en",
+  de: "de",
+  es: "es",
+  fr: "fr",
+  hi: "hi",
+  ja: "ja",
+  pt: "pt-br",
+  "pt-br": "pt-br",
+  zh: "zh",
+  "zh-hant": "zh-tw",
+  "zh-hk": "zh-tw",
+  "zh-mo": "zh-tw",
+  "zh-tw": "zh-tw",
+  uk: "uk",
+  vi: "vi",
+  tr: "tr",
+  pl: "pl",
+  ru: "ru",
+  it: "it",
+  ko: "ko",
 };
+
+/** The packs this page has loaded, under every tag that shows them: English, and each one loadLocalePack fetched. */
+export const locales: Record<string, LocalePack> = { en };
+
+export async function loadLocalePack(tag: string): Promise<LocalePack | undefined> {
+  const name = localePacks[tag];
+  if (locales[tag] || !name || name === "en") return locales[tag];
+  const pack: LocalePack = (await packLoaders[name]()).default;
+  for (const [alias, shown] of Object.entries(localePacks)) if (shown === name) locales[alias] ??= pack;
+  return pack;
+}
 
 export const localeChoices: ReadonlyArray<{ code: string; label: string }> = [
   { code: "en", label: "English" },
@@ -56,4 +75,5 @@ export const localeChoices: ReadonlyArray<{ code: string; label: string }> = [
   { code: "pl", label: "Polski" },
   { code: "ru", label: "Русский" },
   { code: "it", label: "Italiano" },
+  { code: "ko", label: "한국어" },
 ];

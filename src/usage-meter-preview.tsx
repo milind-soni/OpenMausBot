@@ -9,7 +9,7 @@ import { ConfirmDialogCard } from "@/components/ConfirmDialog";
 import { CloudUsageCardView, CloudUsageSettingsView } from "@/components/CloudUsageMeter";
 import { Card } from "@/components/SettingsPrimitives";
 import { cloudPlanLabel } from "@/lib/cloud-plan";
-import { setLocale, t } from "@/lib/i18n";
+import { loadLocale, t } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
 import { upgradeConfirmBody, usageCardView } from "@/lib/usage-meter";
 import "./styles.css";
@@ -90,7 +90,6 @@ function Preview() {
   const params = new URLSearchParams(location.search);
   const skin = (SKIN_IDS as readonly string[]).includes(params.get("skin") ?? "") ? params.get("skin") as SkinId : "midnight";
   document.documentElement.dataset.skin = skin;
-  setLocale(params.get("lang") ?? "en");
   const usage = USAGE[params.get("state") ?? "near"] ?? USAGE.near!;
   const view = params.get("view") ?? "sidebar";
   return <div className="h-screen overflow-hidden">
@@ -98,4 +97,5 @@ function Preview() {
   </div>;
 }
 
+await loadLocale(new URLSearchParams(location.search).get("lang") ?? "en");
 createRoot(document.getElementById("root")!).render(<StrictMode><Preview /></StrictMode>);

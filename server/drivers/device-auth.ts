@@ -292,9 +292,10 @@ export class DeviceAuthController {
         return;
       }
       output += chunk.toString("utf8");
-      const prompt = parsePrompt && !flow.ready ? deviceSignInPrompt(provider, stripVTControlCharacters(output)) : null;
-      if (prompt) {
-        flow.status = { ...flow.status, ...prompt };
+      const prompt = parsePrompt ? deviceSignInPrompt(provider, stripVTControlCharacters(output)) : null;
+      if (!prompt || (prompt.userCode === flow.status.userCode && prompt.authorizationUrl === flow.status.authorizationUrl)) return;
+      flow.status = { ...flow.status, ...prompt };
+      if (!flow.ready) {
         flow.ready = true;
         clearTimeout(flow.startupTimer);
         flow.resolve({ ...flow.status, phase: "waiting" });

@@ -465,6 +465,9 @@ describe("workspace", () => {
     expect(refused).not.toContain(REMEMBER_AND_FORGET);
     expect(REMEMBER_AND_FORGET).toContain("save it now with memory_update append");
     expect(REMEMBER_AND_FORGET).toContain("call memory_update with action forget");
+    // a preference for all their bots is saved once, never passed on to each bot
+    expect(REMEMBER_AND_FORGET).toContain("saved once with memory_update action prefer");
+    expect(REMEMBER_AND_FORGET).toContain("Never pass it on to each bot.");
   });
 
   it("requires explicit remove to delete a memory passage", () => {

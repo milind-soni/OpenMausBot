@@ -19,14 +19,14 @@ describe("self-hosted update row", () => {
   it("names the new version and how this install is updated", () => {
     const docker = check({ available: true, latest: "0.1.93", command: "docker compose pull omb && docker compose up -d", restart: false });
     expect(serverUpdateRow("available", docker)).toEqual({
-      label: "Version 0.1.93 available — release notes",
+      label: "Version 0.1.93 available (release notes)",
       subtitle: "Update with: docker compose pull omb && docker compose up -d",
     });
     const npm = check({ install: "npm", available: true, latest: "0.1.93", command: "npm install -g openmausbot@latest", restart: true });
     expect(serverUpdateRow("available", npm).subtitle).toBe("Update with: npm install -g openmausbot@latest, then restart the app");
     // an install it cannot recognise still learns there is a new version
     expect(serverUpdateRow("available", check({ install: "unknown", available: true, latest: "0.1.93" }))).toEqual({
-      label: "Version 0.1.93 available — release notes",
+      label: "Version 0.1.93 available (release notes)",
       subtitle: undefined,
     });
   });
@@ -55,13 +55,13 @@ describe("self-hosted update row", () => {
 
   it("explains servers that are updated elsewhere", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" })).label).toBe(
-      "Updates come from the OpenMausBot app on the computer these bots run on",
+      "Updates come from the MausBot app on the computer these bots run on",
     );
     expect(serverUpdateRow("up-to-date", check({ install: "managed" })).label).toBe("Kept up to date for you");
   });
 
   it("reports a failed check plainly", () => {
-    expect(serverUpdateRow("error", null)).toEqual({ label: "Couldn't check for updates — try again" });
+    expect(serverUpdateRow("error", null)).toEqual({ label: "Couldn't check for updates. Try again." });
   });
 });
 
@@ -85,10 +85,10 @@ describe("the update row for another server the app shows", () => {
 
   it("keeps the rows of servers updated for their owner, and the row of this computer", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" }), "0.1.116", "Office Mac").label).toBe(
-      "Updates come from the OpenMausBot app on the computer these bots run on",
+      "Updates come from the MausBot app on the computer these bots run on",
     );
     expect(serverUpdateRow("up-to-date", check({ install: "managed" }), "0.1.116", "Office Mac").label).toBe("Kept up to date for you");
-    expect(serverUpdateRow("available", npm, "0.1.116", null).label).toBe("Version 0.1.127 available — release notes");
+    expect(serverUpdateRow("available", npm, "0.1.116", null).label).toBe("Version 0.1.127 available (release notes)");
   });
 
   it("says it in German too", () => {

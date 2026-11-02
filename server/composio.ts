@@ -580,7 +580,7 @@ function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
 
 let connectorToolsRequest: { identity: string; services: Promise<Record<string, ConnectorToolListing[]>> } | null = null;
 
-/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland). */
+/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read answers the last good one. */
 export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
   const identity = connectorToolsIdentity(cfg, as);
   if (connectorServiceSlugsCache?.identity === identity
@@ -594,7 +594,7 @@ export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): 
       connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
       return slugs;
     },
-    () => [] as readonly string[],
+    () => connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache.slugs : [] as readonly string[],
   );
   connectorServiceSlugsRequest = { identity, slugs: walk };
   try {

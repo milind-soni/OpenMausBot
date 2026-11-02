@@ -24,7 +24,7 @@ const PLACES: RailPlace[] = [
 let host: HTMLDivElement, root: Root | null = null;
 let rail: RailState;
 const workspaces = { state: vi.fn(async () => ({ local: false, name: "My Cloud" })), menu: vi.fn(async () => {}), places: vi.fn(async () => rail),
-  open: vi.fn(async () => {}), add: vi.fn(async () => {}), onChanged: vi.fn(() => () => {}) };
+  open: vi.fn(async () => {}), add: vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined), onChanged: vi.fn(() => () => {}) };
 type Organizations = { canAdd: boolean; blocked?: "no_team_plan" | "limit" | "rate" | "off"; count: number; max: number };
 let organizations: Organizations | undefined;
 const cloudAdd = { state: vi.fn(async () => ({ signedIn: true, hasCloud: true, supported: false, canAdd: false, offer: null, count: 1, home: { name: "My Cloud", color: null },
@@ -52,7 +52,7 @@ it("a circle per place, with its initials on its colour; the place on screen is 
   const circles = [...host.querySelectorAll("[data-rail-place]")];
   expect(circles.map((circle) => circle.textContent)).toEqual(["MC", "CA", "A", "CB", "CC", "O"]);
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("aria-current")).toBe("page");
-  expect(host.querySelector('[data-rail-place="home"] span')?.getAttribute("style")).toContain("var(--identity-purple)");
+  expect(host.querySelector('[data-rail-place="home"] span[style]')?.getAttribute("style")).toContain("var(--identity-purple)");
   expect(host.querySelector('[data-rail-place="acme"] [data-rail-dot]')).toBeTruthy();
   expect(host.querySelector('[data-rail-place="pending:c-b"] [data-rail-ring]')?.getAttribute("data-rail-ring")).toBe("waiting");
   expect(host.querySelector('[data-rail-place="c"] [data-rail-ring]')?.getAttribute("data-rail-ring")).toBe("40");
@@ -60,6 +60,20 @@ it("a circle per place, with its initials on its colour; the place on screen is 
   expect(host.querySelector('[data-rail-place="pending:c-b"]')?.getAttribute("aria-label")).toBe("Client B: waiting for payment");
   expect(host.querySelector("[data-rail-more-button]")).toBeNull();
   expect(host.querySelector("[data-rail-add]")?.getAttribute("aria-label")).toBe("Add a Cloud or your own server");
+});
+
+it("marks the place on screen with a pill on the rail's edge, a short one on hover for a place that opens, and no ring round a tile", async () => {
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const pill = (id: string) => host.querySelector(`[data-rail-place="${id}"] [data-rail-pill]`);
+  expect(pill("home")?.getAttribute("data-rail-pill")).toBe("page");
+  expect(pill("home")?.getAttribute("class")).toEqual(expect.stringContaining("h-4"));
+  expect(pill("home")?.getAttribute("class"), "on the rail's left edge, outside the tile").toEqual(expect.stringContaining("-left-1.5"));
+  expect(pill("a")?.getAttribute("data-rail-pill")).toBe("hover");
+  expect(pill("a")?.getAttribute("class")).toEqual(expect.stringContaining("group-hover/tile:opacity-100"));
+  expect(pill("pending:c-b"), "nothing to open yet: no pill").toBeNull();
+  for (const tile of host.querySelectorAll("[data-rail-place]")) expect(tile.className, tile.getAttribute("data-rail-place")!).not.toMatch(/\bring-/);
+  expect(host.querySelector('[data-rail-place="c"] [data-rail-ring] path')?.getAttribute("stroke-width"), "a whole-pixel line").toBe("2");
+  expect(host.querySelector("[data-places-rail] ul")?.className, "as wide as the rail, so a list that scrolls cuts nothing off round a tile").toEqual(expect.stringContaining("w-full"));
 });
 
 it("a click opens the place through main by its id; the one on screen and one not ready yet open nothing", async () => {
@@ -106,21 +120,6 @@ it("past eight places, ⋯ opens every place, searchable; the place on screen st
   expect(matchingPlaces(many, "zzz")).toEqual([]);
 });
 
-it("＋ offers buying a Cloud or adding the person's own server; the server's three steps end in main's own pairing-link dialog", async () => {
-  await mount(createElement(PlacesRail));
-  await click(host.querySelector("[data-rail-add]"));
-  const sheet = document.querySelector("[data-place-add-sheet]")!;
-  expect([...sheet.querySelectorAll("[data-place-add-choice]")].map((choice) => choice.getAttribute("data-place-add-choice"))).toEqual(["cloud", "server"]);
-  await click(sheet.querySelector('[data-place-add-choice="server"]'));
-  const steps = document.querySelector('[data-place-add="own-server"]')!;
-  expect([...steps.querySelectorAll("[data-own-server-command]")].map((code) => code.textContent)).toEqual(["npx openmausbot start", 'npx openmausbot pair --label "My desktop"']);
-  expect(steps.textContent).toContain("Paste pairing link");
-  expect(steps.textContent).not.toContain("Enter its address instead");
-  await click([...steps.querySelectorAll("button")].find((button) => button.textContent === "Paste pairing link"));
-  expect(workspaces.add.mock.calls).toEqual([["link"]]);
-  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
-});
-
 const type = async (input: Element | null, value: string) => {
   expect(input).toBeTruthy();
   await act(async () => {
@@ -128,6 +127,46 @@ const type = async (input: Element | null, value: string) => {
     input!.dispatchEvent(new Event("input", { bubbles: true }));
   });
 };
+const submit = async (form: Element | null) => {
+  expect(form).toBeTruthy();
+  await act(async () => { (form as HTMLFormElement).requestSubmit(); await Promise.resolve(); await Promise.resolve(); });
+};
+
+it("＋ offers buying a Cloud or adding the person's own server: a box to paste its pairing link, sent to main's own Connect dialog", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  const sheet = document.querySelector("[data-place-add-sheet]")!;
+  expect([...sheet.querySelectorAll("[data-place-add-choice]")].map((choice) => choice.getAttribute("data-place-add-choice"))).toEqual(["cloud", "server"]);
+  await click(sheet.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  expect(form.textContent).toContain("Paste pairing link");
+  expect(form.textContent, "no install commands: the server's Settings shows its link").not.toContain("npx");
+  expect(document.activeElement).toBe(form.querySelector("[data-own-server-link]"));
+  const connect = [...form.querySelectorAll("button")].find((button) => button.textContent === "Connect")!;
+  expect(connect.disabled, "nothing pasted yet").toBe(true);
+  await type(form.querySelector("[data-own-server-link]"), "  https://bots.example.test/#pair=abc  ");
+  await submit(form);
+  expect(workspaces.add.mock.calls).toEqual([["link", "https://bots.example.test/#pair=abc"]]);
+  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
+});
+
+it("a pasted link main can't open says so and keeps the sheet; cancelling main's Connect keeps it too", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  await type(form.querySelector("[data-own-server-link]"), "not a link");
+  workspaces.add.mockRejectedValueOnce(new Error("Enter an HTTPS server address or a full pairing link."));
+  await submit(form);
+  expect(form.querySelector('[role="alert"]')?.textContent).toContain("isn't a pairing link");
+  expect(document.querySelector("[data-place-add-sheet]")).toBeTruthy();
+  await type(form.querySelector("[data-own-server-link]"), "https://bots.example.test/#pair=abc");
+  expect(form.querySelector('[role="alert"]'), "editing the link clears the error").toBeNull();
+  workspaces.add.mockResolvedValueOnce(false);
+  await submit(form);
+  expect(document.querySelector("[data-place-add-sheet]"), "the person cancelled Connect").toBeTruthy();
+});
+
 const createButton = () => [...document.querySelectorAll<HTMLButtonElement>('[data-place-add="organization"] button[type="submit"]')][0];
 
 it("＋ for the account a Team plan's organizations are billed to: New organization first; a name and a color add it at once, no checkout, and the sheet closes", async () => {
@@ -244,9 +283,10 @@ it("a server of the person's own that signed in: a small server mark, the offlin
   expect(workspaces.open.mock.calls).toHaveLength(1);
   const connect = document.querySelector('[data-place-add="connect-server"]')!;
   expect(connect.textContent).toContain("Connect Render VPS");
-  expect([...connect.querySelectorAll("[data-own-server-command]")].map((code) => code.textContent), "it runs OpenMausBot already: only its pairing link is left").toEqual(['npx openmausbot pair --label "My desktop"']);
-  await click([...connect.querySelectorAll("button")].find((button) => button.textContent === "Paste pairing link"));
-  expect(workspaces.add.mock.calls).toEqual([["link"]]);
+  expect(connect.textContent, "it runs OpenMausBot already: only its pairing link is left").not.toContain("npx");
+  await type(connect.querySelector("[data-own-server-link]"), "https://render.example.test/#pair=xyz");
+  await submit(connect);
+  expect(workspaces.add.mock.calls).toEqual([["link", "https://render.example.test/#pair=xyz"]]);
 });
 
 it("where no pairing link can be pasted here, a signed-in server not connected yet opens nothing", async () => {
@@ -270,14 +310,19 @@ it("a server of the person's own on an older release than the newest has a quiet
   expect(host.querySelector('[data-rail-place="s-old"] [data-rail-dot]')).toBeTruthy();
 });
 
-it("the window's own rail: drawn at every width, the place on screen named under its circle, and its sheets cover the window while open", async () => {
+it("the window's own rail: drawn at every width, 36px wide with small rounded tiles named on hover, and its sheets cover the window while open", async () => {
   const expand = vi.fn(async () => {});
   Object.assign(window, { ogb: { workspaces, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
   await mount(createElement(PlacesRail, { chrome: true }));
   const nav = host.querySelector("[data-places-rail]")!;
   expect(nav.className).toContain("flex h-full");
+  expect(nav.className.split(" "), "as thin as its tiles allow; beside a window with its own title bar, in the sidebar's colour as before the frame")
+    .toEqual(expect.arrayContaining(["w-9", "shrink-0", "flex-col", "items-center", "bg-panel"]));
   expect(nav.className, "never hidden on a narrow window").not.toContain("hidden");
-  expect([...host.querySelectorAll("[data-rail-caption]")].map((caption) => caption.textContent)).toEqual(["My Cloud"]);
+  expect(nav.textContent, "no name under the place on screen: its tile's ring marks it").toBe("MCCAACBCCO");
+  expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");
+  expect(host.querySelector('[data-rail-place="home"] span[style]')?.getAttribute("style")).toContain("width: 24px; height: 24px; border-radius: 7px");
+  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[7px]");
   expect(expand.mock.calls.at(-1)).toEqual([false]);
   await click(host.querySelector("[data-rail-add]"));
   expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);
@@ -312,7 +357,7 @@ it("a right-click on a circle opens its place's menu: its colour, saved by main 
     await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
     return host.querySelector(`[data-rail-menu="${id}"]`);
   };
-  expect(host.querySelector('[data-rail-place="local"] span')?.getAttribute("style"), "This computer's circle wears its colour").toContain("var(--identity-teal)");
+  expect(host.querySelector('[data-rail-place="local"] span[style]')?.getAttribute("style"), "This computer's circle wears its colour").toContain("var(--identity-teal)");
   const own = await menuOf("local");
   expect([own?.getAttribute("aria-label"), own?.querySelector("[aria-checked='true']")?.getAttribute("data-swatch")]).toEqual(["This computer", "green"]);
   expect(own!.querySelector("[data-swatch='slate']")?.getAttribute("aria-label"), "the plain swatch says what it does").toBe("None");
@@ -334,4 +379,67 @@ it("a right-click on a circle opens its place's menu: its colour, saved by main 
   expect(locked!.querySelector("[aria-checked='true']")?.getAttribute("data-swatch")).toBe("violet");
   await act(async () => { locked!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   expect(host.querySelector("[data-rail-menu]")).toBeNull();
+});
+
+it("a Cloud of the person's own that ended says so on its circle, and its menu offers Remove from list, asked first; once removed the menu closes", async () => {
+  const remove = vi.fn(async (_id: string) => ({ outcome: "refused" as const }) as { outcome: "removed" | "refused" | "gone" | "unsupported" | "failed" });
+  rail = { places: [
+    place("home", "My Cloud", { active: true, paint: { swatch: null } }),
+    place("old", "Old Cloud", { ended: true, removable: true, paint: { swatch: null } }),
+    place("a", "Client A", { paint: { swatch: "green" } }),
+  ], add: { cloud: false, link: false, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, remove }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  expect(host.querySelector('[data-rail-place="old"]')?.getAttribute("aria-label")).toBe("Old Cloud: ended");
+  expect(host.querySelector('[data-rail-place="old"] [data-rail-ended]'), "dimmed, as a Cloud that isn't running").toBeTruthy();
+  expect((await menuOf("a"))?.querySelector("[data-rail-remove]"), "a running Cloud: no such choice").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("old");
+  await click(menu!.querySelector("[data-rail-remove-ask]"));
+  expect(menu!.querySelector("[data-rail-remove] [role='alertdialog'] p")?.textContent).toBe("Remove “Old Cloud” from your list? You can buy a new Cloud any time.");
+  expect(remove).not.toHaveBeenCalled();
+  await click(menu!.querySelector("[data-rail-remove-confirm]"));
+  await settle();
+  expect(remove).toHaveBeenCalledWith("old");
+  expect(host.querySelector("[data-rail-menu] [role='alert']")?.textContent, "the Admin's no, said plainly").toBe("It can't be removed right now: it is running again, or still has a plan.");
+  remove.mockResolvedValueOnce({ outcome: "removed" });
+  await click(host.querySelector("[data-rail-menu] [data-rail-remove-ask]"));
+  await click(host.querySelector("[data-rail-menu] [data-rail-remove-confirm]"));
+  await settle();
+  expect(host.querySelector("[data-rail-menu]"), "removed: the menu closes, and the circle goes with main's next list").toBeNull();
+  expect(workspaces.places).toHaveBeenCalled();
+});
+
+it("a server of the person's own that main offers as home: its menu's one tap starts the move and closes; main's own words when it can't", async () => {
+  const makeHome = vi.fn(async (_id: string): Promise<{ started: true }> => { throw new Error("Error invoking remote method 'workspaces:make-home': Error: Garage server has other people on it, so your bots stay here."); });
+  rail = { places: [
+    place("home", "This computer", { kind: "computer", active: true, paint: { swatch: null } }),
+    place("garage", "Garage server", { kind: "server", makeHome: true, paint: { swatch: null } }),
+    place("office", "Office", { kind: "server", paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, makeHome }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  expect((await menuOf("office"))?.querySelector("[data-rail-make-home]"), "not offered: no such choice").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("garage");
+  const row = menu!.querySelector("[data-rail-make-home-start]");
+  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it.");
+  await click(row);
+  await settle();
+  expect(makeHome).toHaveBeenCalledWith("garage");
+  expect(host.querySelector("[data-rail-menu] [data-rail-make-home] [role='alert']")?.textContent).toBe("Garage server has other people on it, so your bots stay here.");
+  makeHome.mockResolvedValueOnce({ started: true });
+  await click(host.querySelector("[data-rail-menu] [data-rail-make-home-start]"));
+  await settle();
+  expect(host.querySelector("[data-rail-menu]"), "started: the menu closes, and the account says how it goes").toBeNull();
 });
