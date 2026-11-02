@@ -25,10 +25,9 @@ const FILE = /\.[A-Za-z0-9]+$/u;
 export const ENDED_REFUSAL = "My Cloud has ended. It is open only so you can take your things home.";
 
 /** What a frozen server still changes: the freeze itself, the move's reads and lets-go, signing in and out, the backup
- * that takes things home, the Admin's signed routes, Files and the computers lent to it. A computer lent to the move's
- * destination keeps taking its own screen lease (#4122): without it every screen call from the new home dies on the
- * frozen copy's 409, while files and the terminal keep working. */
-const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/|desktop\/shared-computer-control)/u;
+ * that takes things home, the Admin's signed routes, Files and the computers lent to it. (The lent screen lease has its
+ * own exact exemption in refuses() — see #4122.) */
+const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/)/u;
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** What a frozen copy keeps once its workspace is deleted: the marker, this server's identity, Files, downloaded tools
  * and caches, and its own runtime files. Everything else, credentials included, is the person's workspace. */
@@ -107,6 +106,10 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
     },
     /** Why a frozen server refuses this request, or null when it takes it. */
     refuses(method: string, path: string): string | null {
+      // A lent computer keeps taking its own screen lease while frozen by a move (#4122): without it, every screen
+      // call from the home the bots moved to dies on this 409 while files and the terminal work. Only that one POST,
+      // and never on an ended Cloud's copy — that Cloud runs no bots, so nothing should be asking for a lease.
+      if (frozen && !exportOnly && method.toUpperCase() === "POST" && path === "/api/desktop/shared-computer-control") return null;
       return frozen && !READS.has(method.toUpperCase()) && !STILL_CHANGES.test(path) ? refusal() : null;
     },
     freeze(cloud: string | null, named: string | null = null): void {

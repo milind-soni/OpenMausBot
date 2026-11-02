@@ -84,6 +84,7 @@ describe("this computer's copy, frozen at the move", () => {
     expect(freeze.unfreeze()).toBe(false);
     expect(freeze.frozen()).toBe(true);
     expect(freeze.refuses("POST", "/api/bots/b1/messages")).toBe(ENDED_REFUSAL);
+    expect(freeze.refuses("POST", "/api/desktop/shared-computer-control"), "an ended Cloud runs no bots, so no screen lease").toBe(ENDED_REFUSAL);
   });
 });
 
