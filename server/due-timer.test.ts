@@ -1,35 +1,46 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DUE_MAX_SLEEP_MS, startDueTimer } from "./due-timer.ts";
+import { DUE_CLOCK_MS, startDueTimer } from "./due-timer.ts";
 
 describe("startDueTimer", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("runs once at start, then only at the next due time, capped for a machine that slept", async () => {
+  it("runs once at start, then only at the next due time, however far off", async () => {
     const runs: number[] = [];
-    let due: number | null = Date.now() + 90_000;
+    let due: number | null = Date.now() + 90 * 60_000;
     const timer = startDueTimer({ run: () => { runs.push(Date.now()); if (Date.now() >= due!) due = null; }, next: () => due });
     const start = Date.now();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(90 * 60_000 - 1);
     expect(runs).toEqual([start]);
-    await vi.advanceTimersByTimeAsync(89_999);
-    expect(runs.map((at) => at - start)).toEqual([0, DUE_MAX_SLEEP_MS]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(runs.map((at) => at - start)).toEqual([0, DUE_MAX_SLEEP_MS, 90_000]);
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(runs).toHaveLength(3 + 10);
+    expect(runs.map((at) => at - start)).toEqual([0, 90 * 60_000]);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(runs).toHaveLength(2);
     timer.stop();
   });
 
-  it("wakes at most once a minute with nothing due", async () => {
+  it("with many timers and nothing due, wakes once a minute in all and runs nothing", async () => {
     const run = vi.fn();
-    const timer = startDueTimer({ run, next: () => null });
+    const before = vi.getTimerCount();
+    const timers = [1, 2, 3, 4].map(() => startDueTimer({ run, next: () => null }));
     await vi.advanceTimersByTimeAsync(60 * 60_000);
-    expect(run).toHaveBeenCalledTimes(1 + 60);
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(vi.getTimerCount() - before).toBe(1);
+    for (const timer of timers) timer.stop();
+    expect(vi.getTimerCount() - before).toBe(0);
+  });
+
+  it("finds work on the wall clock when no timer could have told it: a change it was not told of, or time lost to sleep", async () => {
+    const runs: number[] = [];
+    let due: number | null = null;
+    const timer = startDueTimer({ run: () => { runs.push(Date.now()); due = null; }, next: () => due });
+    const start = Date.now();
+    await vi.advanceTimersByTimeAsync(0);
+    due = start;
+    await vi.advanceTimersByTimeAsync(DUE_CLOCK_MS);
+    expect(runs.map((at) => at - start)).toEqual([0, DUE_CLOCK_MS]);
     timer.stop();
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
-    expect(run).toHaveBeenCalledTimes(1 + 60);
   });
 
   it("brings the run forward when a change makes work due sooner, and never pushes a nearer run back", async () => {

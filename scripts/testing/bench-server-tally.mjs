@@ -45,7 +45,7 @@ const siteOf = () => {
 const wrapTimer = (original, kind) => function (callback, delay, ...args) {
   if (typeof callback !== "function") return original.call(this, callback, delay, ...args);
   const ms = Math.round(Number(delay) || 0);
-  const key = kind === "interval" ? `interval:${ms}:${siteOf()}` : `timeout:${ms < 1000 ? ms : `${Math.round(ms / 1000)}s`}`;
+  const key = kind === "interval" ? `interval:${ms}:${siteOf()}` : ms < 1000 ? `timeout:${ms}` : `timeout:${Math.round(ms / 1000)}s:${siteOf()}`;
   if (kind === "interval") intervals.set(key, (intervals.get(key) ?? 0) + 1);
   return original.call(this, function (...inner) { countFire(key); return callback.apply(this, inner); }, delay, ...args);
 };

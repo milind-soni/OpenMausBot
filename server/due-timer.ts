@@ -1,6 +1,6 @@
-/** Runs `run` when `next()` says work is due, with one timer and no fixed polling. `poke()` after any change that may
- * bring work sooner. A time already past after a run means work is waiting on something outside (a busy bot, a refused
- * start): it is retried every `retryMs`. */
+/** Runs `run` when `next()` says work is due, with no fixed polling. `poke()` after any change that may bring work sooner.
+ * A time already past after a run means work is waiting on something outside (a busy bot, a refused start): it is
+ * retried every `retryMs`. */
 export interface DueTimer {
   poke(): void;
   stop(): void;
@@ -11,18 +11,33 @@ export interface DueTimerOptions {
   /** The earliest time anything is due, null when nothing is. */
   next(): number | null;
   now?: () => number;
-  /** Node's timers stop while macOS sleeps (libuv's monotonic clock), so a long sleep would fire late after a wake: the
-   * timer never waits longer than this. */
-  maxSleepMs?: number;
   retryMs?: number;
   onError?(error: unknown): void;
 }
 
-export const DUE_MAX_SLEEP_MS = 60_000;
+/** Node's timers stop while macOS sleeps (libuv's monotonic clock), so a timer set for a far time would fire late after a
+ * wake. Every due timer looks at the wall clock this often, on one shared interval, and only sets a timer for work due
+ * within this time. */
+export const DUE_CLOCK_MS = 60_000;
+
+const watchers = new Set<() => void>();
+let clock: ReturnType<typeof setInterval> | null = null;
+
+function watchClock(look: () => void): () => void {
+  watchers.add(look);
+  clock ??= setInterval(() => { for (const watcher of [...watchers]) watcher(); }, DUE_CLOCK_MS);
+  clock.unref?.();
+  return () => {
+    watchers.delete(look);
+    if (watchers.size === 0 && clock) {
+      clearInterval(clock);
+      clock = null;
+    }
+  };
+}
 
 export function startDueTimer(options: DueTimerOptions): DueTimer {
   const now = options.now ?? Date.now;
-  const maxSleepMs = options.maxSleepMs ?? DUE_MAX_SLEEP_MS;
   const retryMs = options.retryMs ?? 10_000;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let firesAt = Infinity;
@@ -30,8 +45,13 @@ export function startDueTimer(options: DueTimerOptions): DueTimer {
   let pokedWhileRunning = false;
   let stopped = false;
 
-  const arm = (delay: number) => {
+  const disarm = () => {
     if (timer) clearTimeout(timer);
+    timer = null;
+    firesAt = Infinity;
+  };
+  const arm = (delay: number) => {
+    disarm();
     firesAt = now() + delay;
     timer = setTimeout(fire, delay);
     timer.unref?.();
@@ -40,9 +60,14 @@ export function startDueTimer(options: DueTimerOptions): DueTimer {
     const at = options.next();
     return at === null ? null : Math.max(0, at - now());
   };
+  const poke = () => {
+    if (stopped) return;
+    if (running) { pokedWhileRunning = true; return; }
+    const wait = dueIn();
+    if (wait !== null && wait <= DUE_CLOCK_MS && now() + wait < firesAt) arm(wait);
+  };
   const fire = () => {
-    timer = null;
-    firesAt = Infinity;
+    disarm();
     if (stopped) return;
     running = true;
     pokedWhileRunning = false;
@@ -56,25 +81,19 @@ export function startDueTimer(options: DueTimerOptions): DueTimer {
       running = false;
       if (stopped) return;
       const wait = dueIn();
-      // A change during the run may have made work due now; anything else still due now waits on the outside.
-      if (wait === 0 && pokedWhileRunning) arm(0);
-      else arm(wait === null ? maxSleepMs : wait === 0 ? retryMs : Math.min(wait, maxSleepMs));
+      if (wait === 0) arm(pokedWhileRunning ? 0 : retryMs);
+      else if (wait !== null && wait <= DUE_CLOCK_MS) arm(wait);
     });
   };
 
+  const unwatch = watchClock(poke);
   fire();
   return {
-    poke() {
-      if (stopped) return;
-      if (running) { pokedWhileRunning = true; return; }
-      const wait = dueIn();
-      if (wait !== null && now() + wait < firesAt) arm(Math.min(wait, maxSleepMs));
-    },
+    poke,
     stop() {
       stopped = true;
-      if (timer) clearTimeout(timer);
-      timer = null;
-      firesAt = Infinity;
+      unwatch();
+      disarm();
     },
   };
 }
