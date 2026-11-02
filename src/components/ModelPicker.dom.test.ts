@@ -254,6 +254,30 @@ describe("the full picker's search and the rows around it", () => {
   });
 });
 
+describe("an OpenCode model typed by hand", () => {
+  const typed = "venice/deepseek-v4-1-flash-uncensored";
+  const opencode: InstanceInfo = {
+    instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", access: "subscription",
+    snapshot: { state: "available", version: "1.19.4", authenticated: true },
+    models: { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] },
+  };
+  const onOpenCode = (model: string): Bot => ({ ...scout(), modelSelection: { instanceId: "opencode", model } });
+
+  it.each([false, true])("is picked from the search box (advanced: %s) and then named as typed by hand", async (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = [opencode];
+    render(onOpenCode("opencode/big-pickle"));
+    await openWith("click");
+    type(document.querySelector<HTMLInputElement>("[data-menu-search]")!, typed);
+    const row = [...document.querySelectorAll<HTMLElement>("[data-menu-row]")].find((candidate) => candidate.textContent?.includes("typed by hand"))!;
+    flushSync(() => row.click());
+    await settle();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", selection: { instanceId: "opencode", model: `typed::${typed}` } }));
+    render(onOpenCode(`typed::${typed}`));
+    expect(chip().textContent).toContain(`${typed} · typed by hand`);
+  });
+});
+
 describe("the floating menu and the pointer", () => {
   it("stays open for a click inside its portal and closes for one outside, without taking focus", async () => {
     await openWith("click");
