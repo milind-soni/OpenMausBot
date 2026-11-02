@@ -60,6 +60,9 @@ describe("ChatMarkdown element renderers", () => {
     markdownProps(before, "No thread links here: `code`, **bold** and a [site](https://example.test).");
     expect(threadListReads()).toBe(0);
 
+    markdownProps(before, "## A heading\n\nStill # no thread link.");
+    expect(threadListReads()).toBe(0);
+
     markdownProps(before, "Tracked in #QA PR 245.");
     expect(threadListReads()).toBe(1);
 
