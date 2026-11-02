@@ -4,7 +4,7 @@
 //   FAKE_CODEX_MODE  happy (default) | approval | resume | stream | windows-command | mcp-elicitation |
 //     mcp-app-approval | mcp-form | permissions-approval | question | multi-question | mixed-question |
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
-//     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
+//     image | logged-in-stdout | api-key-configured | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
 //     auth-recovery | mcp-401 | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
@@ -96,6 +96,11 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
   if (mode === "logged-out") {
     process.stderr.write("Not logged in\n");
     process.exit(1);
+  }
+  if (mode === "api-key-configured") {
+    // codex-cli 0.166.0 wording for an API-key login.
+    process.stderr.write("API key configured - sk-test***12345\nAuthentication is checked when you send a request.\n");
+    process.exit(0);
   }
   // Codex 0.147.0 reports a successful login on stderr; older versions wrote it on stdout.
   const statusStream = mode === "logged-in-stdout" ? process.stdout : process.stderr;

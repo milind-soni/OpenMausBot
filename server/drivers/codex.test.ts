@@ -2994,6 +2994,14 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
   });
 
+  it("accepts an API-key login as codex-cli 0.166 words it", async () => {
+    await create({ mode: "api-key-configured" });
+    await expect(instance.snapshot()).resolves.toMatchObject({
+      state: "available",
+      authenticated: true,
+    });
+  });
+
   it("offers the exact stable release update command without blocking older Codex models", async () => {
     process.env.FAKE_CODEX_VERSION = "codex-cli 0.152.1";
     await create();

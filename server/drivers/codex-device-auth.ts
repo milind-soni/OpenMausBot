@@ -33,7 +33,8 @@ export const CODEX_DEVICE_SIGN_IN: DeviceSignIn = {
     args: ["login", "status"],
     read: (code, output) =>
       code === 0 && /^logged in.*chatgpt\b/im.test(output) ? "signed-in"
-      : code === 0 && /^logged in\b/im.test(output) ? "other"
+      // codex-cli 0.166.0 reports an API-key login as "API key configured - sk-…".
+      : code === 0 && /^(?:logged in|api key configured)\b/im.test(output) ? "other"
       : code !== 0 && /^not logged in\b/im.test(output) ? "signed-out"
       : "unknown",
   },
