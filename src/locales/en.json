@@ -673,6 +673,8 @@
   "toolDetail.unverified": "No result",
   "toolDetail.waiting": "Waiting for the tool to finish…",
   "toolDetail.noOutput": "No output was recorded for this call.",
+  "toolDetail.loadingFull": "Loading the full result…",
+  "toolDetail.partial": "Showing the start of the result only: the rest could not be loaded.",
   "toolDetail.previewHint": "Shortened, automatically redacted preview. Review before sharing.",
   "toolDetail.tool": "Tool",
   "toolStep.runCommand": "Run a command",
