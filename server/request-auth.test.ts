@@ -92,6 +92,19 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("lets a member reach a connection card's authorize, whose handler decides who may sign in, and nothing past it", () => {
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot-1/connector-cards/card-1/authorize"],
+      ["GET", "/api/bots/bot-1/connector-cards/card-1/status"],
+      ["POST", "/api/bots/bot-1/connector-cards/card-1/dismiss"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
+    for (const [method, path] of [
+      ["GET", "/api/bots/bot-1/connector-cards/card-1/authorize"],
+      ["POST", "/api/bots/bot-1/connector-cards/card-1/authorize/extra"],
+      ["POST", "/api/connectors/gmail/authorize"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
   it("allows clients to list and read notifications with exactly the feed's methods and paths", () => {
     for (const [method, path] of [
       ["GET", "/api/notifications"],

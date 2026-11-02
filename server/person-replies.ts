@@ -42,7 +42,7 @@ export interface PersonReply {
 
 const conflict = (message: string) => Object.assign(new Error(message), { status: 409 });
 
-/** At Full access a bot decided the question: the person's own answer still replaces its pick. */
+/** A bot answered the question: the person's own answer still replaces it. */
 const decidedByBot = (card: NonNullable<Message["card"]>): boolean => card.answeredBy?.kind === "bot";
 
 export function createPersonReplies(deps: PersonReplyDeps) {

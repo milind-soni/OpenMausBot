@@ -859,34 +859,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       text: `A confirmation card is now visible to the user for ${proposal}.${warningText}\n\n${status} End this turn and wait for the decision.`,
     };
   }
-  if (name === "add_mcp_server") {
-    let saved: Json;
-    try {
-      saved = await api("/api/internal/mcp-servers", {
-        method: "POST",
-        body: JSON.stringify(args),
-      });
-    } catch (error) {
-      return { text: error instanceof Error ? error.message : String(error), isError: true };
-    }
-    const serverName = typeof saved.name === "string" && saved.name ? saved.name : "the MCP server";
-    const transport = saved.transport === "command" || saved.transport === "http" || saved.transport === "sse" ? saved.transport : "";
-    const target = typeof saved.target === "string" ? saved.target : "";
-    const keyNames = (value: unknown) => Array.isArray(value) && value.every((key) => typeof key === "string") ? value.join(", ") : "";
-    const envKeys = keyNames(saved.envKeys);
-    const headerKeys = keyNames(saved.headerKeys);
-    const where = transport && target ? ` (${transport} ${target})` : "";
-    const named = [
-      envKeys ? `Environment names on file: ${envKeys}.` : "",
-      headerKeys ? `Header names on file: ${headerKeys}.` : "",
-    ].filter(Boolean).join(" ");
-    const local = transport === "command" ? " Enabling a local command runs that command on their computer." : "";
-    const keptIn = Array.isArray(saved.keptIn) ? saved.keptIn.filter((path): path is string => typeof path === "string") : [];
-    const own = (saved.own === true ? " It uses files in your own folder, so it works only for you, not for other bots." : "")
-      + (keptIn.length ? ` Its files were in this conversation's temporary folder, so they were copied to ${keptIn.join(", ")} in your own folder, and it runs from there: change them there.` : "");
-    return {
-      text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${own}${named ? ` ${named}` : ""}`,
-    };
+  if (name === "mcp_server") {
+    const r = await apiResponse("/api/internal/mcp-servers", { method: "POST", body: JSON.stringify(args) });
+    if (!r.ok) return { text: String(r.body.error ?? `mcp_server failed (HTTP ${r.status}).`), isError: true };
+    return { text: String(r.body.text ?? "") };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

@@ -15,7 +15,7 @@ import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
 import { serviceSlugFor } from "../connector-verdict.ts";
-import { type McpOAuthManager, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
+import { type McpOAuthManager, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE, type BrokerAccess } from "../team-connections.ts";
@@ -45,7 +45,9 @@ export interface TeamConnectionsHostDeps {
   mcpOAuth: McpOAuthManager;
   /** The bot's enabled MCP servers, as policy allows them, before any sign-in is attached. */
   botMcp(bot: McpBot): Record<string, McpServerSpec>;
-  isSessionLive(id: string): boolean;
+  /** Whether whoever started a member's sign-in (a session, or a chat's Sign in card) is still there to finish it. */
+  isOwnerLive(owner: string): boolean;
+  onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
   composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "connectedServiceSlugs" | "authorizeService" | "removeService">;
@@ -70,7 +72,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     dataDir: deps.dataDir,
     brokerUrl: deps.brokerUrl,
     clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? server.oauth : undefined; },
-    isOwnerLive: deps.isSessionLive,
+    isOwnerLive: deps.isOwnerLive,
+    ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
   });
   const personApps = () => (team ? scopes.person("app") : []);
   /** The apps connected for an installation, the team's or a member's own. A turn never waits on a refresh: what is known
@@ -193,6 +196,13 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     personMcp,
     link,
     turnPerson,
+    nameOf,
+    /** Off a Team Cloud, always; on one, the person this turn acts for is its owner or an admin, as Settings requires. */
+    actsForAdmin(threadId: string, generation?: string): boolean {
+      if (!team) return true;
+      const person = actingFor(threadId, generation);
+      return person !== null && isAdmin(person);
+    },
     /** The person whose private chat work this turn hands on opens in, so it can use their own connections there: the
      * person the turn acts for, when they connected anything of their own. Null: it opens where it always did. */
     handOnFor(threadId: string, generation: string): string | null {

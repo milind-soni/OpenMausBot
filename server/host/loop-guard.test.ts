@@ -136,6 +136,12 @@ describe("loop guard, setting off", () => {
     expect(r.rows).toEqual([]);
   });
 
+  it("never counts Cursor's MCP calls: each arrives titled \"MCP: tool\" with no name or arguments", () => {
+    const r = rig({ settings: { enabled: false } });
+    times(25, () => r.play({ title: "MCP: tool" }));
+    expect(r.rows).toEqual([]);
+  });
+
   it("counts a permission ask by its tool and summary, and cuts a long call in the notice", () => {
     const r = rig({ settings: { enabled: false } });
     for (let i = 0; i < 5; i++) r.ask("Bash", "npm   test\n");
