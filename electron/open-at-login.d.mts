@@ -4,7 +4,7 @@ type LoginItem = { follow(on: boolean): void; startedHidden(): boolean; availabl
 export declare function createOpenAtLogin(options: {
   app: {
     isPackaged: boolean;
-    getLoginItemSettings(options?: { args?: string[] }): { openAtLogin: boolean; wasOpenedAtLogin?: boolean; launchItems?: { name: string; enabled?: boolean }[] };
+    getLoginItemSettings(options?: { args?: string[] }): { openAtLogin: boolean; wasOpenedAtLogin?: boolean; launchItems?: { name: string; args?: string[]; enabled?: boolean }[] };
     setLoginItemSettings(settings: { openAtLogin: boolean; args?: string[]; name?: string }): void;
   };
   file: string;

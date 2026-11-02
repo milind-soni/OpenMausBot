@@ -4,7 +4,7 @@ import { t } from "./i18n";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
-import { choiceIsSelected, modelChoices, type ModelChoice } from "./model-choices";
+import { choiceIsSelected, modelChoices, takesTypedModels, type ModelChoice } from "./model-choices";
 
 export type ModelOption = InstanceInfo["models"]["options"][number];
 
@@ -141,7 +141,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
   const models = new Map(listed.map((instance) => [instance.instanceId, listedModels(instance)]));
   const total = listed.filter((instance) => !instance.policy && !needsCli(instance))
     .reduce((sum, instance) => sum + models.get(instance.instanceId)!.all.length, 0);
-  const search = total > SIMPLE_SEARCH_AFTER;
+  const search = total > SIMPLE_SEARCH_AFTER || listed.some((instance) => takesTypedModels(instance) && !instance.policy && !needsCli(instance));
   const query = search ? input.query.trim() : "";
   const { subscription, api, custom } = splitEngineRail(listed);
   const ordered = [...subscription, ...api, ...custom];
