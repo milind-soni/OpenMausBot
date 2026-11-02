@@ -422,7 +422,7 @@ import { createLocalVmUpdater, LOCAL_VM_UPDATING_PROBLEM, recoverLocalVms, VPS_O
 import { keepInstalledAppsBeforeRemove } from "./local-vm-profiles.ts";
 import { localVmStopReason, recordLocalVmIdleStop } from "./local-vm-stop-reason.ts";
 import { ComputerIdleTimer } from "./computer-idle.ts";
-import { createCloudComputerPower } from "./host/cloud-computer-power.ts";
+import { CLOUD_COMPUTER_DID_NOT_START, CLOUD_COMPUTER_START_BUDGET_MS, CLOUD_COMPUTER_STARTING, createCloudComputerPower } from "./host/cloud-computer-power.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts"; import { createPersonFirst } from "./host/person-first.ts";
@@ -5945,11 +5945,6 @@ async function mountBotVps(
   };
 }
 
-/** Above a slow first start; Boat's own ready wait is 90 seconds. */
-const CLOUD_COMPUTER_START_BUDGET_MS = Math.max(1_000, Number(process.env.OMB_CLOUD_COMPUTER_START_BUDGET_MS) || 150_000);
-const CLOUD_COMPUTER_STARTING = "The cloud computer is still starting. This call was not performed. Take a fresh screenshot in a moment.";
-const CLOUD_COMPUTER_DID_NOT_START = "the cloud computer didn't start in time";
-
 function mountBotBoat(
   bot: BotRecord,
   owner: TurnOwner,
@@ -5957,8 +5952,7 @@ function mountBotBoat(
     source?: PlaceSource;
     onClaimed: (capture: () => Promise<{ png: string; format: string }>) => void;
     onRejected?: (failure: string, error?: unknown) => void;
-    /** Wake or attach the bot's own computer, never create one. */
-    existingOnly?: boolean;
+    /** Wake or attach the bot's own computer, never create one. */ existingOnly?: boolean;
   },
 ): NonNullable<SendTurnInput["integrations"]>["localComputer"] {
   const slot: AutoVmClaimSlot = {
@@ -5972,8 +5966,7 @@ function mountBotBoat(
       try {
         attached = await attachBotBoat(bot, owner, {
           budgetMs: CLOUD_COMPUTER_START_BUDGET_MS,
-          onSeated: () => { slot.pendingReason = CLOUD_COMPUTER_STARTING; },
-          existingOnly: opts.existingOnly,
+          onSeated: () => { slot.pendingReason = CLOUD_COMPUTER_STARTING; }, existingOnly: opts.existingOnly,
         });
         if (!attached) throw new Error(opts.existingOnly ? "this bot no longer has a cloud computer of its own" : "the cloud computer could not be created or reached");
       } catch (error) {
@@ -8080,16 +8073,10 @@ async function beginTurn(
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       const dispatchTask = store.taskByThread(bot.id, threadId);
-      let wants: ComputerWant = computerSkipped ? "off" : plan.computer;
-      const handoffWork = isHandedWork(opts?.coordination ? coordinator.node(opts.coordination.id) : undefined);
-      let handoffOwnCloud = false;
-      if (handoffWork && wants === undefined && !teamComputer && cloudBackend === "box" && boat.boatConfigured(cfg)
-        && canWorkOnCloud(cloudEngine(instance)) && !computerPlaceRefusal("box")
-        && !cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name)
-        && !computerToolsRefusal(toolScope, "works-on", bot.name)) {
-        const ownCloudState = await boat.boatStatus(cfg, bot.id).then(status => status.box?.state, () => undefined);
-        if (handoffUsesOwnCloud({ plan, handoffWork, ownCloudState })) { wants = "cloud"; handoffOwnCloud = true; }
-      }
+      const handoffMayUseCloud = !computerSkipped && plan.computer === undefined && isHandedWork(opts?.coordination ? coordinator.node(opts.coordination.id) : undefined) && !teamComputer && cloudBackend === "box" && boat.boatConfigured(cfg)
+        && canWorkOnCloud(cloudEngine(instance)) && !computerPlaceRefusal("box") && !cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name) && !computerToolsRefusal(toolScope, "works-on", bot.name);
+      const handoffOwnCloud = handoffMayUseCloud && handoffUsesOwnCloud({ plan, handoffWork: true, ownCloudState: await boat.boatStatus(cfg, bot.id).then(status => status.box?.state, () => undefined) });
+      let wants: ComputerWant = computerSkipped ? "off" : handoffOwnCloud ? "cloud" : plan.computer;
       const skipComputer = (error: unknown) => {
         if (!answer.incident || error instanceof DirectTurnSetupCancelled || error instanceof ComputerWaitParked) throw error;
         computerSkipped ??= error instanceof Error ? error.message : String(error);

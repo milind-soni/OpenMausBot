@@ -16,6 +16,10 @@ export const CLOUD_COMPUTER_IDLE_MS = Math.max(1_000, Number(process.env.OMB_CLO
  * minutes or more often never waits on a wake: each wake spends one start from the Boat account's pool, shared by every customer. */
 export const ROUTINE_DUE_SOON_MS = 30 * 60_000;
 const MAX_LISTING_RETRY_MS = 60 * 60_000;
+/** Above a slow first start; Boat's own ready wait is 90 seconds. */
+export const CLOUD_COMPUTER_START_BUDGET_MS = Math.max(1_000, Number(process.env.OMB_CLOUD_COMPUTER_START_BUDGET_MS) || 150_000);
+export const CLOUD_COMPUTER_STARTING = "The cloud computer is still starting. This call was not performed. Take a fresh screenshot in a moment.";
+export const CLOUD_COMPUTER_DID_NOT_START = "the cloud computer didn't start in time";
 
 type ScheduledRoutine = Pick<Routine, "botId" | "runOn" | "enabled" | "nextRunAt">;
 
