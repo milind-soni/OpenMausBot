@@ -12,7 +12,7 @@ import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { cloudColor, cloudColorFill } from "@/lib/cloud-look";
 import { activeLocale, t } from "@/lib/i18n";
-import { localizedRelativeTime } from "@/lib/memory";
+import { localizedRelativeTime } from "@/lib/relative-time";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
 import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";

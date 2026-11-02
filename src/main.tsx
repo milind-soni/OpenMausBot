@@ -5,6 +5,7 @@ import {
   BROWSER_SIGN_IN_FAILED, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
 } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
+import { loadPageLanguage } from "./lib/language-preference";
 import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
@@ -24,12 +25,6 @@ applyChatWidth(readChatWidth());
 async function chooseRoot(): Promise<React.ReactNode> {
   const home = window.ogb?.home;
   if (location.pathname === "/home" && home) return <HomeScreen bridge={home} manage={window.ogb?.cloudPlan?.manage} />;
-  // The window's own rail of places (electron/chrome-rail.mjs): see-through but for the rail and its open sheets.
-  if (location.pathname === "/rail" && window.ogb?.rail?.expand) {
-    document.documentElement.style.background = document.body.style.background = "transparent";
-    const { ChromeRail } = await import("./components/ChromeRail");
-    return <ChromeRail />;
-  }
   if (location.pathname === "/pair") {
     const signIn = takeBrowserSignInFromLocation();
     if (signIn) {
@@ -52,6 +47,6 @@ async function chooseRoot(): Promise<React.ReactNode> {
   return <App />;
 }
 
-void Promise.all([bootstrapBrand(), chooseRoot()]).then(([, root]) => {
+void Promise.all([bootstrapBrand(), chooseRoot(), loadPageLanguage()]).then(([, root]) => {
   createRoot(document.getElementById("root")!).render(<StrictMode>{root}</StrictMode>);
 });
