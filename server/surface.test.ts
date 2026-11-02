@@ -6,6 +6,7 @@ import {
   cloudPlaceRefusal,
   computerSkippedNote,
   computerToolsRefusal,
+  handoffUsesOwnCloud,
   parseSurface,
   pinSource,
   placeUnavailable,
@@ -22,6 +23,28 @@ describe("browserIsThePlace", () => {
     expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: false }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "local", browserOn: true }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "off", browserOn: true }))).toBe(false);
+  });
+});
+
+describe("handoffUsesOwnCloud", () => {
+  const auto = resolveSurface({ destination: undefined, browserOn: true });
+  it("runs handed-off work on Auto on the receiving bot's own cloud computer, awake or asleep", () => {
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: "running" })).toBe(true);
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: "archived" })).toBe(true);
+  });
+  it("never creates one, and leaves a person's own turns and consults alone", () => {
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: null })).toBe(false);
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: undefined })).toBe(false);
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: false, ownCloudState: "running" })).toBe(false);
+  });
+  it("keeps Works on and a pin as they are", () => {
+    for (const plan of [
+      resolveSurface({ destination: "browser", browserOn: true }),
+      resolveSurface({ destination: "local", browserOn: true }),
+      resolveSurface({ destination: "off", browserOn: true }),
+      resolveSurface({ destination: undefined, pinnedSurface: "browser", browserOn: true }),
+      resolveSurface({ destination: undefined, pinnedSurface: "vm", browserOn: true }),
+    ]) expect(handoffUsesOwnCloud({ plan, handoffWork: true, ownCloudState: "running" })).toBe(false);
   });
 });
 

@@ -83,6 +83,11 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
 
+/** On Auto, work handed over by another bot runs on the receiving bot's own cloud computer when it has one (asleep or awake): the handoff cannot pick a place itself. Auto still never creates one; Works on, a pin, a person's turn and a consult keep their usual place. */
+export function handoffUsesOwnCloud(input: { plan: Pick<SurfacePlan, "computer">; handoffWork: boolean; ownCloudState: string | null | undefined }): boolean {
+  return input.handoffWork && input.plan.computer === undefined && Boolean(input.ownCloudState);
+}
+
 export function browserIsThePlace(plan: SurfacePlan): boolean {
   return plan.computer === "off" && plan.browser;
 }
