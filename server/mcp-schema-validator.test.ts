@@ -27,6 +27,12 @@ describe("compileToolSchema", () => {
     expect([double({ x: -1e300 }), double({ x: 0.25 })]).toEqual([true, true]);
   });
 
+  it("accepts schemars' `ip` (Rust's IpAddr) as an IPv4 or IPv6 address", () => {
+    const validate = compileToolSchema({ type: "object", properties: { host: { type: "string", format: "ip" } } });
+    expect(["192.168.0.1", "::1", "2001:db8::8a2e:370:7334"].map((host) => validate({ host }))).toEqual([true, true, true]);
+    expect(["256.1.1.1", "example.com", "192.168.0.1/24", ""].map((host) => validate({ host }))).toEqual([false, false, false, false]);
+  });
+
   it("still refuses a format it does not know", () => {
     expect(() => compileToolSchema({ type: "object", properties: { x: { type: "string", format: "made-up" } } })).toThrow("could not be validated");
   });
