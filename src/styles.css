@@ -118,7 +118,6 @@
   --animate-pop-out: pop-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-caret: caret-blink 1s step-end infinite;
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-  --animate-shimmer: shimmer 2s linear infinite;
   --animate-status-pulse: status-pulse 1.6s steps(2, jump-none) infinite;
   /* onboarding: a block of copy or a row arriving in a beat; `.stagger`
      spaces siblings out. Rare, first-time motion, so it may run past the
@@ -1916,10 +1915,17 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 @keyframes progress-fill {
   from { clip-path: inset(0 100% 0 0 round 999px); }
 }
-/* "Thinking…" label sheen while the model reasons */
-@keyframes shimmer {
-  from { background-position: 200% 50%; }
-  to { background-position: -200% 50%; }
+/* "Thinking…" label sheen while the model reasons. The band crosses the phrase while the brighter copy inside it
+   crosses back, so the letters hold still and only the light moves. It moves by transform, in a dozen steps, and
+   rests between sweeps: a smooth sweep (or a background-position one) draws the whole page every display frame for
+   as long as a turn runs. */
+@keyframes sheen-band {
+  from { transform: translateX(-70%); animation-timing-function: steps(12, jump-none); }
+  35%, to { transform: translateX(70%); }
+}
+@keyframes sheen-letters {
+  from { transform: translateX(70%); animation-timing-function: steps(12, jump-none); }
+  35%, to { transform: translateX(-70%); }
 }
 @keyframes reduced-loader-pulse {
   0%, 100% { opacity: 0.45; }
@@ -1934,28 +1940,47 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   60% { opacity: 0.25; }
 }
 .thinking-shimmer {
-  background: linear-gradient(90deg, var(--color-ink-secondary) 40%, var(--color-ink) 50%, var(--color-ink-secondary) 60%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  /* background-clip:text only paints glyphs inside the background box. A
-     tight line box (leading-none) is shorter than ascenders, descenders and
-     arabic marks, so they were cut. Pad the box past the glyphs and pull the
-     margins back so the layout doesn't move. */
+  position: relative;
+  color: var(--color-ink-secondary);
+  /* A truncated phrase clips to its box, and a tight line box (leading-none)
+     is shorter than ascenders, descenders and arabic marks. Pad the box past
+     the glyphs and pull the margins back so the layout doesn't move. */
   padding: 0.35em 0.12em;
   margin: -0.35em -0.12em;
 }
-/* Simple mode's typing row is quieter: the shimmer runs from tertiary ink up to secondary. */
-.turn-phrase-quiet .thinking-shimmer {
-  background-image: linear-gradient(90deg, var(--color-ink-tertiary) 40%, var(--color-ink-secondary) 50%, var(--color-ink-tertiary) 60%);
+.thinking-sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
 }
+.thinking-sheen > span {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000 50%, transparent 70%);
+  mask-image: linear-gradient(90deg, transparent 30%, #000 50%, transparent 70%);
+  animation: sheen-band var(--sheen-period) linear var(--sheen-delay) infinite;
+}
+.thinking-sheen > span::before {
+  content: attr(data-text) / "";
+  position: absolute;
+  inset: 0;
+  padding: 0.35em 0.12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-ink);
+  animation: sheen-letters var(--sheen-period) linear var(--sheen-delay) infinite;
+}
+/* Simple mode's typing row is quieter: the sheen runs from tertiary ink up to secondary. */
+.turn-phrase-quiet .thinking-shimmer { color: var(--color-ink-tertiary); }
+.turn-phrase-quiet .thinking-sheen > span::before { color: var(--color-ink-secondary); }
 /* rotating presence phrase: the new phrase fades in where the old one was;
    only one is ever drawn */
 @keyframes turn-phrase-in {
   from { opacity: 0; }
 }
-.turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
+.turn-phrase-in { animation: turn-phrase-in 0.32s ease-out both; }
 .turn-now-toggle {
   display: flex;
   min-width: 0;
@@ -1996,10 +2021,9 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 @media (prefers-reduced-motion: reduce) {
   .turn-now-card { animation: none; }
   .turn-now-chevron { transition: none; }
-  .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
-  .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
-  .turn-phrase-quiet .thinking-shimmer { background: none; color: var(--color-ink-tertiary); }
+  .thinking-sheen { display: none; }
   .turn-phrase-in { animation: none; }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .reply-bubble-in { animation: none; }
