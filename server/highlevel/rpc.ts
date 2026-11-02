@@ -17,6 +17,8 @@ export interface HighLevelRpcDeps {
 
 export type HighLevelToolsList = { tools: HighLevelTool[]; instructions: string };
 
+class HighLevelAccessRefused extends Error {}
+
 export async function highlevelRpc(
   request: { method?: unknown; params?: unknown } | null | undefined,
   deps: HighLevelRpcDeps,
@@ -31,11 +33,19 @@ export async function highlevelRpc(
   const problem = highlevelToolCallProblem(params.name, args);
   if (problem || !isHighLevelToolName(params.name)) return highlevelErrorResult(problem ?? "Unknown HighLevel tool.", { code: "invalid_input" });
   const name = params.name;
-  deps.assertActive();
-  const verdict = deps.authorize(name);
-  if (!verdict.ok) return highlevelErrorResult(verdict.text, { code: "refused" });
-  const { result, write } = await deps.client.withActiveCall(deps.assertActive, () => runHighLevelTool(deps.client, name, args as Record<string, unknown>));
-  deps.assertActive();
-  if (write && !result.isError) deps.onWrite?.(write);
-  return result;
+  const assertAllowed = () => {
+    deps.assertActive();
+    const verdict = deps.authorize(name);
+    if (!verdict.ok) throw new HighLevelAccessRefused(verdict.text);
+  };
+  try {
+    assertAllowed();
+    const { result, write } = await deps.client.withActiveCall(assertAllowed, () => runHighLevelTool(deps.client, name, args as Record<string, unknown>));
+    deps.assertActive();
+    if (write && !result.isError) deps.onWrite?.(write);
+    return result;
+  } catch (error) {
+    if (error instanceof HighLevelAccessRefused) return highlevelErrorResult(error.message, { code: "refused" });
+    throw error;
+  }
 }

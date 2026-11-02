@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { X_MESSAGES, XResearchError, type XResearchClient } from "../x-research.ts";
-import type { ResearchClient } from "../research.ts";
+import { createXClient, X_MESSAGES, XResearchError, type XResearchClient } from "../x-research.ts";
+import { createResearchClient, type ResearchClient } from "../research.ts";
 import type { ServiceCredential } from "../included-services.ts";
 import { PASS } from "./table.ts";
 import { createXResearchInternalRoutes, type XInternalContext } from "./x-research.ts";
@@ -27,10 +27,10 @@ function sink() {
 
 async function callInternal(
   handler: ReturnType<typeof createXResearchInternalRoutes>,
-  { path = "/api/internal/x/search", method = "POST", body = {} as unknown, botId = "bot-1" } = {},
+  { path = "/api/internal/x/search", method = "POST", body = {} as unknown, botId = "bot-1", readBody = async () => body } = {},
 ) {
   const { sent, json, res } = sink();
-  const out = await handler({ method, path, res, json, botId, readBody: async () => body });
+  const out = await handler({ method, path, res, json, botId, readBody });
   return { out, ...sent };
 }
 
@@ -124,6 +124,119 @@ describe("X research internal routes", () => {
   });
 });
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((yes) => { resolve = yes; });
+  return { promise, resolve };
+}
+
+describe.each([false, true])("live research access (included: %s)", (included) => {
+  const credential: ServiceCredential = { token: "fixture", api: "https://synthetic.invalid", included };
+  const endpoint = { id: "fixture.lookup", method: "POST" };
+  const page = { output: { data: { items: [{ id: "50", text: "Fixture", authorUsername: "fixture" }], nextCursor: "page2" } } };
+
+  function routes(fetcher: typeof fetch) {
+    let enabled = true;
+    return {
+      revoke: () => { enabled = false; },
+      handler: createXResearchInternalRoutes({
+        credential: () => credential, botEnabled: () => enabled,
+        client: (c, assertAllowed) => createXClient(c, { fetcher, assertAllowed }),
+        research: (c, assertAllowed) => createResearchClient(c, { fetcher, assertAllowed, retryDelayMs: 0 }),
+      }),
+    };
+  }
+
+  it.each([
+    { action: "x/search", body: { query: "fixture" } },
+    { action: "x/user-posts", body: { handle: "fixture" } },
+    { action: "x/post", body: { post: "50", replies: true } },
+    { action: "x/profile", body: { handle: "fixture" } },
+    { action: "research/search", body: { job: "fixture" } },
+    { action: "research/endpoint", body: { id: "fixture.lookup" } },
+    { action: "research/call", body: { id: "fixture.lookup" } },
+  ])("refuses $action revoked during the body read without dispatch", async ({ action, body }) => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ endpoint }));
+    const h = routes(fetcher);
+    const reading = deferred(), release = deferred();
+    const input = { path: `/api/internal/${action}`, body };
+    const pending = callInternal(h.handler, { ...input, readBody: async () => {
+      reading.resolve();
+      await release.promise;
+      return body;
+    } });
+    await reading.promise;
+    h.revoke();
+    release.resolve();
+    expect(await pending).toEqual(await callInternal(h.handler, input));
+    expect(await callInternal(h.handler, input)).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["fallback", "page", "replies", "catalog", "retry", "in_progress"].filter((kind) => kind !== "catalog" || !included))(
+    "refuses a revoked %s continuation without another dispatch", async (kind) => {
+      const sent = deferred(), release = deferred();
+      const calls: string[] = [];
+      const isX = ["fallback", "page", "replies"].includes(kind);
+      const fetcher: typeof fetch = async (url) => {
+        const path = new URL(String(url)).pathname;
+        calls.push(path);
+        if (!included && !isX && kind !== "catalog" && calls.length === 1) return Response.json({ endpoint });
+        const heldCall = !included && !isX && kind !== "catalog" ? 2 : 1;
+        if (calls.length === heldCall) {
+          sent.resolve();
+          await release.promise;
+          if (kind === "fallback") return Response.json({}, { status: 500 });
+          if (kind === "page") return Response.json(page);
+          if (kind === "replies") return Response.json({ output: { data: { id: "50", text: "Fixture", authorUsername: "fixture" } } });
+          if (kind === "catalog") return Response.json({ endpoint });
+          if (kind === "in_progress") return Response.json({ detail: "in progress", message: "in progress" }, { status: 409 });
+          throw new Error("Fixture lost response");
+        }
+        return Response.json({ result: "unexpected continuation", output: { data: { items: [] } } });
+      };
+      const h = routes(fetcher);
+      const input = kind === "replies" ? { path: "/api/internal/x/post", body: { post: "50", replies: true } }
+        : isX ? { path: "/api/internal/x/search", body: { query: "fixture" } }
+          : { path: "/api/internal/research/call", body: { id: "fixture.lookup" } };
+      const pending = callInternal(h.handler, input);
+      await sent.promise;
+      const before = [...calls];
+      h.revoke();
+      release.resolve();
+      expect(await pending).toEqual(await callInternal(h.handler, input));
+      expect(await callInternal(h.handler, input)).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
+      expect(calls).toEqual(before);
+    },
+  );
+
+  it.each(["x", "research"].flatMap((client) => [200, 422].map((status) => ({ client, status }))))(
+    "preserves the completed $client $status outcome after revocation", async ({ client, status }) => {
+      const sent = deferred(), release = deferred();
+      let calls = 0;
+      const h = routes(async (url) => {
+        calls++;
+        if (String(url).includes("/catalog/endpoints/")) return Response.json({ endpoint });
+        sent.resolve();
+        await release.promise;
+        return Response.json(status === 422 ? { message: "Fixture rejection" } : client === "x" ? { output: { data: { items: [] } } } : { saved: true }, { status });
+      });
+      const input = client === "x" ? { path: "/api/internal/x/search", body: { query: "fixture" } }
+        : { path: "/api/internal/research/call", body: { id: "fixture.lookup" } };
+      const pending = callInternal(h.handler, input);
+      await sent.promise;
+      h.revoke();
+      release.resolve();
+      const result = await pending;
+      expect(result.status).toBe(status === 200 ? 200 : 400);
+      if (status === 200) expect(result.body).toEqual(client === "x" ? { posts: [], more: false } : { result: { saved: true } });
+      else expect(result.body).toHaveProperty("code", "bad_input");
+      expect(await callInternal(h.handler, input)).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
+      expect(calls).toBe(client === "research" && !included ? 2 : 1);
+    },
+  );
+});
+
 describe("research internal routes", () => {
   const ownKey: ServiceCredential = { token: "treg_own", api: "https://treg.to", included: false };
   const fakeResearch = (overrides: Partial<ResearchClient> = {}): ResearchClient => ({
@@ -158,3 +271,68 @@ describe("research internal routes", () => {
   });
 });
 
+
+describe("research credential replaced mid-operation", () => {
+  const own: ServiceCredential = { token: "treg_own_fixture", api: "https://synthetic-own.invalid", included: false };
+  const plan: ServiceCredential = { token: "omb_xd_plan_fixture", api: "https://synthetic-plan.invalid", included: true };
+  const endpoint = { id: "fixture.lookup", method: "POST" };
+  const page = { output: { data: { items: [{ id: "50", text: "Fixture", authorUsername: "fixture" }], nextCursor: "page2" } } };
+
+  function routes(fetcher: typeof fetch) {
+    let current = own;
+    return {
+      removeOwnKey: () => { current = plan; },
+      handler: createXResearchInternalRoutes({
+        credential: () => current, botEnabled: () => true,
+        client: (c, assertAllowed) => createXClient(c, { fetcher, assertAllowed }),
+        research: (c, assertAllowed) => createResearchClient(c, { fetcher, assertAllowed, retryDelayMs: 0 }),
+      }),
+    };
+  }
+
+  const usedOwnKey = (init: RequestInit | undefined) => JSON.stringify(init?.headers ?? {}).includes(own.token);
+
+  it("refuses when the own key is removed during the body read, and sends nothing with it", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ endpoint }));
+    const h = routes(fetcher);
+    const reading = deferred(), release = deferred();
+    const pending = callInternal(h.handler, { path: "/api/internal/research/call", body: { id: "fixture.lookup" }, readBody: async () => {
+      reading.resolve();
+      await release.promise;
+      return { id: "fixture.lookup" };
+    } });
+    await reading.promise;
+    h.removeOwnKey();
+    release.resolve();
+    expect(await pending).toMatchObject({ status: 403, body: { error: X_MESSAGES.keyChanged } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["catalog", "page"])("stops a %s continuation once the own key is removed, without another request on it", async (kind) => {
+    const sent = deferred(), release = deferred();
+    const after: Array<RequestInit | undefined> = [];
+    let removed = false;
+    let calls = 0;
+    const fetcher: typeof fetch = async (_url, init) => {
+      calls++;
+      if (removed) after.push(init);
+      if (calls === 1) {
+        sent.resolve();
+        await release.promise;
+        return kind === "catalog" ? Response.json({ endpoint }) : Response.json(page);
+      }
+      return Response.json({ result: "unexpected continuation", output: { data: { items: [] } } });
+    };
+    const h = routes(fetcher);
+    const input = kind === "catalog" ? { path: "/api/internal/research/call", body: { id: "fixture.lookup" } }
+      : { path: "/api/internal/x/search", body: { query: "fixture" } };
+    const pending = callInternal(h.handler, input);
+    await sent.promise;
+    h.removeOwnKey();
+    removed = true;
+    release.resolve();
+    expect(await pending).toMatchObject({ status: 403, body: { error: X_MESSAGES.keyChanged } });
+    expect(after.filter(usedOwnKey)).toEqual([]);
+    expect(calls).toBe(1);
+  });
+});
