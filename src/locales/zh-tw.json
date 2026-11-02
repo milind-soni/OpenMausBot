@@ -4137,6 +4137,7 @@
   "cloudSend.move.homeAgain": "你的 Cloud 已結束，所以你的機器人回到了這台電腦。你在 Cloud 上做的事也正在搬回來。",
   "cloudSend.move.back": "你的 Cloud 已結束，所以你的機器人回到了這台電腦，連同你在 Cloud 上做的事。你在 Cloud 上新增的登入資訊和金鑰沒有回來：如有需要，請在這裡重新新增。",
   "cloudSend.move.backLost": "你的 Cloud 已結束，所以你的機器人以搬走時的樣子回到了這台電腦。之後你在 Cloud 上做的事無法搬回來。",
+  "cloudSend.move.backGone": "你的機器人搬去的 Cloud 已結束，所以它們以搬走時的樣子回到了這台電腦。它們的自動化已關閉：打開你想要的那些。",
   "cloudSend.move.elsewhere": "你的機器人回到了 {name}。這台電腦保留它在 {date} 的副本，自動化已關閉。",
   "cloudSend.move.elsewhereEmpty": "你的機器人回到了 {name}。",
   "homeScreen.openingNamed": "正在開啟 {name}…",

@@ -4756,6 +4756,7 @@
   "cloudSend.move.homeAgain": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này. Những gì bạn đã làm trên Cloud cũng đang quay về.",
   "cloudSend.move.back": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này, cùng với những gì bạn đã làm trên Cloud. Thông tin đăng nhập và khóa bạn thêm trên Cloud chưa quay về: hãy thêm lại ở đây nếu cần.",
   "cloudSend.move.backLost": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này như lúc chuyển đi. Những gì bạn làm trên Cloud từ đó không thể quay về.",
+  "cloudSend.move.backGone": "Cloud mà bot của bạn đã chuyển đến đã kết thúc nên chúng đã quay về máy tính này như lúc chuyển đi. Tự động hóa của chúng đang tắt: hãy bật những cái bạn muốn.",
   "cloudSend.move.elsewhere": "Bot của bạn đã quay về {name}. Máy tính này giữ bản sao của riêng nó từ {date}, và tự động hóa đã tắt.",
   "cloudSend.move.elsewhereEmpty": "Bot của bạn đã quay về {name}.",
   "homeScreen.openingNamed": "Đang mở {name}…",

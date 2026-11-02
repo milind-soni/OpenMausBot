@@ -2263,6 +2263,7 @@
   "cloudSend.move.homeAgain": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur. Ce que tu as fait dans le Cloud revient aussi.",
   "cloudSend.move.back": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur, avec ce que tu as fait dans le Cloud. Les identifiants et les clés ajoutés dans le Cloud ne sont pas revenus : ajoute-les ici à nouveau si tu en as besoin.",
   "cloudSend.move.backLost": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur tels qu'ils étaient au moment du déménagement. Ce que tu as fait dans le Cloud depuis n'a pas pu revenir.",
+  "cloudSend.move.backGone": "Le Cloud où tes bots avaient déménagé a pris fin, donc ils sont de retour sur cet ordinateur tels qu'ils étaient au moment du déménagement. Leurs automatisations sont désactivées : active celles que tu veux.",
   "cloudSend.move.elsewhere": "Tes bots sont revenus sur {name}. Cet ordinateur garde sa copie du {date}, avec les automatisations désactivées.",
   "cloudSend.move.elsewhereEmpty": "Tes bots sont revenus sur {name}.",
   "homeScreen.openingNamed": "Ouverture de {name}…",

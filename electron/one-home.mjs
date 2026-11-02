@@ -14,7 +14,11 @@
 // back what was done on My Cloud while the Admin still holds it (one-home-again.mjs) and switches on what was on there
 // (`back`). Once done, the Admin is told once per sign-in that this computer moved, so it can be the one an ended Cloud's
 // things come home to. When the Admin names another computer as that one, this one only opens its own copy, with every
-// automation off, and says where the bots went (`back` with `elsewhere`).
+// automation off, and says where the bots went (`back` with `elsewhere`). When the Cloud this computer moved to is gone and
+// is not My Cloud any more (deleted, or ended while another Cloud is My Cloud), by the Admin's word on that Cloud, this
+// computer opens its own copy as it was at the move, with every automation off, keeps its bots here, and says so once
+// (`back` with `gone`). That word is asked for the journal's Cloud, or for the Cloud the freeze names when this app kept no
+// journal.
 //
 // A person may keep this computer's bots on this computer (`keep`, its own choice, kept on this computer). Then no move
 // starts, and one under way stops before the switch as the Admin's kill switch stops it. Once this computer has moved,
@@ -138,10 +142,12 @@ export function arrivedCounts(here, there) {
  * @param {{
  *   journal: { read(): unknown, write(value: unknown): void },
  *   cloud(): null | { origin: string | null, account: string, machine: string | null, ready: boolean, moves: boolean, ended: boolean, paid: boolean,
- *     homecoming?: { installationId: string, name: string }, signIn?: string },
+ *     homecoming?: { installationId: string, name: string }, signIn?: string, verified?: boolean },
  *   send: { move(options?: { final?: boolean }): Promise<unknown>, check(): Promise<{ ok: boolean }>, switches(): Record<string, boolean>, snapshot(): any },
  *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string, what?: string }>, unfreeze(options?: { automations?: "off" }): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
- *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void> },
+ *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void>,
+ *     marker?(): Promise<{ frozen: boolean, cloud?: string, place?: string }> },
+ *   gone?(origin: string): Promise<"deleted" | "ended" | null>,
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   release?(): Promise<void>,
  *   lend?(projects: string[]): Promise<unknown>,
@@ -162,7 +168,9 @@ export function arrivedCounts(here, there) {
  *   now?(): number,
  *   timers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
  *   log?(line: string): void,
- * }} deps
+ * }} deps `gone(origin)`: the Admin's word that this account's Cloud at `origin` is gone ("deleted", or "ended": stopped
+ * and kept only until it is deleted); null for anything else, and while it can't be asked. `cloud().verified`: the Admin
+ * answered this sign-in just now (connected). `local.marker()`: this computer's freeze marker.
  */
 export function createOneHome(deps) {
   const now = deps.now ?? Date.now;
@@ -202,7 +210,8 @@ export function createOneHome(deps) {
     if (journal.phase === "done") return { phase: "done", ...(Number.isSafeInteger(journal.doneAt) ? { at: journal.doneAt } : {}), ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
     if (journal.phase === "keeping") return { phase: "keeping", ...(journal.updating ? { updating: true } : {}) };
     if (journal.phase === "home-again" || journal.phase === "back") {
-      return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}), ...(journal.elsewhere ? { elsewhere: journal.elsewhere } : {}), ...(journal.kept ? { kept: true } : {}) };
+      return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}), ...(journal.elsewhere ? { elsewhere: journal.elsewhere } : {}), ...(journal.kept ? { kept: true } : {}),
+        ...(journal.phase === "back" && journal.gone ? { gone: true } : {}) };
     }
     const running = deps.send.snapshot?.()?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
@@ -402,6 +411,54 @@ export function createOneHome(deps) {
     return null;
   }
 
+  /** The Cloud this computer is frozen for (`from`: the journal, or what the freeze names) is gone and My Cloud is another
+   * Cloud or none, by the Admin's word on that Cloud: this computer opens its own copy as it was at the move, with every
+   * automation off (the person may have set things up again elsewhere), keeps its bots here so no move starts by itself,
+   * and says so once. Nothing is asked of a Cloud that no longer exists. One already home, bringing that Cloud's things
+   * back, only stops waiting for them. */
+  async function cameHomeGone(from, gone) {
+    if (from.phase === "home-again") { write({ ...from, phase: "back", lost: true, retryAt: undefined }); return; }
+    try { await deps.local.unfreeze({ automations: "off" }); }
+    catch (error) { log(`one home: could not open this computer's copy yet (${error?.message ?? error})`); later(MINUTE); return; }
+    try { deps.keep?.write({ v: 1, on: true, at: now() }); } catch {}
+    const { retryAt: _, ...rest } = from;
+    log(`one home: the Cloud this computer moved to is ${gone === "deleted" ? "deleted" : "ended"}; its own copy is open again, with every automation off`);
+    write({ ...rest, v: 1, phase: "back", gone, endedAt: from.endedAt ?? now(), told: undefined });
+    deps.openLocal?.();
+  }
+
+  /** The Cloud this computer is frozen for, when it is not My Cloud now and the Admin's verified word on it may bring this
+   * computer home: the journal's while home is there (or on its way back from it), else the Cloud the freeze names when
+   * this app kept no journal of it. Never a server of the person's own (`place`), nor one another account moved to. */
+  async function frozenFor(journal, cloud) {
+    if (!cloud?.verified || !deps.gone) return null;
+    if (journal && (awayIn(journal) || journal.phase === "home-again")) return journal.cloud.origin !== cloud.origin ? journal : null;
+    if (journal && journal.phase !== "back") return null;
+    const marker = await deps.local.marker?.().catch(() => null);
+    if (!marker?.frozen || marker.place || typeof marker.cloud !== "string" || marker.cloud === cloud.origin) return null;
+    return { v: 1, cloud: { origin: marker.cloud, account: cloud.account, machine: marker.cloud }, startedAt: now() };
+  }
+
+  /** Whether the Cloud this computer is frozen for is gone, so this run only brings it home (cameHomeGone). */
+  async function goneHome(journal, cloud) {
+    const from = await frozenFor(journal, cloud);
+    if (!from) return false;
+    const gone = await deps.gone(from.cloud.origin).catch(() => null);
+    if (gone !== "deleted" && gone !== "ended") return false;
+    await cameHomeGone(from, gone);
+    return true;
+  }
+
+  /** My Cloud's word as it bears on this journal: what the session says of My Cloud is said of the Cloud this computer
+   * moved to only while they are the same Cloud. While My Cloud is another Cloud (or none), the one moved to neither ends
+   * nor takes a top-up by that word, and a move not yet switched over stops as it does when My Cloud ends (nothing runs
+   * there yet). Only a verified session's word, for the journal's own account. */
+  function judged(cloud, journal) {
+    if (!cloud?.verified || !journal || journal.phase === "back" || cloud.account !== journal.cloud.account || cloud.origin === journal.cloud.origin) return cloud;
+    const { homecoming: _, ...rest } = cloud;
+    return awayIn(journal) || journal.phase === "home-again" ? { ...rest, ready: false, ended: false } : { ...rest, ended: true };
+  }
+
   /** My Cloud ended: this computer is home again at once, as it was at the move, then brings back what was done there. */
   async function homeAgain(journal) {
     let next = journal;
@@ -530,7 +587,7 @@ export function createOneHome(deps) {
   async function run() {
     noted = null;
     let journal = read();
-    const cloud = deps.cloud();
+    const said = deps.cloud(), cloud = judged(said, journal);
     // A move left off while My Cloud was away goes on as soon as it is back, unless it failed frozen: that waits its hour.
     const cameBack = cloud?.ready === true && wasReady === false;
     wasReady = cloud ? cloud.ready : null;
@@ -541,6 +598,7 @@ export function createOneHome(deps) {
       await deps.release?.();
       return;
     }
+    if (await goneHome(journal, said)) return;
     if (journal?.phase === "back" && journal.switchBack) {
       await switchBack(journal);
       journal = read();
