@@ -328,6 +328,7 @@ import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./t
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractReplayImages, extractTurnImages } from "./turn-images.ts";
+import { videoFrameImages } from "./turn-video.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle, llmThreadTitlesEnabled } from "./thread-title-generate.ts";
 import { stallLimitMs, TurnWatchdog } from "./turn-watchdog.ts";
@@ -7754,7 +7755,9 @@ async function startTurn(
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
-  const turnImages = usesNativeImageInput ? resolvedImages.images : [];
+  const turnImages = usesNativeImageInput
+    ? [...resolvedImages.images, ...(await videoFrameImages(resolvedImages.videos))]
+    : [];
   const commsDepth = opts?.commsDepth ?? 0;
   if (commsDepth > 0) markInternalTurn(threadId);
   else clearInternalTurn(threadId);
@@ -9896,6 +9899,7 @@ async function runClaimedGroupMemberTurn(
   const burstIds = new Set(operation?.queuedQueueIds ?? []);
   const burstOverrides: Array<{ messageId: string; text: string }> = [];
   const burstImages: ReturnType<typeof extractTurnImages>["images"] = [];
+  const burstVideos: ReturnType<typeof extractTurnImages>["videos"] = [];
   if (usesNativeImageInput && !cardContinuation) {
     for (const message of store.activePath(threadId)) {
       if (message.role !== "user" || message.kind !== "text" || !message.text) continue;
@@ -9903,13 +9907,14 @@ async function runClaimedGroupMemberTurn(
       const resolved = extractTurnImages(message.text);
       burstOverrides.push({ messageId: message.id, text: resolved.text });
       burstImages.push(...resolved.images);
+      burstVideos.push(...resolved.videos);
     }
   }
   // The latest line is usually the burst's last: extracting it again would double-count its attachments.
   const latestInBurst = latestUser?.queueId !== undefined && burstIds.has(latestUser.queueId);
   const resolvedLatestImages = latestUser?.text && !cardContinuation && !latestInBurst
     ? extractTurnImages(latestUser.text)
-    : { text: latestUser?.text ?? "", images: [] };
+    : { text: latestUser?.text ?? "", images: [], videos: [] };
   const roomWindow = roomTranscript.window(
     threadId,
     userName,
@@ -9922,7 +9927,9 @@ async function runClaimedGroupMemberTurn(
     bot.id,
   );
   const roomContext = roomWindow.text;
-  const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images] : [];
+  const turnImages = usesNativeImageInput
+    ? [...burstImages, ...resolvedLatestImages.images, ...(await videoFrameImages([...burstVideos, ...resolvedLatestImages.videos]))]
+    : [];
   const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills);
   const selectedSkills = mergeSkills(
     selectBundledSkills(
