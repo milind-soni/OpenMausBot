@@ -4,6 +4,7 @@ import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath 
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
+import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
 import { withWslNotice } from "./wsl-launch.ts";
@@ -173,13 +174,13 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      const live = withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+      const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
-      }))));
+      })))));
       this.shareSnapshot(live);
       return { instanceId, live: decorate ? decorate(live) : live };
     } catch (e) {

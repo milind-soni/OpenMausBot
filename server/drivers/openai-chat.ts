@@ -119,6 +119,8 @@ interface RuntimeOptions<Config> {
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
+  /** The name to send for a model, when its server knows it by another. */
+  servedModel?: (model: string) => Promise<string>;
   /** Smaller models announce a step and end the turn without calling a tool; such a reply gets a nudge, at most three
    * per turn and each only after tool progress since the last. */
   nudgeAnnouncedAction?: boolean;
@@ -288,10 +290,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
+      const served = options.servedModel ? await options.servedModel(model) : model;
       const payload = JSON.stringify(route === "responses"
-        ? responsesRequest({ model, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model) })
+        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model) })
         : {
-          ...options.requestBody(model, messages, stream),
+          ...options.requestBody(served, messages, stream),
           ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
           ...(tools.length ? { tools } : {}),
         });

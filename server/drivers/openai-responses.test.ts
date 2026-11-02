@@ -106,6 +106,8 @@ async function fixture(script: Script, apiUrl = OPENAI) {
       return;
     }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     const call = { path: request.url ?? "", body: JSON.parse(data) as Record<string, any> };
     calls.push(call);
