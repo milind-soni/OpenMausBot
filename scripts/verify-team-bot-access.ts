@@ -298,6 +298,7 @@ try {
       await crowd(); await openSettings();
       await page.evaluate(`(() => { const field = document.querySelector("[data-access-search]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, "payroll"); field.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
       await page.until("document.querySelectorAll('[data-access-row]').length === 1", "the search");
+    } },
     { name: "department-access-preview", who: "ada", query: "mode=simple", act: async () => {
       for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
       await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
