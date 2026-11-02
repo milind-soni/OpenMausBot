@@ -30,7 +30,7 @@ import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
-import { Agent, fetch as fetchWithoutLimits } from "undici";
+import type { Agent } from "undici";
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -109,8 +109,9 @@ interface NativeLog {
 const FETCH_LIMIT_MS = 300_000;
 const LIVENESS_MISSES = 3;
 let unlimitedAgent: Agent | undefined;
-function fetchPastLimit(url: string, init: RequestInit): Promise<Response> {
-  unlimitedAgent ??= new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+async function fetchPastLimit(url: string, init: RequestInit): Promise<Response> {
+  const { Agent: UndiciAgent, fetch: fetchWithoutLimits } = await import("undici");
+  unlimitedAgent ??= new UndiciAgent({ headersTimeout: 0, bodyTimeout: 0 });
   return fetchWithoutLimits(url, { ...init, dispatcher: unlimitedAgent } as Parameters<typeof fetchWithoutLimits>[1]) as unknown as Promise<Response>;
 }
 
