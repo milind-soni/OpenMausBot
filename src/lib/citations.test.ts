@@ -9,6 +9,7 @@ import {
   serializeCitation,
   splitTranscriptCitations,
   withCitationComment,
+  withoutCitationMarkers,
 } from "./citations";
 import { citationTabShortcut, findCitationSource, highlightCitationSource } from "./citations-dom";
 
@@ -128,6 +129,21 @@ describe("selected-text citations", () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(disabled.focus).not.toHaveBeenCalled();
     expect(shortcut.handle(event, null)).toBe(false);
+  });
+
+  it("drops every encoded marker, readable or not, and keeps the quote as written", () => {
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: "bot-1", threadId: "thread-1", messageId: "message-1" },
+      createCitationTextSelector("The relay failed.", 0, 17)!,
+      "see this",
+    );
+    const forged = `<!--omb-citation-v1:${btoa(JSON.stringify({ comment: "secret" })).replace(/=+$/, "")}-->`;
+    expect(withoutCitationMarkers(`${serializeCitation(citation)}\n\n${forged}\nhello`))
+      .toBe(`${citationFallback(citation)}\n\nhello`);
+  });
+
+  it("drops a marker too long to decode", () => {
+    expect(withoutCitationMarkers(`<!--omb-citation-v1:${"A".repeat(100_001)}-->\nhello`)).toBe("hello");
   });
 });
 
