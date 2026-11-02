@@ -649,7 +649,12 @@ async function main() {
     await sleep(1_000);
     const back = await switchTo(seeded.bigBotId, seeded.bigLastMessageId);
     await sleep(1_000);
-    big.switchConversation = { toSmall: away, backToBig: back };
+    const awayAgain = await switchTo(seeded.otherBotId, null);
+    await sleep(1_000);
+    const backAgain = await switchTo(seeded.bigBotId, seeded.bigLastMessageId);
+    await sleep(1_000);
+    // The first visit draws the conversation for the first time; the second is what a return to it costs.
+    big.switchConversation = { toSmall: away, backToBig: back, toSmallAgain: awayAgain, backToBigAgain: backAgain };
     const memoryBefore = await page.metrics();
     const box = await page.evaluate<{ x: number; y: number; rows: number; nodes: number; top: number; height: number } | null>(TRANSCRIPT_BOX);
     if (!box) big.scroll = { error: "no scrolling transcript" };
@@ -693,6 +698,7 @@ async function main() {
       await slice("CSS animations paused and no animation frames", "window.requestAnimationFrame = () => 0"),
     ];
     await page.close();
+    log("big workspace: profiling build");
     const preview = await serveDist(profileDist, fixture.url);
     const profiled = await chrome.newPage({ storage: STORAGE });
     await pageLoad(profiled, preview.url);
@@ -711,9 +717,12 @@ async function main() {
         groups: componentGroups({ ...snapshot.renders, ...Object.fromEntries(Object.entries(snapshot.mounts).map(([name, n]) => [name, n + (snapshot.renders[name] ?? 0)])) }, snapshot.selfMs),
         topSelfMs: Object.fromEntries(topSelf.map(([name, ms]) => [name, Math.round(ms)])), longestTaskMs: Math.max(0, ...snapshot.longTasks.map((task) => task[1])) };
     };
+    log("big workspace: switching conversations");
     const awayProfiled = await profiledSwitch(seeded.otherBotId, null);
     const backProfiled = await profiledSwitch(seeded.bigBotId, seeded.bigLastMessageId);
-    big.switchProfiled = { toSmall: awayProfiled, backToBig: backProfiled };
+    const awayAgainProfiled = await profiledSwitch(seeded.otherBotId, null);
+    const backAgainProfiled = await profiledSwitch(seeded.bigBotId, seeded.bigLastMessageId);
+    big.switchProfiled = { toSmall: awayProfiled, backToBig: backProfiled, toSmallAgain: awayAgainProfiled, backToBigAgain: backAgainProfiled };
     log("streaming a reply, big workspace");
     big.stream = await streamTurn(chrome, profiled, fixture, seeded.bigBotId);
     await profiled.close();
