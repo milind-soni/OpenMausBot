@@ -145,6 +145,8 @@ export interface WireTask extends InboxTask {
   routineRunId?: string;
   /** Set when a bot, not a person, opened this thread. */
   openedBy?: TaskOpenedBy;
+  /** An outside caller opened this thread through the bot's API; only such a thread may be continued through it. */
+  botApi?: true;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
   /** Set by close_thread; absent while the thread is open. */

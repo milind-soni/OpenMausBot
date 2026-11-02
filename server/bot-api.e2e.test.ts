@@ -1,0 +1,129 @@
+// A bot's API on a real server with the fake engine: switched on from the app, called with the very curl the card shows,
+// answered with the bot's reply in a thread the app shows as the API's; a wrong key, an API that is off, the rate limit;
+// and, on a bot that asks before acting, a call that stops at the approval nobody outside may give.
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { connect, type Socket } from "node:net";
+import { join } from "node:path";
+import { afterEach, expect, it } from "vitest";
+
+import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import { botApiCurl } from "../shared/bot-api.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
+
+let fixture: VerificationServer | undefined;
+let socket: Socket | undefined;
+afterEach(async () => {
+  socket?.destroy();
+  socket = undefined;
+  await fixture?.close();
+  fixture = undefined;
+});
+
+function appApi(url: string) {
+  return async (method: string, path: string, body?: unknown, status?: number) => {
+    const response = await fetch(url + path, { method, headers: { "content-type": "application/json", origin: url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const value = await response.json() as any;
+    if (status !== undefined) expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    else expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBeLessThan(300);
+    return value;
+  };
+}
+
+const call = async (endpoint: string, key: string, body: unknown) => {
+  const response = await fetch(endpoint, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+  return { status: response.status, body: await response.json() as any };
+};
+
+const sh = (command: string) => new Promise<string>((resolve, reject) => {
+  execFile("sh", ["-c", command], { timeout: 60_000 }, (error, stdout, stderr) => (error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve(stdout)));
+});
+
+it("answers the card's own curl with the bot's reply, and refuses a wrong key, an API that is off, and an eleventh call in a minute", async () => {
+  fixture = await launchVerificationServer(process.env);
+  const { url } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Scout", "--url", url]) as any).bot;
+  const port = Number(new URL(url).port);
+
+  // Off by default, and the card's address is the webhook receiver's.
+  const before = await api("GET", `/api/bots/${bot.id}/bot-api`);
+  expect(before).toMatchObject({ enabled: false, callCount: 0, canManage: true, url: `http://127.0.0.1:${port + 1}/hooks/api/bots/${bot.id}/messages` });
+  expect((await call(before.url, "bak_nothing", { message: "Hi" })).status).toBe(403);
+
+  // On: the key comes back once, with the address; the saved file holds a hash, not the key.
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  expect(on.key).toMatch(/^bak_/);
+  expect(readFileSync(join(fixture.info.dataDir, "bot-api.json"), "utf8")).not.toContain(on.key);
+
+  // The curl exactly as the card shows it, pasted into a shell.
+  const answered = JSON.parse(await sh(botApiCurl(on.url, on.key))) as { reply: string; thread: string };
+  expect(answered.reply).toBe("hello from fake claude");
+  expect(answered.thread).toMatch(/^[\w-]+$/);
+
+  // The app shows the thread as the API's, with what the caller asked and what the bot said.
+  const bots = (await api("GET", "/api/bots")).bots as any[];
+  const task = bots.find((candidate) => candidate.id === bot.id).tasks.find((candidate: any) => candidate.threadId === answered.thread);
+  expect(task).toMatchObject({ botApi: true, title: "Hello! What can you do?" });
+  const lines = (await api("GET", `/api/threads/${answered.thread}/messages`)).messages as any[];
+  expect(lines.find((line) => line.role === "user")).toMatchObject({ text: "Hello! What can you do?", via: "api" });
+  expect(lines.filter((line) => line.role === "bot" && line.kind === "text").map((line) => line.text)).toEqual(["hello from fake claude"]);
+
+  // Reading the thread back, and continuing it, through the same door; a wrong key gets nothing.
+  const read = await fetch(`${on.url}?thread=${answered.thread}`, { headers: { authorization: `Bearer ${on.key}` } });
+  expect(await read.json()).toEqual({ reply: "hello from fake claude", thread: answered.thread });
+  expect((await call(on.url, `${on.key}x`, { message: "Hi" })).status).toBe(401);
+  expect((await call(on.url, on.key, { message: "Again", thread: answered.thread })).body).toMatchObject({ reply: "hello from fake claude", thread: answered.thread });
+  for (let i = 0; i < 8; i += 1) expect((await call(on.url, on.key, { message: `call ${i}`, thread: answered.thread })).status).toBe(200);
+  const eleventh = await call(on.url, on.key, { message: "one more", thread: answered.thread });
+  expect(eleventh.status).toBe(429);
+
+  // Every call was recorded; the key never shows again.
+  const after = await api("GET", `/api/bots/${bot.id}/bot-api`);
+  expect(after).toMatchObject({ enabled: true, callCount: 10 });
+  expect(after.calls.map((entry: any) => entry.statusCode)).toContain(429);
+  expect(JSON.stringify(after)).not.toContain(on.key);
+
+  // Off again: the key is gone with it.
+  expect(await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: false })).toMatchObject({ enabled: false });
+  expect((await call(on.url, on.key, { message: "Hi" })).status).toBe(403);
+}, hostTimeout(180_000));
+
+it("stops at an approval the bot asks for: nobody outside answers it, and the call says needs_approval", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  const { url, dataDir } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Careful", "--url", url]) as any).bot;
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" });
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+
+  // A turn that never answers: the call's own wait runs out and it says it is still working.
+  const working = await call(on.url, on.key, { message: "Think about it", wait: 1 });
+  expect(working).toMatchObject({ status: 202, body: { status: "working", thread: expect.any(String) } });
+
+  // The bot asks before acting: the fake engine's permission broker carries the ask the engine would make.
+  const dump = join(dataDir, "fake-claude-dump.json");
+  const pending = call(on.url, on.key, { message: "Clean up the downloads folder", wait: 60 });
+  await expect.poll(() => existsSync(dump) && JSON.parse(readFileSync(dump, "utf8")).prompt?.includes("Clean up the downloads folder"), { timeout: hostTimeout(30_000) }).toBe(true);
+  const launch = JSON.parse(readFileSync(dump, "utf8"));
+  expect(launch.argv).toContain("--permission-prompt-tool");
+  expect(launch.prompt).toContain("[UNTRUSTED BOT API MESSAGE]");
+  expect(launch.systemPrompt).toContain("through this bot's API");
+  socket = connect(launch.mcpConfig.mcpServers.ogb.args.at(-1));
+  await new Promise<void>((resolve, reject) => { socket!.once("connect", resolve); socket!.once("error", reject); });
+  const answers: any[] = [];
+  socket.on("data", (chunk) => { for (const line of String(chunk).split("\n").filter(Boolean)) answers.push(JSON.parse(line)); });
+  socket.write(`${JSON.stringify({ t: "ask", id: randomUUID(), tool: "Bash", input: { command: "ls ~/Downloads" } })}\n`);
+
+  const stopped = await pending;
+  expect(stopped).toMatchObject({ status: 202, body: { status: "needs_approval", thread: expect.any(String) } });
+  const threadId = stopped.body.thread as string;
+  const lines = (await api("GET", `/api/threads/${threadId}/messages`)).messages as any[];
+  const card = lines.find((line) => line.card?.requestId)?.card;
+  expect(card).toMatchObject({ requestType: "permission" });
+  expect(card.answered).toBeUndefined();
+  expect(answers).toEqual([]);
+  const read = await fetch(`${on.url}?thread=${threadId}`, { headers: { authorization: `Bearer ${on.key}` } });
+  expect(await read.json()).toEqual({ thread: threadId, status: "needs_approval" });
+}, hostTimeout(180_000));

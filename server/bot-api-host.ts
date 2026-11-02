@@ -1,0 +1,256 @@
+// The Bot API's two sides. Outside: `POST /hooks/api/bots/<id>/messages` on the webhook receiver, a bearer key, a
+// message in, the bot's reply out; the turn it starts is outside work (the "api" trigger), so it never acts for the
+// person, is told the message came from outside, and anything that needs an approval waits for the person in the thread.
+// Inside: the app's routes to switch it on, mint a key and switch it off, open only to whoever may edit the bot.
+import { z } from "zod";
+
+import { redactSecretsInText } from "../shared/redact.ts";
+import { botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
+import type { AdminActionRow } from "./admin-activity.ts";
+import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiPrompt, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
+import type { RequestAuth } from "./request-auth.ts";
+import { PASS, type RouteHandler } from "./routes/table.ts";
+import { parseJson, schemaIssue } from "./schema.ts";
+import type { Message, Store } from "./store.ts";
+import { bearerSecret, header, json, readRawBody, type IngressDoor } from "./webhook-ingress.ts";
+
+/** How long a call waits for the reply before answering "working". */
+export const BOT_API_DEFAULT_WAIT_MS = 5 * 60_000;
+const POLL_MS = 250;
+const PUBLIC_PATH = /^\/hooks\/api\/bots\/([\w-]{1,128})\/messages$/;
+const APP_PATH = /^\/api\/bots\/([\w-]{1,128})\/bot-api(?:\/(new-key))?$/;
+
+const callSchema = z.object({
+  message: z.string().min(1).max(BOT_API_MAX_MESSAGE_CHARS),
+  thread: z.string().regex(/^[\w-]{1,128}$/).optional(),
+  /** Seconds to wait for the reply, within the default. */
+  wait: z.number().min(0).max(BOT_API_DEFAULT_WAIT_MS / 1000).optional(),
+});
+const switchSchema = z.object({ enabled: z.boolean() });
+
+type TurnOutcome = { ok: boolean; text: string; cards?: unknown };
+
+export interface BotApiTurnOptions {
+  threadId: string;
+  automationSource: "api";
+  unattended: true;
+  userMessage: Message;
+  onSettled: (outcome: TurnOutcome) => void;
+  onDispatchError: (message: string) => void;
+}
+
+export interface BotApiHostDeps {
+  store: Pick<Store, "bot" | "taskByThread" | "createTask" | "patchTask" | "appendMessage" | "messagesFor" | "onChange">;
+  startTurn(botId: string, text: string, opts: BotApiTurnOptions): Promise<unknown>;
+  threadBusy(botId: string, threadId: string): boolean;
+  /** The webhook receiver's public base, as the app advertises it for webhooks. */
+  hooksBaseUrl(): string;
+  /** Why this person may not change the bot's API; null when they may. */
+  manageRefusal(auth: RequestAuth, botId: string): string | null;
+  /** The same claim a webhook delivery makes on arrival (wakes, moves, maintenance). */
+  claimRequest?(): () => void;
+  /** Settings → Activity on a Team Cloud. */
+  record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
+  manager?: BotApiManager;
+  waitMs?: number;
+}
+
+function fail(status: number, message: string): never {
+  throw Object.assign(new Error(message), { status });
+}
+
+function statusOf(error: unknown): number {
+  const parsed = z.object({ status: z.number().int() }).safeParse(error);
+  return parsed.success ? parsed.data.status : 500;
+}
+
+/** A card the bot put to the person and nobody has answered: the call stops there. */
+function pendingCard(lines: readonly Message[]): boolean {
+  return lines.some((line) => line.card?.requestId !== undefined && !line.card.answered && !line.card.dismissed);
+}
+
+function replyText(lines: readonly Message[]): string {
+  return redactSecretsInText(lines.filter((line) => line.role === "bot" && line.kind === "text" && typeof line.text === "string" && line.text.trim())
+    .map((line) => line.text!.trim()).join("\n\n"));
+}
+
+export function createBotApiHost(deps: BotApiHostDeps) {
+  const manager = deps.manager ?? new BotApiManager();
+  const waitMs = deps.waitMs ?? BOT_API_DEFAULT_WAIT_MS;
+  /** Turns the API started that have not settled, per bot: the pending cap counts these. */
+  const running = new Map<string, Set<string>>();
+  deps.store.onChange((change) => { if (change.type === "bot.deleted") manager.removeForBot(change.botId); });
+
+  const pendingFor = (botId: string) => {
+    const set = running.get(botId);
+    for (const threadId of set ?? []) if (!deps.threadBusy(botId, threadId)) set!.delete(threadId);
+    return set?.size ?? 0;
+  };
+  const markRunning = (botId: string, threadId: string, on: boolean) => {
+    const set = running.get(botId) ?? new Set<string>();
+    if (on) set.add(threadId); else set.delete(threadId);
+    if (set.size) running.set(botId, set); else running.delete(botId);
+  };
+
+  /** The thread as the caller sees it now, from the lines after its last message. */
+  function threadState(botId: string, threadId: string): BotApiReply {
+    const lines = deps.store.messagesFor(threadId);
+    const last = lines.findLastIndex((line) => line.role === "user");
+    const after = lines.slice(last + 1);
+    if (pendingCard(after)) return { thread: threadId, status: "needs_approval" };
+    if (deps.threadBusy(botId, threadId)) return { thread: threadId, status: "working" };
+    return { reply: replyText(after), thread: threadId };
+  }
+
+  async function runCall(botId: string, call: z.output<typeof callSchema>): Promise<{ status: number; body: BotApiReply }> {
+    const store = deps.store;
+    let threadId = call.thread;
+    if (threadId !== undefined) {
+      const task = store.taskByThread(botId, threadId);
+      // Only a thread this API opened: the caller never writes into the person's own conversations.
+      if (!task || task.botApi !== true) fail(404, "no such thread");
+      if (deps.threadBusy(botId, threadId)) return { status: 409, body: { thread: threadId, status: "working" } };
+    } else {
+      const task = store.createTask(botId, call.message.slice(0, 80), false);
+      if (!task) fail(404, "no such bot");
+      threadId = task.threadId;
+      store.patchTask(botId, threadId, { botApi: true });
+    }
+    const receivedAt = Date.now();
+    const userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text: call.message, via: "api" });
+    const after = () => { const all = store.messagesFor(threadId!); return all.slice(all.findIndex((line) => line.id === userMessage.id) + 1); };
+    let settled: TurnOutcome | undefined;
+    let dispatchError: string | undefined;
+    markRunning(botId, threadId, true);
+    try {
+      await deps.startTurn(botId, botApiPrompt(call.message, receivedAt), {
+        threadId, automationSource: "api", unattended: true, userMessage,
+        onSettled: (outcome) => { settled = outcome; markRunning(botId, threadId!, false); },
+        onDispatchError: (message) => { dispatchError = message; markRunning(botId, threadId!, false); },
+      });
+    } catch (error) {
+      markRunning(botId, threadId, false);
+      throw error;
+    }
+    const deadline = Date.now() + Math.min(waitMs, call.wait === undefined ? waitMs : call.wait * 1000);
+    for (;;) {
+      if (dispatchError !== undefined) fail(502, dispatchError);
+      if (settled) break;
+      if (pendingCard(after())) return { status: 202, body: { thread: threadId, status: "needs_approval" } };
+      if (Date.now() >= deadline) return { status: 202, body: { thread: threadId, status: "working" } };
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+    if (pendingCard(after())) return { status: 202, body: { thread: threadId, status: "needs_approval" } };
+    if (!settled.ok) fail(502, settled.text || "The bot could not answer");
+    return { status: 200, body: { reply: replyText(after()), thread: threadId } };
+  }
+
+  const door: IngressDoor = async (req, res, url) => {
+    const match = PUBLIC_PATH.exec(url.pathname);
+    if (!match) return false;
+    const botId = match[1]!;
+    if (req.method !== "POST" && req.method !== "GET") { json(res, 405, { error: "The Bot API takes POST and GET" }); return true; }
+    const release = deps.claimRequest?.();
+    try {
+      if (!manager.enabled(botId) || !deps.store.bot(botId)) {
+        if (deps.store.bot(botId)) manager.record(botId, { outcome: "rejected", statusCode: 403, reason: "The Bot API is off for this bot" });
+        json(res, 403, { error: "The Bot API is off for this bot" });
+        return true;
+      }
+      if (!manager.authorize(botId, bearerSecret(req))) {
+        manager.record(botId, { outcome: "rejected", statusCode: 401, reason: "Invalid key" });
+        json(res, 401, { error: "Invalid key" });
+        return true;
+      }
+      if (req.method === "GET") {
+        const threadId = url.searchParams.get("thread") ?? "";
+        const task = /^[\w-]{1,128}$/.test(threadId) ? deps.store.taskByThread(botId, threadId) : undefined;
+        if (!task || task.botApi !== true) { json(res, 404, { error: "no such thread" }); return true; }
+        const state = threadState(botId, threadId);
+        json(res, "reply" in state ? 200 : 202, state);
+        return true;
+      }
+      let call: z.output<typeof callSchema>;
+      try {
+        const raw = await readRawBody(req);
+        const contentType = header(req, "content-type")?.toLowerCase() ?? "";
+        if (!contentType.includes("json")) fail(415, "Send JSON: Content-Type: application/json");
+        const parsed = callSchema.safeParse(parseJson(raw));
+        if (!parsed.success) fail(400, schemaIssue(parsed.error, "Send {\"message\": \"…\"}"));
+        call = parsed.data;
+      } catch (error) {
+        const status = statusOf(error) === 500 ? 400 : statusOf(error);
+        const message = error instanceof Error ? error.message : "Invalid JSON body";
+        manager.record(botId, { outcome: "rejected", statusCode: status, reason: message });
+        json(res, status, { error: message });
+        return true;
+      }
+      if (!manager.admit(botId)) {
+        manager.record(botId, { outcome: "rejected", statusCode: 429, reason: "Rate limit exceeded", preview: call.message });
+        json(res, 429, { error: "Too many calls: this key takes 10 a minute" });
+        return true;
+      }
+      if (pendingFor(botId) >= BOT_API_MAX_PENDING) {
+        manager.record(botId, { outcome: "rejected", statusCode: 409, reason: "The bot is busy", preview: call.message });
+        json(res, 409, { error: `The bot is busy: ${BOT_API_MAX_PENDING} calls are still being answered` });
+        return true;
+      }
+      try {
+        const answer = await runCall(botId, call);
+        manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: call.message,
+          reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : "Still working" });
+        json(res, answer.status, answer.body);
+      } catch (error) {
+        const status = statusOf(error);
+        const message = error instanceof Error ? error.message : String(error);
+        manager.record(botId, { outcome: "rejected", statusCode: status, reason: message, preview: call.message });
+        json(res, status, { error: message });
+      }
+      return true;
+    } finally {
+      release?.();
+    }
+  };
+
+  const view = (botId: string, auth: RequestAuth): BotApiStatus & { url: string; canManage: boolean; calls: BotApiAttempt[] } => ({
+    ...manager.status(botId),
+    url: botApiEndpoint(deps.hooksBaseUrl(), botId),
+    canManage: deps.manageRefusal(auth, botId) === null,
+    calls: manager.listAttempts(botId).slice(-10).reverse(),
+  });
+
+  const routes: RouteHandler = async ({ req, res, path, method, auth, json: answer, readBody }) => {
+    const match = APP_PATH.exec(path);
+    if (!match) return PASS;
+    const botId = match[1]!;
+    const bot = deps.store.bot(botId);
+    if (!bot) return answer(res, 404, { error: "no such bot" });
+    if (method === "GET" && !match[2]) return answer(res, 200, view(botId, auth));
+    if (method !== "POST") return PASS;
+    const refusal = deps.manageRefusal(auth, botId);
+    if (refusal) return answer(res, 403, { error: refusal });
+    const target = { kind: "bot", id: bot.id, name: bot.name };
+    try {
+      if (match[2] === "new-key") {
+        if (!manager.enabled(botId)) return answer(res, 409, { error: "The Bot API is off for this bot" });
+        const minted = manager.enable(botId);
+        deps.record?.(auth, { category: "bot-api", action: "bot-api.new-key", target });
+        return answer(res, 200, { key: minted.key, ...view(botId, auth) });
+      }
+      const parsed = switchSchema.safeParse(await readBody(req));
+      if (!parsed.success) return answer(res, 400, { error: schemaIssue(parsed.error, "Send {\"enabled\": true | false}") });
+      if (parsed.data.enabled) {
+        const was = manager.enabled(botId);
+        const minted = manager.enable(botId);
+        deps.record?.(auth, { category: "bot-api", action: was ? "bot-api.new-key" : "bot-api.on", target });
+        return answer(res, 200, { key: minted.key, ...view(botId, auth) });
+      }
+      if (manager.disable(botId)) deps.record?.(auth, { category: "bot-api", action: "bot-api.off", target });
+      return answer(res, 200, view(botId, auth));
+    } catch (error) {
+      return answer(res, statusOf(error), { error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  return { manager, door, routes };
+}

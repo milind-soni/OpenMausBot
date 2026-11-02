@@ -6,6 +6,7 @@ import type { Bot } from "@/state/store";
 import { useChatMoreItems } from "../ChatMoreMenu";
 import { ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
+import { BotApiCard } from "../bot-settings/BotApiCard";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
@@ -83,6 +84,8 @@ export function DetailsTab({ bot, derived, onOpen }: {
           />
         </Card>
       )}
+
+      <BotApiCard bot={bot} webhooksLink className="mt-3.5" />
 
       <TryAsking bot={bot} />
 

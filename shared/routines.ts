@@ -60,7 +60,8 @@ export interface RoutineContextAttachment {
   size: number;
 }
 
-export type RoutineRunTrigger = "schedule" | "manual" | "webhook" | "startup";
+/** "api": an outside caller through the bot's API; "webhook": an outside event. Both run as nobody's work. */
+export type RoutineRunTrigger = "schedule" | "manual" | "webhook" | "startup" | "api";
 
 /** A check a routine runs on each tick before any AI turn, in plain code: `calendar` reads the next 36 hours, `mail`
  * new inbox mail since the last check, `runs` other routines' finished runs. Nothing new means no AI turn. */
