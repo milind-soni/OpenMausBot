@@ -52,7 +52,7 @@ const send = async (frame: ServerFrame) => {
 
 beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);
-  vi.stubGlobal("fetch", (path: string) => path.startsWith("/api/bots?") ? json({ bots: [bot], groups: [] }) : json(answers[path] ?? {}));
+  vi.stubGlobal("fetch", (path: string) => path.startsWith("/api/bots?") ? json({ bots: [bot], groups: [] }) : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}));
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

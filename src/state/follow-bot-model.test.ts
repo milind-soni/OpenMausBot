@@ -50,7 +50,7 @@ beforeAll(async () => {
       return json({ switched: 0, busy: 1, bot: before });
     }
     if (path === "/api/instances") return json({ instances: [] });
-    if (path === "/api/routines") return json({ routines: [], runs: [] });
+    if (path.startsWith("/api/routines?since=")) return json({ routines: [], runs: [] });
     if (path === "/api/webhooks") return json({ webhooks: [], attempts: [] });
     return json({});
   });
