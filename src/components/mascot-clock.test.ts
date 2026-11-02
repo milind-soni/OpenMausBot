@@ -107,6 +107,17 @@ describe("mascot clock", () => {
     expect(paintedAt.size).toBeLessThanOrEqual(63);
   });
 
+  it("asks for no frame once the last mascot has gone, with a timer already set", () => {
+    const fake = fakeEnvironment();
+    const clock = createMascotClock(fake.env);
+    const ticket = clock.add(() => 500);
+    fake.advance(20);
+    const asked = fake.stats.frameRequests;
+    ticket.remove();
+    fake.advance(1000);
+    expect(fake.stats.frameRequests).toBe(asked);
+  });
+
   it("asks for no frames while every mascot is still, and one frame when woken", () => {
     const fake = fakeEnvironment();
     const clock = createMascotClock(fake.env);

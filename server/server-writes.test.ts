@@ -23,7 +23,8 @@ const bots = () => readFileSync(join(DATA_DIR, "bots.json"), "utf8");
 
 describe("bots.json saves", () => {
   beforeEach(() => {
-    rmSync(DATA_DIR, { recursive: true, force: true });
+    // Not the whole folder: on Windows the open messages database holds it.
+    rmSync(join(DATA_DIR, "bots.json"), { force: true });
     vi.mocked(fs.renameSync).mockClear();
   });
 
