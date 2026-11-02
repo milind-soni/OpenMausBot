@@ -235,6 +235,7 @@
   "server.teammates.resumedWorkResultsRestart": "Ripreso dopo un riavvio con i risultati del lavoro delegato, in revisione",
   "server.teammates.delegatedWork": "lavoro delegato",
   "server.teammates.answerPassed": "Risposta passata al lavoro in attesa",
+  "server.teammates.answeredForPerson": "Risposto alla domanda di {name} per conto della persona",
   "server.teammates.personReplied": "{name} ha risposto",
   "server.teammates.personAssistantAnswered": "L'assistente di {name} ha risposto",
   "server.teammates.told": "Avvisato {name}",

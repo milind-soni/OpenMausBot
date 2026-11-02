@@ -183,6 +183,7 @@
   "server.teammates.resumedWorkResultsRestart": "रीस्टार्ट के बाद सौंपे गए काम के नतीजों के साथ फिर शुरू हुआ, समीक्षा जारी",
   "server.teammates.delegatedWork": "सौंपा गया काम",
   "server.teammates.answerPassed": "जवाब इंतज़ार कर रहे काम तक पहुँचाया गया",
+  "server.teammates.answeredForPerson": "व्यक्ति की ओर से {name} के सवाल का जवाब दिया",
   "server.teammates.personReplied": "{name} ने जवाब दिया",
   "server.teammates.personAssistantAnswered": "{name} के असिस्टेंट ने जवाब दिया",
   "server.teammates.told": "{name} को बताया",

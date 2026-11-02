@@ -10,7 +10,7 @@ import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.
 import { composeAddition } from "../runtime/envelope.ts";
 import { personOnly, withDefault } from "../runtime/questions.ts";
 import type { Answerer } from "../runtime/types.ts";
-import { conversationLanguage } from "../server-lines.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { answerableInWords } from "./ask-cards.ts";
 import { sentRow } from "./handoff-sent.ts";
@@ -173,7 +173,7 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
     const settled = store.messagesFor(threadId).find((one) => one.id === row.id)?.card;
     if (settled) store.patchMessage(threadId, row.id, { card: { ...settled, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
     store.appendMessage(input.senderThreadId, { role: "bot", kind: "activity", from: { botId: sender.id, name: sender.name, color: sender.color },
-      tool: { name: `Answered ${target.name}'s question for the person`, ok: true, output: question.slice(0, 400) },
+      tool: { name: serverLine(conversationLanguage(input.senderThreadId), "server.teammates.answeredForPerson", { name: target.name }), ok: true, output: question.slice(0, 400) },
       threadRef: { botId: target.id, threadId, title: task.title } });
     return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "injected", threadId,
       detail: `answered its question "${question}" for the person; it carries on with your answer, and the person can still give their own in that thread` });
