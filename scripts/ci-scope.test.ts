@@ -105,7 +105,7 @@ describe("CI path scope", () => {
   });
 
   it("runs the build, the Linux shards and the renderer smoke for a renderer change", () => {
-    expect(selectCiScope(["src/App.tsx", "public/icon.svg", "cloud-buy-preview.html", "src/locales/en.json", "docs/guide.md"]))
+    expect(selectCiScope(["src/App.tsx", "public/icon.svg", "previews/cloud-buy-preview.html", "src/locales/en.json", "docs/guide.md"]))
       .toEqual({ areas: ["docs", "web"], checks: ["build", "docs-tests", "linux-tests", "ui-smoke"] });
   });
 

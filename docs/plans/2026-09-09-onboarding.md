@@ -90,7 +90,7 @@ sweep, and beats swap without the view transition.
 
 ## Preview and verification
 
-- `onboarding-preview.html` + `src/onboarding-preview.tsx` is a dev gallery
+- `previews/onboarding-preview.html` + `src/previews/onboarding-preview.tsx` is a dev gallery
   of every beat in every skin (`?beat=&skin=&reduced=1&all=1`).
 - Pure logic is covered by Vitest: `onboarding.test.ts`,
   `guided-tour.test.ts`, `first-conversation.test.ts`, and the config merge

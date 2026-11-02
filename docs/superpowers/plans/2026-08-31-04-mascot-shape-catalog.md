@@ -195,7 +195,7 @@ Give the file this header:
 
 - [ ] **Step 4: Re-wire `CursorAvatar.tsx`**
 
-Replace the removed block with an import, and re-export so every existing consumer keeps working unchanged (`src/lib/mascot.ts` and `src/mascot-preview.tsx` both import from `./CursorAvatar`):
+Replace the removed block with an import, and re-export so every existing consumer keeps working unchanged (`src/lib/mascot.ts` and `src/previews/mascot-preview.tsx` both import from `./CursorAvatar`):
 
 ```ts
 import {

@@ -31,9 +31,13 @@ vi.mock("./MenuMotion", () => ({
   useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }),
   useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
 }));
-vi.mock("./DesktopCapabilities", async () => {
+vi.mock("./DesktopCapabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./DesktopCapabilities")>();
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
+  return {
+    ...actual,
+    useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities(), ready: true }),
+  };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
