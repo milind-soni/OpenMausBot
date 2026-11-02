@@ -96,7 +96,7 @@ describe("incident wording", () => {
     expect(text).toContain('Ada last said: "Starting the reconciliation now"');
     expect(text).toContain('retry_thread with bot_id "ada" and thread_id "t-ada"');
     expect(text).not.toContain("incident on that thread");
-    expect(incidentChip(incident)).toBe('Incident: Ada\'s run in its thread #Invoice reconciliation failed: "exit_before_result"');
+    expect(incidentChip(incident)).toBe('Ada hit a problem: its run in its thread #Invoice reconciliation failed: "exit_before_result"');
   });
 
   it("counts repeats and, once retries are used up, asks for the person instead of another retry", () => {
@@ -109,7 +109,7 @@ describe("incident wording", () => {
   });
 
   it("words a stall, a start failure, a routine and a room each in their own terms", () => {
-    expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Incident: Ada's run in its thread #Invoice reconciliation stopped after showing no activity");
+    expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Ada hit a problem: its run in its thread #Invoice reconciliation stopped after showing no activity");
     expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada's run in its main conversation could not start");
     expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada's scheduled routine in its thread #Inbox digest failed");
     expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada\'s run in the room "Standup" failed');

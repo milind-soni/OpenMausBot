@@ -611,7 +611,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
     bots.find((b) => b.id === peer.botId) ?? bots.find((b) => b.name === peer.name);
   const how =
     peer.delivery === "delegate_bot"
-      ? t("chat.peer.delegated")
+      ? t("chat.peer.handedTask")
       : peer.delivery === "start_thread"
         ? t("chat.peer.openedThread")
         : peer.delivery === "coordinate_bots"

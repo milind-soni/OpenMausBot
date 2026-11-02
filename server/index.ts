@@ -115,7 +115,7 @@ import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { connectorCardDescription, connectorCardText, signInCardText } from "./connector-card-text.ts";
-import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
+import { wearsCrown } from "../shared/default-bot.ts"; import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
 import { createMemoryUpkeep, dreamConversations, upkeepEnabled } from "./memory-upkeep.ts";
@@ -4070,10 +4070,10 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       if (resumed && !group) {
         const asking = coordinator.children(node.id).filter(child => child.question !== undefined);
         const settledFrom = [...new Set((asking.length ? asking : coordinator.children(node.id)).map(child => store.bot(child.botId)?.name ?? "Teammate"))];
-        const language = threadLanguage(node.threadId), who = settledFrom.length ? settledFrom.join(", ") : serverLine(language, "server.teammates.delegatedWork");
+        const language = threadLanguage(node.threadId), who = settledFrom.length ? settledFrom.join(", ") : serverLine(language, "server.teammates.handedWork");
         store.appendMessage(node.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: serverLine(language, asking.length ? node.restart ? "server.teammates.resumedQuestionRestart" : "server.teammates.resumedQuestion" : !settledFrom.length ? node.restart ? "server.teammates.resumedWorkResultsRestart" : "server.teammates.resumedWorkResults" : node.restart ? "server.teammates.resumedResultsRestart" : "server.teammates.resumedResults", { who }), ok: true },
+          tool: { name: serverLine(language, asking.length ? node.restart ? "server.teammates.resumedQuestionRestart" : "server.teammates.resumedQuestion" : !settledFrom.length ? node.restart ? "server.teammates.backWithResultsRestart" : "server.teammates.backWithResults" : node.restart ? "server.teammates.resumedResultsRestart" : "server.teammates.resumedResults", { who }), ok: true },
         });
         const quiet = turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet;
         const routineRoot = !node.parentId && activeRoutineRunForThread(node.threadId) !== null;
@@ -8491,7 +8491,7 @@ async function beginTurn(
       const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
         { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) }, { id: "people", label: "People", text: teamMessages.prompt(bot.id, threadId, Boolean(integrations.agents)) },
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, {
-          skills: skillAuthoring, chief: Boolean((liveBot ?? bot).chiefOfStaff),
+          skills: skillAuthoring, chief: wearsCrown(liveBot ?? bot),
           cwd: liveBot?.cwd ?? bot.cwd,
           connectedApps: setupConnectedApps(bot, instance.adapter.capabilities.composioMcp === true, Boolean(integrations.composio)),
         }) },

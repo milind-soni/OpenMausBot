@@ -28,6 +28,10 @@ export interface HelperIntroField extends HelperFollowupField {
 
 export const defaultBotPerson = (bot: DefaultBotFields): string => bot.defaultBot?.person?.trim().toLowerCase() ?? "";
 
+/** A Chief of Staff people see as one: a Team Cloud member's MausBot is its person's Chief without the title, the
+ * team-wide notices or the place's proactive work. */
+export const wearsCrown = (bot: DefaultBotFields & { chiefOfStaff?: boolean }): boolean => Boolean(bot.chiefOfStaff) && !defaultBotPerson(bot);
+
 /** The MausBot a viewer sees as theirs: their own on a Team Cloud (by email), else the place's. */
 export function viewersDefaultBot<T extends DefaultBotFields>(bots: readonly T[], email?: string | null): T | undefined {
   const person = email?.trim().toLowerCase() ?? "";

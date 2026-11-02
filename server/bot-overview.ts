@@ -1,3 +1,4 @@
+import { wearsCrown } from "../shared/default-bot.ts";
 import type { BotRecord } from "./store.ts";
 import type { Routine } from "./routines.ts";
 import type { RoutineRequestSchedule } from "../shared/routine-request.ts";
@@ -227,7 +228,7 @@ function reachesLines(facts: OverviewFacts): string[] {
       ? "Talks only to the bots chosen for it."
       : peers === 1 ? "Can talk to the other bot." : `Can talk to all ${peers} other bots, in any department.`);
   }
-  if (facts.bot.chiefOfStaff) lines.push("Coordinates its department as Chief of Staff.");
+  if (wearsCrown(facts.bot)) lines.push("Coordinates its department as Chief of Staff.");
   if (facts.bot.chiefOfStaff && facts.bot.managedSections?.length) {
     lines.push(`Also in charge of these departments: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
   }

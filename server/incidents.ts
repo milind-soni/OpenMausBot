@@ -1,3 +1,4 @@
+import { wearsCrown } from "../shared/default-bot.ts";
 import type { WireMessage as Message } from "../shared/wire.ts";
 import { withoutDeliveredNote } from "./peer-provenance.ts";
 import { botOwner } from "../shared/bot-owner.ts";
@@ -15,6 +16,7 @@ export interface IncidentBot {
   createdBy?: string;
   reportsTo?: string;
   hidden?: boolean;
+  defaultBot?: { person?: string };
 }
 
 export interface Incident {
@@ -28,13 +30,15 @@ export interface Incident {
   lastReply?: string | null;
 }
 
-export const INCIDENTS_THREAD_TITLE = "Team incidents";
+export const INCIDENTS_THREAD_TITLE = "Problems to look at";
+/** The same notices chat, as older versions named it. */
+export const OLD_INCIDENTS_THREAD_TITLE = "Team incidents";
 
 const sectionKey = (section?: string): string => section?.trim() || "";
 
 export function chiefForBot<T extends IncidentBot>(bots: readonly T[], bot: IncidentBot): T | null {
   if (bot.chiefOfStaff) return null;
-  const chiefs = bots.filter((candidate) => candidate.chiefOfStaff && !candidate.hidden && candidate.id !== bot.id);
+  const chiefs = bots.filter((candidate) => wearsCrown(candidate) && !candidate.hidden && candidate.id !== bot.id);
   // A bot someone owns on a Team Cloud has their Chief or none; the department's Chief is not its person's.
   const owner = botOwner(bot);
   if (owner) return chiefs.find((chief) => botOwner(chief) === owner) ?? null;
@@ -137,10 +141,10 @@ export function incidentContext(messages: readonly Pick<Message, "role" | "kind"
 }
 
 const CHIP: Record<IncidentKind, readonly [plain: ServerLineKey, why: ServerLineKey]> = {
-  failed: ["server.incidents.failed", "server.incidents.failedWhy"],
-  stalled: ["server.incidents.stalled", "server.incidents.stalledWhy"],
-  "could-not-start": ["server.incidents.couldNotStart", "server.incidents.couldNotStartWhy"],
-  "routine-failed": ["server.incidents.routineFailed", "server.incidents.routineFailedWhy"],
+  failed: ["server.problem.failed", "server.problem.failedWhy"],
+  stalled: ["server.problem.stalled", "server.problem.stalledWhy"],
+  "could-not-start": ["server.problem.couldNotStart", "server.problem.couldNotStartWhy"],
+  "routine-failed": ["server.problem.routineFailed", "server.problem.routineFailedWhy"],
 };
 
 /** What the person reads (the status row and its notification), in their language; the Chief's report says it in

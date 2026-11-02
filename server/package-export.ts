@@ -1,3 +1,4 @@
+import { wearsCrown } from "../shared/default-bot.ts";
 import { parseBotPackage, type BotPackageDefinition, type BotPackagePlaybook, type BotPackageSkill, type ParsedBotPackage } from "./bot-package.ts";
 import type { DefaultsPreset, PublishedLibrary } from "./presets.ts";
 import type { PublishedTeam } from "./published-teams.ts";
@@ -239,7 +240,7 @@ export function createBotPackageExport(input: {
     requirements: { apps: [...requirements.values()], capabilities: [] },
     agents,
   };
-  const chief = bots.find((bot) => bot.chiefOfStaff);
+  const chief = bots.find(wearsCrown);
   if (chief) definition.chiefOfStaff = idToKey.get(chief.id)!;
   if (rooms.length) definition.rooms = rooms;
   if (routines.length) definition.routines = routines;
@@ -650,7 +651,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
     }];
   });
 
-  const chief = bots.find((bot) => bot.chiefOfStaff);
+  const chief = bots.find(wearsCrown);
   const brief = input.brief?.trim() ? input.brief : undefined;
   const definition: PackageDefinition = {
     id: packageId,

@@ -178,7 +178,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
           </p>
           {usesMyChrome(selectedProfile) ? <>
             {chromeNote}
-            {!myChrome && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLend")}</p>}
+            {!myChrome && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeShare")}</p>}
           </>
             : (selected === "" || selectedProfile) && (
               <SignedInSites key={`${currentBot.id}:${selected}`} target={{ bot: currentBot.id }} scope={browserScope(state.config?.team, bot?.threadId)} sharedBy={selected ? usersOf(selected) : [currentBot.name]} disabled={locked} />

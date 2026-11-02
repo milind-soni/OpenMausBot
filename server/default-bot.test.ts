@@ -1,3 +1,6 @@
+import { wearsCrown } from "../shared/default-bot.ts";
+import { chiefForBot } from "./incidents.ts";
+import { mainChief } from "./host/proactive-owner.ts";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -43,6 +46,54 @@ describe("MausBot, every person's helper", () => {
     const maus = placeMausBots(again)[0]!;
     expect(maus).toMatchObject({ name: "MausBot", color: "chrome", chiefOfStaff: true, defaultBot: {} });
     expect(intros(again, maus)).toHaveLength(1);
+  });
+
+  describe("a member's MausBot on a Team Cloud", () => {
+    const ada = "ada@acme.test", ROLES = { ada: "admin", ben: "member" } as const;
+    const place = () => { const store = new Store(selection); store.seedIfEmpty({ defaultBot: false }); return store; };
+    const member = (store: Store, person: string) => ensureDefaultBot(store, { dataDir: DATA_DIR, person, team: "Acme" })!;
+
+    it("is crowned as its person's Chief, with no other Chief's crown touched, and only once", () => {
+      const store = place();
+      const department = store.bots.find((bot) => bot.chiefOfStaff)!;
+      const own = member(store, ada);
+      expect(own).toMatchObject({ chiefOfStaff: true, defaultBot: { person: ada } });
+      expect(store.bot(department.id)?.chiefOfStaff).toBe(true);
+      expect(member(store, ada).id).toBe(own.id);
+    });
+
+    it("leaves a Chief the person already has alone, and crowns an existing MausBot of someone who has none", () => {
+      const store = place();
+      const chief = store.createBot({ name: "Ada's Chief", reportsTo: ada } as never);
+      store.setChiefOfStaff(chief.id);
+      expect(member(store, ada).chiefOfStaff).toBeFalsy();
+      expect(store.bot(chief.id)?.chiefOfStaff).toBe(true);
+      const before = member(store, "ben@acme.test");
+      store.patchBot(before.id, { chiefOfStaff: undefined });
+      expect(member(store, "ben@acme.test").chiefOfStaff).toBe(true);
+    });
+
+    it("never holds a Chief's powers through the crown: only through its member's role", () => {
+      const store = place();
+      const own = member(store, ada), bens = member(store, "ben@acme.test");
+      readTeamRolesWith((email) => ROLES[email.split("@")[0] as keyof typeof ROLES] ?? null);
+      expect(chiefLevel(own), "an Admin's").toBe(true);
+      expect(chiefLevel(bens), "a User's, crowned").toBe(false);
+      readTeamRolesWith(() => null);
+      expect(chiefLevel(own), "with no role known").toBe(false);
+    });
+
+    it("takes nothing team-wide: not the place's main Chief, not another bot's problems, not a backup's Chief", () => {
+      const store = new Store(selection);
+      store.seedIfEmpty({ defaultBot: false });
+      const department = store.bots.find((bot) => bot.chiefOfStaff)!;
+      store.setChiefOfStaff(null, department.section);
+      const own = member(store, ada);
+      expect(mainChief(store), "not the place's proactive bot").toBeNull();
+      expect(chiefForBot(store.bots, { id: "fox", name: "Fox", reportsTo: ada }), "its person hears of a failure in their inbox instead").toBeNull();
+      expect(wearsCrown(own)).toBe(false);
+      expect(wearsCrown({ chiefOfStaff: true })).toBe(true);
+    });
   });
 
   it("gives an existing install without one a MausBot once on update, beside its Chief, which stays exactly as it was", () => {

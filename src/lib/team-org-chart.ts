@@ -1,9 +1,10 @@
 // "Who reports to whom" on a Team Cloud: one column per person, each with their Chief of Staff and the bots that report
 // to them grouped by department, and a column for bots nobody owns yet.
+import { wearsCrown } from "../../shared/default-bot";
 import { botOwner, nameFromEmail } from "../../shared/bot-owner";
 import type { TeamPerson } from "@/state/team-people";
 
-export interface OrgBot { id: string; name: string; hidden?: boolean; section?: string; chiefOfStaff?: boolean; createdBy?: string; reportsTo?: string }
+export interface OrgBot { id: string; name: string; hidden?: boolean; section?: string; chiefOfStaff?: boolean; createdBy?: string; reportsTo?: string; defaultBot?: { person?: string } }
 export interface OrgDepartment<T extends OrgBot> { key: string; bots: T[] }
 export interface OrgColumn<T extends OrgBot> { person: TeamPerson | null; chief: T | null; departments: OrgDepartment<T>[] }
 
@@ -26,7 +27,7 @@ export function buildOrgChart<T extends OrgBot>(bots: readonly T[], people: read
   const ordered = [...people, ...unlisted].sort((a, b) => Number(Boolean(b.you)) - Number(Boolean(a.you)));
   const columns: OrgColumn<T>[] = ordered.map((person) => {
     const own = shown.filter((bot) => botOwner(bot) === person.email);
-    const chief = own.find((bot) => bot.chiefOfStaff) ?? null;
+    const chief = own.find(wearsCrown) ?? null;
     return { person, chief, departments: departmentsOf(own.filter((bot) => bot !== chief)) };
   });
   const unowned = shown.filter((bot) => !botOwner(bot));

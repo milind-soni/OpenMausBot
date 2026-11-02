@@ -1,3 +1,4 @@
+import { wearsCrown } from "../../shared/default-bot";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
@@ -72,11 +73,11 @@ import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
 import { useCloudOwner } from "./CloudOwner";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { NeedsYouButton, OwnerFace, OwnerPickerHost, pickOwnerOf } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople";
+import { NeedsYouButton, OwnerPickerHost, pickOwnerOf } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople";
 import { showWhoReportsToWhom, TeamMenuItems } from "./SidebarTeamMenu";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 import { ELEVATED_CONTROL } from "./elevated";
-import { departmentOwner, useTeamPeople } from "@/state/team-people";
+import { useTeamPeople } from "@/state/team-people";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
@@ -714,7 +715,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const visible = useVisibleMessages(bot);
   const last = lastNonReceipt(visible);
   const title = bot.title.trim();
-  const details = [title, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : ""].filter(Boolean);
+  const details = [title, wearsCrown(bot) ? t("sidebar.bot.chiefOfStaff") : ""].filter(Boolean);
   const rowClass = cn(
     "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
     iconOnly
@@ -757,7 +758,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-accent", iconOnly ? "size-3" : "size-2.5")} />}
         {!simpleRow && !teammateWait && !waiting && !working && queued && <span data-testid="queued-dot" role="status" aria-label={t("task.queued")} title={t("task.queued")}
           className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-ink-secondary", iconOnly ? "size-3" : "size-2.5")} />}
-        {bot.chiefOfStaff && (iconOnly || simpleRow) && (
+        {wearsCrown(bot) && (iconOnly || simpleRow) && (
           <span className="absolute -left-1 -top-1 flex rounded-full bg-raised p-[3px]">
             <Crown size={11} strokeWidth={2.25} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
               <title>{t("sidebar.bot.chiefOfStaff")}</title>
@@ -794,7 +795,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               className="truncate"
               inputClassName={cn("w-full rounded bg-inset px-1 py-0.5", simpleRow ? "text-[14px] font-medium" : "text-[15px] font-semibold")}
             />
-            {!simpleList && bot.chiefOfStaff && !renaming && (
+            {!simpleList && wearsCrown(bot) && !renaming && (
               <Crown size={13} strokeWidth={2.25} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
                 <title>{t("sidebar.bot.chiefOfStaff")}</title>
               </Crown>
@@ -816,7 +817,6 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             </span>
           )}
           {expanded && unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
-          {!renaming && <span className="flex shrink-0 self-center"><OwnerFace bot={bot} /></span>}
           {simpleRow && (unread || waiting) && <RowDot waiting={waiting} />}
         </div>
         {(!expanded || deleting) && <div className="flex items-center justify-between gap-2">
@@ -864,7 +864,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           !renaming && iconOnly
             ? deleting
               ? t("sidebar.bot.deletingAria", { name: bot.name })
-              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${bot.chiefOfStaff ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
+              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${wearsCrown(bot) ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
             : undefined
         }
         aria-busy={deleting || undefined} aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
@@ -1489,7 +1489,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 {density !== "icons" && !headless && (
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
-                    lead={sectionName ? departmentOwner([...sectionChiefItems, ...sectionBotItems], teamPeople)?.name : undefined}
                     line={simple}
                     count={simple ? sectionChiefItems.length + sectionBotItems.length + sectionGroupItems.length : undefined}
                     onMenu={simple && !remoteClient && sectionName ? (button) => {

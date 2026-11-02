@@ -1,3 +1,4 @@
+import { wearsCrown } from "../shared/default-bot.ts";
 import { createHash } from "node:crypto";
 import { botOwner, chiefScope } from "../shared/bot-owner.ts";
 import { z } from "zod";
@@ -161,7 +162,7 @@ export class TeamSetupRequestService {
         if (this.options.targetBusy(target.id, sourceThreadId) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
       }
       const fields = this.fields(operation.fields, target ?? undefined);
-      if (fields.chiefOfStaff !== undefined && !chief.chiefOfStaff) throw new TeamSetupError(`Only the Chief of Staff changes who the Chief is; ${chief.name} doesn't.`, 403);
+      if (fields.chiefOfStaff !== undefined && !wearsCrown(chief)) throw new TeamSetupError(`Only the Chief of Staff changes who the Chief is; ${chief.name} doesn't.`, 403);
       if (confirming && target) this.options.validateChange?.(target, fields);
       const destination = fields.section ?? target?.section ?? chief.section;
       if (!allowed(destination)) throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);

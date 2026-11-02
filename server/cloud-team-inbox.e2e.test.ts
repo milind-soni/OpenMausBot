@@ -161,8 +161,7 @@ beforeAll(async () => {
     return created.body.bot as Bot;
   };
   scout = await create({ name: "Scout" });
-  chief = await create({ name: "Ben's Chief", reportsTo: BEN.email });
-  expect((await team.as(cleo, "PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+  chief = (await bots(ben)).find((one) => (one as { defaultBot?: { person?: string } }).defaultBot?.person === BEN.email)!;
   reporter = await create({ name: "Reporter", reportsTo: BEN.email });
   expect((await team.as(cleo, "PATCH", `/api/bots/${reporter.id}`, { approvalMode: "ask" })).status).toBe(200);
   cleoThread = await newThread(cleo, scout, "Cleo and Scout");

@@ -188,47 +188,22 @@ it("lets the member who owns a bot hand it over, and nobody else but an Admin", 
   expect(await asked(bob)).toContain("Which landing page should I rewrite?");
 }, hostTimeout(30_000));
 
-let bobsChief: Bot;
-
-it("gives each person a Chief of Staff of their own whose team is the bots that report to them, while it can reach every bot", async () => {
-  const adasChief = await create(ada, { name: "Ada's Chief", reportsTo: ADA.email });
-  bobsChief = await create(ada, { name: "Bob's Chief", reportsTo: BOB.email });
-  for (const chief of [adasChief, bobsChief]) expect((await team.as(ada, "PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
-  // Both crowned in General beside the department's own Chief, which nobody owns.
-  const crowned = (await bots(olive)).filter((one) => one.chiefOfStaff);
-  expect(crowned.filter((one) => one.reportsTo).map((one) => one.name).sort()).toEqual(["Ada's Chief", "Bob's Chief"]);
-  expect(crowned.filter((one) => !one.reportsTo && !one.createdBy)).toHaveLength(1);
-  // Bob's Chief reported to Ada would be her second.
-  const second = await team.as(ada, "PUT", `/api/bots/${bobsChief.id}/reports-to`, { email: ADA.email });
-  expect(second.status).toBe(409);
-  expect(second.body.error).toContain("Ada already has a Chief of Staff");
-
-  const prompt = async (token: string, chief: Bot) => {
-    rmSync(join(team.home, "dump.json"), { force: true });
-    expect((await team.as(token, "POST", `/api/bots/${chief.id}/messages`, { text: "Who is on my side?", threadId: chief.threadId })).status).toBe(202);
-    await expect.poll(() => existsSync(join(team.home, "dump.json")), { timeout: 20_000 }).toBe(true);
-    await expect.poll(() => busy(chief.id), { timeout: 20_000 }).toBe(false);
-    return JSON.parse(readFileSync(join(team.home, "dump.json"), "utf8")).systemPrompt as string;
-  };
-  // Each Chief's own team, then everyone else it can reach.
-  const split = (text: string, person: string) => {
-    const [, mine = "", others = ""] = text.split(new RegExp(`Bots that report to ${person} \\(your team\\):|Other bots you can reach \\(they report to someone else\\):`));
-    return { mine, others };
-  };
-  const adasPrompt = await prompt(ada, adasChief);
-  expect(adasPrompt).toContain("You are Ada's assistant and Chief of Staff");
-  const adas = split(adasPrompt, "Ada");
-  expect(adas.mine).toContain("Tech Lead");
-  expect(adas.mine).not.toMatch(/\bFox\b|\bOwl\b/);
-  expect(adas.others).toMatch(/\bFox\b/);
-  expect(adas.others).toMatch(/\bOwl\b/);
-  const bobsPrompt = await prompt(bob, bobsChief);
-  expect(bobsPrompt).toContain("You are Bob's assistant and Chief of Staff");
-  const bobs = split(bobsPrompt, "Bob");
-  expect(bobs.mine).toMatch(/\bFox\b/);
-  expect(bobs.mine).toMatch(/\bOwl\b/);
-  expect(bobs.mine).not.toContain("Tech Lead");
-  expect(bobs.others).toContain("Tech Lead");
+it("makes each person's MausBot their Chief, crowns no other bot someone owns, and keeps the department's own Chief", async () => {
+  const ownOf = async (token: string, email: string) => (await bots(token)).find((one) => (one as { defaultBot?: { person?: string } }).defaultBot?.person === email)!;
+  for (const [token, email] of [[ada, ADA.email], [bob, BOB.email]] as const) expect((await ownOf(token, email)).chiefOfStaff).toBe(true);
+  const second = await create(ada, { name: "Ada's Chief", reportsTo: ADA.email });
+  const refused = await team.as(ada, "PATCH", `/api/bots/${second.id}`, { chiefOfStaff: true });
+  expect(refused.status).toBe(403);
+  expect(refused.body.error).toBe("Ada's Chief can't be made a Chief of Staff on a team: each person's own MausBot already looks after their bots and holds their inbox.");
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Also a Chief?", reportsTo: ADA.email, settings: { chiefOfStaff: true } });
+  expect(made.status, JSON.stringify(made.body)).toBe(201);
+  expect(made.body.bot.chiefOfStaff).toBeFalsy();
+  const department = (await bots(olive)).find((one) => one.chiefOfStaff && !one.reportsTo && !one.createdBy && !(one as { defaultBot?: unknown }).defaultBot)!;
+  expect(department).toBeTruthy();
+  // Bob's MausBot is his Chief, so a Chief handed to him would be his second.
+  const handed = await team.as(ada, "PUT", `/api/bots/${department.id}/reports-to`, { email: BOB.email });
+  expect(handed.status).toBe(409);
+  expect(handed.body.error).toContain("Bob already has a Chief of Staff");
 }, hostTimeout(90_000));
 
 it("keeps a member's private chat theirs: its asks reach only them, never the bot's owner, an Admin, or the owner's inbox", async () => {

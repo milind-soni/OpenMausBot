@@ -62,7 +62,7 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: `${name} — delegated by ${from.name}, ${via}a Chief of Staff on ${name}`, ok: true },
+      tool: { name: `${name} — handed on by ${from.name}, ${via}a Chief of Staff on ${name}`, ok: true },
     });
   }
 
