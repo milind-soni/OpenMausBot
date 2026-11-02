@@ -1,6 +1,37 @@
 // How a chat-completions provider says no to a request, and what that means for the turn.
 import { ChatProtocolError, object } from "./openai-chat-protocol.ts";
 
+export interface ProviderBody {
+  error?: unknown;
+  base_resp?: { status_code?: unknown; status_msg?: unknown };
+}
+
+/** MiniMax reports auth, balance and parameter failures as `base_resp` with HTTP 200. */
+function providerError(json: ProviderBody): string | null {
+  if (typeof json.error === "string") return json.error;
+  const error = object(json.error);
+  if (error) return typeof error.message === "string" ? error.message : "unknown error";
+  const code = json.base_resp?.status_code;
+  if (typeof code === "number" && code !== 0) {
+    const msg = typeof json.base_resp?.status_msg === "string" ? json.base_resp.status_msg : "";
+    return `upstream error ${code}${msg ? `: ${msg}` : ""}`;
+  }
+  return null;
+}
+
+const MACHINE_CODE = /^[a-z][a-z0-9_]*$/;
+
+/** A failed response's own error message, then its machine code (trial-credit.ts parses it), else the raw body. */
+export function httpErrorDetail(body: string, limit = 500): string {
+  let json: ProviderBody | undefined;
+  try { json = object(JSON.parse(body)); } catch { json = undefined; }
+  const message = json ? providerError(json) : null;
+  if (!message || message === "unknown error") return body.slice(0, limit);
+  const code = object(json?.error)?.code;
+  const suffix = typeof code === "string" && MACHINE_CODE.test(code) ? ` (${code})` : "";
+  return message.slice(0, limit) + suffix;
+}
+
 export class UnsupportedChatToolsError extends Error {}
 
 export function rejectsToolsParameter(status: number, body: string): boolean {
@@ -57,4 +88,12 @@ export function refusedToolCallFailure(error: RejectedToolCallError, earlierStep
     ? "The steps before it already ran, so ask only for what's left."
     : "Nothing ran. Retry; if it keeps happening, rephrase the request or choose another model.";
   return `The model ${what}. ${next} Provider: ${words.slice(0, 200)}`;
+}
+
+export function completionError(json: ProviderBody, label: string): ChatProtocolError | null {
+  const message = providerError(json);
+  if (!message) return null;
+  const text = `provider returned a ${label}: ${message.slice(0, 200)}`;
+  const refusal = toolCallRefusal(json.error);
+  return refusal ? new RejectedToolCallError(text, refusal) : new ChatProtocolError(text);
 }
