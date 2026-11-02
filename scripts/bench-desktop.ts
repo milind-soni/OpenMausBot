@@ -630,7 +630,12 @@ async function main() {
     await sleep(1_000);
     const back = await switchTo(seeded.bigBotId, seeded.bigLastMessageId);
     await sleep(1_000);
-    big.switchConversation = { toSmall: away, backToBig: back };
+    const awayAgain = await switchTo(seeded.otherBotId, null);
+    await sleep(1_000);
+    const backAgain = await switchTo(seeded.bigBotId, seeded.bigLastMessageId);
+    await sleep(1_000);
+    // The first visit draws the conversation for the first time; the second is what a return to it costs.
+    big.switchConversation = { toSmall: away, backToBig: back, toSmallAgain: awayAgain, backToBigAgain: backAgain };
     const memoryBefore = await page.metrics();
     const box = await page.evaluate<{ x: number; y: number; rows: number; nodes: number; top: number; height: number } | null>(TRANSCRIPT_BOX);
     if (!box) big.scroll = { error: "no scrolling transcript" };
@@ -694,7 +699,9 @@ async function main() {
     };
     const awayProfiled = await profiledSwitch(seeded.otherBotId, null);
     const backProfiled = await profiledSwitch(seeded.bigBotId, seeded.bigLastMessageId);
-    big.switchProfiled = { toSmall: awayProfiled, backToBig: backProfiled };
+    const awayAgainProfiled = await profiledSwitch(seeded.otherBotId, null);
+    const backAgainProfiled = await profiledSwitch(seeded.bigBotId, seeded.bigLastMessageId);
+    big.switchProfiled = { toSmall: awayProfiled, backToBig: backProfiled, toSmallAgain: awayAgainProfiled, backToBigAgain: backAgainProfiled };
     log("streaming a reply, big workspace");
     big.stream = await streamTurn(chrome, profiled, fixture, seeded.bigBotId);
     await profiled.close();
