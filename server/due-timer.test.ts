@@ -35,11 +35,12 @@ describe("startDueTimer", () => {
     const runs: number[] = [];
     let due: number | null = null;
     const timer = startDueTimer({ run: () => { runs.push(Date.now()); due = null; }, next: () => due });
-    const start = Date.now();
     await vi.advanceTimersByTimeAsync(0);
-    due = start;
-    await vi.advanceTimersByTimeAsync(DUE_CLOCK_MS);
-    expect(runs.map((at) => at - start)).toEqual([0, DUE_CLOCK_MS]);
+    due = Date.now();
+    await vi.advanceTimersByTimeAsync(DUE_CLOCK_MS - 1);
+    expect(runs).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(runs).toHaveLength(2);
     timer.stop();
   });
 

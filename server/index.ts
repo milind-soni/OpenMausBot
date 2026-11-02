@@ -241,7 +241,7 @@ import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine }
 import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
-import { createHandoffTicks } from "./handoff-ticks.ts";
+import { createHandoffTicks } from "./handoff-ticks.ts"; import { IDLE_HTTP_SERVER } from "./due-timer.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
 import { personOf, promptWithReply, replyTargetIn, speakerOf, transcriptText, type PersonName, type ReplyTarget } from "./replies.ts";
@@ -15585,7 +15585,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   }
 };
 
-const server = createServer(handleRequest);
+const server = createServer(IDLE_HTTP_SERVER, handleRequest);
 upgrades.attach(server, handleRequest);
 
 moveFreeze.hold(() => calendarCalls.start(), () => calendarCalls.stop());
@@ -15685,7 +15685,7 @@ const TUNNEL_SOCKET = process.env.OMB_TUNNEL_SOCKET?.trim() || null;
 let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
   if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
-  tunnelListener = createServer(gzipTunnelReplies(handleRequest));
+  tunnelListener = createServer(IDLE_HTTP_SERVER, gzipTunnelReplies(handleRequest));
   upgrades.attach(tunnelListener, handleRequest);
   tunnelListener.listen(TUNNEL_SOCKET, () => {
     console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);

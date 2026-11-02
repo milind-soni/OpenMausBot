@@ -36,6 +36,10 @@ function watchClock(look: () => void): () => void {
   };
 }
 
+/** Node looks for timed-out connections on every HTTP server every 30 s by default; a minute is enough for requests whose
+ * limits are minutes. */
+export const IDLE_HTTP_SERVER = { connectionsCheckingInterval: DUE_CLOCK_MS };
+
 export function startDueTimer(options: DueTimerOptions): DueTimer {
   const now = options.now ?? Date.now;
   const retryMs = options.retryMs ?? 10_000;
