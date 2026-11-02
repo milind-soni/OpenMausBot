@@ -56,12 +56,13 @@ function probe(options: ProbeOptions): void {
   const bench = {
     marks: {} as Record<string, number>, commits: 0, commitMs: 0, probeMs: 0, renderedTotal: 0, maxRendered: 0,
     renders: {} as Record<string, number>, selfMs: {} as Record<string, number>, mounts: {} as Record<string, number>,
+    why: {} as Record<string, Record<string, number>>,
     timerFires: {} as Record<string, number>, liveIntervals: new Map<number, string>(),
     sse: { frames: 0, bytes: 0, kinds: {} as Record<string, { n: number; bytes: number }> },
     longTasks: [] as Array<[number, number]>,
     reset() {
       bench.commits = 0; bench.commitMs = 0; bench.probeMs = 0; bench.renderedTotal = 0; bench.maxRendered = 0;
-      bench.renders = {}; bench.selfMs = {}; bench.mounts = {}; bench.timerFires = {}; bench.longTasks = [];
+      bench.renders = {}; bench.selfMs = {}; bench.mounts = {}; bench.why = {}; bench.timerFires = {}; bench.longTasks = [];
       bench.sse = { frames: 0, bytes: 0, kinds: {} };
     },
   };
@@ -116,7 +117,7 @@ function probe(options: ProbeOptions): void {
     } as typeof EventSource;
   }
 
-  interface Fiber { tag: number; type: { displayName?: string; name?: string; render?: { displayName?: string; name?: string } } | null; alternate: Fiber | null; child: Fiber | null; sibling: Fiber | null; flags: number; actualDuration?: number }
+  interface Fiber { tag: number; type: { displayName?: string; name?: string; render?: { displayName?: string; name?: string } } | null; alternate: Fiber | null; child: Fiber | null; sibling: Fiber | null; flags: number; actualDuration?: number; memoizedProps?: Record<string, unknown> | null }
   const COMPOSITE = new Set([0, 1, 11, 15]);
   const nameOf = (fiber: Fiber) => {
     const type = fiber.type;
@@ -143,6 +144,14 @@ function probe(options: ProbeOptions): void {
           if (mounted || fiber.flags & 1) {
             const counts = mounted ? bench.mounts : bench.renders;
             counts[name] = (counts[name] ?? 0) + 1;
+            if (previous) {
+              // Why a component rendered again: the props that changed, a parent's new props object with equal values,
+              // or the same props (its own state, a context or a store it reads).
+              const before = previous.memoizedProps ?? {}, after = fiber.memoizedProps ?? {};
+              const changed = before === after ? ["self"] : Object.keys(after).filter((key) => after[key] !== before[key]).map((key) => `prop:${key}`);
+              const reasons = bench.why[name] ?? (bench.why[name] = {});
+              for (const reason of changed.length ? changed : [before === after ? "self" : "parent"]) reasons[reason] = (reasons[reason] ?? 0) + 1;
+            }
             rendered += 1;
             if (typeof fiber.actualDuration === "number") {
               let self = fiber.actualDuration;

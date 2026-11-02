@@ -430,7 +430,7 @@ import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts"
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
-import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineRunsFor } from "./routine-run-window.ts"; import { batchSaves } from "./save-batch.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
@@ -680,8 +680,8 @@ const sessions = new SessionRegistry({
     const membership = signInAllowList();
     return (email) => allowedScopes(email, membership);
   },
-  portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
-});
+  portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true, recheckMs: 1_000,
+}); onConfigSaved(() => sessions.membershipChanged());
 const deviceLinks = new DeviceLinks(); const sharedComputers = new SharedComputers(id => sessions.isLive(id), new LentComputers(join(DATA_DIR, "lent-computers.json")), deviceLinks, lentCopies);
 // A Cloud home's secrets come over the launcher's pipe, never this process's environment.
 const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
@@ -4809,7 +4809,7 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
 /** `adminOnly` frames are withheld from client sessions, live and on replay; a `person`'s frames reach only their streams. */
 function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string } = {}) {
   // Close stale email streams before any further workspace data is delivered.
-  sessions.revalidateEmailSessions();
+  sessions.recheckMembership();
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
@@ -7648,7 +7648,9 @@ function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; in
 
 const titleRegenerations = new Set<string>();
 
-async function startTurn(
+/** The turn's start saves its thread's bookkeeping (title, last asked, read) once, when its synchronous part returns. */
+function startTurn(...args: Parameters<typeof beginTurn>): ReturnType<typeof beginTurn> { return batchSaves(() => beginTurn(...args)); }
+async function beginTurn(
   botId: string,
   text: string,
   opts?: {
@@ -14834,14 +14836,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     if (path === "/api/routines" && method === "GET") {
-      const fromParam = url.searchParams.get("from");
-      const toParam = url.searchParams.get("to");
-      const from = fromParam == null ? undefined : Number(fromParam);
-      const to = toParam == null ? undefined : Number(toParam);
       return json(res, 200, {
         routines: routines!.listRoutines().filter((routine) => routineVisible(routine, visible)),
-        runs: routines!.listRuns(from != null && Number.isFinite(from) ? from : undefined, to != null && Number.isFinite(to) ? to : undefined)
-          .filter((run) => routineRunVisible(run, visible)),
+        runs: routineRunsFor((from, to) => routines!.listRuns(from, to), url.searchParams).filter((run) => routineRunVisible(run, visible)),
       });
     }
     const routineResultsRefusal = (body: unknown): string | null =>

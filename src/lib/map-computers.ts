@@ -123,7 +123,7 @@ export function useMapComputers(enabled: boolean) {
     };
     void poll();
     const timer = window.setInterval(poll, MAP_COMPUTERS_POLL_MS);
-    const stopListening = listenLiveFrames({
+    const stopListening = listenLiveFrames({ screens: true,
       onFrame: (frame) => {
         if (frame.kind !== "screen" || frame.surface !== "computer" || !frame.png) return;
         const computer = computerForBot(computersRef.current, frame.botId);
