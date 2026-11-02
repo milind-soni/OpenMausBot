@@ -43,12 +43,17 @@ describe("OpenAI speech HTTP boundary", () => {
   });
   it("leaves normal completed requests alive until audio is ready and returns WAV", async () => {
     cfg = { openai: { key: "fixture-key" }, tts: { provider: "openai" } };
-    const spy = vi.spyOn(openai, "synthesize").mockImplementation(async (_text, _voice, _key, signal) => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(signal?.aborted).toBe(false);
-      return { mime: "audio/wav", bytes: Buffer.from("fixture-wav") };
-    });
-    const response = await post();
+    let release!: () => void;
+    let pendingSignal: AbortSignal | undefined;
+    const spy = vi.spyOn(openai, "synthesize").mockImplementation((_text, _voice, _key, signal) => new Promise((resolve) => {
+      pendingSignal = signal;
+      release = () => resolve({ mime: "audio/wav", bytes: Buffer.from("fixture-wav") });
+    }));
+    const pending = post();
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+    expect(pendingSignal?.aborted).toBe(false);
+    release();
+    const response = await pending;
     expect(response.headers.get("content-type")).toBe("audio/wav");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.text()).toBe("fixture-wav");
