@@ -1072,7 +1072,7 @@ export class RoutineManager {
       for (const { id, hold } of checks) this.runChecks(id, hold).catch((error) => console.error(`routines: the checks of ${id} failed`, error));
 
       // Oldest first, by id: a rollback across awaits can replace the run objects.
-      for (const id of this.runs.filter((run) => run.status === "queued").map((run) => run.id)) {
+      for (const id of this.runs.map((run) => run.id)) {
         if (this.closing) return;
         const run = this.runs.find((candidate) => candidate.id === id);
         if (!run || run.status !== "queued" || (run.retryAt ?? 0) > now) continue;
