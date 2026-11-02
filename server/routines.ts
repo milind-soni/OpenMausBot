@@ -226,7 +226,7 @@ export interface RoutineManagerOptions {
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   isResultsThread?: (botId: string, threadId: string) => boolean;
   resolveResultsThread?: (routine: Routine, forceNew: boolean) => { threadId: string; main?: true } | undefined;
-  eventResultsThread?: (event: { webhookId: string; webhookName: string; botId: string }) => string | undefined;
+  eventResultsThread?: (event: { webhookId: string; webhookName: string; botId: string; resultsThreadId?: string }) => string | undefined;
   frozenResultsThread?: (botId: string, threadId: string) => boolean;
   discardResultsThread?: (botId: string, threadId: string) => void;
   startTurn: (
@@ -764,7 +764,9 @@ export class RoutineManager {
       id: randomUUID(), routineId: input.webhookId, routineName: input.webhookName, prompt: input.prompt, target: "bot",
       botId: input.botId, runOn: input.runOn, scheduledFor: input.receivedAt, status: "queued", manual: false,
       triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
-      resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}),
+      resultsThreadId: input.eventSource === "wait"
+        ? input.resultsThreadId ?? this.options.eventResultsThread?.(input)
+        : this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}),
     };
     this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
     return cloneRun(run);

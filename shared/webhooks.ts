@@ -9,15 +9,18 @@ export interface WebhookTrigger {
   prompt: string;
   botId: string;
   runOn: RoutineRunOn;
+  delivery?: "run" | "post";
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
   lastReceivedAt?: number;
   lastRunId?: string;
-  /** delivery:"post" only: the stable thread this webhook's messages land in,
+  /** delivery:"post": the stable thread this webhook's messages land in,
    *  created on first delivery and reused after, never the bot's
    *  currently-selected thread. Unset on a room webhook (`groupId`), whose
-   *  messages land in the room's own thread. */
+   *  messages land in the room's own thread.
+   *  For run deliveries (default): optional destination thread where routine
+   *  results land instead of the main thread. */
   resultsThreadId?: string;
   /** delivery:"post" only, optional: a room id. Set, each delivery appends
    *  one bot-authored message (plus optional voice note and images) straight
@@ -40,6 +43,7 @@ export interface WebhookTriggerInput {
   prompt: string;
   botId: string;
   runOn?: RoutineRunOn;
+  delivery?: "run" | "post";
   /** Requires `delivery: "post"`; a room webhook with any other delivery is refused. `null` on an edit
    *  takes the room off, so deliveries go back to the webhook's own thread. */
   groupId?: string | null;
@@ -48,6 +52,9 @@ export interface WebhookTriggerInput {
   eventTypes?: string[];
   /** 1–50; `null` goes back to the default. */
   maxPendingRuns?: number | null;
+  /** Optional destination thread for run deliveries. Supplying it for `delivery: "post"` is refused;
+   *  `null` on an edit clears the override. */
+  resultsThreadId?: string | null;
 }
 
 export interface WebhookVerificationSample {

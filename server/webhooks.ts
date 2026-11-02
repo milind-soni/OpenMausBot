@@ -68,6 +68,7 @@ export interface WebhookManagerOptions {
     runOn: RoutineRunOn;
     deliveryId: string;
     receivedAt: number;
+    resultsThreadId?: string;
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
@@ -116,6 +117,7 @@ const triggerInputSchema = z.object({
   verificationPending: z.boolean().optional(),
   eventTypes: eventTypesSchema,
   maxPendingRuns: maxPendingRunsSchema.nullable().optional(),
+  resultsThreadId: z.string().min(1).nullable().optional(),
 });
 const triggerPatchSchema = triggerInputSchema.partial();
 const verificationSampleSchema = z.object({
@@ -240,6 +242,9 @@ function cleanInput(input: WebhookTriggerInput): CleanWebhookInput {
   if (groupId && clean.delivery !== "post") fail(400, "a webhook room is only for delivery \"post\" webhooks");
   if (groupId) clean.groupId = groupId;
   if (typeof input.maxPendingRuns === "number") clean.maxPendingRuns = input.maxPendingRuns;
+  const resultsThreadId = typeof input.resultsThreadId === "string" ? input.resultsThreadId.trim() : "";
+  if (resultsThreadId && clean.delivery === "post") fail(400, "resultsThreadId cannot be configured for delivery \"post\" webhooks");
+  if (resultsThreadId) clean.resultsThreadId = resultsThreadId;
   return clean;
 }
 
@@ -457,12 +462,18 @@ export class WebhookManager {
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
     const patch = parseTriggerPatch(value);
+    const targetDelivery = patch.delivery ?? trigger.delivery;
+    if (patch.resultsThreadId && targetDelivery === "post") {
+      fail(400, "resultsThreadId cannot be configured for delivery \"post\" webhooks");
+    }
     const clean = cleanInput({
       name: patch.name ?? trigger.name,
       prompt: patch.prompt ?? trigger.prompt,
       botId: patch.botId ?? trigger.botId,
       runOn: patch.runOn ?? trigger.runOn,
-
+      resultsThreadId: targetDelivery !== "post"
+        ? (patch.resultsThreadId === undefined ? trigger.resultsThreadId : (patch.resultsThreadId ?? undefined))
+        : undefined,
       delivery: patch.delivery ?? trigger.delivery,
       groupId: patch.groupId === undefined ? trigger.groupId : patch.groupId,
       enabled: patch.enabled ?? trigger.enabled,
@@ -472,10 +483,16 @@ export class WebhookManager {
     });
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     if (clean.groupId) this.assertRoomMember(clean.botId, clean.groupId);
+    const wasPost = trigger.delivery === "post";
     Object.assign(trigger, clean, { updatedAt: this.now() });
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
     if (!clean.groupId) delete trigger.groupId;
     if (clean.maxPendingRuns === undefined) delete trigger.maxPendingRuns;
+    if (targetDelivery === "post") {
+      if (!wasPost) delete trigger.resultsThreadId;
+    } else if (!clean.resultsThreadId) {
+      delete trigger.resultsThreadId;
+    }
     if (patch.enabled === false) {
       this.options.cancelQueued?.(trigger.id, "The webhook was paused before this delivery started");
     }
@@ -767,6 +784,7 @@ export class WebhookManager {
       runOn: trigger.runOn,
       deliveryId,
       receivedAt: now,
+      ...(trigger.resultsThreadId ? { resultsThreadId: trigger.resultsThreadId } : {}),
     });
     this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: run.id, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) {
