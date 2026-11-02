@@ -847,7 +847,14 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("7");
+    expect(IMAGE_LAYER_VERSION).toBe("8");
+  });
+
+  it("starts the driver's Chrome without its own sandbox inside the hardened container", () => {
+    // Without it Chrome exits with code 21 ("Failed to move to new namespace"): see the start-script comment.
+    const dockerfile = managedImageDockerfile();
+    const exec = dockerfile.split("\n").find((line) => line.includes(`${CUA_EXECUTABLE} serve`));
+    expect(exec).toContain("exec env CUA_DRIVER_BROWSER_NO_SANDBOX=1 ");
   });
 
   it("rejects a zero-byte OpenSSL base image before the wheel download needs curl", () => {
