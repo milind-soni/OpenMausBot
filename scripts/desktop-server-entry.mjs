@@ -1,4 +1,4 @@
-// The packaged desktop forks this instead of index.js: it turns on Node's
+// The packaged desktop and the container launcher run this instead of index.js: it turns on Node's
 // on-disk compile cache for this process, so a relaunch reuses the compiled
 // bundle, then runs the server unchanged. Copied, not bundled: bundling would
 // inline index.js.

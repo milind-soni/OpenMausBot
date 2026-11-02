@@ -1,5 +1,8 @@
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
+import { createHash } from "node:crypto";
+
 import { findCliCandidates } from "../env-path.ts";
+import { buildStamp } from "../environment.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
@@ -78,6 +81,11 @@ function withinDeadline(read: () => Promise<ProviderSnapshot>): Promise<Provider
   ]).finally(() => clearTimeout(deadline));
 }
 
+/** An engine the last run found ready this recently is taken as read at start, so a restart or a Cloud's wake probes no
+ * CLI; one it found unavailable or signed out is probed, since a restart is how a fix gets picked up. A probe that finds
+ * the same status refreshes the recorded time only once it is half this old, so it is not rewritten. */
+export const ENGINE_STATUS_FRESH_MS = 30 * 60_000;
+
 /** How long the start-up read waits on one CLI before probing the next, so a stuck CLI holds back no other for long. */
 export const START_READ_STEP_MS = 5_000;
 
@@ -104,6 +112,10 @@ export class ProviderRegistry {
   private lastSnapshots = new Map<InstanceId, ProviderSnapshot>();
   private seeds = new Map<InstanceId, ProviderSnapshot>();
   private seedObjects = new WeakSet<ProviderSnapshot>();
+  private checkedAt = new Map<InstanceId, number>();
+  /** A digest of each engine's settings and this server's build: a status probed under other settings (a key, a sign-out)
+   * or another build's CLIs is not fresh. */
+  private settings = new Map<InstanceId, string>();
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
@@ -168,6 +180,7 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
+      this.settings.set(instanceId, createHash("sha256").update(JSON.stringify([entry, buildStamp()])).digest("hex").slice(0, 16));
       const live = withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
@@ -222,16 +235,23 @@ export class ProviderRegistry {
    * each CLI is read from a cold disk with no other in the way; `afterFirst` runs once the first has answered; engines
    * without a CLI are read at once. An engine the last run saw available that a probe now finds unavailable is probed
    * once more, warm, before the read ends. Until the read reaches an engine, a turn on it probes that engine itself
-   * (`engineRead`) and `describe({ known: true })` answers it from the last run's status.
+   * (`engineRead`) and `describe({ known: true })` answers it from the last run's status, unless that status is fresh
+   * (`ENGINE_STATUS_FRESH_MS`) and counts as read.
    */
-  async readAtStart(first: readonly InstanceId[] = [], afterFirst: () => void = () => {}) {
+  async readAtStart(first: readonly InstanceId[] = [], afterFirst: () => void = () => {}, now = Date.now()) {
     const live = this.instances().map((instance) => instance.instanceId);
-    for (const [instanceId, snapshot] of this.status?.read((id) => this.byId.get(id)?.live ? this.cliTarget(id) : null) ?? []) {
+    const fresh = new Set<InstanceId>();
+    for (const [instanceId, { snapshot, checkedAt, settings }] of this.status?.read((id) => this.byId.get(id)?.live ? this.cliTarget(id) : null) ?? []) {
       this.seeds.set(instanceId, snapshot);
-      this.seedObjects.add(snapshot);
+      if (snapshot.state === "available" && snapshot.authenticated !== false && settings === this.settings.get(instanceId)
+        && checkedAt !== null && now - checkedAt >= 0 && now - checkedAt < ENGINE_STATUS_FRESH_MS) {
+        fresh.add(instanceId);
+        this.lastSnapshots.set(instanceId, snapshot);
+        this.checkedAt.set(instanceId, checkedAt);
+      } else this.seedObjects.add(snapshot);
     }
     const seeded = new Map(this.seeds);
-    this.unread = new Set(live);
+    this.unread = new Set(live.filter((id) => !fresh.has(id)));
     try {
       const withCli = new Set(live.filter((id) => this.cliTarget(id)?.cli));
       const withoutCli = this.engineRead(...live.filter((id) => !withCli.has(id)));
@@ -411,6 +431,9 @@ export class ProviderRegistry {
     }
     // Only while this is still the live instance: a reload may have replaced it during the read.
     if (this.byId.get(instance.instanceId)?.live === instance) {
+      const before = this.lastSnapshots.get(instance.instanceId), checkedAt = this.checkedAt.get(instance.instanceId);
+      if (checkedAt === undefined || Date.now() - checkedAt >= ENGINE_STATUS_FRESH_MS / 2 || !before
+        || JSON.stringify(snapshotFrom(before)) !== JSON.stringify(snapshotFrom(snapshot))) this.checkedAt.set(instance.instanceId, Date.now());
       this.lastSnapshots.set(instance.instanceId, snapshot);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
@@ -421,7 +444,9 @@ export class ProviderRegistry {
   private saveStatus(): void {
     this.status?.save(this.instances().flatMap(({ instanceId, driverKind }) => {
       const snapshot = this.lastSnapshots.get(instanceId) ?? this.seeds.get(instanceId);
-      return snapshot ? [{ instanceId, driverKind, cli: this.cliTarget(instanceId)?.cli ?? null, snapshot }] : [];
+      const checkedAt = this.lastSnapshots.has(instanceId) ? this.checkedAt.get(instanceId) : undefined, settings = this.settings.get(instanceId);
+      return snapshot ? [{ instanceId, driverKind, cli: this.cliTarget(instanceId)?.cli ?? null, snapshot,
+        ...(checkedAt === undefined || settings === undefined ? {} : { checkedAt, settings }) }] : [];
     }));
   }
 
@@ -505,6 +530,8 @@ export class ProviderRegistry {
     this.byId.clear();
     this.cliByInstance.clear();
     this.lastSnapshots.clear();
+    this.checkedAt.clear();
+    this.settings.clear();
     this.seeds.clear();
   }
 
@@ -513,6 +540,8 @@ export class ProviderRegistry {
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
     this.lastSnapshots.delete(instanceId);
+    this.checkedAt.delete(instanceId);
+    this.settings.delete(instanceId);
     this.seeds.delete(instanceId);
     await entry?.live?.dispose();
   }

@@ -136,7 +136,7 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
 
-// The packaged desktop forks this bootstrap to turn on Node's compile cache.
+// The packaged desktop and the container launcher run this bootstrap to turn on Node's compile cache.
 // Copied, not bundled: esbuild would inline index.js into it.
 copyFileSync(join(root, "scripts", "desktop-server-entry.mjs"), join(root, "dist-server", "desktop-entry.mjs"));
 

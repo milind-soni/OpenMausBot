@@ -73,7 +73,7 @@ const STREAM_ENV = {
   FAKE_CLAUDE_TOOL_CALLS: JSON.stringify(TOOL_CALLS),
 };
 
-interface Tally { cpu: { user: number; system: number }; memory: { rss: number; heapUsed: number }; fired: Record<string, number>; intervals: Record<string, number>; writes: Record<string, { bytes: number; calls: number }>; fsyncs: number; renames: number }
+interface Tally { cpu: { user: number; system: number }; memory: { rss: number; heapUsed: number }; fired: Record<string, number>; intervals: Record<string, number>; writes: Record<string, { bytes: number; calls: number }>; fsyncs: number; renames: number; spawned?: Record<string, number> }
 interface Fixture {
   url: string; dataDir: string; pid: number; readyMs: number; logPath: string;
   api(method: string, path: string, body?: unknown): Promise<{ status: number; ms: number; bytes: number; body: any }>;
@@ -519,19 +519,28 @@ async function main() {
       const cache = join(work, "compile-cache");
       const packaged: number[] = [];
       const memory: Record<string, number> = {};
+      const heap: Record<string, number> = {};
+      const spawned: Record<string, Record<string, number>> = {};
+      // The first start sets up a new data folder; the next two start again on it, as a restart or a Cloud's wake does.
+      const dataDir = newDataDir();
       for (let i = 0; i < 3; i++) {
-        const fixture = await startFixture({ bundle: { entry, cache } });
+        const fixture = await startFixture({ bundle: { entry, cache }, dataDir });
         packaged.push(Math.round(fixture.readyMs));
         await sleep(i === 0 ? 11_000 : 3_000);
+        if (i === 0) spawned.firstStartAt11s = (await fixture.tally()).spawned ?? {};
         if (i === 2) {
-          memory.at3s = await rssMb(fixture);
+          const at3s = await fixture.tally();
+          [memory.at3s, heap.at3s, spawned.laterStartAt3s] = [round(at3s.memory.rss / 1048576), round(at3s.memory.heapUsed / 1048576), at3s.spawned ?? {}];
           await sleep(27_000);
-          memory.at30s = await rssMb(fixture);
+          const at30s = await fixture.tally();
+          [memory.at30s, heap.at30s, spawned.laterStartAt30s] = [round(at30s.memory.rss / 1048576), round(at30s.memory.heapUsed / 1048576), at30s.spawned ?? {}];
         }
-        await fixture.close();
+        await fixture.close(i < 2);
       }
       server.bundleReadyMs = { cold: packaged[0], warm: packaged.slice(1) };
       server.bundleRssMb = memory;
+      server.bundleHeapMb = heap;
+      server.bundleSpawned = spawned;
       server.bundleKb = kb(statSync(join(dirname(entry), "index.js")).size);
     } catch (error) {
       server.bundleError = error instanceof Error ? error.message : String(error);

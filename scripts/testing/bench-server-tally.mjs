@@ -1,5 +1,6 @@
 // Loaded with --import into a fixture server that scripts/bench-desktop.ts starts, never into the app: it counts
 // timer callbacks and file writes, and on SIGUSR2 writes the running totals, CPU and memory to $OMB_BENCH_TALLY.
+import childProcess from "node:child_process";
 import fs from "node:fs";
 import module from "node:module";
 import { basename, dirname } from "node:path";
@@ -73,6 +74,19 @@ for (const method of ["write", "writeFile", "appendFile"]) {
   const original = FileHandle[method];
   FileHandle[method] = function (data, ...rest) { const path = handlePaths.get(this); if (path) tallyWrite(path, data); return original.call(this, data, ...rest); };
 }
+// Child processes started, by program and first argument. exec goes through execFile, so it is not counted twice.
+const spawned = new Map();
+const countSpawn = (file, args) => {
+  const first = Array.isArray(args) ? args.find((arg) => typeof arg === "string") : undefined;
+  const key = `${basename(String(file)).split(" ")[0]}${first ? ` ${basename(first).slice(0, 40)}` : ""}`;
+  spawned.set(key, (spawned.get(key) ?? 0) + 1);
+};
+for (const method of ["spawn", "spawnSync", "execFile", "execFileSync", "fork"]) {
+  const original = childProcess[method];
+  childProcess[method] = function (file, args, ...rest) { countSpawn(file, args); return original.call(this, file, args, ...rest); };
+}
+const { execSync } = childProcess;
+childProcess.execSync = function (command, ...rest) { countSpawn(String(command).split(" ")[0], []); return execSync.call(this, command, ...rest); };
 module.syncBuiltinESMExports();
 
 if (out) {
@@ -86,6 +100,7 @@ if (out) {
       writes: Object.fromEntries(writes),
       fsyncs,
       renames,
+      spawned: Object.fromEntries(spawned),
     }));
   });
 }
