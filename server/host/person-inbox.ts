@@ -210,10 +210,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   const line = (item: Item) => store.messagesFor(item.threadId).find((message) => message.id === item.id);
 
-  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. */
-  const asking = (item: Item) => item.requestId && item.origin
+  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. An ask that
+   * came from no conversation (someone asking for access to a bot) is its own card. */
+  const asking = (item: Item) => !item.requestId ? undefined : item.origin
     ? store.messagesFor(item.origin.threadId).findLast((message) => message.card?.requestId === item.requestId && !message.inbox)
-    : undefined;
+    : line(item);
   /** An ask waits on its person while its copy here and the card that asked are open, however either is answered or
    * closed. */
   const askWaits = (item: Item, copy = line(item)) => item.kind === "ask" && liveCardKind(copy?.card) !== null && liveCardKind(asking(item)?.card) !== null;

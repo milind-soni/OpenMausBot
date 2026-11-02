@@ -388,6 +388,17 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   dialog on a team; the conversation's copy and download sit at its foot. Someone who can only view a bot sees "You
   can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens its main chat
   rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
+- **Bot access** (Settings, for a team's admins): every team bot down the side (each person's own MausBot stays out),
+  each User across, and what everyone in the team gets; each cell is that person's level (the owner's says Owner), and
+  the Everyone column sets it for everyone. The same sharing as the Share dialog, applied at once with Undo.
+- **Asking to chat.** Beside "You can view Payroll" sits "Ask Ada to chat" (Ada owns it; "Ask an admin to chat" when
+  nobody on the team does). `POST /api/bots/<id>/access-request` (anyone who can view the bot; someone who can chat
+  already gets 409) puts an Allow / Not now card in the owner's inbox, or each admin's when the owner is gone
+  (`server/host/access-requests.ts`). Asking again while a card waits sends nothing new. Allow, answered from the inbox
+  or the card in its chat, gives Can chat at once, settles the same card in every other inbox, and tells the asker in
+  their own inbox ("Ada let you chat with Payroll."); it takes effect only while the person answering can edit the bot.
+  Not now changes nothing and tells nobody; they can ask again. The card is a set-answer question card
+  (`card.accessRequest`), shown in each person's language, and its answer is always its own option.
 
 ## One inbox per person
 

@@ -3552,5 +3552,21 @@
   "botAccess.yours.chat": "你可以和 {bot} 聊天，也可以和它开始自己的对话。能编辑它的人决定谁有访问权限。",
   "botAccess.yours.other": "能编辑 {bot} 的人决定谁有访问权限。",
   "botAccess.viewOnly": "你可以查看 {bot}，但不能和它聊天。",
-  "botAccess.viewOnlyRoom": "你只能查看 {bot}，所以可以阅读这个聊天室，但不能在里面发言。"
+  "botAccess.viewOnlyRoom": "你只能查看 {bot}，所以可以阅读这个聊天室，但不能在里面发言。",
+  "botAccess.ask": "请 {name} 允许你聊天",
+  "botAccess.askAdmins": "请管理员允许你聊天",
+  "botAccess.asked": "已请求 {name}",
+  "botAccess.theAdmins": "管理员",
+  "botAccess.request.question": "{name} 请求和 {bot} 聊天。允许后，对方可以和它聊天并开始自己的对话。",
+  "botAccess.request.allow": "允许",
+  "botAccess.request.notNow": "暂不",
+  "settings.section.botAccess": "机器人访问权限",
+  "botAccess.overview.intro": "{team} 里谁可以查看、和哪个机器人聊天以及编辑它。更改立即生效。",
+  "botAccess.overview.noBots": "还没有团队机器人。",
+  "botAccess.overview.noPeople": "团队里除了管理员还没有其他人。",
+  "botAccess.overview.bot": "机器人",
+  "botAccess.overview.setForEveryone": "为所有人设置：{bot}",
+  "botAccess.overview.cell": "{name} 能对 {bot} 做什么",
+  "botAccess.overview.toastEveryone": "{bot}：{team} 的所有人 · {level}",
+  "botAccess.overview.toastPerson": "{bot}：{name} · {level}"
 }

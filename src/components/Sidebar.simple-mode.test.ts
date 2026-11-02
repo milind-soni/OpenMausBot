@@ -443,7 +443,7 @@ describe("bot-first sidebar", () => {
     ]);
   });
 
-  it.each(densities)("lists the bot alone in Simple mode, with no thread or activity rows under it, keeping its dots, in %s density", (density) => {
+  it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person, keeping its dots, in %s density", (density) => {
     // Its threads were left expanded in Advanced mode.
     fixture.advanced = true;
     let tree: ReactNode;
@@ -458,13 +458,18 @@ describe("bot-first sidebar", () => {
       expect(markup).toContain(`data-sidebar-bot-row="${bot.id}"`);
       expect(markup).not.toContain("data-sidebar-thread-row");
       expect(markup).not.toContain("data-sidebar-folder-row");
-      expect(markup).not.toContain("data-sidebar-activity-row");
-      expect(markup).not.toContain("data-sidebar-bot-activity");
       expect(markup).not.toContain('aria-label="Atlas threads"');
+      if (density === "icons") expect(markup).not.toContain("data-sidebar-bot-activity");
+      else {
+        // It asks the person something, or has a reply they have not read; running, queued and idle threads stay out.
+        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "unread"]);
+      }
       expect(markup).toContain('data-testid="waiting-dot"');
     }
     const unread = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, tasks: [bot.tasks![0]!, bot.tasks![5]!] })));
-    expect(unread).not.toContain("data-sidebar-activity-row");
+    expect(unread.includes('data-sidebar-activity-row="unread"')).toBe(density !== "icons");
+    const read = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, unread: false, tasks: [bot.tasks![0]!, bot.tasks![1]!, bot.tasks![3]!] })));
+    expect(read).not.toContain("data-sidebar-activity-row");
     expect(unread).toContain(density === "icons" ? "rounded-full border border-panel bg-accent" : density === "comfortable" ? 'data-testid="unread-dot"' : 'aria-label="Unread threads"');
     forgetSearchDisclosuresForTests();
   });

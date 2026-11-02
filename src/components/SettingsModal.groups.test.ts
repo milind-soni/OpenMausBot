@@ -20,13 +20,14 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
   ownerOrAdmin: null as boolean | null,
+  config: {} as Record<string, unknown>,
 }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: fixture.api,
-  useStore: () => ({ state: { appSettingsSection: fixture.section, instances: [] }, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { appSettingsSection: fixture.section, instances: [], config: fixture.config }, dispatch: fixture.dispatch }),
 }));
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
@@ -71,6 +72,7 @@ beforeEach(() => {
   fixture.advancedMode = true;
   fixture.switches = [];
   fixture.ownerOrAdmin = null;
+  fixture.config = {};
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
   setLocale("en");
@@ -100,7 +102,7 @@ describe("Settings rail groups", () => {
     expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(["you", "ai", "computers", "account"]);
     const ids = SECTIONS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(19); // 16 + the shared Skills library (AI group) + Logins (Devices) + Import (Account)
+    expect(ids).toHaveLength(20); // 16 + the shared Skills library (AI group) + Logins (Devices) + Import and a team's Bot access (Account)
     for (const entry of SECTIONS) expect(SETTINGS_GROUPS.map((group) => group.id)).toContain(entry.group);
   });
 
@@ -124,6 +126,17 @@ describe("Settings rail groups", () => {
     expect(groups.account).toEqual(["usage", "backups", "people", "activity", "experimental"]);
     expect(Object.values(groups).flat()).not.toContain("desktopWorkspaces");
     expect(Object.values(groups).flat()).not.toContain("cloudAccount");
+  });
+
+  it("gives a team's admins its Bot access page, and nobody else", () => {
+    fixture.config = { team: { id: "team-acme", name: "Acme" }, cloudHome: true };
+    fixture.ownerOrAdmin = true;
+    expect(rail(render()).account).toContain("botAccess");
+    fixture.ownerOrAdmin = false;
+    expect(Object.values(rail(render())).flat()).not.toContain("botAccess");
+    fixture.config = {};
+    fixture.ownerOrAdmin = true;
+    expect(Object.values(rail(render())).flat()).not.toContain("botAccess");
   });
 
   it("shows a paired remote client only Appearance, Remote access and Servers", () => {

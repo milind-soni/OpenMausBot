@@ -13,6 +13,7 @@ import { settleAdvancedModeDefault } from "./lib/interface-mode";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
 import { HomeScreen, SignedOutAtHome } from "./components/HomeScreen";
+import { PageBoundary } from "./components/PageBoundary";
 import { endedBeforeReload, forgetEndedSession, SESSION_ENDED_REASON } from "./lib/session-ended";
 import "./styles.css";
 
@@ -48,5 +49,5 @@ async function chooseRoot(): Promise<React.ReactNode> {
 }
 
 void Promise.all([bootstrapBrand(), chooseRoot(), loadPageLanguage()]).then(([, root]) => {
-  createRoot(document.getElementById("root")!).render(<StrictMode>{root}</StrictMode>);
+  createRoot(document.getElementById("root")!).render(<StrictMode><PageBoundary>{root}</PageBoundary></StrictMode>);
 });
