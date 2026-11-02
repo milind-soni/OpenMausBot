@@ -33,6 +33,7 @@ vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ brand: { name: "OpenMausBo
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapshot: { state: string; authenticated?: boolean } }) =>
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
 import { AppNotices } from "./AppNotices";
+import { TwoPlacesCard } from "./TwoPlacesCard";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, launchNotice, localDay, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { track } from "@/lib/analytics";
@@ -1088,6 +1089,37 @@ describe("bots in two places", () => {
     expect(after).toContain('data-notice="two-places"');
     expect(after).not.toContain("Move bots");
     expect(after).toContain("Bring them together");
+    expect(tree().find(node => node.props["data-two-places-bring"])?.props.autoFocus, "focus returns to the button Cancel brought back").toBe(true);
+  });
+
+  it("Escape on the confirm step works as Cancel and never dismisses the card", async () => {
+    returning();
+    await launch();
+    press("Bring them together");
+    await settle();
+    const escape = { key: "Escape", preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    tree().find(node => node.props.role === "group")!.props.onKeyDown(escape);
+    expect(escape.stopPropagation, "the card's own Escape never sees it").toHaveBeenCalled();
+    const after = await settle();
+    expect(dismissed).toEqual([]);
+    expect(accepted).toEqual([]);
+    expect(after).toContain('data-notice="two-places"');
+    expect(after).not.toContain("Move bots");
+  });
+
+  it("a different suggested place starts a fresh card, so a confirm never carries over to it", async () => {
+    returning();
+    await launch();
+    // Children.toArray would re-key, so walk the elements as rendered.
+    const find = (value: unknown): Node | undefined => {
+      if (Array.isArray(value)) return value.map(find).find(Boolean);
+      if (!isValidElement(value)) return undefined;
+      const node = value as Node;
+      if (node.type === TwoPlacesCard) return node;
+      return typeof node.type === "function" ? find((node.type as (props: unknown) => ReactNode)(node.props)) : find(node.props.children);
+    };
+    f.index = 0; f.effects = [];
+    expect(find(AppNotices({ viewer, now: () => now }))?.key).toBe(GARAGE.key);
   });
 
   it("Not now hands main the place to remember, and the card goes", async () => {
