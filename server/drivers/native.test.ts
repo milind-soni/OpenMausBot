@@ -127,15 +127,15 @@ describe("the native tee", () => {
   it("holds incoming lines, in order, until a flush or the timer, and writes what it sent at once", () => {
     vi.useFakeTimers();
     try {
-      appendNative("t1", { dir: "in", source: "claude.sdk.message", msg: { type: "system", n: 1 } });
-      appendNative("t1", { dir: "in", source: "claude.sdk.message", msg: { type: "stream_event", event: { type: "content_block_delta" } } });
-      appendNative("t1", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant", n: 2 } });
-      expect(rows("t1")).toEqual([]);
-      appendNative("t1", { dir: "out", source: "claude.sdk.message", msg: { type: "user", n: 3 } });
-      expect(rows("t1").map((row) => row.msg.n)).toEqual([1, 2, 3]);
-      appendNative("t1", { dir: "in", source: "claude.sdk.message", msg: { type: "result", n: 4 } });
+      appendNative("t-held", { dir: "in", source: "claude.sdk.message", msg: { type: "system", n: 1 } });
+      appendNative("t-held", { dir: "in", source: "claude.sdk.message", msg: { type: "stream_event", event: { type: "content_block_delta" } } });
+      appendNative("t-held", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant", n: 2 } });
+      expect(rows("t-held")).toEqual([]);
+      appendNative("t-held", { dir: "out", source: "claude.sdk.message", msg: { type: "user", n: 3 } });
+      expect(rows("t-held").map((row) => row.msg.n)).toEqual([1, 2, 3]);
+      appendNative("t-held", { dir: "in", source: "claude.sdk.message", msg: { type: "result", n: 4 } });
       vi.advanceTimersByTime(300);
-      expect(rows("t1").map((row) => row.msg.n)).toEqual([1, 2, 3, 4]);
+      expect(rows("t-held").map((row) => row.msg.n)).toEqual([1, 2, 3, 4]);
     } finally {
       vi.useRealTimers();
     }
@@ -143,27 +143,27 @@ describe("the native tee", () => {
 
   it("writes a thread's held lines when its turn ends on the bus", () => {
     const bus = new EventBus(() => {});
-    appendNative("t2", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant", n: 1 } });
-    bus.publish({ eventId: "e1", provider: "claudeAgent", threadId: "t2", createdAt: new Date().toISOString(), type: "turn.completed", ok: true } as unknown as RuntimeEvent);
-    expect(rows("t2").map((row) => row.msg.n)).toEqual([1]);
+    appendNative("t-turn-end", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant", n: 1 } });
+    bus.publish({ eventId: "e1", provider: "claudeAgent", threadId: "t-turn-end", createdAt: new Date().toISOString(), type: "turn.completed", ok: true } as unknown as RuntimeEvent);
+    expect(rows("t-turn-end").map((row) => row.msg.n)).toEqual([1]);
   });
 
   it("drops a deleted thread's held lines, so no flush recreates its log", () => {
-    appendNative("t3", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant" } });
-    discardNativeLog("t3");
-    flushNativeLog("t3");
+    appendNative("t-deleted", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant" } });
+    discardNativeLog("t-deleted");
+    flushNativeLog("t-deleted");
     flushNativeLogs();
-    expect(existsSync(file("t3"))).toBe(false);
+    expect(existsSync(file("t-deleted"))).toBe(false);
   });
 
   it("writes every held line when the process exits", () => {
     const script = `const { appendNative } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "native.ts")).href)});
-      for (let n = 0; n < 5; n++) appendNative("t4", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant", n } });
+      for (let n = 0; n < 5; n++) appendNative("t-exit", { dir: "in", source: "claude.sdk.message", msg: { type: "assistant", n } });
       process.exit(0);`;
     const child = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script], {
       env: { ...process.env, OMB_DATA_DIR: dirname(NATIVE_DIR) }, encoding: "utf8",
     });
     expect(child.status, child.stderr).toBe(0);
-    expect(rows("t4").map((row) => row.msg.n)).toEqual([0, 1, 2, 3, 4]);
+    expect(rows("t-exit").map((row) => row.msg.n)).toEqual([0, 1, 2, 3, 4]);
   });
 });
