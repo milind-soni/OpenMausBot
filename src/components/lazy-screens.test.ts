@@ -208,18 +208,19 @@ describe("launch bundle", () => {
       : specifier.startsWith(".") ? join(dirname(from), specifier) : null;
     if (!base) return null;
     for (const candidate of [base, `${base}.tsx`, `${base}.ts`, join(base, "index.tsx"), join(base, "index.ts")]) {
-      if (/\.tsx?$/.test(candidate) && existsSync(candidate)) return candidate;
+      if (/\.(tsx?|json)$/.test(candidate) && existsSync(candidate)) return candidate;
     }
     return null;
   };
   const staticImports = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)(?:[^"'`;]*?\sfrom\s+)?["']([^"']+)["']/g;
-  const launchModules = () => {
+  const launchModules = (entry = "main.tsx") => {
     const seen = new Set<string>();
-    const queue = [join(srcRoot, "main.tsx")];
+    const queue = [join(srcRoot, entry)];
     while (queue.length) {
       const file = queue.pop()!;
       if (seen.has(file)) continue;
       seen.add(file);
+      if (file.endsWith(".json")) continue;
       for (const [, specifier] of readFileSync(file, "utf8").matchAll(staticImports)) {
         const target = resolve(file, specifier!);
         if (target) queue.push(target);
@@ -239,5 +240,17 @@ describe("launch bundle", () => {
       "RoutinesPage", "SettingsModal", "TeamMapPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
     ].map((name) => `components/${name}.tsx`);
     expect(deferred.filter((file) => reached.has(file))).toEqual([]);
+  });
+
+  it("carries English and no other language: the one a person chose loads before the first render", () => {
+    expect([...launchModules()].filter((file) => file.startsWith("locales/")).sort()).toEqual(["locales/en.json", "locales/index.ts"]);
+  });
+
+  it("gives the window's rail a page of its own that leaves the app out", () => {
+    const rail = launchModules("rail.tsx");
+    expect(rail.has("components/PlacesRail.tsx")).toBe(true);
+    expect(rail.has("components/PlaceAddSheet.tsx")).toBe(true);
+    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/ChatView.tsx"].filter((file) => rail.has(file))).toEqual([]);
+    expect([...rail].filter((file) => file.startsWith("locales/")).sort()).toEqual(["locales/en.json", "locales/index.ts"]);
   });
 });
