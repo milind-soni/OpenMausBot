@@ -207,6 +207,38 @@ describe("a team bot shared with a level per person", () => {
     expect((await botOf("dan", payroll.id))?.soul).toBe("Answer pay questions briefly.");
   });
 
+  it("lets Admins and the bot's editors manage its Bot API, and its calls run as outside work the team can read", async () => {
+    const path = `/api/bots/${mirror.id}/bot-api`;
+    expect((await as("eve", "GET", path)).status).toBe(404);
+    for (const who of ["bob", "cara"]) {
+      expect((await as(who, "POST", path, { enabled: true })).status, who).toBe(403);
+      expect((await as(who, "POST", `${path}/new-key`)).status, who).toBe(403);
+    }
+    expect((await as("cara", "GET", path)).body).toMatchObject({ enabled: false, canManage: false });
+    const on = await as("dan", "POST", path, { enabled: true });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    expect((await as("ada", "POST", `${path}/new-key`)).status).toBe(200);
+    const rekeyed = await as("dan", "POST", `${path}/new-key`);
+    const key = rekeyed.body.key as string;
+
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${mirror.id}/messages`;
+    const answered = await fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "What is the pay date?" }) });
+    const body = await answered.json() as { reply?: string; thread: string };
+    expect(answered.status, JSON.stringify(body)).toBe(200);
+    expect(body.reply).toBeTruthy();
+    const task = (await botOf("cara", mirror.id) as unknown as { tasks: Array<{ threadId: string; botApi?: boolean; approvalMode?: string }> }).tasks.find((one) => one.threadId === body.thread);
+    expect(task).toMatchObject({ botApi: true, approvalMode: "ask" });
+    expect((await as("cara", "GET", `/api/threads/${body.thread}/messages`)).body.messages.find((line: { role: string }) => line.role === "user")).toMatchObject({ text: "What is the pay date?", via: "api" });
+    expect((await as("cara", "GET", path)).body.calls).toEqual([]);
+    expect((await as("dan", "GET", path)).body.calls[0]).toMatchObject({ statusCode: 200, preview: "What is the pay date?" });
+    const activity = JSON.stringify((await as("ada", "GET", "/api/admin-activity?what=bot-api")).body);
+    expect(activity).toContain("bot-api.on");
+    expect(activity).toContain("bot-api.new-key");
+    expect(activity).not.toContain(key);
+    expect((await as("dan", "POST", path, { enabled: false })).body).toMatchObject({ enabled: false });
+    await until(idle);
+  });
+
   it("relays another app's message only for a person who can chat with the bot", async () => {
     const relay = async (email: string | undefined, n: number) => {
       const leaf = (await as("ada", "GET", `/api/threads/${payroll.threadId}/messages?limit=1`)).body.activeLeafId ?? null;

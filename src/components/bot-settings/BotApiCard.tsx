@@ -9,12 +9,23 @@ import { api, useStore, type Bot } from "@/state/store";
 import { BOT_API_KEY_PLACEHOLDER, botApiCurl } from "../../../shared/bot-api";
 import { Switch } from "../SettingsPrimitives";
 
+export interface BotApiCall {
+  id: string;
+  receivedAt: number;
+  outcome: "accepted" | "rejected";
+  statusCode: number;
+  preview?: string;
+  reason?: string;
+  repeats?: number;
+}
+
 export interface BotApiView {
   enabled: boolean;
   url: string;
   canManage: boolean;
   callCount: number;
   lastCalledAt?: number;
+  calls?: BotApiCall[];
 }
 
 /** The key rides only on the answer that made it: nothing keeps it after this view. */
@@ -27,6 +38,21 @@ export function callsLine(view: Pick<BotApiView, "callCount" | "lastCalledAt">, 
   const when = relativeTime(view.lastCalledAt, now);
   return view.callCount === 1 ? t("botApi.callsOne", { when }) : t("botApi.calls", { count: view.callCount, when });
 }
+
+export function callWords(call: Pick<BotApiCall, "outcome" | "statusCode" | "repeats">): string {
+  const words = call.statusCode === 200 ? t("botApi.call.replied")
+    : call.statusCode === 202 ? t("botApi.call.accepted")
+      : call.statusCode === 401 ? t("botApi.call.wrongKey")
+        : call.statusCode === 403 ? t("botApi.call.off")
+          : call.statusCode === 429 ? t("automations.calls.tooFast")
+            : call.statusCode === 409 ? t("botApi.call.busy")
+              : call.statusCode === 413 ? t("automations.calls.tooLarge")
+                : call.statusCode === 400 || call.statusCode === 415 ? t("automations.calls.unreadable")
+                  : t("botApi.call.failed");
+  return call.repeats && call.repeats > 1 ? `${words} (${call.repeats})` : words;
+}
+
+const onlyThisComputer = (url: string) => /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/]/.test(url);
 
 export function webhooksLine(count: number): string {
   return count === 0 ? t("botApi.webhooksNone") : count === 1 ? t("botApi.webhooksOne") : t("botApi.webhooks", { count });
@@ -56,9 +82,9 @@ export function BotApiCard({ bot, webhooksLink = false, className }: { bot: Bot;
     setError(null);
     setConfirmingNewKey(false);
     try {
-      const next = await request();
+      const { key, ...next } = await request() as BotApiView & { key?: string };
       setView(next);
-      setFreshKey("key" in next ? next.key : null);
+      setFreshKey(key ?? null);
     } catch (failure) {
       setError(failure instanceof Error && failure.message ? failure.message : t("botApi.error"));
     } finally {
@@ -73,6 +99,7 @@ export function BotApiCard({ bot, webhooksLink = false, className }: { bot: Bot;
     setCopied(result === "copied" ? "copied" : "failed");
     window.setTimeout(() => setCopied(null), 1500);
   };
+  const refreshCalls = () => { api<BotApiView>(path).then(setView).catch(() => undefined); };
   const webhookCount = state.webhooks.filter((webhook) => webhook.botId === bot.id).length;
   const canManage = view?.canManage ?? false;
 
@@ -104,6 +131,7 @@ export function BotApiCard({ bot, webhooksLink = false, className }: { bot: Bot;
           <div className={cn("text-[12px]", freshKey ? "text-warning" : "text-ink-secondary")} data-testid="bot-api-key-note">
             {freshKey ? t("botApi.keyOnce") : t("botApi.keyHidden")}
           </div>
+          {onlyThisComputer(view.url) && <div className="text-[12px] text-ink-secondary" data-testid="bot-api-local">{t("botApi.localOnly")}</div>}
           {canManage && (
             confirmingNewKey ? (
               <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-secondary">
@@ -112,8 +140,17 @@ export function BotApiCard({ bot, webhooksLink = false, className }: { bot: Bot;
                 <button type="button" onClick={() => setConfirmingNewKey(false)} className={buttonCls}>{t("common.cancel")}</button>
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[12px] text-ink-secondary" data-testid="bot-api-calls">{callsLine(view)}</span>
+              <div className="flex items-start justify-between gap-3">
+                <details className="min-w-0 flex-1 text-[12px] text-ink-secondary" data-testid="bot-api-calls" onToggle={(event) => { if (event.currentTarget.open) refreshCalls(); }}>
+                  <summary className="cursor-pointer">{callsLine(view)}</summary>
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {(view.calls ?? []).map((call) => (
+                      <li key={call.id} className="min-w-0 truncate" title={call.preview}>
+                        {relativeTime(call.receivedAt)} · {callWords(call)}{call.preview ? ` · ${call.preview}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
                 <button type="button" onClick={() => setConfirmingNewKey(true)} disabled={busy} className={buttonCls} data-testid="bot-api-new-key">{t("botApi.newKey")}</button>
               </div>
             )
@@ -124,7 +161,7 @@ export function BotApiCard({ bot, webhooksLink = false, className }: { bot: Bot;
       {webhooksLink && (
         <button
           type="button"
-          onClick={() => dispatch({ type: "toggleSettings", open: true, section: "access" })}
+          onClick={() => dispatch({ type: "showRoutines", view: "list" })}
           className="mt-3 text-[13px] text-ink-secondary hover:text-ink"
           data-testid="bot-api-webhooks"
         >

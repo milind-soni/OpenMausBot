@@ -7400,7 +7400,14 @@
   "botApi.error": "Couldn’t change the Bot API. Try again.",
   "chat.viaBotApi": "Sent through the Bot API",
   "activity.what.bot-api": "Bot API",
-  "activity.action.bot-api.on": "Turned on a bot's API",
+  "activity.action.bot-api.on": "Turned on Bot API",
   "activity.action.bot-api.new-key": "Made a new Bot API key",
-  "activity.action.bot-api.off": "Turned off a bot's API"
+  "activity.action.bot-api.off": "Turned off Bot API",
+  "botApi.localOnly": "This address works only on this computer.",
+  "botApi.call.replied": "Replied",
+  "botApi.call.accepted": "Taken, reply not ready",
+  "botApi.call.wrongKey": "Wrong key",
+  "botApi.call.off": "Turned away: Bot API was off",
+  "botApi.call.busy": "Turned away: the bot was busy",
+  "botApi.call.failed": "The bot couldn't answer"
 }

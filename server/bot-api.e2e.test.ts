@@ -3,7 +3,7 @@
 // and, on a bot that asks before acting, a call that stops at the approval nobody outside may give.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -90,26 +90,24 @@ it("answers the card's own curl with the bot's reply, and refuses a wrong key, a
   expect((await call(on.url, on.key, { message: "Hi" })).status).toBe(403);
 }, hostTimeout(180_000));
 
-it("stops at an approval the bot asks for: nobody outside answers it, and the call says needs_approval", async () => {
+it.each(["ask", "full", "auto"])("a bot at %s stops at the approval: nothing answers it, and the call says needs_approval", async (level) => {
   fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
   const { url, dataDir } = fixture.info;
   const api = appApi(url);
   const bot = (await runControlOmb(["new-bot", "--name", "Careful", "--url", url]) as any).bot;
-  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" });
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: level });
   const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
-
-  // A turn that never answers: the call's own wait runs out and it says it is still working.
-  const working = await call(on.url, on.key, { message: "Think about it", wait: 1 });
-  expect(working).toMatchObject({ status: 202, body: { status: "working", thread: expect.any(String) } });
 
   // The bot asks before acting: the fake engine's permission broker carries the ask the engine would make.
   const dump = join(dataDir, "fake-claude-dump.json");
-  const pending = call(on.url, on.key, { message: "Clean up the downloads folder", wait: 60 });
-  await expect.poll(() => existsSync(dump) && JSON.parse(readFileSync(dump, "utf8")).prompt?.includes("Clean up the downloads folder"), { timeout: hostTimeout(30_000) }).toBe(true);
-  const launch = JSON.parse(readFileSync(dump, "utf8"));
+  const pending = call(on.url, on.key, { message: "Clean up the downloads folder", wait: 60 }).catch((error: unknown) => ({ status: 0, body: { error: String(error) } }));
+  const dumped = () => { try { return JSON.parse(readFileSync(dump, "utf8")); } catch { return null; } };
+  await expect.poll(() => JSON.stringify(dumped()?.prompt ?? "").includes("Clean up the downloads folder"), { timeout: hostTimeout(30_000) }).toBe(true);
+  const launch = dumped();
   expect(launch.argv).toContain("--permission-prompt-tool");
-  expect(launch.prompt).toContain("[UNTRUSTED BOT API MESSAGE]");
-  expect(launch.systemPrompt).toContain("through this bot's API");
+  expect(launch.argv[launch.argv.indexOf("--permission-mode") + 1]).toBe("default");
+  expect(JSON.stringify(launch.prompt)).toContain("[UNTRUSTED BOT API MESSAGE]");
+  expect(JSON.stringify(launch.systemPrompt)).toContain("through this bot's API");
   socket = connect(launch.mcpConfig.mcpServers.ogb.args.at(-1));
   await new Promise<void>((resolve, reject) => { socket!.once("connect", resolve); socket!.once("error", reject); });
   const answers: any[] = [];
@@ -118,12 +116,62 @@ it("stops at an approval the bot asks for: nobody outside answers it, and the ca
 
   const stopped = await pending;
   expect(stopped).toMatchObject({ status: 202, body: { status: "needs_approval", thread: expect.any(String) } });
-  const threadId = stopped.body.thread as string;
+  const threadId = (stopped.body as { thread: string }).thread;
   const lines = (await api("GET", `/api/threads/${threadId}/messages`)).messages as any[];
   const card = lines.find((line) => line.card?.requestId)?.card;
   expect(card).toMatchObject({ requestType: "permission" });
   expect(card.answered).toBeUndefined();
+  expect(card.allowSession).toBeUndefined();
   expect(answers).toEqual([]);
   const read = await fetch(`${on.url}?thread=${threadId}`, { headers: { authorization: `Bearer ${on.key}` } });
   expect(await read.json()).toEqual({ thread: threadId, status: "needs_approval" });
-}, hostTimeout(180_000));
+}, hostTimeout(120_000));
+
+it("stays on Ask when the person sets the whole bot to Full access afterwards", async () => {
+  // Each turn relaunches the fake engine, so its command line shows the level this turn really runs at.
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
+  const { url, dataDir } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Flipped", "--url", url]) as any).bot;
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" });
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  const first = await call(on.url, on.key, { message: "First" });
+  expect(first.status).toBe(200);
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full", applyToAllThreads: true });
+  expect((await call(on.url, on.key, { message: "Second", thread: first.body.thread })).status).toBe(200);
+  const launch = JSON.parse(readFileSync(join(dataDir, "fake-claude-dump.json"), "utf8"));
+  expect(JSON.stringify(launch.prompt)).toContain("Second");
+  expect(launch.argv[launch.argv.indexOf("--permission-mode") + 1]).toBe("default");
+}, hostTimeout(90_000));
+
+it("a saved command rule never answers for a call: the card waits for the person", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  const { url, dataDir } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Ruled", "--url", url]) as any).bot;
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" });
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  const pending = call(on.url, on.key, { message: "Run the fixture", wait: 20 }).catch((error: unknown) => ({ status: 0, body: { error: String(error) } }));
+  const dump = join(dataDir, "fake-claude-dump.json");
+  const dumped = () => { try { return JSON.parse(readFileSync(dump, "utf8")); } catch { return null; } };
+  await expect.poll(() => JSON.stringify(dumped()?.prompt ?? "").includes("Run the fixture"), { timeout: hostTimeout(30_000) }).toBe(true);
+  const task = ((await api("GET", "/api/bots")).bots as any[]).find((candidate) => candidate.id === bot.id).tasks.find((one: any) => one.botApi);
+  const command = "printf 'rule fixture'";
+  await api("POST", `/api/bots/${bot.id}/command-allowlist`, { command, cwd: task.cwd, providerInstanceId: "claude" });
+  socket = connect(dumped().mcpConfig.mcpServers.ogb.args.at(-1));
+  await new Promise<void>((resolve, reject) => { socket!.once("connect", resolve); socket!.once("error", reject); });
+  const answers: any[] = [];
+  socket.on("data", (chunk) => { for (const line of String(chunk).split("\n").filter(Boolean)) answers.push(JSON.parse(line)); });
+  socket.write(`${JSON.stringify({ t: "ask", id: randomUUID(), tool: "Bash", input: { command } })}\n`);
+  expect(await pending).toMatchObject({ status: 202, body: { status: "needs_approval" } });
+  expect(answers).toEqual([]);
+}, hostTimeout(90_000));
+
+it("says it is still working when the reply takes longer than the caller will wait", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  const { url } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Slow", "--url", url]) as any).bot;
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  expect(await call(on.url, on.key, { message: "Think about it", wait: 1 })).toMatchObject({ status: 202, body: { status: "working", thread: expect.any(String) } });
+}, hostTimeout(60_000));

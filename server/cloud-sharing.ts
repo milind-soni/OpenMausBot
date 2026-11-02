@@ -26,12 +26,14 @@ export function cloudShared(evidence: SharingEvidence): boolean {
   return [...adopted].some(someoneElse) || [...evidence.recorded].some(someoneElse) || [...(evidence.seen ?? [])].some(someoneElse);
 }
 
-/** A webhook drove this conversation: its run, a payload posted into it, or a conversation that handed it the work. */
+/** A webhook or a Bot API caller drove this conversation: its run, a payload posted into it, a thread the Bot API opened, or
+ * a conversation that handed it the work. */
 export function outsideDriven(threadId: string, records: {
   webhookRun(threadId: string): boolean;
   webhookPosted(threadId: string): boolean;
+  botApi(threadId: string): boolean;
   handedFrom(threadId: string): Iterable<string>;
 }): boolean {
-  const driven = (id: string) => records.webhookRun(id) || records.webhookPosted(id);
+  const driven = (id: string) => records.webhookRun(id) || records.webhookPosted(id) || records.botApi(id);
   return driven(threadId) || [...records.handedFrom(threadId)].some(driven);
 }

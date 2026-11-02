@@ -6673,10 +6673,17 @@
   "botApi.webhooksOne": "Webhook: 1件のトリガー",
   "botApi.webhooksNone": "Webhook: なし",
   "botApi.notAllowed": "これを変更できるのは{name}を編集できる人だけです。",
-  "botApi.error": "Bot APIを変更できませんでした。もう一度お試しください。",
-  "chat.viaBotApi": "Bot API経由で送信",
+  "botApi.error": "Bot API を変更できませんでした。もう一度お試しください。",
+  "chat.viaBotApi": "Bot API 経由で送信",
   "activity.what.bot-api": "Bot API",
-  "activity.action.bot-api.on": "ボットのAPIをオンにしました",
-  "activity.action.bot-api.new-key": "新しいBot APIキーを作成しました",
-  "activity.action.bot-api.off": "ボットのAPIをオフにしました"
+  "activity.action.bot-api.on": "Bot API をオンにしました",
+  "activity.action.bot-api.new-key": "新しい Bot API キーを作成しました",
+  "activity.action.bot-api.off": "Bot API をオフにしました",
+  "botApi.localOnly": "このアドレスはこのコンピューターでのみ使えます。",
+  "botApi.call.replied": "返信しました",
+  "botApi.call.accepted": "受け付けました(返事はまだです)",
+  "botApi.call.wrongKey": "キーが違います",
+  "botApi.call.off": "拒否: Bot API はオフでした",
+  "botApi.call.busy": "拒否: ボットは取り込み中でした",
+  "botApi.call.failed": "ボットは返事できませんでした"
 }

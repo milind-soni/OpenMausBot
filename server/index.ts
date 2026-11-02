@@ -1058,7 +1058,7 @@ function guestEngineRefusal(threadId: string): string {
 
 /** A webhook or app event drove this conversation: its run, a payload posted into it, or a conversation that handed it the work. */
 const outsideDrivenThread = (threadId: string) => outsideDriven(threadId, { webhookRun: (id) => activeRoutineRunForThread(id)?.triggerSource === "webhook",
-  webhookPosted: (id) => store.messagesFor(id).some((line) => line.webhookPost), handedFrom: (id) => coordinator.active().filter((node) => node.threadId === id).flatMap((node) => handedFrom(node.id)) });
+  webhookPosted: (id) => store.messagesFor(id).some((line) => line.webhookPost), botApi: botApiThread, handedFrom: handedFromThread }); function botApiThread(id: string): boolean { const owner = store.botByThread(id); return Boolean(owner && store.taskByThread(owner.id, id)?.botApi); } function handedFromThread(id: string): string[] { return coordinator.active().filter((node) => node.threadId === id).flatMap((node) => handedFrom(node.id)); } /** Security: this conversation, or the one that handed it the work, came in through the Bot API, so nothing answers an approval for it and it never reaches this computer. */ const botApiDriven = (threadId: string) => outsideDriven(threadId, { webhookRun: () => false, webhookPosted: () => false, botApi: botApiThread, handedFrom: handedFromThread });
 /** A guest-driven turn runs in Ask whatever the bot's own level, with no shell. On a Cloud only its owner ever used, only what came in from outside is. */
 function cloudGuestDriven(threadId: string): boolean {
   if (!CLOUD_HOME) return false; if (CLOUD_TEAM) return guestDrivenTurns.has(threadId) || outsideDrivenThread(threadId);
@@ -3125,7 +3125,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
 /** Defense in depth against hand-edited records. Delegation uses the receiving bot's grant, never the sender's, except a Chief's (delegatedLevel). */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false, threadId = bot.threadId): ApprovalMode => {
   // Judged by the conversation the turn runs in, never whichever of the bot's conversations is active.
-  if (cloudGuestDriven(threadId) || proactive.fence.confines(threadId)) return "ask";
+  if (cloudGuestDriven(threadId) || botApiDriven(threadId) || proactive.fence.confines(threadId)) return "ask";
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(bot.modelSelection, mode)) {
     return "ask";
@@ -6561,7 +6561,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (asker && proactive.fence.answers(event, asker, pushMessage)) break;
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
       // No command the owner saved answers for a guest-driven turn.
-      const guestDriven = cloudGuestDriven(event.threadId);
+      const guestDriven = cloudGuestDriven(event.threadId) || botApiDriven(event.threadId);
       const ownApprovalMode = (who: BotRecord) => liveApprovalMode(who, event.threadId, isInternalTurn(event.threadId));
       const effectiveApprovalMode = !asker || guestDriven ? "ask"
         : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
@@ -8077,7 +8077,7 @@ async function beginTurn(
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       const dispatchTask = store.taskByThread(bot.id, threadId);
-      let wants: ComputerWant = computerSkipped ? "off" : plan.computer;
+      let wants: ComputerWant = computerSkipped || (plan.computer === "local" && botApiDriven(threadId)) ? "off" : plan.computer;
       const skipComputer = (error: unknown) => {
         if (!answer.incident || error instanceof DirectTurnSetupCancelled || error instanceof ComputerWaitParked) throw error;
         computerSkipped ??= error instanceof Error ? error.message : String(error);
@@ -8352,7 +8352,7 @@ async function beginTurn(
       if (
         !integrations.localComputer &&
         wants === undefined &&
-        !hostBarred &&
+        !hostBarred && !botApiDriven(threadId) &&
         !computerPlaceRefusal("thisComputer") &&
         shouldMountLocalComputer({
           requested: undefined,
@@ -9640,7 +9640,7 @@ const webhooks = new WebhookManager({
     if (!forceNew && trigger.resultsThreadId && store.taskByThread(trigger.botId, trigger.resultsThreadId)) return trigger.resultsThreadId;
     return store.createTask(trigger.botId, "Updates", false)?.threadId;
   }, ...createWebhookRoomPost({ store, cfg, roomTalks }) });
-const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" }); const botApi = createBotApiHost({ store, startTurn, threadBusy, hooksBaseUrl: () => webhookIngressStatus().baseUrl, manageRefusal: (auth, botId) => auth.scopes.includes("admin") || (CLOUD_TEAM && levelOf(auth, botId) === "edit") ? null : refusalFor(store.bot(botId)?.name ?? "this bot", "edit"), claimRequest: () => { cloudPower?.arrived("/hooks", {}); moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) });
+const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" }); const botApi = createBotApiHost({ store, startTurn, threadBusy, canStart: canAdmitDirectTurn, opened: (threadId) => { if (CLOUD_OWNER_KEY) threadStarters.set(threadId, CLOUD_OWNER_KEY); }, hooksBaseUrl: () => webhookIngressStatus().baseUrl, manageRefusal: (auth, botId) => auth.scopes.includes("admin") || (CLOUD_TEAM && levelOf(auth, botId) === "edit") ? null : refusalFor(store.bot(botId)?.name ?? "this bot", "edit"), claimRequest: () => { cloudPower?.arrived("/hooks", {}); moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) });
 const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => webhookIngressStatus().baseUrl, routines: () => routines!, botState: unattendedDispatchState, timeZone: routineTimeZone, emit: broadcast, connectionMode: () => composio.connectionMode(cfg),
   access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId),
   audit: (row) => appendDecision(DATA_DIR, { ...row, decision: "auto-approved", source: "routine" }) });

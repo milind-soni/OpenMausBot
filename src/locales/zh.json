@@ -7378,7 +7378,14 @@
   "botApi.error": "无法更改 Bot API。请重试。",
   "chat.viaBotApi": "通过 Bot API 发送",
   "activity.what.bot-api": "Bot API",
-  "activity.action.bot-api.on": "开启了机器人的 API",
+  "activity.action.bot-api.on": "开启了 Bot API",
   "activity.action.bot-api.new-key": "创建了新的 Bot API 密钥",
-  "activity.action.bot-api.off": "关闭了机器人的 API"
+  "activity.action.bot-api.off": "关闭了 Bot API",
+  "botApi.localOnly": "此地址仅在这台电脑上有效。",
+  "botApi.call.replied": "已回复",
+  "botApi.call.accepted": "已收到,回复尚未就绪",
+  "botApi.call.wrongKey": "密钥错误",
+  "botApi.call.off": "已拒绝:Bot API 已关闭",
+  "botApi.call.busy": "已拒绝:机器人正忙",
+  "botApi.call.failed": "机器人无法回答"
 }

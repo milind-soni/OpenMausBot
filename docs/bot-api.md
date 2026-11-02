@@ -5,13 +5,13 @@ with a key and gets its reply. It is off by default, per bot.
 
 ## Turning it on
 
-In the bot's panel (or Bot settings → Access), **Bot API**: switch on **Let apps
+In the bot's panel (Advanced: Bot settings → Access), **Bot API**: switch on **Let apps
 talk to this bot**. The card shows the command to paste, with the key filled in.
 The key is shown that once and kept hashed; when the card is opened again the
 command shows `YOUR_KEY` in its place. **New key** replaces the key (apps using
 the old one stop working); switching the card off forgets it. Only someone who
-may edit the bot can switch it on, mint a key or switch it off; on a Team Cloud
-each of those is a **Bot API** row in Settings → Activity.
+may edit the bot can switch it on, mint a key or switch it off; each of those
+is a **Bot API** row in Settings → Activity.
 
 ## Calling it
 
@@ -43,15 +43,31 @@ Answers:
 - `202 {"thread": "<id>", "status": "needs_approval"}`: the bot asked for an
   approval. Nobody outside can give it: the person opens the thread in the app
   and answers there; a later `GET` returns the reply.
-- `400` bad body, `401` wrong key, `403` the API is off for this bot, `404` no
-  such thread, `409` the thread is still working or fifty calls are in flight,
-  `413` body over 256 KB, `429` more than ten calls in a minute for this key.
+- `400` bad body, `401` wrong key, `403` the API is off for this bot (or there is
+  no such bot), `404` no such thread, `409` that thread is still working or the bot
+  is at its limit of conversations at once (3 by default, 50 API calls at most),
+  `413` body over 256 KB, `415` not JSON, `429` more than ten calls in a minute for
+  this key, `502` the bot could not answer (the reason is on the card, not in the
+  response).
 
 ## What a call may do
 
 A call starts a normal thread the app shows, marked as sent through the Bot API.
-The turn is outside work, like a webhook's: it never acts for the person, never
-uses a Mac or PC lent to a Cloud, and gets the message inside an untrusted-data
-block. Every approval the bot would ask for waits for the person; none is
-granted for the caller. Each call is recorded with the bot's API settings
-(count, last call, recent calls) and never carries the key.
+The turn is outside work: it never acts for the person, gets the message inside
+an untrusted-data block, and can't use a Mac or PC lent to a Cloud, or the
+computer the app runs on. The thread always asks, whatever the bot's own level
+(Full access and Auto included) and with none of its saved allowances; nothing
+answers an approval for the caller, and the person's answer in the app is for
+that one request. On a Team Cloud the turn also runs confined, as a webhook's does.
+
+Approvals guard actions, not everything the bot can read: what the bot can read
+without asking, its memory and files included, can reach a key holder through its
+reply. Give a key only to something you would let talk to this bot.
+
+If something between the caller and this address drops a silent connection before
+the reply is ready, pass a shorter `wait` and read the thread with `GET`: an answer
+that never arrived also never gave the caller its thread id.
+
+Each call is kept with the bot's API settings and shown on the card (count, last
+call, recent calls) to those who can manage the key. Refused calls roll up into
+one row per burst. Neither ever holds the key.

@@ -17,6 +17,7 @@ export const BOT_API_MAX_PENDING = 50;
 export const BOT_API_MAX_MESSAGE_CHARS = 20_000;
 const MAX_ATTEMPTS = 2_000;
 const KEY_PREFIX = "bak_";
+const REFUSED_BURST_MS = 15 * 60_000;
 
 const recordSchema = z.object({
   botId: z.string().min(1),
@@ -35,6 +36,7 @@ const attemptSchema = z.object({
   threadId: z.string().optional(),
   preview: z.string().optional(),
   reason: z.string().optional(),
+  repeats: z.number().int().positive().optional(),
 });
 const fileSchema = z.object({
   version: z.literal(1),
@@ -177,6 +179,21 @@ export class BotApiManager {
     return attempt;
   }
 
+  /** Anyone who can reach the receiver can send these: one rolling row per burst, in memory until the next real change. */
+  recordRefused(botId: string, statusCode: 401 | 403, reason: string): BotApiAttempt {
+    const at = this.attempts.findLastIndex((attempt) => attempt.botId === botId);
+    const burst = at === -1 ? undefined : this.attempts[at]!;
+    if (burst?.outcome === "rejected" && burst.statusCode === statusCode && this.now() - burst.receivedAt <= REFUSED_BURST_MS) {
+      burst.receivedAt = this.now();
+      burst.repeats = (burst.repeats ?? 1) + 1;
+      return burst;
+    }
+    const attempt: BotApiAttempt = { id: randomUUID(), botId, receivedAt: this.now(), outcome: "rejected", statusCode, reason };
+    this.attempts.push(attempt);
+    if (this.attempts.length > MAX_ATTEMPTS) this.attempts.splice(0, this.attempts.length - MAX_ATTEMPTS);
+    return attempt;
+  }
+
   private assertWritable(): void {
     if (this.unreadable) throw Object.assign(new Error("The saved Bot API settings could not be read. Repair bot-api.json before changing them."), { status: 503 });
   }
@@ -189,6 +206,11 @@ export class BotApiManager {
 }
 
 export const BOT_API_MESSAGE_DATA = "[UNTRUSTED BOT API MESSAGE]";
+
+/** Security: the tag names a stored file for the turn to load, so a caller's copy of it never reaches the turn. */
+export function withoutAttachedImages(message: string): string {
+  return message.replace(/<(\s*attached-image)/gi, "($1");
+}
 
 /** The caller's words go to the model as data from outside, never as the person's request. */
 export function botApiPrompt(message: string, receivedAt: number): string {

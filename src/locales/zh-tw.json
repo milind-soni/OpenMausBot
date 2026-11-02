@@ -4635,7 +4635,14 @@
   "botApi.error": "無法變更 Bot API。請再試一次。",
   "chat.viaBotApi": "透過 Bot API 傳送",
   "activity.what.bot-api": "Bot API",
-  "activity.action.bot-api.on": "開啟了機器人的 API",
+  "activity.action.bot-api.on": "開啟了 Bot API",
   "activity.action.bot-api.new-key": "建立了新的 Bot API 金鑰",
-  "activity.action.bot-api.off": "關閉了機器人的 API"
+  "activity.action.bot-api.off": "關閉了 Bot API",
+  "botApi.localOnly": "此位址僅在這台電腦上有效。",
+  "botApi.call.replied": "已回覆",
+  "botApi.call.accepted": "已收到,回覆尚未就緒",
+  "botApi.call.wrongKey": "金鑰錯誤",
+  "botApi.call.off": "已拒絕:Bot API 已關閉",
+  "botApi.call.busy": "已拒絕:機器人忙碌中",
+  "botApi.call.failed": "機器人無法回答"
 }
