@@ -72,7 +72,8 @@ it("moves one bot and one conversation between Claude, GitHub Copilot and a cust
   }
 }, 120_000);
 
-it("creates and updates a routine through Copilot's launcher-owned tools", async () => {
+/** Verifies routine create and update calls through Copilot's scoped launcher-owned MCP server. */
+async function createAndUpdateRoutineThroughCopilotTools() {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, undefined, ["copilot"]);
   const { url, dataDir, logPath } = fixture.info;
   const evidence: unknown[] = [{ fixture: fixture.info }];
@@ -129,4 +130,6 @@ it("creates and updates a routine through Copilot's launcher-owned tools", async
     console.info(JSON.stringify({ logPath, evidencePath }));
     await fixture.close();
   }
-}, 90_000);
+}
+
+it("creates and updates a routine through Copilot's launcher-owned tools", createAndUpdateRoutineThroughCopilotTools, 90_000);

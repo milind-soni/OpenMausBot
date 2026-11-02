@@ -298,6 +298,7 @@ function decodeAcpConfig(defaultCli: string) {
   };
 }
 
+/** Builds an ACP driver while keeping launch-owned MCP servers available to hooks even when omitted from session params. */
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   if (support.sessionScopedApproval && !support.configureSession) {
     throw new Error(`${support.displayName}: sessionScopedApproval needs configureSession to apply each turn's mode`);
