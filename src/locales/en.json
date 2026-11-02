@@ -1701,6 +1701,8 @@
   "team.moveMany": "Move {count} bots",
   "team.moveSelected": "Move selected bots",
   "team.addBots": "Add bots",
+  "team.markAllRead": "Mark all as read",
+  "team.markingAllRead": "Marking as read…",
   "team.manageBots": "Add or remove bots",
   "team.manageBotsIn": "Add or remove bots in {name}",
   "team.manageIntro": "Checked bots belong to this department. Uncheck a bot to move it to General.",
