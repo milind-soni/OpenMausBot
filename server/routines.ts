@@ -28,7 +28,7 @@ import {
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
-import { cloneAttachments } from "./routine-attachments.ts";
+import { attachmentPathsOf, cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
@@ -375,8 +375,8 @@ export class RoutineManager {
     }
   }
 
-  /** Files every saved routine and run names, unloaded rows too; null while routines.json is unreadable, so nothing can clear them. */
-  attachmentPaths(): string[] | null { return this.unreadable ? null : [...this.routines, ...this.unloadedRoutines, ...this.runs].flatMap((owner) => owner.attachments?.map((file) => file.path) ?? []); }
+  /** Files every saved routine and run names, unloaded rows too; null while routines.json is unreadable or a row's attachments are malformed, so nothing can clear them. */
+  attachmentPaths(): string[] | null { return this.unreadable ? null : attachmentPathsOf([...this.routines, ...this.unloadedRoutines, ...this.runs]); }
 
   listRoutines(): Routine[] {
     return this.routines.map(routine => this.routineWithHealth(routine));
