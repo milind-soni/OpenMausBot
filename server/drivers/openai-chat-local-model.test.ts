@@ -56,6 +56,8 @@ async function fixture(script: Script, driver: "local" | "hosted" = "local") {
   const server = createServer(async (request, response) => {
     if (request.url === "/v1/models") { response.setHeader("content-type", "application/json"); response.end('{"data":[]}'); return; }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     const body = JSON.parse(data) as ChatRequest;
     requests.push(body);
