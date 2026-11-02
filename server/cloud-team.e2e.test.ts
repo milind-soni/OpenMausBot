@@ -2,7 +2,7 @@
 // signed member claims, the audience rule on chats, memory, recall and files, the team's connected apps, and a My Cloud
 // that refuses a team claim. The engine is the synthetic Claude CLI, so this proves the plumbing, not a model's judgement.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
@@ -165,6 +165,57 @@ it("a room's turn reads the room's layer and the team's, never a member's notes,
   expect(JSON.stringify((await messages(ada, roomThread)).body)).toContain("Ben says Wednesday");
 }, hostTimeout(120_000));
 
+it("a room's bot reply is unread for each person until they read it, and one person reading clears it for nobody else", async () => {
+  const room = async (token: string) => ((await team.as(token, "GET", "/api/bots")).body.groups as Array<{ id: string; unread?: boolean; lastReadMessageId?: string }>)
+    .find((group) => group.id === roomId)!;
+  for (const token of [ada, admin, cleo]) expect((await room(token)).unread).toBe(true);
+  const read = await team.as(ada, "POST", `/api/groups/${roomId}/read`);
+  expect(read.status, JSON.stringify(read.body)).toBe(200);
+  expect(read.body.group.unread).toBe(false);
+  expect((await room(ada)).unread).toBe(false);
+  for (const token of [admin, cleo]) expect((await room(token)).unread, "Ada reading is Ada's alone").toBe(true);
+  await turn(admin, roomThread, "@Scout and Friday?", roomId);
+  expect((await room(ada)).unread, "the bot's next reply is new to Ada").toBe(true);
+  const marked = await team.as(ada, "PATCH", `/api/groups/${roomId}`, { unread: false });
+  expect(marked.status, JSON.stringify(marked.body)).toBe(200);
+  expect(marked.body.group.unread).toBe(false);
+  expect((await room(ada)).unread, "marking a room read is reading it").toBe(false);
+  expect((await room(cleo)).unread, "Ada marking it read is Ada's alone").toBe(true);
+  expect((await team.as(ada, "PATCH", `/api/groups/${roomId}`, { unread: true })).body.group.unread).toBe(true);
+  expect((await room(ada)).unread).toBe(true);
+  expect((await team.as(cleo, "POST", `/api/groups/${roomId}/read`)).body.group.unread).toBe(false);
+  expect((await room(ada)).unread, "Cleo reading leaves Ada's mark").toBe(true);
+}, hostTimeout(120_000));
+
+it("sends a person's read of a room to their own streams only", async () => {
+  const listen = async (token: string) => {
+    const controller = new AbortController();
+    const stream = await fetch(`${team.base}/api/events`, { headers: { ...fx.edge, authorization: `Bearer ${token}`, accept: "text/event-stream" }, signal: controller.signal });
+    expect(stream.status).toBe(200);
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    const done = (async () => { for (;;) { const { value, done } = await reader.read(); if (done) return; text += decoder.decode(value, { stream: true }); } })().catch(() => {});
+    const rooms = () => text.split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)) as { kind: string; group?: { id: string } })
+      .filter((frame) => frame.kind === "group" && frame.group?.id === roomId);
+    await expect.poll(() => text.includes("\"hello\""), { timeout: 10_000 }).toBe(true);
+    return { rooms, close: async () => { controller.abort(); await done; } };
+  };
+  const adas = await listen(ada), cleos = await listen(cleo);
+  try {
+    expect((await team.as(ada, "POST", `/api/groups/${roomId}/read`)).status).toBe(200);
+    expect((await team.as(cleo, "POST", `/api/groups/${roomId}/read`)).status).toBe(200);
+    expect((await team.as(ada, "POST", `/api/groups/${roomId}/read`)).status).toBe(200);
+    await expect.poll(() => adas.rooms().length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(() => cleos.rooms().length, { timeout: 10_000 }).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect([adas.rooms().length, cleos.rooms().length], "nobody else's read reaches a stream").toEqual([2, 1]);
+  } finally {
+    await adas.close();
+    await cleos.close();
+  }
+}, hostTimeout(60_000));
+
 it("recall never crosses: a room's fact never surfaces in a private chat and a private chat's never in the room", async () => {
   const search = async (threadId: string, q: string) => {
     const token = await team.capability(bot.id, threadId);
@@ -246,4 +297,23 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   expect((await team.as(cleo, "GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "managed" });
   const seen = await turn(cleo, await newThread(cleo, "Cleo and Scout"), "Check my mail.");
   expect(Object.keys(seen.mcpConfig.mcpServers)).toContain("composio");
+}, hostTimeout(120_000));
+
+it("a member's private chat keeps its own folder when the team's bot is given a working folder; the Owner's own thread moves there", async () => {
+  const ownFolder = (threadId: string) => realpathSync(join(team.home, ".openmausbot", "task-workspaces", bot.id, threadId));
+  const cwdOf = async (token: string, threadId: string, text: string) => realpathSync((await turn(token, threadId, text) as unknown as { cwd: string }).cwd);
+  const hers = await newThread(ada, "Ada's own folder");
+  const olives = await newThread(owner, "Olive's own folder");
+  expect(await cwdOf(ada, hers, "Hello.")).toBe(ownFolder(hers));
+  expect(await cwdOf(owner, olives, "Hello.")).toBe(ownFolder(olives));
+  const project = join(team.home, "team-project");
+  mkdirSync(project, { recursive: true });
+  const given = await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: project });
+  expect(given.status, JSON.stringify(given.body)).toBe(200);
+  try {
+    expect(await cwdOf(ada, hers, "Hello again.")).toBe(ownFolder(hers));
+    expect(await cwdOf(owner, olives, "Hello again.")).toBe(realpathSync(project));
+  } finally {
+    expect((await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: null })).status).toBe(200);
+  }
 }, hostTimeout(120_000));

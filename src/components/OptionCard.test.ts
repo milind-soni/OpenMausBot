@@ -74,38 +74,32 @@ describe("OptionCard", () => {
     const card = msg({ id: "quiz", kind: "options", card: { title: "Pick one", subtitle: "", options: ["A thing"] } });
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(OptionCard, { botId: "atlas", message: card })));
     expect(markup).toContain(`aria-label="${t("onboarding.card.dismiss")}"`);
-    expect(markup).toContain('<input dir="auto"');
+    expect(markup).toContain('<textarea dir="auto"');
   });
 
   const render = (card: Message["card"]) => renderToStaticMarkup(
     createElement(StoreProvider, null, createElement(OptionCard, { botId: "atlas", message: msg({ id: "ask", kind: "options", card }) })),
   );
 
-  it("waits in the shared ask card, its title then its question, with the choices as lettered rows in Simple mode", () => {
+  it("waits in the shared ask card, its title then its question, one button per choice and no letter keys", () => {
     const markup = render({ title: "Pick a region", subtitle: "Where should the bucket live?", options: ["us-east-1", "eu-west-1"], requestId: "r1" });
     expect(markup).toContain('data-ask-card="pending"');
     expect(markup).toContain("Pick a region");
     expect(markup).toContain("Where should the bucket live?");
-    expect(markup).toMatch(/size-6[^"]*rounded-\[7px\][^"]*">B</);
-    expect(markup).toContain("eu-west-1");
-  });
-
-  it("makes a bot's own question the title in Simple mode, without the generic heading", () => {
-    const markup = render({ title: "Your bot has a question", subtitle: "Which region should the bucket use?", options: ["us-east-1", "eu-west-1"], requestId: "r1", requestType: "question" });
-    expect(markup).not.toContain("Your bot has a question");
-    expect(markup).toMatch(/text-\[16px\] font-semibold leading-\[22px\] text-ink-secondary"><bdi dir="auto">Which region should the bucket use\?</);
+    expect(markup.match(/data-ask-choice=""/g)).toHaveLength(2);
+    expect(markup).not.toContain("aria-keyshortcuts");
     expect(markup).toContain('placeholder="Something else…"');
   });
 
   it("offers a closed set of choices with no free-text box", () => {
     const offer = { title: "Claude is out of quota", subtitle: "Continue this conversation with another AI?", options: ["Codex", "Not now"], requestId: "r1" };
     // an open question keeps its box; the same card marked fixedOptions drops it
-    expect(render(offer)).toContain("<input");
+    expect(render(offer)).toContain("<textarea");
     const markup = render({ ...offer, fixedOptions: true });
     expect(markup).toContain('data-ask-card="pending"');
     expect(markup).toContain("Codex");
     expect(markup).toContain("Not now");
-    expect(markup).not.toContain("<input");
+    expect(markup).not.toContain("<textarea");
   });
 
   it("folds an answered live ask into one line with what was picked", () => {
@@ -113,7 +107,7 @@ describe("OptionCard", () => {
     expect(markup).toContain('data-ask-card="settled"');
     expect(markup).toContain("eu-west-1");
     expect(markup).not.toContain("us-east-1");
-    expect(markup).not.toContain("<input");
+    expect(markup).not.toContain("<textarea");
   });
 
   it("says a live ask nobody answered was closed, not answered", () => {

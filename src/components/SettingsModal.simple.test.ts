@@ -5,7 +5,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SECTIONS, SIMPLE_FOLDED, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
-import { SIMPLE_ADVANCED_ONLY } from "./SettingsSimplePages";
+import { SIMPLE_ADVANCED_ONLY, SimpleLooksPage } from "./SettingsSimplePages";
 
 const fixture = vi.hoisted(() => ({
   section: "general" as AppSettingsSection,
@@ -17,6 +17,8 @@ const fixture = vi.hoisted(() => ({
   ownerOrAdmin: null as boolean | null,
   updater: null as import("@/lib/updater").UpdaterState | null,
   serverUpdate: null as ReturnType<typeof import("./SidebarProfileMenu").useServerUpdateItem>,
+  rail: null as { available: boolean; hidden: boolean } | null,
+  railHidden: [] as boolean[],
 }));
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
@@ -31,6 +33,7 @@ vi.mock("@/lib/interface-mode", () => ({
 }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
+vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: (hidden: boolean) => fixture.railHidden.push(hidden) }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
   const original = await importOriginal<typeof import("./SettingsPrimitives")>();
   return {
@@ -47,13 +50,7 @@ const { marker } = vi.hoisted(() => ({
 }));
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: marker("engines") }));
 vi.mock("./DecisionModelSettings", () => ({ DecisionModelSettings: marker("decisionModel") }));
-vi.mock("./ApiKeys", () => ({
-  ApiKeyRow: marker("apiKey"),
-  AnthropicEveryClaudeBot: marker("anthropicEvery"),
-  OpenAiCompatUrl: marker("compatUrl"),
-  OpenCodeProviderKeys: marker("opencodeProviderKeys"),
-  VpsConnection: marker("vps"),
-}));
+vi.mock("./keys/KeysPage", () => ({ KeysPage: marker("apiKey") }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("companion") }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
 vi.mock("./CompanionSection", () => ({ CompanionSection: () => null }));
@@ -93,6 +90,8 @@ beforeEach(() => {
   fixture.ownerOrAdmin = null;
   fixture.updater = null;
   fixture.serverUpdate = null;
+  fixture.rail = null;
+  fixture.railHidden = [];
   fixture.api.mockResolvedValue({});
   vi.stubGlobal("window", desktop);
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
@@ -163,7 +162,35 @@ describe("Settings in Simple mode", () => {
     expect(html).toMatch(/aria-expanded="false" aria-controls="[^"]+"[^>]*>Add<\/button>/);
   });
 
-  it("keeps the everyday rows and leaves the fifteen builder controls to Advanced, where search still points", () => {
+  it("puts the sidebar's colour and picture right under Theme in General, the switch for the window's rail beside them, and only the skins behind More looks", () => {
+    fixture.rail = { available: true, hidden: false };
+    const html = render();
+    const appearance = html.slice(html.indexOf('data-settings-block="appearance"'), html.indexOf(">Notifications<"));
+    const order = ['role="radiogroup" aria-label="Theme"', ">Sidebar picture<", 'aria-label="Show your computers"', 'aria-label="Color my messages with the bot&#x27;s color"', ">More looks<"]
+      .map((needle) => appearance.indexOf(needle));
+    expect(order.every((at) => at > -1), String(order)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(appearance).toContain("A circle for each place your bots live, at the window&#x27;s left edge.");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
+    expect(toggle.checked).toBe(true);
+    toggle.onClick!({} as never);
+    expect(fixture.railHidden).toEqual([true]);
+    const looks = renderToStaticMarkup(createElement(SimpleLooksPage, { onBack: () => {} }));
+    expect(looks).toContain('data-settings-block="looks"');
+    expect(looks).not.toContain("data-place-picture");
+  });
+
+  it("shows the rail's switch only where this window has a rail to hide", () => {
+    for (const rail of [null, { available: false, hidden: true }]) {
+      fixture.rail = rail;
+      expect(render()).not.toContain("Show your computers");
+    }
+    fixture.rail = { available: true, hidden: true };
+    render();
+    expect(fixture.switches.find((props) => props["aria-label"] === "Show your computers")?.checked).toBe(false);
+  });
+
+  it("keeps the everyday rows and leaves the fourteen builder controls to Advanced, where search still points", () => {
     const general = open("general");
     for (const shown of ['aria-label="Send usage analytics"', 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="Send messages with"',
       'aria-label="Notification sounds"', 'aria-label="Show the notification feed"', 'aria-label="App language"', 'role="radiogroup" aria-label="Theme"']) {
@@ -172,10 +199,10 @@ describe("Settings in Simple mode", () => {
     expect(placement(open("updates"), "MARKER:updatesConsent;")).toBe("shown");
     const everyPage = ["general", "engines", "companion", "usage", "updates"].map((section) => open(section as AppSettingsSection)).join("");
     for (const gone of ["Effort for new bots", "Defaults for new bots", "Group turns", "MCP calls", "Parallel threads", "Automatic recovery", "Event log cleanup",
-      "Interface font", "Chat width", "Sidebar density", "Pinned bots as circles", "Universal pins", "Tool calls", "This run", "Keep prompt cache warm"]) {
+      "Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "Tool calls", "This run", "Keep prompt cache warm"]) {
       expect(everyPage, gone).not.toContain(`>${gone}<`);
     }
-    expect(SIMPLE_ADVANCED_ONLY).toHaveLength(15);
+    expect(SIMPLE_ADVANCED_ONLY).toHaveLength(14);
     expect(SIMPLE_ADVANCED_ONLY.map((key) => t(key))).toEqual(expect.arrayContaining(["Effort for new bots", "Interface font", "Keep prompt cache warm"]));
   });
 
@@ -183,7 +210,7 @@ describe("Settings in Simple mode", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, updater: { check: vi.fn(), install: vi.fn(), onState: vi.fn() } } });
     fixture.updater = { status: "idle" };
     const html = open("updates");
-    expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
+    expect(html).toMatch(/>MausBot [^<]+<\/div>/);
     for (const shown of ["Check for updates", "MARKER:updatesConsent;", "Replay welcome tour", "Diagnostics"]) expect(placement(html, shown), shown).toBe("shown");
   });
 
@@ -192,7 +219,7 @@ describe("Settings in Simple mode", () => {
     const onSelect = vi.fn();
     fixture.serverUpdate = { phase: "up-to-date", pending: false, label: "Up to date", item: { key: "update", label: "Up to date", subtitle: "v1.2.3", icon: null, disabled: false, onSelect } };
     const html = open("updates");
-    expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
+    expect(html).toMatch(/>MausBot [^<]+<\/div>/);
     expect(html).toContain("Up to date v1.2.3");
     expect(placement(html, "Check for updates")).toBe("shown");
   });
@@ -206,13 +233,14 @@ describe("Settings in Simple mode", () => {
     expect(SIMPLE_FOLDED).toEqual({ connections: "ai-keys", remote: "computer-elsewhere", desktopWorkspaces: "computer-elsewhere" });
   });
 
-  it("shows the AI page as Your AI, then API keys and connections", () => {
+  it("shows the AI page as Your AI, then API keys", () => {
     fixture.section = "engines";
     const html = render();
     expect(currentPage(html)).toBe("ai");
     expect(blocks(html)).toEqual(["engines", "connections"]);
     expect(markers(html).filter((name) => name === "engines" || name === "decisionModel")).toEqual(["engines"]);
-    expect(html).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?API keys and connections/);
+    expect(html).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?>API keys</);
+    expect(html).not.toContain("API keys and connections");
   });
 
   it("orders Computer as your bots' computers, your devices, the browser, logins, then Connect from elsewhere", () => {
@@ -298,26 +326,26 @@ describe("Settings in Simple mode", () => {
     else expect(markers(html)).toContain(content);
   });
 
-  it("scrolls a later section of a stacked page into view, and starts a page at its top", () => {
-    const scrollIntoView = vi.fn();
-    const querySelector = vi.fn(() => ({ scrollIntoView }));
-    const scroller = { scrollTop: 320, querySelector };
+  it("scrolls a later section of a stacked page to the top of the scroller alone, and starts a page at its top", () => {
+    const block = { getBoundingClientRect: () => ({ top: 500 }) };
+    const querySelector = vi.fn(() => block);
+    const scroller = { scrollTop: 320, clientHeight: 600, getBoundingClientRect: () => ({ top: 100 }), querySelector };
     revealSettingsBlock(scroller, "connections", 1);
     expect(querySelector).toHaveBeenCalledWith('[data-settings-block="connections"]');
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(scroller.scrollTop).toBe(720);
     revealSettingsBlock(scroller, "engines", 0);
     expect(scroller.scrollTop).toBe(0);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(querySelector).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("Settings in Advanced mode", () => {
   beforeEach(() => { fixture.advancedMode = true; });
 
-  it("keeps the grouped rail, the glass pop-up and General as it was, Advanced mode switch first", () => {
+  it("keeps the grouped rail and General, Advanced mode switch first, on the same Settings look as Simple", () => {
     const html = render();
     expect(html).toContain("glass-surface");
-    expect(html).not.toContain("data-settings-look");
+    expect(html).toContain('data-settings-look="advanced"');
     expect(html).not.toContain("data-settings-page=");
     expect([...html.matchAll(/data-settings-group="([^"]+)"/g)].map((match) => match[1])).toEqual(["you", "ai", "computers", "account"]);
     expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));

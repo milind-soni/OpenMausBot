@@ -8,6 +8,7 @@ import { allowsTool, canUseMcpServer, parseToolScope, type ToolIdentity } from "
 import { ASK_USER_TOOL, formatQuestionAnswers, MAX_OPTIONS, MAX_QUESTIONS, parseAskQuestions } from "../../shared/ask-question.ts";
 import { CALL_TOOL, directoryCallTarget, isDirectoryTool } from "../mcp-directory.ts";
 import { REMOTE_MCP_STARTUP_MS } from "../mcp-http.ts";
+import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts";
 
 interface McpServerDef {
   command: string;
@@ -80,7 +81,7 @@ interface PiExtensionApi {
 }
 
 const MCP_STARTUP_TIMEOUT_MS = 8_000;
-const MCP_TOOL_TIMEOUT_MS = 10 * 60_000;
+const MCP_TOOL_TIMEOUT_MS = AGENTS_TOOL_TIMEOUT_SECONDS * 1000;
 const MCP_MAX_LIST_PAGES = 100;
 const MCP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
@@ -695,7 +696,8 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const target = directoryTool ? directoryCallTarget(toolName, params) : toolName;
             if (scope !== undefined && (enforcementFailed
-              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target })))) {
+              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target },
+                (directoryTool && toolName === CALL_TOOL ? (params as { arguments?: unknown } | undefined)?.arguments : params) ?? {})))) {
               throw new Error("Tool selection excludes this tool");
             }
             // Host tools ask first through pi's native card (ctx.ui.confirm → extension_ui_request).

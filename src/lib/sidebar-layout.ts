@@ -15,7 +15,7 @@ const USER_SECTION_PREFIX = "section:";
 
 export type SidebarSectionId = string;
 export type SectionDropPlace = "before" | "after";
-export type SidebarDensityMode = "comfortable" | "compact" | "icons";
+export type SidebarDensityMode = "comfortable" | "icons";
 
 const GOAL_RUN_PREVIEW_LABEL = {
   working: "Working",
@@ -174,19 +174,17 @@ export function orderedSidebarSections(
   return result;
 }
 
-export const SIMPLE_FIXED_SECTION_IDS: readonly SidebarSectionId[] = [PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, BOT_CHATS_SECTION_ID];
+export const SIMPLE_FIRST_SECTION_IDS: readonly SidebarSectionId[] = [PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, BOT_CHATS_SECTION_ID];
 
 export function simpleSidebarSections(ids: SidebarSectionId[]): SidebarSectionId[] {
   return [
-    ...SIMPLE_FIXED_SECTION_IDS.filter((id) => ids.includes(id)),
-    ...ids.filter((id) => !SIMPLE_FIXED_SECTION_IDS.includes(id)),
+    ...SIMPLE_FIRST_SECTION_IDS.filter((id) => ids.includes(id)),
+    ...ids.filter((id) => !SIMPLE_FIRST_SECTION_IDS.includes(id)),
   ];
 }
 
-export function keepFixedSectionSlots(fullOrder: SidebarSectionId[], simpleOrder: SidebarSectionId[]): SidebarSectionId[] {
-  const moved = simpleOrder.filter((id) => !SIMPLE_FIXED_SECTION_IDS.includes(id));
-  let next = 0;
-  return fullOrder.map((id) => (SIMPLE_FIXED_SECTION_IDS.includes(id) ? id : moved[next++] ?? id));
+export function simpleOrderedSections(ordered: SidebarSectionId[], simpleSaved: SidebarSectionId[]): SidebarSectionId[] {
+  return orderedSidebarSections(simpleSidebarSections(ordered), simpleSaved);
 }
 
 export function moveSection(

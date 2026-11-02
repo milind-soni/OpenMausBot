@@ -46,8 +46,9 @@ export interface TodaySources {
   groups: ReadonlyArray<{ id: string; threadId: string; tasks?: ReadonlyArray<{ threadId: string }> }>;
   routines: { listRoutines(): ReadonlyArray<{ botId: string; groupId?: string }>; listRuns(from?: number): readonly RunRecord[] } | null;
   engines: ReadonlyArray<{ instanceId: string; snapshot?: { state: string; authenticated?: boolean } }>;
-  /** Work parked on a question for the person (a NEEDS INPUT line rather than a card). */
-  parked: ReadonlyArray<{ id: string; botId: string; threadId: string; question?: string; createdAt: number }>;
+  /** Work parked on a question for the person (a NEEDS INPUT line rather than a card); one its requester decides
+   * (`decide`) waits on no person. */
+  parked: ReadonlyArray<{ id: string; botId: string; threadId: string; question?: string; decide?: unknown; createdAt: number }>;
 }
 
 /** Place failures a person fixes by changing a setting or plan; the rest pass or retry by themselves. */
@@ -117,8 +118,9 @@ function approvalText(card: QuestionCard & { tool?: string }): string {
   return plainTitle(`Approve: ${card.subtitle || card.tool || card.title || ""}`);
 }
 
+/** A question card the harness made carries the question as its subtitle, under a generic title. */
 function questionText(card: QuestionCard): string {
-  return plainTitle(card.questionRequest?.questions?.[0]?.question || card.title || card.subtitle || "");
+  return plainTitle(card.questionRequest?.questions?.[0]?.question || (card.requestType === "question" && card.subtitle) || card.title || card.subtitle || "");
 }
 
 export function todayReport(sources: TodaySources, viewer: TodayViewer, requestedSince: number, now = Date.now()): TodayReport {
@@ -324,7 +326,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
   }
 
   for (const work of sources.parked) {
-    if (!work.question || items.has(`question:${work.threadId}`) || !seen(work.threadId) || (viewer.asks && !viewer.asks(work.botId, work.threadId))) continue;
+    if (!work.question || work.decide || items.has(`question:${work.threadId}`) || !seen(work.threadId) || (viewer.asks && !viewer.asks(work.botId, work.threadId))) continue;
     keep(`question:${work.threadId}`, { kind: "question", id: work.id, at: work.createdAt, botId: work.botId, threadId: work.threadId, text: plainTitle(work.question) });
   }
 

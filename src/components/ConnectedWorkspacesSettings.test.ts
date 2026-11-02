@@ -98,7 +98,7 @@ it("creates an environment with the chosen folder — and without one when the f
   envFormFields()[0]!.props.onChange!({ target: { value: "Work" } });
   forms()[0]!.props.onSubmit!({ preventDefault: () => {} });
   await flush();
-  expect(render().html).toContain("Couldn't create the environment.");
+  expect(render().html).toContain("Couldn't create the environment. Check the data folder, then try again.");
 });
 
 it('"Choose…" fills the folder field from the native picker', async () => {
@@ -150,7 +150,7 @@ it("confirms before switching to a local environment, and a failed switch says o
   rowButton("Switch to Old")!.props.onClick!();
   await flush();
   expect(environments.switch).toHaveBeenCalledWith("env-2");
-  expect(render().html).toContain("Couldn't switch.");
+  expect(render().html).toContain("Couldn't switch environments. Try again.");
 });
 
 it("a failed forget keeps the panel honest: one generic error, no crash", async () => {
@@ -161,7 +161,7 @@ it("a failed forget keeps the panel honest: one generic error, no crash", async 
   textButton("Forget")!.props.onClick!();
   await flush();
   expect(environments.forget).toHaveBeenCalledWith("env-1");
-  expect(render().html).toContain("Couldn't forget the environment.");
+  expect(render().html).toContain("Couldn't forget the environment. Try again.");
   expect(render().html).not.toContain("purge");
 });
 
@@ -172,18 +172,23 @@ it("offers no Forget for the environment this app is on", async () => {
   expect(html).toContain('aria-label="Forget Old"');
 });
 
-// Two controls over one record let the Cloud switch read off while Computer access lent apps and screen to the same Cloud.
-it("My Cloud's entry has one lending control, Let my bots use this computer; other servers keep Computer access", async () => {
+it("a Cloud of the person's own has no lending control here, since this computer is lent to it by itself; other servers keep Computer access", async () => {
   config.value = { features: { sharedComputers: true } };
-  const open = vi.fn().mockResolvedValue(undefined);
   const cloud = { id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev", home: true };
-  stub({ computerSharing: { state: vi.fn() }, cloudLending: { open } });
+  const other = { id: "a", name: "Client A", origin: "https://omb-c-a.fly.dev", cloud: { id: "c-a", role: "owner" } };
+  stub({ computerSharing: { state: vi.fn() } });
   vi.mocked((globalThis.window as unknown as { ogb: { environments: { state: ReturnType<typeof vi.fn> } } }).ogb.environments.state)
-    .mockResolvedValue({ localOrigin: "http://127.0.0.1:1", remote: false, activeId: "local", environments: [VPS, cloud] });
+    .mockResolvedValue({ localOrigin: "http://127.0.0.1:1", remote: false, activeId: "local", environments: [VPS, cloud, other] });
   await mount();
   const labels = render().nodes.filter(node => node.type === "button").map(node => node.props["aria-label"] ?? Children.toArray(node.props.children).join(""));
   expect(labels).toContain("Computer access for VPS");
-  expect(labels).not.toContain("Computer access for My Cloud");
-  render().nodes.find(node => node.type === "button" && Children.toArray(node.props.children).join("") === "Let my bots use this computer")!.props.onClick!();
-  expect(open).toHaveBeenCalledOnce();
+  expect(labels.filter(label => /Computer access for (My Cloud|Client A)|use this/.test(label))).toEqual([]);
+  expect(render().html).not.toContain("data-cloud-lending-link");
+});
+
+it("shows local environment controls in Simplified Chinese", async () => {
+  stubEnvironments(); setLocale("zh"); await mount();
+  const { html } = render();
+  expect(html).toContain("每个环境都有自己的机器人、会话和数据文件夹");
+  expect(html).not.toContain("Separate setups on this computer");
 });

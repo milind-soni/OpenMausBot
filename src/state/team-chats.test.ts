@@ -80,3 +80,15 @@ it("a Member's existing conversation opens with no request; a refusal shows as a
   expect(dispatch.mock.calls.map(([action]) => action), "the bot's main chat, as before").toEqual([{ type: "select", id: "scout" }]);
   expect(openOwnTeamChat(dispatch, scout([]), () => {})).toBe(false);
 });
+
+it("opens the main chat of a bot this person can only view, without trying to start a conversation of their own", async () => {
+  setTeamChats(MEMBER);
+  const dispatch = vi.fn();
+  const viewOnly = { ...scout([]), yourAccess: "view" };
+  expect(openOwnTeamChat(dispatch, viewOnly, () => {})).toBe(false);
+  await settle();
+  expect(server.calls).toEqual([]);
+  const opened = vi.fn();
+  expect(openOwnTeamChat(dispatch, { ...scout([{ threadId: "bob-own", private: true, createdAt: 5 }]), yourAccess: "view" }, opened)).toBe(true);
+  expect(opened).toHaveBeenCalledWith("bob-own");
+});

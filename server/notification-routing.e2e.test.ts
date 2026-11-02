@@ -93,6 +93,8 @@ beforeAll(async () => {
   mkdirSync(data, { recursive: true });
   dumpFile = join(home, "quick-dump.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
+    // These tests compare whole conversations; a setup card refreshing after a rename would change under them.
+    features: { smartSetupChoices: false },
     instances: {
       // answers at once; its dump is the only place to read the per-boot comms token the internal endpoints need
       quick: {
@@ -517,6 +519,8 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
   it("still buzzes when a peer's turn stops to ask the person a question", async () => {
     const asker = await createBot("Quill", "quick");
     const peer = await createBot("Sage", "curious", "fake-model");
+    // On "Ask me first" a peer's question is the person's; at Full access its asker answers it instead.
+    for (const bot of [asker, peer]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {
       const asked = await api(

@@ -1,6 +1,6 @@
 // People watching and driving a bot's browser. Every viewer gets its own CDP session on the tab in front, with its own
-// screencast sized to it, and the page fills the panel: in fill mode the window is resized to the size the latest
-// viewer asked for, 1280x800 with nobody watching. Frames come at the screen's real device scale, so they stay sharp.
+// screencast sized to it, and the page fills the panel: in fill mode it takes the shape of the latest viewer's panel at
+// a desktop's width, 1280x800 with nobody watching. Frames come at the screen's real device scale, so they stay sharp.
 //
 // Adapted from pingdotgg/t3code@00cdceb1 apps/server/src/preview/ServerBrowser.ts (attachViewer,
 // dispatchViewerInput, releaseViewerInput, applySetting, withScreencastsPaused), MIT License, Copyright (c) 2026 T3
@@ -19,9 +19,11 @@ import type { OpenFileChooser } from "../cdp/files.ts";
 import { editingCommands, keyDescription, US_KEYBOARD } from "../cdp/keyboard.ts";
 import type { ProfileControl, TakeResult } from "../control.ts";
 import { personUrl } from "../dispatch.ts";
+import type { HoldLimits } from "../hold.ts";
 import type { Tab } from "../tabs.ts";
 import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
-import { MIN_WINDOW_WIDTH, VIEWPORT_LIMITS, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
+import { ViewerHold } from "./hold.ts";
+import { fitsScreen, MIN_WINDOW_WIDTH, requestedSize, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
 
 /** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
 export const ACK_PACE_MS = { hi: 100, lo: 200 } as const;
@@ -75,8 +77,10 @@ export type ViewerOutput =
   | { type: "gone"; reason: string };
 
 export interface ViewerOptions {
-  /** Who is watching: a session id, or local-owner. */
+  /** The session watching, or local-owner. */
   owner: string;
+  /** Whose hold this view shares, on any device: their account's key, the owner when unset. */
+  person?: string;
   canOperate: boolean;
   /** The largest frame this viewer can use, in device pixels. */
   maxWidth: number;
@@ -96,6 +100,7 @@ export interface ViewerOptions {
 /** What a hub needs from the browser service. */
 export interface HubHost {
   readonly control: ProfileControl<Tab>;
+  readonly holdLimits?: HoldLimits;
   browser(): CdpBrowser | null;
   active(): Tab | null;
   tabs(): Tab[];
@@ -122,13 +127,6 @@ const modifiersOf = (message: Record<string, unknown>) => {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const appliedKey = (size: { width: number; height: number }, zoom: number) => `${size.width}x${size.height}@${zoom}`;
-
-/** A viewer's resize request, or null when it is out of range (a collapsed panel, say) and the page keeps its size. */
-export function requestedSize(width: unknown, height: unknown): { width: number; height: number } | null {
-  const w = Math.min(Math.round(num(width)), VIEWPORT_LIMITS.maxWidth);
-  const h = Math.min(Math.round(num(height)), VIEWPORT_LIMITS.maxHeight);
-  return w >= VIEWPORT_LIMITS.minWidth && h >= VIEWPORT_LIMITS.minHeight ? { width: w, height: h } : null;
-}
 
 export class Viewer {
   readonly id = randomUUID();
@@ -164,6 +162,7 @@ export class Viewer {
     this.#push = push;
     this.options = {
       owner: options.owner,
+      person: options.person ?? options.owner,
       canOperate: options.canOperate,
       maxWidth: Math.max(1, Math.round(options.maxWidth)),
       maxHeight: Math.max(1, Math.round(options.maxHeight)),
@@ -401,6 +400,9 @@ export class Viewer {
     this.#hub.pushTabs(this);
   }
 
+  /** Who holds the browser, as this viewer's control message tells it. */
+  controlState(): Extract<ViewerOutput, { type: "control" }> { return this.#hub.controlFor(this); }
+
   /** Everything a viewer that just started listening needs: who controls, the size, the tabs, and a picture. */
   async refresh(): Promise<void> {
     this.push(this.#hub.statusFor());
@@ -409,9 +411,9 @@ export class Viewer {
     await this.pushStill();
   }
 
-  async close(): Promise<void> {
+  async close({ dropped = false }: { dropped?: boolean } = {}): Promise<void> {
     if (this.closed) return;
-    await this.#hub.detach(this);
+    await this.#hub.detach(this, { dropped });
   }
 
   async teardown(): Promise<void> {
@@ -438,10 +440,14 @@ export class ViewerHub {
   #shown: { width: number; height: number; zoom: number } | null = null;
   #emulated = false;
   #applying: Promise<void> = Promise.resolve();
+  readonly #hold: ViewerHold;
 
   constructor(host: HubHost) {
     this.host = host;
+    this.#hold = new ViewerHold(host, this.viewers, () => this.broadcastControl());
   }
+
+  handBack(): Promise<void> { return this.#hold.handBack(); }
 
   get size(): number {
     return this.viewers.size;
@@ -458,7 +464,7 @@ export class ViewerHub {
     return viewportFor(this.setting, latest ? { width: latest.width, height: latest.height } : null, this.host.pageLimit());
   }
 
-  /** Resizes the real window; a zoom, or a preset narrower than any Chrome window, is emulated, as DevTools' device mode does. */
+  /** Resizes the real window; a zoom, or a page narrower than any Chrome window or larger than the screen, is emulated, as DevTools' device mode does. */
   applyViewport(): Promise<void> {
     this.#applying = this.#applying.then(() => this.#apply(), () => this.#apply());
     return this.#applying;
@@ -469,7 +475,7 @@ export class ViewerHub {
     if (!browser) return;
     const size = this.viewport();
     const zoom = this.zoom;
-    const emulated = size.width < MIN_WINDOW_WIDTH || zoom !== 1;
+    const emulated = size.width < MIN_WINDOW_WIDTH || zoom !== 1 || !fitsScreen(size, this.host.pageLimit());
     const key = appliedKey(size, zoom);
     const active = this.host.active();
     if (this.#applied === key && browser.viewport?.width === Math.max(size.width, MIN_WINDOW_WIDTH)) return;
@@ -524,11 +530,13 @@ export class ViewerHub {
     if (size && options.canOperate && this.host.control.owner === null) viewer.requested = { ...size, order: ++this.#order };
     this.viewers.add(viewer);
     this.host.used();
+    this.#hold.opened(viewer);
     try {
       viewer.push({ type: "starting" });
       await this.host.running();
       if (viewer.closed) return viewer;
-      await viewer.hide(this.#hides(viewer));
+      await this.#hold.carryOn(viewer);
+      await viewer.hide(this.#hold.hides(viewer));
       void this.#resizeForViewers().catch(() => undefined);
       viewer.push(this.controlFor(viewer));
       viewer.push({ type: "viewport", ...(this.#shown ?? { ...zoomedLayout(this.viewport(), this.zoom), zoom: this.zoom }), setting: this.setting });
@@ -544,46 +552,38 @@ export class ViewerHub {
     }
   }
 
-  async detach(viewer: Viewer): Promise<void> {
+  async detach(viewer: Viewer, { dropped = false }: { dropped?: boolean } = {}): Promise<void> {
     if (!this.viewers.has(viewer)) return;
     this.viewers.delete(viewer);
-    if (this.host.control.owner === viewer.id) await this.host.release(viewer.id, () => viewer.releaseInput()).catch(() => {});
-    else await viewer.releaseInput();
+    await this.#hold.left(viewer, dropped);
     await viewer.teardown();
     this.broadcastControl();
     if (viewer.requested) void this.#resizeForViewers().catch(() => undefined);
   }
 
   broadcast(output: ViewerOutput, { holderOnly = false }: { holderOnly?: boolean } = {}): void {
-    const owner = this.host.control.owner;
     for (const viewer of this.viewers) {
-      if (holderOnly && owner !== viewer.id) continue;
-      if (!holderOnly && owner !== null && owner !== viewer.id && (output.type === "tabs" || output.type === "url" || output.type === "nav" || output.type === "pointer")) continue;
+      if (holderOnly && !this.#hold.drives(viewer)) continue;
+      if (!holderOnly && this.#hold.hides(viewer) && (output.type === "tabs" || output.type === "url" || output.type === "nav" || output.type === "pointer")) continue;
       viewer.push(output);
     }
   }
 
-  /** Another person holds the browser: this viewer sees none of it, unless it only watches for that same person (their picture in picture). */
-  #hides(viewer: Viewer): boolean {
-    const owner = this.host.control.owner;
-    if (owner === null || owner === viewer.id) return false;
-    const holder = [...this.viewers].find((candidate) => candidate.id === owner);
-    return viewer.options.canOperate || holder?.options.owner !== viewer.options.owner;
-  }
-
-  controlFor(viewer: Viewer): ViewerOutput {
+  controlFor(viewer: Viewer): Extract<ViewerOutput, { type: "control" }> {
     const control = this.host.control;
     const owner = control.owner;
+    const owned = this.#hold.owns(viewer);
+    const controlling = this.#hold.controls(viewer);
     // Security: a dialog's text can be a code meant for the person holding the browser.
-    const dialog = owner === null || owner === viewer.id ? this.host.active()?.page.dialogs.pending ?? null : null;
+    const dialog = owner === null || owned ? this.host.active()?.page.dialogs.pending ?? null : null;
     return {
       type: "control",
       canOperate: viewer.options.canOperate,
       // "you" means this viewer's input runs now: while a takeover waits for the bot's work, the bot still has it.
-      controller: owner === viewer.id ? (control.canControl(viewer.id) ? "you" : "agent") : owner !== null ? "another-viewer" : control.agents > 0 ? "agent" : "unclaimed",
+      controller: controlling ? "you" : owned ? "agent" : owner !== null ? "another-viewer" : control.agents > 0 ? "agent" : "unclaimed",
       held: owner !== null,
-      owned: owner === viewer.id,
-      controlling: control.canControl(viewer.id),
+      owned,
+      controlling,
       stale: control.stale,
       generation: this.host.active()?.control.generation ?? 0,
       dialog: dialog ? { type: dialog.type, message: dialog.message, defaultValue: dialog.defaultPrompt } : null,
@@ -592,7 +592,7 @@ export class ViewerHub {
 
   broadcastControl(): void {
     for (const viewer of this.viewers) {
-      void viewer.hide(this.#hides(viewer));
+      void viewer.hide(this.#hold.hides(viewer));
       viewer.push(this.controlFor(viewer));
     }
     void this.offerFileChooser();
@@ -601,8 +601,7 @@ export class ViewerHub {
 
   /** The newest HTTP sign-in a tab waits on goes to the person holding the browser, named by tab and challenge, so their answer reaches that one only. */
   offerAuthPrompt(): void {
-    const owner = this.host.control.owner;
-    const holder = [...this.viewers].find((viewer) => viewer.id === owner && viewer.options.authPrompts && !viewer.closed);
+    const holder = this.#hold.driver?.options.authPrompts ? this.#hold.driver : undefined;
     const asking = holder ? newestChallenge(this.host.tabs()) : null;
     const offered = this.#authOffered;
     if (offered && offered.viewer === holder && offered.id === asking?.challenge.id) return;
@@ -618,8 +617,7 @@ export class ViewerHub {
   }
 
   async #offer(): Promise<void> {
-    const owner = this.host.control.owner;
-    const holder = owner === null ? null : [...this.viewers].find((viewer) => viewer.id === owner && !viewer.closed) ?? null;
+    const holder = this.#hold.driver;
     const tab = this.host.active();
     const open = tab?.page.fileChoosers.open ?? null;
     const offered = this.#chooser;
@@ -631,7 +629,7 @@ export class ViewerHub {
     if (!holder || !tab || !open) return;
     const accept = await callOnNode<string>(tab.page.frames, open, ACCEPT_OF).catch(() => "");
     // Whatever changed meanwhile queued its own offer.
-    if (tab.page.fileChoosers.open !== open || this.host.control.owner !== holder.id || holder.closed || this.#chooser) return;
+    if (tab.page.fileChoosers.open !== open || this.#hold.driver !== holder || this.#chooser) return;
     const chooser = { id: randomUUID(), tab, viewer: holder, open };
     this.#chooser = chooser;
     holder.push({ type: "fileChooser", id: chooser.id, multiple: open.multiple, accept: typeof accept === "string" ? accept : "" });
@@ -647,7 +645,8 @@ export class ViewerHub {
   async answerFileChooser(owner: string, id: string, paths: readonly string[]): Promise<boolean> {
     const chooser = this.#chooser;
     if (!chooser || !this.fileChooserOffered(owner, id)) return false;
-    await this.host.control.human(chooser.viewer.id, chooser.tab, () => chooser.tab.page.fileChoosers.answer(paths, { waitMs: 0 }));
+    this.#hold.used();
+    await this.host.control.human(chooser.viewer.options.person, chooser.tab, () => chooser.tab.page.fileChoosers.answer(paths, { waitMs: 0 }));
     return true;
   }
 
@@ -657,8 +656,7 @@ export class ViewerHub {
   }
 
   pushTabs(viewer: Viewer): void {
-    const owner = this.host.control.owner;
-    if (owner !== null && owner !== viewer.id) return;
+    if (this.#hold.hides(viewer)) return;
     viewer.push(this.tabsMessage());
     const active = this.host.active();
     if (active) viewer.push({ type: "url", url: active.page.url() });
@@ -785,26 +783,26 @@ export class ViewerHub {
         await this.host.running().catch(() => viewer.push({ type: "asleep" }));
         return;
       case "takeControl": {
-        const taking = this.host.take(viewer.id);
+        const taking = this.host.take(viewer.options.person);
         this.broadcastControl();
-        await taking.finally(() => this.broadcastControl());
+        await taking.then(() => this.#hold.took(viewer)).finally(() => this.broadcastControl());
         return;
       }
       case "releaseControl": {
-        const releasing = this.host.release(viewer.id, () => viewer.releaseInput());
+        const releasing = this.#hold.release(viewer);
         this.broadcastControl();
         await releasing.finally(() => this.broadcastControl());
         return;
       }
       case "resize": {
         const size = requestedSize(message.width, message.height);
-        if (!size || (control.owner !== null && control.owner !== viewer.id)) return;
+        if (!size || (control.owner !== null && !this.#hold.drives(viewer))) return;
         viewer.requested = { ...size, order: ++this.#order };
         if (this.setting.mode === "fill") await this.#resizeForViewers();
         return;
       }
       case "viewport": {
-        if (!control.canControl(viewer.id)) return;
+        if (!this.#hold.controls(viewer)) return;
         const setting = parseSetting(message.setting);
         if (!setting) return;
         this.setting = setting;
@@ -813,7 +811,7 @@ export class ViewerHub {
       }
       case "zoom": {
         const factor = num(message.factor, 0);
-        if (!control.canControl(viewer.id) || !(factor > 0)) return;
+        if (!this.#hold.controls(viewer) || !(factor > 0)) return;
         this.zoom = Math.round(Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, factor)) * 100) / 100;
         await this.#resizeForViewers();
         return;
@@ -823,10 +821,11 @@ export class ViewerHub {
         return;
     }
     const tab = this.host.active();
-    if (!tab || !control.canControl(viewer.id)) {
+    if (!tab || !this.#hold.controls(viewer)) {
       this.broadcastControl();
       return;
     }
+    this.#hold.used();
     switch (message.type) {
       case "dialog":
         if (typeof message.accept === "boolean") await tab.page.answerDialog({ accept: message.accept, ...(typeof message.promptText === "string" ? { promptText: message.promptText.slice(0, 4_000) } : {}) });
@@ -846,11 +845,11 @@ export class ViewerHub {
       }
       case "tabSelect": {
         const next = typeof message.tabId === "string" ? this.host.tab(message.tabId) : undefined;
-        if (next) await control.human(viewer.id, next, () => this.host.showTab(next));
+        if (next) await control.human(viewer.options.person, next, () => this.host.showTab(next));
         return;
       }
       case "tabNew":
-        await this.host.openTab(typeof message.url === "string" ? message.url : null, viewer.id);
+        await this.host.openTab(typeof message.url === "string" ? message.url : null, viewer.options.person);
         return;
       case "tabClose": {
         const closing = typeof message.tabId === "string" ? this.host.tab(message.tabId) : undefined;
@@ -862,11 +861,11 @@ export class ViewerHub {
         viewer.select = null;
         const index = num(message.index, -1);
         if (!select || select.id !== message.id || select.tab !== tab || !Number.isInteger(index) || index < 0) return;
-        await control.human(viewer.id, tab, () => chooseOption(tab.page, select.id, index));
+        await control.human(viewer.options.person, tab, () => chooseOption(tab.page, select.id, index));
         return;
       }
     }
-    await control.human(viewer.id, tab, () => this.#dispatch(viewer, tab, message));
+    await control.human(viewer.options.person, tab, () => this.#dispatch(viewer, tab, message));
   }
 
   /** A press on a dropdown list: the viewer draws its options, since no frame shows Chrome's own popup. */

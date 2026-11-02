@@ -2,7 +2,7 @@
 
 Files is a top-level page in the desktop app, for people with a MausBot Cloud ("My Cloud"). It does two jobs:
 
-- **Lent folders, even while this computer sleeps.** Every folder lent to My Cloud ("Use my Mac", Settings → MausBot Cloud) also gets a copy on My Cloud, kept up to date while this computer is on. While it is away, bots read that copy, and a change to a folder lent with editing waits on My Cloud and lands here when the computer is back. Nobody chooses anything: what fits is copied, the rest stays live only.
+- **Lent folders, even while this computer sleeps.** Every folder lent to My Cloud (each moved bot's project folder, a folder added here) also gets a copy on My Cloud, kept up to date while this computer is on. The home folder, which this computer lends My Cloud by itself (`docs/cloud-pro.md`, "This computer works for your Clouds"), is too broad for a copy and stays live only. While it is away, bots read that copy, and a change to a folder lent with editing waits on My Cloud and lands here when the computer is back. Nobody chooses anything: what fits is copied, the rest stays live only.
 - **Your bots' work.** What Cloud bots make comes down to `Documents/MausBot/<bot>/<conversation>` on this computer.
 
 It never merges two sides. Nothing on this computer is deleted because of something that happened on My Cloud, and a bot changes the person's files only in a folder lent with editing, by the same rules whether the computer is on or away.
@@ -11,7 +11,7 @@ It never merges two sides. Nothing on this computer is deleted because of someth
 
 Nothing new. Lending a folder is what it was; the copy happens behind it. There is no setting, size picker or list of changes.
 
-- **Add a folder** on the Files page lends it, read only. The folder picker opens. The app checks the folder, then asks: "Share “Clients” with My Cloud? 1,240 files · 3.2 GB." Choose **Share** or **Cancel**. When lending to My Cloud is off, lending turns on with just that folder; when it can't be lent at all, Files copies it on its own, as before.
+- **Add a folder** on the Files page lends it, read only. The folder picker opens. The app checks the folder, then asks: "Share “Clients” with My Cloud? 1,240 files · 3.2 GB." Choose **Share** or **Cancel**. When it can't be lent (before this computer is signed in to My Cloud, or a change of what is lent overtook it), Files copies it on its own, as before.
 - **Stop sharing**, from the ⋯ menu. The folder is no longer lent (lending stops when it was all that was lent), and My Cloud's copy moves to its trash for 30 days. Nothing on this computer changes.
 - **The Files page lists every folder My Cloud has a copy of.** A lent folder whose copy is too big shows only where lending shows its folders.
 - **After a move to My Cloud**, the folders that stayed on this computer are offered: **Share them with My Cloud**.
@@ -30,7 +30,7 @@ Nothing new. Lending a folder is what it was; the copy happens behind it. There 
 - **When the computer is back**, the next pass applies what waited before it copies the folder up again: a file the person didn't touch since the bot read it takes the bot's version, and the one it replaces goes to the Recycle Bin first; a new file is created. A file the person changed, or removed, meanwhile keeps theirs, and the bot's version lands beside it, named the way bots' work is in a clash, "todo (new from My Cloud, 27 Oct 2026).md". That is the only thing said: the folder's line on the Files page reads "Kept both versions of “todo.md”: yours, and the bot's as “todo (new from My Cloud, 27 Oct 2026).md”." for a week. Changes that land without a clash are silent.
 - **This computer stays the authority.** Each change is checked again here as a live write is (a folder still lent with editing, no link, no `.git`, no protected place); a folder no longer lent with editing keeps its changes waiting. The copy on My Cloud still follows this computer, so a bot's change reaches the copy only by landing here first.
 - **Apps and screen, and the terminal,** still need the computer on. Queuing them for when it is back is a follow-up.
-- **Lending stops** (the switch off, or the folder no longer lent): its copy goes to My Cloud's trash, as Stop sharing does.
+- **A folder stops being lent** (Stop sharing here, or the folder gone from this computer): its copy goes to My Cloud's trash, as Stop sharing does. **Pause** in the menu bar keeps every copy and keeps it in step; bots' changes made on My Cloud then wait there until **Resume**, as they do while the computer is away.
 - **A Cloud from before lent copies** (its `GET /api/sync` has no `lentCopies: true`) gets no copies of lent folders: there they would sit where every bot reads them, so lending stays live only until that Cloud is updated.
 
 ## Git repositories
@@ -45,7 +45,7 @@ Nothing new. Lending a folder is what it was; the copy happens behind it. There 
 
 ## Folders the Files page shared before
 
-Folders shared from the Files page before lent folders keep working. Once lending to My Cloud is on, each joins what is lent, read only, and keeps its copy and its records: nothing is sent again, and nobody redoes anything. From then on it is a lent folder like any other, so turning lending off takes it back too. Until lending is on, it stays a copy as before. Its copy stays in `/data/Synced`, where bots read it as before.
+Folders shared from the Files page before lent folders keep working. Once this computer lends itself to My Cloud, each joins what is lent, read only, and keeps its copy and its records: nothing is sent again, and nobody redoes anything. From then on it is a lent folder like any other. Until then, it stays a copy as before. Its copy stays in `/data/Synced`, where bots read it as before.
 
 ## Shared folders (this computer → My Cloud)
 

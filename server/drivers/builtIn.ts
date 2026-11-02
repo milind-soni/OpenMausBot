@@ -14,11 +14,13 @@ import { CustomAcpDriver } from "./acp/custom.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
 import { DeepSeekAgentDriver } from "./acp/deepseek.ts";
 import { ClineAgentDriver } from "./acp/cline.ts";
+import { CopilotAgentDriver } from "./acp/copilot.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
 import { MistralDriver } from "./mistral.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { GroqDriver } from "./groq.ts";
+import { GreenferenceDriver } from "./greenference.ts";
 import { MetaDriver } from "./meta.ts";
 import { MuseCodeDriver } from "./muse-code.ts";
 import { MinimaxDriver } from "./minimax.ts";
@@ -34,6 +36,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   QwenAgentDriver,
   HermesAgentDriver,
   ClineAgentDriver,
+  CopilotAgentDriver,
   CustomAcpDriver,
   PiDriver,
   OpenAICompatDriver,
@@ -44,6 +47,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   MistralDriver,
   CerebrasDriver,
   GroqDriver,
+  GreenferenceDriver,
   MetaDriver,
   MuseCodeDriver,
   DeepSeekAgentDriver,

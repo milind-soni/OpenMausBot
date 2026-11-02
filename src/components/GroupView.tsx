@@ -25,7 +25,7 @@ import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
-import { StatusActivityRow } from "@/components/StatusActivityRow";
+import { StatusActivityRow } from "@/components/StatusActivityRow"; import { BugReportNote } from "@/components/BugReportNote";
 import { normalizeState } from "@/lib/mascot";
 import { botTextShowsSpeaker, laterTextOwns, runShowsSpeaker } from "@/lib/room-speaker";
 import { defaultResponderName, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
@@ -47,7 +47,7 @@ import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 import { roomRetryRequest } from "@/lib/room-retry";
 import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
-import { Composer } from "./Composer";
+import { RoomComposer } from "./bot-access/RoomComposer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { RoomContextWarnings } from "./ContextWarning";
 import { ChatFindBar } from "./ChatFindBar";
@@ -64,7 +64,7 @@ import { OptionCard } from "./OptionCard";
 import { GroupCallOverlay } from "./GroupCallView";
 
 import { ApprovalCard } from "./ApprovalCard";
-import { QuestionCard } from "./QuestionCard";
+import { isQuestionCard, QuestionCard } from "./QuestionCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
 import { groupActivityRuns, isStatusActivity, roomTurnFolds } from "@/lib/activity-runs";
 import { TurnNarrationRun } from "./TurnNarrationRun";
@@ -252,7 +252,7 @@ function RoomTextMessage({
                 data-citation-thread={group.threadId}
               >
                 <ThreadRefText text={display} peers={peers} everyone={!group.dm} />
-              </div>
+              </div>{m.bugReport && <BugReportNote report={m.bugReport} />}
               {cited && <SentCitations
                 citations={cited.citations}
                 onNavigate={async (citation: CitationAttachment) => {
@@ -421,15 +421,15 @@ export const Transcript = memo(function Transcript({
           <CancelledTurnRow onRetry={canRetryRoom ? retryRoom : undefined} />
         ) :
           m.kind === "secret" && m.secret && m.from?.botId ? (
-            <SecretRequestCard botId={m.from.botId} threadId={group.threadId} message={m} />
+            <SecretRequestCard botId={m.from.botId} color={m.from.color} threadId={group.threadId} message={m} />
           ) : m.kind === "signin" && m.signIn && m.from?.botId ? (
-            <SignInRequestCard botId={m.from.botId} botName={m.from.name} threadId={group.threadId} message={m} />
+            <SignInRequestCard botId={m.from.botId} botName={m.from.name} color={m.from.color} threadId={group.threadId} message={m} />
           ) : m.kind === "connector" && m.connector && m.from?.botId ? (
-            <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
-          ) : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
+            <ConnectorCard botId={m.from.botId} color={m.from.color} threadId={group.threadId} message={m} />
+          ) : m.kind === "options" && isQuestionCard(m.card) ? (
             <div className="flex justify-start">
-              <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>
-                <QuestionCard threadId={group.threadId} bot={memberOf(m.from?.botId)} message={m} />
+              <MessageBoundary fallbackText={m.card?.subtitle || m.card?.title || ""}>
+                <QuestionCard threadId={group.threadId} asker={memberOf(m.from?.botId)} message={m} />
               </MessageBoundary>
             </div>
           ) : m.kind === "options" && m.card?.requestId && m.card.tool ? (
@@ -1171,7 +1171,7 @@ export function GroupView({ group }: { group: Group }) {
               visible={presenceVisible}
               phrases={activity?.phrases}
               phase={activity?.phase}
-              size={activity?.size}
+              size={activity?.size} hover={activity?.hover} quiet={live.status && "quiet" in live.status ? live.status.quiet : undefined}
               seed={`${group.id}:${group.turnStartedAt ?? ""}:${speaker?.id ?? ""}`}
               answering={popping !== null}
               since={speaker ? group.turnStartedAt ?? null : null}
@@ -1203,7 +1203,7 @@ export function GroupView({ group }: { group: Group }) {
       )}
 
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
-      <Composer
+      <RoomComposer
         key={group.threadId}
         group={group}
         members={members}

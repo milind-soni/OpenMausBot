@@ -4,6 +4,7 @@ import { t } from "./i18n";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
+import { choiceIsSelected, modelChoices, type ModelChoice } from "./model-choices";
 
 export type ModelOption = InstanceInfo["models"]["options"][number];
 
@@ -12,7 +13,9 @@ export const CURRENT_GROUP_SUGGESTIONS = 4;
 export const GROUP_SUGGESTIONS = 3;
 
 export interface MenuModelRow {
-  option: ModelOption;
+  option: ModelChoice;
+  model?: string;
+  variant?: string;
   label: string;
   route?: string;
   current: boolean;
@@ -95,7 +98,7 @@ export function repeatedModelLabels(options: readonly ModelOption[]): Set<string
 
 function listedModels(instance: InstanceInfo) {
   const signedOut = !isCustomOnly(instance) && needsSignIn(instance);
-  const own = isCustomOnly(instance) || signedOut ? [] : instance.models.options.filter((option) => !option.custom);
+  const own = isCustomOnly(instance) || signedOut ? [] : modelChoices(instance, instance.models.options.filter((option) => !option.custom));
   const local = partitionCustomModels(instance.models.options.filter((option) => option.custom));
   return { signedOut, own, all: [...own, ...local.pinned, ...local.rest] };
 }
@@ -149,14 +152,16 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     if (needsCli(instance)) return query ? null : { kind: "setUp" };
     const { signedOut, own, all } = models.get(instance.instanceId)!;
     if (all.length === 0) return query ? null : signedOut ? { kind: "signIn" } : { kind: "empty", loading: input.refreshing === instance.instanceId };
-    const currentId = instance.instanceId === selection.instanceId ? selection.model : undefined;
+    const currentSelection = instance.instanceId === selection.instanceId ? selection : undefined;
     const repeated = repeatedModelLabels(all);
-    const botModel = bot.follows === false && bot.selection.instanceId === instance.instanceId ? bot.selection.model : undefined;
-    const row = (option: ModelOption): MenuModelRow => ({
+    const botSelection = bot.follows === false && bot.selection.instanceId === instance.instanceId ? bot.selection : undefined;
+    const row = (option: ModelChoice): MenuModelRow => ({
       option,
+      ...(option.nativeModel ? { model: option.nativeModel } : {}),
+      ...(option.variant ? { variant: option.variant } : {}),
       label: shortModelLabel(option.label, provider),
       ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
-      current: option.id === currentId,
+      current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
     });
     const mixed = own.length > 0 && own.length < all.length;
     if (query) {
@@ -164,9 +169,10 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
       return rows.length === 0 ? null
         : { kind: "models", rows, total: all.length, toggle: null, localFrom: localFrom(rows, mixed), signInForOwn: false, probing: false };
     }
-    const others = all.filter((option) => option.id !== currentId && option.id !== botModel);
+    const others = all.filter((option) => (!currentSelection || !choiceIsSelected(option, currentSelection))
+      && (!botSelection || !choiceIsSelected(option, botSelection)));
     const suggested = suggestedModels(others, instance.models.default, undefined,
-      currentId === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS);
+      currentSelection === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS);
     const rest = others.filter((option) => !suggested.includes(option));
     const open = expanded.has(instance.instanceId) || rest.length === 1;
     const rows = (open ? [...suggested, ...rest] : suggested).map(row);

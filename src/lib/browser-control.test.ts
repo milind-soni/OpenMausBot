@@ -431,6 +431,17 @@ describe("holding the browser on purpose", () => {
     expect(h.transport.release).toHaveBeenCalledOnce();
   });
 
+  it("hands back at once a hold the person has from another view, which this one never took", async () => {
+    const h = harness();
+    h.control.handBack();
+    await settle();
+    expect(h.transport.release).not.toHaveBeenCalled();
+    const mine = createBrowserControl({ ...h.options, mine: () => true });
+    mine.handBack();
+    await settle();
+    expect(h.transport.release).toHaveBeenCalledOnce();
+  });
+
   it("after a hand-back from elsewhere, the next interaction takes control again", async () => {
     const h = harness();
     h.interact(press, lift);

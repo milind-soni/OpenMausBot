@@ -8,6 +8,7 @@ import { writeComputerPanelView } from "@/lib/computer-panel-view";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { openBotSettings } from "@/components/bot-panel/panel-link";
+import { openKeySettings } from "@/components/keys/key-focus";
 import type { Action, Bot, ConfigStatus, InstanceInfo } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import {
@@ -114,7 +115,7 @@ export function openPlaceAction(
   target: { botId: string; threadId?: string; place?: Place },
   dispatch: (action: Action) => void,
 ): boolean {
-  const appSettings = (section: "engines" | "computer" | "connections" | "cloudAccount") =>
+  const appSettings = (section: "engines" | "computer" | "cloudAccount") =>
     dispatch({ type: "toggleAppSettings", open: true, section });
   switch (id) {
     case "choose-model": openBotSettings(dispatch, "model", { botId: target.botId }); return true;
@@ -122,7 +123,7 @@ export function openPlaceAction(
     case "change-routine": openBotSettings(dispatch, "routines", { botId: target.botId }); return true;
     case "sign-in": appSettings("engines"); return true;
     case "manage-computers": appSettings("computer"); return true;
-    case "add-boat-key": appSettings("connections"); return true;
+    case "add-boat-key": dispatch(openKeySettings("box")); return true;
     case "open-vm-settings":
       window.sessionStorage?.setItem("openmausbot.settings.section", "computer");
       appSettings("computer");

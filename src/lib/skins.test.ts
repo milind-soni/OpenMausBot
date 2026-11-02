@@ -46,14 +46,6 @@ describe("skins", () => {
     }
   });
 
-  it("puts Advanced mode's Midnight and Daylight menu rows back on raised", () => {
-    for (const id of ["midnight", "daylight"]) {
-      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]:where\\(:root\\[data-interface="advanced"\\][^{]*\\{([^}]*)\\}`))?.[1] ?? "";
-      expect(body, id).toContain("--color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);");
-      expect(body, id).toContain("--color-menu-active: var(--color-raised);");
-    }
-  });
-
   it("selects a code-only light or dark palette in every nearest skin", () => {
     for (const id of SKIN_IDS) {
       const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";

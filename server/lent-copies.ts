@@ -245,7 +245,8 @@ export function createLentCopies(options: { dataDir: string; now?: () => number 
     },
     /** A folder action for a computer that is away, answered from its copy; null when there is no copy to answer from. */
     answer(operation: Operation, principal: string | null, online: ReadonlyArray<{ id: string; name: string }> = []): Promise<Result> | null {
-      if (principal !== OWNER || !["list_files", "read_file", "write_file"].includes(operation.action)) return null;
+      const edits = ["edit_file", "append_file", "delete_file"].includes(operation.action);
+      if (principal !== OWNER || !(edits || ["list_files", "read_file", "write_file"].includes(operation.action))) return null;
       const found = lent(operation.folder_id);
       if (!found) return null;
       const { computer, folder } = found;
@@ -258,6 +259,7 @@ export function createLentCopies(options: { dataDir: string; now?: () => number 
       if (!folder.syncId) return Promise.resolve(refusal(`${folder.name} is only on their ${device}${folder.live === "too-big" ? ": it is too big to keep a copy on the Cloud" : ""}. ${later}`));
       const root = copyOf(folder.syncId);
       if (!root) return Promise.resolve(refusal(`${folder.name} is still being copied to the Cloud. ${later}`));
+      if (edits) return Promise.resolve(refusal(folder.write ? `${operation.action} needs their ${device} on. While it's away, read the file and write it whole with write_file.` : "This folder is read-only."));
       const path = wirePath(operation.path);
       if (path === null) return Promise.resolve(refusal("Use a relative path inside the shared folder"));
       const state = read();

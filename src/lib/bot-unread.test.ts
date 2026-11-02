@@ -1,6 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { showBrowserUnread, titleWithUnread } from "./bot-unread";
+import { botUnreadCount, showBrowserUnread, titleWithUnread } from "./bot-unread";
+
+describe("what one bot adds to the unread count", () => {
+  it("adds one while it shows unread, and nothing once read, as it always did", () => {
+    expect(botUnreadCount({ tasks: [{ unread: true }, { unread: true }] })).toBe(1);
+    expect(botUnreadCount({ unread: true })).toBe(1);
+    expect(botUnreadCount({ tasks: [{ unread: false }] })).toBe(0);
+  });
+
+  it("adds each ask waiting on the person in their inbox, read or not, and drops them as they are settled", () => {
+    expect(botUnreadCount({ tasks: [{ unread: true, openAsks: 3 }] })).toBe(3);
+    expect(botUnreadCount({ tasks: [{ unread: false, openAsks: 2 }] })).toBe(2);
+    expect(botUnreadCount({ tasks: [{ unread: true, openAsks: 1 }] })).toBe(1);
+    expect(botUnreadCount({ tasks: [{ unread: false }] }), "all settled").toBe(0);
+  });
+});
 
 describe("browser unread indicator", () => {
   afterEach(() => vi.unstubAllGlobals());

@@ -3,16 +3,18 @@ import type { AppSettingsSection } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { appVersion } from "@/lib/app-links";
 import type { LocaleKey } from "@/locales";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { AnalyticsRow } from "./AnalyticsRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
 import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
+import { TalkShortcutRow } from "./TalkShortcutRow";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
+import { AccessOverview } from "./bot-access/AccessOverview";
 import { BuiltInBrowserRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
@@ -22,12 +24,16 @@ import { SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsRows } from "
 import { UsageSection } from "./UsageSection";
 import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
+import { PlaceLookRows } from "./PlaceLookCard";
+import { ChromeRailRow } from "./ChromeRailToggle";
+import { WindowFrameRow } from "./WindowFrameRow";
 import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
-import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
+import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
 import { ThemeRow } from "./ThemeRow";
+import { AdminOnly } from "./AdminOnly";
 
 export type SimpleDisclosureId = "ai-more" | "ai-keys" | "computer-elsewhere" | "billing-limits";
 
@@ -35,7 +41,7 @@ export type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; ope
 
 export const SIMPLE_ADVANCED_ONLY: readonly LocaleKey[] = [
   "settings.newBotEffort.title", "newBot.defaults", "settings.roomTurns.title", "settings.mcpCalls.title", "settings.threads.title",
-  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title", "sidebar.density.title",
+  "settings.recovery.title", "settings.threadCleanup.title", "settings.font.title", "settings.chatWidth.title",
   "settings.pinnedCircles.title", "settings.universalPins.title", "settings.toolCalls.title", "settings.runCard.title", "settings.keepWarm.title",
 ];
 
@@ -57,9 +63,13 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsGroup label={t("settings.section.appearance")} block="appearance">
           <SettingsRows>
             <ThemeRow simple />
+            <PlaceLookRows />
+            <ChromeRailRow />
+            <WindowFrameRow />
             <ColorUserBubblesRow simple />
             <LanguageRow simple />
             <SendKeyRow simple />
+            <FollowUpRow simple />
             <SettingRow title={t("settings.simple.looks.title")}>
               <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
             </SettingRow>
@@ -76,12 +86,14 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
           <SettingsRows>
             <OpenAtLoginRow simple />
             <DefaultBotSidebarRow simple />
+            <TalkShortcutRow />
             <AnalyticsRow simple />
           </SettingsRows>
         </SettingsGroup>
       )}
-      {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><ImportSettings /></SettingsGroup>}
+      {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><AdminOnly><ImportSettings /></AdminOnly></SettingsGroup>}
       {has("organization") && <SettingsGroup label={t("settings.section.organization")} block="organization"><OrganizationSettings /></SettingsGroup>}
+      {has("botAccess") && <SettingsGroup label={t("settings.section.botAccess")} block="botAccess"><AccessOverview /></SettingsGroup>}
       {has("activity") && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
       <div data-settings-block="advanced-mode" className="scroll-mt-4">
         <SettingsRows><AdvancedModeRow simple /></SettingsRows>
@@ -102,11 +114,13 @@ export function SimpleLooksPage({ onBack }: { onBack: () => void }) {
 export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclose: Disclose; connections: ReactNode }) {
   return (
     <>
-      {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><EnginesSettings simple more={disclose("ai-more")} /></div>}
+      {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><AdminOnly><EnginesSettings simple more={disclose("ai-more")} /></AdminOnly></div>}
       {has("connections") && (
-        <SettingsDisclosureRow title={t("settings.simple.ai.keys")} block="connections" {...disclose("ai-keys")}>
-          {connections}
-        </SettingsDisclosureRow>
+        <AdminOnly>
+          <SettingsDisclosureRow title={t("settings.section.connections")} block="connections" {...disclose("ai-keys")}>
+            {connections}
+          </SettingsDisclosureRow>
+        </AdminOnly>
       )}
     </>
   );
@@ -117,7 +131,7 @@ export type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "compan
 export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { has: Has; remoteAccess: RemoteAccessCards; servers: ReactNode; disclose: Disclose }) {
   return (
     <>
-      {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><LocalComputerSection /></SettingsGroup>}
+      {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><AdminOnly><LocalComputerSection /></AdminOnly></SettingsGroup>}
       {has("companion") && (
         <SettingsGroup label={t("settings.simple.computer.devices")} block="companion">
           {remoteAccess.pairing}
@@ -148,12 +162,12 @@ export function SimpleBillingPage({ has, disclose, cloudAccount }: { has: Has; d
   return (
     <>
       <div data-settings-block="usage" className="scroll-mt-4">
-        {usage ? <CloudUsageSummaryView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSummaryView> : <PlanUsageSummary />}
+        {usage ? <CloudUsageSummaryView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSummaryView> : <AdminOnly note="settings.adminOnly.usage"><PlanUsageSummary /></AdminOnly>}
       </div>
       {(usage || has("usage")) && (
         <SettingsDisclosureRow title={t("settings.simple.billing.limits")} {...disclose("billing-limits")}>
           {usage && <CloudUsageDetails usage={usage} upgrade={upgrade} />}
-          {has("usage") && <UsageSection />}
+          {has("usage") && <AdminOnly note="settings.adminOnly.usage"><UsageSection /></AdminOnly>}
         </SettingsDisclosureRow>
       )}
       {has("cloudAccount") && (
@@ -166,7 +180,7 @@ export function SimpleBillingPage({ has, disclose, cloudAccount }: { has: Has; d
   );
 }
 
-const versionTitle = () => `${brand().name} ${appVersion()}`;
+const versionTitle = () => `${productName()} ${appVersion()}`;
 
 function ServerUpdatesRow() {
   const entry = useServerUpdateItem(true);

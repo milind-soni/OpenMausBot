@@ -43,6 +43,21 @@ describe("Store", () => {
     expect(new Store(selection).bot(bot.id)).not.toHaveProperty("toolScope");
   });
 
+  it("gives an app the bot's Apps switch turned on its tools, on load and whenever the switch changes", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Mail reader" });
+    const file = join(DATA_DIR, "bots.json");
+    const rows = JSON.parse(readFileSync(file, "utf8")) as BotRecord[];
+    Object.assign(rows.find((row) => row.id === bot.id)!, { composio: true, connectorTools: {}, connectorScopes: { apps: { gmail: "read", googlecalendar: "write" } } });
+    writeFileSync(file, JSON.stringify(rows));
+    const loaded = new Store(selection);
+    expect(loaded.bot(bot.id)?.connectorTools).toEqual({ gmail: { tools: "*" }, googlecalendar: { tools: "*" } });
+    expect((JSON.parse(readFileSync(file, "utf8")) as BotRecord[]).find((row) => row.id === bot.id)?.connectorTools, "saved").toEqual({ gmail: { tools: "*" }, googlecalendar: { tools: "*" } });
+    loaded.patchBot(bot.id, { connectorTools: { gmail: { tools: ["GMAIL_FETCH_EMAILS"] } } });
+    loaded.patchBot(bot.id, { connectorScopes: { apps: { gmail: "read", github: "write" } } });
+    expect(loaded.bot(bot.id)?.connectorTools, "a list already chosen for an app stays").toEqual({ gmail: { tools: ["GMAIL_FETCH_EMAILS"] }, github: { tools: "*" } });
+  });
+
   it.each([undefined, { allow: ["native:read"] }, { deny: ["native:bash"] }])("does not activate a wider tool selection when saving %j fails", (toolScope) => {
     const store = new Store(selection);
     const bot = store.createBot();

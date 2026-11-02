@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { introStaged, stageIntro, useChiefStepOpen } from "@/lib/default-bot";
 import { setLocale } from "@/lib/i18n";
-import { CLOUD_PRO_UPDATE_NOTICE } from "@/lib/notices";
+import { WHATS_NEW_NOTICE } from "@/lib/notices";
 import { EMPTY_ONBOARDING, MET_CHIEF_HINT, WELCOME_VERSION } from "@/lib/onboarding";
 import { saveWelcomeDraft } from "@/lib/welcome-draft";
 import type { InstanceInfo } from "@/state/store";
@@ -100,7 +100,7 @@ afterEach(async () => {
 describe("a new install's first run", () => {
   it("is two screens with an AI already working: Next, then Create, and it lands in the Chief's chat", async () => {
     await show();
-    expect(host.querySelector("h1")?.textContent).toBe("Meet OpenMausBot");
+    expect(host.querySelector("h1")?.textContent).toBe("Meet MausBot");
     expect(host.querySelector("[data-demo-composer]")?.textContent, "reduced motion shows the whole sentence").toContain("Hand off any task to your team of bots");
     for (const gone of ["Step 1", "Back", "Skip", "Your name", "Connect an AI", "Set up later"]) expect(text()).not.toContain(gone);
     expect(button("Next")!.disabled).toBe(false);
@@ -164,27 +164,10 @@ describe("the Chief step", () => {
   });
 });
 
-describe("the Cloud Pro popup", () => {
-  const desktop = (extra: Record<string, unknown> = {}) => {
+describe("What's new", () => {
+  it("is left for a later launch by a first run on a desktop that sells the Cloud: everyone who installs sees it once", async () => {
     const seen = vi.fn(async () => {});
-    vi.stubGlobal("ogb", { remoteClient: { active: false }, cloudAccount: { offer: vi.fn() }, desktopNotices: { seen }, ...extra });
-    return seen;
-  };
-
-  it("is settled by a first run on a desktop that could offer the Cloud, so it never follows on the next launch", async () => {
-    const seen = desktop();
-    await show();
-    await toChief();
-    await press("Create Chief of Staff");
-    await tick(CHIEF_FADE_MS);
-    await act(async () => {});
-    expect(seen).toHaveBeenCalledWith(CLOUD_PRO_UPDATE_NOTICE);
-    expect(saved()[0].onboarding.hintsSeen).toEqual([MET_CHIEF_HINT, CLOUD_PRO_UPDATE_NOTICE]);
-    expect(localStorage.getItem(CLOUD_PRO_UPDATE_NOTICE)).toBe("1");
-  });
-
-  it("is left alone where the Cloud is never offered, and by a replay", async () => {
-    const seen = desktop({ cloudAccount: undefined });
+    vi.stubGlobal("ogb", { remoteClient: { active: false }, cloudAccount: { offer: vi.fn() }, desktopNotices: { seen } });
     await show();
     await toChief();
     await press("Create Chief of Staff");
@@ -192,6 +175,7 @@ describe("the Cloud Pro popup", () => {
     await act(async () => {});
     expect(seen).not.toHaveBeenCalled();
     expect(saved()[0].onboarding.hintsSeen).toEqual([MET_CHIEF_HINT]);
+    expect(localStorage.getItem(WHATS_NEW_NOTICE)).toBeNull();
   });
 });
 
@@ -199,7 +183,7 @@ describe("with no AI working yet", () => {
   it("keeps the screen's shape: the pill signs in, and the line under it offers other ways or later", async () => {
     f.state = { ...f.state, instances: [signIn()] };
     await show();
-    expect(host.querySelector("h1")?.textContent).toBe("Meet OpenMausBot");
+    expect(host.querySelector("h1")?.textContent).toBe("Meet MausBot");
     expect(button("Next")).toBeUndefined();
     expect(button("Sign in with Claude")).toBeDefined();
     expect(button("Other ways to connect")).toBeDefined();
@@ -220,7 +204,7 @@ describe("with no AI working yet", () => {
     expect(dialog.querySelector('[data-engine-setup="claude"]')).not.toBeNull();
     await act(async () => { dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(host.querySelector("[data-connect-ai]")).toBeNull();
-    expect(text(), "Escape closed the dialog only").toContain("Meet OpenMausBot");
+    expect(text(), "Escape closed the dialog only").toContain("Meet MausBot");
   });
 
   it("says why an AI didn't answer its test, under the pill and in the dialog with Check again", async () => {
@@ -261,7 +245,7 @@ describe("with no AI working yet", () => {
     await show();
     await key("Enter");
     expect(host.querySelector("[data-connect-ai]"), "Enter pressed Connect Claude").not.toBeNull();
-    expect(text()).toContain("Meet OpenMausBot");
+    expect(text()).toContain("Meet MausBot");
     await act(async () => { host.querySelector("[data-connect-ai]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     await key("Escape");
     await tick(100);
@@ -272,7 +256,7 @@ describe("with no AI working yet", () => {
 describe("other first runs", () => {
   it("gives a hosted place's admin the first screen only, then the chat", async () => {
     await show({ hosted: true });
-    expect(text()).toContain("This is your team's shared OpenMausBot");
+    expect(text()).toContain("This is your team's shared MausBot");
     await press("Next");
     expect(text()).not.toContain("Introducing your Chief of Staff");
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith(null);

@@ -161,7 +161,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     }
   };
 
-  /** The bot's side: list_triggers and list_trigger_events, for the bot whose turn holds the capability. */
+  /** The bot's side: trigger_info list and events, for the bot whose turn holds the capability. */
   const internalRoutes = (context: InternalTriggerContext): RouteHandler => async ({ res, url, path, method, json }: RouteContext) => {
     if (method !== "GET" || (path !== "/api/internal/triggers" && path !== "/api/internal/trigger-events")) return PASS;
     if (!context.ownsThread(context.from.id, context.threadId)) return json(res, 403, { error: "source conversation does not belong to sender" });
@@ -188,7 +188,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     return json(res, 200, { ...listing, trigger: { ...shown, ...address } });
   };
 
-  /** create_trigger (when=app_event) and manage_trigger on one: applies at once and leaves the receipt card. */
+  /** trigger create (when=app_event) and every change to one: applies at once and leaves the receipt card. */
   async function submit(res: ServerResponse, json: RouteContext["json"], input: InternalTriggerContext & {
     operation: { action: string; trigger?: unknown; triggerId?: string; changes?: unknown };
     forBot?: { botId: string; name: string };

@@ -17,6 +17,8 @@ export const instanceSettingsSchema = z.object({
   displayName: displayName.optional(),
   configDir: configDir.optional(),
   tools: z.boolean().optional(),
+  /** null goes back to the server's default wait. */
+  replyWaitMinutes: z.number().int().min(1).max(60).nullable().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 function rawConfig(entry: InstanceConfig): Record<string, unknown> {

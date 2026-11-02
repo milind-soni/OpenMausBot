@@ -21,11 +21,10 @@ export function botTooltip(bot: Pick<Bot, "name" | "title" | "chiefOfStaff" | "m
   ].filter(Boolean).join(" · ");
 }
 
-export function BotModelBadge({ bot, instances, avatarSize, subtle = false }: {
+export function BotModelBadge({ bot, instances, avatarSize }: {
   bot: Pick<Bot, "modelSelection">;
   instances: InstanceInfo[];
   avatarSize: number;
-  subtle?: boolean;
 }) {
   const model = botModel(bot, instances);
   if (!model) return null;
@@ -35,7 +34,7 @@ export function BotModelBadge({ bot, instances, avatarSize, subtle = false }: {
     <span data-testid="model-badge" role="img" aria-label={description} title={model.label}
       className="absolute -bottom-0.5 -left-0.5 flex items-center justify-center rounded-full border-2 border-panel bg-panel"
       style={{ width: size, height: size }}>
-      <InstanceProviderMark instance={model.instance} size={size - 4} subtle={subtle} />
+      <InstanceProviderMark instance={model.instance} size={size - 4} subtle />
     </span>
   );
 }
@@ -48,19 +47,6 @@ export function BotEngineMark({ bot, instances, className }: { bot: Pick<Bot, "m
     <span data-testid="model-badge" role="img" aria-label={t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName })}
       className={cn("flex shrink-0", className)}>
       <InstanceProviderMark instance={model.instance} size={14} subtle />
-    </span>
-  );
-}
-
-/** The engine's mark at the right end of a sidebar row's text; hovering it names the model. */
-export function BotModelMark({ bot, instances }: { bot: Pick<Bot, "modelSelection">; instances: InstanceInfo[] }) {
-  const model = botModel(bot, instances);
-  if (!model) return null;
-  const description = t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName });
-  return (
-    <span data-testid="model-badge" role="img" aria-label={description} title={model.label}
-      className="ml-auto flex shrink-0 items-center self-center text-ink-secondary">
-      <InstanceProviderMark instance={model.instance} size={14} />
     </span>
   );
 }

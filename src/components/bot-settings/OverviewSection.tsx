@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Circle, Sparkles } from "lucide-react";
+import { ChevronRight, Circle, Sparkles } from "lucide-react";
 
 import type { BotOverview } from "@/lib/bot-overview-types";
 import { t } from "@/lib/i18n";
@@ -78,7 +78,7 @@ export function OverviewSection({
                   >
                     <Circle aria-hidden="true" size={14} className="shrink-0 text-ink-secondary" />
                     <span className="flex-1">{setupLabel(step.id, step.label)}</span>
-                    <span className="text-[12px] text-ink-secondary">→</span>
+                    <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-ink-secondary rtl:-scale-x-100" />
                   </button>
                 )}
               </li>
@@ -167,7 +167,7 @@ export function OverviewSection({
             onClick={() => onOpen("history")}
             className="shrink-0 text-[12px] text-ink-secondary hover:text-ink"
           >
-            {t("botOverview.viewAll")} →
+            {t("botOverview.viewAll")} <ChevronRight size={14} aria-hidden="true" className="inline align-[-2px] rtl:-scale-x-100" />
           </button>
         </div>
         {overview.recent.length === 0 ? (

@@ -90,3 +90,31 @@ test("the freeze's answer carries what holds the move, by name or, with none, wh
   assert.deepEqual(freezeAnswer({ ok: true, status: 200, body: { frozen: true } }), { frozen: true });
   assert.throws(() => freezeAnswer({ ok: false, status: 500, body: {} }), /could not pause/u);
 });
+
+test("while a server of the person's own is chosen as home, no move to My Cloud starts, and this computer's page shows that move's line", async () => {
+  const handlers = new Map();
+  const install = (other) => {
+    let kept = null;
+    const main = installOneHome({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => json({}, 401),
+      reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => "http://127.0.0.1:4100",
+      fetch: async () => json({}, 404), localRequest: async (route) => (route === "/api/move/freeze" ? json({ frozen: false }) : json({}, 404)),
+      account: () => ({ state: () => ({ status: "connected", account: { id: "acct-1" }, machine: { status: "ready", origin: "https://omb-u-1.fly.dev", moves: true } }),
+        pairHome: async () => { throw new Error("no code in this test"); } }),
+      journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } }, other,
+    });
+    return { main, journal: () => kept };
+  };
+  const own = { active: () => true, view: () => ({ phase: "copy", place: "Garage server" }), seen: () => null, retry: async () => {} };
+  const chosen = install(() => own);
+  try {
+    await chosen.main.kick();
+    assert.equal(chosen.journal(), null, "My Cloud's move never starts");
+    assert.deepEqual((await handlers.get("cloud-send:notice")({})).move, { phase: "copy", place: "Garage server" });
+  } finally { chosen.main.close(); }
+  const none = install(() => null);
+  try {
+    await none.main.kick();
+    assert.equal(none.journal()?.cloud.origin, "https://omb-u-1.fly.dev", "without one, My Cloud's move starts as before");
+  } finally { none.main.close(); }
+});

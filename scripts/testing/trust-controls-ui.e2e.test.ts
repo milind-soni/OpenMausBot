@@ -66,7 +66,7 @@ describe("trust controls in the real renderer", () => {
     await runControlOmb(["wait", "--bot", bot.id, "--timeout", "20", "--url", info.url]);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ran a command");
     await ui("screenshot", "--out", `${info.logPath}.activity.png`);
-    await click("Close Activity");
+    await click("Close activity");
 
     const interactive = await ui("snapshot", "--interactive");
     const profile = Object.entries(interactive.refs as Record<string, { role: string; name: string }>)

@@ -53,8 +53,8 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
       }
       const result = store.updateTeamMembers(section, parsed.data.addBotIds, parsed.data.removeBotIds);
       if (!result.ok) return json(res, result.reason === "unavailable" ? 404 : 409, { error:
-        result.reason === "chief-conflict" ? "A team can have only one Chief of Staff. Change the Chief before moving this bot."
-          : result.reason === "membership-changed" ? "Team membership changed. Reopen the dialog and try again."
+        result.reason === "chief-conflict" ? "A department can have only one Chief of Staff. Change the Chief before moving this bot."
+          : result.reason === "membership-changed" ? "Department membership changed. Reopen the dialog and try again."
           : "One or more bots are unavailable" });
       return json(res, 200, { sections: store.sections, bots: result.bots.map(wireBot) });
     }

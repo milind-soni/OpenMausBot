@@ -45,6 +45,7 @@ export function NewRoomPanel({ onClose }: { onClose: () => void }) {
             if (e.key === "Enter") create();
             if (e.key === "Escape") onClose();
           }}
+          aria-label={t("sidebar.newChannel.nameLabel")}
           placeholder={t("sidebar.newChannel.name")}
           className="mb-3 w-full rounded-lg bg-raised/70 px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
         />

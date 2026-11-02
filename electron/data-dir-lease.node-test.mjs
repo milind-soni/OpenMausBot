@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir, uptime as osUptime } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -58,16 +58,6 @@ async function exitedPid() {
     child.once("close", resolve);
   });
   return pid;
-}
-
-function wmicAvailable() {
-  if (process.platform !== "win32") return false;
-  try {
-    execFileSync("wmic", ["/?"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 test.afterEach(() => {
@@ -430,6 +420,59 @@ test("a live owner from the current boot still blocks a second instance", () => 
   assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
 });
 
+test("a Linux record names its pid namespace and when its process started; elsewhere both are null", () => {
+  const { dataDir } = temporaryDirectory();
+  const record = recordWrittenByThisProcess(dataDir);
+  if (process.platform !== "linux") {
+    assert.deepEqual({ ns: record.ns, start: record.start }, { ns: null, start: null });
+    return;
+  }
+  assert.equal(record.ns, /^pid:\[(\d+)\]$/.exec(readlinkSync("/proc/self/ns/pid"))[1]);
+  const stat = readFileSync("/proc/self/stat", "utf8");
+  assert.equal(record.start, Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]));
+});
+
+// Two containers on one host: the same boot, another pid namespace, and pids that start again from 1.
+const anotherPidNamespace = (current) => String(BigInt(current.ns) + 1n);
+
+test("a lease another container on this host left is never judged by this container's pids", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.boot === null) return t.skip("no pid namespace or boot identity on this platform");
+  // The new container's server got the pid the dead one recorded, here our own live pid.
+  const leasePath = plantOwner(dataDir, { ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+  const planted = readFileSync(leasePath, "utf8");
+
+  assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+  assert.equal(readFileSync(leasePath, "utf8"), planted);
+  assert.deepEqual(clearRecordsFromOtherMachines(dataDir), [{ path: leasePath, host: current.host, pid: process.pid }]);
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(leasePath, "utf8")).ns, current.ns);
+  assert.equal(lease.release(), true);
+});
+
+test("a pid this container reused for another process is not the lease's owner", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.start === null) return t.skip("no process start time on this platform");
+  plantOwner(dataDir, { pid: process.pid, start: current.start + 1, token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a lease this host left before a reboot is recovered whatever pid namespace wrote it", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.boot === null) return t.skip("no pid namespace or boot identity on this platform");
+  plantOwner(dataDir, { boot: randomUUID(), ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
 test("a reaper from an earlier boot is succeeded even when its pid is live", (t) => {
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
@@ -609,8 +652,8 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
 });
 
 test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
-  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
-  if (!wmicAvailable()) return t.skip("wmic is not available; the Windows process-identity check cannot be exercised");
+  // With or without wmic: Windows 11 no longer installs it, and the check must still tell a reused pid apart.
+  if (process.platform !== "win32") return t.skip("Windows-only: process-identity check");
   const { dataDir } = temporaryDirectory();
   const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
   const siblingPid = sibling.pid;

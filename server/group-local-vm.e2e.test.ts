@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
+import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -586,6 +587,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(computer(after)).toBeTruthy();
       expect(after.systemPrompt).toContain("Local VM");
       expect(after.systemPrompt).not.toContain("call select_computer");
+      // The continuation, which may not pick again, is listed the agents tools its request was, select_computer too.
+      const agentsTools = (dumped: any) => availableTools(catalogProfileFromEnv(dumped.mcpConfig.mcpServers.agents.env));
+      expect(agentsTools(after)).toEqual(agentsTools(before));
+      expect(agentsTools(after).map((tool) => tool.name)).toContain("select_computer");
       await idle(bot.id);
       const state = await api("GET", "/api/bots?messages=30");
       const saved = state.bots.find((b: any) => b.id === bot.id);

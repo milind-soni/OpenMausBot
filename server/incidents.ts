@@ -2,6 +2,7 @@ import type { WireMessage as Message } from "../shared/wire.ts";
 import { withoutDeliveredNote } from "./peer-provenance.ts";
 import { botOwner } from "../shared/bot-owner.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
+import { serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export type IncidentKind = "failed" | "stalled" | "could-not-start" | "routine-failed";
 
@@ -135,8 +136,22 @@ export function incidentContext(messages: readonly Pick<Message, "role" | "kind"
   };
 }
 
-export function incidentChip(incident: Incident): string {
-  return `Incident: ${whatHappened(incident)}`;
+const CHIP: Record<IncidentKind, readonly [plain: ServerLineKey, why: ServerLineKey]> = {
+  failed: ["server.incidents.failed", "server.incidents.failedWhy"],
+  stalled: ["server.incidents.stalled", "server.incidents.stalledWhy"],
+  "could-not-start": ["server.incidents.couldNotStart", "server.incidents.couldNotStartWhy"],
+  "routine-failed": ["server.incidents.routineFailed", "server.incidents.routineFailedWhy"],
+};
+
+/** What the person reads (the status row and its notification), in their language; the Chief's report says it in
+ * English (incidentText). */
+export function incidentChip(incident: Incident, language?: string): string {
+  const where = incident.room ? serverLine(language, "server.incidents.where.room", { room: incident.room })
+    : incident.title ? serverLine(language, "server.incidents.where.thread", { title: fold(incident.title, 60) })
+    : serverLine(language, "server.incidents.where.main");
+  const [plain, why] = CHIP[incident.kind] ?? CHIP.failed;
+  return incident.detail ? serverLine(language, why, { bot: incident.bot.name, where, detail: fold(incident.detail, 240) })
+    : serverLine(language, plain, { bot: incident.bot.name, where });
 }
 
 /** What OpenMausBot did about the failure before the Chief heard: it retried the run once and the retry failed as above,

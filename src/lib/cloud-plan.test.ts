@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { CHECKOUT_SOURCES } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudTeam, CloudTrial } from "../../electron/cloud-home.mjs";
-import { buyOfferAllowed, CLOUD_SOURCES, cloudAddView, cloudCreditLine, cloudIntroView, cloudNoticeKind, cloudPlanLine, cloudPlanView, cloudTrialNotice, cloudTrialView,
+import { buyOfferAllowed, cardRows, CLOUD_SOURCES, cloudAddView, cloudCreditLine, cloudIntroView, cloudNoticeKind, cloudPlanLine, cloudPlanView, cloudTrialNotice, cloudTrialView,
   dueToday, moneyBackLine, moneyBackShort, offerPlan, offerTrialDays, planCardRows, planCards, sameTerms, sharedTrialDays, trialTimeline, usd,
   type CloudSignInPhase } from "./cloud-plan";
 import { setLocale } from "./i18n";
@@ -197,6 +197,28 @@ describe("what is for sale, as the Admin says", () => {
     expect(JSON.stringify(cards)).not.toMatch(/a day|credit|Everything in/);
   });
 
+  it("a card shows the numbers a person weighs up, and sleeping only where the plans differ; Compare plans keeps the rest of its rows", () => {
+    const pro = { tier: "pro", label: "Pro", amount: 4900, allowances: { cpus: 4, cpuKind: "shared" as const, memoryMb: 4096, swapMb: 4096, diskGb: 10, maxDiskGb: 100, computers: 15,
+      computerHours: 300, voiceCharacters: 60_000, snapshotDays: 14 } };
+    const starter = { ...pro, tier: "starter", label: "Starter", amount: 1500, allowances: { ...pro.allowances, cpus: 2, memoryMb: 2048, maxDiskGb: 20, computerHours: 100 } };
+    const max = { ...pro, tier: "max", label: "Max", amount: 9900, allowances: { ...pro.allowances, cpus: 8, memoryMb: 8192, computerHours: 800 } };
+    const keys = (rows: Array<{ key: string }>) => rows.map(row => row.key);
+    const cards = planCards({ plans: [starter, pro, max], recommended: "pro" });
+    const split = cardRows(cards);
+    expect(split.map(card => keys(card.shown))).toEqual(Array(3).fill(["hours", "storage", "voice"]));
+    expect(split.map(card => keys(card.details))).toEqual(Array(3).fill(["power", "desktops", "machine", "backups"]));
+    expect(split.map(card => [...card.shown, ...card.details].length), "no row is dropped").toEqual(cards.map(card => card.rows.length));
+    const asleep = (plan: typeof pro) => ({ ...plan, allowances: { ...plan.allowances, sleeps: true as const } });
+    const one = cardRows(planCards({ plans: [asleep(starter), pro, max], recommended: "pro" }));
+    expect(one.map(card => card.shown[0]!.text), "one plan sleeps: every card says how it runs")
+      .toEqual(["Sleeps when idle, wakes in about a second", "Always on, around the clock", "Always on, around the clock"]);
+    expect(one.map(card => keys(card.details))).toEqual(Array(3).fill(["desktops", "machine", "backups"]));
+    const all = cardRows(planCards({ plans: [starter, pro, max].map(asleep), recommended: "pro" }));
+    expect(all.map(card => keys(card.shown)), "every plan sleeps: nothing sets them apart there").toEqual(Array(3).fill(["hours", "storage", "voice"]));
+    const bare = cardRows(planCards({ plans: [{ tier: "team", label: "Team", amount: 19900 }, pro], recommended: "pro" }));
+    expect(bare.map(card => keys(card.shown)), "a plan without allowances sets nothing apart").toEqual([[], ["hours", "storage", "voice"]]);
+  });
+
   it("speaks the reader's language, numbers included", () => {
     setLocale("de");
     const [card] = planCards({ plans: [{ tier: "max", amount: 9900, trialDays: 3, allowances: { cpus: 8, cpuKind: "shared", memoryMb: 8192, diskGb: 10, maxDiskGb: 100, computers: 15,
@@ -254,7 +276,7 @@ describe("what is for sale, as the Admin says", () => {
       points: ["Routines run on time, day and night", "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start"],
       price: "Then from $15/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan." });
     const bare = cloudIntroView({ ...OFFER, creditUsd: undefined, refundDays: undefined })!;
-    expect(bare.points[2]).toBe("Cloud desktops and voice included"); expect(bare.moneyBack).toBeNull();
+    expect(bare.points[2]).toBe("Voice and cloud desktops by Boat included"); expect(bare.moneyBack).toBeNull();
     expect(cloudIntroView(noTrial(OFFER))).toBeNull(); expect(cloudIntroView(null)).toBeNull(); expect(cloudIntroView(undefined)).toBeNull();
     expect(JSON.stringify(cloudIntroView(OFFER))).not.toMatch(/launch|\$89|first 100/i);
     const partial: CloudOffer = { ...OFFER, plans: OFFER.plans.map(plan => plan.tier === "starter" ? { ...plan, trialDays: undefined } : plan) };

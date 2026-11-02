@@ -5,7 +5,7 @@ import { engineReady } from "@/components/EngineLibrary";
 import { staggerIndex } from "@/components/onboarding/beats/shared";
 import { withViewTransition } from "@/components/onboarding/view-transition";
 import { track } from "@/lib/analytics";
-import { brand } from "@/lib/brand";
+import { productName } from "@/lib/brand";
 import { CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN } from "@/lib/cloud-setup";
 import { dismissCloudIntent, markIntentSent, reopenCloudIntent, setPendingIntent, setupMessage, useCloudIntent } from "@/lib/cloud-intent";
 import { cn } from "@/lib/cn";
@@ -146,7 +146,7 @@ export function CloudIntent() {
       />
       <div className="stagger relative mx-auto flex w-full max-w-[620px] flex-col px-6 pb-12 pt-[clamp(48px,12vh,128px)]">
         <div className="animate-rise flex justify-center" style={staggerIndex(0)}>
-          <MausAvatar color="green" state={face} motion={motion.kind} motionKey={motion.key} size={64} label={brand().name} />
+          <MausAvatar color="green" state={face} motion={motion.kind} motionKey={motion.key} size={64} label={productName()} />
         </div>
         <h1 className="animate-rise mt-5 text-center text-[24px] font-semibold tracking-[-0.015em] text-ink [text-wrap:balance]" style={staggerIndex(1)}>
           {t("cloudIntent.title")}

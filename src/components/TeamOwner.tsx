@@ -10,6 +10,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { askingWhom, departmentOwner, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import type { NeedsYouItem } from "../../shared/today";
 import { useHeldMenuMotion } from "./MenuMotion";
+import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 
 export type OwnerPickerTarget = { botIds: string[]; title: string; current: string | null; x: number; y: number };
 
@@ -100,13 +101,13 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
   const left = Math.max(8, Math.min(shown.x, window.innerWidth - 260));
   return createPortal(
     <div data-owner-picker role="menu" aria-label={shown.title} style={{ top, left }}
-      className={cn("popover-surface fixed z-50 w-[248px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}>
-      <div className="px-3.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{shown.title}</div>
-      <div className="flex max-h-[260px] flex-col gap-0.5 overflow-y-auto px-1.5 py-1">
+      className={cn("fixed z-50 w-[248px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+      <div className={MENU_HEADING}>{shown.title}</div>
+      <div className="flex max-h-[260px] flex-col gap-1 overflow-y-auto">
         {team.people.map((person) => (
           <button key={person.email} type="button" role="menuitemradio" aria-checked={person.email === shown.current} disabled={busy}
             onClick={() => void pick(person)}
-            className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink", person.email === shown.current ? "bg-menu-active" : "hover:bg-menu-hover")}>
+            className={cn("flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink", person.email === shown.current ? "bg-menu-active" : "hover:bg-menu-hover")}>
             <PersonFace person={person} size={20} />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{person.you ? t("owner.you", { name: person.name }) : person.name}</span>
@@ -116,7 +117,7 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
           </button>
         ))}
       </div>
-      <div className="px-3.5 pt-1 text-[11px] leading-snug text-ink-secondary">{t("owner.pickHint")}</div>
+      <div className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">{t("owner.pickHint")}</div>
     </div>,
     document.body,
   );
@@ -175,7 +176,7 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
         <span className="rounded-full bg-warning px-1.5 text-[11px] font-semibold tabular-nums text-panel">{items.length}</span>
       </button>
       {open && (
-        <div role="menu" aria-label={t("needsYou.title")} className="popover-surface absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60">
+        <div role="menu" aria-label={t("needsYou.title")} className={cn("absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto", MENU_SHEET)}>
           {items.map((item) => {
             const botId = "botId" in item ? item.botId : item.botIds[0]!;
             const title = item.kind === "message" ? t("needsYou.message", { name: item.from })
@@ -188,7 +189,7 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
                 openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
                 if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
               }}
-              className="flex w-full flex-col items-start px-3.5 py-2 text-left hover:bg-menu-hover">
+              className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-menu-hover">
               <NeedsYouTitle item={item} title={title} />
               {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}
             </button>;

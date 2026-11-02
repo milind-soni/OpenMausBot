@@ -17,7 +17,8 @@ export function deviceTimeZone(): string | null {
 /** Only the owner's own devices: a guest or teammate has no admin scope, and their zone is not the owner's. */
 export async function syncCloudTimeZone(zone: string | null, request: typeof api = api): Promise<boolean> {
   if (!zone) return false;
-  const current = await request<{ timeZone?: string; adopts?: boolean }>("/api/time-zone", { timeoutMs: 10_000 });
+  // A read after every reconnect, not someone using My Cloud (src/state/api.ts `background`); the rare change below is.
+  const current = await request<{ timeZone?: string; adopts?: boolean }>("/api/time-zone", { timeoutMs: 10_000, background: true });
   if (!current?.adopts || current.timeZone === zone) return false;
   await request("/api/time-zone", { method: "PUT", body: JSON.stringify({ timeZone: zone }), timeoutMs: 10_000 });
   return true;

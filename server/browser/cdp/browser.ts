@@ -8,7 +8,7 @@ import { RefCounter } from "./refs.ts";
 import { applyPermissions, releaseSession, setUpWorkerSession, type TargetSetup } from "./targets.ts";
 import type { CdpTransport } from "./transport.ts";
 
-/** Every headless page is this size, so pictures, boxes and clicks agree. */
+/** The page size a headless browser connected without one is fitted to; setViewport changes it. */
 export const VIEWPORT = { width: 1280, height: 720 } as const;
 const FIT_ROUNDS = 3;
 

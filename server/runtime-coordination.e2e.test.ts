@@ -173,7 +173,13 @@ it("S1 assigns a teammate under the envelope and resumes the Chief once with the
   expect(f.eventsOf(child.id).map((event: any) => event.kind)).toEqual(expect.arrayContaining(["enqueued", "started", "settled", "reported"]));
 }), hostTimeout(60_000));
 
+/** A question reaches the person on "Ask me first"; at Full access, the default, the Chief answers it instead. */
+const askMeFirst = async (f: any) => {
+  for (const id of [f.clive.id, f.mira.id]) expect((await f.api("PATCH", `/api/bots/${id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
+};
+
 it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, carries the person's answer into her next turn, and resumes the Chief with the result", () => scenario(async (f) => {
+  await askMeFirst(f);
   const brief = "S2-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
     { key: "C0", match: ["S2-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
@@ -218,6 +224,7 @@ it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, c
 }), hostTimeout(60_000));
 
 it("S2b resumes the Chief once with a parked question, keeps one question chip across a restart and names the parked thread as waiting on the person", () => scenario(async (f) => {
+  await askMeFirst(f);
   const brief = "S2B-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
     { key: "C0", match: ["S2B-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },

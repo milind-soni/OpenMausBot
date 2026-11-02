@@ -162,15 +162,17 @@ export function liveControl(value: { held?: unknown; owned?: unknown; controllin
   const dialog = value.dialog as { type?: unknown; message?: unknown; defaultValue?: unknown } | null | undefined;
   const shown = dialog && typeof dialog.type === "string" && typeof dialog.message === "string" && typeof dialog.defaultValue === "string"
     ? { type: dialog.type, message: dialog.message, defaultValue: dialog.defaultValue } : null;
-  return { canOperate: true, controller, generation, dialog: shown };
+  return { canOperate: true, controller, generation, dialog: shown, ...(value.owned === true ? { owned: true } : {}) };
 }
 
 /**
  * Opens the v1 view of a bot's browser. Frames come as base64 JPEG and wait for an acknowledgement each; the view
  * reconnects a few times after a dropped connection, never replaying input, and asks the server for the hold its last
  * view had. It reconnects at once when the window is focused, shown or back online, also after its retries ran out.
+ * The panel's size (`initialSize`, then each resize) goes with every connection and to the open view, so the page fills
+ * the panel; a server without resizing refuses the action and its page keeps its own size.
  */
-export function createLiveStreamClient(botId: string, events: PreviewStreamEvents, post: LivePost, resume: LiveResume = { viewer: "" }, scope: Readonly<Record<string, string>> = {}): LiveStreamClient {
+export function createLiveStreamClient(botId: string, events: PreviewStreamEvents, post: LivePost, resume: LiveResume = { viewer: "" }, scope: Readonly<Record<string, string>> = {}, initialSize: { width: number; height: number } | null = null): LiveStreamClient {
   let stopped = false;
   /** Stopped because its retries ran out, not refused for good: coming back to the window tries again. */
   let revivable = false;
@@ -185,6 +187,9 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
   let retry: ReturnType<typeof setTimeout> | null = null;
   /** Inputs one request may carry: what this view's server said, 1 for one that takes no batches. */
   let inputBatch = 1;
+  let size = initialSize;
+  /** The size on its way to the open view; a newer one waits for its answer. */
+  let sizing: { width: number; height: number } | null = null;
 
   const dropped = (live: EventSource, retryable: boolean) => {
     live.close();
@@ -222,10 +227,28 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     notice(cause instanceof Error ? cause.message : String(cause));
   }, () => inputBatch);
 
+  /** One resize request at a time, the newest size last; a refusal changes nothing. */
+  const sendSize = () => {
+    const wanted = size;
+    const to = viewerId;
+    if (sizing || !wanted || !to) return;
+    sizing = wanted;
+    void post({ type: "resize", width: Math.round(wanted.width), height: Math.round(wanted.height) }, to).catch(() => undefined).finally(() => {
+      sizing = null;
+      if (size !== wanted && viewerId === to) sendSize();
+    });
+  };
+
   const connect = () => {
     retry = null;
     if (stopped) return;
-    const query = withBrowserScope(resume.viewer ? `?resume=${encodeURIComponent(resume.viewer)}` : "", scope);
+    const params = new URLSearchParams(resume.viewer ? { resume: resume.viewer } : {});
+    const opening = size;
+    if (size) {
+      params.set("width", String(Math.round(size.width)));
+      params.set("height", String(Math.round(size.height)));
+    }
+    const query = withBrowserScope(params.size ? `?${params.toString()}` : "", scope);
     const live = new EventSource(`/api/bots/${encodeURIComponent(botId)}/browser/live${query}`);
     source = live;
     heardAt = Date.now();
@@ -241,6 +264,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       inputBatch = Number.isSafeInteger(data.inputBatch) ? Math.max(1, Math.min(Number(data.inputBatch), 64)) : 1;
       resume.viewer = "";
       events.onConnectedChange(true);
+      if (size !== opening) sendSize();
     });
     listen("heartbeat", () => { attempts = 0; });
     listen("frame", (data) => {
@@ -269,7 +293,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     });
     listen("control", (data) => {
       const next = liveControl(data, generation);
-      if (control && next.controller === control.controller && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
+      if (control && next.controller === control.controller && next.owned === control.owned && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
       control = next.controller === control?.controller ? next : liveControl(data, ++generation);
       events.onControl?.(control);
     });
@@ -308,10 +332,15 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
   if (page) document.addEventListener("visibilitychange", returned);
 
   const send = (input: PreviewStreamInput) => {
+    if (input.type === "resize") {
+      size = { width: input.width, height: input.height };
+      sendSize();
+      return true;
+    }
     if (!viewerId || !control?.canOperate) return false;
-    if (!["takeControl", "resize", "restart"].includes(input.type) && control.controller !== "you") return false;
+    if (!["takeControl", "restart"].includes(input.type) && control.controller !== "you") return false;
     const action = liveAction(input);
-    if (!action) return input.type === "resize";
+    if (!action) return false;
     // The page's question holds the input queued behind it, so its answer goes straight to the server.
     if (input.type === "dialog" && !Array.isArray(action)) {
       void postTo(action, viewerId).catch((cause: unknown) => notice(cause instanceof Error ? cause.message : String(cause)));

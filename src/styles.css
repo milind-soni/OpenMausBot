@@ -47,9 +47,6 @@
 .mention-editor-mirror {
   /* Match the native textarea's direction independently for each paragraph. */
   unicode-bidi: plaintext;
-  padding: 4px;
-  font-size: 15px;
-  line-height: 24px;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   color: var(--color-ink);
@@ -65,10 +62,9 @@
 }
 /* Safari zooms smaller form text on focus. In a standalone phone window that
    can leave the header under the status bar after the keyboard closes. Keep
-   the native editor and its mention mirror at the same readable touch size. */
+   the native editor at a readable touch size. */
 @media (pointer: coarse) {
-  .mention-editor textarea,
-  .mention-editor-mirror { font-size: 16px; }
+  .mention-editor textarea { font-size: 16px; }
 }
 @media (forced-colors: active) {
   .mention-editor-mirror { display: none; }
@@ -166,6 +162,10 @@
      there `raised` is pure white and a card is too. */
   --color-control: #282828;
   --color-hairline: #383838;
+  /* the window's frame: its top bar and the rail of places, around the
+     app's rounded card (the sidebar and the chat). The app's own colour a step darker, so it
+     stays in the skin's family: --frame-shade of black. */
+  --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -211,7 +211,7 @@
   --chat-prose-max: 44rem;
   /* .chat-column: fills a narrow pane, then stops at this width and centers, so wider windows only grow the gutters. */
   --chat-column-max: 60rem;
-  /* Simple mode's menus; a phone rounds them like its sheets. */
+  /* Menus; a phone rounds them like its sheets. */
   --radius-menu: 14px;
 }
 :root[data-chat-width="wide"] {
@@ -231,6 +231,10 @@
 
 :root {
   --code-color-scheme: dark;
+  /* how far the frame steps from the app's colour toward black: further on
+     the dark skins, whose colours sit close to black, and a small step on the
+     light ones (2.5%), where the quiet ink must still clear 4.5:1 on it */
+  --frame-shade: 30%;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -316,6 +320,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
   --code-color-scheme: light;
+  --frame-shade: 3%;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -460,6 +465,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
   --code-color-scheme: light;
+  --frame-shade: 4%;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -589,6 +595,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
   --code-color-scheme: light;
+  --frame-shade: 3.5%;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -712,6 +719,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #fcfcfc;           /* the thread */
   --color-panel: #f5f5f5;         /* sidebar, one step down from the thread */
   --color-raised: #e4e4e4;
@@ -782,6 +790,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #ffffff;           /* the thread */
   --color-panel: #f6f8f6;         /* sidebar */
   --color-raised: #e9eeea;
@@ -843,6 +852,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="pop"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #fdf5ea;           /* the page */
   --color-panel: #f6ebdb;         /* sidebar */
   --color-raised: #efe3d1;
@@ -949,61 +959,57 @@
   --identity-chrome: #B3BAC4;
 }
 
-/* Advanced mode keeps Midnight's and Daylight's brighter inks, firmer fields and raised menu rows. :where() holds
-   these at a skin block's specificity, so the phone and wide-gamut blocks below still win. */
-[data-skin="midnight"]:where(:root[data-interface="advanced"], :root[data-interface="advanced"] *) {
-  --color-raised-hover: #2e2e2e;
-  --color-composer-ring: #2e2e2e;
-  --color-inset: #171717;
-  --color-ink: #fcfcfc;
-  --color-ink-secondary: #fcfcfcbf;
-  --color-ink-tertiary: #fcfcfc90;
-  --color-bubble-user-ink: #fcfcfc;
-  --color-maus-line: #fcfcfc;
-  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
-  --color-menu-active: var(--color-raised);
-}
-[data-skin="daylight"]:where(:root[data-interface="advanced"], :root[data-interface="advanced"] *) {
-  --color-inset: #e6e6e6;
-  --color-control: #dedede;
-  --color-composer-ring: #e4e4e4;
-  --color-ink: #0d0d0d;
-  --color-ink-secondary: #444444;
-  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
-  --color-menu-active: var(--color-raised);
-}
-
-/* Simple mode: every popover and menu in the menu tone, flat in Midnight and on a soft lift in Daylight. A
-   popover's rim is its border, never a ring, so clearing box-shadow leaves the rim. */
-:root[data-interface="simple"] .popover-surface {
+/* Every popover and menu in the menu tone, flat in Midnight and on a soft lift in Daylight. A popover's rim is its
+   border, never a ring, so clearing box-shadow leaves the rim. */
+.popover-surface {
   background-color: var(--color-menu);
 }
-:root[data-interface="simple"][data-skin="midnight"] .popover-surface {
+:root[data-skin="midnight"] .popover-surface {
   box-shadow: none;
 }
-:root[data-interface="simple"][data-skin="daylight"] .popover-surface {
+:root[data-skin="daylight"] .popover-surface {
   box-shadow: 0 10px 20px -3px rgb(28 28 28 / 0.1), 0 4px 6px -4px rgb(28 28 28 / 0.1);
 }
 
-/* Simple mode's primary action in Midnight and Daylight is a neutral pill: white on dark, black on light. Unlayered,
-   so it wins over the accent fill a call site may still carry. */
-:root[data-interface="simple"]:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary {
+/* In Midnight and Daylight a primary action is a neutral pill: white on dark, black on light. Unlayered, so it wins
+   over the accent fill a call site may still carry. */
+:root:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary {
   border-color: transparent;
   background: var(--color-ink);
   color: var(--color-app);
 }
-:root[data-interface="simple"]:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary:not(:disabled):is(:hover, :active) {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary:not(:disabled):is(:hover, :active) {
   background: color-mix(in srgb, var(--color-ink) 88.5%, var(--color-app));
   color: var(--color-app);
   filter: none;
 }
-:root[data-interface="simple"]:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary:disabled {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary:disabled {
   opacity: 1;
   background: color-mix(in srgb, var(--color-ink) 13%, transparent);
   color: color-mix(in srgb, var(--color-ink) 30%, transparent);
 }
-:root[data-interface="simple"][data-skin="daylight"] .ui-button-primary:disabled {
+:root[data-skin="daylight"] .ui-button-primary:disabled {
   background: color-mix(in srgb, var(--color-ink) 15%, transparent);
+}
+
+/* A primary action that belongs to one bot wears that bot's flat bubble tone in every skin. Unlayered, like the
+   neutral pill above, so no utility repaints it. Its focus ring is the global one, 2px off the fill, so it reads on
+   any bot colour; a disabled one takes the same quiet colours as a disabled accent button. */
+.bot-button {
+  border-color: transparent;
+  background-color: var(--bot-button);
+  color: var(--bot-button-ink);
+}
+.bot-button:enabled:hover {
+  background-color: var(--bot-button-hover);
+}
+.bot-button:enabled:active {
+  background-color: var(--bot-button-pressed);
+}
+.bot-button:disabled {
+  background-color: var(--color-raised-hover);
+  color: var(--color-ink-secondary);
+  opacity: 1;
 }
 
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
@@ -1284,18 +1290,19 @@ body {
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
   }
-  /* One row of a popover menu: 36px, 14px, icon then label. */
+  /* One row of a popover menu: 30px, 14px, icon then label. */
   .ui-menu-row {
     display: flex;
     width: 100%;
     align-items: center;
-    gap: 0.75rem;
-    min-height: 2.25rem;
-    padding: 0.5rem 0.875rem;
+    gap: 0.5rem;
+    min-height: 30px;
+    padding: 0.375rem 0.5rem;
+    border-radius: 0.375rem;
     text-align: left;
     font-size: 14px;
     font-weight: 400;
-    line-height: 1.25rem;
+    line-height: 18px;
   }
   .ui-menu-row:enabled:hover { background: var(--color-menu-hover); }
   .ui-menu-row:disabled { opacity: 0.6; }
@@ -1313,20 +1320,20 @@ body {
     cursor: not-allowed;
     opacity: 0.45;
   }
-  /* Simple mode's secondary action in Midnight and Daylight: a faint ink wash with a hairline of ink. Layered, so a
+  /* A secondary action in Midnight and Daylight: a faint ink wash with a hairline of ink. Layered, so a
      call site's own fill (an ink pill, a danger outline) still wins. */
-  :root[data-interface="simple"][data-skin="midnight"] .ui-button {
+  :root[data-skin="midnight"] .ui-button {
     border-color: color-mix(in srgb, var(--color-ink) 10%, transparent);
     background: color-mix(in srgb, var(--color-ink) 4%, transparent);
   }
-  :root[data-interface="simple"][data-skin="midnight"] .ui-button:enabled:is(:hover, :active) {
+  :root[data-skin="midnight"] .ui-button:enabled:is(:hover, :active) {
     background: color-mix(in srgb, var(--color-ink) 8%, transparent);
   }
-  :root[data-interface="simple"][data-skin="daylight"] .ui-button {
+  :root[data-skin="daylight"] .ui-button {
     border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
     background: color-mix(in srgb, var(--color-ink) 6%, transparent);
   }
-  :root[data-interface="simple"][data-skin="daylight"] .ui-button:enabled:is(:hover, :active) {
+  :root[data-skin="daylight"] .ui-button:enabled:is(:hover, :active) {
     background: color-mix(in srgb, var(--color-ink) 10%, transparent);
   }
   /* A dialog for the first-run surfaces: the menu tone on a hairline of ink, lifted only in Daylight. */
@@ -1353,6 +1360,11 @@ body {
   }
   @container style(--code-color-scheme: dark) {
     .ui-scrim { background: rgb(0 0 0 / 0.7); }
+  }
+  /* A lighter dim, for a dialog about the app behind it, which should still show through as it changes. */
+  .ui-scrim-light { background: rgb(0 0 0 / 0.2); }
+  @container style(--code-color-scheme: dark) {
+    .ui-scrim-light { background: rgb(0 0 0 / 0.4); }
   }
   @media (prefers-reduced-motion: reduce) {
     .ui-button,
@@ -1447,36 +1459,36 @@ body {
   }
 }
 
-/* Simple Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the
-   page colour, with no shadow; every other skin keeps its glass. */
-[data-settings-look="simple"] {
+/* Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the page
+   colour, with no shadow; every other skin keeps its glass. */
+[data-settings-look] {
   --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
 }
-:root[data-skin="midnight"] [data-settings-look="simple"] {
+:root[data-skin="midnight"] [data-settings-look] {
   --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface {
   background: var(--color-app);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
   box-shadow: none;
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-rail {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-rail {
   background: transparent;
   border-right: 0.5px solid var(--settings-edge);
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface .bg-card {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface .bg-card {
   background-color: var(--color-menu);
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .bg-inset {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .bg-inset {
   background-color: transparent;
   border-color: var(--settings-edge);
 }
-:root[data-skin="midnight"] [data-settings-look="simple"] > .glass-scrim {
+:root[data-skin="midnight"] [data-settings-look] > .glass-scrim {
   background: rgb(0 0 0 / 0.7);
 }
-:root[data-skin="daylight"] [data-settings-look="simple"] > .glass-scrim {
+:root[data-skin="daylight"] [data-settings-look] > .glass-scrim {
   background: rgb(0 0 0 / 0.5);
 }
 @media (min-width: 768px) {
@@ -1541,6 +1553,52 @@ body {
   backdrop-filter: none;
   mask-image: none;
 }
+/* The colour of the place on screen (PlaceTint), faint, from the very top of the sidebar to just below its head, under
+   everything there: the head's words and controls stay on what is still almost the plain panel. Dark skins take a
+   little more of it to show at all. Reduced transparency: a thin solid line at the top instead; forced colours: none. */
+.place-tint {
+  height: calc(var(--glass-top, 48px) + 16px);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--place-tint) var(--place-tint-strength, 16%), transparent), transparent);
+}
+@container style(--code-color-scheme: dark) {
+  .place-tint { --place-tint-strength: 26%; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .place-tint { height: 3px; background: var(--place-tint); }
+}
+@media (forced-colors: active) {
+  .place-tint { display: none; }
+}
+/* The workspace's banner picture (PlaceTint), in place of its colour's tint: faded into the panel from the top of the
+   sidebar, dimmed and lightly blurred, so the head's words and controls stay readable over any picture. Without a
+   picture (or before it loads) the colour's tint shows; with reduced transparency or forced colours the picture never
+   does, and the tint's own rules apply. */
+.place-banner {
+  /* Its head's height and a little more, as the tint: the list's own fade band never cuts through it. */
+  height: calc(var(--glass-top, 48px) + 16px);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black, rgb(0 0 0 / 0.6) 60%, transparent);
+  mask-image: linear-gradient(to bottom, black, rgb(0 0 0 / 0.6) 60%, transparent);
+}
+.place-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--place-banner-strength, 0.3);
+  filter: blur(1.5px) saturate(0.85);
+  transform: scale(1.04);
+}
+@container style(--code-color-scheme: dark) {
+  .place-banner img { --place-banner-strength: 0.26; filter: blur(1.5px) saturate(0.85) brightness(0.8); }
+}
+.place-tint[data-under-banner] { display: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .place-banner { display: none; }
+  .place-tint[data-under-banner] { display: block; }
+}
+@media (forced-colors: active) {
+  .place-banner { display: none; }
+}
 /* The frame publishes its bars' heights. Rows rest clear of the glass,
    keyboard focus scrolls them clear, and the scrollbar runs only between the
    bars (a bar over it would swallow the drag). */
@@ -1590,8 +1648,8 @@ body {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
-/* Simple mode shows keyboard focus on a menu row as the row's hover fill. */
-:root[data-interface="simple"] [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
+/* A menu row shows keyboard focus as its hover fill. */
+[role="menu"] :is(button, [role^="menuitem"]):focus-visible {
   outline: none;
   background-color: var(--color-menu-hover);
 }
@@ -1898,7 +1956,46 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   from { opacity: 0; }
 }
 .turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
+.turn-now-toggle {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin: -4px -6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  text-align: start;
+  cursor: pointer;
+}
+.turn-now-toggle:hover, .turn-now-toggle[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+.turn-now-toggle:focus-visible {
+  outline: 1.5px solid var(--color-focus);
+  outline-offset: 1px;
+}
+.turn-now-chevron {
+  flex-shrink: 0;
+  color: var(--color-ink-tertiary);
+  transition: transform 160ms ease-out;
+}
+@keyframes turn-now-in {
+  from { opacity: 0; transform: translateY(-2px); }
+}
+.turn-now-card {
+  margin-top: 8px;
+  margin-inline-start: 44px;
+  width: min(560px, calc(100% - 44px));
+  border-radius: 14px;
+  background: var(--color-composer);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 10%, transparent);
+  padding: 10px 12px;
+  animation: turn-now-in 160ms ease-out both;
+}
 @media (prefers-reduced-motion: reduce) {
+  .turn-now-card { animation: none; }
+  .turn-now-chevron { transition: none; }
   .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
@@ -2812,7 +2909,10 @@ button:disabled.bg-danger {
    scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
    AA pairs hold here exactly as on desktop. */
 @media (max-width: 767.98px) {
+  /* The window's frame keeps the desktop ground at any width: the rail of places is a page 36px wide beside a full
+     page, and both draw the frame's top bar or rail in one colour. */
   :is([data-skin="midnight"]) {
+    --color-frame: color-mix(in oklab, #121212, black var(--frame-shade));
     --color-app: #141414;
     --color-panel: #1c1c1e;
     --color-raised: #2c2c2e;
@@ -2831,6 +2931,7 @@ button:disabled.bg-danger {
     --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
+    --color-frame: color-mix(in oklab, #ffffff, black var(--frame-shade));
     --color-app: #f6f8f6;
     --color-panel: #fcfdfc;
     --color-card: #ffffff;
@@ -2857,8 +2958,16 @@ button:disabled.bg-danger {
 [data-window-drag] :has(> :is(select, input)),
 [data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
 :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
-.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
+.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])),
+[data-browser-transport] {
   -webkit-app-region: no-drag;
+}
+
+/* Simple's sidebar in the window frame: Search and New sit in its top corner
+   (Sidebar's corner row), and the bot tiles rise beside them while their first
+   row leaves the corner free (SidebarTileGrid measures it). */
+[data-sidebar-top-row="corner"] + [data-sidebar-tiles][data-beside-corner] {
+  margin-top: -34px;
 }
 
 /* Room speaker names. Each skin sets a tone of the bot's palette that clears
@@ -2893,59 +3002,49 @@ button:disabled.bg-danger {
   color: var(--bubble-selection-ink, #ffffff);
 }
 
-/* The Cloud night shift scene: a night sky tinted by the skin's accent, an
-   evening sky in light skins. Only stars twinkle and the z's drift up; the
-   z's need transform-box to grow around their own centre instead of the
-   SVG's origin. */
-.cloud-scene {
-  --cloud-scene-sky-top: light-dark(color-mix(in oklab, var(--color-accent) 26%, #3d4598), color-mix(in oklab, var(--color-accent) 14%, #080d26));
-  --cloud-scene-sky-bottom: light-dark(color-mix(in oklab, var(--color-accent) 16%, #a49ae0), color-mix(in oklab, var(--color-accent) 20%, #262b68));
-  --cloud-scene-haze: light-dark(rgb(255 191 211 / 0.42), color-mix(in oklab, color-mix(in oklab, var(--color-accent) 35%, #8a6cf0) 42%, transparent));
-  --cloud-scene-glow: color-mix(in oklab, color-mix(in oklab, var(--color-accent) 70%, #ffffff) 40%, transparent);
-  --cloud-scene-rose: rgb(244 114 182 / 0.32);
-  --cloud-scene-cloud-top: #f4f3ff;
-  --cloud-scene-cloud-low: light-dark(color-mix(in oklab, var(--color-accent) 8%, #d6d3f6), color-mix(in oklab, var(--color-accent) 10%, #cdc4f2));
-  --cloud-scene-cloud-shade: light-dark(color-mix(in oklab, var(--color-accent) 10%, #b4aeea), color-mix(in oklab, var(--color-accent) 16%, #9fa3df));
-  --cloud-scene-mist: rgb(190 194 255 / 0.3);
-  --cloud-scene-hill-top: light-dark(color-mix(in oklab, var(--color-accent) 10%, #5a5fb0), color-mix(in oklab, var(--color-accent) 10%, #2b3170));
-  --cloud-scene-hill-bottom: light-dark(color-mix(in oklab, var(--color-accent) 8%, #3a3f8a), color-mix(in oklab, var(--color-accent) 8%, #141838));
-  --cloud-scene-rim: rgb(206 212 255 / 0.5);
-  --cloud-scene-star: #fff7dd;
-  --cloud-scene-lamp: #ffcf87;
-  --cloud-scene-bubble: rgb(176 186 255 / 0.34);
-  --cloud-scene-bubble-edge: rgb(255 255 255 / 0.9);
-  --cloud-scene-moon-glow: rgb(255 222 140 / 0.42);
-  --cloud-scene-ring: light-dark(color-mix(in oklab, var(--color-accent) 22%, transparent), rgb(255 255 255 / 0.08));
-  position: relative;
-  width: 100%;
-  overflow: hidden;
-  isolation: isolate;
-  border-radius: 16px;
-  color-scheme: var(--code-color-scheme);
-  background:
-    radial-gradient(70% 85% at 38% 110%, var(--cloud-scene-haze), transparent 72%),
-    radial-gradient(45% 70% at 4% 0%, var(--cloud-scene-glow), transparent 70%),
-    radial-gradient(40% 60% at 100% 100%, var(--cloud-scene-rose), transparent 72%),
-    linear-gradient(180deg, var(--cloud-scene-sky-top), var(--cloud-scene-sky-bottom));
-  box-shadow: inset 0 0 0 1px var(--cloud-scene-ring);
+/* MausBot Cloud's night: a deep night sky in the dark skins and an indigo dusk in the light ones. light-dark() picks by
+   the color-scheme of the element that paints it. One star twinkles, the z's drift and now and then a star shoots, each
+   slowly; the z's need transform-box to grow around their own centre. */
+:root {
+  --cloud-night-from: light-dark(#2c3274, #0e1230);
+  --cloud-night-mid: light-dark(#373b84, #151a45);
+  --cloud-night-to: light-dark(#7a68ae, #252c69);
+  --cloud-night-glow: light-dark(#f2a9c2, #6d5fd0);
+  --cloud-night-ink: #ffffff;
+  --cloud-night-ink-quiet: light-dark(#ffffffd6, #ffffffc4);
+  --cloud-night-star: light-dark(#ffffff, #fff7dd);
+  --cloud-night-laptop: light-dark(#eceef7, #c4c9de);
+  --cloud-night-laptop-edge: light-dark(#a9aecb, #7c84a8);
+  --cloud-night-z: light-dark(#ffffffe0, #dfe3ffcc);
+  --cloud-night-paper: light-dark(#f7eedb, #efe4c6);
+  --cloud-night-carve: light-dark(#d6c7a2, #c9bb95);
+  --cloud-night-far: light-dark(#5a4e9c, #1f2560);
+  --cloud-night-near: light-dark(#463f8c, #161b4b);
 }
-.cloud-scene-beat { border-radius: 12px; }
-.cloud-scene-stage { position: relative; margin-inline: auto; width: min(100%, 320px); aspect-ratio: 320 / 150; }
-.cloud-scene-beat .cloud-scene-stage { width: min(100%, 400px); aspect-ratio: 400 / 116; }
-.cloud-scene-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.cloud-scene-box { position: absolute; }
-.cloud-scene-box > span { display: flex; width: 100%; height: 100%; }
-.cloud-scene-box > span > svg { width: 100%; height: 100%; }
-.cloud-scene-twinkle { animation: cloud-scene-twinkle 6s ease-in-out infinite; }
-.cloud-scene-z { transform-box: fill-box; transform-origin: center; animation: cloud-scene-z 6s linear infinite; }
-.cloud-scene-z:nth-child(2) { animation-delay: -2s; }
-.cloud-scene-z:nth-child(3) { animation-delay: -4s; }
-.cloud-scene[data-paused] * { animation-play-state: paused; }
-@keyframes cloud-scene-twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-@keyframes cloud-scene-z {
-  0% { opacity: 0; transform: translate(0, 0) scale(0.5); }
+.cloud-night {
+  color-scheme: var(--code-color-scheme);
+  color: var(--cloud-night-ink);
+  background:
+    radial-gradient(55% 110% at 90% 115%, color-mix(in srgb, var(--cloud-night-glow) 20%, transparent), transparent 70%),
+    linear-gradient(100deg, var(--cloud-night-from) 0%, var(--cloud-night-mid) 55%, var(--cloud-night-to) 100%);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.08);
+}
+.cloud-night-twinkle { animation: cloud-night-twinkle 9s ease-in-out infinite; }
+.cloud-night-z { transform-box: fill-box; transform-origin: center; animation: cloud-night-z 7s linear infinite; }
+.cloud-night-z:nth-child(2) { animation-delay: -2.4s; }
+.cloud-night-z:nth-child(3) { animation-delay: -4.8s; }
+.cloud-night-shoot { opacity: 0; animation: cloud-night-shoot 19s ease-in infinite; }
+.cloud-night[data-paused] * { animation-play-state: paused; }
+@keyframes cloud-night-twinkle { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes cloud-night-z {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
   15%, 70% { opacity: 1; }
-  100% { opacity: 0; transform: translate(20px, -34px) scale(1.1); }
+  100% { opacity: 0; transform: translate(14px, -22px) scale(1.05); }
+}
+@keyframes cloud-night-shoot {
+  0%, 90% { opacity: 0; transform: translate(0, 0); }
+  92% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(120px, 36px); }
 }
 
 /* Trace waterfall: AI steps lavender, tools pale teal, errors red, each mixed into the skin's card so every skin keeps its contrast. */

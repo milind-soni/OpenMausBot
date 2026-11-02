@@ -17,6 +17,13 @@ test("a wire path is relative, slash-separated and NFC", () => {
   for (const bad of ["", "/a", "a//b", "a/./b", "../a", "a/..", "a\\b", "a\0b", "Café.txt", 7, null]) assert.equal(validWirePath(bad), false, String(bad));
 });
 
+test("wire paths reject unpaired surrogates and accept Unicode scalar values", () => {
+  for (const good of ["\ufffd.txt", "\ud83d\udcc4.txt", "docs/\ud83d\udcc4.txt"]) assert.equal(validWirePath(good), true, good);
+  for (const bad of ["\ud800.txt", "\ud801.txt", "\udbff.txt", "\udc00.txt", "\udfff.txt", "docs/\ud800.txt", "a\ud800", "\udc00\ud800.txt"]) {
+    assert.equal(validWirePath(bad), false, JSON.stringify(bad));
+  }
+});
+
 test("names a Windows PC cannot hold", () => {
   assert.equal(windowsProblem("a/b:c.txt"), "characters");
   assert.equal(windowsProblem("notes./x"), "trailing");

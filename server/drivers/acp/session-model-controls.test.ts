@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SessionModelControls } from "./session-model-controls.ts";
+import { pickSessionModel, SessionModelControls } from "./session-model-controls.ts";
 
 const thought = (value = "low") => ({ id: "thought_level", type: "select", category: "thought_level", currentValue: value,
   options: [{ value: "low", name: "Low" }, { value: "max", name: "Max" }] });
@@ -81,11 +81,52 @@ describe("ACP session model controls", () => {
     await expect(controls.select(request, "s", 100)).rejects.toThrow("did not switch to two");
   });
 
+  it("accepts an unset currentValue only for an id the driver names", async () => {
+    let state: any;
+    const modelOption = (currentValue?: string) => ({ configOptions: [{ id: "model", type: "select", ...(currentValue === undefined ? {} : { currentValue }),
+      options: [{ value: "auto", name: "Auto" }, { value: "one", name: "One" }] }] });
+    const controlsFor = (model: string) => new SessionModelControls({
+      selection: { configId: "model", unsetIds: ["auto"] }, variants: false, displayName: "GitHub Copilot",
+      model: () => model, reportedModel: () => model, state: () => state, store: (value) => { state = value; }, report: () => {},
+    });
+    const unset = modelOption();
+    controlsFor("auto").receive(modelOption("one"), true);
+    await expect(controlsFor("auto").select(async (_method, _params, _timeout, receive) => { receive?.(unset); return unset; }, "s", 100)).resolves.toBe("auto");
+    expect(controlsFor("auto").confirms("auto")).toBe(true);
+    expect(controlsFor("one").confirms("one")).toBe(false);
+    controlsFor("one").receive(modelOption("one"), true);
+    await expect(controlsFor("auto").select(async (_method, _params, _timeout, receive) => { receive?.(modelOption("one")); return modelOption("one"); }, "s", 100)).rejects.toThrow("did not switch to auto (still one)");
+    controlsFor("one").receive(modelOption(), true);
+    await expect(controlsFor("one").select(async () => ({}), "s", 100)).rejects.toThrow("did not switch to one (still unknown)");
+  });
+
   it("clears the previous native session's settings when a new session has none", () => {
     const { controls, state } = fixture();
     controls.receive(modern("two"), true);
     controls.receive({}, true);
     expect(controls.modelOf(state())).toBeNull();
     expect(() => controls.variant("low")).toThrow("does not advertise variant");
+  });
+});
+
+describe("picking the session model before the setter runs", () => {
+  const catalog = { default: "one", options: [{ id: "one", label: "One" }, { id: "two", label: "Two" }] };
+  const pick = (support: Parameters<typeof pickSessionModel>[0], model: string, session: any = { sessionConfigResult: modern("one") }) =>
+    pickSessionModel(support, { configId: "model", session, requested: { threadId: "t", text: "hi", model }, turn: { threadId: "t", text: "hi", model },
+      variant: undefined, reportedModel: model, catalog, launchedThisTurn: true });
+
+  it("maps a legacy pick onto the live catalog before the stale and fallback checks", () => {
+    const normalizeSessionSelection = vi.fn((turn, offered: readonly string[]) => offered.includes("two") ? { ...turn, model: "two", variant: "max" } : turn);
+    const picked = pick({ displayName: "Agent", normalizeSessionSelection, fallbackModel: () => "one" }, "two-max");
+    expect(normalizeSessionSelection).toHaveBeenCalledWith(expect.objectContaining({ model: "two-max" }), ["one", "two"]);
+    expect(picked).toMatchObject({ turn: { model: "two", variant: "max" }, variant: "max", reportedModel: "two-max", staleProcess: false, notice: null });
+  });
+
+  it("falls back to the driver's pick with one notice per session for a model the session no longer offers", () => {
+    const session = { sessionConfigResult: modern("one") };
+    const support = { displayName: "Agent", fallbackModel: () => "one" };
+    expect(pick(support, "retired", session)).toMatchObject({ turn: { model: "one" }, reportedModel: "one", notice: expect.stringContaining("no longer offers retired") });
+    expect(pick(support, "retired", session)).toMatchObject({ turn: { model: "one" }, notice: null });
+    expect(pick({ displayName: "Agent" }, "retired", session)).toMatchObject({ turn: { model: "retired" }, notice: null });
   });
 });

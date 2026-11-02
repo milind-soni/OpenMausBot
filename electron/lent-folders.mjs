@@ -3,7 +3,7 @@
 // computer sleeps. Nobody chooses anything: what fits is copied, the rest stays live only. Pure, apart from
 // `lendingForFiles`, main's handle on lending; cloud-sync.mjs carries the plan out.
 import { randomUUID } from "node:crypto";
-import { existingFolders } from "./cloud-lending-ipc.mjs";
+import { existingFolders } from "./computer-sharing.mjs";
 import { cloudReserveBytes } from "./cloud-sync-rules.mjs";
 
 /** A folder's path as its file system compares it: "/" between parts, no trailing one, and on Windows and macOS (whose
@@ -98,13 +98,16 @@ export function lendingForFiles({ environment, sharing, validate }) {
     return env ? { env, sharing: sharing() } : null;
   };
   const kept = (state) => ({ screen: state.screen === true, internet: state.internet === true, chrome: state.chrome === true, terminal: state.terminal === true });
+  /** What is lent now, the home folder keeping its editing (My Cloud is the person's own). */
+  const stillLent = (folders) => existingFolders(folders, (list) => validate(list, { homeEdits: true }));
   return {
     /** `{ lendingId, folders, protectedPaths }` while it lends, `{ off: true }` while it does not, null when unknown. */
     now() {
       const found = current();
       return found ? found.sharing.lentToCloud(found.env) : null;
     },
-    /** One more folder, read only, on top of what is lent; lending turns on with just it when it was off. The folder as lent. */
+    /** One more folder, read only, on top of what is lent; lending turns on with just it when it was off. The folder as
+     * lent, or null when it wasn't (a change of what is lent overtook it). */
     async lend(pcPath) {
       const found = current();
       if (!found) return null;
@@ -112,11 +115,11 @@ export function lendingForFiles({ environment, sharing, validate }) {
       const [folder] = await validate([{ id: randomUUID(), path: pcPath, write: false }]);
       if (!folder) return null;
       // A lent folder deleted since is left out, as lending itself does, so it never stops the rest.
-      const lent = state.enabled ? await existingFolders(state.folders, validate) : [];
+      const lent = state.enabled ? await stillLent(state.folders) : [];
       const already = lent.find((entry) => entry.path === folder.path);
       if (already) return already;
-      await found.sharing.saveCloud(found.env, { folders: [...lent, folder], ...(state.enabled ? kept(state) : {}) });
-      return folder;
+      const saved = await found.sharing.saveCloud(found.env, { folders: [...lent, folder], ...(state.enabled ? kept(state) : {}) });
+      return saved.folders.find((entry) => entry.path === folder.path) ?? null;
     },
     /** That folder is no longer lent; lending stops when it was all that was lent. */
     async unlend(folderId) {
@@ -124,7 +127,7 @@ export function lendingForFiles({ environment, sharing, validate }) {
       if (!found) return;
       const state = found.sharing.cloudState(found.env);
       if (!state.enabled || !state.folders.some((folder) => folder.id === folderId)) return;
-      const folders = await existingFolders(state.folders.filter((folder) => folder.id !== folderId), validate);
+      const folders = await stillLent(state.folders.filter((folder) => folder.id !== folderId));
       const rest = kept(state);
       if (!folders.length && !Object.values(rest).some(Boolean)) { found.sharing.revoke(found.env); return; }
       await found.sharing.saveCloud(found.env, { folders, ...rest });

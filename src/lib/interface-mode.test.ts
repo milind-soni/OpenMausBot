@@ -20,18 +20,13 @@ async function fresh() {
   return import("./interface-mode");
 }
 
-const root = { dataset: {} as Record<string, string> };
-
 beforeEach(() => {
   local = memoryStorage();
-  root.dataset = {};
   vi.stubGlobal("localStorage", local);
   vi.stubGlobal("window", new EventTarget());
-  vi.stubGlobal("document", { documentElement: root });
 });
 
 afterEach(() => {
-  vi.doUnmock("react");
   vi.unstubAllGlobals();
 });
 
@@ -66,46 +61,6 @@ describe("interface mode", () => {
     });
     setAdvancedMode(true);
     expect(readAdvancedMode()).toBe(true);
-  });
-
-  it("marks the page with the mode it boots in", async () => {
-    const simple = await fresh();
-    simple.settleAdvancedModeDefault();
-    simple.applyInterfaceMode();
-    expect(root.dataset.interface).toBe("simple");
-
-    root.dataset = {};
-    local.setItem(simple.ADVANCED_MODE_KEY, "1");
-    const advanced = await fresh();
-    advanced.settleAdvancedModeDefault();
-    advanced.applyInterfaceMode();
-    expect(root.dataset.interface).toBe("advanced");
-  });
-
-  it("moves the page mark when the mode is switched", async () => {
-    const { setAdvancedMode } = await fresh();
-    setAdvancedMode(true);
-    expect(root.dataset.interface).toBe("advanced");
-    setAdvancedMode(false);
-    expect(root.dataset.interface).toBe("simple");
-  });
-
-  it("marks the page once the app reads the mode, and moves the mark when another window switches it", async () => {
-    // Stands in for React subscribing a component, which is what attaches the storage listener.
-    vi.doMock("react", () => ({
-      useSyncExternalStore: (subscribe: (listener: () => void) => void, read: () => boolean) => {
-        subscribe(() => {});
-        return read();
-      },
-    }));
-    const { useAdvancedMode, setAdvancedMode, ADVANCED_MODE_KEY } = await fresh();
-    setAdvancedMode(false);
-    root.dataset = {};
-    expect(useAdvancedMode()).toBe(false);
-    expect(root.dataset.interface).toBe("simple");
-    local.setItem(ADVANCED_MODE_KEY, "1");
-    window.dispatchEvent(Object.assign(new Event("storage"), { key: ADVANCED_MODE_KEY, storageArea: local }));
-    expect(root.dataset.interface).toBe("advanced");
   });
 
   it("falls back to Simple when storage cannot be read at all", async () => {

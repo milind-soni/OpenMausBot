@@ -125,6 +125,8 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
     await api("POST", `/api/instances/${instanceId}/refresh-models`, {});
     const mcpScript = join(fixture.info.dataDir, "fixture-mcp.mjs");
     writeFileSync(mcpScript, MCP_FIXTURE);
+    // A server is started once to check it starts for the bots that use it; the starter bot uses none of these.
+    for (const starter of (await api("GET", "/api/bots")).bots) await api("PATCH", `/api/bots/${starter.id}`, { mcpServers: [] });
     for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "selected", "scope-empty", ...(instanceId === "openaiCompat" ? ["announced"] : []), "tools-off"]) {
       scenario = mode;
       const artifact = join(fixture.info.dataDir, `${mode}-artifact.txt`);

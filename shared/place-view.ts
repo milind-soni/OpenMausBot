@@ -127,7 +127,7 @@ export const PLACE_EN = {
   "place.view.ccSignIn.line": "Sign in to {engine} first. {bot} uses it on its cloud desktop too.",
   "place.view.ccSignIn.lineMyCloud": "Sign in to {engine} in the Cloud first. {bot} uses it on its cloud desktop too.",
   "place.view.ccNew.short": "Ready",
-  "place.view.ccNew.line": "{bot} gets its own cloud desktop the first time a task needs one. The first start takes about a minute.",
+  "place.view.ccNew.line": "{bot} gets its own cloud desktop from Boat the first time a task needs one. The first start takes about a minute.",
   "place.view.ccStarting.short": "Starting…",
   "place.view.ccStarting.line": "Starting {bot}'s cloud desktop. The first start takes about a minute.",
   "place.view.ccWaking.short": "Waking…",

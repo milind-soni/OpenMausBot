@@ -4,18 +4,19 @@ import type { NativeCardId } from "@/lib/native-apps";
 
 import { HighLevelCard } from "./HighLevelCard";
 import { McpServersPanel } from "./McpServersPanel";
+import { PostizCard } from "./PostizCard";
 import { XCard } from "./XCard";
 
 export function nativeAppTiles(props: {
   shown: Record<NativeCardId, boolean>;
-  inCategoryView: boolean;
   refreshKey: number;
   onWhopConnection: (connected: boolean) => void;
   onFamulorConnection: (connected: boolean) => void;
   onXConnection: (connected: boolean | null) => void;
   onHighLevelConnection: (connected: boolean | null) => void;
+  onPostizConnection: (connected: boolean | null) => void;
 }): ReactNode {
-  const visible = (id: NativeCardId) => props.shown[id] && !props.inCategoryView ? "contents" : "hidden";
+  const visible = (id: NativeCardId) => props.shown[id] ? "contents" : "hidden";
   return (
     <>
       <div className={visible("whop")}>
@@ -28,6 +29,7 @@ export function nativeAppTiles(props: {
       <div data-native-card="highlevel" className={visible("highlevel")}>
         <HighLevelCard refreshKey={props.refreshKey} onConnection={props.onHighLevelConnection} />
       </div>
+      <div data-native-card="postiz" className={visible("postiz")}><PostizCard refreshKey={props.refreshKey} onConnection={props.onPostizConnection} /></div>
     </>
   );
 }

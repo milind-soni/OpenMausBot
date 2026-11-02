@@ -69,7 +69,7 @@ export interface EngineHost {
   managedPolicyFiles: readonly string[];
 }
 
-const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
+const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
 
 /** Whether text may name the agents server: it contains `mcp__agents` (a server merely starting so counts
  * too) or `mcp__` then a wildcard. Security: plain substring tests; no pattern is ever built from config text. */

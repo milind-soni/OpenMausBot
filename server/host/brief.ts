@@ -185,7 +185,7 @@ export function createBrief(deps: BriefDeps) {
   /** The person's local midnight, to the minute. */
   const dayStart = (): number => {
     const zone = timeZone(), day = today();
-    let start = now();
+    let start = Math.floor(now() / MINUTE) * MINUTE;
     while (localDate(start - HOUR, zone) === day) start -= HOUR;
     while (localDate(start - MINUTE, zone) === day) start -= MINUTE;
     return start;

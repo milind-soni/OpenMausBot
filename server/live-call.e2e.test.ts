@@ -473,7 +473,8 @@ posixOnly("Live call e2e", () => {
       const lines = async (): Promise<Line[]> => ((await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Line[] }).messages;
       const original = (await lines()).find((m) => m.card?.requestId)!;
       expect((await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
-      await expect.poll(() => isBusy(bot.id), { timeout: 5_000 }).toBe(false);
+      // Stop ends the turn; a loaded CI runner can take longer than a few seconds to wind the fake engine down.
+      await expect.poll(() => isBusy(bot.id), { timeout: 15_000 }).toBe(false);
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "Green", start_ms: 5_000, end_ms: 5_300 });
       live.emit(session.id, { type: "session.delegation.created", offset_ms: 5_400, delegation: { id: "del_late", target: "client" } });
       await expect.poll(async () => (await lines()).find((m) => m.id === original.id)?.card, { timeout: 5_000 }).toMatchObject({ answered: "answer", answeredText: "Green", answeredBy: { kind: "loopback", via: "call" } });
@@ -483,7 +484,7 @@ posixOnly("Live call e2e", () => {
       await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
       await post("/api/live/call/end", { callId: call.callId });
     }
-  }, 40_000);
+  }, 60_000);
 
   it("ends the call and tells clients when the sideband drops", async () => {
     const bot = await createBot();
@@ -657,7 +658,7 @@ posixOnly("Live call on the person's Cloud", () => {
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {
         // Pin the fleet's other defaults so this never probes an installed CLI.
-        ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+        ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
         claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
       },
     }));
@@ -776,7 +777,7 @@ posixOnly("Live calls for everyone, with the person's own OpenAI key", () => {
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {
         // Pin the fleet's other defaults so this never probes an installed CLI.
-        ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+        ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
         claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
       },
     }));

@@ -33,9 +33,9 @@ function tabsOf(value: unknown): BrowserTab[] {
 }
 
 /**
- * A bot's browser: the page fills the panel, streamed over the v2 WebSocket when the new engine runs it, else over the
- * v1 live view. Security: a new connection never silently restores permission to type and never replays old input.
- * Only the server returns a hold, and only to this panel's reconnect after its own v1 stream dropped.
+ * A bot's browser: the page fills the panel on either engine, streamed over the v2 WebSocket when the new engine runs
+ * it, else over the v1 live view. Security: a new connection never replays old input. Only the server gives this view a
+ * hold: one of the same person's, when none of their views uses it or when they take it over here.
  */
 export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
@@ -115,7 +115,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     return createLiveStreamClient(bot.id, events, (body, viewerId) => api(withBrowserScope(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, scope), {
       // 120 s matches the server's browser requestTimeoutMs.
       method: "POST", body: JSON.stringify({ ...body, viewerId }), timeoutMs: 120_000,
-    }), resume.current, scope);
+    }), resume.current, scope, { width: target.width, height: target.height });
   }, [bot.id, bot.browserProfile, scopedThread, stream]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
@@ -137,6 +137,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const created = createBrowserControl({
       transport,
       owned: () => controlRef.current?.controller === "you",
+      mine: () => controlRef.current?.owned === true,
       onTakeStatus: setTakeStatus,
       onError: setError,
       onHalted: () => setError(t("browser.input.tooSlow")),
@@ -221,8 +222,17 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   }, []);
   const toggleFullscreen = () => {
     const leaving = Boolean(panel.current) && document.fullscreenElement === panel.current;
+    if (leaving && maximized) {
+      setMaximized(false);
+    }
     const request = leaving ? document.exitFullscreen() : panel.current?.requestFullscreen();
     void request?.catch(() => setError(leaving ? "Could not leave full screen. Press Esc instead." : "Full screen is unavailable in this browser."));
+  };
+  const toggleMaximize = () => {
+    if (fullscreen && document.fullscreenElement === panel.current) {
+      void document.exitFullscreen().catch(() => {});
+    }
+    setMaximized((value) => !value);
   };
   // The maximized panel swallows its Escape (defaultPrevented) so the same press cannot close a dialog beneath.
   // Capture: listeners registered before this panel must see the key already refused.
@@ -231,11 +241,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
+      if (fullscreen && document.fullscreenElement === panel.current) {
+        void document.exitFullscreen().catch(() => {});
+      }
       setMaximized(false);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [maximized]);
+  }, [maximized, fullscreen]);
 
   const restart = () => {
     if (!window.confirm(t("browser.panel.confirmRestart"))) return;
@@ -276,6 +289,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       connected={connected}
       control={control}
       takeStatus={takeStatus}
+      hint={t(kept || signInOpen ? "browser.control.keptHint" : "browser.control.yoursHint", { name: bot.name })}
       commandsReady={commandsReady}
       profileName={profileName}
       fullscreen={fullscreen}
@@ -289,7 +303,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       onTake={takeControl}
       onHandBack={handBack}
       onFullscreen={toggleFullscreen}
-      onMaximize={() => setMaximized((value) => !value)}
+      onMaximize={toggleMaximize}
       onProfiles={() => { browserControl.current?.handBack(); setShowProfiles(true); }}
       menu={<MoreMenu
         stream={stream}
@@ -317,7 +331,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
           ref={surface}
           connect={connect}
           input={interact}
-          followSize={stream}
           label={`${bot.name}’s browser page`}
           onClient={onClient}
           onControl={onControl}
@@ -375,7 +388,7 @@ export function BrowserPanel({ bot, signIn, page }: { bot: Bot; signIn?: Browser
   if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} page={page} />;
   return <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-3 rounded-xl bg-card p-5">
     <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? t("browser.panel.installIncomplete") : t("browser.panel.engineNotInstalled")}</div>
-    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : browserUnavailableReason(state.config)}</p>
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : engine?.installable && admin !== false ? t("browser.panel.engineNotInstalledHelp", { name: bot.name }) : browserUnavailableReason(state.config)}</p>
     {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? t("browser.panel.installing") : engine?.kind === "engine" ? t("browser.panel.retryInstall") : t("browser.panel.installEngine")}</button> : null}
     {(engine?.installError || error) && <p role="alert" className="text-[12px] text-danger">{error ?? engine?.installError}</p>}
   </div>;

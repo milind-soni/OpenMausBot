@@ -28,6 +28,7 @@ import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capabili
 import { onCallStartRequest } from "@/lib/call-start-request";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { MENU_SHEET } from "./menu-recipe";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 const CALL_ENDPOINT_MS = 850;
@@ -418,7 +419,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
         if (event.key === "Tab") onClose();
         else navigateThreadMenu(event);
       }}
-      className={cn("popover-surface animate-pop-in absolute right-0 z-30 w-[280px] rounded-xl border border-hairline bg-panel p-1.5 text-left shadow-2xl space-y-1", placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
+      className={cn("animate-pop-in absolute right-0 z-30 w-[280px] text-left", MENU_SHEET, placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
     >
       {CALL_MODES.map((entry) => {
         const unavailable = entry.id === "turns" ? turnsUnavailable : null;
@@ -434,12 +435,12 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
               if (!unavailable) onChoose(entry.id);
             }}
             className={cn(
-              "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none hover:bg-raised focus-visible:bg-raised aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
-              mode === entry.id && "bg-raised/60",
+              "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-menu-hover aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
+              mode === entry.id && "bg-menu-active",
             )}
           >
             <span className="min-w-0 flex-1">
-              <span className={cn("block text-[13px] font-medium", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
+              <span className={cn("block text-[14px] leading-[18px]", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
               <span className="mt-0.5 block text-[12px] leading-[1.4] text-ink-secondary">
                 {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome })}
               </span>

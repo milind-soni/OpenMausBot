@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Check, ListChecks } from "lucide-react";
+import { Check, ChevronDown, ListChecks } from "lucide-react";
 
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
+import { MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { APPROVAL_LEVELS_URL, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import {
@@ -90,9 +91,9 @@ export function ApprovalModeSelector({
         triggerRef.current?.focus();
         onManageCommandAllowlist();
       }}
-      className="flex items-center gap-3 border-t border-hairline/20 px-4 py-3 text-left text-[14px] text-ink hover:bg-raised-hover"
+      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink hover:bg-menu-hover"
     >
-      <ListChecks size={18} className="shrink-0 opacity-80" />
+      <ListChecks size={16} className="shrink-0 text-ink-secondary" />
       {t("commandAllowlist.title")}
     </button>
   );
@@ -120,7 +121,7 @@ export function ApprovalModeSelector({
         ) : (
           <CurrentIcon size={16} className="shrink-0 opacity-80" />
         )}
-        {wide && <span aria-hidden className="text-[11px] text-ink-secondary">⌄</span>}
+        {wide && <ChevronDown size={14} aria-hidden className="shrink-0 text-ink-secondary" />}
       </button>
 
       {motion.shown && (
@@ -129,14 +130,14 @@ export function ApprovalModeSelector({
           aria-label={t("approvalMode.menuAria", { provider: providerName })}
           {...motion.exitProps}
           className={cn(
-            "absolute z-40 w-[340px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl",
+            "absolute z-40 w-[340px] overflow-hidden", MENU_SHEET,
             menuDirection === "up" ? "bottom-full mb-2" : "top-full mt-2",
             align === "right" ? "right-0" : "left-0",
             wide && "w-full min-w-[340px]",
             motion.className,
           )}
         >
-          <div className="border-b border-hairline/20 px-4 py-3">
+          <div className="px-2 pb-1 pt-1.5">
             <div className="text-[14px] font-medium text-ink">
               {t("approvalMode.question", { provider: providerName })}
             </div>
@@ -149,7 +150,8 @@ export function ApprovalModeSelector({
               {t("approvalMode.learnMore")}
             </button>
           </div>
-          <div className="flex flex-col py-1.5">
+          <div role="separator" className={MENU_ITEM_SEPARATOR} />
+          <div className="flex flex-col gap-1">
             {visibleOptions.map((option) => {
               const selected = option.mode === mode;
               const Icon = option.Icon;
@@ -167,15 +169,15 @@ export function ApprovalModeSelector({
                       setOpen(false);
                     }}
                     className={cn(
-                      "flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover",
+                      "flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-menu-hover",
                       modesDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
                     )}
                   >
-                    <Icon size={18} className="mt-0.5 shrink-0 opacity-80" />
+                    <Icon size={16} className="mt-px shrink-0 text-ink-secondary" />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="flex items-center justify-between gap-3 text-[14px] text-ink">
                         {option.label}
-                        {selected && <Check size={15} className="shrink-0" />}
+                        {selected && <Check size={14} className="shrink-0" />}
                       </span>
                       <span className="text-[13px] leading-snug text-ink-secondary">
                         {option.description}
@@ -188,7 +190,7 @@ export function ApprovalModeSelector({
             })}
             {!visibleOptions.some((option) => option.mode === "full") && allowlistAction}
             {!trustedModesAvailable && (trustedModesNotice || driverKind === "codex" || requiresLocalDesktop) && (
-              <div className="border-t border-hairline/20 px-4 py-2.5 text-[12px] leading-snug text-ink-secondary">
+              <div className="px-2 py-1.5 text-[12px] leading-snug text-ink-tertiary">
                 {trustedModesNotice ?? t("approvalMode.customLocalOnlyDot")}
               </div>
             )}

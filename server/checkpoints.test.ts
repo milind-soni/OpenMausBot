@@ -279,6 +279,8 @@ describe("snapshot", () => {
     writeFileSync(join(cwd, "node_modules", "x.txt"), "installed dependency");
     writeFileSync(join(cwd, ".env"), "API_KEY=hunter2");
     writeFileSync(join(cwd, "run.log"), "log line");
+    mkdirSync(join(cwd, ".openmausbot-secrets", "thread-1"), { recursive: true });
+    writeFileSync(join(cwd, ".openmausbot-secrets", "thread-1", "card-1"), "sk_secret_file");
     const checkpoint = await snapshot(bot, cwd, "turn 1");
     expect(userGit(shadowOf(bot, cwd), "ls-tree", "-r", "--name-only", checkpoint!).trim().split("\n")).toEqual([".gitignore", "a.txt"]);
   });

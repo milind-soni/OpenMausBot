@@ -227,7 +227,7 @@ it.runIf(process.platform === "darwin")("on Auto, signs in in the bot's own brow
     const [turn] = evidence();
     expect(turn.system).toContain("Two surfaces are mounted");
     expect(turn.system).toContain("Web tasks → the built-in browser");
-    expect(turn.system).toContain("use, in this order: your built-in browser, a cloud computer if select_computer offers one, a connected app");
+    expect(turn.system).toContain("use, in this order: a connected app that does it, your built-in browser, a cloud computer if select_computer offers one");
     const [filled] = answered(0, "fill_login");
     expect(filled.isError).toBeFalsy();
     expect(filled.content[0].text).toBe(`Filled the username and the password for ${USERNAME} on example.com and submitted it; the page is now https://example.com/invoices (“Invoices”). Check you are signed in.`);

@@ -29,8 +29,8 @@ export interface AutomationLine {
   routineId: string;
   runId: string;
   name: string;
-  /** What started the run; "app" is a connected-app event. */
-  trigger: "schedule" | "manual" | "startup" | "webhook" | "app";
+  /** What started the run; "app" is a connected-app event, "wait" a wait's follow-up. */
+  trigger: "schedule" | "manual" | "startup" | "webhook" | "app" | "wait";
   executionThreadId: string;
   scheduledFor: number;
   /** The run needs the person: it asked them something or cannot go on without them. */

@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserRuntime } from "./browser-runtime.ts";
+import { HOLD_LIMITS } from "./browser/hold.ts";
 import { BrowserActionFailedError, BrowserLive, browserRestartRefusal, browserStreamPort, normalizeBrowserLiveMessage, parseBrowserLiveAction } from "./browser-live.ts";
 import type { Cdp, CdpListeners } from "./browser-sites.ts";
 
@@ -77,8 +78,10 @@ beforeEach(() => {
     watch: vi.fn(() => () => {}),
     onIdleClose: vi.fn(),
     settled: vi.fn(async () => {}),
+    working: vi.fn(() => true),
     launchReady: vi.fn(async () => {}),
     launched: vi.fn(async () => {}),
+    pageSizes: { resize: vi.fn(async () => {}) },
   } as unknown as BrowserRuntime;
   live = new BrowserLive({ runtime });
   SocketFixture.instances = [];
@@ -91,9 +94,9 @@ beforeEach(() => {
 });
 afterEach(() => { live.closeAll(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
-async function open({ botId = "bot-a", session = "profile-a", owner = "admin-a", current = () => true, resume }: { botId?: string; session?: string; owner?: string; current?: () => boolean; resume?: string } = {}) {
+async function open({ botId = "bot-a", session = "profile-a", owner = "admin-a", current = () => true, resume, size }: { botId?: string; session?: string; owner?: string; current?: () => boolean; resume?: string; size?: { width: number; height: number } } = {}) {
   const res = new ResponseFixture();
-  await live.open({ botId, session, owner, isCurrent: current, res: res as unknown as ServerResponse, ...(resume ? { resume } : {}),
+  await live.open({ botId, session, owner, isCurrent: current, res: res as unknown as ServerResponse, ...(resume ? { resume } : {}), ...(size ? { size } : {}),
     spec: { command: "/trusted/agent-browser", args: ["mcp", "--tools", "core"], env: { AGENT_BROWSER_SESSION: session, AGENT_BROWSER_SOCKET_DIR: "/isolated/socket" } } });
   return { res, socket: SocketFixture.instances.at(-1)!, action: (body: unknown) => live.action({ viewerId: res.id, botId, owner, body }) };
 }
@@ -120,10 +123,12 @@ describe("browser viewer protocol boundary", () => {
     expect(normalizeBrowserLiveMessage({ type: "tabs", tabs: [{ tabId: "t1", title: "Page", url: "https://user:secret@example.com/", active: true, targetId: "private" }] })).toEqual({ type: "tabs", tabs: [{ tabId: "t1", title: "Page", url: "https://example.com/", active: true }] });
     expect(normalizeBrowserLiveMessage({ type: "status", connected: true, engine: "private" })).not.toHaveProperty("engine");
   });
-  it("rejects corrupt, oversized and non-image frames", () => {
-    for (const patch of [{ seq: -1 }, { seq: 1.5 }, { data: "<script>" }, { data: "/9j/" + "A".repeat(3 * 1024 * 1024) }, { metadata: { deviceWidth: 100000, deviceHeight: 100000 } }]) {
+  it("rejects corrupt, oversized and non-image frames, and passes a busy page's frame at the largest size it sizes", () => {
+    for (const patch of [{ seq: -1 }, { seq: 1.5 }, { data: "<script>" }, { data: "/9j/" + "A".repeat(4 * 1024 * 1024) }, { metadata: { deviceWidth: 100000, deviceHeight: 100000 } }]) {
       expect(normalizeBrowserLiveMessage({ ...frame, ...patch })).toBeNull();
     }
+    // 2,768,256 characters: a 1280x2560 frame of a page of noise from agent-browser 0.37.0.
+    expect(normalizeBrowserLiveMessage({ ...frame, data: "/9j/" + "A".repeat(2_768_252), metadata: { ...frame.metadata, deviceWidth: 1280, deviceHeight: 2560 } })).toMatchObject({ type: "frame" });
   });
   it("requires a valid integer port from successful stream status, not a caller URL", () => {
     expect(browserStreamPort(ready)).toBe(43210);
@@ -319,40 +324,44 @@ describe("authenticated browser viewer relay", () => {
     await expect(reconnecting).rejects.toThrow("Reconnect to retry");
     expect(nativeClose).toHaveBeenCalledTimes(2);
   });
-  it("gives a headless browser it shows the standard page size, but never sizes an attached or headed one", async () => {
-    const view = (env: Record<string, string>, status = ready) => {
-      execute.mockReset().mockResolvedValueOnce(output(status)).mockResolvedValue(output({}));
-      const res = new ResponseFixture();
-      return live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse,
-        spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s", ...env } } });
-    };
-    await view({ AGENT_BROWSER_HEADLESS: "1" }, { ...ready, connected: false });
-    expect(execute.mock.calls.map((call) => call[1])).toEqual([
-      ["stream", "status", "--json", "--no-webmcp"], ["open", "--json", "--no-webmcp"], ["set", "viewport", "1280", "720", "--json", "--no-webmcp"],
-    ]);
-    expect(execute.mock.calls[2]?.[2]).toMatchObject({ timeout: 5_000 });
-    live.closeAll();
-    await view({ AGENT_BROWSER_HEADLESS: "1" });
-    expect(execute.mock.calls.map((call) => call[1].slice(0, 2))).toEqual([["stream", "status"], ["set", "viewport"]]);
-    live.closeAll();
-    await view({ AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_CDP: "http://127.0.0.1:9222" });
-    expect(execute.mock.calls.map((call) => call[1][0])).toEqual(["stream"]);
-    live.closeAll();
-    await view({});
-    expect(execute.mock.calls.map((call) => call[1][0])).toEqual(["stream"]);
+  it("has the page fill the panel of the view that asked last, once the bot's call ends, and the standard page when no view is left", async () => {
+    const resize = vi.mocked(runtime.pageSizes.resize);
+    const first = await open({ size: { width: 400, height: 750 } });
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 400, height: 750 }, true);
+    expect(execute.mock.calls.map((call) => call[1][0])).not.toContain("set");
+    const second = await open({ owner: "admin-b", size: { width: 900, height: 700 } });
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 900, height: 700 }, true);
+    expect(await first.action({ type: "resize", width: 380, height: 760 })).toEqual({ ok: true });
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 380, height: 760 }, false);
+    const calls = resize.mock.calls.length;
+    expect(await first.action({ type: "resize", width: 380, height: 40 })).toEqual({ ok: true });
+    expect(resize).toHaveBeenCalledTimes(calls);
+    await expect(first.action({ type: "resize", width: "wide", height: 760 })).rejects.toThrow("Invalid browser action.");
+    first.res.destroy();
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 900, height: 700 }, false);
+    second.res.destroy();
+    expect(resize).toHaveBeenLastCalledWith("profile-a", null, false);
   });
-  it("still opens the view when sizing the page fails or the session is busy again", async () => {
-    execute.mockReset().mockResolvedValueOnce(output(ready))
-      .mockRejectedValueOnce(Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL", code: null }));
-    const res = new ResponseFixture();
-    await live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse,
-      spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s", AGENT_BROWSER_HEADLESS: "1" } } });
+  it("leaves the page of the person holding the browser as it is when another view opens or resizes", async () => {
+    const resize = vi.mocked(runtime.pageSizes.resize);
+    const holder = await open({ size: { width: 1400, height: 900 } });
+    await holder.action({ type: "take" });
+    const other = await open({ owner: "admin-b", size: { width: 400, height: 750 } });
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 1400, height: 900 }, true);
+    await other.action({ type: "resize", width: 420, height: 800 });
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 1400, height: 900 }, true);
+    await holder.action({ type: "resize", width: 1500, height: 900 });
+    expect(resize).toHaveBeenLastCalledWith("profile-a", { width: 1500, height: 900 }, false);
+  });
+  it("still opens the view when sizing the page fails", async () => {
+    vi.mocked(runtime.pageSizes.resize).mockRejectedValue(new Error("engine without viewport"));
+    const { res } = await open({ size: { width: 400, height: 750 } });
     expect(res.id).toBeTruthy();
-    expect(res.events("waiting")).toHaveLength(0);
+    expect(res.events("ready")).toHaveLength(1);
   });
-  it("opens no stream socket when the viewer closes while the page is being sized", async () => {
+  it("opens no stream socket when the viewer closes while the browser is still starting", async () => {
     let finish!: (value: ReturnType<typeof output>) => void;
-    execute.mockReset().mockResolvedValueOnce(output(ready)).mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
+    execute.mockReset().mockResolvedValueOnce(output({ ...ready, connected: false })).mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
     const res = new ResponseFixture();
     const opening = live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse,
       spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s", AGENT_BROWSER_HEADLESS: "1" } } });
@@ -466,14 +475,15 @@ describe("authenticated browser viewer relay", () => {
   ])("refuses a batch with %s", (_name, events) => {
     expect(() => parseBrowserLiveAction({ type: "input_batch", events })).toThrow("Invalid browser action.");
   });
-  it("requires a viewer-specific human lease and releases only its own control on disconnect", async () => {
-    const a = await open(); const b = await open({ botId: "bot-b" });
+  it("requires the person's own human lease and releases only theirs on disconnect", async () => {
+    const a = await open(); const b = await open({ botId: "bot-b", owner: "admin-b" });
     await expect(a.action({ type: "navigate", url: "https://example.com" })).rejects.toThrow("Browser control changed");
     await a.action({ type: "take" });
     await expect(b.action({ type: "take" })).rejects.toThrow("Another window or device controls this browser. Hand control back there");
     await expect(b.action({ type: "back" })).rejects.toThrow("Another window or device controls this browser");
+    await b.action({ type: "release" });
     b.socket.close();
-    expect(held.get("profile-a")).toBe(a.res.id);
+    expect(held.get("profile-a")).toBe("admin-a");
     await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", text: "a" });
     expect(nativeInput.mock.calls[0]?.[0]).toBe("http://127.0.0.1:43210/api/command");
     expect(nativeInput.mock.calls[0]?.[1]).toMatchObject({ method: "POST", redirect: "error", headers: { Origin: "http://127.0.0.1:43210" } });
@@ -482,8 +492,8 @@ describe("authenticated browser viewer relay", () => {
     a.socket.close(); expect(held.has("profile-a")).toBe(false);
     expect(execute).toHaveBeenCalledTimes(2); // No close command: logins/browser survive viewers.
   });
-  it("withholds login frames/tabs/URLs from other views, advances their upstream ACK and restores the newest frame on release", async () => {
-    const a = await open(); const b = await open({ botId: "bot-b" });
+  it("withholds login frames/tabs/URLs from another person's views, advances their upstream ACK and restores the newest frame on release", async () => {
+    const a = await open(); const b = await open({ botId: "bot-b", owner: "admin-b" });
     await a.action({ type: "take" });
     a.socket.receive(frame); b.socket.receive(frame);
     b.socket.receive({ type: "url", url: "https://private.example/login" });
@@ -524,7 +534,8 @@ describe("authenticated browser viewer relay", () => {
     live.closeForBot("bot-a");
     expect(a.res.writableEnded).toBe(true);
     expect(b.res.writableEnded).toBe(false);
-    expect(held.get("profile-a")).toBe(b.res.id);
+    expect(held.get("profile-a")).toBe("admin-a");
+    expect(b.res.events("control").at(-1)).toEqual({ held: true, owned: true, controlling: true });
   });
   it("sends a typed password to the page only: never logged, echoed or sent to another view", async () => {
     const secret = "hunter2-correct-horse";
@@ -545,14 +556,14 @@ describe("authenticated browser viewer relay", () => {
     const a = await open(); const b = await open({ botId: "bot-b" });
     await a.action({ type: "take" });
     live.handBack("profile-b");
-    expect(held.get("profile-a")).toBe(a.res.id);
+    expect(held.get("profile-a")).toBe("admin-a");
     live.handBack("profile-a");
     expect(held.has("profile-a")).toBe(false);
     expect(a.res.events("control").at(-1)).toEqual({ held: false, owned: false, controlling: false });
     expect(b.res.events("control").at(-1)).toEqual({ held: false, owned: false, controlling: false });
     expect(a.res.writableEnded).toBe(false);
     await a.action({ type: "take" });
-    expect(held.get("profile-a")).toBe(a.res.id);
+    expect(held.get("profile-a")).toBe("admin-a");
   });
   it("inserts pasted text literally and preserves modifier shortcuts via native acknowledged actions", async () => {
     const a = await open(); await a.action({ type: "take" });
@@ -771,7 +782,7 @@ describe("authenticated browser viewer relay", () => {
     it("shows the page's question to the view holding the browser, not to another, and its answer lets the input it held through", async () => {
       const tools = devTools();
       live = new BrowserLive({ runtime, devTools: { url: tools.url, connect: tools.connect } });
-      const a = await open(); const b = await open({ botId: "bot-b" });
+      const a = await open(); const b = await open({ botId: "bot-b", owner: "admin-b" });
       expect(tools.connect).toHaveBeenCalledOnce();
       expect(tools.connect.mock.calls[0]![0]).toBe(URL);
       expect(tools.sent[0]).toMatchObject({ method: "Target.setAutoAttach", params: { autoAttach: true, flatten: true } });
@@ -914,13 +925,13 @@ describe("authenticated browser viewer relay", () => {
   });
   it("does not clear uncertain input or other owners when native restart fails", async () => {
     runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
-    const a = await open(); const b = await open({ botId: "bot-b" });
+    const a = await open(); const b = await open({ botId: "bot-b", owner: "admin-b" });
     await a.action({ type: "take" });
     await expect(b.action({ type: "restart" })).rejects.toThrow("could not restart");
     nativeClose.mockResolvedValueOnce(false);
     await expect(a.action({ type: "restart" })).rejects.toThrow("could not restart");
-    expect(runtime.heldBy("profile-a")).toBe(a.res.id);
-    expect(runtime.canControl("profile-a", a.res.id)).toBe(false);
+    expect(runtime.heldBy("profile-a")).toBe("admin-a");
+    expect(runtime.canControl("profile-a", "admin-a")).toBe(false);
     await expect(runtime.withAgentAction("profile-a", async () => true)).rejects.toThrow();
     await a.action({ type: "restart" });
     await expect(runtime.withAgentAction("profile-a", async () => true)).resolves.toBe(true);
@@ -946,6 +957,16 @@ describe("a person's view whose stream drops while they hold the browser", () =>
     await b.action({ type: "release" });
     await expect(botWorks()).resolves.toBe(true);
     expect(runtime.interrupted("profile-a")).toBe(false);
+  });
+
+  it("gives the hold to the same person's next view, which can hand it back, though it never named the view that dropped", async () => {
+    const phone = await open(); await phone.action({ type: "take" });
+    // The phone leaves the browser, or the app is closed: its stream ends.
+    phone.res.destroy();
+    const reopened = await open();
+    expect(reopened.res.events("control").at(-1)).toEqual({ held: true, owned: true, controlling: true });
+    await reopened.action({ type: "release" });
+    await expect(botWorks()).resolves.toBe(true);
   });
 
   it("lets go of a key and button it held in the page instead of asking for a restart", async () => {
@@ -1023,16 +1044,18 @@ describe("a person's view whose stream drops while they hold the browser", () =>
     await expect(botWorks()).resolves.toBe(true);
   });
 
-  it("gives the hold to no other view, and lets the same person take it back with an explicit take", async () => {
+  it("gives the hold to no other person, even one naming the view that dropped", async () => {
     const a = await open(); await a.action({ type: "take" });
     a.res.destroy();
     const stranger = await open({ owner: "other", resume: a.res.id });
     expect(stranger.res.events("control").at(-1)).toEqual({ held: true, owned: false, controlling: false });
     await expect(stranger.action({ type: "take" })).rejects.toThrow("Another window or device controls this browser");
+    await expect(stranger.action({ type: "release" })).resolves.toEqual({ ok: true });
+    await expect(botWorks()).rejects.toThrow("paused while a person controls");
     const reloaded = await open({ botId: "bot-a" });
-    expect(reloaded.res.events("control").at(-1)).toEqual({ held: true, owned: false, controlling: false });
+    expect(reloaded.res.events("control").at(-1)).toEqual({ held: true, owned: true, controlling: true });
     await expect(reloaded.action({ type: "take" })).resolves.toEqual({ ok: true, waited: false });
-    expect(runtime.canControl("profile-a", reloaded.res.id)).toBe(true);
+    expect(runtime.canControl("profile-a", "admin-a")).toBe(true);
   });
 
   it("does not keep a hold for a view closed on purpose: a revoked owner, a deleted profile, a changed session", async () => {
@@ -1048,6 +1071,68 @@ describe("a person's view whose stream drops while they hold the browser", () =>
     c.res.destroy();
     live.closeForSession("profile-a");
     await expect.poll(() => runtime.heldBy("profile-a")).toBeNull();
+  });
+});
+
+describe("one person's hold, across their views and devices", () => {
+  const bodies = () => nativeInput.mock.calls.map(([, init]) => JSON.parse(init.body));
+  const botWorks = () => runtime.withAgentAction("profile-a", async () => true);
+  const control = (view: { res: ResponseFixture }) => view.res.events("control").at(-1);
+  beforeEach(() => { runtime = new BrowserRuntime(); live = new BrowserLive({ runtime }); });
+
+  it("lets their other view see the hold, take it over and hand it back while the first is still open", async () => {
+    const phone = await open(); await phone.action({ type: "take" });
+    const laptop = await open({ botId: "bot-b" });
+    expect(control(laptop)).toEqual({ held: true, owned: true, controlling: false });
+    await expect(laptop.action({ type: "input_keyboard", eventType: "char", text: "x" })).rejects.toThrow("Browser control changed");
+    expect(await laptop.action({ type: "take" })).toEqual({ ok: true, waited: false });
+    expect(control(laptop)).toEqual({ held: true, owned: true, controlling: true });
+    expect(control(phone)).toEqual({ held: true, owned: true, controlling: false });
+    await expect(phone.action({ type: "input_keyboard", eventType: "char", text: "y" })).rejects.toThrow("Browser control changed");
+    await expect(botWorks()).rejects.toThrow("paused while a person controls");
+    await phone.action({ type: "release" });
+    expect(runtime.heldBy("profile-a")).toBeNull();
+    expect(control(laptop)).toEqual({ held: false, owned: false, controlling: false });
+    await expect(botWorks()).resolves.toBe(true);
+  });
+
+  it("lets go of what the view it was taken from pressed before the new one types", async () => {
+    const phone = await open(); await phone.action({ type: "take" });
+    await phone.action({ type: "input_keyboard", eventType: "keyDown", key: "Shift", code: "ShiftLeft", modifiers: 8 });
+    const laptop = await open({ botId: "bot-b" });
+    nativeInput.mockClear();
+    await laptop.action({ type: "take" });
+    await laptop.action({ type: "input_keyboard", eventType: "char", text: "a" });
+    expect(bodies()).toEqual([
+      { action: "input_keyboard", type: "keyUp", key: "Shift", code: "ShiftLeft" },
+      { action: "keyboard", subaction: "insertText", text: "a" },
+    ]);
+    expect(runtime.interrupted("profile-a")).toBe(false);
+  });
+
+  it("ends a hold its person stopped using, kept or not, while every key they type keeps it", async () => {
+    vi.useFakeTimers();
+    // A view the person left open, whose stream the server never sees end.
+    const phone = await open(); await phone.action({ type: "take" });
+    await vi.advanceTimersByTimeAsync(HOLD_LIMITS.idleMs - 10_000);
+    await phone.action({ type: "input_keyboard", eventType: "char", text: "still typing" });
+    await vi.advanceTimersByTimeAsync(HOLD_LIMITS.idleMs - 10_000);
+    expect(runtime.heldBy("profile-a")).toBe("admin-a");
+    await expect(botWorks()).rejects.toThrow("paused while a person controls");
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(runtime.heldBy("profile-a")).toBeNull();
+    expect(control(phone)).toEqual({ held: false, owned: false, controlling: false });
+    await expect(botWorks()).resolves.toBe(true);
+  });
+
+  it("still refuses another person, from any view", async () => {
+    const phone = await open(); await phone.action({ type: "take" });
+    phone.res.destroy();
+    const someoneElse = await open({ owner: "admin-b" });
+    expect(control(someoneElse)).toEqual({ held: true, owned: false, controlling: false });
+    await expect(someoneElse.action({ type: "take" })).rejects.toThrow("Another window or device controls this browser");
+    await someoneElse.action({ type: "release" });
+    await expect(botWorks()).rejects.toThrow("paused while a person controls");
   });
 });
 
@@ -1079,6 +1164,32 @@ describe("opening a view while the bot holds the browser", () => {
     expect(execute.mock.calls[0]?.[2]).toMatchObject({ timeout: 10_000, killSignal: "SIGKILL" });
   });
 
+  it("resets an engine that stops answering while nothing works in it, says so, and reconnects to a fresh session (#3728)", async () => {
+    vi.mocked(runtime.working).mockReturnValue(false);
+    execute.mockRejectedValueOnce(busy());
+    const { res, opening } = start();
+    await opening;
+    expect(res.events("waiting")).toHaveLength(0);
+    expect(res.events("error")).toEqual([{ retryable: true, message: expect.stringMatching(/browser stopped responding/) }]);
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+    expect(nativeClose).toHaveBeenCalledWith("/engine", expect.objectContaining({ AGENT_BROWSER_SESSION: "profile-a" }));
+    // The next view waits for that reset, then meets the fresh session.
+    const again = start();
+    await again.opening;
+    expect(again.res.events("ready")).toHaveLength(1);
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps waiting, and resets nothing, while a bot call still works in the browser", async () => {
+    vi.useFakeTimers();
+    execute.mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await opening;
+    expect(types(res).slice(0, 2)).toEqual(["waiting", "ready"]);
+    expect(nativeClose).not.toHaveBeenCalled();
+  });
+
   it("does not show a peer's control changes before it is ready", async () => {
     vi.useFakeTimers();
     const a = await open();
@@ -1089,7 +1200,8 @@ describe("opening a view while the bot holds the browser", () => {
     expect(res.events("control")).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1_000);
     await opening;
-    expect(res.events("control").at(-1)).toMatchObject({ held: true, owned: false });
+    // The same person's other view has their hold: this one watches it, and may take it over or hand it back.
+    expect(res.events("control").at(-1)).toEqual({ held: true, owned: true, controlling: false });
   });
 
   it("stops waiting, and stops asking the browser, when the viewer leaves", async () => {

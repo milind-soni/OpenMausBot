@@ -19,11 +19,12 @@ const view = (connector: Partial<NonNullable<Message["connector"]>>) => renderTo
 }));
 
 describe("ConnectorCard ask card", () => {
-  it("asks for the sign-in in the shared ask card, with the app as its accent title", () => {
+  it("asks for the sign-in in the shared ask card, the app its title in clear ink", () => {
     const html = view({});
     expect(html).toContain('data-ask-card="pending"');
     expect(html).toContain('data-tour="connector"');
-    expect(html).toContain("text-accent-text");
+    expect(html).toMatch(/font-medium leading-\[22px\] text-ink"><bdi dir="auto">/);
+    expect(html).not.toContain("text-accent-text\"><bdi");
     expect(html).toContain(t("connectors.card.connectSecurely"));
     expect(html).toContain(`aria-label="${t("connectors.card.notNow")}"`);
   });

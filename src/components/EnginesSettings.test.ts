@@ -6,7 +6,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { accountActions } from "./EngineAccounts";
 import { AntigravityFreeSpace, formatDiskSize } from "./AntigravityFreeSpace";
 
-const fixture = vi.hoisted(() => ({ instances: [] as InstanceInfo[], bots: [] as Bot[] }));
+const fixture = vi.hoisted(() => ({ instances: [] as InstanceInfo[], bots: [] as Bot[], config: undefined as Record<string, unknown> | undefined }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   useStore: () => ({ state: fixture, refreshInstances: async () => {}, refreshModels: async () => {} }),
@@ -231,7 +231,7 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
   });
 
-  it("keeps an API-key engine listed after its key is saved and links to changing the key", () => {
+  it("keeps an API-key engine listed after its key is saved, with the key masked and Replace beside it", () => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("navigator", { userAgent: "Linux" });
     fixture.bots = [];
@@ -242,25 +242,29 @@ describe("Settings → Engines → setup cards", () => {
     fixture.instances = [openai({ state: "unavailable", reason: "No API key" })];
     const before = renderToStaticMarkup(createElement(EnginesSettings));
     expect(before).toContain("OpenAI needs an API key");
-    expect(before).toContain("Open API keys");
-    expect(before).not.toContain("Change key");
+    expect(before).toContain('data-key-row="openai"');
+    expect(before).toContain('placeholder="sk-…"');
+    expect(before).not.toContain("data-key-replace");
 
     fixture.instances = [openai({ state: "available", authenticated: true, version: null })];
+    fixture.config = { openai: { configured: true, last4: "a1b2" } };
     const saved = renderToStaticMarkup(createElement(EnginesSettings));
     expect(saved).toContain('data-engine-card="openai"');
     expect(saved).toContain('data-engine-setup-api-key="configured"');
     expect(saved).toContain("OpenAI uses your API key");
-    expect(saved).toContain("Change key");
+    expect(saved).toContain("••••••••a1b2");
+    expect(saved).toContain("data-key-replace");
     expect(saved).not.toContain("OpenAI needs an API key");
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(remote).toContain("open Settings → API keys on the computer running OpenMausBot");
-    expect(remote).not.toContain("Change key");
+    expect(remote).toContain("open Settings → API keys on the computer running MausBot");
+    expect(remote).not.toContain("data-key-row");
 
     vi.stubGlobal("window", {});
     fixture.instances = [{ ...openai({ state: "available", authenticated: true, version: null }), managed: { organizationId: "org", organizationName: "Acme" } }];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Change key");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-key-row");
+    fixture.config = undefined;
   });
 });
 

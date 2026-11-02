@@ -2202,6 +2202,8 @@ describe("a value derived from config.json", () => {
     const derive = vi.fn(members);
     const read = cacheUntilConfigChanges(derive);
     read();
+    // Linux stamps ctime from a clock that ticks every 1 to 10 ms, so a chmod in the write's own tick keeps its ctime.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     // chmod and chown leave the size, the time and the file the same.
     chmodSync(path, 0o600);
     read();

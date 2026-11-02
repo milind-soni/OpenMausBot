@@ -103,6 +103,27 @@ describe("the bots' browser tools", () => {
     expect(text(unknown)).toContain("There is no browser tool named agent_browser_teleport.");
   });
 
+  it("says how a screenshot's pixels map to the CSS pixels a point takes, and refuses a point outside the viewport as it is now", async () => {
+    const { service, call, text, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/swap" });
+    expect(text(await call("agent_browser_screenshot"))).toContain("Screenshot of t1: \"Swap\" at https://example.com/swap, 1280x800 pixels, one per CSS pixel of the viewport");
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 800, maxHeight: 1500, size: { width: 400, height: 750 } }, (output) => {
+      if (output.type === "frame") output.ack();
+    });
+    await sleep(20);
+    expect(backend.chrome.viewport).toEqual({ width: 1280, height: 2400 });
+    expect(text(await call("agent_browser_screenshot"))).toContain("794x1488 pixels: the 1280x2400 CSS-pixel viewport drawn at 0.62, so divide x and y read off it by 0.62");
+    expect(text(await call("agent_browser_click", { x: 200, y: 2000 }))).toContain("Clicked 200,2000.");
+    await viewer.close();
+    await sleep(20);
+    const refused = await call("agent_browser_click", { x: 200, y: 2000 });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("200,2000 is outside the page's viewport, which is 1280x800 CSS pixels now. Take a new screenshot and aim inside it.");
+    expect((await call("agent_browser_hover", { x: 1280, y: 10 })).isError).toBe(true);
+    expect((await call("agent_browser_drag", { from: { x: 10, y: 10 }, to: { x: 10, y: 900 } })).isError).toBe(true);
+    expect((await call("agent_browser_click", { x: 1279, y: 799 })).isError).toBeUndefined();
+  });
+
   it("names a tab the page opened, which comes to the front", async () => {
     const { call, text, backend } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });
@@ -198,7 +219,7 @@ describe("a person and the bot sharing one browser", () => {
     await call("agent_browser_open", { url: "https://example.com/form" });
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
-    expect(service.heldBy("bot-a")).toBe(viewer.id);
+    expect(service.heldBy("bot-a")).toBe("local-owner");
     for (const name of ["agent_browser_status", "agent_browser_snapshot", "agent_browser_click", "agent_browser_eval", "agent_browser_dialog"]) {
       await expect(call(name, name === "agent_browser_click" ? { ref: "e2" } : name === "agent_browser_eval" ? { expression: "1" } : name === "agent_browser_dialog" ? { accept: true } : {})).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
     }
@@ -216,10 +237,10 @@ describe("a person and the bot sharing one browser", () => {
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     const taking = viewer.input({ type: "takeControl" });
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(service.heldBy("bot-a")).toBe(viewer.id);
-    expect(service.canControl("bot-a", viewer.id)).toBe(false);
+    expect(service.heldBy("bot-a")).toBe("local-owner");
+    expect(viewer.controlState().controlling).toBe(false);
     await taking;
-    expect(service.canControl("bot-a", viewer.id)).toBe(true);
+    expect(viewer.controlState().controlling).toBe(true);
     expect(service.interrupted("bot-a")).toBe(false);
     expect(String(await snapshot)).toContain(BROWSER_CONTROL_REFUSAL);
   });
@@ -232,7 +253,7 @@ describe("a person and the bot sharing one browser", () => {
     await sleep(20);
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
-    expect(service.canControl("bot-a", viewer.id)).toBe(true);
+    expect(viewer.controlState().controlling).toBe(true);
     expect(service.interrupted("bot-a")).toBe(true);
     await viewer.input({ type: "releaseControl" });
     expect(service.heldBy("bot-a")).toBeNull();

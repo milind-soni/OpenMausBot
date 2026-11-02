@@ -25,6 +25,93 @@ From 80% of a known window, the bot's 1:1 header shows the figure with a
 **Compact now** button that calls this route (hidden again once a compaction
 record is newer than the last reply).
 
+## Warm summaries: summarizing while the conversation is idle
+
+Both kinds of compaction above run when the next turn starts, on the person's
+time. On a Team trial every first answer slower than 35 s was Claude Code
+summarizing a conversation of about 162k tokens at the start of the person's
+turn (35 to 58 s, warm cache or not). A warm summary writes that summary in
+the idle gap after the turn before, while the prompt cache is still warm, so
+the next turn starts small.
+
+- **When:** a direct conversation (not a room or a routine's run) whose turn
+  ended with 100k tokens or more of context gets one about 3 minutes later. A
+  conversation at 80% or more of where Claude Code summarizes by itself
+  (`OMB_CLAUDE_AUTOCOMPACT`, 200,000 by default) gets one about 10 seconds
+  later, because its next turn would summarize anyway. For other engines,
+  OpenMausBot's own fold runs while idle once the conversation is at 85% of
+  the threshold its next turn would fold at.
+- **Claude Code:** `/compact` with instructions to keep the person's latest
+  requests and every open question (open question cards are named), on a
+  fork of the session (`--resume <session> --fork-session`) launched with
+  the live process's exact contract, as the keep-warm ping is. It therefore
+  reads the cached prompt start and keeps the conversation's tool list. No
+  tool can run in it, and the engine hooks never hear it. When it finishes,
+  the conversation moves to the fork: the old process is closed, and the
+  next turn resumes the fork.
+- **Word for word:** the person's last two messages and everything since
+  count as not yet seen by the new session. The next turn sends them on the
+  existing "not seen yet" path, which is saved with the conversation.
+- **Shown in the chat:** the line "summarized this conversation while it was
+  idle; the latest messages carry on word for word", in the language of the
+  conversation's person (`server.warmSummary.summarized`). OpenMausBot's fold
+  shows its usual summary note instead.
+- **A turn that starts meanwhile wins:** the summary is abandoned and nothing
+  changes. The exception is a turn that would summarize at its start anyway,
+  which waits (up to 3 minutes) for the summary already being written rather
+  than writing a second one.
+- **Skipped while work is due:**
+  - a message waiting in the queue;
+  - a teammate working on this conversation's request, or one whose answer
+    it awaits;
+  - a wait that fired and will carry on here;
+  - the workspace's spend limit reached.
+
+  It is retried, every 2 minutes for up to 50 minutes after the turn (the
+  cache's life), while the bot is busy, memory is short, or one of the bot's
+  routines is due.
+- **Opening the conversation:** the app's presence ping names the chat that
+  is open. That starts a summary the next turn needs right away, and keeps
+  the conversation's engine process alive for 10 minutes past the person's
+  last activity.
+- **Turning it off:** `context.autoCompact: false` turns warm summaries off
+  with the rest of automatic compaction; `OMB_WARM_SUMMARY=0` turns off only
+  warm summaries. The summary's model call is booked to the bot like a
+  keep-warm ping.
+
+```sh
+pnpm exec vitest run server/warm-summary.e2e.test.ts
+pnpm exec vitest run server/warm-summary.test.ts server/host/warm-summary-host.test.ts server/drivers/claude-warm-summary.test.ts server/thread-presence.test.ts server/routes/presence.test.ts
+```
+
+The fixture runs the real server with the fake Claude Code:
+
+- the conversation grows 20k tokens a turn from 110k;
+- Claude Code's own compaction fires at 162k and takes 6 s (standing in for
+  35 to 58 s);
+- warm summaries run at 1/100 of their delays (`OMB_WARM_SUMMARY_TIME_SCALE`).
+
+It proves:
+
+| Case | Time to the next reply |
+|---|---|
+| Off: the turn waits for the CLI's compaction | about 6.2 s |
+| On: the conversation was summarized while idle | about 0.3 s |
+| A message sent while the summary it needs is written | about 5.4 s (the rest of that summary, not a second one) |
+| A message sent during a summary it did not need | under 0.5 s; the fork is dropped |
+
+It also proves:
+
+- the summary ran on a persisted fork with `/compact`, and the next turn
+  resumed that fork;
+- the last two exchanges reached the engine word for word, and the first did
+  not.
+
+The times are kept in
+`<tmp>/openmausbot-verification-evidence/warm-summary-timings.jsonl`. No live
+model runs: whether a real Claude Code honours `--fork-session` for
+`/compact` in print mode is checked only by the fake.
+
 ## Rooms
 
 A room turn resumes no stored session: every turn re-sends the room's

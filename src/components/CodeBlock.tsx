@@ -188,7 +188,7 @@ export function CodePlate({ copied, onCopy, copyLabel, items }: {
             : <Copy size={14} aria-hidden="true" />}
       </button>
       {copied !== "idle" && <span role="status" className="sr-only">{copied === "failed" ? t("common.copyFailed") : t("code.copiedTitle")}</span>}
-      <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="below" compact triggerClassName="rounded-full" triggerTitle={t("chat.more")}
+      <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="below" triggerClassName="rounded-full" triggerTitle={t("chat.more")}
         renderTrigger={() => <span className={PLATE_BUTTON}><MoreHorizontal size={14} aria-hidden="true" /></span>} />
     </div>
   );

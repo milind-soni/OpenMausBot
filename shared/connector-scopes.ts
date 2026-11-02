@@ -71,6 +71,17 @@ export function connectorAccessDecision(scopes: ConnectorScopes | undefined, cal
   return { ok: true };
 }
 
+/** A bot whose scopes switch an app on gets that app's tools: every one, unless its tool list already names some. A tool
+ * list that leaves out an app its scopes turn on would give that app no tool on any engine. True when `bot` changed. */
+export function grantScopedApps(bot: { connectorScopes?: ConnectorScopes; connectorTools?: Record<string, { tools: "*" | string[] }> }): boolean {
+  const tools = bot.connectorTools, scopes = bot.connectorScopes;
+  if (!scopes || !tools || typeof tools !== "object" || Array.isArray(tools)) return false;
+  const missing = Object.keys(scopes.apps).filter((slug) => !Object.hasOwn(tools, slug));
+  if (!missing.length) return false;
+  bot.connectorTools = { ...tools, ...Object.fromEntries(missing.map((slug) => [slug, { tools: "*" as const }])) };
+  return true;
+}
+
 /** One sentence for the bot's prompt, so it does not spend a turn finding
  * out. Empty when the bot is unscoped. */
 export function describeConnectorScopes(scopes: ConnectorScopes | undefined): string {

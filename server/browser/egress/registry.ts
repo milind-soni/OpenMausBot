@@ -4,7 +4,6 @@ import type { Server } from "node:net";
 
 import { agentBrowserDevToolsPorts, agentBrowserStreamPorts } from "../../browser-engine.ts";
 import { sanitizePageText } from "../../browser-page-health.ts";
-import { useMyComputerLink } from "../../../shared/use-my-computer.ts";
 import { FLEET_FIRST_PORT, FLEET_PORT_STRIDE } from "../../fleet.ts";
 import { botEngineSessions } from "../../procs.ts";
 import { openGate, resolveTarget, type EgressGate, type GateTarget, type GateUpstream, type ResolvedAddress } from "./gate.ts";
@@ -105,7 +104,7 @@ interface Blocked { target: string; reason: Refusal }
 export const awayNotice = (device: string) => `The person's ${device} is away, so sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection for now and may refuse. They open through the ${device} again once it is back.`;
 
 /** What the bot reads once when those sites load from My Cloud's own connection because no computer shares one. */
-export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them they can share their computer's internet connection with My Cloud: ${useMyComputerLink("computer")} in OpenMausBot on that computer, and these sites then open through it while it is on.`;
+export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while OpenMausBot is open on it, signed in to MausBot Cloud.`;
 
 /** One gate per browser session for the life of the server, so a Chrome keeps the port it launched with. */
 export class BrowserEgress {

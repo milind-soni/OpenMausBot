@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, type CredentialBroker } from "./broker.ts";
+import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, upstreamUrl, type CredentialBroker } from "./broker.ts";
 
 const REAL_KEY = "sk-ant-real-key-0123456789abcdef";
 
@@ -119,5 +119,30 @@ linuxBox("the credential broker", () => {
   it("refuses a grant name it cannot put in a URL", async () => {
     await start();
     expect(() => broker.mintForProcess({ grants: { "../x": { upstream: "http://127.0.0.1:9", headers: {} } } })).toThrow(/grant name/);
+  });
+
+  it("forwards a request for the grant itself to the upstream exactly as given, and anything below it below the upstream", async () => {
+    const port = await start();
+    const headers = { authorization: `Bearer ${REAL_KEY}` };
+    const minted = broker.mintForThread({ threadId: "t1", grants: {
+      "mcp-hq": { upstream: `http://127.0.0.1:${port}/mcp?team=acme`, headers },
+      "mcp-slash": { upstream: `http://127.0.0.1:${port}/mcp/`, headers },
+    } });
+    for (const path of ["/mcp-hq", "/mcp-hq?session=1", "/mcp-hq/messages", "/mcp-slash", "/mcp-slash/"]) {
+      expect((await call(broker.socketPath, "POST", `/b/${minted.token}${path}`, {}, "{}")).status, path).toBe(200);
+    }
+    // A Cloudflare Worker serves /mcp and answers /mcp/ with 404: the server's own address is never given a slash.
+    expect(seen.map((request) => request.url)).toEqual(["/mcp?team=acme", "/mcp?team=acme&session=1", "/mcp/messages?team=acme", "/mcp/", "/mcp/"]);
+  });
+});
+
+describe("the upstream address", () => {
+  it("is the upstream as given for the grant itself, the client's path below it, and both queries", () => {
+    expect(upstreamUrl("https://hq.example/mcp", "", "")?.href).toBe("https://hq.example/mcp");
+    expect(upstreamUrl("https://hq.example/mcp/", "", "")?.href).toBe("https://hq.example/mcp/");
+    expect(upstreamUrl("https://api.example/v1/", "/messages", "?beta=1")?.href).toBe("https://api.example/v1/messages?beta=1");
+    expect(upstreamUrl("https://api.example", "/v1/messages", "")?.href).toBe("https://api.example/v1/messages");
+    expect(upstreamUrl("https://hq.example/mcp?key=abc", "", "?session=2")?.href).toBe("https://hq.example/mcp?key=abc&session=2");
+    expect(upstreamUrl("not a url", "", "")).toBeNull();
   });
 });

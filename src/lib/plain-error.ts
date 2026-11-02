@@ -15,7 +15,7 @@ const TECHNICAL: RegExp[] = [
   /\b(?:E(?:CONNRESET|CONNREFUSED|CONNABORTED|NOTFOUND|AI_AGAIN|TIMEDOUT|PIPE|ACCES|PERM|NOENT|ADDRINUSE|HOSTUNREACH|NETUNREACH)|ERR_[A-Z_]{3,})\b/,
   /^(?:[\w-]+ ){0,2}(?:API Error|HTTP|status(?: code)?)[:\s]+\d{3}\b/i,
   /Unexpected token .* in JSON|is not valid JSON|Unexpected end of JSON input/,
-  /^\S+ exited (?:with code )?-?\d+\b/,
+  /^\S+(?: \S+){0,2} exited (?:with code )?(?:-?\d+|null|SIG[A-Z0-9]+)\b/,
   /^[a-z]+(?:_[a-z0-9]+)+$/,
 ];
 

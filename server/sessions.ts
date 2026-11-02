@@ -590,11 +590,12 @@ export class SessionRegistry {
   }
 
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
-   * can open another. Returns how many sessions ended. */
-  revokeMember(email: string): number {
+   * can open another. With `keepRole` (the Admin vouched for them at that role), only those at another role end. Returns
+   * how many sessions ended. */
+  revokeMember(email: string, keepRole?: TeamRole): number {
     const address = email.trim().toLowerCase();
-    this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address);
-    const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address);
+    this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address || pairing.member.role === keepRole);
+    const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
     for (const session of ended) this.revoke(session.id);
     return ended.length;
   }

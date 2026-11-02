@@ -105,7 +105,7 @@ describe("owner tool selection status", () => {
 
   it("shows corrupt saved restrictions as a blocked setup, never all tools", () => {
     const corrupt = render(makeBot({ toolScope: { allow: "native:*" } } as unknown as Partial<Bot>));
-    expect(corrupt).toContain("Invalid saved selection. This bot cannot start until it is repaired.");
+    expect(corrupt).toContain("This bot&#x27;s saved tool selection is damaged, so the bot can&#x27;t start. Choose its tools again to fix it.");
     expect(corrupt).toContain('role="alert"');
   });
 
@@ -370,5 +370,19 @@ describe("AccessSection parts", () => {
     const folder = renderToStaticMarkup(createElement(StoreProvider, null, createElement(AccessSection, { bot: makeBot(), derived: makeDerived(), parts: ["folder"] })));
     expect(folder).toContain("Working folder");
     expect(folder).not.toContain("Let this bot use notes");
+  });
+});
+
+describe("working folder note", () => {
+  const folderCard = (bot: Bot) => renderToStaticMarkup(createElement(StoreProvider, null, createElement(AccessSection, { bot, derived: makeDerived(), parts: ["folder"] })));
+  const inFolder = (cwd: string | null, botCwd?: string) => makeBot({ ...(botCwd ? { cwd: botCwd } : {}), tasks: [{ threadId: "thread-1", cwd }] as unknown as Bot["tasks"] });
+
+  it("calls a thread pinned only to a folder chosen for it, or to an earlier working folder, never to its own folder", () => {
+    for (const own of ["/data/.openmausbot/task-workspaces/bot-1/thread-1", "C:\\Users\\Ada\\.openmausbot\\task-workspaces\\bot-1\\thread-1"]) {
+      expect(folderCard(inFolder(own, "/projects/site"))).not.toContain("This task is pinned");
+      expect(folderCard(inFolder(own))).not.toContain("This task is pinned");
+    }
+    expect(folderCard(inFolder("/projects/old", "/projects/site"))).toContain("This task is pinned to /projects/old.");
+    expect(folderCard(inFolder("/projects/site", "/projects/site"))).not.toContain("This task is pinned");
   });
 });

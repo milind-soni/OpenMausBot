@@ -5,12 +5,19 @@ export function windowBackground(prefersDark) {
   return prefersDark ? "#121212" : "#fcfcfc";
 }
 
-export function windowChromeOptions(platform) {
+/** macOS: where the traffic lights (14px) sit. In the frame's 28px top bar, 12px in, while the page beside the rail draws
+ * that frame (src/components/WindowFrameBar.tsx); where an older page made room for them otherwise. The window opens with
+ * them in the bar, and main moves them as each page says (chrome-rail.mjs). */
+export const TRAFFIC_LIGHTS = { framed: { x: 12, y: 7 }, unframed: { x: 16, y: 16 } };
+
+/** `frame`: the window draws its own frame (the person may turn it off): on macOS the traffic lights open where it puts
+ * them, and on Windows the app draws its caption buttons, or else the system's own title bar comes back. */
+export function windowChromeOptions(platform, frame = true) {
   if (platform === "darwin") {
-    return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } };
+    return { titleBarStyle: "hiddenInset", trafficLightPosition: frame ? TRAFFIC_LIGHTS.framed : TRAFFIC_LIGHTS.unframed };
   }
   if (platform === "win32") {
-    return { titleBarStyle: "hidden" };
+    return frame ? { titleBarStyle: "hidden" } : {};
   }
   return {};
 }

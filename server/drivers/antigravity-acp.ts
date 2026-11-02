@@ -10,6 +10,7 @@ import { killCliTree, spawnCli } from "../procs.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { acpVariantOption } from "./acp/config-options.ts";
 import {
   VERIFICATION_TEMP_KEY,
   antigravityTempDir,
@@ -525,7 +526,13 @@ export function catalogFromAntigravityConfigOptions(
   const options = modelOptions(model?.options);
   if (!options.length) return null;
   const current = typeof model?.currentValue === "string" ? model.currentValue : "";
-  return { default: options.some((option) => option.id === fallbackDefault) ? fallbackDefault : current || options[0]!.id, options };
+  const defaultModel = options.some((option) => option.id === fallbackDefault) ? fallbackDefault : current || options[0]!.id;
+  const selectedModel = current || defaultModel;
+  const variants = acpVariantOption({ configOptions })?.options;
+  return {
+    default: defaultModel,
+    options: options.map((option) => option.id === selectedModel && variants?.length ? { ...option, variants } : option),
+  };
 }
 
 export async function probeAntigravityModels(input: {

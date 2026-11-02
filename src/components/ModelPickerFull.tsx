@@ -142,12 +142,12 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
         aria-pressed={selected}
         title={`${label} · ${managedBy ?? engineStatus(target)}`}
         className={cn(
-          "relative flex size-9 shrink-0 items-center justify-center rounded-[8px]",
+          "group relative flex size-9 shrink-0 items-center justify-center rounded-[8px]",
           selected ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
           managedBy && "opacity-40",
         )}
       >
-        <InstanceProviderMark instance={target} size={18} />
+        <InstanceProviderMark instance={target} size={18} subtle={!selected} />
         {target.access === "api" && (
           <span data-rail-key-badge className="absolute bottom-0 left-0 flex size-3.5 items-center justify-center rounded-full bg-menu text-ink-secondary">
             <KeyRound size={9} aria-hidden="true" />

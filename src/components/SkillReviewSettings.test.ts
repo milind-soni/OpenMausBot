@@ -10,7 +10,7 @@ const render = (engines: string[]) => renderToStaticMarkup(createElement(SkillRe
 describe("SkillReviewEngineNote", () => {
   it("says plainly which engines' bots won't learn skills, under the switch", () => {
     const markup = render(["Pi", "Groq"]);
-    expect(markup).toContain("Bots on Pi, Groq won't learn skills this way: their engine can't run the background review.");
+    expect(markup).toContain("Bots on Pi, Groq won't learn skills this way: their AI can't run the background review.");
     expect(markup).toContain('data-testid="skill-review-engine-note"');
   });
 

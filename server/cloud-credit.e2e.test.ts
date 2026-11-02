@@ -120,10 +120,23 @@ beforeAll(async () => {
   // environment; the credit's engine never runs it.
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const home = ${JSON.stringify(home)};
+// Signing out in Settings runs \`claude auth logout\`.
+if (process.argv[2] === "auth" && process.argv[3] === "logout") {
+  rmSync(join(home, "signed-in"), { force: true });
+  process.stdout.write("Successfully logged out from your Anthropic account.\\n", () => process.exit(0));
+  await new Promise(() => {});
+}
+// Signed out, \`auth status\` exits 1, as Claude Code's does; a key leaked into its environment would still sign it in.
+if (process.argv[2] === "auth" && process.argv[3] === "status" && !existsSync(join(home, "signed-in")) && !process.env.ANTHROPIC_API_KEY) {
+  process.stdout.write(JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider: "firstParty" }) + "\\n", () => process.exit(1));
+  await new Promise(() => {});
+}
 process.env.FAKE_CLAUDE_AUTH = existsSync(join(home, "signed-in")) ? "in" : "inherited-api-key";
+// Signed out, a turn fails the way Claude Code's does.
+if (!existsSync(join(home, "signed-in"))) process.env.FAKE_CLAUDE_MODE = "not-logged-in";
 // Signed out, a one-shot call answers as the CLI does: the sign-in line, and a failure.
 const format = process.argv[process.argv.indexOf("--output-format") + 1];
 if (!existsSync(join(home, "signed-in")) && process.argv.includes("-p") && (format === "text" || format === "json")) {
@@ -138,7 +151,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   writeFileSync(join(data, "config.json"), JSON.stringify({
     instances: {
       // Pin the fleet's other defaults so this never probes an installed CLI.
-      ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
     },
   }));
@@ -274,19 +287,46 @@ describe("the free trial's Claude credit on a Cloud home", { timeout: 90_000 }, 
     expect((await named("From the desktop")).messages.filter((message) => message.tool?.name.startsWith("notice: Claude is connected"))).toHaveLength(1);
   });
 
-  it("signed out again, a bot's next message runs on the credit; used up, that chat says so once in plain words, and nothing more is sent", async () => {
-    rmSync(join(home, "signed-in"), { force: true });
-    rmSync(join(home, "own-turn.json"), { force: true });
-    expect((await api("POST", "/api/instances/claude/check", { body: {} })).body)
-      .toEqual({ ok: false, error: "Claude isn't signed in on this computer anymore. Sign in again, then check again." });
-    await expect.poll(async () => (await credit())?.snapshot.state, { timeout: 15_000 }).toBe("available");
+  it("signed out on purpose, every bot stays on the person's own Claude: the credit takes none, a message says to sign in, and the routine waits quietly", async () => {
     const copied = await named("From the desktop");
-    expect(answered(await turn("back on the credit?", copied))).toBe(true);
+    const created = await api("POST", "/api/routines", { body: { name: "Morning export", prompt: "Export the numbers.", botId: copied.id,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
+    expect(created.status, created.text).toBe(201);
+    rmSync(join(home, "own-turn.json"), { force: true });
+    // Signing out in Settings is the whole request: nothing moves onto the credit in it, or after.
+    const signedOut = await api("POST", "/api/instances/claude/auth/sign-out", { body: {} });
+    expect(signedOut.status, signedOut.text).toBe(200);
+    expect((signedOut.body.instances as Instance[]).find((instance) => instance.instanceId === "claude")?.snapshot.authenticated).toBe(false);
+    expect((await credit())?.snapshot.state).toBe("available");
+    for (const bot of await bots()) expect(bot.modelSelection.instanceId).toBe("claude");
+    // The routine is off and says why; the person's Chief has one quiet line about it, and nothing else is sent.
+    const routines = (await api("GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean; heldFor?: string }>;
+    expect(routines.find((routine) => routine.id === created.body.routine.id)).toMatchObject({ enabled: false, heldFor: "no_engine" });
+    const paused = (await bots()).flatMap((bot) => bot.messages).filter((message) => message.tool?.name.startsWith("notice: Your routines are paused"));
+    expect(paused).toHaveLength(1);
+    const sent = completions().length;
+    const failed = await turn("still there?", copied);
+    expect(answered(failed)).toBe(false);
+    expect(failed.modelSelection.instanceId).toBe("claude");
+    expect(completions()).toHaveLength(sent);
+    expect(moved()).toEqual({});
+  });
+
+  it("picked by hand, the credit still answers; used up, that chat says so once in plain words, and nothing more is sent", async () => {
+    const copied = await named("From the desktop");
+    const others = (await bots()).filter((bot) => bot.id !== copied.id);
+    for (const bot of [copied, others[0]!]) {
+      const picked = await api("PATCH", `/api/bots/${bot.id}`, { body: { modelSelection: SONNET } });
+      expect(picked.status, picked.text).toBe(200);
+    }
+    expect(answered(await turn("on the credit now?", copied))).toBe(true);
     expect((await named("From the desktop")).modelSelection).toEqual(SONNET);
-    expect(() => readFileSync(join(home, "own-turn.json"), "utf8")).toThrow();
+    expect(completions().at(-1)!.model).toBe("claude-sonnet-5");
+    // Claude Code never ran this turn (bots still on the signed-out Claude may start their own work meanwhile).
+    expect((() => { try { return readFileSync(join(home, "own-turn.json"), "utf8"); } catch { return ""; } })()).not.toContain("on the credit now?");
     usedUp = true;
     const failed = await turn("one more", copied);
-    const refusals = failed.messages.filter((message) => message.tool?.name.startsWith("error:"));
+    const refusals = failed.messages.slice(failed.messages.findLastIndex((message) => message.role === "user")).filter((message) => message.tool?.name.startsWith("error:"));
     expect(refusals).toHaveLength(1);
     expect(refusals[0]!.tool).toMatchObject({ name: `error: ${TRIAL_CREDIT_REFUSED.used_up}`, setup: true });
     const transcript = (await api("GET", "/api/bots?messages=50")).text;

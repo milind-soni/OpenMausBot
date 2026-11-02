@@ -335,7 +335,7 @@ export class CdpPage implements ActionContext, WaitContext {
         height: Math.max(1, Math.max(...ys) - Math.min(...ys)),
       };
     }
-    return captureScreenshot(this.session, await this.devicePixelRatio(), { ...options, ...(clip ? { clip } : {}) });
+    return captureScreenshot(this.session, (await this.devicePixelRatio()) * (this.#emulated?.zoom ?? 1), { ...options, ...(clip ? { clip } : {}) });
   }
 
   async evaluate(expression: string, options: EvaluateOptions = {}): Promise<unknown> {

@@ -13,7 +13,7 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("@/state/store", async (importOriginal) => ({ ...await importOriginal<typeof import("@/state/store")>(), api: fixture.api, useStore: () => ({ state: fixture.state }) }));
 vi.mock("./BrowserProfilesManager", () => ({ BrowserProfilesManager: () => null }));
-const { LiveBrowser } = await import("./BrowserPanel");
+const { BrowserPanel, LiveBrowser } = await import("./BrowserPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -115,11 +115,11 @@ describe("the browser panel's connection", () => {
     expect(host.querySelector("[data-browser-transport]")!.getAttribute("data-browser-transport")).toBe("stream");
   });
 
-  it("uses the v1 live view on agent-browser, and when the stream is refused before it opens", async () => {
+  it("uses the v1 live view on agent-browser, sized to the panel, and when the stream is refused before it opens", async () => {
     fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
     await render();
     expect(FakeSocket.instances).toHaveLength(0);
-    expect(FixtureEventSource.instances[0]!.url).toBe("/api/bots/pepper/browser/live");
+    expect(FixtureEventSource.instances[0]!.url).toBe("/api/bots/pepper/browser/live?width=1600&height=1000");
     act(() => root.unmount());
     root = createRoot(host);
     fixture.state.config.browserEngine = { kind: "engine", engine: "chrome" };
@@ -216,7 +216,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(host.textContent).toContain("Browser disconnected");
     await act(async () => button("Reconnect").click());
     await flush();
-    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&width=1600&height=1000");
     await emit("ready", { viewerId: "new-viewer" });
     expect(host.textContent).not.toContain("Browser disconnected");
   });
@@ -251,7 +251,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(host.textContent).toContain("Browser disconnected");
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     expect(FixtureEventSource.instances).toHaveLength(7);
-    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&width=1600&height=1000");
     await emit("ready", { viewerId: "back-viewer" });
     expect(host.textContent).not.toContain("Browser disconnected");
   });
@@ -271,6 +271,29 @@ describe("who holds the browser", () => {
     await act(async () => pill().click());
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "releaseControl" });
+  });
+
+  it("says what keeping the browser means while the person has it", async () => {
+    const socket = await streaming("agent");
+    await act(async () => pill().click());
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(pill().title).toBe(t("browser.control.keptHint", { name: "Pepper" }));
+    expect(pill().title).toContain("5 minutes");
+  });
+
+  it("shows the person their hold from another of their views, and hands it back from here", async () => {
+    const socket = await streaming("agent");
+    await act(async () => socket.control("agent", { owned: true }));
+    await flush();
+    expect(pill().dataset.pill).toBe("held");
+    expect(pill().textContent).toContain("Pepper is paused for you");
+    expect(pill().textContent).toContain(t("browser.control.handBack"));
+    expect(pill().disabled).toBe(false);
+    expect(host.textContent).not.toContain(BROWSER_HELD_ELSEWHERE);
+    await act(async () => pill().click());
+    await flush();
+    expect(socket.sent).toEqual([{ type: "releaseControl" }]);
   });
 
   it("takes the browser on the first click and then sends that click, once", async () => {
@@ -455,5 +478,27 @@ describe("a sign-in that stops at a passkey", () => {
     const again = await streaming("you");
     await go(again, PASSKEY);
     expect(notice()?.textContent).toContain(t("browser.passkey.lendPc", { name: "Pepper" }));
+  });
+});
+
+describe("the browser panel before the browser is installed", () => {
+  async function renderUninstalled(scopes: string[]) {
+    fixture.state = { config: { browserProfiles: [], browserEngine: { kind: "unavailable", installable: true } }, computerControl: {} };
+    fixture.api.mockImplementation(async (path: string) => path === "/api/auth/session" ? { scopes } : { ok: true });
+    await act(async () => root.render(createElement(BrowserPanel, { bot })));
+    await flush();
+  }
+
+  it("offers the install here instead of sending an admin to the panel they are on", async () => {
+    await renderUninstalled(["admin"]);
+    expect(host.textContent).toContain(t("browser.panel.engineNotInstalledHelp", { name: "Pepper" }));
+    expect(host.textContent).not.toContain(t("browser.notInstalled"));
+    expect(button(t("browser.panel.installEngine")).disabled).toBe(false);
+  });
+
+  it("keeps the setup steps for someone who cannot install", async () => {
+    await renderUninstalled([]);
+    expect(host.textContent).toContain(t("browser.notInstalled"));
+    expect(button(t("browser.panel.installEngine")).disabled).toBe(true);
   });
 });

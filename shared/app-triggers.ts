@@ -93,7 +93,7 @@ export interface AppTriggersSnapshot {
   service: AppTriggerService;
 }
 
-/** One event type a connected app offers, as the picker and `list_trigger_events` show it. */
+/** One event type a connected app offers, as the picker and `trigger_info` events show it. */
 export interface AppEventType {
   event: string;
   name: string;

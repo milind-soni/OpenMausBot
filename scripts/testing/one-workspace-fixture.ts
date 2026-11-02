@@ -389,12 +389,11 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     "workspaces:menu": () => null,
     "workspaces:line": () => homePlaces.line(),
     "desktop-notices:state": () => ({ seen: [...NOTICES], cloud: false }),
-    "desktop-notices:seen": () => null, "desktop-notices:shown": () => false,
+    "desktop-notices:seen": () => null,
     "cloud-plan:state": () => ({ status: "paid", tier: "pro", home: true }),
     "cloud-send:notice": () => ({ ready: false, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null, whole: null }),
     "update:get-state": () => ({ status: "idle" }),
     "perm:status": () => ({ mic: "unsupported", pageMic: "refused" }),
-    "cloud-lending:state": () => null,
   };
 
   // Chrome, its two tabs' worth of windows.

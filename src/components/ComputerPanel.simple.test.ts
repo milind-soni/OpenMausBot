@@ -22,7 +22,7 @@ const fixture = vi.hoisted(() => {
     index: 0,
     own: 0,
     seed: {} as Record<string, unknown>,
-    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean } },
+    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean; last4?: string } },
     instances: [] as InstanceInfo[],
     android: false,
     dispatch: (() => {}) as (...args: unknown[]) => void,
@@ -104,7 +104,7 @@ const { ComputerPanel } = await import("./ComputerPanel");
 const { ComputerFilesPane } = await import("./ComputerFilesPane");
 const { CloudBackendPicker } = await import("./CloudBackendPicker");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
-const { ApiKeyRow } = await import("./ApiKeys");
+const { KeyRow } = await import("./keys/KeyRow");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -430,8 +430,23 @@ describe("Where the bot works", () => {
   it("saves a Boat key pasted into the panel as one from the Computer panel", () => {
     fixture.config = { ...fixture.config, box: { configured: false } };
     fixture.seed = { phase: "unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" } };
-    const rows = render(makeBot({ computer: "cloud" })).nodes.filter((node) => node.type === ApiKeyRow);
-    expect(rows.map((node) => ({ section: node.props.section, via: node.props.via }))).toEqual([{ section: "box", via: "computer_panel" }]);
+    const rows = render(makeBot({ computer: "cloud" })).nodes.filter((node) => node.type === KeyRow);
+    expect(rows.map((node) => ({ id: node.props.id, via: node.props.via }))).toEqual([{ id: "box", via: "computer_panel" }]);
+  });
+
+  it("keeps a Boat key saved in the panel in view, masked and connected, after the panel moves on", () => {
+    fixture.config = { ...fixture.config, box: { configured: false } };
+    fixture.seed = { phase: "unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" } };
+    const before = render(makeBot({ computer: "cloud" }));
+    const saved = before.nodes.find((node) => node.type === KeyRow)!.props.onSaved as (configured: boolean) => void;
+    saved(true);
+    fixture.values[phaseIndex] = "checking";
+    fixture.config = { ...fixture.config, box: { configured: true, last4: "c3d4" } };
+    const after = render(makeBot({ computer: "cloud" }));
+    expect(after.nodes.filter((node) => node.type === KeyRow).map((node) => node.props.id)).toEqual(["box"]);
+    expect(after.html).toContain("••••••••c3d4");
+    expect(after.html).toContain(">Connected<");
+    expect(after.html).toContain("data-key-replace");
   });
 
   it("dispatches exactly what the Advanced picker dispatches for each place", () => {

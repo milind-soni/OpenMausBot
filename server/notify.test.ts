@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { conversationLanguage, setConversationLanguage } from "./server-lines.ts";
+import "./server-line-packs.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
@@ -77,6 +79,11 @@ describe("buildNotification", () => {
 
     expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
   });
+  it("titles a finished wait and keeps its line as the body", () => {
+    expect(buildNotification("wait", { id: "b", name: "Pepper" }, "t", "the build: done. ci passed.")).toEqual({
+      kind: "wait", botId: "b", botName: "Pepper", threadId: "t", title: "Pepper's wait is over", body: "the build: done. ci passed.",
+    });
+  });
 });
 
 describe("sign-in requests", () => {
@@ -118,5 +125,21 @@ describe("buildSpendNotification", () => {
       kind: "spend", botId: "bot-1", botName: "Scout", threadId: "thread-9",
       title: "Monthly spend limit reached", body: "$100.00 of $100.00 spent this month (2026-09).",
     });
+  });
+});
+
+describe("a notification's title", () => {
+  afterEach(() => setConversationLanguage(() => undefined));
+
+  it("is in the language of the conversation's person", () => {
+    setConversationLanguage((threadId) => (threadId === "beaver-main" ? "de" : undefined));
+    const bot = { id: "beaver", name: "Biber", threadId: "beaver-main" };
+    expect(conversationLanguage("beaver-main")).toBe("de");
+    expect(buildNotification("routine-failed", bot, "beaver-main", "Nightly report: signed out")?.title).toBe("Routine von Biber ist fehlgeschlagen");
+    expect(buildNotification("question", bot, "beaver-main", "Send it?", { group: { id: "launch", name: "Launch" } })?.title).toBe("Biber in Launch hat eine Frage");
+    expect(buildNotification("sign-in", bot, "beaver-main", "", { site: "github.com" })?.title).toBe("Biber braucht deine Anmeldung bei github.com");
+    expect(buildNotification("sign-in", bot, "beaver-main", "")?.title).toBe("Biber braucht deine Anmeldung bei einer Website");
+    expect(buildNotification("done", bot, "beaver-main", "Done.")?.title).toBe("Biber ist fertig");
+    expect(buildNotification("routine-failed", bot, "other", "x")?.title).toBe("Biber's routine failed");
   });
 });

@@ -1,7 +1,10 @@
 // cua-driver 0.28.2 refuses browser_prepare's existing_profile strategy in standard mode unless its daemon was launched with
 // --grant existing-profile or an authorization host, and its embedded host (SDK through 0.37.0) takes neither. The refusal
 // names only those two, so a bot relays them to the person, who has no way to act on either.
+import { typeOneCharacterAtATime, typesInOneBurst } from "../electron/paced-typing.mjs";
 import { describeComputerCall } from "../shared/your-computer.ts";
+import type { ChildCalls, ToolCall } from "./mcp-bridge.ts";
+import { CLICK_TOOLS, unconfirmedClickResult } from "./unconfirmed-click.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -44,4 +47,17 @@ export function localComputerResultLine(line: string): string {
 export function localComputerCallQuery(frame: unknown): Record<string, string> {
   const { app, site } = describeComputerCall(frame);
   return { ...(app ? { app } : {}), ...(site ? { site } : {}) };
+}
+
+/** The calls this computer's driver gets in a form of its own. Only on Windows: there foreground text is typed one
+ * character at a time, and a click whose after-check failed is answered as the sent click it was. */
+export function localComputerRelay(platform: string) {
+  return (call: ToolCall, child: ChildCalls): Promise<unknown> | null => {
+    if (platform !== "win32") return null;
+    if (typesInOneBurst(platform, child.driverVersion, call.name, call.arguments)) {
+      return typeOneCharacterAtATime(child.call, call.arguments as ToolCall["arguments"] & { text: string });
+    }
+    if (!CLICK_TOOLS.has(call.name)) return null;
+    return child.call(call.name, call.arguments).then((result) => unconfirmedClickResult(result) ?? result);
+  };
 }

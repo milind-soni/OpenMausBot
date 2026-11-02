@@ -8,6 +8,7 @@ import type { LocaleKey } from "@/locales";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
+import { openKeySettings } from "./keys/key-focus";
 
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
 /** The room decision budget in server/decider/room-routing.ts; slower falls back to the lead. */
@@ -280,7 +281,7 @@ export function DecisionModelSettings() {
                 <button
                   type="button"
                   data-testid="decider-manage-keys"
-                  onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+                  onClick={() => dispatch(openKeySettings("openrouter"))}
                   className="cursor-pointer text-accent hover:underline"
                 >
                   {t("decider.openrouter.key.manageLink")}

@@ -413,9 +413,9 @@ pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
 
 A trigger is "when something happens, a bot does something". Tell a bot "every weekday at 9, send me a summary
 of my inbox" or "whenever our form calls, draft a reply" and it sets the trigger up in that turn with
-`create_trigger` (no confirmation; the chat shows a live card with Edit, Pause and Undo). **Triggers**, first in
+its `trigger` tool (no confirmation; the chat shows a live card with Edit, Pause and Undo). **Triggers**, first in
 the sidebar, lists every schedule and webhook, with a calendar and the run history. Bots manage them with
-`list_triggers`, `create_trigger` and `manage_trigger`; a webhook a bot makes never shows the bot its secret:
+`trigger_info` (list, app events), `trigger` (create, update, pause, resume, run now) and `delete_trigger`; a webhook a bot makes never shows the bot its secret:
 the person copies the link from the card or the Triggers page.
 
 Schedules (routines) can run once, on selected weekdays, or every 5–1,440 minutes, using either a bot's configured
@@ -427,8 +427,8 @@ but reuse the same queued task executor and calendar
 receipts.
 
 **App events** start a bot when something happens in a connected app ("whenever I get an email from Acme, draft
-a reply"). The bot finds the app's events with `list_trigger_events` and calls `create_trigger` with
-`when: "app_event"`; the person can also choose **New → Set it up yourself → When something happens in an app**.
+a reply"). The bot finds the app's events with `trigger_info` (`action: "events"`) and calls `trigger` with
+`action: "create"` and `when: "app_event"`; the person can also choose **New → Set it up yourself → When something happens in an app**.
 Composio sends each event to OpenMausBot's connected-apps service, which queues it; the app collects the queue
 with a long poll, so a desktop needs no public address and events wait while it is closed. Gmail is checked every
 15 minutes; Slack, GitHub and other push apps arrive at once. A desktop keeps up to 500 events a day and a paid

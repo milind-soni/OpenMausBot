@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { acpToolProgress, claudeToolDraft, codexPatchProgress } from "./tool-progress.ts";
+import { acpToolOutput, acpToolProgress, claudeToolDraft, codexCommandOutput, codexPatchProgress } from "./tool-progress.ts";
 
 /** Claude Code's stream-json frames (2.1.306, --include-partial-messages) for one model message, as the CLI prints
  * them: `{type: "stream_event", event}` around the API's own streaming events. */
@@ -106,5 +106,23 @@ describe("ACP: a tool call still running", () => {
     expect(acpToolProgress({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress" })).toBeNull();
     expect(acpToolProgress({ sessionUpdate: "tool_call", toolCallId: "t1", kind: "think" })).toBeNull();
     expect(acpToolProgress({ sessionUpdate: "agent_message_chunk", content: { text: "hi" } })).toBeNull();
+  });
+});
+
+describe("a running command's output, as engines stream it", () => {
+  it("Codex: item/commandExecution/outputDelta is the next chunk to append", () => {
+    expect(codexCommandOutput({ threadId: "t", turnId: "u", itemId: "call_1", delta: "page 3 of 40\n" }))
+      .toEqual({ type: "item.output", itemType: "tool", itemId: "call_1", text: "page 3 of 40\n" });
+    expect(codexCommandOutput({ itemId: "call_1", delta: "" })).toBeNull();
+    expect(codexCommandOutput({ delta: "orphan" })).toBeNull();
+  });
+
+  it("ACP: a running call's text content is all of its output so far, replaced on each update", () => {
+    expect(acpToolOutput({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress",
+      content: [{ type: "content", content: { type: "text", text: "Collecting 12 items" } }, { type: "diff", path: "a.ts", newText: "x" }] }))
+      .toEqual({ type: "item.output", itemType: "tool", itemId: "c1", text: "Collecting 12 items", whole: true });
+    expect(acpToolOutput({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "done" } }] })).toBeNull();
+    expect(acpToolOutput({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress", content: [{ type: "terminal", terminalId: "t" }] })).toBeNull();
   });
 });

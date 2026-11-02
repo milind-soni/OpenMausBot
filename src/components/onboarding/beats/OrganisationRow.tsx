@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Building2, Check } from "lucide-react";
 import type { ManagedDesktopBridge, ManagedDesktopState } from "../../../../electron/managed-desktop.mjs";
-import { brand } from "@/lib/brand";
+import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { companyModelCount, DEFAULT_ADMIN_ORIGIN } from "@/lib/onboarding";
 import { staggerIndex } from "./shared";
@@ -87,7 +87,7 @@ export function OrganisationRow({
     body = (
       <>
         <p className="text-[13px] leading-snug text-ink-secondary">
-          <span className="font-medium text-ink">{t("onboarding.org.title", { app: brand().name })}</span>{" "}
+          <span className="font-medium text-ink">{t("onboarding.org.title", { app: productName() })}</span>{" "}
           {t("onboarding.org.body")}
         </p>
         <button type="button" onClick={onOpenSettings} className={linkClass}>

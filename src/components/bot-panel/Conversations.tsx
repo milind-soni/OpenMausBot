@@ -110,16 +110,18 @@ export function BotConversations({ bot }: { bot: Bot }) {
   return (
     <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")} className="mt-3.5">
       <div className={cn("flex items-center gap-2", listed && "mb-2")}>
-        <button
-          type="button"
-          data-conversations-new
-          aria-label={t("botPanel.conversations.new")}
-          onClick={startNew}
-          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]"
-        >
-          <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-          <span className="truncate">{t("botPanel.conversations.new")}</span>
-        </button>
+        {bot.yourAccess !== "view" && (
+          <button
+            type="button"
+            data-conversations-new
+            aria-label={t("botPanel.conversations.new")}
+            onClick={startNew}
+            className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]"
+          >
+            <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+            <span className="truncate">{t("botPanel.conversations.new")}</span>
+          </button>
+        )}
         {listed && (
           <button
             type="button"

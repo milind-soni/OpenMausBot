@@ -63,7 +63,7 @@ beforeEach(() => {
 });
 
 describe("AutomaticRecoverySettings", () => {
-  it("starts off and explains scope, bounded recovery, no replay and provider charges", () => {
+  it("starts off and explains scope, bounded recovery, no replay, provider charges and that a bot's own backups need no switch", () => {
     const view = render();
     expect(view.toggle.props.checked).toBe(false);
     expect(view.engine.props.disabled).toBe(true);
@@ -76,7 +76,8 @@ describe("AutomaticRecoverySettings", () => {
     expect(view.html).toContain("can incur charges from its provider");
     expect(view.html).toContain('for="automatic-recovery-engine"');
     expect(view.html).toContain('for="automatic-recovery-model"');
-    expect(view.html).toContain('aria-describedby="automatic-recovery-help automatic-recovery-scope"');
+    expect(view.html).toContain("Bots with backups of their own (Model → Backup models for this bot) use those instead, whether or not this is on.");
+    expect(view.html).toContain('aria-describedby="automatic-recovery-help automatic-recovery-scope automatic-recovery-own"');
   });
 
   it("requires a ready backup, preserves drafts through broadcasts and failed saves, and saves only once", async () => {

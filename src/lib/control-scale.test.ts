@@ -34,7 +34,7 @@ describe("control scale", () => {
     expect(rule(".ui-pill")).toMatchObject({ "min-height": "1.75rem", "border-radius": "9999px", "font-size": "13px", "font-weight": "500", "line-height": "1.25rem", "align-items": "center" });
     expect(rule(".ui-chip")).toMatchObject({ "min-height": "1.375rem", "border-radius": "9999px", "font-size": "12px", "font-weight": "500", "line-height": "1rem" });
     expect(rule(".ui-code-chip")).toMatchObject({ "box-decoration-break": "clone", "font-family": "var(--font-mono)", "font-size": "0.86em", "line-height": "1" });
-    expect(rule(".ui-menu-row")).toMatchObject({ "min-height": "2.25rem", "font-size": "14px", "line-height": "1.25rem", gap: "0.75rem" });
+    expect(rule(".ui-menu-row")).toMatchObject({ "min-height": "30px", "border-radius": "0.375rem", "font-size": "14px", "line-height": "18px", gap: "0.5rem" });
   });
 
   it("keeps every step on skin tokens", () => {

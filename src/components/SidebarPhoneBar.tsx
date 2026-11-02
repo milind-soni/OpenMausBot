@@ -4,6 +4,7 @@ import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 
+import { CloudRoomCard } from "./CloudRoomCard";
 import { CloudUsageCard } from "./CloudUsageMeter";
 import { useAutomationsNeedYou } from "./SidebarFooterNav";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
@@ -47,6 +48,7 @@ export function SidebarPhoneBar({ query, onQuery }: { query: string; onQuery: (q
   ];
   return (
     <div data-sidebar-phone-bar className="px-3 pb-3 pt-1">
+      <CloudRoomCard />
       <CloudUsageCard />
       <div className="flex items-center gap-2 not-first:mt-2">
         <SidebarPopoverMenu

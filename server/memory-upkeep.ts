@@ -126,11 +126,14 @@ function loadState(): UpkeepState {
   }
 }
 
-function saveState(state: UpkeepState): void {
+/** Answers whether the file on disk is now current; a failed write stays pending for the next flush. */
+function saveState(state: UpkeepState): boolean {
   try {
     mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
     writeFileAtomic(statePath(), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+    return true;
   } catch {
+    return false;
   }
 }
 
@@ -272,19 +275,63 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   const log = (line: string) => deps.log?.(line);
   const inflight = new Set<Promise<unknown>>();
   const tidying = new Map<string, Promise<TidyReport>>();
-  const dreaming = new Map<string, Promise<DreamReport>>();
+  const dreaming = new Map<string, { generation: number; promise: Promise<DreamReport> }>();
   let timer: ReturnType<typeof setInterval> | null = null;
+  let first: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
   let paused = false;
+  const cancelled = (started: number) => started !== generation || paused;
   // Flushed chats wait here, also through a backup; one worker drains it, one capture call at a time.
   const queue: Waiting[] = [];
   let worker: Promise<void> | null = null;
 
-  const record = (botId: string, patch: { lastTidy?: TidyReport; lastCapture?: CaptureReport; topicCursor?: string; lastDream?: DreamReport; dreamedTo?: number }) => {
+  // The reports this process knows about: read once, written when the batch that recorded them ends,
+  // so a tick over a large workspace writes once however many bots it touches. A capture's batch also
+  // writes while an outer tick batch is open: its report must outlive a restart mid-tick, and the tick
+  // can be minutes away from its own write.
+  let known: UpkeepState | null = null;
+  let unsaved = false;
+  const open: { dirty: boolean; flushWhileOpen: boolean }[] = [];
+
+  const loaded = (): UpkeepState => (known ??= loadState());
+
+  function flush(): void {
+    if (!unsaved || !known) return;
+    if (!saveState(known)) return;
+    unsaved = false;
+    for (const batch of open) batch.dirty = false;
+  }
+
+  /** One write for everything recorded inside `work`, however many bots it touches. */
+  function batched<T>(work: () => Promise<T>, flushWhileOpen = false): Promise<T> {
+    const batch = { dirty: false, flushWhileOpen };
+    open.push(batch);
+    const end = () => {
+      const at = open.lastIndexOf(batch);
+      if (at >= 0) open.splice(at, 1);
+      if (batch.dirty && (batch.flushWhileOpen || !open.length)) flush();
+    };
+    let promise: Promise<T>;
+    try {
+      promise = work();
+    } catch (error) {
+      end();
+      throw error;
+    }
+    return promise.finally(end);
+  }
+
+  const record = (botId: string, patch: { lastTidy?: TidyReport; lastCapture?: CaptureReport; topicCursor?: string; lastDream?: DreamReport; dreamedTo?: number; core?: string[] }) => {
     // a capture or tidy that was out when its bot was deleted leaves nothing behind
     if (!deps.bot(botId)) return;
-    const state = loadState();
+    const state = loaded();
     state.bots[botId] = { ...state.bots[botId], ...patch };
-    saveState(state);
+    unsaved = true;
+    if (!open.length) {
+      flush();
+      return;
+    }
+    for (const batch of open) batch.dirty = true;
   };
 
   const track = <T>(promise: Promise<T>): Promise<T> => {
@@ -364,6 +411,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
 
   /** One model call for one bot's waiting chats, each read as its own conversation. */
   async function captureCall(batches: readonly CaptureBatch[]): Promise<CaptureReport> {
+    const started = generation;
     // The batch names where the facts go (a bot's own memory, or one of its layers on a Team Cloud); the bot record says whose.
     const id = batches[0]!.botId;
     const bot = deps.bot(id);
@@ -395,6 +443,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       today,
       topics: memoryTopicIndex(id),
     }));
+    if (started !== generation) return { ...off, note: "upkeep stopped" };
     if (answer === null) {
       const report = { at, added: 0, topics: 0, aboutMe: 0, note: "The capture call did not answer in time." };
       record(id, { lastCapture: report });
@@ -429,6 +478,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const aboutMe = learned.length ? deps.addToAboutMe({ botId: id, botName: bot.name }, learned) : 0;
     const organized = await organize(id);
     const report: CaptureReport = { at, added, topics, aboutMe, organized };
+    if (cancelled(started)) return report;
     record(id, { lastCapture: report });
     if (added || topics || aboutMe) log(`memory upkeep: noticed ${added} fact(s) for MEMORY.md, ${topics} for topic files and ${aboutMe} for About me — ${bot.name} (${id}) from ${conversations.map((conversation) => conversation.threadId).join(", ")}`);
     return report;
@@ -453,13 +503,14 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   }
 
   async function work(): Promise<void> {
+    const started = generation;
     try {
       // chats flushed together are all queued before the first call takes its share
       await Promise.resolve();
-      while (!paused && queue.length) {
+      while (!cancelled(started) && queue.length) {
         const call = takeCall();
         try {
-          const report = await captureCall(call.map((entry) => entry.batch));
+          const report = await batched(() => captureCall(call.map((entry) => entry.batch)), true);
           for (const entry of call) entry.done?.resolve(report);
         } catch (error) {
           log(`memory upkeep: capture failed for ${call[0]!.batch.botId}: ${(error as Error).message}`);
@@ -468,6 +519,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       }
     } finally {
       worker = null;
+      kick();
     }
   }
 
@@ -499,16 +551,16 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   });
 
   async function organize(botId: string): Promise<number> {
+    const started = generation;
     const engine = deps.engine(botId);
     if (!engine?.generateText) return 0;
     const today = memoryDate(now());
-    const state = loadState();
-    const core = new Set(state.bots[botId]?.core ?? []);
+    const core = new Set(loaded().bots[botId]?.core ?? []);
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const candidates = organizeCandidates(first, today, core);
     if (!candidates.length) return 0;
     const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId)));
-    if (answer === null || paused || !upkeepEnabled(deps.bot(botId))) return 0;
+    if (answer === null || cancelled(started) || !upkeepEnabled(deps.bot(botId))) return 0;
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first) return 0;
     const proposed = parseMoves(answer, candidates);
@@ -516,9 +568,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const moved = new Set(proposed.map((move) => move.entry.line));
     const moves = proposed.slice(0, MAX_MOVES);
     const judgedCore = candidates.filter((entry) => !moved.has(entry.line)).map((entry) => factIdentity(entry.body));
-    const saved = loadState();
-    saved.bots[botId] = { ...saved.bots[botId], core: [...new Set([...(saved.bots[botId]?.core ?? []), ...judgedCore])].slice(-MAX_CORE) };
-    saveState(saved);
+    record(botId, { core: [...new Set([...(loaded().bots[botId]?.core ?? []), ...judgedCore])].slice(-MAX_CORE) });
     if (!moves.length) return 0;
     return writing(botId, () => {
       const { byTopic } = applyMoves(before, moves);
@@ -560,14 +610,15 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   }
 
   async function runTidy(botId: string): Promise<TidyReport> {
+    const started = generation;
     const bot = deps.bot(botId);
     const at = now().getTime();
     const today = memoryDate(now());
     const stopped: TidyReport = { at, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false, note: "Memory upkeep is off or paused; no further changes were made." };
-    if (paused || !upkeepEnabled(bot)) return stopped;
+    if (cancelled(started) || !upkeepEnabled(bot)) return stopped;
     ensureWorkspace(botId);
     const organized = await organize(botId);
-    if (paused || !upkeepEnabled(deps.bot(botId))) return stopped;
+    if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const engine = deps.engine(botId);
     const candidates = contradictionCandidates(first, today);
@@ -584,7 +635,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
         contradictionsChecked = true;
       }
     }
-    if (paused || !upkeepEnabled(deps.bot(botId))) return stopped;
+    if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
     // Re-read after the await: if the notes changed, the model's line numbers are stale.
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first && contradictions.length) {
@@ -607,7 +658,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     let topicDeferred = 0;
     let topicChecks = 0;
     let topicsDeferred = 0;
-    let topicCursor = loadState().bots[botId]?.topicCursor;
+    let topicCursor = loaded().bots[botId]?.topicCursor;
     const deadline = Date.now() + MODEL_TIMEOUT_MS;
     const topics = listMemoryTopics(botId).filter(topic => topic.name !== ARCHIVE_TOPIC).sort((a, b) => a.name.localeCompare(b.name));
     const cursorAt = topics.findIndex(topic => topic.name === topicCursor) + 1;
@@ -624,7 +675,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           topicChecks++;
           topicCursor = topic.name;
           const answer = await askModel(engine, contradictionPrompt(topicCandidates), remaining);
-          if (paused || !upkeepEnabled(deps.bot(botId))) return stopped;
+          if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
           if (readRaw(botId, path) !== topicBefore) {
             topicsDeferred++;
             continue;
@@ -670,21 +721,22 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   function tidy(botId: string): Promise<TidyReport> {
     const running = tidying.get(botId);
     if (running) return running;
-    const promise = track(runTidy(botId)).finally(() => tidying.delete(botId));
+    const promise = track(batched(() => runTidy(botId))).finally(() => tidying.delete(botId));
     tidying.set(botId, promise);
     return promise;
   }
 
   /** Reads the chats since the last dream that answered; the first one looks back a week. */
   function dreamSince(botId: string, at: number): number {
-    return loadState().bots[botId]?.dreamedTo ?? at - DREAM_FIRST_LOOKBACK_MS;
+    return loaded().bots[botId]?.dreamedTo ?? at - DREAM_FIRST_LOOKBACK_MS;
   }
 
   async function runDream(botId: string): Promise<DreamReport> {
+    const started = generation;
     const bot = deps.bot(botId);
     const at = now().getTime();
     const report = (note: string, conversations = 0): DreamReport => ({ at, conversations, learned: [], outdated: [], ideas: [], aboutMe: 0, note });
-    if (paused || !upkeepEnabled(bot)) return report("Memory upkeep is off or paused, so nothing was read.");
+    if (cancelled(started) || !upkeepEnabled(bot)) return report("Memory upkeep is off or paused, so nothing was read.");
     if (!deps.conversations) return report("Dreaming is not available here.");
     const engine = deps.engine(botId);
     if (!engine?.generateText) {
@@ -703,12 +755,12 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const notebook = contradictionCandidates(first, today);
     const answer = await askModel(engine, dreamPrompt({ botName: bot.name, today, conversations, notebook, topics: memoryTopicIndex(botId) }), DREAM_TIMEOUT_MS);
+    if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return report("Memory upkeep was stopped, switched off or paused during the dream; no changes were made.", conversations.length);
     if (answer === null) {
       const late = report("The dream did not answer in time.", conversations.length);
       record(botId, { lastDream: late });
       return late;
     }
-    if (paused || !upkeepEnabled(deps.bot(botId))) return report("Memory upkeep was switched off or paused during the dream; no changes were made.", conversations.length);
     const dreamt = parseDream(answer, conversations.length, notebook.length);
     const source = `dream across ${conversations.length} chats`;
     // Re-read inside the write: if the notes changed after the prompt, its line numbers are stale.
@@ -750,16 +802,19 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   }
 
   function dream(botId: string): Promise<DreamReport> {
+    const started = generation;
     const running = dreaming.get(botId);
-    if (running) return running;
-    const promise = track(runDream(botId)).finally(() => dreaming.delete(botId));
-    dreaming.set(botId, promise);
+    if (running?.generation === started) return running.promise;
+    const promise = track(batched(() => runDream(botId))).finally(() => {
+      if (dreaming.get(botId)?.promise === promise) dreaming.delete(botId);
+    });
+    dreaming.set(botId, { generation: started, promise });
     return promise;
   }
 
   function dreamDue(botId: string): boolean {
     const current = now();
-    const saved = loadState().bots[botId];
+    const saved = loaded().bots[botId];
     if (deps.dreamer?.() !== botId || !deps.conversations || current.getHours() < deps.tidyHour()) return false;
     if (saved?.lastDream && memoryDate(new Date(saved.lastDream.at)) >= memoryDate(current)) return false;
     return deps.conversations(botId, dreamSince(botId, current.getTime())).length >= DREAM_MIN_CONVERSATIONS;
@@ -768,30 +823,34 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   function due(botId: string): boolean {
     const current = now();
     if (current.getHours() < deps.tidyHour()) return false;
-    const last = loadState().bots[botId]?.lastTidy?.at;
+    const last = loaded().bots[botId]?.lastTidy?.at;
     return !last || memoryDate(new Date(last)) < memoryDate(current);
   }
 
   async function tick(): Promise<void> {
-    if (paused) return;
-    for (const bot of deps.bots()) {
-      if (paused) return;
-      if (!upkeepEnabled(bot) || deps.busy(bot.id)) continue;
-      if (due(bot.id)) {
+    const started = generation;
+    if (cancelled(started)) return;
+    // One batch: the state file is written once at the end however many bots this tick touches.
+    await batched(async () => {
+      for (const bot of deps.bots()) {
+        if (cancelled(started)) return;
+        if (!upkeepEnabled(bot) || deps.busy(bot.id)) continue;
+        if (due(bot.id)) {
+          try {
+            await tidy(bot.id);
+          } catch (error) {
+            log(`memory upkeep: tidy failed for ${bot.id}: ${(error as Error).message}`);
+          }
+        }
+        if (cancelled(started)) return;
         try {
-          await tidy(bot.id);
+          if (deps.busy(bot.id) || !dreamDue(bot.id)) continue;
+          await dream(bot.id);
         } catch (error) {
-          log(`memory upkeep: tidy failed for ${bot.id}: ${(error as Error).message}`);
+          log(`memory upkeep: dream failed for ${bot.id}: ${(error as Error).message}`);
         }
       }
-      if (paused) return;
-      try {
-        if (deps.busy(bot.id) || !dreamDue(bot.id)) continue;
-        await dream(bot.id);
-      } catch (error) {
-        log(`memory upkeep: dream failed for ${bot.id}: ${(error as Error).message}`);
-      }
-    }
+    });
   }
 
   return {
@@ -809,20 +868,21 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       buffer.dropBot(botId);
       dropQueued(botId);
       dropPending(botId);
-      const state = loadState();
+      const state = loaded();
       if (!state.bots[botId]) return;
       delete state.bots[botId];
-      saveState(state);
+      unsaved = true;
+      flush();
     },
     capture: (batch) => new Promise<CaptureReport>((resolve, reject) => enqueue({ batch, done: { resolve, reject } })),
     tidy,
     dream,
     ideas(botId) {
-      const last = loadState().bots[botId]?.lastDream;
+      const last = loaded().bots[botId]?.lastDream;
       return last && now().getTime() - last.at < IDEAS_FOR_MS ? { ideas: last.ideas, conversations: last.conversations } : { ideas: [], conversations: 0 };
     },
     status(botId) {
-      const { lastTidy, lastCapture, lastDream } = loadState().bots[botId] ?? {};
+      const { lastTidy, lastCapture, lastDream } = loaded().bots[botId] ?? {};
       return { ...(lastTidy ? { lastTidy } : {}), ...(lastCapture ? { lastCapture } : {}), ...(lastDream ? { lastDream } : {}), modelSteps: Boolean(deps.engine(botId)?.generateText) };
     },
     tick,
@@ -841,18 +901,25 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           log(`memory upkeep: could not queue turns saved at the last shutdown: ${(error as Error).message}`);
         }
       }
-      timer = setInterval(() => void tick(), TIDY_CHECK_MS);
+      const started = ++generation;
+      const scheduledTick = () => { if (started === generation) void tick(); };
+      timer = setInterval(scheduledTick, TIDY_CHECK_MS);
       timer.unref?.();
-      const first = setTimeout(() => void tick(), 60_000);
+      first = setTimeout(scheduledTick, 60_000);
       first.unref?.();
     },
     stop() {
+      generation++;
       if (timer) clearInterval(timer);
       timer = null;
+      if (first) clearTimeout(first);
+      first = null;
       const queued = queue.splice(0);
       for (const entry of queued) entry.done?.resolve({ at: now().getTime(), added: 0, topics: 0, aboutMe: 0, note: "kept for the next start" });
       const waiting = [...queued.map((entry) => entry.batch), ...buffer.drain()];
       if (deps.restoreTurn) savePending(waiting);
+      // Whatever the last tick recorded is on disk before the timer stops carrying it.
+      flush();
     },
     pause() {
       paused = true;

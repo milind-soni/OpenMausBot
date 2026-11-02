@@ -4,6 +4,8 @@ export interface ReplayFrame {
   frame: string | null;
   clientFrame: string | null;
   payload: Record<string, unknown> | null;
+  /** Only this person's streams get it (a Team Cloud's room as they read it). */
+  person?: string;
 }
 
 export const REPLAY_MAX_FRAMES = 500;

@@ -1,5 +1,5 @@
 import { Crown, Loader2, Phone } from "lucide-react";
-import { memo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 
 import { botShowsUnread } from "@/lib/bot-unread";
 import { cn } from "@/lib/cn";
@@ -134,11 +134,44 @@ export function SidebarNoBots() {
   return <p data-sidebar-empty="" className="px-5 pt-4 text-[13px] leading-[18px] text-ink-tertiary">{t("onboarding.shell.noBots")}</p>;
 }
 
-export function SidebarTileGrid({ primary, pinned, row }: { primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps }) {
+/** How much of the grid's right end Search and New take in a framed window's corner (Sidebar's corner row). */
+const CORNER_CLEAR = 60;
+
+/** Whether the tiles' first row, as laid out, ends before the corner's buttons: the sidebar's width and the number of
+ * tiles decide it. */
+export function tilesClearCorner(tiles: { top: number; right: number }[], gridRight: number): boolean {
+  if (!tiles.length) return false;
+  const top = tiles[0]!.top;
+  return Math.max(...tiles.filter((tile) => Math.abs(tile.top - top) < 1).map((tile) => tile.right)) <= gridRight - CORNER_CLEAR;
+}
+
+/** While the tiles clear the corner they rise beside its buttons (styles.css); else they start under them. */
+function useBesideCorner(corner: boolean, count: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [beside, setBeside] = useState(false);
+  useLayoutEffect(() => {
+    const grid = ref.current;
+    if (!corner || !grid) { setBeside(false); return; }
+    const measure = () => {
+      const tiles = [...grid.querySelectorAll<HTMLElement>("[data-sidebar-tile]")].map((tile) => tile.getBoundingClientRect());
+      setBeside(tilesClearCorner(tiles, grid.getBoundingClientRect().right));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [corner, count]);
+  return { ref, beside };
+}
+
+export function SidebarTileGrid({ primary, pinned, row, corner = false }: { primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps; corner?: boolean }) {
   const order = usePinnedCircleDrag(pinned);
+  const besideCorner = useBesideCorner(corner, (primary ? 1 : 0) + order.ranked.length);
   if (!primary && order.ranked.length === 0) return null;
   return (
-    <div data-sidebar-tiles="" className="flex max-h-[40vh] flex-wrap justify-center gap-1 overflow-y-auto px-3 pb-4 pt-2.5" {...order.frameProps}>
+    <div ref={besideCorner.ref} data-sidebar-tiles="" data-beside-corner={besideCorner.beside ? "" : undefined}
+      className="flex max-h-[40vh] flex-wrap justify-center gap-1 overflow-y-auto px-3 pb-4 pt-2.5" {...order.frameProps}>
       {primary && <SidebarBotTile {...row(primary)} primary />}
       {order.ranked.map((bot) => <SidebarBotTile key={bot.id} {...row(bot)} {...order.dragProps(bot)} />)}
       <span role="status" className="sr-only">{order.moved}</span>

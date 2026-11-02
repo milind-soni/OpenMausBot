@@ -77,22 +77,23 @@ describe("Grok cannot run here: an xAI key instead", () => {
   it.each([
     ["a server's page in a browser", undefined, false],
     ["My Cloud in the desktop app's window", desktop, true],
-  ] as const)("says so in one line with one action on %s", (_where, ogb, cloudHome) => {
+  ] as const)("says so in one line, with the xAI key's own field right there on %s", (_where, ogb, cloudHome) => {
     const html = render(missing, ogb, cloudHome);
     expect(grokKeyInstead(missing, cloudHome)).toBe(true);
     expect(html).toContain("data-engine-setup-key-instead");
     expect(html).toContain(NOT_INSTALLED);
-    expect(html.match(/<button/g)).toHaveLength(1);
-    expect(html).toContain("Add xAI key");
+    expect(html).toContain('data-key-row="xai"');
+    expect(html).toMatch(/<input[^>]*placeholder="xai-…"[^>]*aria-label="xAI API key"/);
+    expect(html.match(/data-key-save=/g)).toHaveLength(1);
     expect(html).not.toContain(CURL);
     expect(html).not.toContain("Set up Grok");
     expect(html).not.toContain("Terminal");
   });
 
-  it("opens Settings → API keys", () => {
+  it("takes the key in place instead of sending the person to Settings", () => {
     render(missing, undefined);
-    host.querySelector("button")!.click();
-    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleAppSettings", open: true, section: "connections" });
+    expect(host.querySelector('[data-key-row="xai"] [data-key-input]')).not.toBeNull();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("has no button on a paired desktop, whose Settings hide the keys", () => {

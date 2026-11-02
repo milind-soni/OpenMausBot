@@ -118,8 +118,11 @@ export function renderUnseen(unseen: readonly UnseenMessage[]): { block: string;
   };
 }
 
+/** Ends the unseen block, so the turn's own message never reads as one more line of it. */
+export const UNSEEN_END = "[End of those messages. Now reply to the user's latest message:]";
+
 export function withUnseenMessages(block: string, text: string): string {
-  return block ? `${block}\n\n${text}` : text;
+  return block ? `${block}\n\n${UNSEEN_END}\n\n${text}` : text;
 }
 
 export function recordHanded(state: HandedState, order: readonly string[], received: Iterable<string>): HandedState {
@@ -221,6 +224,18 @@ export class Handoffs {
 
   forget(threadId: string): void {
     this.pending.delete(threadId);
+  }
+
+  /** For a turn answered without its engine: nothing it would have handed counts as received. The returned call hands
+   * it on after all, bound to `turnId`, when the engine does run the turn, unless a newer turn has taken the thread. */
+  withhold(threadId: string): (turnId: string) => void {
+    const pending = this.pending.get(threadId);
+    this.pending.delete(threadId);
+    return (turnId) => {
+      if (!pending || this.pending.has(threadId)) return;
+      pending.turnId ??= turnId;
+      this.pending.set(threadId, pending);
+    };
   }
 
   /** Just before sendTurn: an adapter may emit the whole turn before it resolves. */

@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   chmod,
@@ -15,12 +14,10 @@ import {
 } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { createInflateRaw } from "node:zlib";
 
 import { DATA_DIR } from "../config.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
+import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
 import { augmentedPath } from "../env-path.ts";
 import {
   resolveAntigravityReleaseAsset,
@@ -194,124 +191,6 @@ export async function resolveAntigravityRuntime(
     : "Antigravity is not installed. Install the official Google runtime to continue.");
 }
 
-interface PinnedZipEntry {
-  name: string;
-  compression: 0 | 8;
-  compressedBytes: number;
-  uncompressedBytes: number;
-  localHeaderOffset: number;
-  externalAttributes: number;
-}
-
-const EOCD_SIGNATURE = 0x06054b50;
-const CENTRAL_SIGNATURE = 0x02014b50;
-const LOCAL_SIGNATURE = 0x04034b50;
-const MAX_EOCD_BYTES = 22 + 0xffff;
-
-/** Reads the ZIP directory without loading the 300 MiB archive; after the SHA pin, only the manifest's two flat members pass. */
-async function pinnedZipEntries(path: string): Promise<PinnedZipEntry[]> {
-  const handle = await open(path, "r");
-  try {
-    const info = await handle.stat();
-    const tailBytes = Math.min(info.size, MAX_EOCD_BYTES);
-    const tail = Buffer.alloc(tailBytes);
-    const tailOffset = info.size - tailBytes;
-    if ((await handle.read(tail, 0, tailBytes, tailOffset)).bytesRead !== tailBytes) {
-      throw new Error("The verified archive was truncated.");
-    }
-    let eocd = -1;
-    for (let cursor = tail.length - 22; cursor >= 0; cursor -= 1) {
-      if (
-        tail.readUInt32LE(cursor) === EOCD_SIGNATURE
-        && cursor + 22 + tail.readUInt16LE(cursor + 20) === tail.length
-      ) {
-        eocd = cursor;
-        break;
-      }
-    }
-    if (eocd < 0) throw new Error("The verified archive has no valid ZIP directory.");
-    const disk = tail.readUInt16LE(eocd + 4);
-    const directoryDisk = tail.readUInt16LE(eocd + 6);
-    const diskEntries = tail.readUInt16LE(eocd + 8);
-    const entryCount = tail.readUInt16LE(eocd + 10);
-    const directoryBytes = tail.readUInt32LE(eocd + 12);
-    const directoryOffset = tail.readUInt32LE(eocd + 16);
-    const eocdOffset = tailOffset + eocd;
-    if (
-      disk !== 0 || directoryDisk !== 0 || diskEntries !== entryCount || entryCount !== 2
-      || directoryBytes === 0xffffffff || directoryOffset === 0xffffffff
-      || directoryOffset + directoryBytes > eocdOffset
-    ) throw new Error("The verified archive uses an unsupported ZIP layout.");
-
-    const directory = Buffer.alloc(directoryBytes);
-    if ((await handle.read(directory, 0, directoryBytes, directoryOffset)).bytesRead !== directoryBytes) {
-      throw new Error("The verified archive directory was truncated.");
-    }
-    const entries: PinnedZipEntry[] = [];
-    let cursor = 0;
-    while (cursor < directory.length) {
-      if (cursor + 46 > directory.length || directory.readUInt32LE(cursor) !== CENTRAL_SIGNATURE) {
-        throw new Error("The verified archive directory is invalid.");
-      }
-      const flags = directory.readUInt16LE(cursor + 8);
-      const compression = directory.readUInt16LE(cursor + 10);
-      const compressedBytes = directory.readUInt32LE(cursor + 20);
-      const uncompressedBytes = directory.readUInt32LE(cursor + 24);
-      const nameBytes = directory.readUInt16LE(cursor + 28);
-      const extraBytes = directory.readUInt16LE(cursor + 30);
-      const commentBytes = directory.readUInt16LE(cursor + 32);
-      const startDisk = directory.readUInt16LE(cursor + 34);
-      const externalAttributes = directory.readUInt32LE(cursor + 38);
-      const localHeaderOffset = directory.readUInt32LE(cursor + 42);
-      const next = cursor + 46 + nameBytes + extraBytes + commentBytes;
-      if (
-        next > directory.length || startDisk !== 0 || (flags & 1) !== 0
-        || (compression !== 0 && compression !== 8)
-        || compressedBytes === 0xffffffff || uncompressedBytes === 0xffffffff
-        || localHeaderOffset === 0xffffffff
-      ) throw new Error("The verified archive contains an unsupported ZIP member.");
-      entries.push({
-        name: directory.subarray(cursor + 46, cursor + 46 + nameBytes).toString("utf8"),
-        compression,
-        compressedBytes,
-        uncompressedBytes,
-        localHeaderOffset,
-        externalAttributes,
-      });
-      cursor = next;
-    }
-    if (entries.length !== entryCount) throw new Error("The verified archive member count is invalid.");
-    return entries;
-  } finally {
-    await handle.close();
-  }
-}
-
-async function zipEntryDataOffset(path: string, entry: PinnedZipEntry): Promise<number> {
-  const handle = await open(path, "r");
-  try {
-    const header = Buffer.alloc(30);
-    if ((await handle.read(header, 0, header.length, entry.localHeaderOffset)).bytesRead !== header.length) {
-      throw new Error("A verified archive member header was truncated.");
-    }
-    const nameBytes = header.readUInt16LE(26);
-    const extraBytes = header.readUInt16LE(28);
-    if (
-      header.readUInt32LE(0) !== LOCAL_SIGNATURE
-      || header.readUInt16LE(8) !== entry.compression
-      || (header.readUInt16LE(6) & 1) !== 0
-    ) throw new Error("A verified archive member header is invalid.");
-    const name = Buffer.alloc(nameBytes);
-    if ((await handle.read(name, 0, nameBytes, entry.localHeaderOffset + 30)).bytesRead !== nameBytes) {
-      throw new Error("A verified archive member name was truncated.");
-    }
-    if (name.toString("utf8") !== entry.name) throw new Error("A verified archive member name did not match its directory.");
-    return entry.localHeaderOffset + 30 + nameBytes + extraBytes;
-  } finally {
-    await handle.close();
-  }
-}
-
 async function extractPinnedArchive(
   archivePath: string,
   outputDirectory: string,
@@ -322,7 +201,7 @@ async function extractPinnedArchive(
     [asset.harness.name, asset.harness.bytes],
   ]);
   const seen = new Set<string>();
-  for (const entry of await pinnedZipEntries(archivePath)) {
+  for (const entry of await readZipDirectory(archivePath, 2)) {
     const expectedBytes = expected.get(entry.name);
     const unixType = (entry.externalAttributes >>> 16) & 0o170000;
     if (
@@ -332,22 +211,7 @@ async function extractPinnedArchive(
       || entry.uncompressedBytes !== expectedBytes || entry.compressedBytes <= 0
     ) throw new Error("The archive contains an unexpected or unsafe file.");
     seen.add(entry.name);
-    const dataOffset = await zipEntryDataOffset(archivePath, entry);
-    let bytes = 0;
-    const counter = new Transform({
-      transform(chunk, _encoding, callback) {
-        bytes += chunk.length;
-        callback(bytes <= expectedBytes ? null : new Error("An extracted file exceeded its pinned size."), chunk);
-      },
-    });
-    const source = createReadStream(archivePath, {
-      start: dataOffset,
-      end: dataOffset + entry.compressedBytes - 1,
-    });
-    const destination = createWriteStream(join(outputDirectory, entry.name), { flags: "wx", mode: 0o700 });
-    if (entry.compression === 8) await pipeline(source, createInflateRaw(), counter, destination);
-    else await pipeline(source, counter, destination);
-    if (bytes !== expectedBytes) throw new Error("An extracted file was truncated.");
+    await extractZipMember(archivePath, entry, join(outputDirectory, entry.name));
   }
   if (seen.size !== 2) throw new Error("The archive is missing an expected file.");
 }

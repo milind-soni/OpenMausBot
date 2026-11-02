@@ -403,7 +403,8 @@ app.whenReady().then(async () => {
   assert.equal(askPeerResponse.body.receipts[0].threadId, peerWorkThreadId);
   const peerCard = await until(async () => pendingCard((await api(`/api/threads/${peerWorkThreadId}/messages`)).body));
   assert.equal(lastPrompt().mode, "default");
-  const askDecision = (await api("/api/decisions")).body.decisions.find((row) => row.threadId === peerWorkThreadId && row.requestId === peerCard.requestId);
+  // The card can show before its decision row is written: wait for the row, as the checks above do.
+  const askDecision = await until(async () => (await api("/api/decisions")).body.decisions.find((row) => row.threadId === peerWorkThreadId && row.requestId === peerCard.requestId));
   assert.equal(askDecision.decision, "card-shown");
   assert.notEqual(askDecision.source, "full-access");
   assert.equal((await api(`/api/threads/${peerWorkThreadId}/respond`, "POST", { requestId: peerCard.requestId, behavior: "allow" })).status, 200);

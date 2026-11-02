@@ -9,8 +9,11 @@ import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
+import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
+import { OPENCODE_STANDALONE } from "./opencode-release.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { acpModelOption, acpVariantOption, offeredModels } from "./config-options.ts";
+import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli, killCliTree, spawnCli } from "../../procs.ts";
@@ -573,6 +576,11 @@ export function ensureOpenCodeInjectModel(
   return native;
 }
 
+/** OpenCode 1.18 appends every process's log to one file under its xdg data folder. */
+export function openCodeLogPath(env: Record<string, string | undefined>): string {
+  return join(env.XDG_DATA_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".local", "share"), "opencode", "log", "opencode.log");
+}
+
 /** The CLI is xdg-flavoured on every platform (`opencode auth list` on macOS prints
  * `~/.local/share/opencode/auth.json`), so the xdg path comes first. */
 function storedAuthPaths(env: Record<string, string | undefined>): string[] {
@@ -824,8 +832,10 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
     docsUrl: "https://opencode.ai/docs/",
     signInCommand: "opencode auth login",
     needsNode: true,
+    standalone: OPENCODE_STANDALONE,
   },
   spawnArgs: () => ["acp"],
+  statusLog: { path: openCodeLogPath, parse: parseOpenCodeLogLine, shared: true },
   // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
   // shares: a connection check or memory upkeep would show up in their history there.
   oneShotFolder: discoveryDirectory,
@@ -842,7 +852,10 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
   engineTools: 24,
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
-  transformEnv: withholdProviderKeysWhenManaged,
+  transformEnv: (env, config, instanceId, instanceEnvironment) => {
+    withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
+    applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
+  },
   spawnFingerprint: openCodeLoginsFingerprint,
   applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
     if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";

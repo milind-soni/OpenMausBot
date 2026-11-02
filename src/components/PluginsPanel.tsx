@@ -27,12 +27,15 @@ import {
 import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
+import { POSTIZ_CATALOG_CARD } from "@/lib/postiz";
 import { nativeCardsState } from "@/lib/native-apps";
 import { McpServersPanel } from "./McpServersPanel";
 import { nativeAppTiles } from "./native-app-tiles";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import { openBotSettings } from "./bot-panel/panel-link";
-import { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
+import { openKeySettings } from "./keys/key-focus";
+import { lacksAdminScope, unlessRefused } from "@/lib/admin-scope";
+import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
 let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;
@@ -45,9 +48,13 @@ export interface ConnectorInventory {
   services: Record<string, ConnectorStatus>;
   /** false when the server could not read the credential store: nothing may be cleared on the strength of it. */
   authoritative: boolean;
+  /** This session may not see the connected apps: its role, not the credential store. */
+  refused?: true;
 }
 
-export function preloadConnectedApps(force = false): Promise<ConnectorInventory> {
+const REFUSED_INVENTORY: ConnectorInventory = { services: {}, authoritative: true, refused: true };
+
+export function preloadConnectedApps(force = false, background = false): Promise<ConnectorInventory> { // background: src/state/api.ts
   if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
     return Promise.resolve({
       services: cachedConnectorStatus,
@@ -55,8 +62,10 @@ export function preloadConnectedApps(force = false): Promise<ConnectorInventory>
     });
   }
   if (connectorStatusRequest) return connectorStatusRequest;
-  connectorStatusRequest = api("/api/connectors/connected")
-    .then((response: { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean }) => {
+  type ConnectedAnswer = { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean };
+  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", background ? { background: true } : undefined), null)
+    .then((response): ConnectorInventory => {
+      if (!response) return REFUSED_INVENTORY;
       const services: Record<string, ConnectorStatus> = response.services ?? {};
       if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
         cachedConnectorStatusAuthoritative = false;
@@ -181,12 +190,19 @@ export function PluginsPanel() {
   const [highLevelConnected, setHighLevelConnected] = useState<boolean | null>(null);
   const [xConnected, setXConnected] = useState<boolean | null>(null);
   const [famulorConnected, setFamulorConnected] = useState<boolean | null>(null);
+  const [postizConnected, setPostizConnected] = useState<boolean | null>(null);
 
   const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
   const latestStatusRequests = useRef(new Map<string, number>());
   const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
 
+  /** A connection that finished or failed since a request no newer than this one no longer needs its sign-in page. */
+  const forgetSettledUrls = (services: Record<string, ConnectorStatus>, requestGenerations: ReadonlyMap<string, number>) => {
+    const settled = Object.entries(services).filter(([slug, state]) => (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0)
+      && ((state.connected && !state.pending) || /^(expired|failed)$/i.test(state.status ?? ""))).map(([slug]) => slug);
+    if (settled.length) setPendingUrls((current) => settled.some((slug) => current[slug]) ? Object.fromEntries(Object.entries(current).filter(([slug]) => !settled.includes(slug))) : current);
+  };
   const refreshStatus = useCallback((slugs: string[]): Promise<Record<string, ConnectorStatus>> => {
     if (!slugs.length) return Promise.resolve({});
     const requestGenerations = new Map(slugs.map((slug) => [slug, statusGenerations.current.get(slug) ?? 0]));
@@ -210,15 +226,7 @@ export function PluginsPanel() {
           statusGenerations.current,
           requestGenerations,
         ));
-        for (const [slug, state] of Object.entries(services)) {
-          const isCurrent = (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0);
-          if (isCurrent && ((state.connected && !state.pending) || /^(expired|failed)$/i.test(state.status ?? ""))) setPendingUrls((current) => {
-            if (!current[slug]) return current;
-            const next = { ...current };
-            delete next[slug];
-            return next;
-          });
-        }
+        forgetSettledUrls(services, requestGenerations);
         return services;
       })
       .catch(() => ({}));
@@ -228,8 +236,9 @@ export function PluginsPanel() {
     const requestGenerations = new Map(statusGenerations.current);
     setRefreshing(true);
     return preloadConnectedApps(force)
-      .then(({ services, authoritative }) => {
+      .then(({ services, authoritative, refused }) => {
         setStale(!authoritative);
+        if (refused) setError({ key: "connectors.adminOnly" });
         setStatus((current) => mergeCompleteConnectorStatus(
           current,
           services,
@@ -237,15 +246,7 @@ export function PluginsPanel() {
           requestGenerations,
           authoritative,
         ));
-        for (const [slug, state] of Object.entries(services)) {
-          const isCurrent = (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0);
-          if (isCurrent && ((state.connected && !state.pending) || /^(expired|failed)$/i.test(state.status ?? ""))) setPendingUrls((current) => {
-            if (!current[slug]) return current;
-            const next = { ...current };
-            delete next[slug];
-            return next;
-          });
-        }
+        forgetSettledUrls(services, requestGenerations);
         return services;
       })
       .finally(() => setRefreshing(false));
@@ -296,7 +297,8 @@ export function PluginsPanel() {
       })
       .catch((e) => {
         if (!alive) return;
-        setError(e.message);
+        setCards((current) => current ?? []);
+        setError(lacksAdminScope(e) ? { key: "connectors.adminOnly" } : e.message);
       });
     return () => {
       alive = false;
@@ -436,7 +438,7 @@ export function PluginsPanel() {
     && (!search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase())));
   const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
-  const native = nativeCardsState({ search, filter, connected: { whop: whopConnected, famulor: famulorConnected, highlevel: highLevelConnected, x: xConnected } });
+  const native = nativeCardsState({ search, filter, category, connected: { whop: whopConnected, famulor: famulorConnected, highlevel: highLevelConnected, x: xConnected, postiz: postizConnected } });
   const visible = (filter === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
@@ -458,11 +460,11 @@ export function PluginsPanel() {
     if (surface !== "apps") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
   };
 
-  const ranked = rankCategories(cards ?? []);
+  const ranked = rankCategories([...(cards ?? []), POSTIZ_CATALOG_CARD], undefined, POSTIZ_CATALOG_CARD.categories);
   const moreCategories = ranked.more;
   const categoryInMore = category !== null && moreCategories.includes(category);
   const inCategoryView = filter === "all" && category !== null;
-  const nativeCardsShown = !inCategoryView && native.anyShown;
+  const nativeCardsShown = native.anyShown;
   const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
   const sectioned = filter === "all" && !search && category === null;
   const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
@@ -635,10 +637,7 @@ export function PluginsPanel() {
                   setupNotice.tone === "info" && "text-ink",
                   remoteClient && "hidden",
                 )}
-                onClick={() => {
-                  close();
-                  dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
-                }}
+                onClick={() => { close(); dispatch(openKeySettings("composio")); }}
               >
                 {t("connectors.openSettings")}
               </button>
@@ -757,7 +756,7 @@ export function PluginsPanel() {
                   </>
                 )}
               >
-                {nativeAppTiles({ shown: native.show, inCategoryView, refreshKey: whopRefresh, onWhopConnection: setWhopConnected, onFamulorConnection: setFamulorConnected, onXConnection: setXConnected, onHighLevelConnection: setHighLevelConnected })}
+                {nativeAppTiles({ shown: native.show, refreshKey: whopRefresh, onWhopConnection: setWhopConnected, onFamulorConnection: setFamulorConnected, onXConnection: setXConnected, onHighLevelConnection: setHighLevelConnected, onPostizConnection: setPostizConnected })}
                 {allShown.map((card) => renderTile(card))}
               </AppsSection>
             </div>
@@ -991,35 +990,4 @@ export function PluginsPanel() {
       </div>
     );
   }
-}
-
-function AppsSection({ id, title, note, viewAll, after, children }: {
-  id: string;
-  title: string;
-  note?: string;
-  viewAll?: { label: string; onClick: () => void };
-  after?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} data-apps-section={id}>
-      <div className="mb-1.5 flex min-h-7 items-center justify-between gap-3 px-2">
-        <h3 id={id} className="min-w-0 truncate text-[14px] font-semibold leading-5 text-ink">
-          {title}
-          {note && <span className="ms-2 text-[12px] font-normal text-ink-secondary">{note}</span>}
-        </h3>
-        {viewAll && (
-          <button
-            type="button"
-            onClick={viewAll.onClick}
-            className="shrink-0 rounded-full px-2 text-[13px] font-medium leading-5 text-ink-secondary transition-colors hover:text-ink"
-          >
-            {viewAll.label}
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2">{children}</div>
-      {after}
-    </section>
-  );
 }
