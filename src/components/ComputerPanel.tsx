@@ -665,7 +665,7 @@ export function ComputerPanel({
   useEffect(() => {
     lastLiveAt.current = 0;
     if (!cloudPreviewReady) return;
-    return listenLiveFrames({
+    return listenLiveFrames({ screens: true,
       onFrame: (frame) => {
         if (frame.kind !== "screen" || frame.botId !== bot.id || frame.threadId !== bot.threadId) return;
         lastLiveAt.current = Date.now();

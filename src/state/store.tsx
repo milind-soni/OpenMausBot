@@ -67,7 +67,7 @@ import { t } from "@/lib/i18n";
 import { createBotPatchQueue, flushWhenLeaving, keepaliveFits, type BotUpdatePatch } from "./bot-patch-queue"; import { createNewTaskOnce } from "./new-task-once";
 import { liveCallFromFrame, nextLiveCallLookup } from "./live-call";
 import { useChatErrorClear } from "./chat-error";
-import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
+import { openLiveEvents, publishLiveFrame, publishMissedFrames, withoutScreenPixels } from "@/lib/live-events";
 import { unlessRefused } from "@/lib/admin-scope";
 import { trimRoutineRuns } from "./routine-runs";
 import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } from "./queue-receipts";
@@ -3297,7 +3297,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onFrame: (frame) => {
         publishLiveFrame(frame as ServerFrame);
         if (hydrated) handleFrame(frame as ServerFrame);
-        else pendingFrames.push(frame as ServerFrame);
+        else pendingFrames.push(withoutScreenPixels(frame as ServerFrame));
       },
     });
     return () => {

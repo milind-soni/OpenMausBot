@@ -180,6 +180,9 @@ export interface SessionStoreOptions {
   emailScopes?: EmailScopesResolver;
   emailScopesSnapshot?: () => EmailScopesResolver;
   portalMembership?: boolean;
+  /** Between membershipChanged() calls, the hot paths (each request, stream frame and liveness check) recheck email
+   * membership at most this often. Default 0: every call. */
+  recheckMs?: number;
 }
 
 export class SessionRegistry {
@@ -196,6 +199,7 @@ export class SessionRegistry {
   private readonly openMarker: string;
   private closed = false;
   private adminOnly: string | null = null;
+  private membershipCheckedAt = -Infinity;
 
   // No parameter properties: Node's strip-only TypeScript mode only erases types.
   constructor(options: SessionStoreOptions) {
@@ -257,7 +261,7 @@ export class SessionRegistry {
   }
 
   private prune(): void {
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const now = this.now();
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
@@ -508,9 +512,21 @@ export class SessionRegistry {
     this.failures.delete(source);
   }
 
+  /** The sign-in lists may have changed: the next recheckMembership() reads them. */
+  membershipChanged(): void {
+    this.membershipCheckedAt = -Infinity;
+  }
+
+  /** revalidateEmailSessions(), unless one ran within `recheckMs` and membershipChanged() has not been called since. */
+  recheckMembership(): void {
+    if (this.now() - this.membershipCheckedAt < (this.options.recheckMs ?? 0)) return;
+    this.revalidateEmailSessions();
+  }
+
   /** Email membership is live: losing any scope revokes the token and its streams; promotions never widen existing credentials. */
   revalidateEmailSessions(): void {
     if (this.closed) throw new Error("Session registry is closed.");
+    this.membershipCheckedAt = this.now();
     // A team session's membership is the Admin's signed claim, checked at each pairing (cloud-team.ts), never the sign-in list.
     const eligible = this.sessions.filter(session => session.email !== undefined && session.membershipAuthority !== "team" && !(this.options.portalMembership && session.membershipAuthority === "portal"));
     if (!eligible.length) return;
@@ -542,7 +558,7 @@ export class SessionRegistry {
 
   authenticate(token: string | undefined): SessionRecord | null {
     if (!token) return null;
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const hash = sha256(token);
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
@@ -558,7 +574,7 @@ export class SessionRegistry {
 
   /** Call only after origin and scope checks pass; never revives an expired session. */
   renew(sessionId: string): boolean {
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
     if (!record || record.expiresAt <= now) return false;
