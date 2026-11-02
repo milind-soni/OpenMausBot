@@ -10,7 +10,7 @@ import { standalonePlatformKey } from "../engine-standalone.ts";
 import { findCliCandidates, registerFallbackPathDir, registerPathDir, resetPathCache, resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
-import { ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
+import { ENGINE_LIST_REUSE_MS, ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
 
 describe("ProviderRegistry", () => {
   it("creates live instances for known drivers", async () => {
@@ -398,6 +398,40 @@ describe("ProviderRegistry", () => {
     await Promise.all([before, after]);
     await registry.describe();
     expect(fake.probes).toHaveLength(4);
+  });
+
+  it("answers the engine list from earlier reads, reads again in the background once they are old, and never after forgetSnapshots() or a reload", async () => {
+    vi.useFakeTimers();
+    try {
+      const options: Parameters<typeof makeFakeDriver>[0] = {};
+      const fake = makeFakeDriver(options);
+      const registry = new ProviderRegistry([fake.driver]);
+      await registry.load({ a: { driver: "fake" } });
+      const reuse = { ms: ENGINE_LIST_REUSE_MS, changed: vi.fn() };
+      await registry.describe({ reuse });
+      await vi.advanceTimersByTimeAsync(ENGINE_LIST_REUSE_MS - 1);
+      await registry.describe({ reuse });
+      expect(fake.probes).toEqual(["a"]);
+
+      options.answer = { state: "unavailable", reason: "signed out" };
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await registry.describe({ reuse }))[0].snapshot).toEqual({ state: "available", version: "0.0.0-fake" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.probes).toEqual(["a", "a"]);
+      expect(reuse.changed).toHaveBeenCalledTimes(1);
+      expect((await registry.describe({ reuse }))[0].snapshot).toEqual({ state: "unavailable", reason: "signed out" });
+      expect(fake.probes).toHaveLength(2);
+
+      registry.forgetSnapshots();
+      await registry.describe({ reuse });
+      expect(fake.probes).toHaveLength(3);
+      await registry.load({ a: { driver: "fake", displayName: "Renamed" } });
+      await registry.describe({ reuse });
+      expect(fake.probes).toHaveLength(4);
+      expect(reuse.changed).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("runs a decorator's own check on every read, and probes again after an install, a model refresh or a reload", async () => {

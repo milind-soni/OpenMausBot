@@ -54,7 +54,7 @@ beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
     requests.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    return path.startsWith("/api/bots?") ? json({ bots: [bot], groups: [] }) : json(answers[path] ?? { ok: true });
+    return path.startsWith("/api/bots?") ? json({ bots: [bot], groups: [] }) : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? { ok: true });
   });
   const container = document.createElement("div");
   document.body.append(container);

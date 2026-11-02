@@ -638,6 +638,8 @@ it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut 
   const upstream = createServer(async (req, res) => {
     if (req.url === "/v1/models") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "fixture-model" }] })); return; }
     let body = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const content = JSON.parse(body).messages.filter((m: any) => m.role === "user").at(-1)?.content;
     chats.push(typeof content === "string" ? content : JSON.stringify(content));

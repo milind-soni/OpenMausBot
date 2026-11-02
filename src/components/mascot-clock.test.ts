@@ -122,6 +122,22 @@ describe("mascot clock", () => {
     expect(fake.pendingFrames() + fake.pendingTimers()).toBe(0);
   });
 
+  it("draws a mascot woken for a later frame on that frame, with the others on its grid", () => {
+    const fake = fakeEnvironment();
+    const clock = createMascotClock(fake.env);
+    const drawnAt: number[] = [];
+    const ticket = clock.add((now) => { drawnAt.push(now); return Infinity; });
+    fake.advance(110);
+    drawnAt.length = 0;
+    ticket.wake(nextFrameAt(110, 50));
+    fake.advance(39);
+    expect(drawnAt).toEqual([]);
+    fake.advance(20);
+    expect(drawnAt).toHaveLength(1);
+    expect(drawnAt[0]).toBeGreaterThanOrEqual(150 - 4);
+    expect(drawnAt[0]).toBeLessThan(150 + FULL_FRAME_MS);
+  });
+
   it("sleeps on a timer between slow frames instead of polling every display frame", () => {
     const fake = fakeEnvironment(120);
     const clock = createMascotClock(fake.env);
