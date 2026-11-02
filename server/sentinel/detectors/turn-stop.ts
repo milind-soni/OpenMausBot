@@ -1,8 +1,13 @@
 // Stops the person asked for are not failures.
 import { capTitle, HARNESS_NOTICE, normalizeSignatureText, signatureOf } from "../normalize.ts";
 import type { Detector, Observation, Origin } from "../types.ts";
+import { isServerLine } from "../../server-lines.ts";
 
 export const TURN_TIMEOUT_NOTICE = /\b(?:exceeded|made no progress for) \d+ minutes?\b/i;
+/** A stopped room turn's row, as written before rows were in the room's language, or in any language now. */
+export function isTurnTimeoutNotice(text: string): boolean {
+  return TURN_TIMEOUT_NOTICE.test(text) || isServerLine("server.rooms.turnStalled.one", text) || isServerLine("server.rooms.turnStalled.many", text);
+}
 
 const PERSON_STOPS = new Set(["interrupted", "cancelled"]);
 /** Settled ok, but out of budget rather than done. */
@@ -15,7 +20,7 @@ export const turnStop: Detector = {
   detect(records) {
     const observations: Observation[] = [];
     for (const record of records) {
-      if (record.type === "tool" && record.tool === HARNESS_NOTICE && TURN_TIMEOUT_NOTICE.test(record.text)) {
+      if (record.type === "tool" && record.tool === HARNESS_NOTICE && isTurnTimeoutNotice(record.text)) {
         const text = normalizeSignatureText(record.text);
         observations.push({
           kind: "turn_timeout",

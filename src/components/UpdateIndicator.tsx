@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
 
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { releaseHighlights } from "@/lib/release-highlights";
@@ -26,31 +26,24 @@ export function updateIndicatorLabel(state: UpdaterState): string {
     : t("update.button.downloading", { percent: Math.round(state.percent) });
 }
 
-/** The pill's own words, short enough for the window frame's top bar; its title keeps the long ones. */
-export function updatePillText(state: UpdaterState): string {
-  if (state.status === "downloaded" || state.status === "installing") return t("update.card.restart");
-  if (state.status === "preparing") return t("update.button.preparing");
-  return state.percent == null ? t("update.card.downloadingStart") : t("update.card.downloading", { percent: Math.round(state.percent) });
-}
-
-/** `bar`: the pill in the window frame's top bar. In a framed window that pill is the only one, so the sidebar's
- * round buttons draw nothing. */
-export function UpdateIndicator({ className, bar = false }: { className?: string; bar?: boolean }) {
+/** `bar`: in the window frame's top bar, a download arrow in that bar's button look (the class given). In a framed
+ * window that arrow is the only one, so the sidebar's round buttons draw nothing. */
+export function UpdateIndicator({ className, bar }: { className?: string; bar?: string }) {
   const state = useUpdaterState();
-  const framed = windowFramed(useDesktopCapabilities().capabilities.windowChrome);
+  const framed = windowFramed(useDesktopCapabilities().capabilities);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const settled = !state || state.status === "idle" || state.status === "checking" || state.status === "handed-off";
   useEffect(() => {
     if (settled) setOpen(false);
   }, [settled]);
-  if (framed && !bar) return null;
+  if (framed && bar === undefined) return null;
   if (!state || !updateIndicatorShown(state)) {
     return open && !settled ? <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} /> : null;
   }
   const label = updateIndicatorLabel(state);
   const ready = state.status === "downloaded";
-  if (bar) return (
+  if (bar !== undefined) return (
     <>
       <button
         ref={buttonRef}
@@ -60,16 +53,9 @@ export function UpdateIndicator({ className, bar = false }: { className?: string
         aria-haspopup="dialog"
         title={label}
         onClick={() => setOpen(true)}
-        className={cn(
-          "me-1 flex h-5 shrink-0 items-center gap-1.5 rounded-full bg-menu ps-0.5 pe-2.5 text-[12px] font-medium leading-none text-ink shadow-sm ring-1 ring-ink/10 transition-shadow hover:ring-ink/25",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-          className,
-        )}
+        className={cn(bar, "text-accent hover:text-accent", className)}
       >
-        <span aria-hidden className="flex size-4 items-center justify-center rounded-full bg-accent text-accent-ink">
-          <ArrowDown size={11} strokeWidth={2.5} className={cn(!ready && "animate-pulse")} />
-        </span>
-        {updatePillText(state)}
+        <ArrowDownToLine size={15} strokeWidth={2} aria-hidden className={cn(!ready && "animate-pulse motion-reduce:animate-none")} />
       </button>
       {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
     </>

@@ -17,7 +17,7 @@ const bot = (filed: NonNullable<Bot["tasks"]>): Bot => ({
   tasks: [...loose, ...filed],
 });
 const render = (value: Bot, query = "") => renderToStaticMarkup(createElement(BotThreadList, {
-  ...botRowProps(initialState, vi.fn(), value, { density: "comfortable", quiet: false, query, onMenu: vi.fn() }), selected: true,
+  ...botRowProps(initialState, vi.fn(), value, { density: "comfortable", query, onMenu: vi.fn() }), selected: true,
 }));
 
 describe("an open folder whose threads are older than the short list", () => {

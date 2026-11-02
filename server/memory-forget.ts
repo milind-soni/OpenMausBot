@@ -72,15 +72,40 @@ export function ownersOwnAsk(path: ReadonlyArray<{ role: string; kind?: string; 
   return Boolean(asked) && !asked!.sender && !asked!.peerAsk;
 }
 
-export type BotMemoryResult = MemoryUpdateResult | { ok: true; forgotten: string[]; aboutMe: string[] };
+export type BotMemoryResult = MemoryUpdateResult | { ok: true; forgotten: string[]; aboutMe: string[] }
+  | { ok: true; preference: "saved" | "known"; person?: string };
+
+/** The longest preference one line of About me holds: one standing wish, not instructions. */
+export const PREFERENCE_CHARS = 300;
+
+/** Where a preference saved in this turn goes: the About me of the person whose own words began this work. */
+export interface PreferenceTarget {
+  /** Their name on a Team Cloud, for the bot's words; none for the one person of a desktop or My Cloud. */
+  person?: string;
+  /** Adds the line; 0 when it was there already or the person removed it before. */
+  save(text: string): number;
+}
 
 /** memory_update from a bot's turn. forget takes the passage in oldText; `aboutMe` is null when this conversation may not
- * change the person's About me. */
+ * change the person's About me. prefer saves one standing preference into the About me of the person who began this
+ * work, which every bot reads, so nothing has to be passed on to each bot; `prefer` is null when no one person began it. */
 export function botMemoryUpdate(
   layer: string,
   body: { action?: unknown; text?: unknown; oldText?: unknown; until?: unknown },
-  opts: { source: string; aboutMe: Pick<AboutMe, "forget"> | null },
+  opts: { source: string; aboutMe: Pick<AboutMe, "forget"> | null; prefer?: PreferenceTarget | null },
 ): BotMemoryResult {
+  if (body.action === "prefer") {
+    const text = typeof body.text === "string" ? body.text.replace(/\s+/g, " ").trim() : "";
+    if (!text || text.length > PREFERENCE_CHARS) {
+      return { ok: false, code: "invalid", error: `prefer needs text: the person's preference as one short line, at most ${PREFERENCE_CHARS} characters.` };
+    }
+    if (!opts.prefer) {
+      return { ok: false, code: "invalid", error: "Only work one person began with their own words can save their preference: ask them to say it in their own chat with you." };
+    }
+    // Said again now, it holds again, even after the person had it forgotten.
+    clearForgotten(text);
+    return { ok: true, preference: opts.prefer.save(text) > 0 ? "saved" : "known", ...(opts.prefer.person ? { person: opts.prefer.person } : {}) };
+  }
   if (body.action === "forget") {
     const passage = typeof body.oldText === "string" ? body.oldText : "";
     const mentions = passageMatcher(passage);

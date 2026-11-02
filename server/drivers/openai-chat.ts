@@ -13,20 +13,21 @@ import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQu
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
-import { ChatToolSessionError, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, chatToolNotices, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { noteToolBudget } from "../tool-budgets.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
-import { plainFailureMessage } from "./engine-errors.ts";
+import { plainFailureMessage } from "./engine-errors.ts"; import { toolFailureMessage } from "./tool-failure.ts";
 import { refusesRequestSize, RequestTooLargeError, sizeChange, smallerResend } from "./chat-size-limit.ts";
 import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
-import { Agent, fetch as fetchWithoutLimits } from "undici";
+import type { Agent } from "undici";
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -105,8 +106,9 @@ interface NativeLog {
 const FETCH_LIMIT_MS = 300_000;
 const LIVENESS_MISSES = 3;
 let unlimitedAgent: Agent | undefined;
-function fetchPastLimit(url: string, init: RequestInit): Promise<Response> {
-  unlimitedAgent ??= new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+async function fetchPastLimit(url: string, init: RequestInit): Promise<Response> {
+  const { Agent: UndiciAgent, fetch: fetchWithoutLimits } = await import("undici");
+  unlimitedAgent ??= new UndiciAgent({ headersTimeout: 0, bodyTimeout: 0 });
   return fetchWithoutLimits(url, { ...init, dispatcher: unlimitedAgent } as Parameters<typeof fetchWithoutLimits>[1]) as unknown as Promise<Response>;
 }
 
@@ -633,7 +635,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let failure: string | undefined;
       let toolFailed = false;
       let correctiveRounds = 0;
-      const denials: string[] = [];
+      const denials: string[] = [], failedCalls: string[] = [];
       const seenCalls = new Set<string>();
       let nudges = 0;
       let unread: string[] = [];
@@ -644,11 +646,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const scope = parsed.scope;
         tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
           toolSchemaProfileFor({ url: options.apiUrl, model }));
-        for (const { server, reason } of tools.skipped) {
-          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `MCP server "${server}" was skipped for this turn: ${safeText(reason)}` });
-        }
-        const trimmedNotice = trimmedToolsNotice(tools.trimmed);
-        if (trimmedNotice) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: trimmedNotice });
+        noteToolBudget(turn.botId, tools.budget);
+        for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
         const questionAllowed = options.tools !== false && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
         let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
@@ -766,7 +765,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 continue;
               }
               stopReason = "tool_error";
-              throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
+              throw new ChatProtocolError(toolFailureMessage(failedCalls, denials.filter((name) => name !== ASK_USER_TOOL)));
             }
             if (options.nudgeAnnouncedAction && tools.definitions.length && announcesAction(completion.text)) {
               if (nudges >= MAX_ANNOUNCEMENT_NUDGES || turnEntry.ending) {
@@ -798,13 +797,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
           messages.push({ ...assistantReply(model, completion, completion.text || null), tool_calls: completion.toolCalls });
           // After a corrective round, the failure stays pending only until the bot runs tools again.
-          if (correctiveRounds && !denials.length) toolFailed = false;
+          if (correctiveRounds && !denials.length) { toolFailed = false; failedCalls.length = 0; }
           const screenshotParts: ChatContentPart[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();
             let result: ChatToolResult;
             let started = false;
-            let fatal: Error | undefined;
+            let fatal: Error | undefined, title = call.function.name;
             try {
               let args: unknown;
               try { args = JSON.parse(call.function.arguments); }
@@ -834,7 +833,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 }
               } else {
                 tools.validate(call.function.name, args);
-                const shown = tools.view(call.function.name, args as Record<string, unknown>);
+                const shown = tools.view(call.function.name, args as Record<string, unknown>); title = shown.title;
                 const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // This runtime has no provider reviewer, so Full access is honoured here.
                 const full = (turn.approvalModeNow?.() ?? turn.approvalMode) === "full";
@@ -875,7 +874,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             const text = safeText(result.text);
             const output = preview({ ok: result.ok, result: text });
             emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "tool", itemId: call.id, ok: result.ok, output });
-            if (!result.ok) toolFailed = true;
+            if (!result.ok) { toolFailed = true; failedCalls.push(title); }
             messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ ok: result.ok, result: text }) });
             screenshotParts.push(...chatToolImages(call.id, result.images));
             abort.signal.throwIfAborted();

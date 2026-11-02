@@ -7,6 +7,7 @@ import {
   computerSkippedNote,
   computerToolsRefusal,
   parseSurface,
+  pinSource,
   placeUnavailable,
   resolveSurface,
   surfaceOfComputerKind,
@@ -21,6 +22,17 @@ describe("browserIsThePlace", () => {
     expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: false }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "local", browserOn: true }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "off", browserOn: true }))).toBe(false);
+  });
+});
+
+describe("pinSource", () => {
+  it("counts a turn's own pin to the place Works on names as Works on, so This computer is not asked for again", () => {
+    expect(pinSource("local", { surfaceSource: "auto" }, "local")).toBe("works-on");
+    expect(pinSource("local", { surfaceSource: "auto" }, undefined)).toBe("auto-pin");
+    expect(pinSource("local", { surfaceSource: "auto" }, "vm")).toBe("auto-pin");
+    expect(pinSource("local", { surfaceSource: "user" }, "local")).toBe("pin");
+    expect(pinSource("local", {}, undefined)).toBe("pin");
+    expect(pinSource("local", undefined, "cloud")).toBe("pin");
   });
 });
 
@@ -156,17 +168,17 @@ describe("surfacePrompt", () => {
     expect(surfacePrompt({ computer: "local", browser: false })).toMatch(/tell them it is on this computer/);
   });
 
-  it("on the person's own computer, sends web work to the bot's own browser first and their screen last", () => {
+  it("on the person's own computer, sends web work to a connected app first, then the bot's own browser, and their screen last", () => {
     const beside = surfacePrompt({ computer: "local", browser: true });
     expect(beside).toMatch(/Web tasks → the built-in browser/);
     expect(beside).toContain("This computer is the person's own: their screen, their apps and the browsers they are signed in to.");
-    expect(beside).toContain("use, in this order: your built-in browser, a cloud computer if select_computer offers one, a connected app.");
+    expect(beside).toContain("use, in this order: a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.");
     expect(beside).toContain("Use their own browser or screen only when the task needs their own signed-in session and nothing else works.");
     expect(beside).toContain("OpenMausBot asks them once whether you may, at every approval level");
     expect(beside).toContain("never mention DevTools, CDP, debugging ports, profiles, grants, binding, attaching, endpoints or drivers");
     const alone = surfacePrompt({ computer: "local", browser: false });
     expect(alone).not.toMatch(/web pages included/);
-    expect(alone).toContain("use, in this order: web search and fetching pages, a cloud computer if select_computer offers one, a connected app.");
+    expect(alone).toContain("use, in this order: a connected app that does it, web search and fetching pages, a cloud computer if select_computer offers one.");
     expect(alone).toContain("Use their own browser or screen only when the task needs their own signed-in session");
     // Other computers are the bot's own: their wording is unchanged.
     expect(surfacePrompt({ computer: "vm", browser: false })).not.toContain("the person's own");
@@ -339,5 +351,18 @@ describe("placeUnavailable", () => {
     const long = `${"x".repeat(400)}.`;
     expect(placeUnavailable("vm", { state: "place-failed", params: { bot: "Scout", cause: long }, source: "works-on" }).message)
       .toBe(`${long} Check it in the Screen panel.`);
+  });
+});
+
+describe("a connected app before any screen", () => {
+  const RULE = "When a connected app can do the task, use it before any browser or screen. If that app is refused or fails, say so in one plain line with what fixes it (connecting it, or who can), and ask before doing the task on a screen instead.";
+  it("is said wherever a browser or a screen is mounted, a Cloud home's too", () => {
+    for (const mounted of [{ computer: "local" as const, browser: true }, { computer: "local" as const, browser: false }, { computer: "cloud" as const, browser: true }, { computer: null, browser: true }]) {
+      expect(surfacePrompt(mounted), JSON.stringify(mounted)).toContain(RULE);
+      expect(surfacePrompt(mounted, { cloudHome: true }), JSON.stringify(mounted)).toContain(RULE);
+    }
+  });
+  it("is not said where nothing on a screen can be done", () => {
+    expect(surfacePrompt({ computer: null, browser: false })).not.toContain(RULE);
   });
 });

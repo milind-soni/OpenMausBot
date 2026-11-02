@@ -24,6 +24,18 @@ export function keepViewsToDepartments(sessions: Pick<SessionRegistry, "dropMiss
   });
 }
 
+/** A session whose streams ended because what it may see changed: reconnecting from before the seq it ended at gets a
+ * snapshot, since a replay cannot withdraw or add what it was never sent. */
+export function snapshotsAfterViewChanges(sessions: Pick<SessionRegistry, "onSessionChanged" | "onSessionRevoked">, seq: () => number, closeStreams: (sessionId: string) => void) {
+  const from = new Map<string, number>();
+  sessions.onSessionChanged((sessionId) => {
+    from.set(sessionId, seq());
+    closeStreams(sessionId);
+  });
+  sessions.onSessionRevoked((sessionId) => { from.delete(sessionId); });
+  return { mark: (sessionId: string) => { from.set(sessionId, seq()); }, from: (sessionId: string) => from.get(sessionId) ?? -1 };
+}
+
 export function checkedDeviceView(value: unknown, store: DeviceViewRouteDeps["store"], options?: { allowNothing?: boolean }): { ok: true; view: DeviceView | null } | { ok: false; error: string } {
   const parsed = parseDeviceView(value, options);
   if (!parsed.ok || !parsed.view) return parsed;

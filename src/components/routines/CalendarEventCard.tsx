@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { MAUS_COLORS, type MausState } from "@/lib/mascot";
 import { CALENDAR_SLOT_MINUTES } from "@/lib/routine-calendar";
-import { routineRunLabel } from "@/lib/routine-display";
+import { routineHeldNote, routineRunLabel } from "@/lib/routine-display";
 import type { RoutineRunStatus } from "@/lib/routines";
 import { intervalLabel, niceTime } from "@/lib/schedule-label";
 import type { Bot, Group } from "@/state/store";
@@ -73,7 +73,7 @@ export function CalendarEventCard({
   const height = Math.max(16, (previewDuration / 60) * HOUR_HEIGHT);
   const fit = cardLayout(height);
   const who = isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : room ? room.name : primary?.name;
-  const details = [name, niceTime(item.at), who, intervalCadence, paused ? t("routines.pausedSchedule") : statusLabel].filter(Boolean).join(" · ");
+  const details = [name, niceTime(item.at), who, intervalCadence, paused ? (routine && routineHeldNote(routine)) ?? t("routines.pausedSchedule") : statusLabel].filter(Boolean).join(" · ");
   const cronHint = routine?.schedule.type === "cron" ? "Open this automation to change its repeating schedule and time zone." : "";
 
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {

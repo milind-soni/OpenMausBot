@@ -254,6 +254,30 @@ describe("the full picker's search and the rows around it", () => {
   });
 });
 
+describe("an OpenCode model typed by hand", () => {
+  const typed = "venice/deepseek-v4-1-flash-uncensored";
+  const opencode: InstanceInfo = {
+    instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", access: "subscription",
+    snapshot: { state: "available", version: "1.19.4", authenticated: true },
+    models: { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] },
+  };
+  const onOpenCode = (model: string): Bot => ({ ...scout(), modelSelection: { instanceId: "opencode", model } });
+
+  it.each([false, true])("is picked from the search box (advanced: %s) and then named as typed by hand", async (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = [opencode];
+    render(onOpenCode("opencode/big-pickle"));
+    await openWith("click");
+    type(document.querySelector<HTMLInputElement>("[data-menu-search]")!, typed);
+    const row = [...document.querySelectorAll<HTMLElement>("[data-menu-row]")].find((candidate) => candidate.textContent?.includes("typed by hand"))!;
+    flushSync(() => row.click());
+    await settle();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", selection: { instanceId: "opencode", model: `typed::${typed}` } }));
+    render(onOpenCode(`typed::${typed}`));
+    expect(chip().textContent).toContain(`${typed} · typed by hand`);
+  });
+});
+
 describe("the floating menu and the pointer", () => {
   it("stays open for a click inside its portal and closes for one outside, without taking focus", async () => {
     await openWith("click");
@@ -289,5 +313,65 @@ describe("the floating menu and the pointer", () => {
     const rows = [...document.querySelectorAll<HTMLElement>("[data-simple-provider] [data-menu-row]")];
     flushSync(() => rows[1]!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" })));
     expect(focused()).toBe(rows[1]);
+  });
+});
+
+describe("a model the organization turned off", () => {
+  const blockedThree: Option[] = three.map((option) => option.id === "claude-sonnet-5-5" ? { ...option, orgBlocked: true } : option);
+  const row = () => document.querySelector<HTMLButtonElement>("[data-org-blocked]")!;
+
+  for (const advanced of [false, true]) {
+    const name = advanced ? "the full picker" : "the Simple menu";
+    it(`${name} keeps it visible, disabled, with the reason, and it cannot be picked`, async () => {
+      fixture.advanced = advanced;
+      fixture.instances = [claude(blockedThree)];
+      render();
+      await openWith("click");
+      expect(row().disabled).toBe(true);
+      expect(row().textContent).toContain("Sonnet 5.5");
+      expect(row().textContent).toContain("Turned off by your organization");
+      flushSync(() => row().click());
+      await settle();
+      expect(fixture.dispatch).not.toHaveBeenCalled();
+      expect(menu()).not.toBeNull();
+    });
+
+    it(`${name}: the arrows go past it`, async () => {
+      fixture.advanced = advanced;
+      fixture.instances = [claude(blockedThree)];
+      render();
+      await openWith("ArrowDown");
+      press("ArrowDown");
+      expect(focused()?.hasAttribute("data-org-blocked")).toBe(false);
+      expect(focused()?.textContent).toContain("Haiku 5.5");
+    });
+  }
+
+  it("a selection the organization turned off shows on the chip and the current row", async () => {
+    fixture.instances = [claude(blockedThree)];
+    render(scout("claude-sonnet-5-5"));
+    expect(chip().querySelector("[data-model-attention]")).not.toBeNull();
+    expect(chip().title).toContain("Turned off by your organization");
+    await openWith("click");
+    expect(document.querySelector("[data-current-model]")?.textContent).toContain("Turned off by your organization");
+  });
+
+  it("the current row of a blocked model has nothing to set up: tapping it just closes the menu", async () => {
+    fixture.instances = [claude(blockedThree)];
+    render(scout("claude-sonnet-5-5"));
+    await openWith("click");
+    flushSync(() => document.querySelector<HTMLButtonElement>("[data-current-model]")!.click());
+    await settle();
+    expect(menu()).toBeNull();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("the full picker opens on a row it can focus when the selection is the blocked one", async () => {
+    fixture.advanced = true;
+    fixture.instances = [claude(blockedThree)];
+    render(scout("claude-sonnet-5-5"));
+    await openWith("ArrowDown");
+    expect(focused()?.hasAttribute("data-menu-row")).toBe(true);
+    expect((focused() as HTMLButtonElement).disabled).toBe(false);
   });
 });

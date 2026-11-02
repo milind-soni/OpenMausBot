@@ -12,6 +12,8 @@ import {
   withAuthConfigParameter,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
+import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote } from "./connector-arguments.ts";
+import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
@@ -50,6 +52,10 @@ function parsedHeaders(): Record<string, string> {
 
 const upstreamHeaders = parsedHeaders();
 let upstreamSessionId = "";
+/** Each listed tool's input schema, as the connector service listed it: what a call's arguments are fitted to. */
+const SCHEMAS = new Map<string, unknown>();
+/** The connected apps this bot may use, named when a refused call might read as "no such tool". */
+const USABLE_APPS = ALLOWED_TOOLS ? SERVICE_SLUGS.filter((slug) => Object.hasOwn(ALLOWED_TOOLS, slug)) : SERVICE_SLUGS;
 const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
 function textResult(id: unknown, text: string, isError = false): Json {
@@ -220,13 +226,37 @@ function withAppTools(frame: Json): Json {
   return { ...frame, result: { ...result, tools: [...result.tools, ...added] } };
 }
 
+function rememberSchemas(frame: Json): Json {
+  const tools = (frame.result as { tools?: unknown } | undefined)?.tools;
+  if (Array.isArray(tools)) {
+    for (const tool of tools) {
+      const { name, inputSchema } = (tool ?? {}) as { name?: unknown; inputSchema?: unknown };
+      if (typeof name === "string" && inputSchema !== undefined) SCHEMAS.set(name, inputSchema);
+    }
+  }
+  return frame;
+}
+
+/** A call refused over its arguments says how to call again; one whose arguments were fitted says how they were read. */
+function withArgumentNotes(name: string, response: Json, changed: readonly string[]): Json {
+  const error = response.error as { message?: unknown } | undefined;
+  if (error && typeof error.message === "string" && ARGUMENT_REFUSAL.test(error.message)) {
+    return textResult(response.id, `${error.message}\n\n${argumentRefusalNote(name, SCHEMAS.get(name), USABLE_APPS)}`, true);
+  }
+  if (annotateFailedCall(response, ARGUMENT_REFUSAL, (tools) => argumentRefusalNote(tools[0] ?? name, SCHEMAS.get(tools[0] ?? name), USABLE_APPS), [name])) return response;
+  const result = response.result as { content?: unknown; isError?: unknown } | undefined;
+  if (changed.length && result && result.isError !== true && Array.isArray(result.content)) result.content.push({ type: "text", text: fittedArgumentsNote(name, changed) });
+  return response;
+}
+
 function fittedList(frame: Json): Json {
   if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
   const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
   return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
 }
 
-async function handle(message: Json): Promise<void> {
+async function handle(received: Json): Promise<void> {
+  let message = received;
   const id = message.id;
   const method = String(message.method ?? "");
   // OpenCode and other MCP clients mark a stdio server failed unless initialize returns capabilities and serverInfo.
@@ -248,9 +278,14 @@ async function handle(message: Json): Promise<void> {
     }
     return;
   }
+  let changed: string[] = [];
   if (method === "tools/call") {
+    const given = (message.params ?? {}) as Json;
+    const name = String(given.name ?? "");
+    const fitted = SCHEMAS.has(name) ? fitArguments(given.arguments, SCHEMAS.get(name)) : { args: given.arguments, changed: [] };
+    changed = fitted.changed;
+    if (changed.length) message = { ...message, params: { ...given, arguments: fitted.args } };
     const params = (message.params ?? {}) as Json;
-    const name = String(params.name ?? "");
     const { requests, badAuthConfig } = /MANAGE_CONNECTIONS$/i.test(name)
       ? connectorAdds(params.arguments)
       : { requests: [], badAuthConfig: false };
@@ -285,8 +320,9 @@ async function handle(message: Json): Promise<void> {
       ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
       : await relay(message);
     if (response && id !== undefined) {
-      send(method === "tools/list" ? fittedList(withAppTools(withAuthConfigParameter(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response)))
-        : method === "tools/call" ? withSignedOutHint(message, response, SERVICE_SLUGS) : response);
+      const name = String((message.params as Json | undefined)?.name ?? "");
+      send(method === "tools/list" ? fittedList(rememberSchemas(withAppTools(withAuthConfigParameter(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response))))
+        : method === "tools/call" ? withArgumentNotes(name, withSignedOutHint(message, response, SERVICE_SLUGS), changed) : response);
     }
   } catch (error) {
     if (id === undefined) return;

@@ -5,7 +5,8 @@ import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
+import { readCachedInventory } from "@/lib/connected-apps-cache";
+import { connectorStatusMemory, preloadConnectedApps, rememberConnectorStatus } from "@/lib/connected-apps";
 import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { pollConnector } from "@/lib/connector-poll";
@@ -35,55 +36,11 @@ import { X_CARD_SEARCH, XCard } from "./XCard";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { openKeySettings } from "./keys/key-focus";
-import { lacksAdminScope, unlessRefused } from "@/lib/admin-scope";
+import { lacksAdminScope } from "@/lib/admin-scope";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
-let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;
-let cachedConnectorStatusAt = 0;
-let cachedConnectorStatusAuthoritative = true;
-let connectorStatusRequest: Promise<ConnectorInventory> | null = null;
-const CONNECTOR_STATUS_CACHE_MS = 30_000;
-
-export interface ConnectorInventory {
-  services: Record<string, ConnectorStatus>;
-  /** false when the server could not read the credential store: nothing may be cleared on the strength of it. */
-  authoritative: boolean;
-  /** This session may not see the connected apps: its role, not the credential store. */
-  refused?: true;
-}
-
-const REFUSED_INVENTORY: ConnectorInventory = { services: {}, authoritative: true, refused: true };
-
-export function preloadConnectedApps(force = false, background = false): Promise<ConnectorInventory> { // background: src/state/api.ts
-  if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
-    return Promise.resolve({
-      services: cachedConnectorStatus,
-      authoritative: cachedConnectorStatusAuthoritative,
-    });
-  }
-  if (connectorStatusRequest) return connectorStatusRequest;
-  type ConnectedAnswer = { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean };
-  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", background ? { background: true } : undefined), null)
-    .then((response): ConnectorInventory => {
-      if (!response) return REFUSED_INVENTORY;
-      const services: Record<string, ConnectorStatus> = response.services ?? {};
-      if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
-        cachedConnectorStatusAuthoritative = false;
-        return { services: readCachedInventory()?.services ?? services, authoritative: false };
-      }
-      cachedConnectorStatus = services;
-      cachedConnectorStatusAt = Date.now();
-      cachedConnectorStatusAuthoritative = true;
-      writeCachedInventory(services, Date.now());
-      return { services, authoritative: true };
-    })
-    .catch(() => ({ services: readCachedInventory()?.services ?? {}, authoritative: false }))
-    .finally(() => {
-      connectorStatusRequest = null;
-    });
-  return connectorStatusRequest;
-}
+export { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
 
 export function disconnectAccountConfirmation(
   service: string,
@@ -167,10 +124,10 @@ export function PluginsPanel() {
   const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
   const [setup, setSetup] = useState<ConnectorSetup | undefined>(undefined);
   const [status, setStatus] = useState<Record<string, ConnectorStatus>>(
-    () => cachedConnectorStatus ?? readCachedInventory()?.services ?? {},
+    () => connectorStatusMemory()?.services ?? readCachedInventory()?.services ?? {},
   );
   const [stale, setStale] = useState(
-    cachedConnectorStatus !== null && !cachedConnectorStatusAuthoritative,
+    connectorStatusMemory()?.authoritative === false,
   );
   const [pendingUrls, setPendingUrls] = useState<Record<string, PendingAuthorization>>({});
   const [aliasSlug, setAliasSlug] = useState<string | null>(null);
@@ -178,7 +135,7 @@ export function PluginsPanel() {
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [inventoryPhase, setInventoryPhase] = useState<ConnectorInventoryPhase>(
-    cachedConnectorStatus === null ? "loading" : "ready",
+    connectorStatusMemory() === null ? "loading" : "ready",
   );
   const [error, setError] = useState<string | { key: LocaleKey } | null>(null);
   const [search, setSearch] = useState("");
@@ -253,7 +210,7 @@ export function PluginsPanel() {
   }, []);
 
   const loadConnectionInventory = useCallback((force = false) => {
-    const hadCachedInventory = cachedConnectorStatus !== null;
+    const hadCachedInventory = connectorStatusMemory() !== null;
     if (!hadCachedInventory) setInventoryPhase("loading");
     setError(null);
     return refreshConnectedStatus(force)
@@ -277,9 +234,7 @@ export function PluginsPanel() {
 
   useEffect(() => {
     if (inventoryPhase !== "ready") return;
-    cachedConnectorStatus = status;
-    cachedConnectorStatusAt = Date.now();
-    cachedConnectorStatusAuthoritative = !stale;
+    rememberConnectorStatus(status, !stale);
   }, [inventoryPhase, stale, status]);
 
   useEffect(() => {
@@ -798,9 +753,8 @@ export function PluginsPanel() {
     const reconnect = pending ? undefined : accountToReconnect(serviceStatus);
     const addingAccount = aliasSlug === card.slug && !included;
     const busy = busySlug === card.slug;
-    const unavailableReason = managedConnectorUnavailableReason(mode, card.slug)
-      ? t("connectors.selfHostOnlyReason")
-      : null;
+    const policy = state.config?.managedPolicy, unavailableReason = policy?.apps && !policy.apps.allowAll && !policy.apps.allowlist.includes(card.slug) ? t("policy.managedBy", { organization: policy.organizationName })
+      : managedConnectorUnavailableReason(mode, card.slug) ? t("connectors.selfHostOnlyReason") : null;
     const usedBy = connected || included ? botsUsingService(state.bots, state.instances, card.slug) : [];
     const description = unavailableReason ?? (
       pending

@@ -80,7 +80,7 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.gate.strategy).toBeUndefined();
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(workflow.jobs.vitest.strategy.matrix).toBe("${{ fromJSON(needs.static.outputs.vitest_matrix) }}");
-    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 20 || 30 }}");
+    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}");
   });
 
   it("runs each selected platform's own shards, and its e2e files, from ci-scope's matrix", () => {
@@ -155,6 +155,17 @@ describe("CI concurrency", () => {
       .map((match) => `scripts/${match[1]}`);
     expect(imports).toContain("scripts/ci-scope.mjs");
     expect(sparse.sort()).toEqual(["scripts/release-ci.mjs", ...imports].sort());
+  });
+
+  it("builds the Windows Defender check's installer exactly as the release's Windows job does", () => {
+    const release = parse(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
+    const check = parse(readFileSync(new URL("../.github/workflows/windows-defender-check.yml", import.meta.url), "utf8"));
+    type Step = { uses?: string; with?: unknown; run?: string; shell?: string };
+    const toolchainToInstaller = (steps: Step[]) => steps.slice(1, steps.findIndex((step) => step.run === "pnpm package:win") + 1)
+      .map(({ uses, with: inputs, run, shell }) => ({ uses, with: inputs, run, shell }));
+    expect(toolchainToInstaller(check.jobs.check.steps).at(-1)?.run).toBe("pnpm package:win");
+    expect(toolchainToInstaller(check.jobs.check.steps)).toEqual(toolchainToInstaller(release.jobs.windows.steps));
+    expect(check.jobs.check["runs-on"]).toBe(release.jobs.windows["runs-on"]);
   });
 
   it("lets the scope read the previous commit's CI and a pull request's labels, and nothing more", () => {

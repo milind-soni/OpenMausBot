@@ -8,12 +8,15 @@ import { createAcpDriver, type AcpSupport } from "./drivers/acp/core.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import * as procs from "./procs.ts";
 import { holdUntilFirstEngineRead } from "./first-engine-read.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "./startup-model-catalog.ts";
+import { CodexDriver } from "./drivers/codex.ts";
+import { openStartupModelCatalog, readStartupModelCache, readStartupModelCacheEntry, STARTUP_MODEL_CACHE_FRESH_MS, unconfirmedModelCatalog, writeStartupModelCache } from "./startup-model-catalog.ts";
 
 const CACHED: ModelCatalog = {
   default: "cached-model",
   options: [{ id: "cached-model", label: "Cached" }],
 };
+/** Saved by a run long enough ago that a later start reads the list again. */
+const STALE = { checkedAt: Date.now() - STARTUP_MODEL_CACHE_FRESH_MS };
 const FRESH: ModelCatalog = {
   default: "fresh-model",
   options: [{ id: "fresh-model", label: "Fresh" }],
@@ -110,9 +113,14 @@ describe("startup model catalogs", () => {
     rmSync(join(DATA_DIR, "providers", "engine-models"), { recursive: true, force: true });
   });
 
+  it("keeps a model the organization turned off marked in the saved list, so no start offers it while its refresh waits", () => {
+    writeStartupModelCache("org-blocked", { default: "a", options: [{ id: "a", label: "A" }, { id: "b", label: "B", orgBlocked: true }] });
+    expect(readStartupModelCache("org-blocked")?.options[1]).toEqual({ id: "b", label: "B", orgBlocked: true });
+  });
+
   it("does not wait for a slow refresh when a later start already has a catalog", async () => {
     seedBots();
-    writeStartupModelCache("slow", CACHED);
+    writeStartupModelCache("slow", CACHED, STALE);
     const gate = deferredCatalog();
     const { driver } = slowDriver(gate.promise);
     const registry = new ProviderRegistry([driver]);
@@ -130,7 +138,7 @@ describe("startup model catalogs", () => {
     seedBots();
     let refreshes = 0;
     const open = (instanceId = "held") => openStartupModelCatalog({ instanceId, use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; } });
-    writeStartupModelCache("held", CACHED);
+    writeStartupModelCache("held", CACHED, STALE);
     const release = holdUntilFirstEngineRead();
     const opened = open() as { pending: Promise<void> };
     for (let i = 0; i < 12; i += 1) await Promise.resolve();
@@ -141,6 +149,7 @@ describe("startup model catalogs", () => {
     release();
     await opened.pending;
     expect(refreshes).toBe(1);
+    writeStartupModelCache("held", CACHED, STALE);
     await (open() as { pending: Promise<void> }).pending;
     expect(refreshes).toBe(2);
 
@@ -149,6 +158,62 @@ describe("startup model catalogs", () => {
     await open();
     expect(refreshes).toBe(3);
     releaseAgain();
+  });
+
+  it("uses a list read within the fresh window as it is, and reads an older one again", async () => {
+    seedBots();
+    let refreshes = 0;
+    const now = 1_800_000_000_000;
+    const open = (age: number) => {
+      writeStartupModelCache("timed", CACHED, { checkedAt: now - age });
+      let used: ModelCatalog | null = null;
+      const opened = openStartupModelCatalog({ instanceId: "timed", use: (catalog) => { used = catalog; }, current: () => CACHED,
+        refresh: async () => { refreshes += 1; }, now });
+      return { opened, used: () => used };
+    };
+    const fresh = open(STARTUP_MODEL_CACHE_FRESH_MS - 1);
+    expect(fresh.used()).toEqual(CACHED);
+    expect(await fresh.opened).toBeNull();
+    expect(refreshes).toBe(0);
+    await (open(STARTUP_MODEL_CACHE_FRESH_MS).opened as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(1);
+    // A clock set back is no proof the list is fresh, and another build's CLIs may list other models.
+    await (open(-60_000).opened as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(2);
+    writeStartupModelCache("timed", CACHED, { checkedAt: now, build: "0.0.1 an older image" });
+    await (openStartupModelCatalog({ instanceId: "timed", use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; }, now }) as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(3);
+    expect(readStartupModelCacheEntry("timed")).toMatchObject({ catalog: CACHED, checkedAt: expect.any(Number), build: expect.any(String) });
+  });
+
+  it("reads a list the engine did not confirm again at the next start", async () => {
+    seedBots();
+    const standIn = { ...CACHED };
+    unconfirmedModelCatalog(standIn);
+    writeStartupModelCache("timed", standIn);
+    expect(readStartupModelCacheEntry("timed")?.checkedAt).toBe(0);
+    let refreshes = 0;
+    const opened = openStartupModelCatalog({ instanceId: "timed", use: () => {}, current: () => standIn, refresh: async () => { refreshes += 1; } }) as { pending: Promise<void> };
+    await opened.pending;
+    expect(refreshes).toBe(1);
+  });
+
+  it("a later start of Codex on a fresh list starts no app-server; on an older one it does, once the first engine is read", async () => {
+    seedBots();
+    const appServers = () => spawn.mock.calls.filter(([, args]) => (args as string[] | undefined)?.[0] === "app-server").length;
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => { throw new Error("spawned"); });
+    const start = () => CodexDriver.create({ instanceId: "codex-later", displayName: "Codex", environment: {}, enabled: true, config: CodexDriver.defaultConfig() });
+    writeStartupModelCache("codex-later", CACHED);
+    const fresh = await start();
+    expect(fresh.models).toEqual(CACHED);
+    expect(fresh.startupModelRefresh).toBeUndefined();
+    expect(appServers()).toBe(0);
+    await fresh.dispose();
+    writeStartupModelCache("codex-later", CACHED, STALE);
+    const stale = await start();
+    await stale.startupModelRefresh;
+    expect(appServers()).toBe(1);
+    await stale.dispose();
   });
 
   it("still waits for discovery on the first run, when nothing is cached", async () => {
@@ -165,7 +230,7 @@ describe("startup model catalogs", () => {
 
   it("a turn waits for the in-flight refresh instead of the saved catalog", async () => {
     seedBots();
-    writeStartupModelCache("slow", CACHED);
+    writeStartupModelCache("slow", CACHED, STALE);
     const gate = deferredCatalog();
     const { driver, seenByTurn } = slowDriver(gate.promise);
     const registry = new ProviderRegistry([driver]);
@@ -184,7 +249,7 @@ describe("startup model catalogs", () => {
 
   it("an ACP engine serves a saved catalog and lets the turn wait for the refresh", async () => {
     seedBots();
-    writeStartupModelCache("cursor", CACHED);
+    writeStartupModelCache("cursor", CACHED, STALE);
     const gate = deferredCatalog();
     const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => {
       throw new Error("spawned");

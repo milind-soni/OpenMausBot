@@ -35,7 +35,7 @@ describe("docs/analytics.md", () => {
     expect(events).toEqual(expect.arrayContaining(["app_opened", "app_snapshot", "api_key_saved", "message_sent", "onboarding_cloud"]));
     const rows = eventRows(read("docs/analytics.md"));
     expect(rows.filter((event) => !event.startsWith("$")).sort(), "Give each event its own row in docs/analytics.md").toEqual(events);
-    expect(rows.filter((event) => event.startsWith("$")), "PostHog's own events the app causes").toEqual(["$identify"]);
+    expect(rows.filter((event) => event.startsWith("$")), "PostHog's own events the app causes").toEqual([]);
   });
 
   it("is the page the docs site shows", () => {

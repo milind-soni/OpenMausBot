@@ -11,6 +11,7 @@ import { removeTempDir } from "../../testing/cleanup.ts";
 import {
   classifyCursorError,
   createCursorAgentDriver,
+  cursorCatalogFromSession,
   CursorAgentDriver,
   decodeCursorAuthStatus,
   decodeCursorAuthText,
@@ -101,6 +102,28 @@ cursor-text - Cursor Text
   });
 });
 
+describe("cursorCatalogFromSession", () => {
+  it("offers one flat slug per base, names default[] auto, and keeps only the static entries the session offers", () => {
+    expect(cursorCatalogFromSession([
+      { id: "default[]", label: "Auto" },
+      { id: "grok-4.7[reasoning_effort=high,fast=true]", label: "grok-4.7" },
+      { id: "grok-4.7[reasoning_effort=high,fast=false]", label: "grok-4.7" },
+      { id: "gpt-5.3-codex[reasoning=medium]", label: "Codex 5.3" },
+    ])).toEqual({
+      default: "auto",
+      options: [
+        { id: "auto", label: "Auto" },
+        { id: "gpt-5.3-codex", label: "Codex 5.3" },
+        { id: "grok-4.7", label: "Grok 4.7" },
+      ],
+    });
+  });
+
+  it("returns null when the session advertises nothing, so the text list can answer", () => {
+    expect(cursorCatalogFromSession([])).toBeNull();
+  });
+});
+
 describe("classifyCursorError", () => {
   it("maps auth and subscription failures onto provider codes", () => {
     expect(classifyCursorError({ code: -32000, message: "Authentication required" })).toBe("invalid_credentials");
@@ -154,6 +177,60 @@ describe("CursorAgentDriver", () => {
       expect(instance.models.default).toBe("auto");
     } finally {
       await instance.dispose();
+    }
+  });
+
+  it("lists every model the ACP session advertises when `cursor-agent models` lists only auto", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-acp-catalog-"));
+    scratchDirs.push(scratch);
+    const dump = join(scratch, "dump.json");
+    const rpc = join(scratch, "rpc.jsonl");
+    // Cursor CLI 2026.10.22-27dcf5f: `models` prints only `auto`, session/new lists 32.
+    process.env.FAKE_ACP_MODELS_LIST = "auto-only";
+    process.env.FAKE_ACP_SESSION_MODELS = [
+      "auto-smart[optimize_for=balanced]|Auto Balance",
+      "grok-4.7[context=256k,reasoning_effort=high,fast=true]|grok-4.7",
+      "composer-2.5[fast=true]|composer-2.5",
+      "gpt-5.6-sol[context=272k,reasoning=medium,fast=false]|gpt-5.6-sol",
+      "gpt-5.3-codex[reasoning=medium,fast=false]|gpt-5.3-codex",
+      "kimi-k3[reasoning=max]|kimi-k3",
+      "glm-5.2[reasoning=high]|glm-5.2",
+    ].join(",");
+    process.env.FAKE_ACP_RPC_APPEND_FILE = rpc;
+
+    const instance = await createCursorAgentDriver().create({
+      instanceId: "cursor-acp-catalog",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      expect(instance.models.default).toBe("auto");
+      expect(instance.models.options.map((option) => option.id)).toEqual([
+        "auto", "composer-2.5", "composer-2.5-fast", "gpt-5.3-codex",
+        "auto-smart", "grok-4.7", "gpt-5.6-sol", "kimi-k3", "glm-5.2",
+      ]);
+      expect(instance.models.options.find((option) => option.id === "auto-smart")?.label).toBe("Auto Balance");
+      const methods = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
+      expect(methods).toContain("session/new");
+      expect(methods).not.toContain("session/prompt");
+      expect(methods).not.toContain("session/set_model");
+
+      process.env.FAKE_ACP_DUMP = dump;
+      const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-acp-catalog", text: "hi", model: "gpt-5.6-sol" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
+        { method: "session/set_model", params: { sessionId: expect.any(String), modelId: "gpt-5.6-sol[context=272k,reasoning=medium,fast=false]" } },
+      ]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODELS_LIST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
     }
   });
 

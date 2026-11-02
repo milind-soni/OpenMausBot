@@ -126,7 +126,8 @@ Teammates start at Full access like every bot, but a person may have set one
 lower, and switching each thread a Chief opens back up by hand was where a
 team's owner spent their day. So **a Chief of Staff's level flows down**. Work
 it hands out with `coordinate_bots` — into the work thread the Chief's
-conversation has with a teammate, or a fresh thread with `thread: "new"` —
+conversation has with a teammate, a fresh thread with `thread: "new"`, or a
+thread it opened earlier, named by its id —
 starts at the level of the Chief conversation it came from: Auto-accept edits,
 Approve for me, or Full access. The teammate's thread is switched to that
 level, keeps it, and opens with a line saying so ("Approve for me — delegated

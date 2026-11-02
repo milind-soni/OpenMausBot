@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
-import { latestRoutineRun, routineDateTime, routineFinished, routineNextLabel, routineRunLabel, routineRunTone, routineScheduleState } from "@/lib/routine-display";
+import { latestRoutineRun, routineDateTime, routineFinished, routineHeldNote, routineNextLabel, routineRunLabel, routineRunTone, routineScheduleState } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 
@@ -47,6 +47,7 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
         {!!routine.failureStreak && <p className="mt-2 text-[12px] text-danger">{t("routines.failureStreak", { count: routine.failureStreak })}</p>}
         {routine.weekRuns && <p className="mt-2 text-[12px] text-ink-secondary">{t("routines.weekRuns", routine.weekRuns)}</p>}
         {routine.warning && <p className="mt-2 text-[12px] leading-relaxed text-warning">{routine.warning}</p>}
+        {routine.heldFor && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{routineHeldNote(routine)}</p>}
         {!!routine.skippedRuns && <p className="mt-2 text-[12px] text-ink-secondary">
           {t("routines.skippedRuns", { count: routine.skippedRuns })}
           {routine.lastSkippedAt != null && <> · {t("routines.lastSkipped", { date: routineDateTime(routine.lastSkippedAt) })}</>}

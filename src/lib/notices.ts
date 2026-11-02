@@ -1,6 +1,7 @@
 import { hintSeen, hintSeenPatch, type OnboardingStatus } from "@/lib/onboarding";
 
-export const CLOUD_PRO_UPDATE_NOTICE = "cloud-pro-update-2026-10";
+/** The What's new popup's campaign: each person sees it once. A new id shows it once more. */
+export const WHATS_NEW_NOTICE = "whats-new-2026-11";
 export const UPDATES_CONSENT_NOTICE = "updates-consent";
 /** The Simple mode popup, once per browser (simple-mode-prompt.ts keeps whether it was closed). */
 export const SIMPLE_MODE_NOTICE = "simple-mode-prompt";
@@ -8,24 +9,67 @@ export const CLOUD_INTRO = "cloud-trial-intro-v1";
 export const CLOUD_TRIAL_NOTICE = "cloud-trial-notice";
 export const CLOUD_NOTICE = "cloud-notice";
 export const STAR_NOTICE = "github-star-dismissed";
+/** Bots on this computer and on another place of the person's (two-places.ts): dismissed per place, by main. */
+export const TWO_PLACES_NOTICE = "two-places";
 export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
 
-export type NoticeId = typeof SIMPLE_MODE_NOTICE | typeof CLOUD_PRO_UPDATE_NOTICE | typeof UPDATES_CONSENT_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof BOAT_OFFER_NOTICE | typeof STAR_NOTICE;
+/**
+ * Every notice, in the order a launch asks them: one launch shows one notice, the first one due, and only the product-updates
+ * question may follow it there. The rest wait for later launches, in this order.
+ */
+export const NOTICES = [
+  SIMPLE_MODE_NOTICE,
+  WHATS_NEW_NOTICE,
+  UPDATES_CONSENT_NOTICE,
+  TWO_PLACES_NOTICE,
+  PRODUCT_HUNT_NOTICE,
+  CLOUD_INTRO,
+  CLOUD_TRIAL_NOTICE,
+  CLOUD_NOTICE,
+  BOAT_OFFER_NOTICE,
+  STAR_NOTICE,
+] as const;
 
-export const NOTICES: readonly NoticeId[] = [SIMPLE_MODE_NOTICE, CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE];
+export type NoticeId = (typeof NOTICES)[number];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 
-export function nextNotice(facts: NoticeFacts, seen: (id: NoticeId) => boolean): NoticeId | null {
+/** `launch`: the notice this launch already showed (launchNotice), the only one besides the product-updates question that
+ * may show again in it. */
+export function nextNotice(facts: NoticeFacts, seen: (id: NoticeId) => boolean, launch: NoticeId | null = null): NoticeId | null {
   for (const id of NOTICES) {
-    if (seen(id)) continue;
+    if (seen(id) || (launch !== null && id !== launch && id !== UPDATES_CONSENT_NOTICE)) continue;
     if (facts[id] === null) return null;
     if (facts[id]) return id;
   }
   return null;
+}
+
+const LAUNCH_KEY = "omb.launch.notice";
+// Where browser storage is blocked, this page's memory stands in for it, so a claim still holds for the page.
+let launchMemory: NoticeId | null = null;
+const isNotice = (id: unknown): id is NoticeId => (NOTICES as readonly unknown[]).includes(id);
+
+/** The first notice this launch showed, kept for the window's session, so a reload is the same launch. */
+export function launchNotice(): NoticeId | null {
+  try {
+    const id = sessionStorage.getItem(LAUNCH_KEY);
+    if (isNotice(id)) return id;
+  } catch {}
+  return launchMemory;
+}
+
+/** The first claim of a launch holds; a later one changes nothing. */
+export function markLaunchNotice(id: NoticeId): void {
+  if (launchNotice()) return;
+  try {
+    sessionStorage.setItem(LAUNCH_KEY, id);
+  } catch {
+    launchMemory = id;
+  }
 }
 
 const stored = (id: string): string | null => { try { return localStorage.getItem(id); } catch { return null; } };

@@ -7,8 +7,10 @@
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
+import { intlLocale } from "./language.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
+import { serverLine } from "./server-lines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 
@@ -36,11 +38,13 @@ const localTime = (at: number) =>
   inHostZone(at, "en-CA", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(",", "");
 
 // ICU 72+ puts a narrow no-break space (U+202F) before AM/PM.
-const clockTime = (at: number) => inHostZone(at, "en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
+const clockTime = (at: number, language?: string) =>
+  inHostZone(at, intlLocale(language), { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
 
-/** The line a run with nothing new posts when the automation's line before it in the chat said a run failed. */
-export function recoveredText(name: string, at: number): string {
-  return `Recovered: ${name} finished OK at ${clockTime(at)}`;
+/** The line a run with nothing new posts when the automation's line before it in the chat said a run failed, in the
+ * language of the chat's person. */
+export function recoveredText(name: string, at: number, language?: string): string {
+  return serverLine(language, "server.runs.recovered", { name, time: clockTime(at, language) });
 }
 
 /** How the chat's own session reads an automation's line: as its own report, named and dated. */
@@ -49,18 +53,20 @@ export function automationContextText(line: AutomationLine, at: number, text: st
   return `[Your automation ${JSON.stringify(line.name)} ${what} at ${localTime(at)}:]\n${text}`;
 }
 
-/** A sign-in, connection or credential card still waiting on the person, in plain words; null once it is settled. */
-export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">): string | null {
+/** A sign-in, connection or credential card still waiting on the person, in plain words in their language; null once
+ * it is settled. */
+export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">, language?: string): string | null {
   const { signIn, connector, secret } = message;
   if (message.kind === "signin" && signIn && signInWaits(signIn) && !signIn.resumed && !signIn.stopped) {
     const reason = signIn.reason?.trim();
-    return `I need you to sign in to ${signIn.site}${reason ? `: ${reason}${/[.!?]$/.test(reason) ? "" : "."}` : "."}`;
+    return reason ? serverLine(language, "server.connect.signInWhy", { site: signIn.site, reason: /[.!?]$/.test(reason) ? reason : `${reason}.` })
+      : serverLine(language, "server.connect.signIn", { site: signIn.site });
   }
   if (message.kind === "connector" && connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed && !connector.stopped) {
-    return `I need you to connect ${connector.label}.`;
+    return serverLine(language, "server.connect.app", { app: connector.label });
   }
   if (message.kind === "secret" && secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed && !secret.stopped) {
-    return `I need your ${secret.label}.`;
+    return serverLine(language, "server.connect.secret", { label: secret.label });
   }
   return null;
 }
@@ -87,6 +93,8 @@ export interface AutomationReportDeps {
   notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
   /** A run that delivers to the brief completed: its answer is the brief's to read. */
   brief?(run: RoutineRun, turnId?: string): void;
+  /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
+  threadLanguage?(threadId: string): string | undefined;
 }
 
 export function createAutomationReports(deps: AutomationReportDeps) {
@@ -133,7 +141,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   /** An option card is copied whole and answered through its request; any other card the run waits on is named. */
   const writeCopy = (line: Extract<Waiting, { kind: "card" }>, target: { bot: BotRecord; threadId: string }) => {
     const original = store.messagesFor(line.threadId).find((message) => message.id === line.messageId);
-    const named = original ? waitingCardText(original) : null;
+    const named = original ? waitingCardText(original, deps.threadLanguage?.(target.threadId)) : null;
     if (!original || (!named && !liveCardKind(original.card))) return;
     const automation = lineOf(line.run, { needsYou: true, copyOf: original.id });
     store.appendMessage(target.threadId, named ? { role: "bot", kind: "text", text: named, automation } : { role: "bot", kind: "options", card: { ...original.card! }, automation });
@@ -161,14 +169,15 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       return true;
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
+    const language = deps.threadLanguage?.(target.threadId);
     const said: RunReply = line.kind === "reply" ? read(source)
-      : { quiet: false, text: line.detail ? `This run didn't finish: ${line.detail}` : "This run didn't finish." };
+      : { quiet: false, text: line.detail ? serverLine(language, "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
       return true;
     }
-    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now()) } : said;
+    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now(), language) } : said;
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
       ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),

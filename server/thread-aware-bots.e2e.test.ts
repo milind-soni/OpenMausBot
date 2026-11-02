@@ -522,6 +522,8 @@ describe("coordinate_bots on a teammate", () => {
   it("still buzzes when a coordinated thread asks the person a question, deep-linked to that thread", async () => {
     const pm = await createBot("Pam", "gated");
     const sage = await createBot("Sage", "curious", "fake-model");
+    // On "Ask me first" a teammate's question is the person's; at Full access the bot that handed the work on answers it.
+    for (const bot of [pm, sage]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {
       const token = await heldTurn(pm, "Ask Sage.");

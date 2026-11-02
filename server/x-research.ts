@@ -41,7 +41,8 @@ export const TREG_X_ENDPOINTS = {
   profile: "treg.x.user.profile",
 } as const;
 
-export type XResearchErrorCode = "bad_input" | "bad_key" | "no_credit" | "rate_limited" | "not_found" | "unavailable" | "in_progress";
+/** `off`: research is not on for this account (the plan's relay said so), not a failure a retry fixes. */
+export type XResearchErrorCode = "bad_input" | "bad_key" | "no_credit" | "rate_limited" | "not_found" | "unavailable" | "in_progress" | "off";
 export const TREG_TOP_UP_URL = "https://treg.to";
 
 /** Every sentence a bot or the Settings page can be shown about X research. */

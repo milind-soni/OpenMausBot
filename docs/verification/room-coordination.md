@@ -139,8 +139,14 @@ Outside a room, a conversation has one thread with each recipient, titled
 “@Clive · work”. The first request opens it; every later request from that
 conversation — a follow-up, a change of plan, rework — goes into it, so the
 recipient has the earlier work in its own history. If the recipient is still
-working there, the request waits and runs next; the same work never runs twice
-in parallel. A different conversation of the sender gets its own thread.
+working there on what the sender handed it before, the request goes into that
+work: it reaches the running turn, which reads it at its next step, or answers
+the question that work waits on, and the work's one result comes back once.
+Only when the recipient's engine cannot take a message mid-turn does the
+request wait and run next; a second request from the same turn always does.
+The same work never runs twice in parallel. A request can also name, by its
+thread id, any thread the sender opened on that recipient (`thread`), and goes
+there. A different conversation of the sender gets its own thread.
 Successful reported work closes in the sidebar but remains readable, and
 reopens when the next request arrives; failed or withheld work remains
 visible. Each receipt names the thread the request went into. Within the
@@ -340,7 +346,7 @@ no recipient starts until all are allowed. It does not claim model judgment or a
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
 checks that follow-ups from one conversation continue one recipient thread
-(queued behind running work, never in parallel), that another conversation
+(into the running work, never in parallel), that another conversation
 gets its own thread, thread titles, work that closes itself and reopens, recipient model/permission
 defaults, idempotency without extra tasks, capacity-bound queues, dispatch to a
 spare recipient thread while unrelated work remains active, pinned parent

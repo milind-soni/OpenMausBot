@@ -268,7 +268,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   if (view.kind === "has-cloud" && account?.status === "connected" && account.clouds && window.ogb?.cloudAdd
     && (account.addCloud?.canAdd !== false || (account.adding && !account.adding.done))) {
     return <CloudAddSheet kind={extraWide ? "offer" : "has-cloud"} staging={account.staging === true} onClose={close}>
-      <AddCloudFlow onClose={close} onFirstCloud={() => {}} onWide={setExtraWide} />
+      <AddCloudFlow onClose={close} onFirstCloud={() => {}} onWide={setExtraWide} source={request.source} />
     </CloudAddSheet>;
   }
 

@@ -33,7 +33,7 @@ vi.mock("./MenuMotion", () => ({
 }));
 vi.mock("./DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }) };
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
@@ -395,5 +395,34 @@ describe("a bot's menu in Simple", () => {
   it("offers only New department… to a bot in none, when there are no departments yet", () => {
     fixture.state = { ...fixture.state, sections: [], bots: [bot("atlas"), bot("bea")] };
     expect(open(menuProps("atlas")).map(label)).toEqual(["New department…"]);
+  });
+});
+
+describe("deleting a Chief of Staff", () => {
+  type MenuProps = Parameters<typeof BotContextMenu>[0];
+  const askToDelete = (target: Bot) => (render().find((node) => node.type === BotContextMenu)!.props as unknown as MenuProps).onDelete(target);
+  const openDialog = () => render().find((node) => node.type === ConfirmDialog && node.props.open === true);
+
+  it("offers Archive first, which keeps its chats, and archives it as an ordinary bot", async () => {
+    const chief = bot("atlas", { chiefOfStaff: true });
+    fixture.state = { ...fixture.state, bots: [chief, bot("bea")] };
+    askToDelete(chief);
+    const dialog = openDialog()!;
+    expect(dialog.props.body).toContain("Archive it instead to keep every conversation");
+    const alternative = dialog.props.alternative as { label: string; onClick: () => void };
+    expect(alternative.label).toBe("Archive instead");
+    alternative.onClick();
+    await vi.waitFor(() => expect(fixture.requests).toContainEqual({ path: "/api/bots/atlas", method: "PATCH", body: { hidden: true, chiefOfStaff: false } }));
+    expect(openDialog()).toBeUndefined();
+  });
+
+  it("offers nothing else for any other bot, or for the last bot there is", () => {
+    askToDelete(bot("bea"));
+    expect(openDialog()!.props.alternative).toBeUndefined();
+    const chief = bot("atlas", { chiefOfStaff: true });
+    fixture.values = [];
+    fixture.state = { ...fixture.state, bots: [chief] };
+    askToDelete(chief);
+    expect(openDialog()!.props.alternative).toBeUndefined();
   });
 });

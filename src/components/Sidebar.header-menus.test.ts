@@ -29,7 +29,7 @@ vi.mock("./MenuMotion", () => ({
 }));
 vi.mock("./DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }) };
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 // The Active Threads menu is an Advanced-mode control; Simple hides it.

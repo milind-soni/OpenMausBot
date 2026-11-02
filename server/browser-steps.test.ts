@@ -265,7 +265,7 @@ describe("around every bot's browser call", () => {
       ['Typed •••• into the element "#cvc"', "secret-on-screen"],
     ]);
     expect(kept.at(-1)!.verify).toMatchObject({ landed: null });
-    expect(JSON.stringify(kept)).not.toContain("4242");
+    expect(JSON.stringify(kept.map(step => ({ ...step, at: 0 })))).not.toContain("4242");
   });
 
   it("records closing the browser without a screenshot, and forgets its page", async () => {

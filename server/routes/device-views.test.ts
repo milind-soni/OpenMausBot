@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, expect, it } from "vitest";
 
 import type { RequestAuth } from "../request-auth.ts";
-import { createDeviceViewRoutes, pairingView, TEAM_VIEW_REFUSAL, type DeviceViewRouteDeps } from "./device-views.ts";
+import { createDeviceViewRoutes, pairingView, snapshotsAfterViewChanges, TEAM_VIEW_REFUSAL, type DeviceViewRouteDeps } from "./device-views.ts";
 
 const VIEW = { sections: ["Ops"], bots: [], groups: [] };
 
@@ -61,5 +61,27 @@ describe("PATCH a device's view", () => {
 
   it("lifts a limit with null", async () => {
     expect(await patch({ view: null })).toMatchObject({ status: 200, body: { session: { id: "s-1", view: null } } });
+  });
+});
+
+describe("a session whose view changed", () => {
+  it("closes its streams and starts over from the seq it changed at, until it is revoked", () => {
+    const changed: Array<(id: string) => void> = [];
+    const revoked: Array<(id: string) => void> = [];
+    const closed: string[] = [];
+    let seq = 7;
+    const snapshots = snapshotsAfterViewChanges({
+      onSessionChanged: (listener) => { changed.push(listener); return () => {}; },
+      onSessionRevoked: (listener) => { revoked.push(listener); return () => {}; },
+    }, () => seq, (id) => closed.push(id));
+    expect(snapshots.from("s-1")).toBe(-1);
+    changed.forEach((listener) => listener("s-1"));
+    expect(closed).toEqual(["s-1"]);
+    seq = 9;
+    expect(snapshots.from("s-1")).toBe(7);
+    snapshots.mark("s-2");
+    expect(snapshots.from("s-2")).toBe(9);
+    revoked.forEach((listener) => listener("s-1"));
+    expect(snapshots.from("s-1")).toBe(-1);
   });
 });

@@ -38,9 +38,14 @@
 //   FAKE_ACP_MODELS  model ids: opencode-shaped configOptions and set_config_option (-32602 for others);
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
+//   FAKE_ACP_MODELS_REFRESH_FROM  `models --refresh` copies this file over FAKE_ACP_MODELS_FILE, as OpenCode 1.19.4
+//     refetches its models.dev cache only then; OPENCODE_CONFIG_CONTENT's provider models join any model list
 //   FAKE_ACP_MODELS_LIST=v2  OpenCode 2: `models` answers empty with exit 0, `models --verbose` exits 1
+//   FAKE_ACP_MODELS_LIST=auto-only  Cursor CLI 2026.10.22: `models` lists only `auto`
 //   FAKE_ACP_VERBOSE_FAIL_ONCE  marker path: the first `models --verbose` fails, like a new OpenCode home's first run
 //   FAKE_ACP_MODEL_STICKS  set_config_option succeeds but keeps the old model
+//   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
+//     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
@@ -81,6 +86,12 @@ const modelsText = process.env.FAKE_ACP_MODELS_FILE && existsSync(process.env.FA
   : process.env.FAKE_ACP_MODELS ?? "";
 // One id per line when the list holds a newline (DeepSeek's wire values are JSON pairs with commas); else comma-separated.
 const models = modelsText.split(modelsText.includes("\n") ? "\n" : ",").map((id) => id.trim()).filter(Boolean);
+try {
+  const declared = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}")?.provider ?? {};
+  for (const [provider, entry] of Object.entries<any>(declared)) {
+    for (const id of Object.keys(entry?.models ?? {})) if (models.length && !models.includes(`${provider}/${id}`)) models.push(`${provider}/${id}`);
+  }
+} catch {}
 const defaultModelEnv = process.env.AGY_ACP_DEFAULT_MODEL;
 if (models.length && defaultModelEnv && !models.includes(defaultModelEnv)) models.push(defaultModelEnv);
 let currentModel: string | null = models.length && defaultModelEnv ? defaultModelEnv : models[0] ?? null;
@@ -137,7 +148,7 @@ const configOptions = () => {
           name: "Model",
           category: "model",
           type: "select",
-          currentValue: currentModel,
+          ...(process.env.FAKE_ACP_OMIT_MODEL_VALUE === currentModel ? {} : { currentValue: currentModel }),
           options: models.map((value) => ({ value, name: value })),
         },
       ] : []),
@@ -280,6 +291,12 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
 }
+if (argv[0] === "models" && argv.includes("--refresh")) {
+  if (process.env.FAKE_ACP_MODELS_REFRESH_FROM && process.env.FAKE_ACP_MODELS_FILE) {
+    writeFileSync(process.env.FAKE_ACP_MODELS_FILE, readFileSync(process.env.FAKE_ACP_MODELS_REFRESH_FROM));
+  }
+  process.exit(0);
+}
 if (argv[0] === "models" || argv.includes("--list-models")) {
   const failOnce = process.env.FAKE_ACP_VERBOSE_FAIL_ONCE;
   if (failOnce && argv.includes("--verbose") && !existsSync(failOnce)) {
@@ -292,6 +309,10 @@ if (argv[0] === "models" || argv.includes("--list-models")) {
       console.error("Unrecognized flag: --verbose");
       process.exit(1);
     }
+    process.exit(0);
+  }
+  if (process.env.FAKE_ACP_MODELS_LIST === "auto-only") {
+    console.log(["Available models", "", "auto - Auto (default)"].join("\n"));
     process.exit(0);
   }
   if (models.length) {

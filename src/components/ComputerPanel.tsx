@@ -34,7 +34,7 @@ import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
 import { SignInBanner } from "./SignInRequestCard";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
-import { MacLocalControl } from "./MacLocalControl";
+import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
   busyBoatView,
@@ -665,7 +665,7 @@ export function ComputerPanel({
   useEffect(() => {
     lastLiveAt.current = 0;
     if (!cloudPreviewReady) return;
-    return listenLiveFrames({
+    return listenLiveFrames({ screens: true,
       onFrame: (frame) => {
         if (frame.kind !== "screen" || frame.botId !== bot.id || frame.threadId !== bot.threadId) return;
         lastLiveAt.current = Date.now();
@@ -1118,7 +1118,7 @@ export function ComputerPanel({
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
     ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || placeOffered(mode, state.config)).map(([mode, labelKey, descriptionKey, Icon]) => {
+  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server"))).map(([mode, labelKey, descriptionKey, Icon]) => {
     const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
     const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
     const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
@@ -1677,7 +1677,7 @@ export function ComputerPanel({
         {phase !== "team-boat" && (bot.computer !== undefined || computerStatusCurrent) && <>
           <LocalScreenPreview />
           <LinuxLocalControl />
-          <MacLocalControl />
+          <MacLocalControl /><WindowsLocalControl />
         </>}
 
         {advanced ? <>

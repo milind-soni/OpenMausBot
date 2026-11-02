@@ -201,8 +201,9 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       const request = deps.request(threadId);
       const flags = deps.turnStops.read?.(threadId, event.turnId)?.flags;
       const cause = deps.turnStops.failureCause(event);
+      // A tool call's failure names the tool, never the engine's own limit, whatever its words.
       const scope: TakeoverScope | undefined = signedOutStop(event.stopReason, cause) ? "signed-out"
-        : flags?.limit ?? (classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+        : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
       if (!scope) return null;
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;
       const from = thread.modelSelection;

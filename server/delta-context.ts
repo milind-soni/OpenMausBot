@@ -118,8 +118,11 @@ export function renderUnseen(unseen: readonly UnseenMessage[]): { block: string;
   };
 }
 
+/** Ends the unseen block, so the turn's own message never reads as one more line of it. */
+export const UNSEEN_END = "[End of those messages. Now reply to the user's latest message:]";
+
 export function withUnseenMessages(block: string, text: string): string {
-  return block ? `${block}\n\n${text}` : text;
+  return block ? `${block}\n\n${UNSEEN_END}\n\n${text}` : text;
 }
 
 export function recordHanded(state: HandedState, order: readonly string[], received: Iterable<string>): HandedState {

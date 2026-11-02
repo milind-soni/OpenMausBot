@@ -6,7 +6,7 @@ import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { agentsMcp } from "./drivers/agents-mcp.ts";
 import { agentsServerEnv, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type AgentsConversation, type AgentsTurn } from "./agents-turn.ts";
 
-const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, escalations: true, voiceNotes: true, research: true };
+const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, escalations: true, voiceNotes: true, x: true, research: true };
 const CHAT: AgentsConversation = { threadId: "thread-1", bot: { id: "bot-1", chiefOfStaff: true }, room: false, teamComputer: false, host: HOST };
 const ROOM: AgentsConversation = { ...CHAT, threadId: "room-1", room: true };
 
@@ -62,6 +62,15 @@ describe("one conversation's agents tools", () => {
     for (const tool of ["select_computer", "wait_until", "list_waits", "cancel_wait"]) expect(room).not.toContain(tool);
     for (const tools of [chat, room]) expect(tools).toEqual(expect.arrayContaining(["skills_list", "skill_manage"]));
     expect(await names({ ...CHAT, host: { ...HOST, skillAuthoring: false } })).not.toContain("skill_manage");
+  });
+
+  it("lists x_search with a research credential, and the research tools only while research works for it", async () => {
+    const names = async (conversation: AgentsConversation) =>
+      (JSON.parse((await everyTurn(conversation))[0]!.wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name).filter((tool) => /^(x|research)_/.test(tool));
+    expect(await names(CHAT)).toEqual(["x_search", "research_search", "research_endpoint", "research_call"]);
+    expect(await names({ ...CHAT, host: { ...HOST, research: false } })).toEqual(["x_search"]);
+    expect(await names({ ...CHAT, host: { ...HOST, x: false } })).toEqual([]);
+    expect(await names({ ...CHAT, bot: { ...CHAT.bot, xResearch: false } })).toEqual([]);
   });
 
   it("leaves select_computer out only where the conversation can never pick a computer", async () => {

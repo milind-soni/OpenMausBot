@@ -2,12 +2,14 @@
 // edit or an older version left out of range is dropped, never trusted.
 import { z } from "zod";
 
+import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { ROUTINE_CHECKS, type RoutineCheck } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import { loadAttachments, loadTimeoutMinutes } from "./routine-attachments.ts";
+import { isRoutineHoldCause } from "./routine-holds.ts";
 import { MAX_DATE_MS } from "./routine-intervals.ts";
 import { loadSchedule } from "./routine-schedules.ts";
-import type { Routine, RoutineGoalStatus, RoutinePackageStamp, RoutineRun, RoutineTarget } from "./routines.ts";
+import type { Routine, RoutineGoalStatus, RoutinePackageStamp, RoutineRequestReceipt, RoutineRun, RoutineTarget } from "./routines.ts";
 
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
 
@@ -96,9 +98,10 @@ export function loadRoutine(routine: Routine, now: number): Routine | null {
     checkedAt: instant(routine.checkedAt),
     checkTrouble: typeof routine.checkTrouble === "string" && routine.checkTrouble ? routine.checkTrouble.slice(0, 300) : undefined,
     wakeAt: instant(routine.wakeAt),
+    heldFor: isRoutineHoldCause(routine.heldFor) ? routine.heldFor : undefined,
   };
   delete loaded.failureStreak;
-  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt"]));
+  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt", "heldFor"]));
 }
 
 export function loadRun(run: RoutineRun): RoutineRun {
@@ -118,4 +121,21 @@ export function loadRun(run: RoutineRun): RoutineRun {
     checkKey: typeof run.checkKey === "string" && /^[\w-]{1,128}$/.test(run.checkKey) ? run.checkKey : undefined,
   };
   return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey"]);
+}
+
+const REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>(["create", "update", "pause", "resume", "run_now", "delete"]);
+
+/** The applied routine-request receipts routines.json holds, each whole: one with a field out of shape is dropped. */
+export function loadRequestReceipts(value: unknown): RoutineRequestReceipt[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((receipt): receipt is RoutineRequestReceipt =>
+    typeof receipt?.requestId === "string" &&
+    typeof receipt?.messageId === "string" &&
+    typeof receipt?.botId === "string" &&
+    typeof receipt?.threadId === "string" &&
+    REQUEST_ACTIONS.has(receipt?.action) &&
+    receipt?.fingerprintVersion === 1 &&
+    typeof receipt?.fingerprint === "string" && /^[a-f0-9]{64}$/.test(receipt.fingerprint) &&
+    typeof receipt?.resultId === "string" &&
+    Number.isFinite(receipt?.appliedAt));
 }

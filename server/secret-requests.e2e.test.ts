@@ -173,7 +173,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   expect(readFileSync(secretFile, "utf8")).toBe(FILE_CANARY);
   expect(statSync(secretFile).mode & 0o777).toBe(0o600);
 
-  // A one-use secretRef for add_mcp_server.
+  // A one-use secretRef for mcp_server.
   await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" });
   const refCard = (await cards()).at(-1);
   expect(refCard.secret.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it.");
@@ -186,13 +186,13 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   expect(asFile.text).toContain("not as a file for your commands (not a file request), so this card asks for it again");
   expect((await cards()).at(-1).secret).toMatchObject({ label: "Notion key", delivery: "file" });
 
-  const added = await tools.call("add_mcp_server", { name: "notion", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}`, "Notion-Version": "2022-06-28" } });
-  expect(added).toEqual({ isError: false, text: expect.stringMatching(/^Saved MCP server “notion”/u) });
+  const added = await tools.call("mcp_server", { action: "add", name: "notion", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}`, "Notion-Version": "2022-06-28" } });
+  expect(added).toEqual({ isError: false, text: expect.stringMatching(/^Added MCP server notion and turned it on\. Test: /u) });
   const config = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
   expect(config.mcpServers.notion.headers).toEqual({ Authorization: `Bearer ${REF_CANARY}`, "Notion-Version": "2022-06-28" });
-  const reused = await tools.call("add_mcp_server", { name: "notion2", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}` } });
+  const reused = await tools.call("mcp_server", { action: "add", name: "notion2", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}` } });
   expect(reused).toEqual({ isError: true, text: `${ref} was already used: each secretRef works once. Ask again with request_credential.` });
-  const pathAsRef = await tools.call("add_mcp_server", { name: "stripe", command: "npx", env: { STRIPE_SECRET_KEY: secretFile } });
+  const pathAsRef = await tools.call("mcp_server", { action: "add", name: "stripe", command: "npx", env: { STRIPE_SECRET_KEY: secretFile } });
   expect(pathAsRef.isError).toBe(true);
   expect(pathAsRef.text).toMatch(/^That is a secret file for your own commands, not a secretRef/u);
 

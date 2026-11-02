@@ -299,6 +299,18 @@ written. A note never ends up as a date with no words. The words are kept in
 the person asks a bot to remember it once more. The bot confirms in one plain
 line and names no files.
 
+A standing preference for all of the person's bots ("reminders go to my task
+app") is `memory_update` with `action: "prefer"` and the preference as one line
+of at most 300 characters. It goes once into the About me of the person whose
+own words began the work, as a learned line, and every bot reads it there, so
+no bot has to be told it and nothing fans out to each bot
+(`server/host/person-preference.ts`). On a Team Cloud that is the person the
+turn acts for: their own chat, a group chat line of theirs, or work handed on
+from it, and nobody's once another person's words joined. Elsewhere it is the
+one person, when their own message began the work. A routine, a webhook, an
+outside app or a bot's own work saves no one's preference. A Chief of Staff
+saves such a preference itself instead of sending it to each bot.
+
 ## Editing
 
 `MEMORY.md` and every topic file can be edited in the panel. A save carries

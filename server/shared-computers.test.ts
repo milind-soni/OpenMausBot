@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerScopeRefusal } from "./shared-computers.ts";
+import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerScopeRefusal } from "./shared-computers.ts";
 import { hostScreenBusyText, SharedComputerControl } from "./shared-computer-control.ts";
 import { TurnResources } from "./turn-resources.ts";
 
@@ -98,6 +98,27 @@ describe("shared computer authority and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(45_000);
     await expect(tools.result).rejects.toThrow(/timed out/);
     tools.close();
+  });
+  it("runs a command up to 900 seconds on a desktop that takes long commands, and refuses past 240 on one that does not", async () => {
+    expect(sharedComputerOperation.safeParse({ computer_id: randomUUID(), action: "run_command", command: "./scan", timeout_seconds: 900 }).success).toBe(true);
+    expect(sharedComputerOperation.safeParse({ computer_id: randomUUID(), action: "run_command", command: "./scan", timeout_seconds: 901 }).success).toBe(false);
+    vi.useFakeTimers();
+    const broker = new SharedComputers(() => true);
+    const computer = { ...registration({ terminal: true }), commandTimeouts: true as const, longCommands: true as const }; broker.register(computer, alice, secret);
+    const result = broker.request({ computer_id: computer.id, action: "run_command", command: "./evals", timeout_seconds: 900 }, alice.person, () => true);
+    result.catch(() => {});
+    const job = await broker.poll(computer.id, alice.session, secret);
+    expect(job!.operation).toMatchObject({ timeout_seconds: 900 });
+    broker.liveJob(computer.id, alice.session, secret, job!.id);
+    await vi.advanceTimersByTimeAsync(899_000);
+    broker.complete(computer.id, alice.session, secret, job!.id, { exitCode: 0 });
+    await expect(result).resolves.toEqual({ exitCode: 0 });
+    broker.close();
+    const older = new SharedComputers(() => true);
+    const capped = { ...registration({ terminal: true }), commandTimeouts: true as const }; older.register(capped, alice, secret);
+    await expect(older.request({ computer_id: capped.id, action: "run_command", command: "./evals", timeout_seconds: 241 }, alice.person, () => true))
+      .rejects.toThrow(/at most 240 seconds/);
+    older.close();
   });
   it("never sends a timeout to a desktop that did not say it takes one, and waits for it as before", async () => {
     const broker = new SharedComputers(() => true);
@@ -359,6 +380,25 @@ describe("server-side scope check (audit M1)", () => {
     lending.register(registration({ computer: true }), alice, secret);
     expect(lending.screenNotLent(alice.person)).toEqual({});
     broker.close(); lending.close();
+  });
+  it("on the person's own Cloud, every computer that can't give what's needed sends the bot to ask with a card, never to explain the fix", async () => {
+    const ask = 'call ask_for_computer with need "screen"';
+    expect(sharedComputerScopeRefusal({ ...lent, platform: "win32" }, { action: "computer_call" }, "ask_for_computer"))
+      .toBe("Apps and screen are not lent to this Cloud right now. Call ask_for_computer with need \"screen\" and what you want to do: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat, and don't use your own cloud computer instead unless they ask.");
+    expect(sharedComputerScopeRefusal({ ...lent, name: "HOME-PC" }, { action: "run_command" }, "ask_for_computer")).toContain('Call ask_for_computer with need "terminal"');
+    const broker = new SharedComputers(() => true);
+    broker.askTool = "ask_for_computer";
+    const changes: number[] = [];
+    broker.changed = () => changes.push(Date.now());
+    const pc = { ...registration(), platform: "win32" as const };
+    broker.register(pc, alice, secret);
+    expect(broker.screenNotLent(alice.person).screen).toBe(`Desktop doesn't lend its apps and screen right now. To use them, ${ask} and what you want to do: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat, and don't use your own cloud computer instead unless they ask.`);
+    expect(broker.lendingNow(alice.person)).toEqual([{ id: pc.id, name: "Desktop", platform: "win32", computer: false, terminal: false }]);
+    expect(broker.lendingNow(bob.person)).toEqual([]);
+    broker.disconnect(pc.id, alice.session, secret);
+    expect(changes, "connecting and stopping both tell the asks").toHaveLength(2);
+    await expect(broker.request({ computer_id: pc.id, action: "computer_call", tool_name: "list_apps" }, alice.person, () => false)).rejects.toThrow(/Call ask_for_computer with need "screen"/);
+    broker.close();
   });
   it("never queues an out-of-scope operation for the desktop", async () => {
     const broker = new SharedComputers(() => true);

@@ -170,10 +170,10 @@ jobs:
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
     runs-on: ${{ matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
-    # their recorded seconds on that platform, about 13 minutes a shard. The
-    # cap catches a hang, not normal suite growth; Windows runners are about
-    # 1.45x slower and vary more.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 20 || 30 }}
+    # their recorded seconds on that platform, about 17 minutes a Linux shard
+    # and 10 to 15 a Windows one. The cap catches a hang, not normal suite
+    # growth; Windows runners are about 1.45x slower and vary more.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -289,7 +289,7 @@ jobs:
     if: contains(needs.static.outputs.jobs, '"windows-cua"')
     name: Windows CUA host smoke
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -301,6 +301,9 @@ jobs:
       - name: Smoke the staged Windows CUA host (no computer actions)
         timeout-minutes: 5
         run: pnpm build:cua:win && pnpm smoke:cua-win
+      - name: Lend this PC's apps and screen as the installed app does (reads only, no input)
+        timeout-minutes: 5
+        run: pnpm smoke:cua-win-lend
 
   electron-smokes:
     needs: static

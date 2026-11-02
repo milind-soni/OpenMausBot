@@ -1,5 +1,5 @@
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
-import type { ConnectorCardData } from "../../shared/wire";
+import type { ConnectorCardData } from "../../shared/connector-card";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar } from "./default-bot";
 
@@ -15,7 +15,7 @@ const USER_SECTION_PREFIX = "section:";
 
 export type SidebarSectionId = string;
 export type SectionDropPlace = "before" | "after";
-export type SidebarDensityMode = "comfortable" | "compact" | "icons";
+export type SidebarDensityMode = "comfortable" | "icons";
 
 const GOAL_RUN_PREVIEW_LABEL = {
   working: "Working",

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkTregKey, costLine, createResearchClient, RESEARCH_MESSAGES, researchRequest } from "./research.ts";
+import { checkTregKey, costLine, createResearchAvailability, createResearchClient, RESEARCH_MESSAGES, researchOffered, researchRequest } from "./research.ts";
 import { X_MESSAGES, XResearchError } from "./x-research.ts";
 
 type Reply = { status?: number; body: unknown; headers?: Record<string, string> } | Error;
@@ -123,6 +123,57 @@ describe("research through the plan's relay", () => {
     expect((await failure(createResearchClient(PLAN, used).call({ id: "apollo.people.search" }))).message).toBe("This month's $15 of research is used up. It resets on 1 November. Add your own treg key to keep going.");
     const off = fakeFetch({ status: 404, body: { error: "not_found", message: "Not found." } });
     expect((await failure(createResearchClient(PLAN, off).search({ job: "x", limit: 5 }))).message).toBe(RESEARCH_MESSAGES.notOffered);
+  });
+});
+
+describe("whether research works", () => {
+  it("asks the plan's relay with a search that names no job, which spends nothing, and reads its answer", async () => {
+    const asked = fakeFetch({ status: 400, body: { error: "invalid_request", message: "Say what the research is for in q." } });
+    expect(await researchOffered(PLAN, asked)).toBe(true);
+    expect(asked.calls.map((call) => [call.method, call.url, call.headers.get("authorization")])).toEqual([["GET", `${PLAN.api}/research/search`, "Bearer omb_xd_plan"]]);
+    for (const [status, body] of [[503, { error: "service_unavailable", message: "Research isn't available right now." }], [402, { error: "subscription_inactive" }], [404, { error: "not_found" }], [401, { error: "invalid_api_key" }]] as const) {
+      expect(await researchOffered(PLAN, fakeFetch({ status, body })), String(status)).toBe(false);
+    }
+    expect(await researchOffered(PLAN, fakeFetch({ status: 503, body: { error: "overloaded" } }))).toBeNull();
+    expect(await researchOffered(PLAN, fakeFetch(new Error("offline")))).toBeNull();
+    const own = fakeFetch();
+    expect(await researchOffered(OWN, own)).toBe(true);
+    expect(own.calls).toEqual([]);
+  });
+
+  it("offers research until the relay says it is off, asks again an hour later, and takes a refused call as off at once", async () => {
+    let clock = 0, answer: boolean | null = false, credential: typeof PLAN | typeof OWN | null = PLAN;
+    const offered = vi.fn(async () => answer);
+    const research = createResearchAvailability({ credential: () => credential, offered, now: () => clock });
+    expect(research.available()).toBe(true);
+    await vi.waitFor(() => expect(research.available()).toBe(false));
+    expect(offered).toHaveBeenCalledTimes(1);
+    clock += 59 * 60_000;
+    expect(research.available()).toBe(false);
+    expect(offered).toHaveBeenCalledTimes(1);
+    answer = true;
+    clock += 60_000;
+    research.available();
+    await vi.waitFor(() => expect(research.available()).toBe(true));
+    expect(offered).toHaveBeenCalledTimes(2);
+    research.refused();
+    expect(research.available()).toBe(false);
+    credential = OWN;
+    expect(research.available()).toBe(true);
+    credential = null;
+    expect(research.available()).toBe(false);
+    expect(offered).toHaveBeenCalledTimes(2);
+  });
+
+  it("tells a bot refused because research is off what to do instead, and marks the refusal as off", async () => {
+    const off = await failure(createResearchClient(PLAN, fakeFetch({ status: 503, body: { error: "service_unavailable", message: "Research isn't available right now." } })).search({ job: "x", limit: 5 }));
+    expect(off).toMatchObject({ code: "off", message: RESEARCH_MESSAGES.off });
+    expect(off.message).toContain("offer another way, such as web search or the browser");
+    const unpaid = await failure(createResearchClient(PLAN, fakeFetch({ status: 402, body: { error: "subscription_inactive", message: "Research is included with a paid Cloud plan, and this account isn't on one right now." } })).call({ id: "apollo.people.search" }));
+    expect(unpaid.code).toBe("off");
+    expect(unpaid.message).toMatch(/^Research is included with a paid Cloud plan, and this account isn't on one right now\. Tell the person research isn't available here/);
+    const busy = await failure(createResearchClient(PLAN, fakeFetch({ status: 503, body: { error: "overloaded", message: "Research is busy right now. Try again in a minute." } })).search({ job: "x", limit: 5 }));
+    expect(busy).toMatchObject({ code: "unavailable", message: "Research is busy right now. Try again in a minute." });
   });
 });
 

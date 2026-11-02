@@ -247,3 +247,29 @@ executable while its process is still running. Local mocked Windows tests
 do not substitute for that native check.
 Processes that intentionally detach into a different group are not owned by
 this POSIX group-based cancellation.
+
+## The person's message during a long tool call
+
+```sh
+pnpm exec vitest run server/person-first.e2e.test.ts server/host/person-first.test.ts
+```
+
+A message from the person in their own chat never waits behind a long tool
+call. The e2e test launches the isolated fixture as the desktop app runs it
+(the owner capability makes the send the person's own), scripts one Bash call
+that holds like a CI poll, and sends a second message, which is steered into
+the turn and stays unread. `OMB_PERSON_FIRST_MS=1500` stands in for the minute a
+tool call may hold it. The turn must be stopped with the row "Stopped a step
+that had run for N s, to answer you first", the person's message must stay one
+row, and the next turn must lead with their words and the note naming the
+stopped step, so the bot's reply answers them. A message from a room, a
+routine, a teammate or an app never stops a turn this way, and neither does
+one sent while the turn waits on the person or a computer
+(`server/host/person-first.test.ts`).
+
+### Last exercised
+
+2026-10-30, macOS, isolated fixture from the e2e test: the scripted CI poll
+was stopped 1.5 s after the steered question, and the fake engine answered the
+question in the next turn. With the steered message's watch removed, the
+question stayed unanswered for 30 s and the test failed.

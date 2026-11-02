@@ -8,7 +8,7 @@ export interface NotificationsHost {
   markRead(ids: readonly string[]): void;
   announceRead(threadId: string, ids: string[]): void;
   now(): number;
-  /** A Team Cloud: the feed is filtered per viewer by the app, which a bot cannot be. */
+  /** A shared workspace (a Team Cloud, or sign-in members): the feed is filtered per viewer by the app, which a bot cannot be. */
   team(): boolean;
 }
 
@@ -56,7 +56,7 @@ export type NotificationsResult = { ok: true; text: string } | { ok: false; erro
 function refusal(host: NotificationsHost, botId: string): string | null {
   const bot = host.bot(botId);
   if (!holdsMausBotTools(bot)) return "Only MausBot reads notifications in chat.";
-  return bot.defaultBot?.person || host.team() ? "On a team, notifications are read in the app; I cannot go through them for you." : null;
+  return bot.defaultBot?.person || host.team() ? "Where several people share this workspace, notifications are read in the app; I cannot go through them for you." : null;
 }
 
 export function listUnread(host: NotificationsHost, botId: string): NotificationsResult {

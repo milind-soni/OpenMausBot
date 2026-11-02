@@ -17,6 +17,8 @@ it("names a team's Cloud on every screen that waits on it, and keeps My Cloud's 
   expect(homeScreenText({ screen: "plan", machine: "stopped" }).title).toBe("My Cloud isn't running");
   expect(homeScreenText({ screen: "waking", name: "Acme" }).title, "only My Cloud is woken").toBe("Waking My Cloud…");
   expect(homeScreenText(null).title).toBe("Opening My Cloud…");
+  expect(homeScreenText({ screen: "moving" }).title).toBe("Moving to My Cloud… almost done");
+  expect(homeScreenText({ screen: "moving", name: "Garage server" })).toMatchObject({ title: "Moving to Garage server… almost done", action: null, busy: true });
 });
 
 it("while the Admin sets My Cloud up, the screen says so plainly, with its step, and never asks the person to do anything", () => {

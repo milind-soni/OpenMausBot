@@ -2,7 +2,7 @@
 // signed member claims, the audience rule on chats, memory, recall and files, the team's connected apps, and a My Cloud
 // that refuses a team claim. The engine is the synthetic Claude CLI, so this proves the plumbing, not a model's judgement.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
@@ -297,4 +297,23 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   expect((await team.as(cleo, "GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "managed" });
   const seen = await turn(cleo, await newThread(cleo, "Cleo and Scout"), "Check my mail.");
   expect(Object.keys(seen.mcpConfig.mcpServers)).toContain("composio");
+}, hostTimeout(120_000));
+
+it("a member's private chat keeps its own folder when the team's bot is given a working folder; the Owner's own thread moves there", async () => {
+  const ownFolder = (threadId: string) => realpathSync(join(team.home, ".openmausbot", "task-workspaces", bot.id, threadId));
+  const cwdOf = async (token: string, threadId: string, text: string) => realpathSync((await turn(token, threadId, text) as unknown as { cwd: string }).cwd);
+  const hers = await newThread(ada, "Ada's own folder");
+  const olives = await newThread(owner, "Olive's own folder");
+  expect(await cwdOf(ada, hers, "Hello.")).toBe(ownFolder(hers));
+  expect(await cwdOf(owner, olives, "Hello.")).toBe(ownFolder(olives));
+  const project = join(team.home, "team-project");
+  mkdirSync(project, { recursive: true });
+  const given = await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: project });
+  expect(given.status, JSON.stringify(given.body)).toBe(200);
+  try {
+    expect(await cwdOf(ada, hers, "Hello again.")).toBe(ownFolder(hers));
+    expect(await cwdOf(owner, olives, "Hello again.")).toBe(realpathSync(project));
+  } finally {
+    expect((await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: null })).status).toBe(200);
+  }
 }, hostTimeout(120_000));

@@ -108,6 +108,8 @@ describe("buildSystemPrompt", () => {
     expect(built.text).toContain("@Fig");
 
     expect(built.stable).toBe(`You are Kiwi. Search past sessions.${REPLY_HABITS_PROMPT}`);
+    // A German person once read "Now the edits." between a bot's German lines: every line they see is in their language.
+    expect(REPLY_HABITS_PROMPT).toContain("in the language they use with you, including a short note between steps and a message you pass on for them");
     expect(built.volatile).toContain("likes tea");
     expect(built.volatile).toContain("@Fig");
     expect(built.volatile).toContain("today 20:48");
@@ -400,6 +402,8 @@ describe("longCommandsPrompt", () => {
     for (const kind of [null, "local", "vps", "box"] as const) {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
+      expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
+      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {

@@ -90,7 +90,7 @@ describe("usePresence", () => {
     expect(fixture.api).not.toHaveBeenCalled();
     render(loaded, dispatch);
     await flush();
-    expect(fixture.api).toHaveBeenCalledWith("/api/presence/active", { method: "POST", body: JSON.stringify({ source: "desktop", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: "en" }) });
+    expect(fixture.api).toHaveBeenCalledWith("/api/presence/active", { method: "POST", body: JSON.stringify({ source: "desktop", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: "en", threadId: "chief-main" }) });
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
       { type: "select", id: "chief" },
       { type: "switchTask", botId: "chief", threadId: "chief-main" },

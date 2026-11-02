@@ -299,13 +299,38 @@ test("a command runs up to the time the call asks for, and a time out of range i
   const run = operation => executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", ...operation }, new AbortController().signal);
   const command = process.platform === "win32" ? "Start-Sleep -Seconds 5" : "sleep 5";
   const started = Date.now();
-  await assert.rejects(run({ command, timeout_seconds: 1 }), /timed out after 1 second/);
+  assert.match(payload(await run({ command, timeout_seconds: 1 })).stopped, /1-second limit/);
   assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
-  for (const timeout_seconds of [0, 241, 1.5, "60"]) {
-    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 240/);
+  for (const timeout_seconds of [0, 901, 1.5, "60"]) {
+    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 900/);
   }
   assert.equal(payload(await run({ command: "echo fixture-default" })).exitCode, 0);
+  assert.equal(payload(await run({ command: "echo fixture-long", timeout_seconds: 900 })).exitCode, 0);
   void dir;
+});
+
+test("a command stopped at its time limit returns what it printed and says it was stopped", async t => {
+  const { grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const command = process.platform === "win32"
+    ? "Write-Output first-line; [Console]::Error.WriteLine('second-line'); Start-Sleep -Seconds 20"
+    : "echo first-line; echo second-line >&2; sleep 20";
+  const stopped = await executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", command, timeout_seconds: 2 }, new AbortController().signal);
+  assert.equal(stopped.isError, true);
+  const result = payload(stopped);
+  assert.equal(result.exitCode, null);
+  assert.match(result.output, /first-line[\s\S]*second-line/);
+  assert.match(result.stopped, /Stopped at its 2-second limit/);
+});
+
+test("a command stopped for too much output returns the output it kept", { skip: process.platform === "win32" }, async t => {
+  const { grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const stopped = await executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", command: "echo first-line; head -c 300000 /dev/zero | tr '\\0' a; sleep 20", timeout_seconds: 30 }, new AbortController().signal);
+  assert.equal(stopped.isError, true);
+  const result = payload(stopped);
+  assert.match(result.output, /^first-line/);
+  assert.match(result.stopped, /Stopped after 256 KB of output/);
 });
 
 /** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */
@@ -435,6 +460,25 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   assert.equal(next.content[0].text, "2"); assert.equal(next.content[1].type, "image");
   cua.close();
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
+});
+
+test("the lent screen's driver gets Windows' own folders, and never this app's keys", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-env-fixture.mjs");
+  await writeFile(script, `import readline from 'node:readline';
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const env={ LOCALAPPDATA: process.env.LOCALAPPDATA ?? null, APPDATA: process.env.APPDATA ?? null, OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null };
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'list_apps'}]}:{content:[{type:'text',text:JSON.stringify(env)}]};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  for (const [key, value] of [["LOCALAPPDATA", "C:\\Users\\you\\AppData\\Local"], ["APPDATA", "C:\\Users\\you\\AppData\\Roaming"], ["OPENAI_API_KEY", "sk-not-for-the-driver"]]) {
+    const before = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; });
+  }
+  const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] });
+  t.after(() => cua.close());
+  const seen = JSON.parse((await cua.call({ action: "computer_call", tool_name: "list_apps" }, new AbortController().signal)).content[0].text);
+  assert.deepEqual(seen, { LOCALAPPDATA: "C:\\Users\\you\\AppData\\Local", APPDATA: "C:\\Users\\you\\AppData\\Roaming", OPENAI_API_KEY: null });
 });
 
 test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {

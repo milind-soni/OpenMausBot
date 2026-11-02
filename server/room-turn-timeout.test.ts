@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { RuntimeEvent } from "./contracts.ts";
 import {
+  ROOM_TOOL_QUIET_LIMIT_MS,
   ROOM_TURN_PROGRESS,
   RoomTurnDeadline,
   RoomTurnStallRegistry,
@@ -11,6 +13,12 @@ import {
 } from "./room-turn-timeout.ts";
 
 afterEach(() => vi.useRealTimers());
+
+const base = { eventId: "e1", provider: "claudeAgent", threadId: "t1", createdAt: "2026-01-01T00:00:00.000Z" } as const;
+const toolStarted = (itemId: string): RuntimeEvent => ({ ...base, type: "item.started", itemType: "tool", itemId });
+const toolEnded = (itemId: string): RuntimeEvent => ({ ...base, type: "item.completed", itemType: "tool", itemId, ok: true });
+const cardOpened: RuntimeEvent = { ...base, type: "request.opened", requestId: "r", requestType: "permission", tool: "Bash", summary: "ls" };
+const cardResolved: RuntimeEvent = { ...base, type: "request.resolved", requestId: "r", behavior: "allow", source: "user" };
 
 describe("room turn timeout", () => {
   it("converts configured minutes to milliseconds", () => {
@@ -175,6 +183,71 @@ describe("room turn timeout", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(onTimeout).toHaveBeenCalledOnce();
     deadline.stop();
+  });
+
+  it("keeps a turn going while a tool runs past the limit, and gives it the full limit once the tool ends", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    deadline.observe(toolStarted("run"));
+    await vi.advanceTimersByTimeAsync(14 * 60_000);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    deadline.observe(toolEnded("run"));
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("stops a turn whose tool shows nothing for the tool limit, as when its end never arrives", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    deadline.observe(toolStarted("lost"));
+    await vi.advanceTimersByTimeAsync(ROOM_TOOL_QUIET_LIMIT_MS - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("stops a turn with no tool running at the limit, whatever tools ended before", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    deadline.observe(toolStarted("a"));
+    deadline.observe(toolEnded("a"));
+    deadline.observe(toolEnded("never-started"));
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the tool limit until the last running tool ends, across a card that opened and closed", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    deadline.observe(toolStarted("a"));
+    deadline.observe(toolStarted("b"));
+    deadline.observe(cardOpened);
+    deadline.observe(toolEnded("a"));
+    deadline.observe(cardResolved);
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    deadline.observe(toolEnded("b"));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(onTimeout).toHaveBeenCalledOnce();
   });
 
   it("does not fire while held even past the budget, and stop() cancels a held clock", async () => {

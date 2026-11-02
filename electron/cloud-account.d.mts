@@ -288,7 +288,8 @@ export interface CloudAccountClient {
   /** `origin` is a Cloud the person owns (My Cloud or another of theirs), by the verified session only. */
   isOwnCloud(origin: string | null | undefined): boolean;
   /** Buys another Cloud (POST /api/cloud/desktop/clouds): its checkout opens in the browser. */
-  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<CloudAddResult>;
+  /** `source`: where the checkout started (CHECKOUT_SOURCES), for the Admin's funnel. */
+  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null; source?: string | null }): Promise<CloudAddResult>;
   /** A new organization on the Team plan this account pays for (POST /api/cloud/desktop/organizations): no checkout. */
   addOrganization(input: { name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<OrganizationAddResult>;
   /** A Cloud's colour on the Admin (PATCH /api/cloud/desktop/clouds/:id), for its owner or its team's Super admin and Admins. */
@@ -310,6 +311,10 @@ export interface CloudAccountClient {
   reportMove(options: { installation: string }): Promise<boolean>;
   /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
   reportKept(options: { installation: string }): Promise<boolean>;
+  /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to): deleted, ended (stopped and
+   * kept only until it is deleted), live, or unknown (none of this account's). Null without a verified sign-in, or from an
+   * Admin that doesn't say. */
+  movedTo(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
   /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status); false without a
    * sign-in or when the Admin doesn't take it yet. */
   reportMoveStatus(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
