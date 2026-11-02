@@ -540,6 +540,15 @@ describe("A chat pinned to a place", () => {
     expect(unpin(render(pinned()))).toBeUndefined();
   });
 
+  it("saves Auto too when Use Auto stands in for This Mac on another server's page", () => {
+    fixture.localComputer = { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: "remote-server" };
+    const button = unpin(render(pinnedOn("local")))!;
+    expect(text(button.props.children)).toBe("Use Auto");
+    (button.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "scout", patch: { computer: null } });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "scout", threadId: "thread-scout", patch: { surface: null } });
+  });
+
   it("waits out a running turn, as the server refuses a busy chat's place change", () => {
     const button = unpin(render(pinnedOn(undefined, { busy: true })))!;
     expect(button.props.disabled).toBe(true);
