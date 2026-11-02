@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // The desktop app's performance baseline, on isolated fixtures only: a temporary HOME and data folder per server, the
 // fake engine, and a headless Chrome with its own profile. Prints one JSON object, so a change can show before/after.
-//   node --experimental-strip-types scripts/bench-desktop.ts [--only bundle,server,start,idle,stream,big,routines]
+//   node --experimental-strip-types scripts/bench-desktop.ts [--only bundle,server,start,screens,idle,stream,big,routines]
 //     [--chrome PATH] [--idle-seconds 30] [--bots 150] [--threads 300] [--messages 2000] [--advanced] [--out FILE] [--keep]
 //     [--screenshots DIR]
 // bundle: the production build's first-load JavaScript and which libraries it pulls in eagerly.
@@ -15,7 +15,7 @@
 //   thread switch and read-marker writes, and a streamed reply there.
 // routines: routines.json with a full run history: its route, and the bytes one run rewrites.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, statSync, writeFileSync, createReadStream } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readdirSync, readFileSync, statSync, writeFileSync, createReadStream } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { cpus, tmpdir, totalmem } from "node:os";
@@ -31,7 +31,7 @@ import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const PHASES = ["bundle", "server", "start", "idle", "stream", "big", "routines"] as const;
+const PHASES = ["bundle", "server", "start", "screens", "idle", "stream", "big", "routines"] as const;
 const { values } = parseArgs({
   options: {
     only: { type: "string" },
@@ -272,17 +272,26 @@ async function buildUi(outDir: string, profiling: boolean) {
   const initial = new Set<string>();
   const visit = (name: string) => { if (initial.has(name)) return; initial.add(name); for (const next of byName.get(name)?.imports ?? []) visit(next); };
   visit(entry.fileName);
+  // main.tsx starts the App chunk's fetch at once, so an app launch loads it too; only /pair and /home stop at the entry.
+  const entryOnly = [...initial].map((name) => byName.get(name)!);
+  const appChunk = chunks.find((chunk) => Object.keys(chunk.modules).some((id) => id.endsWith("/src/App.tsx")));
+  if (appChunk) visit(appChunk.fileName);
   const initialChunks = [...initial].map((name) => byName.get(name)!);
   const sum = (list: ChunkInfo[], key: "bytes" | "gzip") => list.reduce((total, chunk) => total + chunk[key], 0);
   const cssBytes = (names: string[]) => names.reduce((total, name) => total + (assets.find((asset) => asset.fileName === name)?.bytes ?? 0), 0);
   const initialCss = [...new Set(initialChunks.flatMap((chunk) => chunk.css))];
   const packages = new Map<string, number>();
+  const ownModules = new Map<string, number>();
   const heavy: Record<string, { eagerKb: number; lazyKb: number }> = Object.fromEntries(Object.keys(HEAVY).map((name) => [name, { eagerKb: 0, lazyKb: 0 }]));
   let initialModules = 0;
   for (const chunk of chunks) {
     const eager = initial.has(chunk.fileName);
     for (const [id, length] of Object.entries(chunk.modules)) {
-      if (eager) { initialModules += 1; packages.set(packageOf(id), (packages.get(packageOf(id)) ?? 0) + length); }
+      if (eager) {
+        initialModules += 1;
+        packages.set(packageOf(id), (packages.get(packageOf(id)) ?? 0) + length);
+        if (id.includes("/src/") && !id.includes("/node_modules/")) ownModules.set(id.slice(id.lastIndexOf("/src/") + 1), length);
+      }
       for (const [name, pattern] of Object.entries(HEAVY)) if (pattern.test(id)) heavy[name]![eager ? "eagerKb" : "lazyKb"] += length / 1024;
     }
   }
@@ -296,7 +305,9 @@ async function buildUi(outDir: string, profiling: boolean) {
       chunks: initialChunks.map((chunk) => ({ file: chunk.fileName, kb: kb(chunk.bytes), gzipKb: kb(chunk.gzip) })),
       jsKb: kb(sum(initialChunks, "bytes")), jsGzipKb: kb(sum(initialChunks, "gzip")), cssKb: kb(cssBytes(initialCss)), modules: initialModules,
       topPackagesKb: Object.fromEntries([...packages].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([name, length]) => [name, kb(length)])),
+      topOwnModulesKb: Object.fromEntries([...ownModules].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([name, length]) => [name, kb(length)])),
     },
+    signInPage: { jsKb: kb(sum(entryOnly, "bytes")), jsGzipKb: kb(sum(entryOnly, "gzip")) },
     heavyLibraries: heavy,
     largestLazyChunks: chunks.filter((chunk) => !initial.has(chunk.fileName)).sort((a, b) => b.bytes - a.bytes).slice(0, 10)
       .map((chunk) => ({ file: chunk.fileName, kb: kb(chunk.bytes), top: [...new Set(Object.keys(chunk.modules).map(packageOf))].slice(0, 4) })),
@@ -490,7 +501,7 @@ async function main() {
   try { commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch { /* not a checkout */ }
   const chromePath = values.chrome ?? installedChrome() ?? "";
   result.meta = { commit, date: new Date().toISOString(), node: process.version, platform: `${process.platform}-${process.arch}`, cpu: cpus()[0]?.model, cores: cpus().length, memoryGb: round(totalmem() / 2 ** 30), chrome: chromePath, mode: values.advanced ? "advanced" : "simple", idleSeconds: IDLE_MS / 1000 };
-  const needsUi = ["start", "idle", "stream", "big"].some((phase) => only.has(phase));
+  const needsUi = ["start", "screens", "idle", "stream", "big"].some((phase) => only.has(phase));
   const dist = join(work, "dist");
   const profileDist = join(work, "dist-profile");
   if (only.has("bundle") || needsUi) {
@@ -565,8 +576,8 @@ async function main() {
     cleanups.push(() => chrome!.close());
   }
 
-  if (chrome && (only.has("start") || only.has("idle") || only.has("stream"))) {
-    log("small workspace: start, idle, stream");
+  if (chrome && (only.has("start") || only.has("screens") || only.has("idle") || only.has("stream"))) {
+    log("small workspace: start, screens, idle, stream");
     const fixture = await startFixture({ staticDir: dist, fake: STREAM_ENV });
     const botId = await newBot(fixture, "Pepper");
     const page = await chrome.newPage({ storage: STORAGE });
@@ -576,6 +587,38 @@ async function main() {
       result.start = { serverReadyMs: Math.round(fixture.readyMs), firstLoad: loads[0], reloads: loads.slice(1), rendererRssMb: Math.max(...await chrome.rendererRssMb()) };
     } else {
       await pageLoad(page, fixture.url);
+    }
+    if (only.has("screens")) {
+      // A person's first open of a screen: its chunks fetched, compiled and evaluated (0 when something loaded them already).
+      const conditions: Record<string, { cpu?: number; latencyMs?: number }> = { asIs: {}, cpu4x: { cpu: 4 }, remote100ms: { latencyMs: 100 } };
+      const assets = readdirSync(join(dist, "assets"));
+      const firstOpen: Record<string, Record<string, number>> = {};
+      for (const [condition, { cpu, latencyMs }] of Object.entries(conditions)) {
+        firstOpen[condition] = {};
+        for (const name of ["SettingsModal", "PluginsPanel", "ComputerPanel", "BotSettingsDialog", "TriggersPage", "TeamMapPage"]) {
+          const file = assets.find((asset) => asset.startsWith(`${name}-`) && asset.endsWith(".js"));
+          if (!file) continue;
+          const open = await chrome.newPage({ storage: STORAGE });
+          await pageLoad(open, fixture.url);
+          await sleep(2_500);
+          if (cpu) await open.send("Emulation.setCPUThrottlingRate", { rate: cpu });
+          if (latencyMs) {
+            await open.send("Network.enable", {});
+            await open.send("Network.setCacheDisabled", { cacheDisabled: true });
+            await open.send("Network.emulateNetworkConditions", { offline: false, latency: latencyMs, downloadThroughput: 1_250_000, uploadThroughput: 625_000 });
+          }
+          firstOpen[condition]![name] = Math.round(await open.evaluate<number>(`(async () => { const at = performance.now(); await import("/assets/${file}"); return performance.now() - at; })()`));
+          await open.close();
+        }
+      }
+      const pair = await chrome.newPage({ storage: STORAGE });
+      await pair.send("Page.navigate", { url: `${fixture.url}/pair` });
+      await sleep(2_000);
+      const signIn = await pair.evaluate<Record<string, unknown>>(`(() => ({
+        scriptKb: Math.round(performance.getEntriesByType("resource").filter((e) => /\\.js$/.test(e.name)).reduce((t, e) => t + (e.decodedBodySize || 0), 0) / 1024),
+        drew: document.getElementById("root").childElementCount > 0, inputs: document.querySelectorAll("input").length }))()`);
+      await pair.close();
+      result.screens = { firstOpenMs: firstOpen, signInPage: signIn };
     }
     if (only.has("idle")) {
       const rail = await chrome.newPage({ storage: STORAGE, railBridge: true }, 72, 900);
