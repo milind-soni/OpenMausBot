@@ -1915,15 +1915,16 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 @keyframes progress-fill {
   from { clip-path: inset(0 100% 0 0 round 999px); }
 }
-/* "Thinking…" label sheen while the model reasons. A background-position animation repaints the line every frame; a
-   transform runs on the compositor. The band crosses the phrase while the brighter copy inside it crosses back, so
-   the letters hold still and only the light moves. */
+/* "Thinking…" label sheen while the model reasons. The band crosses the phrase while the brighter copy inside it
+   crosses back, so the letters hold still and only the light moves. It moves by transform, in a dozen steps, and
+   rests between sweeps: a smooth sweep (or a background-position one) draws the whole page every display frame for
+   as long as a turn runs. */
 @keyframes sheen-band {
-  from { transform: translateX(-70%); }
+  from { transform: translateX(-70%); animation-timing-function: steps(12, jump-none); }
   35%, to { transform: translateX(70%); }
 }
 @keyframes sheen-letters {
-  from { transform: translateX(70%); }
+  from { transform: translateX(70%); animation-timing-function: steps(12, jump-none); }
   35%, to { transform: translateX(-70%); }
 }
 @keyframes reduced-loader-pulse {

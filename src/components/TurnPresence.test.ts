@@ -203,12 +203,12 @@ describe("thinking shimmer box", () => {
     expect(copy).toContain("content: attr(data-text) / \"\"");
   });
 
-  it("moves the sheen by transform alone, so the compositor draws it without repainting the line", () => {
+  it("moves the sheen by transform alone, in steps, so a turn does not redraw the page every display frame", () => {
     for (const name of ["sheen-band", "sheen-letters"]) {
       const frames = css.match(new RegExp(`@keyframes ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
       const properties = [...frames.matchAll(/([a-z-]+):/g)].map((match) => match[1]);
-      expect(properties.length).toBeGreaterThan(0);
-      expect(new Set(properties)).toEqual(new Set(["transform"]));
+      expect(new Set(properties)).toEqual(new Set(["transform", "animation-timing-function"]));
+      expect(frames).toMatch(/steps\(\d+/);
     }
   });
 
