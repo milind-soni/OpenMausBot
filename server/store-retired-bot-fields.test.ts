@@ -43,7 +43,7 @@ describe("data saved with a peers list, a peer-approval switch or an escalations
     const store = new Store(selection);
     const bot = store.createBot({ name: "Asker" });
     const card = (tool: string, requestId: string) => store.appendMessage(bot.threadId, { role: "bot", kind: "options",
-      card: { title: "A question", options: ["Allow", "Deny"], requestId, tool } });
+      card: { title: "A question", subtitle: "", options: ["Allow", "Deny"], requestId, tool } });
     const left = card("delegate_bot", "left-open");
     const other = card("Bash", "still-live");
     expect(dismissLeftoverPeerCards(store)).toBe(1);
