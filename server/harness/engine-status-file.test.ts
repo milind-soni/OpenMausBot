@@ -22,7 +22,7 @@ it("writes what the save delay still holds when the process exits cleanly, once"
   flushEngineStatusFiles();
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ v: 1, engines: [row] });
   const read = status.read(() => ({ driverKind: "antigravityAgent", cli: "agy" }));
-  expect(read.get("work")).toEqual({ snapshot: { state: "available", authenticated: true }, checkedAt: null, settings: null });
+  expect(read.get("work")).toEqual({ state: "available", authenticated: true });
   flushEngineStatusFiles();
   expect(process.listeners("exit").filter((listener) => listener === flushEngineStatusFiles)).toHaveLength(1);
 });
@@ -39,6 +39,6 @@ it("keeps the marks the welcome and the AI tests read: a ChatGPT plan and OpenCo
   ]);
   flushEngineStatusFiles();
   const read = status.read((instanceId) => instanceId === "opencode" ? { driverKind: "opencodeGo", cli: "opencode" } : { driverKind: "codex", cli: "codex" });
-  expect(read.get("opencode")?.snapshot).toEqual(free);
-  expect(read.get("codex")?.snapshot).toEqual(plan);
+  expect(read.get("opencode")).toEqual(free);
+  expect(read.get("codex")).toEqual(plan);
 });

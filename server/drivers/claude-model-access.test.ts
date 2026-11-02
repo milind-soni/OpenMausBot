@@ -78,8 +78,8 @@ describe("what the organization turned off", () => {
 
 describe("reading the account config", () => {
   it("looks where the CLI keeps it", () => {
-    expect(claudeAccountFiles({ HOME: "/h" })).toEqual(["/h/.claude/.config.json", "/h/.claude.json"]);
-    expect(claudeAccountFiles({ HOME: "/h", CLAUDE_CONFIG_DIR: "/c" })).toEqual(["/c/.config.json", "/c/.claude.json"]);
+    expect(claudeAccountFiles({ HOME: "/h" })).toEqual([join("/h", ".claude", ".config.json"), join("/h", ".claude.json")]);
+    expect(claudeAccountFiles({ HOME: "/h", CLAUDE_CONFIG_DIR: "/c" })).toEqual([join("/c", ".config.json"), join("/c", ".claude.json")]);
   });
 
   const watch = (env: Record<string, string | undefined>[]) => {
