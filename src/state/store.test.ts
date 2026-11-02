@@ -1334,6 +1334,14 @@ describe("optimistic sent messages", () => {
       expect(visibleMessages(restored.bots[0]!).map((message) => message.text)).toEqual(["Ready", "first try", "old answer"]);
       expect(restored.bots[0]?.messages).toEqual([root, question, answer]);
     });
+
+    it("hands back the same branch for the same transcript and leaf", () => {
+      const shown = conversation().bots[0]!;
+      const branch = visibleMessages(shown);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: answer.id })).toBe(branch);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: question.id }).map((message) => message.id)).toEqual([root.id, question.id]);
+      expect(visibleMessages({ messages: [...shown.messages], activeLeafId: answer.id })).not.toBe(branch);
+    });
   });
 
   it("uses the same immediate reconciliation for a channel", () => {
