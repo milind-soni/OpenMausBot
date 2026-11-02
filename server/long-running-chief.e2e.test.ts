@@ -231,10 +231,12 @@ it("carries a consult-and-implement job over several teammate turns, through a s
   expect(chiefRows.filter((name: string) => name.startsWith("Resumed with"))).toEqual(["Resumed with Mira, Eli results, reviewing", "Resumed with Mira, Eli results, reviewing"]);
   for (const node of f.tree(job).filter((candidate: any) => candidate.parentId)) expect(await f.cards(node.threadId)).toEqual([]);
   expect(f.notifications.filter((notification: any) => notification.kind === "approval")).toEqual([]);
+  // No "done" while teammates still work (A0, and A1 handing off again): one at the job's end, with its final answer.
+  await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["done", "A0: Mira is consulting and Eli is implementing."],
     ["delegation-settled", "Results in from Mira, Eli"],
     ["delegation-settled", "Results in from Mira, Eli"],
+    ["done", expect.stringContaining("A-FINAL")],
   ]);
 
   const consult = f.prompt(f.turn("M1"));
@@ -300,11 +302,12 @@ it("tells the Chief what happened to each approval: allowed, denied, or never an
   expect(f.prompt(f.turn("B3"))).toContain("[OpenMausBot report from @Mira on assignment ");
   expect((await f.cards(work)).map((message: any) => [message.card.subtitle, message.card.answered, message.card.dismissed, message.card.answeredBy?.kind]))
     .toEqual([["git log --oneline -5 -- src/export", "allow", false, "loopback"], ["git push origin export", "deny", false, "loopback"], ["pnpm test", "deny", true, undefined]]);
+  await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["done", "B0: Mira is checking."],
     ["approval", "git log --oneline -5 -- src/export"], ["delegation-settled", "Results in from Mira"],
     ["approval", "git push origin export"], ["delegation-settled", "Results in from Mira"],
     ["approval", "pnpm test"], ["delegation-settled", "Results in from Mira"],
+    ["done", expect.stringContaining("APPROVALS-FINAL")],
   ]);
 }), hostTimeout(120_000));
 
@@ -415,8 +418,9 @@ it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => c
   expect(f.child(job, f.mira.id, "LONG-SUITE").result).toBe(stalled.result);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["D0", "D1"]);
   expect((await f.tasks(f.clive.id)).map((task: any) => task.title)).not.toContain("Team incidents");
+  await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["done", "D0: Mira is running the suite."], ["delegation-settled", "Results in from Mira"]]);
+    ["delegation-settled", "Results in from Mira"], ["done", expect.stringContaining("STALL-FINAL")]]);
 }), hostTimeout(90_000));
 
 it("lets a card hold only its own job: other jobs run beside it, or say once whose card they wait behind", () => chiefJob(async (f) => {
