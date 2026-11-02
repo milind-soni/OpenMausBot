@@ -345,11 +345,7 @@ export class RoutineManager {
       this.holds = holdCauses(disk.holds);
       if (typeof disk.startupLaunchId === "string") this.startupLaunchId = disk.startupLaunchId;
     } catch (error) {
-      this.routines = [];
-      this.unloadedRoutines = [];
-      this.runs = [];
-      this.routineRequestReceipts = [];
-      this.webhookRunReceipts = [];
+      this.routines = []; this.unloadedRoutines = []; this.runs = []; this.routineRequestReceipts = []; this.webhookRunReceipts = [];
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         this.unreadable = true;
         // JSON.parse errors can echo a fragment of the input, so they never reach the log.
@@ -378,6 +374,9 @@ export class RoutineManager {
       if (run.status === "failed") this.options.onRunFailed?.(run);
     }
   }
+
+  /** Files every saved routine and run names, unloaded rows too; null while routines.json is unreadable, so nothing can clear them. */
+  attachmentPaths(): string[] | null { return this.unreadable ? null : [...this.routines, ...this.unloadedRoutines, ...this.runs].flatMap((owner) => owner.attachments?.map((file) => file.path) ?? []); }
 
   listRoutines(): Routine[] {
     return this.routines.map(routine => this.routineWithHealth(routine));
