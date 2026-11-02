@@ -1,0 +1,64 @@
+import { useEffect, useState } from "react";
+
+import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
+import { api } from "@/state/store";
+import { SettingRow } from "./SettingsPrimitives";
+
+interface Usage { usedBytes: number; maxBytes: number }
+interface Cleared extends Usage { removed: number; freedBytes: number }
+
+const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
+
+/** Settings → General: how full the attachments store is, and a clear for when it is. Absent where the server has none
+ * (a Team Cloud, or a session that is not the owner's). */
+export function AttachmentStorageSettings() {
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [result, setResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api("/api/attachment-storage").then((body) => { if (live) setUsage(body as Usage); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  if (!usage) return null;
+
+  const clear = async () => {
+    setClearing(true);
+    setResult(null);
+    try {
+      const body = await api("/api/attachment-storage", { method: "POST" }) as Cleared;
+      setUsage(body);
+      setResult({ kind: "success", message: t("settings.attachments.cleared", { count: body.removed, freed: mb(body.freedBytes) }) });
+    } catch (error) {
+      setResult({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setClearing(false);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <SettingRow
+      title={t("settings.attachments.title")}
+      subtitle={<>
+        <span data-attachments-used className="block">{t("settings.attachments.used", { used: mb(usage.usedBytes), max: mb(usage.maxBytes) })}</span>
+        <span className="block">{t(confirming ? "settings.attachments.confirmText" : "settings.attachments.help")}</span>
+      </>}
+      message={result && <p role={result.kind === "error" ? "alert" : "status"} className={cn(result.kind === "error" ? "text-danger" : "text-success")}>
+        {result.message}
+      </p>}
+    >
+      <div className="flex flex-wrap gap-2">
+        {confirming ? <>
+          <button type="button" onClick={() => setConfirming(false)} disabled={clearing} className="ui-button">{t("settings.attachments.cancel")}</button>
+          <button type="button" onClick={() => void clear()} disabled={clearing} className="ui-button text-danger">
+            {clearing ? t("settings.attachments.clearing") : t("settings.attachments.confirm")}
+          </button>
+        </> : <button type="button" onClick={() => { setResult(null); setConfirming(true); }} className="ui-button">{t("settings.attachments.clear")}</button>}
+      </div>
+    </SettingRow>
+  );
+}

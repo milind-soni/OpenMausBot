@@ -105,6 +105,11 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("keeps the attachments clear to the owner: a client may read one file, never empty the store", () => {
+    for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/attachment-storage"), method).toBe("admin");
+    expect(requiredScope("GET", "/api/attachments/a1b2.png")).toBe("client");
+  });
+
   it("allows clients to list and read notifications with exactly the feed's methods and paths", () => {
     for (const [method, path] of [
       ["GET", "/api/notifications"],
