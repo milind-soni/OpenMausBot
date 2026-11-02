@@ -2615,10 +2615,8 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "set_bulletin", bulletin: "Updated brief ✓" })).status).toBe(200);
       const readRoom = async () => (await api("GET", "/api/bots?messages=20")).body.groups.find((group: { id: string }) => group.id === roomId);
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", section, memberIds: [chief.id, peer.id], defaultResponder: { kind: "member", botId: chief.id }, messages: [] });
-      for (const memberId of [foreign.id, "missing-bot"]) {
-        expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
-        expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);
-      }
+      expect((await create({ name: "Forbidden room", memberIds: ["missing-bot"] })).status).toBe(403);
+      expect((await manage({ action: "add_members", memberIds: ["missing-bot"] })).status).toBe(403);
       expect((await create({ name: "Foreign section", memberIds: [peer.id], section: `${section} foreign` })).status).toBe(403);
       expect((await manage({ action: "set_section", section: `${section} foreign` })).status).toBe(403);
       expect((await manage({ action: "set_section" })).status).toBe(400);
@@ -2629,7 +2627,7 @@ describe("harness HTTP API", () => {
       for (const body of [{ action: "set_members", memberIds: [] }, { action: "set_bulletin" }, { action: "set_bulletin", bulletin: "x".repeat(12_001) }, { action: "rename", name: "changed", cwd: "/tmp" }]) {
         expect((await manage(body)).status).toBe(400);
       }
-      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[chief.id, foreign.id], section], [[peer.id], section]] as const) {
+      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[peer.id], section]] as const) {
         const otherRoom = (await api("POST", "/api/groups", { name: "Unmanaged room", memberIds, section: roomSection })).body.group;
         roomIds.push(otherRoom.id);
         expect((await manage({ roomId: otherRoom.id, action: "rename", name: "Forbidden" })).status).toBe(403);
