@@ -154,7 +154,7 @@ RUN set -eux; \\
 ${workspacePreparationDockerfile(VM_WORKSPACE_GUEST)}
 # A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs.
 # Chrome's own sandbox needs namespaces this hardened container (capabilities dropped, runtime seccomp) refuses, so Chrome
-# exits with code 21; the container is the isolation boundary here, as agent-browser and identity.ts already assume.
+# exits with code 21; the container is the isolation boundary here.
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
       '/usr/local/bin/prepare-openmausbot-workspace.sh' \\

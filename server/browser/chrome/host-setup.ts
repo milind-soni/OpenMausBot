@@ -6,10 +6,9 @@
 //
 // OMB never turns Chrome's sandbox off by itself on a host. A host that cannot
 // give it one gets the setup command instead, and only an operator's explicit
-// OMB_BROWSER_SANDBOX=0 launches without it. The one exception is the computer
-// container image (container-computer.ts, also run on a VPS): it drops
-// capabilities, so its Chrome runs without its own sandbox and the container is
-// the isolation boundary.
+// OMB_BROWSER_SANDBOX=0 launches without it. The computer container image (also
+// run on a VPS) is the exception: it drops capabilities, so its Chrome runs
+// without its own sandbox and the container is the isolation boundary.
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
