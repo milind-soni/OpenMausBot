@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -74,6 +74,15 @@ describe.skipIf(!hasFfmpeg())("video frame sampling", () => {
     const frames = await videoFrameImages([clip]);
 
     expect(frames).toHaveLength(2);
+  });
+
+  it("never follows a playlist named as a video to the files it points at", async () => {
+    const root = store();
+    syntheticClip(root, 2);
+    const path = join(root, "disguised.mp4");
+    writeFileSync(path, "ffconcat version 1.0\nfile 'clip.mp4'\nduration 2\n");
+
+    await expect(videoFrameImages([{ path, mime: "video/mp4", bytes: 0 }])).resolves.toEqual([]);
   });
 
   it("drops a video ffmpeg cannot read instead of failing the turn", async () => {
