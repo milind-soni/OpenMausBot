@@ -895,11 +895,20 @@ export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreR
   }
   const pending = readPendingWorkspaceRestoreMetadata(dataDir);
   if (!pending) return { restored: false };
+  const safetyCopyPath = join(root, `safety-${pending.id}`);
+  if (entryExists(safetyCopyPath)) {
+    const saved = join(safetyCopyPath, "data");
+    // Moves start only after the journal is durable; an empty safety tree is an interrupted preparation.
+    if (!lstatSync(safetyCopyPath).isDirectory() || (entryExists(saved) &&
+      (!lstatSync(saved).isDirectory() || readdirSync(saved).length !== 0))) {
+      throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
+    }
+    rmSync(pendingFile, { force: true });
+    return { restored: false, rolledBack: true, id: pending.id, safetyCopyPath };
+  }
   const staged = join(jobPath(dataDir, pending.id), "staged");
   const manifest = validateStaged(staged);
   const prepared = prepareRestore(dataDir, pending.id, manifest);
-  const safetyCopyPath = join(root, `safety-${pending.id}`);
-  if (existsSync(safetyCopyPath)) throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
   folder(join(safetyCopyPath, "data"));
   const journal: RestoreJournal = {
     id: pending.id, phase: "applying",
