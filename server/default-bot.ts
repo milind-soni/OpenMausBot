@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { botOwner } from "../shared/bot-owner.ts";
 import { DEFAULT_BOT_COLOR, DEFAULT_BOT_NAME, defaultBotPerson } from "../shared/default-bot.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -119,7 +118,7 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
   for (const extra of marked.slice(1)) store.patchBot(extra.id, { defaultBot: undefined, sidebarHidden: undefined });
   if (marked[0]) {
     remember(options.dataDir, person, marked[0].id);
-    return crownedForMember(store, marked[0], person);
+    return marked[0];
   }
   if (Object.hasOwn(ledger(options.dataDir), person)) return null;
   const adoptable = person ? undefined : seededMausBot(store.bots);
@@ -133,14 +132,7 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
     bot = createDefaultBot(store, { person, team: options.team, chief });
   }
   remember(options.dataDir, person, bot.id);
-  return crownedForMember(store, bot, person);
-}
-
-/** On a Team Cloud a member's MausBot is their Chief; a Chief they already have keeps the role and their inbox. */
-function crownedForMember(store: DefaultBotStore, bot: BotRecord, person: string): BotRecord {
-  if (!person || bot.chiefOfStaff || store.bots.some((other) => other.chiefOfStaff && botOwner(other) === person)) return bot;
-  store.setChiefOfStaff(bot.id);
-  return store.bot(bot.id) ?? bot;
+  return bot;
 }
 
 /** A move brought this place's MausBot from another computer: it becomes the one MausBot here, and the one this place

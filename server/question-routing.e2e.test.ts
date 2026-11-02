@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
-import { chiefCrownedEarlier } from "./testing/team-earlier-chief.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const MARCO = { email: "marco@acme.test", role: "owner" as const };
@@ -87,7 +86,8 @@ beforeAll(async () => {
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     return created.body.bot as Bot;
   };
-  fuchs = await chiefCrownedEarlier<Bot>(team, marco, "Fuchs", MARCO.email);
+  fuchs = await create({ name: "Fuchs", reportsTo: MARCO.email });
+  expect((await team.as(marco, "PATCH", `/api/bots/${fuchs.id}`, { chiefOfStaff: true })).status).toBe(200);
   dachs = await create({ name: "Dachs", reportsTo: MARCO.email });
   otter = await create({ name: "Otter", reportsTo: MARCO.email });
   expect((await team.as(marco, "PATCH", `/api/bots/${dachs.id}`, { computer: "browser" })).status).toBe(200);

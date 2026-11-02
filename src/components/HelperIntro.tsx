@@ -1,4 +1,3 @@
-import { wearsCrown } from "../../shared/default-bot";
 import { X } from "lucide-react";
 
 import { t } from "@/lib/i18n";
@@ -40,7 +39,7 @@ function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps)
       <div className="w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
         <p className="font-medium">{t("helperIntro.title", { name })}</p>
         <p className="mt-1">{t("helperIntro.body")}</p>
-        {bot && wearsCrown(bot) ? <p className="mt-1">{t("helperIntro.chief")}</p> : bot?.defaultBot && !bot.defaultBot.person && <p className="mt-1">{t("helperIntro.watch")}</p>}
+        {bot?.chiefOfStaff ? <p className="mt-1">{t("helperIntro.chief")}</p> : bot?.defaultBot && !bot.defaultBot.person && <p className="mt-1">{t("helperIntro.watch")}</p>}
         {team && <p className="mt-1">{t("helperIntro.team", { team })}</p>}
         {!answered && <p className="mt-1 text-ink-secondary">{t("helperIntro.try")}</p>}
       </div>

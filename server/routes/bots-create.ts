@@ -1,4 +1,3 @@
-import { teamCrownRefusal } from "../host/team-crown.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { freshLook } from "../bot-look.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
@@ -243,9 +242,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       // Creation is complete: activation errors must not invite a duplicate retry or delete a bot whose routine may have run.
       const warnings: string[] = [];
-      const crownRefused = settings.chiefOfStaff ? teamCrownRefusal(Boolean(deps.team), bot, { chiefOfStaff: true }) : null;
-      if (crownRefused) warnings.push(crownRefused);
-      else if (settings.chiefOfStaff) {
+      if (settings.chiefOfStaff) {
         try {
           store.patchBot(bot.id, { managedSections: settings.managedSections ?? [] });
           store.setChiefOfStaff(bot.id);

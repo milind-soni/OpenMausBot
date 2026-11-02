@@ -4,7 +4,6 @@
 // Admin's signed request, routes/cloud-signed.ts). What was last read is kept in routine-holds.json, so a restart neither
 // frees nor pauses anything before the engines are read again. A cause that begins and pauses routines writes one quiet
 // line in the owner's Chief's chat; nothing else is sent, so nobody who left is messaged.
-import { wearsCrown } from "../../shared/default-bot.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RoutineHoldCause } from "../../shared/routines.ts";
@@ -63,7 +62,7 @@ export function createRoutineHoldsHost(deps: RoutineHoldsHostDeps) {
 
   /** The owner's Chief: the place's own one, else the first made (a Team Cloud's founder's). */
   function tell(line: string): void {
-    const chief = deps.store.bots.filter((bot) => !bot.hidden && wearsCrown(bot))
+    const chief = deps.store.bots.filter((bot) => !bot.hidden && bot.chiefOfStaff)
       .sort((a, b) => Number(Boolean(b.defaultBot)) - Number(Boolean(a.defaultBot)) || a.createdAt - b.createdAt)[0];
     if (chief) deps.store.appendMessage(chief.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${line}`, ok: true } });
   }

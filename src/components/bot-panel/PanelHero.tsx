@@ -1,4 +1,3 @@
-import { wearsCrown } from "../../../shared/default-bot";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Crown, Pencil } from "lucide-react";
 
@@ -88,7 +87,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
         >
           <Pencil size={20} />
         </span>
-        {wearsCrown(bot) && (
+        {bot.chiefOfStaff && (
           <span data-panel-chief title={t("chat.chiefOfStaff")} className="absolute -bottom-0.5 -right-0.5 flex size-[22px] items-center justify-center rounded-full bg-accent text-accent-ink ring-[3px] ring-app">
             <Crown size={12} aria-hidden="true" />
             <span className="sr-only">{t("chat.chiefOfStaff")}</span>

@@ -16,12 +16,12 @@ export function readTeamRolesWith(resolver: TeamRoleOf): void {
  * escalations, who answers a room) stays with `chiefOfStaff`. */
 export function chiefLevel(bot: ({ chiefOfStaff?: boolean } & DefaultBotFields) | null | undefined): boolean {
   if (!bot) return false;
-  const person = bot.defaultBot?.person?.trim().toLowerCase();
-  if (person) {
-    const role = roleOf(person);
-    return role === "owner" || role === "admin";
-  }
-  return bot.chiefOfStaff === true || Boolean(bot.defaultBot);
+  if (bot.chiefOfStaff === true) return true;
+  if (!bot.defaultBot) return false;
+  const person = bot.defaultBot.person?.trim().toLowerCase();
+  if (!person) return true;
+  const role = roleOf(person);
+  return role === "owner" || role === "admin";
 }
 
 type RoleBot = ({ chiefOfStaff?: boolean } & DefaultBotFields) | null | undefined;

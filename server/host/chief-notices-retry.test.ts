@@ -218,6 +218,14 @@ describe("a run stopped to free memory", () => {
 });
 
 describe("the person's line about an incident", () => {
+  it("lands in a notices chat older versions named Team incidents, rather than opening a second one", () => {
+    const f = fixture();
+    f.chief.tasks.push({ threadId: "old-notices", title: "Team incidents" });
+    f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "" });
+    expect(f.store.messagesFor("old-notices").some((line) => line.kind === "activity")).toBe(true);
+    expect(f.chief.tasks.map((task) => task.title)).toEqual(["Team incidents"]);
+  });
+
   it("is in the language of the person whose work failed, while the Chief's report stays English", () => {
     const f = fixture({ threadLanguage: (threadId) => (threadId === "ada-job" ? "de" : undefined) });
     f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "" });

@@ -354,22 +354,16 @@ one notification about it (live and in the feed). The card itself stays in its c
 may answer it, and says "Asking Ada"; the asked person may answer it too, there or from their inbox. Routing decides only
 whose inbox a bot's own asks reach; who may chat with the bot is its sharing's (below).
 
-**MausBot is the person's Chief.** On a team each member's own MausBot is crowned as their Chief when they first arrive
-(`ensureDefaultBot`), and the app shows it as MausBot, with no crown and no "Chief of Staff" (`wearsCrown` in
-`shared/default-bot.ts`). Its authority is exactly the bots that person owns, in every department, and bots that person
-owns answer only to it. Being crowned gives it nothing past that: a Chief's tools still follow its member's role
-(`server/chief-level.ts`: an Owner's or Admin's, never a User's), and it takes nothing team-wide (it is never the place's
-proactive bot, gets no place-wide notice, is no Chief in a backup or a package, and appoints no other Chief). A failure of
-one of their bots reaches them in their inbox rather than as a turn of their MausBot. Its reach stays what the audience
-rule below allows: a MausBot only its person sees reaches no bot everyone sees.
+**One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
+person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
+exactly the bots that person owns, in every department: they are its team in its roster, their incidents and
+escalations come to it (into a notices chat of the person's own, "Problems to look at"; a notice from someone else's
+private chat goes to that person instead), and it retries their threads and changes their setup. The person's private
+chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
+The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
 
-No other bot someone owns is crowned beside it: `PATCH /api/bots/<id>` with `chiefOfStaff: true` answers 403 in plain words,
-`POST /api/bots` creates the bot uncrowned with that line as a warning (`server/host/team-crown.ts`), and the app offers no
-Make Chief of Staff, no Chief card and no "Also in charge of" departments on a team. A bot nobody owns can still be its
-department's Chief, as on any other server, through the API. A crown given to an owned bot earlier stays as it is, with the
-inbox it holds: that person's Chief has the authority above and their incidents come to it, into a notices chat of their
-own ("Problems to look at"; a notice from someone else's private chat goes to that person instead); their MausBot is not
-crowned, and moving a Chief to someone who has one is refused.
+**A member's MausBot is not crowned.** It is theirs alone, and the audience rule below keeps a bot only one person sees
+from reaching a bot everyone sees (`sameAudience`), so today it cannot hand work to the team's shared bots.
 
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
@@ -448,10 +442,10 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
 ## One inbox per person
 
 Everything addressed to a person reaches one place, their **inbox** (`server/host/person-inbox.ts`): their own private
-chat with their own MausBot (every member gets one; a Chief of Staff they crowned before MausBot became the Chief keeps
-it instead). It is the chat that bot opens to for them (`WireTask.inbox`, sent to its person alone): the one their brief
-was in, else their newest own chat with that bot, else a new one, "Inbox". It never moves. Nothing is turned on: every
-member of a team has one, and off a team none exists. The app shows the inbox as one list, newest first, with a dot on
+chat with their own MausBot (every member gets one; a Chief of Staff of their own, crowned through the API or before the
+app stopped offering it, holds it instead). It is the chat that bot opens to for them (`WireTask.inbox`, sent to its
+person alone): the one their brief was in, else their newest own chat with that bot, else a new one, "Inbox". Nothing is
+turned on: every member of a team has one, and off a team none exists. The app shows the inbox as one list, newest first, with a dot on
 each line that waits on the person; a line marked done leaves the list (its `tab` on the wire stays "needs-you",
 "info" or "done" as before).
 

@@ -1,4 +1,3 @@
-import { wearsCrown } from "../../shared/default-bot";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/cn";
@@ -117,7 +116,7 @@ export function SimpleHelperIntro({ botId, threadId, message, answered, followup
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const team = bot?.defaultBot?.person ? state.config?.team?.name : undefined;
   const person = greetingName(state.config?.profile?.name) || undefined;
-  const lines = introLines({ name: bot?.name ?? "MausBot", chief: Boolean(bot && wearsCrown(bot)), person, team });
+  const lines = introLines({ name: bot?.name ?? "MausBot", chief: Boolean(bot?.chiefOfStaff), person, team });
   const look = useLookAround(!answered);
   const ai = thinksWith(bot, state.instances);
 

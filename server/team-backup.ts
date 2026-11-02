@@ -1,4 +1,3 @@
-import { wearsCrown } from "../shared/default-bot.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { botBodyId } from "../shared/bot-body.ts";
 import { takeImportName } from "../shared/import-name.ts";
@@ -107,7 +106,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
       mascotFaceColor: bot.mascotFaceColor ?? undefined,
-      chiefOfStaff: wearsCrown(bot), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
+      chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
       // Grants travel so the team's shape survives, but the import still lands every bot grant-less.
       ...(bot.connectorTools ? { connectorTools: structuredClone(bot.connectorTools) } : {}),
       ...(bot.toolScope !== undefined ? { toolScope: structuredClone(bot.toolScope) } : {}),

@@ -54,7 +54,8 @@ beforeAll(async () => {
   scout = await create({ name: "Scout", title: "Support agent", section: "Support", reportsTo: BOB.email });
   quill = await create({ name: "Quill", title: "Support writer", section: "Support", reportsTo: BOB.email });
   bolt = await create({ name: "Bolt", title: "Developer", section: "Dev", reportsTo: OLIVE.email });
-  chief = ((await team.as(olive, "GET", "/api/bots?messages=0")).body.bots as Array<Bot & { chiefOfStaff?: boolean; defaultBot?: unknown }>).find((one) => one.chiefOfStaff && !one.defaultBot)!;
+  chief = await create({ name: "Bob's Chief", reportsTo: BOB.email });
+  expect((await team.as(olive, "PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
   const made = await team.as(olive, "POST", "/api/groups", { name: "Launch", memberIds: [scout.id, bolt.id], section: "Support",
     setup: { bulletin: "", defaultResponder: { kind: "member", botId: scout.id } } });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
@@ -112,6 +113,21 @@ it("lets Scout, in Bob's private chat, ask Bolt in another department and brings
   expect((await messages(olive, boltThread)).status).toBe(404);
   expect((await messages(olive, bobsChat)).status).toBe(404);
 }, hostTimeout(120_000));
+
+it("keeps Bob's Chief supervising only Bob's bots, while it can reach Bolt too", async () => {
+  const before = turns().length;
+  const sent = await team.as(bob, "POST", `/api/bots/${chief.id}/messages`, { text: "Who is on my side?", threadId: chief.threadId });
+  expect(sent.status, JSON.stringify(sent.body)).toBe(202);
+  await expect.poll(() => turns().length, { timeout: 30_000 }).toBeGreaterThan(before);
+  await expect.poll(settled, { timeout: 20_000 }).toBe(true);
+  const system = turns().filter((turn) => turn.botId === chief.id).at(-1)!.system;
+  const [, mine = "", others = ""] = system.split(/Bots that report to Bob \(your team\):|Other bots you can reach \(they report to someone else\):/);
+  expect(mine).toContain("Scout");
+  expect(mine).toContain("Quill");
+  expect(mine).not.toContain("Bolt");
+  expect(others).toContain("Bolt");
+  expect(system).toContain("Reaching a bot gives you no authority over it");
+}, hostTimeout(90_000));
 
 it("never carries Bob's private chat into a room, by a hand-off or a post", async () => {
   const sent = await team.as(bob, "POST", `/api/bots/${scout.id}/messages`, { text: "Post that in the Launch room too", threadId: bobsChat });

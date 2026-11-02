@@ -5,7 +5,7 @@ import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveSoon } fr
 import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts";
 import { reorderStable } from "../shared/bot-order.ts";
-import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts"; import { wearsCrown } from "../shared/default-bot.ts";
+import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
@@ -1393,7 +1393,7 @@ export class Store {
     if (chief.lastTeamSetupReceipt?.requestId === request.requestId) return chief.lastTeamSetupReceipt.result;
     const managedSections = [...new Set([...(chief.managedSections ?? []), ...request.newTeams])];
     if (managedSections.length > 100 || managedSections.some((name) => name.trim() !== name || name.length > 60) ||
-        request.newTeams.some((name) => !name) || (request.newTeams.length && !wearsCrown(chief))) throw new Error("Invalid reviewed Chief team scope");
+        request.newTeams.some((name) => !name) || (request.newTeams.length && !chief.chiefOfStaff)) throw new Error("Invalid reviewed Chief team scope");
     const nextBots = [...this.bots];
     const changed: BotRecord[] = [];
     for (const operation of request.operations) {

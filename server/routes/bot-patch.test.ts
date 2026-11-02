@@ -40,7 +40,7 @@ beforeEach(() => {
   lifecycleBusy.mockReturnValue(false);
 });
 
-function fixture({ team = false } = {}) {
+function fixture() {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const cfg = { vps: { sshAlias: "production-vps" } } as AppConfig;
@@ -58,7 +58,6 @@ function fixture({ team = false } = {}) {
     routines: () => null,
     // A member's session may chat with this bot: the level that still can't move it or change what it may do.
     levelOf: () => "chat",
-    team,
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
   const patch = async (botId: string, body: Record<string, unknown>, as: { auth?: RequestAuth; headers?: Record<string, string> } = {}) => {
@@ -323,32 +322,5 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.phoneApps).toBeUndefined();
-  });
-});
-
-describe("PATCH /api/bots/:id chiefOfStaff on a team", () => {
-  it("refuses to crown a bot someone owns, crowns a department's own bot, and leaves an earlier crown alone", async () => {
-    const { store, bot, patch } = fixture({ team: true });
-    store.patchBot(bot.id, { createdBy: "ada@acme.test" });
-    const owned = await patch(bot.id, { chiefOfStaff: true });
-    expect(owned.status).toBe(403);
-    expect(owned.body.error).toBe("Scout can't be made a Chief of Staff on a team: each person's own MausBot already looks after their bots and holds their inbox.");
-    expect(store.bot(bot.id)?.chiefOfStaff).toBeFalsy();
-
-    const department = store.createBot({ name: "Ops", section: "Ops" });
-    expect((await patch(department.id, { chiefOfStaff: true })).status).toBe(200);
-    expect(store.bot(department.id)?.chiefOfStaff).toBe(true);
-
-    store.patchBot(bot.id, { chiefOfStaff: true });
-    expect((await patch(bot.id, { chiefOfStaff: true, title: "Lead" })).status).toBe(200);
-    expect((await patch(bot.id, { chiefOfStaff: false })).status).toBe(200);
-    expect(store.bot(bot.id)?.chiefOfStaff).toBe(false);
-  });
-
-  it("crowns an owned bot anywhere but a team", async () => {
-    const { store, bot, patch } = fixture();
-    store.patchBot(bot.id, { createdBy: "ada@acme.test" });
-    expect((await patch(bot.id, { chiefOfStaff: true })).status).toBe(200);
-    expect(store.bot(bot.id)?.chiefOfStaff).toBe(true);
   });
 });

@@ -501,7 +501,7 @@ it("tells the person of a failure whose report waited and was then refused", asy
       await api("PUT", "/api/config", { budgets: { monthlyUsd: 0.005 } });
       writeFileSync(file(incidents, "gate"), "finish");
       await expect.poll(async () => (await messages(incidents)).some((m) =>
-        (m.tool?.name ?? "").startsWith("error: the incident could not reach Clive — this workspace has reached its monthly spend limit")), { timeout: 20_000 }).toBe(true);
+        (m.tool?.name ?? "").startsWith("error: the problem report could not reach Clive — this workspace has reached its monthly spend limit")), { timeout: 20_000 }).toBe(true);
       const sent = await watch.sent(chief.id);
       expect(sent.filter((push: any) => push.kind === "incident")).toEqual([expect.objectContaining({
         botId: ben.id, threadId: ben.activeTaskId, title: "Ben hit a problem",
