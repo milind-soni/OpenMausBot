@@ -26,7 +26,7 @@ export const ENDED_REFUSAL = "My Cloud has ended. It is open only so you can tak
 
 /** What a frozen server still changes: the freeze itself, the move's reads and lets-go, signing in and out, the backup
  * that takes things home, the Admin's signed routes, Files and the computers lent to it. (The lent screen lease has its
- * own exact exemption in refuses() — see #4122.) */
+ * own exact exemption in refuses().) */
 const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/)/u;
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** What a frozen copy keeps once its workspace is deleted: the marker, this server's identity, Files, downloaded tools
@@ -106,7 +106,7 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
     },
     /** Why a frozen server refuses this request, or null when it takes it. */
     refuses(method: string, path: string): string | null {
-      // A lent computer keeps taking its own screen lease while frozen by a move (#4122): without it, every screen
+      // A lent computer keeps taking its own screen lease while frozen by a move: without it, every screen
       // call from the home the bots moved to dies on this 409 while files and the terminal work. Only that one POST,
       // and never on an ended Cloud's copy — that Cloud runs no bots, so nothing should be asking for a lease.
       if (frozen && !exportOnly && method.toUpperCase() === "POST" && path === "/api/desktop/shared-computer-control") return null;
