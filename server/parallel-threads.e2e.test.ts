@@ -276,7 +276,7 @@ describe.skipIf(process.platform === "win32").each(["desktop", "home"] as const)
     expect((await busyThreads(f, botId)).sort(), "both threads run at once").toEqual([...threads].sort());
     f.finish(threads[0]!);
     await expect.poll(async () => (await browse(f, threads[1]!)).body.result.isError, { timeout: 20_000, interval: 100 }).toBeFalsy();
-    expect(await rows(f, threads[1]!)).toContain("The browser is free. Continuing.");
+    await expect.poll(() => rows(f, threads[1]!), { timeout: 10_000, interval: 50 }).toContain("The browser is free. Continuing.");
     f.release();
     await expect.poll(async () => (await botRow(f, botId)).busy, { timeout: 20_000, interval: 100 }).toBe(false);
   }, 90_000);
