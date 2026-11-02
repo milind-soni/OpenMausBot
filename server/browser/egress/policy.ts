@@ -3,7 +3,7 @@
 import { BlockList, isIP } from "node:net";
 import { z } from "zod";
 
-import { addressClass, ownAddresses, type AddressClass } from "../../../electron/egress-addresses.mjs";
+import { addressClass, listed, ownAddresses, type AddressClass } from "../../../electron/egress-addresses.mjs";
 
 export { addressClass, ownAddresses, type AddressClass };
 
@@ -28,6 +28,10 @@ export const REFUSAL_TEXT: Record<Refusal, string> = {
 };
 
 const family = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
+
+/** Clash, Surge and other proxies in TUN + fake-IP mode answer every name from 198.18.0.0/15 and route it themselves. */
+const FAKE_IP = new BlockList();
+FAKE_IP.addSubnet("198.18.0.0", 15, "ipv4");
 
 /** An address literal, or a name RFC 6761 and Chrome resolve to loopback themselves. */
 export function namesThisMachine(host: string): boolean {
@@ -103,7 +107,13 @@ export async function refusalFor(
 ): Promise<Refusal | null> {
   const { host, port } = target;
   for (const { address } of addresses) {
-    const kind = addressClass(address, own);
+    let kind = addressClass(address, own);
+    // On the desktop these come from the person's own proxy: the local network, unless this computer holds the address.
+    if (kind === "reserved" && rules.host === "desktop" && listed(FAKE_IP, address)) {
+      // The proxy picks the real destination, which may be this computer: never let it reach OpenMausBot's own ports.
+      if (rules.ownPort(port)) return "omb";
+      kind = listed(own, address) ? "this-machine" : "private";
+    }
     if (kind === "public") continue;
     if (kind === "metadata" || kind === "link-local" || kind === "reserved") return kind;
     if (kind === "private") {
