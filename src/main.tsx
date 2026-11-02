@@ -1,10 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
 import {
   BROWSER_SIGN_IN_FAILED, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
 } from "./lib/session";
-import { bootstrapBrand } from "./lib/brand";
+import { bootstrapBrand, productName } from "./lib/brand";
 import { loadPageLanguage } from "./lib/language-preference";
 import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
@@ -22,6 +21,12 @@ settleAdvancedModeDefault();
 applySkinChoice(readSkinChoice());
 applyFont(readFont());
 applyChatWidth(readChatWidth());
+
+// The app is its own chunk, so these pages don't parse it. Everywhere else its fetch starts now, alongside the session
+// read, instead of after it. A failed fetch renders as a throw, so PageBoundary offers a reload.
+const PAGES_WITHOUT_THE_APP = new Set(["/home", "/pair", "/desktop-viewer"]);
+const loadApp = () => import("./App").catch((error: unknown) => ({ default: (): never => { throw error; } }));
+const appPage = PAGES_WITHOUT_THE_APP.has(location.pathname) ? null : loadApp();
 
 async function chooseRoot(): Promise<React.ReactNode> {
   const home = window.ogb?.home;
@@ -45,9 +50,12 @@ async function chooseRoot(): Promise<React.ReactNode> {
     const { DesktopViewer } = await import("./components/DesktopViewer");
     return <DesktopViewer />;
   }
+  const { default: App } = await (appPage ?? loadApp());
   return <App />;
 }
 
+// The window is named before the brand file is asked for: the answer only ever renames it.
+document.title = productName();
 void Promise.all([bootstrapBrand(), chooseRoot(), loadPageLanguage()]).then(([, root]) => {
   createRoot(document.getElementById("root")!).render(<StrictMode><PageBoundary>{root}</PageBoundary></StrictMode>);
 });

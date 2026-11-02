@@ -5,7 +5,8 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
-import { companionBridge, type CompanionState } from "./PhoneSetupFlow";
+import { companionBridge } from "@/lib/companion-bridge";
+import type { CompanionState } from "./PhoneSetupFlow";
 
 export const SIDEBAR_PHONE_RECENT_MS = 2 * 60_000;
 const SIDEBAR_PHONE_POLL_MS = 15_000;

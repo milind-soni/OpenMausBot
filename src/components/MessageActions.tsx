@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, use, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Copy, Ellipsis, Reply, X } from "lucide-react";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { cn } from "@/lib/cn";
@@ -18,7 +18,13 @@ export type MessageMenuItem = {
   onSelect: () => void;
   title?: string;
   disabled?: boolean;
+  /** Offered only while the chat's turn is not running. */
+  idleOnly?: boolean;
 };
+
+/** Whether the chat's turn is running, apart from the row values every message reads: a turn starting or ending
+ * re-renders only the few rows that show it, not every message. */
+export const ChatBusyContext = createContext(false);
 
 export const MESSAGE_ROW = "data-message-row";
 
@@ -37,7 +43,7 @@ export function MessageActions({
   side,
   forceOpen = false,
   className,
-  menu = [],
+  menu: items = [],
   children,
 }: {
   side: "user" | "bot";
@@ -51,10 +57,13 @@ export function MessageActions({
   const moreRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const [menuOpen, setMenuOpen] = useState(false);
+  // use() may run conditionally: a closed menu has no reason to follow the turn.
+  const busy = menuOpen && items.some((item) => item.idleOnly) ? use(ChatBusyContext) : false;
+  const menu = busy ? items.filter((item) => !item.idleOnly) : items;
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [tapped, setTapped] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [menuAbove, setMenuAbove] = useState(false);
   const [menuFlipped, setMenuFlipped] = useState(false);
   const mirrored = side === "user";
