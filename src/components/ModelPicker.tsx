@@ -7,7 +7,7 @@ import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
-import { choiceIsSelected, modelChoices, modelSelectionForPick, type ModelChoice } from "@/lib/model-choices";
+import { choiceIsSelected, modelChoices, modelSelectionForPick, takesTypedModels, withTypedModels, type ModelChoice } from "@/lib/model-choices";
 export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import type { Typeahead } from "@/lib/menu-keys";
@@ -247,8 +247,7 @@ export function ModelPicker({
   const [scope, setScope] = useState<"bot" | "thread">("thread");
   const advanced = useAdvancedMode();
   const ownerOrAdmin = useOwnerOrAdmin();
-  // A guest changes only their own conversation's model, never the shared bot's default; thread-only until
-  // authority loads.
+  // A guest changes only their own conversation's model, never the shared bot's default; thread-only until authority loads.
   const simpleUpdatesBotDefault = ownerOrAdmin === true;
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
@@ -307,8 +306,9 @@ export function ModelPicker({
   }, [open, placement]);
 
   const selection = bot.modelSelection;
-  const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
-  const pickerInstances = configuredModelInstances(state.instances, selection.instanceId);
+  const instances = withTypedModels(state.instances, selection, query);
+  const active = instances.find((instance) => instance.instanceId === selection.instanceId);
+  const pickerInstances = configuredModelInstances(instances, selection.instanceId);
   const selectedVariantLabel = selection.variant === undefined ? undefined : variantLabel(
     active?.models.options.find((option) => option.id === selection.model)?.variants?.find((option) => option.id === selection.variant)
       ?? { id: selection.variant, label: selection.variant },
@@ -680,7 +680,7 @@ export function ModelPicker({
   );
 
   const simpleMenu = simpleView ? simpleModelMenu({
-    instances: state.instances,
+    instances,
     listed: pickerInstances,
     selection,
     bot: { name: profile.name, selection: profile.modelSelection, follows },
@@ -820,7 +820,7 @@ export function ModelPicker({
                 </div>
               ) : (
                 <>
-                  {((pane === "main" && official.length > COMPACT_MODEL_COUNT) ||
+                  {((pane === "main" && (official.length > COMPACT_MODEL_COUNT || takesTypedModels(railInstance))) ||
                     (pane === "custom" && custom.length > COMPACT_MODEL_COUNT)) && (
                     <ModelSearch
                       value={query}
