@@ -1,5 +1,6 @@
 import { wearsCrown } from "../shared/default-bot.ts";
 import { chiefForBot } from "./incidents.ts";
+import { canManage, canReach, hasAuthority } from "./peer-roster.ts";
 import { mainChief } from "./host/proactive-owner.ts";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -93,6 +94,15 @@ describe("MausBot, every person's helper", () => {
       expect(chiefForBot(store.bots, { id: "fox", name: "Fox", reportsTo: ada }), "its person hears of a failure in their inbox instead").toBeNull();
       expect(wearsCrown(own)).toBe(false);
       expect(wearsCrown({ chiefOfStaff: true })).toBe(true);
+    });
+
+    it("reaches no bot everyone sees, even one its person owns: the audience rule, which a crown does not change", () => {
+      const store = place();
+      const own = member(store, ada);
+      const fox = store.createBot({ name: "Fox", reportsTo: ada } as never);
+      expect(hasAuthority(own, fox), "it answers to their Chief").toBe(true);
+      expect(canReach(own, fox)).toBe(false);
+      expect(canManage(own, fox)).toBe(false);
     });
   });
 

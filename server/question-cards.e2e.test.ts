@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
+import { chiefCrownedEarlier } from "./testing/team-earlier-chief.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const CLEO = { email: "cleo@acme.test", role: "owner" as const };
@@ -112,8 +113,7 @@ beforeAll(async () => {
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     return created.body.bot as Bot;
   };
-  scout = await create({ name: "Scout", reportsTo: CLEO.email });
-  expect((await team.as(cleo, "PATCH", `/api/bots/${scout.id}`, { chiefOfStaff: true })).status).toBe(200);
+  scout = await chiefCrownedEarlier<Bot>(team, cleo, "Scout", CLEO.email);
   ledger = await create({ name: "Ledger", reportsTo: CLEO.email });
   // Questions reach the person on "Ask me first"; at Full access, the default, the requesting bot decides them instead.
   for (const bot of [scout, ledger]) expect((await team.as(cleo, "PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
