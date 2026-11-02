@@ -8,6 +8,7 @@ import { ATTACHMENTS_DIR } from "../attachments.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
+import type { BotRecord } from "../store.ts";
 import { createTeamPeople } from "../team-people.ts";
 import { PASS } from "./table.ts";
 import { createTeamOwnerRoutes, TEAM_PEOPLE_PATH } from "./team-owners.ts";
@@ -112,3 +113,27 @@ describe("teammates' pictures on a Team Cloud", () => {
       auth: BOB_SESSION, json: (() => {}) as never, readBody: (async () => ({})) as never })).toBe(PASS);
   });
 });
+
+describe("who a bot reports to, in Settings → Activity", () => {
+  it("records each owner change with who made it, before and after, and nothing when it stays the same", async () => {
+    const people = createTeamPeople(mkdtempSync(join(tmpdir(), "omb-team-owner-audit-")));
+    people.seen(ADA, "owner");
+    people.seen(BOB, "member");
+    const bots = [{ id: "ledger", name: "Ledger", reportsTo: ADA }, { id: "payroll", name: "Payroll", reportsTo: ADA }] as unknown as BotRecord[];
+    const store = {
+      get bots() { return bots; },
+      bot: (id: string) => bots.find((bot) => bot.id === id),
+      patchBot: (id: string, patch: Partial<BotRecord>) => { const bot = bots.find((one) => one.id === id)!; Object.assign(bot, patch); return bot; },
+    };
+    const rows: Array<{ auth: RequestAuth; row: { action: string; target?: unknown; before?: unknown; after?: unknown } }> = [];
+    const route = createTeamOwnerRoutes({ team: TEAM, people, store: store as never, sees: () => true, publicBot: (bot) => bot, record: (auth, row) => { rows.push({ auth, row }); } });
+    const admin = asSession(session({ id: "s-ada", email: ADA, teamRole: "owner", scopes: ["admin", "client"] }));
+    const put = (path: string, body: unknown) => route({ req: { headers: {} } as IncomingMessage, res: {} as ServerResponse, url: new URL(`http://x${path}`), path, method: "PUT", auth: admin,
+      json: (() => undefined) as never, readBody: (async () => body) as never });
+    await put("/api/bots/ledger/reports-to", { email: BOB });
+    expect(rows).toEqual([{ auth: admin, row: expect.objectContaining({ category: "bot", action: "owner.update", target: { kind: "bot", id: "ledger", name: "Ledger" }, before: { owner: ADA }, after: { owner: BOB } }) }]);
+    await put("/api/team/reports-to", { botIds: ["ledger", "payroll"], email: BOB });
+    expect(rows.map((one) => (one.row.target as { id: string }).id)).toEqual(["ledger", "payroll"]);
+  });
+});
+

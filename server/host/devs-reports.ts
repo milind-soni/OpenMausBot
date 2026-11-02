@@ -22,6 +22,7 @@ import { failedTurnCause } from "../../shared/failed-turn.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { splitTranscriptCitations } from "../../src/lib/citations.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { startDueTimer } from "../due-timer.ts";
 import type { ProviderSnapshot } from "../contracts.ts";
 import { buildDevsReport, contactAddress, environmentSecrets, redactReportText, type BotSummary, type DevsReportPayload, type ReportedBot } from "../devs-report.ts";
 import { BUG_REPORT_STATUS_MAX_IDS, type ReportStatusAnswer, type ReportStatusQuestion, type SendOutcome } from "../devs-report-send.ts";
@@ -86,7 +87,7 @@ type Author = { bot: BotRecord; summary: BotSummary } | { why: string };
 
 export interface DevsReportsDeps {
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "botByThread" | "groupByThread" | "projectBotForTask" | "activePath" | "appendMessage" | "patchMessage" | "onChange">;
+  store: Pick<Store, "bots" | "sections" | "bot" | "botByThread" | "groupByThread" | "projectBotForTask" | "activePath" | "appendMessage" | "patchMessage" | "onChange">;
   installId: string;
   appVersion: string;
   /** Where this server runs, as the team reads it: desktop app, My Cloud, Team Cloud… */
@@ -228,7 +229,8 @@ export function createDevsReports(deps: DevsReportsDeps) {
     try { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${said.line}`, ok: said.ok } }); }
     catch { /* the conversation is gone; the report still went */ }
   };
-  const botNames = () => store.bots.map((bot) => bot.name);
+  // A bot or a department named devs is tagged instead.
+  const namesBeforeDevs = () => [...store.bots.map((bot) => bot.name), ...store.sections];
   const secrets = () => environmentSecrets();
   const languageFor = (person: string | undefined) => (deps.lineLanguage ? deps.lineLanguage(person) : deps.language());
 
@@ -358,6 +360,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     if (outbox.length >= MAX_OUTBOX) return { ok: false, line: fullLine(language), marker: FAILED_MARKER };
     outbox.push({ messageId: entry.messageId, threadId: entry.threadId, payload, firstAt: now(), attempts: 1,
       nextAt: now() + (outcome.retryAfterMs ?? RETRY_MS[0]), ...(person ? { person } : {}) });
+    timer?.poke();
     return { ok: false, line: notYetLine(outcome, language), marker: FAILED_MARKER };
   }
 
@@ -448,14 +451,16 @@ export function createDevsReports(deps: DevsReportsDeps) {
     const fallingBack = inFlight.has(entry.messageId);
     const said = await deliver(entry, { bot, summary });
     if (!fallingBack) told.push({ threadId, messageId: entry.messageId, said, until: now() + LONGEST_WAIT_MS });
+    timer?.poke();
     return { status: 200, text: `${said.ok ? "Sent" : "Not sent"}. Tell the person this line in your reply, word for word: "${said.line}"` };
   }
 
   function personWrote(threadId: string, line: Message): void {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
-    const names = botNames();
     const own = ownWords(line.text);
+    if (!own.some((part) => tagsDevs(part))) return;
+    const names = namesBeforeDevs();
     if (!own.some((part) => tagsDevs(part, names))) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
@@ -464,6 +469,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(own.map((part) => withoutDevsTags(part, names)).filter(Boolean).join("\n\n")),
       ...(line.sender ? { sender: { name: line.sender.name, ...(line.sender.id ? { id: line.sender.id } : {}) } } : {}) });
     save();
+    timer?.poke();
   }
 
   const unsubscribe = store.onChange((change: StoreChange) => {
@@ -477,8 +483,9 @@ export function createDevsReports(deps: DevsReportsDeps) {
       if (waiting.length + tracked.length !== before) save();
     }
   });
-  const timer = deps.timer === false ? null : setInterval(tick, TICK_MS);
-  timer?.unref();
+  // A waiting @devs line polls whether its turn is still running; otherwise nothing is due before a retry or a status ask.
+  const timer = deps.timer === false ? null : startDueTimer({ run: tick, now, retryMs: TICK_MS,
+    next: () => waiting.length || told.length ? now() : Math.min(nextAskAt, ...outbox.map((queued) => queued.nextAt)) });
 
   return {
     /** The note on a turn in this conversation while a @devs message waits for its summary (none for a turn without
@@ -516,7 +523,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     idle: async () => {
       while (inFlight.size || retrying.size || asking) await Promise.allSettled([...inFlight.values(), asking]).then(() => new Promise((resolve) => setImmediate(resolve)));
     },
-    stop() { unsubscribe(); if (timer) clearInterval(timer); },
+    stop() { unsubscribe(); timer?.stop(); },
   };
 }
 

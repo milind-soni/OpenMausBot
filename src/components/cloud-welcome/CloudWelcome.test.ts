@@ -163,7 +163,7 @@ describe("CloudWelcome", () => {
     render();
     await vi.waitFor(() => expect(button("Choose a team")).toBeDefined());
     click("Choose a team");
-    expect(host.querySelector("[data-team-library]")).not.toBeNull();
+    await vi.waitFor(() => expect(host.querySelector("[data-team-library]")).not.toBeNull());
     flushSync(() => fixture.imported!());
     expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
     expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();

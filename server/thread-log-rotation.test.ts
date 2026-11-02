@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs, EVENTS_DIR, NATIVE_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import { appendNative } from "./drivers/native.ts";
+import { appendNative, flushNativeLog } from "./drivers/native.ts";
 import { EventBus } from "./harness/bus.ts";
 import { bindThreadLogCapProvider, capThreadLog, currentThreadLogCap } from "./thread-log-rotation.ts";
 import { readThreadEvents } from "./thread-events.ts";
@@ -107,7 +107,10 @@ describe("thread log rotation", () => {
 
   it("the native tee caps its log after appending", () => {
     bindThreadLogCapProvider(() => 400);
-    for (let i = 0; i < 12; i++) appendNative(THREAD, { dir: "in", source: "test", msg: { i } });
+    for (let i = 0; i < 12; i++) {
+      appendNative(THREAD, { dir: "in", source: "test", msg: { i } });
+      flushNativeLog(THREAD);
+    }
     const file = join(NATIVE_DIR, `${THREAD}.ndjson`);
     const lines = linesOf(NATIVE_DIR);
     expect(statSync(file).size).toBeLessThanOrEqual(400);

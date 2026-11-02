@@ -6,7 +6,8 @@ import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 
 import { loadAppCards } from "./bot-settings/useBotApps";
-import { preloadConnectedApps, type ToolkitCard } from "./PluginsPanel";
+import { preloadConnectedApps } from "@/lib/connected-apps";
+import type { ToolkitCard } from "./ServiceIcon";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 import { SIMPLE_TOP_BUTTON } from "./SidebarSimpleTop";
 

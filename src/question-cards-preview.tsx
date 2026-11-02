@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import type { InboxRow, InboxView } from "../shared/inbox";
 import { ChatView } from "@/components/ChatView";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
-import { setLocale } from "@/lib/i18n";
+import { loadLocale } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { openInbox, setInboxView } from "@/state/inbox";
@@ -20,7 +20,7 @@ const surface = params.get("surface") ?? "chat";
 const skin = params.get("skin") ?? "midnight";
 setAdvancedMode(params.get("mode") === "advanced");
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
-setLocale(params.get("lang") ?? "en");
+await loadLocale(params.get("lang") ?? "en");
 
 const AT = Date.now() - 12 * 60_000;
 const CLEO = { email: "cleo@acme.test", name: "Cleo", role: "owner" };

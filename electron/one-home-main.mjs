@@ -1,7 +1,8 @@
 // Main's side of the one-time move to My Cloud (one-home.mjs) and of the send it runs (cloud-send-main.mjs): its
 // journal, this computer's server's freeze, My Cloud's owner sessions, the person's typing, and coming home when My
 // Cloud ends (one-home-again.mjs). The Admin's word decides: a move starts only for an account it lets move, to a Cloud
-// that is ready, and a Cloud it holds after it ended is the one signal that brings everything home. The person's own
+// that is ready, and a Cloud it holds after it ended brings everything home, as does its word that the Cloud this computer
+// moved to is gone while My Cloud is another (`gone`). The person's own
 // choice to keep this computer's bots here (Settings → MausBot Cloud, Advanced) is kept beside the journal.
 import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -52,6 +53,30 @@ export function oneHomeCloud(state) {
     paid: connected && state.entitlement?.status === "active" && !trialOn && !teamPlan(state),
     ...(homecoming ? { homecoming: { installationId: homecoming.installationId, name: homecoming.name } } : {}),
     ...(connected && typeof state.deviceId === "string" && state.deviceId ? { signIn: state.deviceId } : {}),
+    verified: connected,
+  };
+}
+
+/** How long an answer that leaves this computer where it is ("live", "unknown", none) stands before the Admin is asked
+ * again about the same Cloud. */
+export const GONE_ASK_MS = 10 * 60_000;
+
+/** One home's `gone(origin)`: `ask(origin)` is the Admin's word on this account's Cloud at `origin` (cloud-account.mjs
+ * `movedTo`), kept per account (`account()`): a Cloud found gone stays gone; any other answer, or a failed ask, is asked
+ * again only after GONE_ASK_MS. */
+export function createGoneCheck({ ask, account, now = Date.now }) {
+  const asked = new Map();
+  return async (origin) => {
+    const who = account();
+    if (!who) return null;
+    const key = `${who} ${origin}`, last = asked.get(key);
+    if (last?.gone) return last.gone;
+    if (last && now() - last.at < GONE_ASK_MS) return null;
+    asked.set(key, { at: now(), gone: null });
+    const said = await ask(origin).catch(() => null);
+    const gone = said === "deleted" || said === "ended" ? said : null;
+    asked.set(key, { at: now(), gone });
+    return gone;
   };
 }
 
@@ -204,11 +229,13 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
         if (!got.ok) throw Object.assign(new Error("OpenMausBot on this computer could not go on again."), { status: got.status });
       },
       frozen: async () => (await local.json("/api/move/freeze"))?.frozen === true,
+      marker: () => local.json("/api/move/freeze"),
       async forget() {
         const got = await local.call("POST", "/api/move/forget");
         if (!got.ok) throw Object.assign(new Error("This computer's copy could not be deleted."), { status: got.status });
       },
     },
+    gone: createGoneCheck({ ask: async (origin) => (await account()?.movedTo?.(origin)) ?? null, account: () => account()?.state()?.account?.id ?? null }),
     session: () => moveSession.open(target()),
     release: () => moveSession.end(),
     lend, phone, openHome, openLocal, restart, version, log,

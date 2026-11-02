@@ -64,6 +64,48 @@ test("Windows: the person's item has a name of its own, apart from lending's hid
   assert.equal(login.chosen(), false);
 });
 
+/** Electron 43's login item API on Windows: one Run entry per name (the AppUserModelId unless named), `openAtLogin` true
+ * only for that default entry with exactly the asked `args`, and `launchItems` listing every entry for this executable. */
+function windowsApp(entries = []) {
+  const items = new Map(entries.map(({ name, args = [], enabled = true }) => [name, { args, enabled }]));
+  const DEFAULT = "electron.app.OpenMausBot";
+  return {
+    isPackaged: true, items,
+    getLoginItemSettings({ args = [] } = {}) {
+      const own = items.get(DEFAULT);
+      return {
+        openAtLogin: Boolean(own) && JSON.stringify(own.args) === JSON.stringify(args),
+        launchItems: [...items].map(([name, item]) => ({ name, path: "C:\\OpenMausBot\\OpenMausBot.exe", args: item.args, scope: "user", enabled: item.enabled })),
+      };
+    },
+    setLoginItemSettings({ openAtLogin: on, args = [], name = DEFAULT }) { if (on) items.set(name, { args, enabled: true }); else items.delete(name); },
+  };
+}
+
+test("Windows: Settings shows on while Windows already starts the app, even from lending's hidden entry", async t => {
+  const dir = await temp(t);
+  const app = windowsApp([{ name: "electron.app.OpenMausBot", args: ["--omb-hidden"] }]);
+  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] });
+  const handlers = new Map();
+  installOpenAtLogin({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler, loginItem: login, changed: () => {} });
+  assert.deepEqual(await handlers.get("open-at-login:state")({}), { available: true, on: true });
+  app.items.get("electron.app.OpenMausBot").enabled = false;
+  assert.equal(login.chosen(), false, "an entry turned off in Task Manager starts nothing");
+});
+
+test("Windows: turning it off removes every entry that starts the app, and lending adds none until it is on again", async t => {
+  const dir = await temp(t);
+  const app = windowsApp([{ name: "electron.app.OpenMausBot", args: ["--omb-hidden"] }, { name: "OpenMausBot at login" }]);
+  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] });
+  login.choose(false);
+  assert.deepEqual([...app.items.keys()], []);
+  login.follow(true);
+  assert.equal(login.chosen(), false, "lending keeps to the person's choice");
+  login.choose(true);
+  login.follow(true);
+  assert.deepEqual([...app.items].sort(), [["OpenMausBot at login", { args: [], enabled: true }], ["electron.app.OpenMausBot", { args: ["--omb-hidden"], enabled: true }]]);
+});
+
 test("Linux: the person's autostart entry has no hidden flag and no lending mark, and lending never removes it", async t => {
   const dir = await temp(t);
   const config = path.join(dir, "config");
