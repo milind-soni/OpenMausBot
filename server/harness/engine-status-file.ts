@@ -9,6 +9,15 @@ export interface EngineStatusRow {
   driverKind: string;
   cli: string | null;
   snapshot: ProviderSnapshot;
+  /** When a probe last gave this status, and a digest of the engine's settings it was probed with. */
+  checkedAt?: number;
+  settings?: string;
+}
+
+export interface SavedEngineStatus {
+  snapshot: ProviderSnapshot;
+  checkedAt: number | null;
+  settings: string | null;
 }
 
 type Target = (instanceId: InstanceId) => { driverKind: string; cli: string | null } | null;
@@ -89,8 +98,8 @@ export function engineStatusFile(file: string) {
   };
   return {
     /** The statuses the last run recorded, for the engines still configured with the same driver and CLI. */
-    read(target: Target): Map<InstanceId, ProviderSnapshot> {
-      const seeds = new Map<InstanceId, ProviderSnapshot>();
+    read(target: Target): Map<InstanceId, SavedEngineStatus> {
+      const seeds = new Map<InstanceId, SavedEngineStatus>();
       let rows: unknown;
       try {
         rows = (JSON.parse(readFileSync(file, "utf8")) as { engines?: unknown }).engines;
@@ -102,7 +111,10 @@ export function engineStatusFile(file: string) {
         if (!row || !text(row.instanceId)) continue;
         const now = target(row.instanceId);
         const snapshot = snapshotFrom(row.snapshot);
-        if (snapshot && now && now.driverKind === row.driverKind && now.cli === (row.cli ?? null)) seeds.set(row.instanceId, snapshot);
+        if (snapshot && now && now.driverKind === row.driverKind && now.cli === (row.cli ?? null)) {
+          seeds.set(row.instanceId, { snapshot, checkedAt: typeof row.checkedAt === "number" && Number.isFinite(row.checkedAt) ? row.checkedAt : null,
+            settings: text(row.settings) ? row.settings : null });
+        }
       }
       return seeds;
     },
