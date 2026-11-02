@@ -53,6 +53,23 @@ start answer 409 `needsKey`; after the OpenAI key is saved through
 `PUT /api/config`, a phone's call starts with that key; a separate Live key
 then wins; neither key appears in the config or the log.
 
+
+## Azure OpenAI as the Live provider
+
+With `live.provider: "azure"` (`OMB_LIVE_PROVIDER=azure`) a call creates its
+GPT-Live session on the person's Azure OpenAI / Foundry resource:
+`POST {endpoint}/openai/v1/live/sessions` with the deployment name
+(`live.azureDeployment`, `OMB_AZURE_OPENAI_LIVE_DEPLOYMENT`, default
+`gpt-live-1`) as `session.model`, and the sideband attaches to
+`wss://{endpoint}/openai/v1/live/sessions/{id}/attach`. Both send the resource
+key as `api-key`, never as a bearer token. The key is only `live.key`; the
+OpenAI API key is never used for Azure. `live.azureEndpoint`
+(`OMB_AZURE_OPENAI_LIVE_ENDPOINT`) must be `https` on an Azure OpenAI host
+(`azureOpenAiRoot` in `server/live-call.ts`), and `PATCH /api/live/settings`
+refuses any other. Without the key, or with a missing or invalid endpoint,
+`POST /api/live/session` answers `409` with `needsKey` and the Azure setup
+sentence before anything leaves the harness. A call keeps the endpoint it
+started with even if the settings change mid-call.
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act

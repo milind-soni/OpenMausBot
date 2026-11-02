@@ -1,5 +1,6 @@
-// The OpenAI key never leaves the harness: the renderer only ever holds the SDP answer and its media connection.
+// The provider key never leaves the harness: the renderer only ever holds the SDP answer and its media connection.
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
+import type { LiveProvider } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 
 export const LIVE_MODEL = "gpt-live-1";
@@ -7,6 +8,7 @@ const OPENAI_BASE = "https://api.openai.com";
 export const DEFAULT_LIVE_VOICE = "marin";
 export const MAX_SDP_BYTES = 64 * 1024;
 export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
+export const LIVE_NEEDS_AZURE = "Live calls through Azure OpenAI need the resource endpoint, the GPT-Live deployment name and its key. Add them in Call settings.";
 
 /** The client's data channel is untrusted: it may only hang up; every append goes over the sideband. */
 export const LIVE_DATA_CHANNEL = {
@@ -21,18 +23,79 @@ export const LIVE_DATA_CHANNEL = {
   ],
 };
 
+/** Hosts an Azure OpenAI or Foundry resource answers on, including Azure Government, Azure China and API Management gateways. The key is only ever sent to one of these. */
+const AZURE_HOST_SUFFIXES = [
+  ".openai.azure.com",
+  ".services.ai.azure.com",
+  ".cognitiveservices.azure.com",
+  ".openai.azure.us",
+  ".openai.azure.cn",
+  ".azure-api.net",
+] as const;
+const AZURE_DEPLOYMENT = /^[A-Za-z0-9][\w.-]{0,63}$/;
+
+/** Where a Live call's session is created and its sideband attached. Never carries the key. */
+export interface LiveEndpoint {
+  provider: LiveProvider;
+  /** The versioned API root, e.g. `https://api.openai.com/v1` or `https://my-res.openai.azure.com/openai/v1`. */
+  apiBase: string;
+  /** The OpenAI model id, or the Azure deployment name. */
+  model: string;
+}
+
+export function liveProviderName(provider: LiveProvider): string {
+  return provider === "azure" ? "Azure OpenAI" : "OpenAI";
+}
+
 /** Only a loopback http URL is accepted, read at call time. */
 export function liveBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.OMB_OPENAI_LIVE_URL?.trim() ?? "";
   return /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(override) ? override : OPENAI_BASE;
 }
 
-export function liveSessionsUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return `${liveBaseUrl(env)}/v1/live/sessions`;
+export function openAiLiveEndpoint(env: NodeJS.ProcessEnv = process.env): LiveEndpoint {
+  return { provider: "openai", apiBase: `${liveBaseUrl(env)}/v1`, model: LIVE_MODEL };
 }
 
-export function liveAttachUrl(sessionId: string, env: NodeJS.ProcessEnv = process.env): string {
-  return `${liveBaseUrl(env).replace(/^http/, "ws")}/v1/live/sessions/${encodeURIComponent(sessionId)}/attach`;
+/** The `…/openai` root of an Azure resource URL as people paste it (bare, with `/openai/v1`, or a full request URL); null for anything that is not https on an Azure host. */
+export function azureOpenAiRoot(raw: string | undefined): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw?.trim() ?? "");
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password) return null;
+  if (!AZURE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix) && host.length > suffix.length)) return null;
+  const path = url.pathname.replace(/\/+$/, "");
+  const at = path.search(/\/openai(\/|$)/i);
+  const prefix = at >= 0 ? path.slice(0, at) : path;
+  return `${url.origin}${prefix}/openai`;
+}
+
+export function azureLiveDeployment(raw: string | undefined): string | null {
+  const name = raw?.trim() || LIVE_MODEL;
+  return AZURE_DEPLOYMENT.test(name) ? name : null;
+}
+
+export function azureLiveEndpoint(endpoint: string | undefined, deployment: string | undefined): LiveEndpoint | null {
+  const root = azureOpenAiRoot(endpoint);
+  const model = azureLiveDeployment(deployment);
+  return root && model ? { provider: "azure", apiBase: `${root}/v1`, model } : null;
+}
+
+export function liveSessionsUrl(endpoint: LiveEndpoint = openAiLiveEndpoint()): string {
+  return `${endpoint.apiBase}/live/sessions`;
+}
+
+export function liveAttachUrl(sessionId: string, endpoint: LiveEndpoint = openAiLiveEndpoint()): string {
+  return `${endpoint.apiBase.replace(/^http/, "ws")}/live/sessions/${encodeURIComponent(sessionId)}/attach`;
+}
+
+/** Azure OpenAI takes a resource key in `api-key`; OpenAI takes a bearer token. */
+export function liveAuthHeaders(provider: LiveProvider, key: string): Record<string, string> {
+  return provider === "azure" ? { "api-key": key } : { authorization: `Bearer ${key}` };
 }
 
 // The API caps startup history at 128 messages / 8,192 tokens; stay well inside it.
@@ -131,22 +194,24 @@ export interface CreateLiveSessionInput {
   history: LiveHistoryMessage[];
   cloudHome: boolean;
   voice?: string;
+  endpoint?: LiveEndpoint;
   fetchImpl?: typeof fetch;
-  url?: string;
   timeoutMs?: number;
 }
 
-/** Errors carry a status and a message fit for the user: never the key, never OpenAI's raw body. */
+/** Errors carry a status and a message fit for the user: never the key, never the provider's raw body. */
 export async function createLiveSession(input: CreateLiveSessionInput): Promise<{ sessionId: string; sdp: string }> {
+  const endpoint = input.endpoint ?? openAiLiveEndpoint();
+  const provider = liveProviderName(endpoint.provider);
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError("Add an OpenAI API key to use Live calls.", 409);
+  if (!key) throw new LiveSessionError(`Add an ${provider} API key to use Live calls.`, 409);
   if (!input.sdp.trim() || Buffer.byteLength(input.sdp) > MAX_SDP_BYTES) {
     throw new LiveSessionError("The call could not start: the connection offer was invalid.", 400);
   }
   const initialInput = liveInitialInput(input.history);
   const body = {
     session: {
-      model: LIVE_MODEL,
+      model: endpoint.model,
       instructions: liveInstructions(input.bot, { cloudHome: input.cloudHome }),
       delegation: { type: "client" },
       audio: { output: { voice: liveVoice(input.voice) } },
@@ -157,45 +222,53 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   };
   let response: Response;
   try {
-    response = await (input.fetchImpl ?? fetch)(input.url ?? liveSessionsUrl(), {
+    response = await (input.fetchImpl ?? fetch)(liveSessionsUrl(endpoint), {
       method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      headers: { ...liveAuthHeaders(endpoint.provider, key), "content-type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(input.timeoutMs ?? CREATE_TIMEOUT_MS),
     });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     throw new LiveSessionError(
-      timedOut ? "OpenAI did not answer in time. Try the call again." : "Could not reach OpenAI. Check the internet connection.",
+      timedOut ? `${provider} did not answer in time. Try the call again.` : `Could not reach ${provider}. Check the internet connection.`,
       502,
     );
   }
   if (!response.ok) {
     const failure = await response.json().catch(() => null) as { error?: { param?: unknown } } | null;
     const param = typeof failure?.error?.param === "string" ? failure.error.param : undefined;
-    throw new LiveSessionError(liveErrorMessage(response.status, param), response.status === 429 ? 429 : 502);
+    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider), response.status === 429 ? 429 : 502);
   }
   const payload = await response.json().catch(() => null) as { session?: { id?: unknown }; transport?: { sdp?: unknown } } | null;
   const sessionId = payload?.session?.id;
   const sdp = payload?.transport?.sdp;
   if (typeof sessionId !== "string" || typeof sdp !== "string" || !sdp.trim()) {
-    throw new LiveSessionError("OpenAI returned an unexpected answer. Try the call again.", 502);
+    throw new LiveSessionError(`${provider} returned an unexpected answer. Try the call again.`, 502);
   }
   return { sessionId, sdp };
 }
 
-export function liveErrorMessage(status: number, param?: string): string {
+export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai"): string {
+  const name = liveProviderName(provider);
   if (status === 400) {
     return param && /voice/i.test(param)
-      ? "OpenAI rejected the voice for this call. Choose another voice."
-      : `OpenAI rejected the call settings (HTTP 400${param ? `, ${param.replace(/[^\w.]/g, "").slice(0, 60)}` : ""}).`;
+      ? `${name} rejected the voice for this call. Choose another voice.`
+      : `${name} rejected the call settings (HTTP 400${param ? `, ${param.replace(/[^\w.]/g, "").slice(0, 60)}` : ""}).`;
   }
-  if (status === 401) return "OpenAI rejected the API key. Check the key for Live calls.";
-  if (status === 403) return "This OpenAI project has no access to GPT-Live. Check the project's model access and billing.";
-  if (status === 404) return "GPT-Live is not available for this OpenAI project.";
-  if (status === 429) return "OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
-  if (status >= 500) return "OpenAI had a problem starting the call. Try again in a moment.";
-  return `OpenAI could not start the call (HTTP ${status}).`;
+  if (provider === "azure") {
+    if (status === 401) return "Azure OpenAI rejected the API key. Check the key of the Azure resource.";
+    if (status === 403) return "This Azure OpenAI resource refused the call. Check its network rules and that the key belongs to it.";
+    if (status === 404) return "Azure OpenAI has no GPT-Live deployment by that name on this resource. Check the endpoint and the deployment name.";
+    if (status === 429) return "Azure OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
+  } else {
+    if (status === 401) return "OpenAI rejected the API key. Check the key for Live calls.";
+    if (status === 403) return "This OpenAI project has no access to GPT-Live. Check the project's model access and billing.";
+    if (status === 404) return "GPT-Live is not available for this OpenAI project.";
+    if (status === 429) return "OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
+  }
+  if (status >= 500) return `${name} had a problem starting the call. Try again in a moment.`;
+  return `${name} could not start the call (HTTP ${status}).`;
 }
 
 function oneLine(value: string): string {

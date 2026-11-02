@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.ts";
-import { LIVE_IDLE_MINUTES_DEFAULT, liveCallKey, liveSettingsFor } from "./live-settings.ts";
+import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY } from "./live-call.ts";
+import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveSettingsFor, liveSetupProblem } from "./live-settings.ts";
 
 describe("live settings", () => {
   it("defaults to a 5 minute idle hang-up and reading typed replies, with no key", () => {
@@ -35,5 +36,42 @@ describe("the key a Live call uses", () => {
     expect(liveCallKey(others)).toBeNull();
     expect(liveCallKey({ ...others, openai: { key: " " } })).toBeNull();
     expect(liveSettingsFor(others)).toEqual({ configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 });
+  });
+});
+
+describe("Live calls through Azure OpenAI", () => {
+  const azure = { provider: "azure" as const, azureEndpoint: "https://my-res.openai.azure.com", azureDeployment: "live-prod" };
+
+  it("never use the OpenAI API key as the Azure resource key", () => {
+    const cfg = { live: azure, openai: { key: "sk-openai" } } as AppConfig;
+    expect(liveCallKey(cfg)).toBeNull();
+    expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_AZURE);
+    expect(liveSettingsFor(cfg)).toMatchObject({ configured: false, provider: "azure", azureEndpoint: azure.azureEndpoint, azureDeployment: "live-prod" });
+  });
+
+  it("are ready with the Live key, a valid endpoint and a deployment, and report none of the key", () => {
+    const cfg = { live: { ...azure, key: "azure-secret" } } as AppConfig;
+    expect(liveCallKey(cfg)).toEqual({ key: "azure-secret", source: "live" });
+    expect(liveCallEndpoint(cfg)).toEqual({ provider: "azure", apiBase: "https://my-res.openai.azure.com/openai/v1", model: "live-prod" });
+    expect(liveSetupProblem(cfg)).toBeNull();
+    const settings = liveSettingsFor(cfg);
+    expect(settings).toMatchObject({ configured: true, keySource: "live", provider: "azure" });
+    expect(JSON.stringify(settings)).not.toContain("azure-secret");
+  });
+
+  it("are not ready with an endpoint that is not an Azure host", () => {
+    const cfg = { live: { ...azure, key: "k", azureEndpoint: "https://evil.example" } } as AppConfig;
+    expect(liveCallEndpoint(cfg)).toBeNull();
+    expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_AZURE);
+    expect(liveSettingsFor(cfg).configured).toBe(false);
+  });
+
+  it("default to gpt-live-1 as the deployment name", () => {
+    expect(liveCallEndpoint({ live: { ...azure, azureDeployment: "" } } as AppConfig)?.model).toBe("gpt-live-1");
+  });
+
+  it("leave OpenAI the default provider", () => {
+    expect(liveCallEndpoint({ openai: { key: "sk" } } as AppConfig, {})).toEqual({ provider: "openai", apiBase: "https://api.openai.com/v1", model: "gpt-live-1" });
+    expect(liveSetupProblem({} as AppConfig)).toBe(LIVE_NEEDS_KEY);
   });
 });

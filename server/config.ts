@@ -397,9 +397,12 @@ const appConfigSchema = z.object({
     fishModel: z.enum(FISH_TTS_MODELS).optional(),
   }).optional(),
   decider: deciderConfigSchema.optional(),
-  /** Live calls: `key` is an OpenAI key for Live calls only; without one they use `openai.key`. `voice` is a GPT-Live voice. */
+  /** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `voice` is a GPT-Live voice. */
   live: z.object({
     key: optionalText,
+    provider: z.enum(["openai", "azure"]).optional(),
+    azureEndpoint: z.string().trim().max(300).optional(),
+    azureDeployment: z.string().trim().max(64).optional(),
     voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
     readTypedReplies: z.boolean().optional(),
     idleMinutes: z.number().int().min(1).max(60).optional(),
@@ -511,7 +514,7 @@ export interface AppConfig extends HelperConfig {
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
-  live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
+  live?: { key?: string; provider?: "openai" | "azure"; azureEndpoint?: string; azureDeployment?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
   profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string };
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
@@ -804,6 +807,10 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_OPENROUTER_DECIDER_KEY !== undefined) cfg.decider.openrouterKey = process.env.OMB_OPENROUTER_DECIDER_KEY; if (process.env.OMB_WORKERS_AI_TOKEN !== undefined) cfg.decider.workersAiToken = process.env.OMB_WORKERS_AI_TOKEN;
   cfg.live = { ...cfg.live };
   if (process.env.OMB_OPENAI_LIVE_KEY !== undefined) cfg.live.key = process.env.OMB_OPENAI_LIVE_KEY;
+  const liveProvider = process.env.OMB_LIVE_PROVIDER?.trim().toLowerCase();
+  if (liveProvider === "openai" || liveProvider === "azure") cfg.live.provider = liveProvider;
+  if (process.env.OMB_AZURE_OPENAI_LIVE_ENDPOINT !== undefined) cfg.live.azureEndpoint = process.env.OMB_AZURE_OPENAI_LIVE_ENDPOINT.trim();
+  if (process.env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT !== undefined) cfg.live.azureDeployment = process.env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT.trim();
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
@@ -863,6 +870,9 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
     [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
+    [patch.live?.provider, "OMB_LIVE_PROVIDER"],
+    [patch.live?.azureEndpoint, "OMB_AZURE_OPENAI_LIVE_ENDPOINT"],
+    [patch.live?.azureDeployment, "OMB_AZURE_OPENAI_LIVE_DEPLOYMENT"],
   ];
   for (const [value, name] of settings) {
     if (value === undefined) continue;

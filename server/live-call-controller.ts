@@ -7,7 +7,7 @@ import {
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
-import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
+import { LIVE_NEEDS_KEY, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -47,10 +47,11 @@ export interface LiveCallDeps {
   personKey?(auth: RequestAuth): string | undefined;
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
-  settings(): { key: string; voice: string; readTypedReplies: boolean; idleMinutes: number };
-  createSession(input: { key: string; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
-  openSocket(url: string, key: string): LiveSocket;
-  attachUrl(sessionId: string): string;
+  /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
+  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; voice: string; readTypedReplies: boolean; idleMinutes: number };
+  createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
+  openSocket(url: string, key: string, endpoint: LiveEndpoint): LiveSocket;
+  attachUrl(sessionId: string, endpoint: LiveEndpoint): string;
   speakable(text: string): string[];
   recordCall?(input: { threadId: string; botName: string; record: LiveCallRecord }): void;
   log(line: string): void;
@@ -88,6 +89,7 @@ interface Call {
   personKey: string | undefined;
   botName: string;
   key: string;
+  endpoint: LiveEndpoint;
   sessionId: string;
   socket: LiveSocket | null;
   attached: boolean;
@@ -149,21 +151,22 @@ export class LiveCallController {
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
     const settings = this.deps.settings();
     const key = settings.key.trim();
-    if (!key) throw new LiveSessionError(LIVE_NEEDS_KEY, 409);
+    const endpoint = settings.endpoint;
+    if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
     const voice = liveVoice(settings.voice);
-    const call = this.newCall(input, key, voice);
+    const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
     this.call = call;
     let session: { sessionId: string; sdp: string };
     try {
-      session = await this.deps.createSession({ key, sdp: input.sdp, botId: input.botId, threadId: input.threadId, voice });
+      session = await this.deps.createSession({ key, endpoint, sdp: input.sdp, botId: input.botId, threadId: input.threadId, voice });
     } catch (error) {
       if (this.call === call) this.call = null;
       this.deps.log(`[live] call failed bot=${input.botId} client=${input.client} status=${error instanceof LiveSessionError ? error.status : "error"}`);
       throw error;
     }
     if (this.call !== call) {
-      this.closeOrphan(session.sessionId, key);
+      this.closeOrphan(session.sessionId, key, endpoint);
       throw new LiveSessionError("The call was cancelled.", 503);
     }
     try {
@@ -182,7 +185,7 @@ export class LiveCallController {
     } catch (error) {
       const sidebandOpened = call.socket !== null;
       this.finish(call, "error", "The call could not start.");
-      if (!sidebandOpened) this.closeOrphan(session.sessionId, key);
+      if (!sidebandOpened) this.closeOrphan(session.sessionId, key, endpoint);
       throw error;
     }
     return { call: { ...call.state }, sdp: session.sdp };
@@ -217,7 +220,7 @@ export class LiveCallController {
   }
 
 
-  private newCall(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient }, key: string, voice: string): Call {
+  private newCall(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient }, key: string, endpoint: LiveEndpoint, voice: string): Call {
     return {
       state: { callId: randomUUID(), botId: input.botId, threadId: input.threadId, client: input.client, voice, startedAt: this.now(), status: "connecting" },
       auth: input.auth,
@@ -225,6 +228,7 @@ export class LiveCallController {
       personKey: this.deps.personKey?.(input.auth),
       botName: input.botName,
       key,
+      endpoint,
       sessionId: "",
       socket: null,
       attached: false,
@@ -265,14 +269,14 @@ export class LiveCallController {
   private attach(call: Call): void {
     let socket: LiveSocket;
     try {
-      socket = this.deps.openSocket(this.deps.attachUrl(call.sessionId), call.key);
+      socket = this.deps.openSocket(this.deps.attachUrl(call.sessionId, call.endpoint), call.key, call.endpoint);
     } catch {
-      this.finish(call, "sideband-lost", "The call could not connect to OpenAI.");
+      this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
       return;
     }
     call.socket = socket;
     const attachTimer = this.later(call, () => {
-      if (!call.attached) this.finish(call, "sideband-lost", "The call could not connect to OpenAI.");
+      if (!call.attached) this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
     }, ATTACH_TIMEOUT_MS);
     socket.onopen = () => {
       call.attached = true;
@@ -285,19 +289,19 @@ export class LiveCallController {
     socket.onmessage = (event) => this.guarded(call, () => this.onSideband(call, event.data));
     // Node's WebSocket reports a refused handshake as an error without a close.
     socket.onerror = () => {
-      if (!call.attached) this.finish(call, "sideband-lost", "The call could not connect to OpenAI.");
+      if (!call.attached) this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
     };
     socket.onclose = () => {
       if (call.state.status === "ended") return;
       if (call.pendingEnd) this.finish(call, call.pendingEnd);
-      else this.finish(call, "sideband-lost", "The call connection to OpenAI dropped.");
+      else this.finish(call, "sideband-lost", `The call connection to ${liveProviderName(call.endpoint.provider)} dropped.`);
     };
   }
 
-  private closeOrphan(sessionId: string, key: string): void {
+  private closeOrphan(sessionId: string, key: string, endpoint: LiveEndpoint): void {
     let socket: LiveSocket;
     try {
-      socket = this.deps.openSocket(this.deps.attachUrl(sessionId), key);
+      socket = this.deps.openSocket(this.deps.attachUrl(sessionId, endpoint), key, endpoint);
     } catch {
       return;
     }

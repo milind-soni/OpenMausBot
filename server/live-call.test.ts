@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  azureLiveEndpoint,
+  azureOpenAiRoot,
   createLiveSession,
   DEFAULT_LIVE_VOICE,
   LIVE_MODEL,
@@ -13,6 +15,7 @@ import {
   liveInstructions,
   liveSessionsUrl,
   MAX_SDP_BYTES,
+  openAiLiveEndpoint,
 } from "./live-call.ts";
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 
@@ -222,17 +225,79 @@ describe("session config for the untrusted client", () => {
 
 describe("live URLs", () => {
   it("uses OpenAI unless a loopback test server is set", () => {
-    expect(liveSessionsUrl({})).toBe("https://api.openai.com/v1/live/sessions");
-    expect(liveAttachUrl("sess_1", {})).toBe("wss://api.openai.com/v1/live/sessions/sess_1/attach");
+    expect(liveSessionsUrl(openAiLiveEndpoint({}))).toBe("https://api.openai.com/v1/live/sessions");
+    expect(liveAttachUrl("sess_1", openAiLiveEndpoint({}))).toBe("wss://api.openai.com/v1/live/sessions/sess_1/attach");
     const env = { OMB_OPENAI_LIVE_URL: "http://127.0.0.1:4555" };
-    expect(liveSessionsUrl(env)).toBe("http://127.0.0.1:4555/v1/live/sessions");
-    expect(liveAttachUrl("sess_1", env)).toBe("ws://127.0.0.1:4555/v1/live/sessions/sess_1/attach");
+    expect(liveSessionsUrl(openAiLiveEndpoint(env))).toBe("http://127.0.0.1:4555/v1/live/sessions");
+    expect(liveAttachUrl("sess_1", openAiLiveEndpoint(env))).toBe("ws://127.0.0.1:4555/v1/live/sessions/sess_1/attach");
   });
   it("ignores an override that is not loopback", () => {
     expect(liveBaseUrl({ OMB_OPENAI_LIVE_URL: "http://evil.example:80" })).toBe("https://api.openai.com");
   });
   it("escapes the session id", () => {
-    expect(liveAttachUrl("a/b", {})).toBe("wss://api.openai.com/v1/live/sessions/a%2Fb/attach");
+    expect(liveAttachUrl("a/b", openAiLiveEndpoint({}))).toBe("wss://api.openai.com/v1/live/sessions/a%2Fb/attach");
+  });
+  it("points an Azure call at the resource's v1 API with the deployment as the model", () => {
+    const endpoint = azureLiveEndpoint("https://my-res.openai.azure.com", "my-live")!;
+    expect(endpoint).toEqual({ provider: "azure", apiBase: "https://my-res.openai.azure.com/openai/v1", model: "my-live" });
+    expect(liveSessionsUrl(endpoint)).toBe("https://my-res.openai.azure.com/openai/v1/live/sessions");
+    expect(liveAttachUrl("s/1", endpoint)).toBe("wss://my-res.openai.azure.com/openai/v1/live/sessions/s%2F1/attach");
+    expect(azureLiveEndpoint("https://my-res.openai.azure.com", "")?.model).toBe(LIVE_MODEL);
+  });
+});
+
+describe("azureOpenAiRoot", () => {
+  it("accepts a resource URL however it is pasted", () => {
+    for (const url of [
+      "https://my-res.openai.azure.com",
+      " https://my-res.openai.azure.com/ ",
+      "https://my-res.openai.azure.com/openai/v1",
+      "https://my-res.openai.azure.com/openai/v1/live/sessions?api-version=preview",
+    ]) expect(azureOpenAiRoot(url), url).toBe("https://my-res.openai.azure.com/openai");
+    expect(azureOpenAiRoot("https://proj.services.ai.azure.com")).toBe("https://proj.services.ai.azure.com/openai");
+    expect(azureOpenAiRoot("https://res.cognitiveservices.azure.com/")).toBe("https://res.cognitiveservices.azure.com/openai");
+    expect(azureOpenAiRoot("https://gw.azure-api.net/team-a/openai/v1")).toBe("https://gw.azure-api.net/team-a/openai");
+  });
+  it("refuses anything the key must not be sent to", () => {
+    for (const url of [
+      undefined,
+      "",
+      "my-res.openai.azure.com",
+      "http://my-res.openai.azure.com",
+      "https://openai.azure.com",
+      "https://my-res.openai.azure.com.evil.example",
+      "https://evil.example/my-res.openai.azure.com",
+      "https://user:pw@my-res.openai.azure.com",
+      "https://api.openai.com",
+    ]) expect(azureOpenAiRoot(url), String(url)).toBeNull();
+  });
+  it("refuses a deployment name Azure could not have", () => {
+    expect(azureLiveEndpoint("https://my-res.openai.azure.com", "bad name/../x")).toBeNull();
+  });
+});
+
+describe("createLiveSession on Azure", () => {
+  it("sends the resource key as api-key, never as a bearer token, and the deployment as the model", async () => {
+    const fetchImpl = okFetch();
+    const endpoint = azureLiveEndpoint("https://my-res.openai.azure.com", "live-prod")!;
+    const result = await createLiveSession({ key: " azure-secret ", endpoint, sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl });
+    expect(result).toEqual({ sessionId: "live_123", sdp: "v=0 answer" });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://my-res.openai.azure.com/openai/v1/live/sessions");
+    const headers = init!.headers as Record<string, string>;
+    expect(headers["api-key"]).toBe("azure-secret");
+    expect(headers.authorization).toBeUndefined();
+    const body = JSON.parse(String(init?.body));
+    expect(body.session.model).toBe("live-prod");
+    expect(body.session.delegation).toEqual({ type: "client" });
+    expect(String(init?.body)).not.toContain("azure-secret");
+  });
+  it("names Azure in its errors", async () => {
+    const endpoint = azureLiveEndpoint("https://my-res.openai.azure.com", undefined)!;
+    const refuse = vi.fn(async () => new Response("{}", { status: 404 }));
+    await expect(createLiveSession({ key: "k", endpoint, sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: refuse }))
+      .rejects.toMatchObject({ status: 502, message: expect.stringContaining("deployment") });
+    expect(liveErrorMessage(401, undefined, "azure")).toMatch(/^Azure OpenAI rejected the API key/);
   });
 });
 
