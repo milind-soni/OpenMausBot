@@ -49,6 +49,8 @@ export interface TeamMemberLeftDeps {
   eraseBrowsers(audience: Audience): Promise<boolean>;
   /** Their own connections, keys and MCP sign-ins (team-connections.ts). */
   forgetConnections(person: string): void;
+  /** Takes them out of the team's groups of people, and out of what those groups gave them (team-groups.ts). */
+  leaveGroups?(email: string): void;
 }
 
 export type TeamMemberLeftResult = { chats: number; layers: number; sessions: number; files: number; browsers: boolean; bots: number; botsKept: number };
@@ -61,6 +63,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     if (!PERSON.test(person)) throw new Error("not a person key");
     // First, so nothing of theirs is opened, written or streamed while it goes.
     const sessions = deps.revokeSessions(email);
+    deps.leaveGroups?.(email);
     const mine = new Set(deps.openedBy(person).filter((threadId) => deps.privateTo(threadId) === person));
     let chats = 0;
     const files = new Set<string>(memberUploads(deps.dataDir, person));

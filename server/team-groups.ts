@@ -59,6 +59,15 @@ export function createTeamGroups(dataDir: string) {
       save();
       return group;
     },
+    /** Takes a person out of every group; the ids of the groups they were in. */
+    leave(email: string): string[] {
+      const address = ownerEmail(email);
+      const left = groups.filter((group) => group.members.includes(address)).map((group) => group.id);
+      if (!left.length) return [];
+      groups = groups.map((group) => (left.includes(group.id) ? { ...group, members: group.members.filter((one) => one !== address) } : group));
+      save();
+      return left;
+    },
     remove(id: string): TeamGroup | undefined {
       const known = groups.find((group) => group.id === id);
       if (!known) return undefined;

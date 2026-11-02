@@ -379,6 +379,16 @@ describe("asking to chat", () => {
     expect(await botOf("eve", vault.id), "Eve left the group").toBeUndefined();
     expect(await botOf("dan", vault.id)).toMatchObject({ yourAccess: "chat" });
 
+    // Someone who leaves the team leaves its groups, and the bots those groups were given stop listing them.
+    const FAY = { email: "fay@acme.test", role: "member" as const };
+    token.fay = (await team.pair(FAY)).token!;
+    expect((await as("ada", "PUT", `/api/team/groups/${finance.id}`, { name: "Finance", members: [DAN.email, FAY.email] })).status).toBe(200);
+    expect(await botOf("fay", vault.id)).toMatchObject({ yourAccess: "chat" });
+    expect((await team.signed("POST", "/api/cloud/team/member-left", { email: FAY.email })).status).toBe(200);
+    const after = ((await as("ada", "GET", "/api/team/groups")).body.groups as Array<{ id: string; members: string[] }>).find((group) => group.id === finance.id);
+    expect(after?.members).toEqual([DAN.email]);
+    expect(JSON.stringify((await botOf("ada", vault.id))?.visibility)).not.toContain(FAY.email);
+
     expect((await as("ada", "DELETE", `/api/team/groups/${finance.id}`)).status).toBe(200);
     expect(await botOf("dan", vault.id), "the group is gone").toBeUndefined();
     expect((await botOf("cara", vault.id))?.access).toEqual({ everyone: "none", people: {} });

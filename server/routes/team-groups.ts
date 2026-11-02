@@ -45,6 +45,18 @@ function affected(store: Pick<Store, "bots">, id: string, removed: boolean): Arr
   return out;
 }
 
+/** Rewrites the sharing of every bot that gives this group a level, so each one's visibility follows its members. One
+ * bot that can't be written doesn't stop the rest; it is rewritten again at the group's next change. */
+export function rewriteGroupBots(store: Pick<Store, "bots">, id: string, removed: boolean, writeAccess: (bot: BotRecord, access: BotAccess) => unknown): void {
+  for (const { bot, access } of affected(store, id, removed)) {
+    try {
+      writeAccess(bot, access);
+    } catch (error) {
+      console.warn(`team groups: could not update ${bot.id} for group ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 export function createTeamGroupRoutes(deps: TeamGroupRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     const one = ONE_GROUP.exec(path);
@@ -57,7 +69,7 @@ export function createTeamGroupRoutes(deps: TeamGroupRouteDeps): RouteHandler {
     const target = one ? groups.get(one[1]!) : undefined;
     if (one && !target) return json(res, 404, { error: "no such group" });
     const settle = (id: string, before: TeamGroup | undefined, after: TeamGroup | undefined) => {
-      for (const { bot, access } of affected(deps.store, id, !after)) deps.writeAccess(bot, access);
+      rewriteGroupBots(deps.store, id, !after, deps.writeAccess);
       deps.broadcast({ kind: "teamGroups", groups: listed() });
       const action = !before ? "group.create" : after ? "group.update" : "group.delete";
       const name = after?.name ?? before?.name;
