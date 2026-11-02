@@ -75,6 +75,19 @@ for (const method of ["write", "writeFile", "appendFile"]) {
   const original = FileHandle[method];
   FileHandle[method] = function (data, ...rest) { const path = handlePaths.get(this); if (path) tallyWrite(path, data); return original.call(this, data, ...rest); };
 }
+// Processes that started (a CLI that is not installed has no pid), by program and first argument. exec goes through
+// execFile, so it is not counted twice.
+const spawned = new Map();
+const countSpawn = (file, args, started) => {
+  if (!started?.pid) return;
+  const first = Array.isArray(args) ? args.find((arg) => typeof arg === "string") : undefined;
+  const key = `${basename(String(file)).split(" ")[0]}${first ? ` ${basename(first).slice(0, 40)}` : ""}`;
+  spawned.set(key, (spawned.get(key) ?? 0) + 1);
+};
+for (const method of ["spawn", "spawnSync", "execFile", "fork"]) {
+  const original = childProcess[method];
+  childProcess[method] = function (file, args, ...rest) { const started = original.call(this, file, args, ...rest); countSpawn(file, args, started); return started; };
+}
 for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
   const original = childProcess[name];
   childProcess[name] = function (...args) { spawns += 1; return original.apply(this, args); };
@@ -92,6 +105,7 @@ if (out) {
       writes: Object.fromEntries(writes),
       fsyncs,
       renames,
+      spawned: Object.fromEntries(spawned),
       spawns,
     }));
   });

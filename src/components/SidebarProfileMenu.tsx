@@ -27,7 +27,7 @@ import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./Accou
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
-import { PhoneAppDialog } from "./PhoneAppDialog";
+import { PhoneAppDialog } from "./lazy-screens";
 import { CloudTile } from "./cloud-buy/parts";
 import { usageBridge } from "./CloudUsageMeter";
 import { useCloudPlanSnapshot } from "./CloudTrialNotice";
@@ -692,15 +692,15 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <PhoneAppDialog
-        open={phoneAppOpen}
+      {phoneAppOpen && <PhoneAppDialog
+        open
         onClose={() => setPhoneAppOpen(false)}
         connect={destinations.map((destination) => ({
           key: destination.id,
           subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
           onSelect: () => connectTo(destination),
         }))}
-      />
+      />}
     </>
   );
 }
