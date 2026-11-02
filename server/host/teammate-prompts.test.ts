@@ -48,6 +48,15 @@ describe("what a Chief is told about its teammates' questions", () => {
     expect(waitedWords(NOW - 2 * LONG_WAIT_MS, NOW)).toBe("for 2 days");
   });
 
+  it("a webhook, routine, guest or read-and-draft turn has no person behind it, whatever the bot's level", () => {
+    const prompts = (over: Partial<TeammatePromptDeps>) => createTeammatePrompts({ store: { bots: [], bot: () => undefined }, isUnattended: () => false, startedOutside: () => false,
+      guestDriven: () => false, confined: () => false, ...over } as unknown as TeammatePromptDeps);
+    expect(prompts({}).personBehind("own", "inbox")).toBe(true);
+    for (const over of [{ isUnattended: () => true }, { startedOutside: () => true }, { guestDriven: () => true }, { confined: () => true }]) {
+      expect(prompts(over).personBehind("own", "inbox")).toBe(false);
+    }
+  });
+
   it("a teammate's words stay in the JSON list, never loose in the sentence that tells the Chief what to do", () => {
     const told = questions(true, NOW - 2 * LONG_WAIT_MS);
     expect(told.split("Keep the old page?")).toHaveLength(2);

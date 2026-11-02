@@ -44,9 +44,12 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
 
   const unattendedWork = (botId: string, threadId: string): boolean => deps.isUnattended(botId, threadId) || deps.startedOutside(threadId);
 
-  /** Security invariant: only a turn the person is behind speaks for them. A webhook, routine or guest turn must not answer their questions. */
-  const actsForPerson = (bot: BotRecord, threadId: string): boolean =>
-    chiefLevel(bot) && !unattendedWork(bot.id, threadId) && !deps.guestDriven(threadId) && !deps.confined(threadId);
+  /** Security invariant: a webhook, routine or guest turn has no person behind it, so it neither hears nor says what waits on them. */
+  const personBehind = (botId: string, threadId: string): boolean =>
+    !unattendedWork(botId, threadId) && !deps.guestDriven(threadId) && !deps.confined(threadId);
+
+  /** Security invariant: only a turn the person is behind speaks for them. */
+  const actsForPerson = (bot: BotRecord, threadId: string): boolean => chiefLevel(bot) && personBehind(bot.id, threadId);
 
   /** A Chief's turns list the questions teammates it manages wait on the person for, so it can answer one for them or send
    * the person to the thread that asks. */
@@ -62,5 +65,5 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
     return ` Teammates you manage wait on the person's answer to these questions: ${JSON.stringify(waiting)}. When the person gives you an answer or asks you to answer one${deps.fullAccess(bot.id, threadId) ? ", or you know the answer for certain" : ""}, send it to that teammate with coordinate_bots with its threadId as thread: it answers the question there for the person, who can still change it. Otherwise tell the person which thread asks; never guess an answer.${said}`;
   }
 
-  return { outstanding, unattendedWork, actsForPerson, questions };
+  return { outstanding, unattendedWork, personBehind, actsForPerson, questions };
 }
