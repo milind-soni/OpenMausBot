@@ -171,7 +171,6 @@ const UPSERT_MESSAGE =
   "text = excluded.text, json = excluded.json";
 
 const ACTIVE_LEAF = "SELECT active_leaf_id FROM thread_state WHERE thread_id = ?";
-
 function db(): DatabaseSync {
   const file = DB_FILE();
   if (handle && handlePath === file && Date.now() - handleCheckedAt < FILE_RECHECK_MS) return handle;
@@ -604,8 +603,7 @@ export function requestSenders(keys: ReadonlyArray<{ threadId: string; id: strin
 }
 
 export function setActiveLeaf(threadId: string, leafId: string | null): void {
-  prepared("INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET active_leaf_id = excluded.active_leaf_id")
-    .run(threadId, leafId);
+  prepared("INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET active_leaf_id = excluded.active_leaf_id").run(threadId, leafId);
 }
 
 /** Each conversation's newest stored row, by its row number, and how many rows it has: what Send to My Cloud compares with what it sent. */
