@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { EVALS_LANE, lanesFor, PACKAGED_SERVER_LANE, runLanes, vitestLane } from "./ci-linux-lanes.mjs";
+import { EVALS_LANE, ISOLATE, laneCommand, lanesFor, PACKAGED_SERVER_LANE, runLanes, vitestLane } from "./ci-linux-lanes.mjs";
 import { vitestMatrix } from "./ci-scope.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -58,5 +58,15 @@ describe("Linux lanes", () => {
     expect(lines.some((line) => /still running .*hang/.test(line))).toBe(true);
     expect(summary).toContain("| quick fail | FAILED (exit 3) |");
     expect(summary).toContain("| slow pass | passed |");
+  });
+
+  it("starts an isolated lane in a network namespace of its own, as the job's user, with its own folders", () => {
+    const lane = { name: "a", env: { WORD: "x" }, commands: ["echo one", "echo two"] };
+    expect(laneCommand(lane, { isolate: false, dir: "/l/1" })).toEqual({ file: "bash", args: ["-eo", "pipefail", "-c", "echo one\necho two"], env: { WORD: "x" } });
+    expect(laneCommand(lane, { isolate: true, dir: "/tmp/omb-lane-1-x", user: { uid: 1000, gid: 1001 } })).toEqual({
+      file: "unshare", args: [...ISOLATE.slice(1), "1000", "1001", "echo one\necho two"],
+      env: { WORD: "x", HOME: "/tmp/omb-lane-1-x/home", TMPDIR: "/tmp/omb-lane-1-x/tmp", XDG_RUNTIME_DIR: "/tmp/omb-lane-1-x/run" },
+    });
+    expect(ISOLATE.slice(0, 3)).toEqual(["unshare", "--net", "--"]);
   });
 });

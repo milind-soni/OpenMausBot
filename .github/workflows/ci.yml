@@ -125,6 +125,10 @@ jobs:
         if: steps.scope.outputs.linux_lanes
         env:
           OMB_CI_LINUX_LANES: ${{ steps.scope.outputs.linux_lanes }}
+          # Each lane in a network namespace of its own, with its own home and temporary folder: side by side, two
+          # lanes' servers picked the same port (EADDRINUSE on 127.0.0.1). Making the namespaces takes root, so the
+          # runner starts through sudo; every lane runs as this user, without capabilities.
+          OMB_CI_ISOLATE_LANES: "1"
           # Boat's image sets en_US.UTF-8, whose collation is Intl's default; GitHub's runners use C.UTF-8 and UTC.
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
@@ -132,7 +136,7 @@ jobs:
         # Boat's runner gives every process cap_dac_read_search as an ambient capability, so a test can still read a
         # file it set to mode 000, and Boat's desktop sets DISPLAY. GitHub's runners have neither.
         shell: setpriv --inh-caps=-all --ambient-caps=-all -- env -u DISPLAY -u XAUTHORITY bash --noprofile --norc -eo pipefail {0}
-        run: node scripts/ci-linux-lanes.mjs
+        run: sudo -n -E env "PATH=$PATH" node scripts/ci-linux-lanes.mjs
       - name: Report flaky tests that needed a retry
         if: ${{ !cancelled() && steps.scope.outputs.linux_lanes }}
         env:

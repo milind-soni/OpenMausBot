@@ -349,7 +349,14 @@ instead (Settings → Secrets and variables → Actions → Variables; anything 
   runs the Linux vitest shards, behavior evals and the Linux packaged server
   smoke side by side as lanes of that VM (`scripts/ci-linux-lanes.mjs`, the
   same commands as their GitHub jobs), and prints each lane's log in a group
-  when it ends. GitHub keeps only 10 error annotations per step, so when many
+  when it ends. Each lane runs in a network namespace of its own, with only
+  its loopback up, and its own home, temporary and runtime folders under
+  `/tmp`: side by side without that, two lanes' servers picked the same port
+  and failed with `EADDRINUSE`. Making the namespaces takes root, so the step
+  starts the runner through `sudo`; every lane runs as the job's user without
+  capabilities. The runner first checks that a lane cannot reach a port
+  listening outside it, and fails the step when that does not hold. A lane has
+  no route off the machine. GitHub keeps only 10 error annotations per step, so when many
   tests fail, the lane groups in the log are the full record. `ci-scope.mjs` leaves those jobs out of the selection, so the
   `CI` gate reads them as skipped by design and `static`'s result covers
   them. The Windows jobs, the macOS smokes, the advisory Linux jobs (open-source

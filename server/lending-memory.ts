@@ -1,7 +1,7 @@
 // Known open risks: a foreign write racing trustedWrite in the same moment cannot be told apart, and a
 // guest-driven shell can still write after the pending window or edit this record (Full access owns the machine).
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, opendirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { type BigIntStats, existsSync, lstatSync, opendirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
@@ -18,6 +18,12 @@ export const ANCESTOR_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGE
 export const FOLDER_ENTRY_CAP = 200;
 const ROOT_ENTRY_CAP = 5_000;
 
+/** The kernel stamps a change from a clock that ticks every 1 to 10 ms (and NTFS can report a folder's change late),
+ * so a second change in the same tick leaves the times a cache key was made from. Only an entry whose last change is
+ * older than this is cached; a newer one is read again on every call. */
+const SETTLE_NS = 2_000_000_000n;
+const settled = (stat: BigIntStats) => BigInt(Date.now()) * 1_000_000n - stat.ctimeNs >= SETTLE_NS;
+
 /** Cached by identity, size and ctime, which no process can set back. */
 const contentCache = new Map<string, { key: string; hash: string }>();
 function describe(file: string): string | undefined {
@@ -33,6 +39,7 @@ function describe(file: string): string | undefined {
   if (cached?.key === key) return cached.hash;
   let hash: string;
   try { hash = `file:${createHash("sha256").update(readFileSync(file)).digest("hex")}`; } catch { hash = "file:unreadable"; }
+  if (!settled(stat)) return hash;
   if (contentCache.size > 50_000) contentCache.clear();
   contentCache.set(file, { key, hash });
   return hash;
@@ -71,6 +78,7 @@ function listing(dir: string, cap: number, through = false): Listing | undefined
     return { key: `${key}:unreadable`, names: new Set(), overflow: true };
   }
   const listed = { key, names, overflow };
+  if (!settled(stat)) return listed;
   if (listingCache.size > 50_000) listingCache.clear();
   listingCache.set(cacheKey, listed);
   return listed;
