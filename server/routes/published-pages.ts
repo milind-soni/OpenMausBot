@@ -25,7 +25,7 @@ export interface PagesInternalContext {
   readBody: () => Promise<unknown>;
   /** Throws once the turn that owns the capability has ended (Stop, or the turn settled). */
   requireActive: () => void;
-  /** Aborts once the tool call's request is gone. */
+  /** Aborts once the turn that owns the capability ends or the tool call's request is gone. */
   signal: AbortSignal;
   /** The bot's own folders for this turn, and its Local VM's workspace on this computer when it has one. */
   folders: () => Promise<{ roots: readonly string[]; vmWorkspace: string | null }>;

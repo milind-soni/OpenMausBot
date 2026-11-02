@@ -40,6 +40,15 @@ const buttons = (container: HTMLElement) => [...container.querySelectorAll("butt
 afterEach(() => { vi.clearAllMocks(); delete (window as { ogb?: unknown }).ogb; });
 
 describe("a published page's card", () => {
+  it("warns when an upload is uncertain and still lets the person unpublish it", async () => {
+    const { container, root } = render(page({ ...live.publishedPage!, uncertain: true }));
+    try {
+      expect(container.textContent).toContain("This page may be live. Unpublish it to remove it.");
+      buttons(container).find((button) => button.textContent === "Unpublish")!.click();
+      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/published-pages/abcdefghijklmnopqrstuvwxyz/unpublish", { method: "POST", body: "{}" }));
+    } finally { root.unmount(); }
+  });
+
   it("shows the title, the link and the usage; on the web Open and the link open a new tab; and it unpublishes the page", async () => {
     const { container, root, panel } = render(live);
     try {
