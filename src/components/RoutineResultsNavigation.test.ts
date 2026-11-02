@@ -163,4 +163,15 @@ describe("routine results navigation", () => {
     fixture.state!.routineRuns = [{ ...run, resultsThreadId: "deleted-destination" }];
     expect(buttonsFrom(() => ChatView({ bot })).has("Back to results")).toBe(false);
   });
+
+  it("shows no run-details bar in a chat a run only joined, like a wait's follow-up or a limit-reset continuation", () => {
+    const chat = { ...bot, threadId: "original-source" };
+    fixture.state!.bots = [chat];
+    fixture.state!.routineRuns = [{ ...run, id: "joined", threadId: "original-source", resultsThreadId: "original-source", sourceThreadId: undefined }, run];
+    expect(buttonsFrom(() => ChatView({ bot: chat })).has("Run logs")).toBe(false);
+    expect(buttonsFrom(() => ChatView({ bot })).has("Run logs")).toBe(true);
+    fixture.state!.routineRuns = [{ ...run, id: "joined", threadId: "original-source" }, run];
+    expect(buttonsFrom(() => ChatView({ bot: chat })).has("Run logs")).toBe(false);
+    expect(buttonsFrom(() => ChatView({ bot })).has("Run logs")).toBe(true);
+  });
 });
