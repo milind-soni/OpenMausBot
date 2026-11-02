@@ -225,14 +225,33 @@ describe("a bot's conversations in its panel", () => {
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: "research" }]]);
   });
 
-  it("pins, renames and deletes through the thread menu the sidebar uses", () => {
+  it("pins, archives, renames and deletes through the thread menu the sidebar uses", () => {
     render(research());
-    click(row("launch").querySelector('[aria-label="Actions for Translate the launch post"]'));
-    const menu = document.querySelector('[data-thread-overlay][aria-label="Actions for Translate the launch post"]')!;
-    const items = [...menu.querySelectorAll("button")].map((button) => button.textContent);
-    expect(items).toEqual(expect.arrayContaining(["Copy link", "Rename thread", "Pin", "Delete thread"]));
-    expect(items).not.toContain("Archive");
-    click([...menu.querySelectorAll("button")].find((button) => button.textContent === "Pin")!);
+    const menuFor = (title: string) => {
+      click(host.querySelector(`[aria-label="Actions for ${title}"]`));
+      return [...document.querySelector(`[data-thread-overlay][aria-label="Actions for ${title}"]`)!.querySelectorAll("button")];
+    };
+    const items = menuFor("Translate the launch post");
+    expect(items.map((button) => button.textContent)).toEqual(expect.arrayContaining(["Copy link", "Rename thread", "Pin", "Archive", "Delete thread"]));
+    click(items.find((button) => button.textContent === "Pin")!);
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { pinned: true } }]]);
+    fixture.dispatch.mockReset();
+    click(menuFor("Translate the launch post").find((button) => button.textContent === "Archive")!);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { archivedAt: expect.any(Number) } }]]);
+  });
+
+  it("lists archived conversations under Archived (N), where they can be unarchived", () => {
+    render(research({ tasks: tasks.map((task) => task.threadId === "launch" || task.threadId === "deck" ? { ...task, archivedAt: now - 1000 } : task) }));
+    expect(listed()).toEqual(["hiring", "who", "pricing"]);
+    const archivedToggle = host.querySelector("[data-conversations-archived]")!;
+    expect(archivedToggle.textContent).toBe("Archived (2)");
+    expect(archivedToggle.getAttribute("aria-expanded")).toBe("false");
+    click(archivedToggle);
+    expect(listed()).toEqual(["hiring", "who", "pricing", "launch", "deck"]);
+    click(host.querySelector('[aria-label="Actions for Summarise the board deck"]'));
+    const unarchive = [...document.querySelector('[data-thread-overlay][aria-label="Actions for Summarise the board deck"]')!.querySelectorAll("button")]
+      .find((button) => button.textContent === "Unarchive")!;
+    click(unarchive);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "deck", patch: { archivedAt: null } }]]);
   });
 });

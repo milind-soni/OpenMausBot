@@ -108,7 +108,7 @@ const TASK_PATCH_FIELDS = [
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null };
 
 function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
   Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
@@ -1053,6 +1053,8 @@ export class Store {
       else if (patch.pinned === false) delete task.pinned;
       if (patch.turnTimeoutMinutes === null) delete task.turnTimeoutMinutes;
       else if (patch.turnTimeoutMinutes !== undefined) task.turnTimeoutMinutes = patch.turnTimeoutMinutes;
+      if (patch.archivedAt === null) delete task.archivedAt;
+      else if (patch.archivedAt !== undefined) task.archivedAt = patch.archivedAt;
     });
     this.emit({ type: "group", groupId });
     return task;

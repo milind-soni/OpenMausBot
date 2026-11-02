@@ -200,6 +200,7 @@ export interface GroupTask {
   pinned?: boolean;
   updatedAt?: number;
   turnTimeoutMinutes?: number;
+  archivedAt?: number;
   lastThreadOrderAt?: number;
   working?: boolean;
   busyBotId?: string | null;
@@ -696,6 +697,7 @@ export type Action =
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
+  | { type: "archiveGroupTask"; groupId: string; threadId: string; archivedAt: number | null }
   | { type: "setConversationTurnLimit"; groupId: string; threadId: string; minutes: number | null; dm: boolean }
   | { type: "deleteGroupTask"; groupId: string; threadId: string }
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
@@ -1748,6 +1750,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return patchGroupTask(state, action.groupId, action.threadId, { title: action.title });
     case "pinGroupTask":
       return patchGroupTask(state, action.groupId, action.threadId, { pinned: action.pinned ? true : undefined });
+    case "archiveGroupTask":
+      return patchGroupTask(state, action.groupId, action.threadId, { archivedAt: action.archivedAt ?? undefined });
     case "setConversationTurnLimit":
       if (!action.dm) return patchGroupTask(state, action.groupId, action.threadId, { turnTimeoutMinutes: action.minutes ?? undefined });
       return { ...state, groups: state.groups.map((group) => group.id === action.groupId ? { ...group, turnTimeoutMinutes: action.minutes ?? undefined } : group) };
@@ -2888,6 +2892,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ pinned: action.pinned, title: action.title }),
+          }).catch(showSavedState({ groupId: action.groupId }));
+          break;
+        case "archiveGroupTask":
+          api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ archivedAt: action.archivedAt }),
           }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "setConversationTurnLimit":
