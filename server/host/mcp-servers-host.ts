@@ -56,9 +56,12 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
   const configured = (bot: Bot): Record<string, McpServerSpec> => deps.policy(customMcpServers(deps.cfg(), bot.mcpServers, bot.id));
   /** None on an AI that starts no servers, and only those its tool selection reaches. */
   const started = (bot: Bot): string[] => (deps.startsServers(bot.id) ? Object.keys(configured(bot)).filter((name) => canUseMcpServer(bot.toolScope, name)) : []);
-  const start: McpHealthDeps["start"] = deps.start ?? (async (_name, server, botId) => {
+  const asBot = (botId: string) => {
     const own = join(deps.dataDir, "workspaces", botId);
-    const result = await probeMcpServer({ ...server, enabled: true }, undefined, undefined, { asBot: { id: botId, cwd: existsSync(own) ? own : deps.dataDir } });
+    return { id: botId, cwd: existsSync(own) ? own : deps.dataDir };
+  };
+  const start: McpHealthDeps["start"] = deps.start ?? (async (_name, server, botId) => {
+    const result = await probeMcpServer({ ...server, enabled: true }, undefined, undefined, { asBot: asBot(botId) });
     return result.ok ? { ok: true } : { ok: false, error: result.error };
   });
   const health = createMcpHealth({
@@ -71,6 +74,8 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
 
   return {
     health,
+    /** How Test starts a command server: as the turns of its bot, or of any bot. */
+    probeAs: (server: { bot?: string }) => (server.bot ? asBot(server.bot) : {}),
     mounted: (bot: Bot): Record<string, McpServerSpec> => health.usable(bot.id, configured(bot)),
     prepare: (bot: Bot): Promise<void> => health.prepare(bot.id, started(bot)),
     off: (bot: Bot) => health.off(bot.id, started(bot)),

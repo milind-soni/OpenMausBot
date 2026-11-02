@@ -31,6 +31,7 @@ import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
 import { WHOP_MCP_URL, isWhopServer, whopServerName } from "@/lib/whop-integration";
 import { POSTIZ_SERVER } from "../../shared/postiz";
+import { CHAT_TOOL_LIMIT, chatToolBudgetFit } from "../../shared/tool-budget";
 import { openBotSettings } from "./bot-panel/panel-link";
 
 export interface ProbeResult {
@@ -82,10 +83,13 @@ function failureReason(server: McpServerListing, result: ProbeResult): string {
   return t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) });
 }
 
-function connectedLabel(result: ProbeResult): string {
+/** The test's answer, with what the server's tool count alone does to an AI that takes a limited number of tools. */
+export function connectedLabel(result: Pick<ProbeResult, "tools" | "total">): string {
   const count = Math.max(result.total ?? 0, result.tools?.length ?? 0);
   if (!count) return t("mcp.check.connectedNone");
-  return count === 1 ? t("mcp.check.connectedOne") : t("mcp.check.connectedMany", { count });
+  const connected = count === 1 ? t("mcp.check.connectedOne") : t("mcp.check.connectedMany", { count });
+  const fit = chatToolBudgetFit(count);
+  return fit === "fits" ? connected : `${connected}. ${t(fit === "exceeds" ? "mcp.check.overLimit" : "mcp.check.crowdsLimit", { count, limit: CHAT_TOOL_LIMIT })}`;
 }
 
 export function McpServersPanel({ embedded = false, whopCard = false, hideWhop = false, refreshKey = 0, onWhopConnection }: {

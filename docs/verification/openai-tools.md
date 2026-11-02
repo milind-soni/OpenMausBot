@@ -71,6 +71,17 @@ steps so far already ran, so ask only for what's left (retrying the whole task
 would repeat them). A batch that would pass 200 runs none of its calls. There
 is no per-bot or per-thread setting for either number.
 
+A turn whose MCP servers offer more than the 128 tools a request may carry
+lists whole servers in turn order and reaches the rest through the
+`mcp_search_tools` / `mcp_describe_tool` / `mcp_call_tool` directory, whose
+three tools count toward the limit; no server is skipped for it. The bot's
+last budget is read at `GET /api/bots/ID/tool-budget`. The driver tests
+cover it with real stdio servers:
+
+```sh
+pnpm exec vitest run server/drivers/chat-mcp-tools.test.ts server/drivers/openai-chat-tools.test.ts
+```
+
 The harness proves the OpenAI-compatible adapter and the shared execution
 path. It does not establish that every third-party model supports tools, or
 that live Grok and MiniMax services accept a particular schema. Model support
