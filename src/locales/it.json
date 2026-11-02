@@ -1050,6 +1050,7 @@
   "cloudSend.move.homeAgain": "My Cloud è terminato, quindi i bot sono di nuovo su questo computer. Anche quello che hai fatto su My Cloud sta tornando.",
   "cloudSend.move.back": "My Cloud è terminato, quindi i bot sono di nuovo su questo computer, con quello che hai fatto su My Cloud. Gli accessi e le chiavi che hai aggiunto su My Cloud non sono tornati: aggiungili di nuovo qui se ti servono.",
   "cloudSend.move.backLost": "My Cloud è terminato, quindi i bot sono di nuovo su questo computer come erano quando si sono spostati. Quello che hai fatto su My Cloud da allora non è potuto tornare.",
+  "cloudSend.move.backGone": "Il Cloud in cui si erano spostati i bot è terminato, quindi sono di nuovo su questo computer come erano quando si sono spostati. Le loro automazioni sono disattivate: attiva quelle che vuoi.",
   "cloudSend.move.elsewhere": "I bot sono tornati su {name}. Questo computer conserva la sua copia del {date}, con le automazioni disattivate.",
   "cloudSend.move.elsewhereEmpty": "I bot sono tornati su {name}.",
   "cloudSend.move.keeping": "I bot di questo computer stanno tornando da My Cloud…",

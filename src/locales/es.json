@@ -5449,6 +5449,7 @@
   "cloudSend.move.homeAgain": "Tu Cloud terminó, así que tus bots volvieron a este equipo. Lo que hiciste en la Cloud también está volviendo.",
   "cloudSend.move.back": "Tu Cloud terminó, así que tus bots volvieron a este equipo, con lo que hiciste en la Cloud. Los inicios de sesión y las claves que agregaste en la Cloud no volvieron: agrégalos aquí de nuevo si los necesitas.",
   "cloudSend.move.backLost": "Tu Cloud terminó, así que tus bots volvieron a este equipo tal como estaban cuando se fueron. Lo que hiciste en la Cloud desde entonces no pudo volver.",
+  "cloudSend.move.backGone": "La Cloud a la que se fueron tus bots terminó, así que volvieron a este equipo tal como estaban cuando se fueron. Sus automatizaciones están apagadas: activa las que quieras.",
   "cloudSend.move.elsewhere": "Tus bots volvieron a {name}. Este equipo conserva su copia del {date}, con las automatizaciones apagadas.",
   "cloudSend.move.elsewhereEmpty": "Tus bots volvieron a {name}.",
   "homeScreen.openingNamed": "Abriendo {name}…",

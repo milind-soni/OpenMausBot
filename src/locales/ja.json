@@ -1071,6 +1071,7 @@
   "cloudSend.move.homeAgain": "Cloud が終了したため、ボットはこのコンピューターに戻りました。Cloud で行ったことも戻ってきています。",
   "cloudSend.move.back": "Cloud が終了したため、ボットは Cloud で行ったことと一緒にこのコンピューターに戻りました。Cloud で追加したログインとキーは戻っていません。必要ならここでもう一度追加してください。",
   "cloudSend.move.backLost": "Cloud が終了したため、ボットは移したときのままこのコンピューターに戻りました。その後 Cloud で行ったことは戻せませんでした。",
+  "cloudSend.move.backGone": "ボットの移動先の Cloud が終了したため、ボットは移したときのままこのコンピューターに戻りました。自動化はオフになっています。使いたいものをオンにしてください。",
   "cloudSend.move.elsewhere": "ボットは {name} に戻りました。このコンピューターには {date} 時点のコピーが残り、自動化はオフになっています。",
   "cloudSend.move.elsewhereEmpty": "ボットは {name} に戻りました。",
   "cloudSend.move.keeping": "このコンピュータのボットを My Cloud から戻しています…",

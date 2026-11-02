@@ -4804,6 +4804,7 @@
   "cloudSend.move.homeAgain": "Cloud'un sona erdi, bu yüzden botların bu bilgisayara geri döndü. Cloud'da yaptıkların da geri geliyor.",
   "cloudSend.move.back": "Cloud'un sona erdi, bu yüzden botların Cloud'da yaptıklarınla birlikte bu bilgisayara geri döndü. Cloud'da eklediğin girişler ve anahtarlar geri gelmedi: gerekiyorsa onları burada yeniden ekle.",
   "cloudSend.move.backLost": "Cloud'un sona erdi, bu yüzden botların taşındıkları andaki hâliyle bu bilgisayara geri döndü. O zamandan beri Cloud'da yaptıkların geri gelemedi.",
+  "cloudSend.move.backGone": "Botlarının taşındığı Cloud sona erdi, bu yüzden taşındıkları andaki hâliyle bu bilgisayara geri döndüler. Otomasyonları kapalı: istediklerini aç.",
   "cloudSend.move.elsewhere": "Botların {name} cihazına geri döndü. Bu bilgisayar {date} tarihli kendi kopyasını tutuyor ve otomasyonlar kapalı.",
   "cloudSend.move.elsewhereEmpty": "Botların {name} cihazına geri döndü.",
   "homeScreen.openingNamed": "{name} açılıyor…",

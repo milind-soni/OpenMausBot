@@ -2339,6 +2339,7 @@
   "cloudSend.move.homeAgain": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer. Was du in der Cloud gemacht hast, kommt auch zurück.",
   "cloudSend.move.back": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer, mit allem, was du in der Cloud gemacht hast. Logins und Schlüssel, die du in der Cloud hinzugefügt hast, sind nicht zurückgekommen: Füge sie hier wieder hinzu, wenn du sie brauchst.",
   "cloudSend.move.backLost": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer, so wie sie beim Umzug waren. Was du seitdem in der Cloud gemacht hast, konnte nicht zurückkommen.",
+  "cloudSend.move.backGone": "Die Cloud, in die deine Bots umgezogen sind, ist beendet, deshalb sind sie wieder auf diesem Computer, so wie sie beim Umzug waren. Ihre Automatisierungen sind ausgeschaltet: Schalte die ein, die du willst.",
   "cloudSend.move.elsewhere": "Deine Bots sind zurück auf {name}. Dieser Computer behält seine Kopie vom {date}, mit ausgeschalteten Automatisierungen.",
   "cloudSend.move.elsewhereEmpty": "Deine Bots sind zurück auf {name}.",
   "homeScreen.openingNamed": "{name} wird geöffnet…",

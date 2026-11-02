@@ -1203,6 +1203,7 @@
   "cloudSend.move.homeAgain": "你的 Cloud 已结束，所以你的机器人回到了这台电脑。你在 Cloud 上做的事也会一起迁回来。",
   "cloudSend.move.back": "你的 Cloud 已结束，所以你的机器人回到了这台电脑，连同你在 Cloud 上做的事。你在 Cloud 上添加的登录信息和密钥没有回来：如有需要，请在这里重新添加。",
   "cloudSend.move.backLost": "你的 Cloud 已结束，所以你的机器人按迁移时的样子回到了这台电脑。之后你在 Cloud 上做的事无法迁回来。",
+  "cloudSend.move.backGone": "你的机器人搬去的 Cloud 已结束，所以它们按搬走时的样子回到了这台电脑。它们的自动化已关闭：打开你想要的那些。",
   "cloudSend.move.elsewhere": "你的机器人回到了 {name}。这台电脑保留它在 {date} 的副本，自动化已关闭。",
   "cloudSend.move.elsewhereEmpty": "你的机器人回到了 {name}。",
   "cloudSend.move.keeping": "正在把这台电脑的机器人从 My Cloud 带回…",

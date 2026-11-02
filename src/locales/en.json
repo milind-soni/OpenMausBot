@@ -1206,6 +1206,7 @@
   "cloudSend.move.homeAgain": "My Cloud has ended, so your bots are back on this computer. What you did on My Cloud is on its way back too.",
   "cloudSend.move.back": "My Cloud has ended, so your bots are back on this computer, with what you did on My Cloud. Logins and keys you added on My Cloud didn't come back: add them here again if you need them.",
   "cloudSend.move.backLost": "My Cloud has ended, so your bots are back on this computer as they were when they moved. What you did on My Cloud since couldn't come back.",
+  "cloudSend.move.backGone": "The Cloud your bots moved to has ended, so they're back on this computer as they were when they moved. Their automations are off: switch on the ones you want.",
   "cloudSend.move.elsewhere": "Your bots came back to {name}. This computer keeps its copy from {date}, with automations off.",
   "cloudSend.move.elsewhereEmpty": "Your bots came back to {name}.",
   "cloudSend.move.keeping": "Bringing this computer's bots back from My Cloud…",
