@@ -1,7 +1,6 @@
 import { Crown, Loader2, Phone } from "lucide-react";
 import { memo, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 
-import { botShowsUnread } from "@/lib/bot-unread";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useLiveMedia } from "@/lib/live-call-media";
@@ -18,7 +17,7 @@ import { RenameTitle } from "./RenameTitle";
 import { openBotContextMenu, useVisibleMessages, type BotRowProps } from "./Sidebar";
 import { sidebarBotStatus } from "./SidebarBotActivity";
 import { SIMPLE_ROW_FOCUS } from "./SidebarSimpleTop";
-import { useUnreadNotice } from "./unread-notice";
+import { useBotUnread } from "./unread-notice";
 
 const RING = "ring-2 ring-[var(--tile)]";
 
@@ -32,8 +31,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const [renaming, setRenaming] = useState(false);
   const visible = useVisibleMessages(bot);
   const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
-  const unread = botShowsUnread(bot);
-  const noticing = useUnreadNotice(unread);
+  const { unread, noticing } = useBotUnread(bot);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const tooltip = botTooltip(bot, instances);
   const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";

@@ -84,8 +84,7 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { botShowsUnread } from "@/lib/bot-unread";
-import { useUnreadNotice } from "./unread-notice";
+import { useBotUnread } from "./unread-notice";
 import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
@@ -728,8 +727,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     simpleRow && rowSurface(selected),
   );
   const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
-  const unread = botShowsUnread(bot);
-  const noticing = useUnreadNotice(unread);
+  const { unread, noticing } = useBotUnread(bot);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
     <>
