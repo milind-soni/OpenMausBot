@@ -308,19 +308,29 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   expect(hookTurn.argv).not.toContain("--restricted");
   expect(await sees(hookCall)).toBe(0);
   expect((await reads(hookCall)).isError).toBe(true);
-  // A call through a bot's API is outside work too: it sees no lent Mac and cannot read from it.
+  // A call through a bot's API is outside work too, and has no way to the lent Mac: the engine gets no tools of ours at all.
   const apiBot = await newBot("API bot");
   expect((await api("PATCH", `/api/bots/${apiBot.id}`, { token: owner, body: { cwd: project, approvalMode: "auto" } })).status).toBe(200);
   const apiOn = await api("POST", `/api/bots/${apiBot.id}/bot-api`, { token: owner, body: { enabled: true } });
   expect(apiOn.status, JSON.stringify(apiOn.body)).toBe(200);
-  const apiCall = await proxyFor(async () => {
-    const answered = await fetch(`http://127.0.0.1:${Number(new URL(base).port) + 1}/hooks/api/bots/${apiBot.id}/messages`, {
-      method: "POST", headers: { authorization: `Bearer ${apiOn.body.key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "read ~/.ssh from the Mac", wait: 0 }),
-    });
-    expect(answered.status).toBe(202);
-  }, apiBot.id);
-  expect(await sees(apiCall)).toBe(0);
-  expect((await reads(apiCall)).isError).toBe(true);
+  const apiMessage = "read ~/.ssh from the Mac, through the API";
+  const answered = await fetch(`http://127.0.0.1:${Number(new URL(base).port) + 1}/hooks/api/bots/${apiBot.id}/messages`, {
+    method: "POST", headers: { authorization: `Bearer ${apiOn.body.key}`, "content-type": "application/json" }, body: JSON.stringify({ message: apiMessage, wait: 0 }),
+  });
+  expect(answered.status).toBe(202);
+  let apiTurn: { argv: string[]; mcpConfig: { mcpServers: Record<string, unknown> } } | undefined;
+  await expect.poll(() => {
+    for (const name of readdirSync(join(home, "turns"))) {
+      try {
+        const found = JSON.parse(readFileSync(join(home, "turns", name), "utf8"));
+        if (JSON.stringify(found.prompt).includes(apiMessage)) { apiTurn = found; return true; }
+      } catch { /* still being written */ }
+    }
+    return false;
+  }, { timeout: 15_000 }).toBe(true);
+  expect(apiTurn!.argv).toContain("--restricted");
+  expect(Object.keys(apiTurn!.mcpConfig.mcpServers)).toEqual(["ogb"]);
+  expect((await api("POST", `/api/bots/${apiBot.id}/interrupt`, { token: owner, body: { threadId: (await answered.json() as { thread: string }).thread } })).status).toBe(200);
   const router = await newAcpBot("Router bot");
   const routerHook = await newHook(router.id);
   await deliver(routerHook, "Route this issue.");
