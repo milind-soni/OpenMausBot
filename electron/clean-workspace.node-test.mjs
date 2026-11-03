@@ -171,7 +171,7 @@ const done = (extra = {}) => ({ v: 1, phase: "done", cloud: { origin: CLOUD, acc
 const onClean = (w) => w.requests.filter(([folder]) => folder === w.cleanDir);
 
 test("a top-up can't read the clean workspace: it waits, with no hour's penalty, and goes once this computer's own copy answers", async (t) => {
-  const w = moved(t, { state: ready(), journal: done() });
+  const w = moved(t, { state: ready(), journal: done({ doneAt: Date.now() }) });
   await w.clean.enter();
   await w.main.kick();
   assert.deepEqual(onClean(w), []);
