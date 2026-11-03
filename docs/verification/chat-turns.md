@@ -273,3 +273,19 @@ one sent while the turn waits on the person or a computer
 was stopped 1.5 s after the steered question, and the fake engine answered the
 question in the next turn. With the steered message's watch removed, the
 question stayed unanswered for 30 s and the test failed.
+
+## Threads of one bot at the same time
+
+Different threads of one bot run at once. A saved `threads.maxConcurrentPerBot` sets how many. With none saved, a Cloud
+runs up to 16 and its memory gate decides; a machine without the gate runs one per 2 GB of memory, 3 to 16. The bot's main
+chat always starts, and takes a slot. On a Starter Cloud a person's or routine's work runs one thread per bot whatever is
+saved; work a bot's own turn started goes through, so a turn can never wait on a child queued behind itself.
+`server/parallel-threads.e2e.test.ts` holds a turn open in each thread with a gate only
+the test releases, as a desktop, personal Cloud and Team Cloud server, on the Claude CLI, ACP and OpenAI-compatible
+engines. What stays one at a time, and what the person sees:
+
+- One thread's own turns stay in order: a later send queues or steers.
+- One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
+  to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
+- One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
+- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory" and starts by itself.

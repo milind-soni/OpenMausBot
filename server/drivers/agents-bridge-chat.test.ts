@@ -45,6 +45,8 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
       return;
     }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     requests.push(JSON.parse(data) as ChatRequest);
     if (requests.length === 1) calls(response, "call_guess", "agents_use_tool", { name: "schedule_task", arguments: { every: "morning" } });

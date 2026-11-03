@@ -219,7 +219,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
       if (child!.exitCode !== null) throw new Error(`the server exited:\n${output}`);
       try { return (await fetch(`${base}/api/health`)).ok; } catch { return false; }
     }, Boolean, 30_000);
-    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents
+    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at
     // turn of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
     const seeded = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
     await apiOk("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
@@ -363,6 +363,51 @@ describe("a cloud computer starts only when the bot uses it", () => {
     expect(creates()).toBe(before);
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 30_000);
+
+  it("work handed to a bot on Auto runs on that bot's own cloud computer; a consult, and a bot with none, get no computer", async () => {
+    const auto = async (name: string) => {
+      const bot = await cloudBot(name);
+      const own = await startTurn(bot.id, "Open the cloud desktop");
+      expect((await computerCall(own, "tools/call", { name: "screenshot", arguments: {} })).body.result.isError).toBeFalsy();
+      await finish(bot.id);
+      await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: null });
+      return bot;
+    };
+    const writer = await auto("Writer");
+    const asked = await auto("Asked");
+    const fresh = await cloudBot("Fresh", { computer: null });
+    const sender = await cloudBot("Sender", { computer: null });
+    const before = { creates: creates(), resumes: resumes() };
+    const agents = (await startTurn(sender.id, "Hand the desktop check over")).mcpConfig.mcpServers.agents;
+    const token = (agents.env.OMB_GATE_UPSTREAM ? JSON.parse(agents.env.OMB_GATE_UPSTREAM).env : agents.env).OMB_COMMS_TOKEN;
+    const handed = async (botId: string, call: Record<string, unknown>) => {
+      rmSync(dumpFile, { force: true });
+      const response = await fetch(`${base}/api/internal/coordinate-bots`, {
+        method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ botIds: [botId], ...call }),
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await dump();
+      expect(sent.cwd).toContain(botId);
+      return sent;
+    };
+    const work = await handed(writer.id, { message: "Check the weather site on your desktop" });
+    expect(work.mcpConfig.mcpServers.computer?.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
+    expect(work.systemPrompt).toContain("assigned cloud computer");
+    const consult = await handed(asked.id, { message: "Which weather site do you use?", consult: true });
+    expect(consult.mcpConfig.mcpServers.computer).toBeUndefined();
+    const none = await handed(fresh.id, { message: "Check the weather site on your desktop" });
+    expect(none.mcpConfig.mcpServers.computer).toBeUndefined();
+    writeFileSync(finishFile, "finish");
+    for (const bot of [writer, asked, fresh, sender]) await idle(bot.id);
+    // Mounting is lazy: nothing was created or woken without a computer call.
+    expect({ creates: creates(), resumes: resumes() }).toEqual(before);
+    // A finished hand-off can still be settling its dispatch for a moment after the bot reads idle; the delete waits for it.
+    for (const bot of [writer, asked, fresh, sender]) {
+      const deleted = await until(() => api("DELETE", `/api/bots/${bot.id}`), (response) => response.status !== 409);
+      expect(deleted.status).toBeLessThan(400);
+    }
+  }, 90_000);
 
   it("a room member whose cloud computer can't start says why in the room, once, under its own name", async () => {
     refuse.creates = true;
