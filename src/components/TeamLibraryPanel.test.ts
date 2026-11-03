@@ -8,6 +8,6 @@ describe("TeamLibraryPanel", () => {
     // Without a GPU (software rendering) a full-window blur is redrawn on every frame, so the page lags while it is open.
     const overlay = source.match(/className="(fixed inset-0 [^"]*)"/)?.[1];
     expect(overlay).toContain("bg-black/55");
-    expect(source).not.toMatch(/backdrop-blur|backdrop-filter/);
+    expect(source).not.toMatch(/backdrop-blur|backdrop-filter|backdropFilter/);
   });
 });
