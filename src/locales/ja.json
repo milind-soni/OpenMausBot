@@ -6426,6 +6426,7 @@
   "team.privateChats": "{team} でのあなたのチャットは非公開です。見られるのはあなただけで、他のメンバーも {team} の管理者も見られません。",
   "team.privateHeader": "非公開 · あなただけ",
   "team.sharedHeader": "共有 · {team} の全員が閲覧できます",
+  "team.sharedHeaderPeople": "共有 · 追加された人と管理者だけが閲覧できます",
   "chat.page.usage": "{limit}ページ中{pages}ページ",
   "chat.page.copyLink": "リンクをコピー",
   "chat.page.copied": "コピーしました",

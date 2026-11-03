@@ -4876,6 +4876,7 @@
   "mcp.apps.toggleAria": "{name} uygulamalarını sohbette göster",
   "team.privateChats": "{team} içindeki sohbetlerin özeldir. Onları yalnızca sen görebilirsin: diğer üyeler de {team} yöneticileri de göremez.",
   "team.privateHeader": "Özel · yalnızca sen",
+  "team.sharedHeaderPeople": "Paylaşıldı · yalnızca eklenen kişiler ve yöneticiler görebilir",
   "chat.page.usage": "{pages}/{limit} sayfa",
   "chat.page.copyLink": "Bağlantıyı kopyala",
   "chat.page.copied": "Kopyalandı",

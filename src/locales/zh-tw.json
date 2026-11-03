@@ -4258,6 +4258,7 @@
   "mcp.apps.toggleAria": "在聊天中顯示 {name} 的應用程式",
   "team.privateChats": "你在 {team} 中的聊天是私密的。只有你看得到：其他成員和 {team} 的管理員都看不到。",
   "team.privateHeader": "私密 · 僅你可見",
+  "team.sharedHeaderPeople": "共享 · 只有新增的人和管理員可見",
   "chat.page.usage": "已用 {pages}/{limit} 個頁面",
   "chat.page.copyLink": "複製連結",
   "chat.page.copied": "已複製",

@@ -9,12 +9,13 @@ import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { BOT_PANEL_ID } from "./bot-panel/side-panel";
+import { sharedChatAudience } from "./TeamPrivateChatsLine";
 
 /** The factory title a new conversation starts with. */
 const UNTITLED = "New thread";
 const CHEVRON_MOTION = "duration-[140ms] ease-[cubic-bezier(.22,1,.36,1)]";
 
-export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string } | null;
+export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string; onlyPeopleAdded?: boolean } | null;
 
 const PRIVACY_ICONS = { private: Lock, ownHelper: UserRound, shared: Users } as const;
 
@@ -22,7 +23,7 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
   switch (privacy?.kind) {
     case "private": return t("team.privateHeader");
     case "ownHelper": return t("team.ownHelperHeader");
-    case "shared": return t("team.sharedHeader", { team: privacy.team });
+    case "shared": return sharedChatAudience(privacy.team, privacy.onlyPeopleAdded);
     default: return null;
   }
 }

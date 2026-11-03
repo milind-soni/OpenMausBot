@@ -6867,6 +6867,7 @@
   "team.privateChats": "{team}에서 내 채팅은 비공개예요. 다른 멤버도, {team}의 관리자도 아닌 나만 볼 수 있어요.",
   "team.privateHeader": "비공개 · 나만",
   "team.sharedHeader": "공유 · {team}의 모든 사람이 볼 수 있음",
+  "team.sharedHeaderPeople": "공유 · 추가된 사람과 관리자만 볼 수 있음",
   "chat.page.usage": "{limit}페이지 중 {pages}페이지",
   "chat.page.copyLink": "링크 복사",
   "chat.page.copied": "복사됨",

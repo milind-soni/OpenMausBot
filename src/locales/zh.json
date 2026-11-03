@@ -7037,6 +7037,7 @@
   "team.privateChats": "你在 {team} 中的聊天是私密的。只有你能看到：其他成员和 {team} 的管理员都看不到。",
   "team.privateHeader": "私密 · 仅你可见",
   "team.sharedHeader": "共享 · {team} 中的所有人可见",
+  "team.sharedHeaderPeople": "共享 · 只有添加的人和管理员可见",
   "liveConnection.reconnecting": "正在重新连接… 连接恢复后新回复就会显示。",
   "liveConnection.offline": "你已离线。恢复在线后新回复就会显示。",
   "team.ownHelperHeader": "个人助手 · 其他成员看不到",

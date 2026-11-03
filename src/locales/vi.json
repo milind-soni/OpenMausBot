@@ -4876,6 +4876,7 @@
   "mcp.apps.toggleAria": "Hiện ứng dụng từ {name} trong đoạn chat",
   "team.privateChats": "Các cuộc trò chuyện của bạn trong {team} là riêng tư. Chỉ bạn xem được: các thành viên khác và quản trị viên của {team} đều không xem được.",
   "team.privateHeader": "Riêng tư · chỉ bạn",
+  "team.sharedHeaderPeople": "Đã chia sẻ · chỉ người được thêm và quản trị viên mới xem được",
   "chat.page.usage": "{pages}/{limit} trang",
   "chat.page.copyLink": "Sao chép liên kết",
   "chat.page.copied": "Đã sao chép",

@@ -2389,6 +2389,7 @@
   "mcp.apps.toggleAria": "{name} के ऐप चैट में दिखाएँ",
   "team.privateChats": "{team} में आपकी चैट निजी हैं। उन्हें सिर्फ़ आप देख सकते हैं: न दूसरे सदस्य, न {team} के एडमिन।",
   "team.privateHeader": "निजी · सिर्फ़ आप",
+  "team.sharedHeaderPeople": "साझा · सिर्फ़ जोड़े गए लोग और एडमिन देख सकते हैं",
   "chat.page.usage": "{limit} में से {pages} पेज",
   "chat.page.copyLink": "लिंक कॉपी करें",
   "chat.page.copied": "कॉपी हो गया",

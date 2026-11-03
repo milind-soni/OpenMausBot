@@ -6304,6 +6304,7 @@
   "team.privateChats": "Twoje czaty w {team} są prywatne. Tylko ty możesz je widzieć. Inni członkowie ani administratorzy {team} nie mają do nich dostępu.",
   "team.privateHeader": "Prywatne · tylko ty",
   "team.sharedHeader": "Udostępnione · widzą wszyscy w {team}",
+  "team.sharedHeaderPeople": "Udostępnione · widzą tylko dodane osoby i administratorzy",
   "chat.page.usage": "Strony: {pages} z {limit}",
   "chat.page.copyLink": "Kopiuj link",
   "chat.page.copied": "Skopiowano",

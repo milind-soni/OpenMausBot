@@ -7114,6 +7114,7 @@
   "team.privateChats": "Your chats in {team} are private. Only you can see them: not other members, not {team}'s admins.",
   "team.privateHeader": "Private · only you",
   "team.sharedHeader": "Shared · everyone in {team} can see",
+  "team.sharedHeaderPeople": "Shared · only people added and admins can see",
   "liveConnection.reconnecting": "Reconnecting… New replies show up once the connection is back.",
   "liveConnection.offline": "You're offline. New replies show up once you're back online.",
   "team.ownHelperHeader": "Own helper · other members can't see it",
