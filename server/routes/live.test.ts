@@ -166,6 +166,11 @@ describe("live routes", () => {
     expect(await request(deps(), "PUT", "/api/live/settings", {})).toEqual({ status: 404, body: { from: "inline routes" } });
     expect(await request(deps(), "GET", "/api/bots")).toEqual({ status: 404, body: { from: "inline routes" } });
   });
+  it("answers a call the Azure limit refuses with its words as a 403, and no setup prompt", async () => {
+    const sentence = "Only an admin can start one.";
+    const d = deps({ calls: { ...deps().calls, start: vi.fn(async () => { throw new LiveSessionError(sentence, 403); }) } });
+    expect(await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0", client: "web" })).toEqual({ status: 403, body: { error: sentence } });
+  });
   it("is for admins only", () => {
     expect(requiredScope("POST", "/api/live/session")).toBe("admin");
     expect(requiredScope("POST", "/api/live/call/end")).toBe("admin");

@@ -10,7 +10,9 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Signing in.** Each person pairs from the app with a link the Admin signs for them; the machine shows the team's name
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
   app); a Member (User) uses each bot as far as it is shared with them (below, "Who can use a bot"), uses rooms and
-  makes routines, and connects no app and makes no webhook.
+  makes routines, and connects no app and makes no webhook. With Azure OpenAI chosen for Live calls, only an Owner or
+  Admin can start one: a Member is told so in plain words and never gets a call through another provider
+  (`docs/verification/live-calls.md`).
 - **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. Teammates are
   in the @ list too, and whatever is addressed to one of them reaches their inbox (below, "One inbox per person"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in

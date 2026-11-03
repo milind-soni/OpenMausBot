@@ -53,7 +53,6 @@ start answer 409 `needsKey`; after the OpenAI key is saved through
 `PUT /api/config`, a phone's call starts with that key; a separate Live key
 then wins; neither key appears in the config or the log.
 
-
 ## Azure OpenAI as the Live provider
 
 With `live.provider: "azure"` (`OMB_LIVE_PROVIDER=azure`) a call creates its
@@ -70,6 +69,37 @@ refuses any other. Without the key, or with a missing or invalid endpoint,
 `POST /api/live/session` answers `409` with `needsKey` and the Azure setup
 sentence before anything leaves the harness. A call keeps the endpoint it
 started with even if the settings change mid-call.
+
+Azure refuses `session.client` (`400 Unknown parameter`), so an Azure call goes
+without `LIVE_DATA_CHANNEL`: the caller's data channel keeps Azure's default
+events instead of "may only hang up". This is read from the code and was not
+checked against Azure: assume the caller could send session or item events and
+receive events holding the bot's instructions. So an Azure call is limited to
+an admin, or the owner of a single-owner server (`azureLiveCallRefusal` in
+`server/live-access.ts`, asked by `LiveCallController.start`, the only place a
+session is created):
+
+| Caller | Azure call |
+| --- | --- |
+| Desktop app's window; the owner's phone through the companion | yes |
+| Single-owner server: local request, or a paired admin device | yes |
+| My Cloud: the owner's session | yes |
+| Team Cloud: Super admin, Admin | yes |
+| Shared company workspace: admin | yes |
+| Self-hosted with a sign-in list: admin session | yes |
+| Team Cloud User, on the app or their phone; a workspace non-admin; a chat-only device | no, plain sentence |
+| A local request where others use the server (a bot's shell): Team Cloud, shared workspace, sign-in list, a chat-only device or code | no |
+| A sign-in that only moves a bot in | no |
+| A published or inline page, with or without an admin's cookie | no |
+
+The refused answer is `403 { "error": "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call." }`,
+with no `needsKey`. Nothing reaches Azure or OpenAI: a refused call never falls
+back to another provider. `GET /api/config` and the stream tell a session
+without the admin scope `live.provider`, never `azureEndpoint` or
+`azureDeployment`. `server/live-access.test.ts` runs each caller above through
+the sign-in gate and the limit; `server/live-azure-access.e2e.test.ts` and
+`server/hosted-access.test.ts` do it on the full server with its `fetch` stubbed.
+
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act

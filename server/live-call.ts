@@ -10,7 +10,12 @@ export const MAX_SDP_BYTES = 64 * 1024;
 export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
 export const LIVE_NEEDS_AZURE = "Live calls through Azure OpenAI need the resource endpoint, the GPT-Live deployment name and its key. Add them in Call settings.";
 
-/** The client's data channel is untrusted: it may only hang up; every append goes over the sideband. */
+/** The client's data channel is untrusted: it may only hang up; every append goes over the sideband.
+ * Exception: Azure OpenAI refuses `session.client`, so an Azure call goes without this list and its caller's channel keeps
+ * Azure's default events. Read that as: the caller may send session or item events and receive events holding the bot's
+ * instructions (not checked against Azure itself). So an Azure call is only for an admin or the owner of a single-owner
+ * server, never another team Member, a shared workspace's non-admin or anyone else: azureLiveCallRefusal in live-access.ts,
+ * asked by LiveCallController.start. */
 export const LIVE_DATA_CHANNEL = {
   allowed_client_events: ["session.close"],
   allowed_server_events: [
@@ -215,7 +220,7 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
       instructions: liveInstructions(input.bot, { cloudHome: input.cloudHome }),
       delegation: { type: "client" },
       audio: { output: { voice: liveVoice(input.voice) } },
-      // Azure's GPT-Live refuses `session.client` ("Unknown parameter"), so its data channel keeps Azure's default events.
+      // Azure's GPT-Live refuses `session.client` ("Unknown parameter"): see LIVE_DATA_CHANNEL for who may hold such a call.
       ...(endpoint.provider === "azure" ? {} : { client: { data_channel: LIVE_DATA_CHANNEL } }),
       ...(initialInput.length ? { input: initialInput } : {}),
     },

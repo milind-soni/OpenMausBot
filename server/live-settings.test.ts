@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY } from "./live-call.ts";
-import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveSettingsFor, liveSetupProblem } from "./live-settings.ts";
+import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveCallSettings, liveSettingsFor, liveSettingsForClient, liveSetupProblem } from "./live-settings.ts";
 
 describe("live settings", () => {
   it("defaults to a 5 minute idle hang-up and reading typed replies, with no key", () => {
@@ -64,6 +64,19 @@ describe("Live calls through Azure OpenAI", () => {
     expect(liveCallEndpoint(cfg)).toBeNull();
     expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_AZURE);
     expect(liveSettingsFor(cfg).configured).toBe(false);
+  });
+
+  it("name the provider in what a call start reads, so the limit on Azure sees it even before setup is done", () => {
+    expect(liveCallSettings({ live: { provider: "azure" } } as AppConfig)).toMatchObject({ provider: "azure", endpoint: null, key: "", setupProblem: LIVE_NEEDS_AZURE });
+    expect(liveCallSettings({ live: { ...azure, key: "k" } } as AppConfig)).toMatchObject({ provider: "azure", key: "k", setupProblem: null, endpoint: { provider: "azure" } });
+    expect(liveCallSettings({ openai: { key: "sk" } } as AppConfig).provider).toBeUndefined();
+  });
+
+  it("tell a caller without the admin scope the service, not which resource", () => {
+    const client = liveSettingsForClient(liveSettingsFor({ live: { ...azure, key: "azure-secret" } } as AppConfig));
+    expect(client).toEqual({ configured: true, keySource: "live", provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 });
+    expect(JSON.stringify(client)).not.toContain("my-res");
+    expect(JSON.stringify(client)).not.toContain("live-prod");
   });
 
   it("default to gpt-live-1 as the deployment name", () => {

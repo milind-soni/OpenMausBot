@@ -6,8 +6,8 @@ import {
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
-import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
-import { LIVE_NEEDS_KEY, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, type LiveEndpoint } from "./live-call.ts";
+import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason, LiveProvider } from "../shared/wire.ts";
+import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -48,7 +48,9 @@ export interface LiveCallDeps {
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
   /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
-  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; voice: string; readTypedReplies: boolean; idleMinutes: number };
+  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; readTypedReplies: boolean; idleMinutes: number };
+  /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
+  azureRefusal(auth: RequestAuth): string | null;
   createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
   openSocket(url: string, key: string, endpoint: LiveEndpoint): LiveSocket;
   attachUrl(sessionId: string, endpoint: LiveEndpoint): string;
@@ -71,6 +73,10 @@ export class LiveCallSignedOutError extends LiveSessionError {
     super("The sign-in that started this call has ended.", 401);
   }
 }
+
+// Node's WebSocket (undici) accepts headers in its second argument.
+export const openLiveSocket: LiveCallDeps["openSocket"] = (url, key, endpoint) =>
+  new WebSocket(url, { headers: liveAuthHeaders(endpoint.provider, key) } as unknown as string[]) as unknown as LiveSocket;
 
 type AppendKind = "instructions" | "thinking" | "commentary";
 type Timer = ReturnType<typeof setTimeout>;
@@ -147,9 +153,17 @@ export class LiveCallController {
   }
 
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string }): Promise<{ call: LiveCallState; sdp: string }> {
+    const settings = this.deps.settings();
+    // First: someone refused here is not told about a running call, or sent to set Azure up.
+    if (settings.provider === "azure" || settings.endpoint?.provider === "azure") {
+      const refusal = this.deps.azureRefusal(input.auth);
+      if (refusal) {
+        this.deps.log(`[live] call refused bot=${input.botId} client=${input.client} provider=azure`);
+        throw new LiveSessionError(refusal, 403);
+      }
+    }
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
-    const settings = this.deps.settings();
     const key = settings.key.trim();
     const endpoint = settings.endpoint;
     if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);

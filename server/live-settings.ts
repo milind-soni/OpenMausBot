@@ -28,6 +28,16 @@ export function liveSetupProblem(cfg: LiveConfig): string | null {
   return liveCallEndpoint(cfg) ? null : LIVE_NEEDS_AZURE;
 }
 
+/** What a call start reads, once: its key, endpoint and provider all come from this one reading. */
+export function liveCallSettings(cfg: AppConfig) {
+  return { key: liveCallKey(cfg)?.key ?? "", endpoint: liveCallEndpoint(cfg), setupProblem: liveSetupProblem(cfg), ...liveSettingsFor(cfg) };
+}
+
+/** A caller without the admin scope learns which service calls use, not which Azure resource. */
+export function liveSettingsForClient({ azureEndpoint: _endpoint, azureDeployment: _deployment, ...settings }: LiveSettings): LiveSettings {
+  return settings;
+}
+
 export function liveSettingsFor(cfg: AppConfig): LiveSettings {
   const minutes = cfg.live?.idleMinutes;
   const key = liveCallKey(cfg);
