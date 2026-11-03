@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { accountPlace, clearPlaceStorage, withoutAccountPlaces } from "./account-places.mjs";
+import { accountPlace, accountPlaces, clearPlaceStorage, withoutAccountPlaces, withoutPlaces } from "./account-places.mjs";
 import { accountsView, createAccountLeave, installAccounts } from "./accounts-main.mjs";
 
 const signedIn = { status: "connected", account: { id: "a", email: "a@example.test" }, deviceId: "d" };
@@ -11,7 +12,7 @@ function harness({ state = signedIn, placePage = () => true, ownPage = () => tru
   const client = { state: () => current, signOut: async () => { calls.push("sign-out"); current = { status: "signed-out" }; return current; } };
   const accounts = installAccounts({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, ownPage, placePage, account: () => client, client: () => client,
-    holdSheet: (open) => calls.push(`hold:${open}`), tellSheet: () => calls.push("tell-sheet"), leaving: () => calls.push("leaving"), leave: async () => calls.push("leave"), show: async () => calls.push("show"), tell: () => calls.push("tell"),
+    holdSheet: (open) => calls.push(`hold:${open}`), tellSheet: () => calls.push("tell-sheet"), leaving: () => calls.push("leaving"), leave: { places: () => { calls.push("places"); return []; }, finish: async () => calls.push("leave") }, show: async () => calls.push("show"), tell: () => calls.push("tell"),
   });
   return { handlers, calls, accounts, call: (channel, ...args) => handlers.get(channel)({}, ...args) };
 }
@@ -45,10 +46,24 @@ test("the sheet asked for before the rail's page was up opens once when that pag
   assert.deepEqual(f.calls, ["hold:true", "tell-sheet", "hold:false"]);
 });
 
-test("sign out: the window lets go first, the sign-in ends, the account's places leave, then the window goes where it belongs", async () => {
+test("sign out: the window lets go, the account's places are named while the sign-in still names My Cloud, the sign-in ends, they leave, then the window goes where it belongs", async () => {
   const f = harness();
   assert.deepEqual(await f.call("accounts:sign-out", "a"), { active: null, others: [] });
-  assert.deepEqual(f.calls, ["leaving", "sign-out", "leave", "show", "tell"]);
+  assert.deepEqual(f.calls, ["leaving", "places", "sign-out", "leave", "show", "tell"]);
+});
+
+test("a My Cloud saved by hand, which carries no mark of its own, leaves with the account although the sign-in no longer names it by the time its session goes", async () => {
+  const HOME = "https://byhand.example.test";
+  let state = signedIn, saved = { activeId: "h", environments: [{ id: "h", kind: "remote", origin: HOME, name: "My server" }, { id: "s", kind: "remote", origin: "https://other.example", name: "Other" }] };
+  const cleared = [];
+  const client = { state: () => state, signOut: async () => { state = { status: "signed-out" }; return state; } };
+  const leave = createAccountLeave({ saved: () => saved, persist: (next) => { saved = next; }, mine: () => (state.status === "connected" ? HOME : null), leaveWindow: async () => {},
+    session: () => ({ clearStorageData: async ({ origin }) => { cleared.push(origin); } }) });
+  const accounts = installAccounts({ ipcMain: { handle() {} }, ownPage: () => true, placePage: () => true, account: () => client, client: () => client, leave, holdSheet() {}, tellSheet() {}, leaving() {}, show: async () => {}, tell() {} });
+  await accounts.signOutActive();
+  assert.deepEqual(saved.environments.map((entry) => entry.id), ["s"], "the hand-saved My Cloud left the list; the other server stays");
+  assert.equal(saved.activeId, "local");
+  assert.deepEqual(cleared, [HOME]);
 });
 
 test("signing out an account that isn't the one here changes nothing", async () => {
@@ -91,7 +106,40 @@ test("leaving: the list changes, then the window leaves, and only then the sessi
   const order = [];
   const leave = createAccountLeave({ saved: () => places, persist: () => order.push("persist"), mine: () => null, leaveWindow: async () => order.push("window"),
     session: () => ({ clearStorageData: async () => { order.push("clear"); } }) });
-  const left = await leave();
+  const left = await leave.finish(leave.places());
   assert.equal(left.length, 3);
   assert.deepEqual(order, ["persist", "window", "clear", "clear", "clear"]);
+});
+
+test("sessions go only after what was still waiting on those places has been answered, since a Cloud's answer re-issues its cookie", async () => {
+  const order = [];
+  let answer;
+  const waiting = new Promise((resolve) => { answer = resolve; });
+  const jar = new Map(places.environments.filter((entry) => entry.origin).map((entry) => [entry.origin, "session"]));
+  const leave = createAccountLeave({ saved: () => places, persist: () => order.push("persist"), mine: () => null, leaveWindow: async () => order.push("window"),
+    settled: () => waiting.then(() => { jar.set("https://home-a.test", "re-issued in the disconnect's answer"); order.push("answered"); }),
+    session: () => ({ clearStorageData: async ({ origin }) => { order.push("clear"); jar.delete(origin); } }) });
+  const left = leave.finish(leave.places());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["persist", "window"], "nothing is cleared while an answer is on its way");
+  answer();
+  await left;
+  assert.deepEqual(order, ["persist", "window", "answered", "clear", "clear", "clear"]);
+  assert.equal(jar.has("https://home-a.test"), false, "the re-issued cookie went with the rest");
+});
+
+test("the app waits for lending's last answers before it clears a signed-out account's sessions", () => {
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  assert.match(main, /createAccountLeave\(\{[^\n]*settled: \(\) => computerSharing\?\.goodbyesDone\(\)/);
+});
+
+test("a My Cloud saved by hand is the account's only while the sign-in names it; what left is removed by id, so a list that changed meanwhile loses nothing else", () => {
+  const byHand = { id: "h", kind: "remote", origin: "https://byhand.example.test", name: "My server" };
+  const saved = { activeId: "h", environments: [byHand, places.environments[3]] };
+  assert.deepEqual(accountPlaces(saved, "https://byhand.example.test").map((entry) => entry.id), ["h"]);
+  assert.deepEqual(accountPlaces(saved, null), [], "once the sign-in has ended, nothing says which server was My Cloud");
+  const changed = { activeId: "h", environments: [...saved.environments, { id: "new", kind: "remote", origin: "https://new.example", name: "New" }] };
+  assert.deepEqual(withoutPlaces(changed, [byHand]).environments.map((entry) => entry.id), ["by-hand", "new"]);
+  assert.equal(withoutPlaces(changed, [byHand]).activeId, "local");
+  assert.equal(withoutPlaces(changed, []), changed, "nothing to remove: the same list");
 });
