@@ -473,10 +473,10 @@ describe("coordinate_bots on a teammate", () => {
       const send = (botIds: string[]) => api("POST", "/api/internal/coordinate-bots", { botIds, message: "Check it." }, token);
       const outside = await send([other.id]);
       expect(outside.status).toBe(403);
-      expect(outside.body.error).toContain("Other cannot be reached from Pam");
+      expect(outside.body.error).toContain("Other is shared with different people from Pam, so nothing was sent.");
       const unlisted = await send([far.id]);
       expect(unlisted.status).toBe(403);
-      expect(unlisted.body.error).toContain("Far cannot be reached from Pam");
+      expect(unlisted.body.error).toContain("Far is shared with different people from Pam, so nothing was sent.");
       expect((await send([near.id, far.id])).status).toBe(403);
       expect((await send([near.id, far.id, other.id, pm.id, "fifth"])).status).toBe(400);
       for (const bot of [other, far]) expect((await botState(bot.id)).tasks).toHaveLength(1);
