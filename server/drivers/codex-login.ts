@@ -33,15 +33,19 @@ export function codexLoginStatus(cli: string, env: Env): Promise<"signed-in" | "
 }
 
 /** Without a login Codex still runs a turn and fails only after a minute of reconnects. Only Codex's own "not
- * logged in" counts, and a login it reads from elsewhere is remembered so later turns skip the check. */
-export function codexLoginCheck(cli: string): (env: Env) => Promise<"missing" | "present"> {
+ * logged in" counts, and a login it reads from elsewhere is remembered so later turns skip the check, until
+ * `forget` is called because a turn found that login gone. */
+export function codexLoginCheck(cli: string): { check: (env: Env) => Promise<"missing" | "present">; forget: () => void } {
   let confirmedWithout: string | null | undefined;
-  return async (env) => {
-    const stored = storedCodexLogin(env);
-    if (readable(stored) || stored === confirmedWithout) return "present";
-    const status = await codexLoginStatus(cli, env);
-    if (status === "signed-in") confirmedWithout = stored;
-    // Another Codex may be rewriting auth.json: a half-written file is not a missing login.
-    return status === "signed-out" && !readable(storedCodexLogin(env)) ? "missing" : "present";
+  return {
+    check: async (env) => {
+      const stored = storedCodexLogin(env);
+      if (readable(stored) || stored === confirmedWithout) return "present";
+      const status = await codexLoginStatus(cli, env);
+      if (status === "signed-in") confirmedWithout = stored;
+      // Another Codex may be rewriting auth.json: a half-written file is not a missing login.
+      return status === "signed-out" && !readable(storedCodexLogin(env)) ? "missing" : "present";
+    },
+    forget: () => { confirmedWithout = undefined; },
   };
 }
