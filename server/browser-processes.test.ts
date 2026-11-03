@@ -277,6 +277,34 @@ describe("a browser on Windows", () => {
     expect(existsSync(join(dir, "lockfile"))).toBe(false);
   });
 
+  it("gives up after a bounded wait when the stopped Chrome's lock stays held", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-win-held-lock-"));
+    homes.push(root);
+    const dir = join(root, "Profile");
+    mkdirSync(join(dir, "lockfile"), { recursive: true });
+    const started = "2026-11-03T09:00:00.0000000Z";
+    const commands: string[][] = [];
+    vi.mocked(execFile).mockImplementation(((file: string, args: string[], options: { env?: NodeJS.ProcessEnv }, done: (error: Error | null, stdout: string) => void) => {
+      commands.push([file, ...args]);
+      let stdout = "";
+      if (file === "powershell.exe" && options.env?.OMB_PROCESS_ID) stdout = `${started}\r\n`;
+      else if (file === "powershell.exe") {
+        stdout = JSON.stringify([{
+          ProcessId: 4600, ParentProcessId: 4100, CommandLine: `"C:\\Chrome\\chrome.exe" "--user-data-dir=${dir}"`,
+          Name: "chrome.exe", Started: started, ParentName: null, ParentStarted: null,
+        }]);
+      }
+      queueMicrotask(() => done(null, stdout));
+      return {} as ChildProcess;
+    }) as unknown as typeof execFile);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const begun = Date.now();
+    await releaseBrowserProfile(dir);
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(1_500);
+    expect(commands.filter(([file]) => file === "taskkill")).toEqual([["taskkill", "/PID", "4600", "/T", "/F"]]);
+    expect(existsSync(join(dir, "lockfile"))).toBe(true);
+  });
+
   it("stops a Chrome whose daemon was killed under it, which would make every launch exit with code 21, and keeps a daemon's own", async () => {
     const root = mkdtempSync(join(tmpdir(), "omb-win-profile-"));
     homes.push(root);
