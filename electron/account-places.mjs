@@ -12,12 +12,21 @@ const OWN_STORAGE = Object.freeze(["cookies"]);
 /** `mine`: My Cloud's verified address, for a My Cloud that was saved by hand before it was known to be one. */
 export const accountPlace = (entry, mine = null) => entry?.kind !== "local" && Boolean(entry?.home === true || entry?.team || entry?.cloud || (mine && entry?.origin === mine));
 
-/** The saved places without the account's, and which those were. The window goes to This computer if it showed one of them. */
+/** The saved places that are the account's. */
+export const accountPlaces = (saved, mine = null) => saved.environments.filter((entry) => accountPlace(entry, mine));
+
+/** The saved places without `left`, by id. The window goes to This computer if it showed one of them. */
+export function withoutPlaces(saved, left) {
+  const ids = new Set(left.map((entry) => entry.id));
+  if (!saved.environments.some((entry) => ids.has(entry.id))) return saved;
+  const active = ids.has(saved.activeId) ? environments.LOCAL_ID : saved.activeId;
+  return { ...saved, environments: saved.environments.filter((entry) => !ids.has(entry.id)), activeId: active };
+}
+
+/** The saved places without the account's, and which those were. */
 export function withoutAccountPlaces(saved, mine = null) {
-  const left = saved.environments.filter((entry) => accountPlace(entry, mine));
-  if (!left.length) return { saved, left };
-  const active = left.some((entry) => entry.id === saved.activeId) ? environments.LOCAL_ID : saved.activeId;
-  return { saved: { ...saved, environments: saved.environments.filter((entry) => !left.includes(entry)), activeId: active }, left };
+  const left = accountPlaces(saved, mine);
+  return { saved: withoutPlaces(saved, left), left };
 }
 
 /** What the window holds for each of these places goes: the next opening signs in with the Admin's one-time code. */
