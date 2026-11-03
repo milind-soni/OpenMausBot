@@ -59,7 +59,7 @@ export function WindowPlaceTitle() {
   </>;
   const tag = "flex h-[22px] min-w-0 max-w-full items-center justify-center gap-1.5 justify-self-center rounded-md bg-ink/[0.06] px-1.5 text-[12px] font-medium text-ink";
   if (!openList) return <div data-window-place className={tag}>{face}</div>;
-  return <button type="button" data-window-place aria-haspopup="dialog" aria-label={t("rail.tagOpen", { name: said })} title={t("rail.tagOpen", { name: said })}
+  return <button type="button" data-window-place aria-haspopup="menu" aria-label={t("rail.tagOpen", { name: said })} title={t("rail.tagOpen", { name: said })}
     onClick={() => void openList().catch(() => {})}
     className={`${tag} transition-colors hover:bg-ink/[0.11] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus`}>
     {face}

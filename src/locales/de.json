@@ -2659,6 +2659,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Team",
   "rail.kindServer": "Server",
+  "cloudBuy.ready.switchHint": "Wechsle zwischen „Dieser Computer“ und {name} oben im Fenster oder an seinem linken Rand.",
   "rail.signIn": "Melde dich an, um deine Clouds und Teams zu sehen",
   "rail.tagOpen": "{name}: alle deine Orte anzeigen",
   "rail.settingUp": "{name}: wird eingerichtet",

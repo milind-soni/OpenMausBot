@@ -5068,6 +5068,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Ekip",
   "rail.kindServer": "Sunucu",
+  "cloudBuy.ready.switchHint": "Bu bilgisayar ile {name} arasında pencerenin üstünden veya sol kenarından geçiş yapın.",
   "rail.signIn": "Cloud'larınızı ve ekiplerinizi görmek için giriş yapın",
   "rail.tagOpen": "{name}: tüm yerlerinizi görün",
   "rail.settingUp": "{name}: kuruluyor",

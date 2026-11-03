@@ -4459,6 +4459,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "團隊",
   "rail.kindServer": "伺服器",
+  "cloudBuy.ready.switchHint": "在視窗頂端或左側邊緣，可以在「這台電腦」和 {name} 之間切換。",
   "rail.signIn": "登入後查看你的 Cloud 和團隊",
   "rail.tagOpen": "{name}：查看你的所有位置",
   "rail.settingUp": "{name}：設定中",

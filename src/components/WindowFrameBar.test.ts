@@ -97,7 +97,7 @@ describe("the window frame's top bar", () => {
     await mount(createElement(WindowFrameBar));
     expect(middle()!.tagName).toBe("BUTTON");
     expect(middle()!.getAttribute("aria-label")).toBe("Studio · Cloud: see all your places");
-    expect(middle()!.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(middle()!.getAttribute("aria-haspopup")).toBe("menu");
     await act(async () => middle()!.click());
     expect(openList).toHaveBeenCalledExactlyOnceWith();
     expect(places, "the list stays on the rail's own page").not.toHaveBeenCalled();

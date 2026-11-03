@@ -17,7 +17,15 @@ export function WindowPlacesList({ onClose }: { onClose: () => void }) {
   const ready = Boolean(state.list);
   useEffect(() => { if (ready) (sheet.current?.querySelector<HTMLElement>("[aria-current='page']") ?? sheet.current?.querySelector<HTMLElement>("button:not([disabled])"))?.focus(); }, [ready]);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      const rows = [...(sheet.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [])];
+      if (!rows.length) return;
+      event.preventDefault();
+      const at = rows.indexOf(document.activeElement as HTMLElement), step = event.key === "ArrowDown" ? 1 : -1;
+      rows[(at + step + rows.length) % rows.length]!.focus();
+    };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
@@ -25,12 +33,12 @@ export function WindowPlacesList({ onClose }: { onClose: () => void }) {
   const canPair = state.add.link || state.add.address;
   const signIn = () => { onClose(); void window.ogb?.workspaces?.add?.("signIn").catch(() => {}); };
   return <div data-window-places-backdrop className="fixed inset-0 z-[60]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    {ready && <div ref={sheet} role="dialog" aria-label={t("rail.label")} data-window-places className={cn(MENU_SHEET, "absolute left-1/2 top-[33px] max-h-[calc(100%-48px)] w-80 max-w-[calc(100%-32px)] -translate-x-1/2")}>
-      <ul className="min-h-0 flex-1 overflow-y-auto">
+    {ready && <div ref={sheet} role="menu" aria-label={t("rail.label")} data-window-places className={cn(MENU_SHEET, "absolute left-1/2 top-[33px] max-h-[calc(100%-48px)] w-80 max-w-[calc(100%-32px)] -translate-x-1/2")}>
+      <ul role="none" className="min-h-0 flex-1 overflow-y-auto">
         {state.list!.map((place) => {
           const word = placeKindWord(place.kind, place.name);
-          return <li key={place.id}>
-            <button type="button" disabled={!placeActs(place, canPair)} aria-current={place.active ? "page" : undefined} data-window-place-row={place.id} className={cn(MENU_ROW, "h-9 focus-visible:outline-none")}
+          return <li key={place.id} role="none">
+            <button type="button" role="menuitem" disabled={!placeActs(place, canPair)} aria-current={place.active ? "page" : undefined} data-window-place-row={place.id} className={cn(MENU_ROW, "h-9")}
               onClick={() => {
                 if (place.active) { onClose(); return; }
                 openPlace(place, setConnecting);
@@ -46,7 +54,7 @@ export function WindowPlacesList({ onClose }: { onClose: () => void }) {
       </ul>
       {state.add.signIn && <>
         <div aria-hidden="true" className={MENU_SEPARATOR} />
-        <button type="button" data-window-places-sign-in className={cn(MENU_ROW, "h-auto min-h-9 py-1.5 font-medium focus-visible:outline-none")} onClick={signIn}>
+        <button type="button" role="menuitem" data-window-places-sign-in className={cn(MENU_ROW, "h-auto min-h-9 py-1.5 font-medium")} onClick={signIn}>
           <LogIn size={16} aria-hidden="true" className="mx-[3px] shrink-0" />
           <span className="min-w-0 flex-1">{t("rail.signIn")}</span>
         </button>

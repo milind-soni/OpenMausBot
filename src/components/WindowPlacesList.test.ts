@@ -61,6 +61,23 @@ it("sizes itself against the window, not the viewport units a resize leaves behi
   expect(list()!.className).not.toContain("100vw");
 });
 
+it("a menu, so a focused row shows as its hover fill; the arrows move through the rows that can be chosen, round the ends", async () => {
+  state = { places: [], list: [place("home", "My Cloud", { active: true }), place("far", "Far", { opens: false, ownNetwork: true }), place("second", "Second")], add: { cloud: true, link: true, address: false, signIn: true } };
+  await mount();
+  await openIt();
+  expect(list()!.getAttribute("role")).toBe("menu");
+  const press = async (key: string) => { await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key }))); };
+  expect(document.activeElement).toBe(row("home"));
+  await press("ArrowDown");
+  expect(document.activeElement, "past the one that can't be chosen").toBe(row("second"));
+  await press("ArrowDown");
+  expect(document.activeElement).toBe(signIn());
+  await press("ArrowDown");
+  expect(document.activeElement, "round the end").toBe(row("home"));
+  await press("ArrowUp");
+  expect(document.activeElement).toBe(signIn());
+});
+
 it("the keyboard lands on the place on screen", async () => {
   state = { ...state, list: [place("home", "My Cloud"), place("second", "Second", { active: true })] };
   await mount();

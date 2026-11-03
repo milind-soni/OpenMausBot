@@ -5068,6 +5068,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Nhóm",
   "rail.kindServer": "Máy chủ",
+  "cloudBuy.ready.switchHint": "Chuyển giữa Máy tính này và {name} ở đầu cửa sổ hoặc dọc cạnh trái.",
   "rail.signIn": "Đăng nhập để xem các Cloud và nhóm của bạn",
   "rail.tagOpen": "{name}: xem mọi nơi của bạn",
   "rail.settingUp": "{name}: đang thiết lập",
