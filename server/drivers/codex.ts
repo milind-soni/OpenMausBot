@@ -1628,7 +1628,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return relaunch(verdict.reason, message, "rpc_error");
         }
         if (!state.settled && !abandoned) {
-          if (refused) loginRefused();
+          if (refused) loginRefused(); else if (chatgptTurn && CODEX_MISSING_CREDENTIALS.test(raw)) loginCheck.forget();
           emit({
             ...base(threadId, turnId), type: "runtime.error",
             message: earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type))

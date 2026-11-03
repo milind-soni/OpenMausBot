@@ -3266,10 +3266,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
     });
 
-    it("asks Codex about its login again once a turn ran without the login Codex reported", async () => {
+    it.each([
+      ["ran the turn", "api-key-configured", { FAKE_CODEX_MISSING_BEARER: "1" }],
+      ["refused turn/start", "unauthorized", {}],
+    ])("asks Codex about its login again once Codex %s without the login it reported", async (_failed, mode, failure) => {
       const codexHome = join(scratch, ".codex");
       mkdirSync(codexHome, { recursive: true });
-      await create({ mode: "api-key-configured", environment: { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: codexHome, FAKE_CODEX_MISSING_BEARER: "1", FAKE_CODEX_STATE: join(scratch, "launches") } });
+      await create({ mode, environment: { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: codexHome, FAKE_CODEX_STATE: join(scratch, "launches"), ...failure } });
       await expect(runTurn("t-login-gone")).resolves.toMatchObject({ errors: [expect.objectContaining({ message: codexNotSignedIn() })] });
       process.env.FAKE_CODEX_MODE = "logged-out";
       const spawn = vi.spyOn(procs, "spawnCli");

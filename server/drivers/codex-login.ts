@@ -37,15 +37,17 @@ export function codexLoginStatus(cli: string, env: Env): Promise<"signed-in" | "
  * `forget` is called because a turn found that login gone. */
 export function codexLoginCheck(cli: string): { check: (env: Env) => Promise<"missing" | "present">; forget: () => void } {
   let confirmedWithout: string | null | undefined;
+  let forgets = 0;
   return {
     check: async (env) => {
       const stored = storedCodexLogin(env);
       if (readable(stored) || stored === confirmedWithout) return "present";
+      const forgetsBefore = forgets;
       const status = await codexLoginStatus(cli, env);
-      if (status === "signed-in") confirmedWithout = stored;
+      if (status === "signed-in" && forgets === forgetsBefore) confirmedWithout = stored;
       // Another Codex may be rewriting auth.json: a half-written file is not a missing login.
       return status === "signed-out" && !readable(storedCodexLogin(env)) ? "missing" : "present";
     },
-    forget: () => { confirmedWithout = undefined; },
+    forget: () => { forgets += 1; confirmedWithout = undefined; },
   };
 }
