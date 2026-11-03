@@ -8,6 +8,8 @@
 // which every new place has, never makes it two places.
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+/** What PUT /api/places/elsewhere takes. */
+const MAX_PLACES = 20;
 /** A place is read again at most this often, unless something about the places changed. */
 export const LOOK_EVERY_MS = 10 * 60_000;
 const KEY = /^(?:cloud|server):[^\s]{1,300}$/u;
@@ -27,7 +29,7 @@ export function parseDismissed(value) {
  * @param {{
  *   local(): Promise<unknown>,
  *   here?: { name(): Promise<string | null>, tell(payload: unknown): Promise<unknown> },
- *   places(): Array<{ key: string, name: string, kind: "cloud" | "server", read(): Promise<unknown>, tell?(payload: unknown): Promise<unknown>, bring?(): Promise<unknown> }>,
+ *   places(): Array<{ key: string, name: string, kind: "cloud" | "server" | "team", read(): Promise<unknown>, tell?(payload: unknown): Promise<unknown>, bring?(): Promise<unknown> }>,
  *   settled(): boolean,
  *   quiet?(): boolean,
  *   dismissed: { read(): unknown, write(value: unknown): void },
@@ -38,7 +40,7 @@ export function parseDismissed(value) {
  * this computer, and telling it where their other bots live. `places()`: the person's own places besides this computer, My
  * Cloud first; each `read()` is that place's move summary (null while it can't be asked, a sleeping Cloud included),
  * `tell()` tells it where their other bots live, and `bring()` (only where this computer's bots could go now) is the
- * one-time move there. `settled()`: no move is under way or done, so this computer's bots are its own. `quiet()`: a move is
+ * one-time move there; a team has neither, it is only read. `settled()`: no move is under way or done, so this computer's bots are its own. `quiet()`: a move is
  * under way, so nothing is read or told until it is done.
  */
 export function createTwoPlaces({ local, here: computer = null, places, settled, quiet = () => false, dismissed, onChange = () => {}, now = Date.now, log = () => {} }) {
@@ -74,11 +76,18 @@ export function createTwoPlaces({ local, here: computer = null, places, settled,
     const receivers = [...(computer && here !== null ? [{ key: "here", name: "this computer", kind: "computer", tell: computer.tell }] : []), ...listed.filter((place) => place.tell)];
     for (const receiver of receivers) {
       const payload = { v: 1, self: { name: receiver.name, kind: receiver.kind },
-        places: everyone.filter((place) => place.key !== receiver.key).map(({ name: placeName, kind, bots }) => ({ name: placeName, kind, bots: bots.slice(0, 500) })) };
+        places: everyone.filter((place) => place.key !== receiver.key).slice(0, MAX_PLACES).map(({ name: placeName, kind, bots }) => ({ name: placeName, kind, bots: bots.slice(0, 500) })) };
       const signature = JSON.stringify(payload);
       if (told.get(receiver.key) === signature) continue;
-      try { await receiver.tell(payload); told.set(receiver.key, signature); }
-      catch (error) { log(`two places: ${receiver.name} was not told where the other bots live (${error?.message ?? error})`); }
+      try {
+        // A place on an older version refuses a kind it does not know; it still hears about the person's own places.
+        await receiver.tell(payload).catch((error) => {
+          const own = payload.places.filter((place) => place.kind !== "team");
+          if (error?.status !== 400 || own.length === payload.places.length) throw error;
+          return receiver.tell({ ...payload, places: own });
+        });
+        told.set(receiver.key, signature);
+      } catch (error) { log(`two places: ${receiver.name} was not told where the other bots live (${error?.message ?? error})`); }
     }
   }
 

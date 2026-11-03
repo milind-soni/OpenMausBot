@@ -2,7 +2,7 @@
 export interface TwoPlacesSuggestion { key: string; name: string; kind: "cloud" | "server" }
 /** A place of the person's own besides this computer: `tell()` says where their other bots live, `bring()` (only where this
  * computer's bots could go now) is the one-time move there. */
-export interface TwoPlacesPlace { key: string; name: string; kind: "cloud" | "server"; read(): Promise<unknown>; tell?(payload: unknown): Promise<unknown>; bring?(): Promise<unknown> }
+export interface TwoPlacesPlace { key: string; name: string; kind: "cloud" | "server" | "team"; read(): Promise<unknown>; tell?(payload: unknown): Promise<unknown>; bring?(): Promise<unknown> }
 
 export declare const LOOK_EVERY_MS: number;
 export function usedBots(summary: unknown): string[];
