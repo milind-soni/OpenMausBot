@@ -401,7 +401,7 @@ function serverAddress(raw: string): { url: string; stripped: string[] } | "inse
   if (url.username || url.password) stripped.push("sign-in in the address");
   url.username = "";
   url.password = "";
-  for (const name of [...url.searchParams.keys()]) {
+  for (const name of Array.from(url.searchParams.keys())) {
     if (!SECRET_QUERY_PARAM.test(name)) continue;
     stripped.push(name);
     url.searchParams.delete(name);
