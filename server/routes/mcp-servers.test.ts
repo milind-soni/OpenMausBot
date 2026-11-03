@@ -14,6 +14,7 @@ import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
 import { listMcpServers } from "../mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { startFakeOAuth } from "../testing/fake-oauth-server.ts";
 import { createMcpConfig } from "../host/mcp-config.ts";
 import { forgetToolBudgets, noteToolBudget } from "../tool-budgets.ts";
 import { createMcpServerRoutes } from "./mcp-servers.ts";
@@ -219,6 +220,23 @@ describe.skipIf(process.platform === "win32")("Test, where bots reach URL server
     expect(await tested(await brokerPath(), mcp.url)).toMatchObject({ ok: true, tools: [{ name: "lookup_order" }] });
     expect(broker!.stats(), "every request went through the broker, and its grant is gone").toMatchObject({ tokens: 0 });
     expect(broker!.stats().forwarded).toBeGreaterThanOrEqual(2);
+  });
+
+  it("asks for a sign-in from a server that lists tools to anyone and refuses calls, with no 'fault is ours' fallback", async () => {
+    const issuer = await startFakeOAuth();
+    mcp = await startFakeHttpMcp({ exactPath: true, guard: "tools/call", acceptBearer: issuer.isValid, wwwAuthenticate: issuer.challenge, tools: [{ name: "buy" }] });
+    try {
+      const path = await brokerPath();
+      const route = await serve({ botsPath: () => path });
+      expect((await route.post("/api/mcp/servers", { name: "shop", type: "http", url: mcp.url, headers: {} })).status).toBe(201);
+      const result = await (await route.post("/api/mcp/servers/shop/test", {})).json();
+      expect(result).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+      expect(mcp.refusedCalls).toHaveLength(1);
+      expect(mcp.calls).toEqual([]);
+      expect(broker!.stats().forwarded).toBeGreaterThanOrEqual(4);
+    } finally {
+      await issuer.close();
+    }
   });
 
   it("never says Connected when bots can't reach a server that answers directly, and says the fault is ours", async () => {

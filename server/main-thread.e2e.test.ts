@@ -138,7 +138,7 @@ it("moves no main thread for a teammate's work or results or a team incident; re
     await idle(teammate.id);
 
     await cli("send", "--bot", teammate.id, "--task", teammate.activeTaskId, "--text", "Reconcile the invoices.");
-    const incidents = await thread(chief.id, "Team incidents");
+    const incidents = await thread(chief.id, "Problems to look at");
     await replied(chief.id, incidents.threadId, "Incident noted.");
 
     expect(Object.keys(stamps(asker.id))).toEqual([asker.activeTaskId]);

@@ -147,7 +147,7 @@ describe("resolveSurface", () => {
     expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
   });
 
-  it("a Team incidents turn that lost its computer is told why and that it has none", () => {
+  it("a Problems to look at turn that lost its computer is told why and that it has none", () => {
     const note = computerSkippedNote("The team's cloud computer is missing; explicitly create or retry it from the Team map.");
     expect(note).toMatch(/^ This turn answers a Team incidents report and your computer could not be prepared for it \(The team's cloud computer is missing; explicitly create or retry it from the Team map\), so no computer is mounted/);
     expect(note).toMatch(/never claim to have checked that computer yourself\.$/);
@@ -233,7 +233,10 @@ describe("surfacePrompt", () => {
   it("names only the browser tab when it is the only surface", () => {
     const text = surfacePrompt({ computer: null, browser: true });
     expect(text).toMatch(/happens in the built-in browser tab/);
-    expect(text).toMatch(/no desktop, file or shell computer/);
+    expect(text).toMatch(/no desktop computer this turn/);
+    // The browser is only the screen: a coding engine's own shell and file tools still work (#4291).
+    expect(text).not.toMatch(/file or shell computer/);
+    expect(text).toContain("your own shell and file tools still work for ordinary code and file tasks");
     expect(text).toMatch(/Browser tab of the Screen panel/);
     expect(text).toMatch(/say in one short sentence where you are working/);
     expect(text).not.toMatch(/happens on the cloud computer/);

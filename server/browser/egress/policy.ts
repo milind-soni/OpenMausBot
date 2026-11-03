@@ -46,7 +46,9 @@ export const browserEgressConfigSchema = z.object({
   allow: z.array(z.string().trim().max(64).refine((entry) => parseAllowEntry(entry) !== null, {
     message: "must be an IP address or CIDR range, with an optional :port",
   })).max(64).optional(),
-  /** Desktop only: false keeps bots' browsers off the local network (the default lets them reach it). */
+  /** Desktop: false keeps bots' browsers off the local network (the default lets them reach it). Self-hosted
+   * servers: true lets them open this server's own sites and its local network (off by default); OpenMausBot's
+   * own ports, cloud metadata and link-local addresses stay closed. MausBot Cloud ignores it. */
   localNetwork: z.boolean().optional(),
 });
 export type BrowserEgressConfig = z.output<typeof browserEgressConfigSchema>;
@@ -89,7 +91,7 @@ export interface EgressRules {
   ownPort(port: number): boolean;
   /** Whether every listener on this loopback port belongs to a bot's processes. */
   botPort(port: number): Promise<boolean>;
-  /** Desktop: the person's local network. */
+  /** Desktop: the person's local network. Self-hosted servers: this server's own sites and its local network. */
   localNetwork: boolean;
   /** Self-hosted servers: `browserEngine.egress.allow`. */
   allowed(address: string, port: number): boolean;
@@ -117,8 +119,12 @@ export async function refusalFor(
     if (kind === "public") continue;
     if (kind === "metadata" || kind === "link-local" || kind === "reserved") return kind;
     if (kind === "private") {
-      const open = rules.host === "desktop" ? rules.localNetwork : rules.host === "server" && rules.allowed(address, port);
-      if (open) continue;
+      if (rules.host === "desktop" ? rules.localNetwork : rules.host === "server" && rules.allowed(address, port)) continue;
+      // The owner's switch opens the local network, but never OpenMausBot's own ports through it (a Docker host's gateway).
+      if (rules.host === "server" && rules.localNetwork) {
+        if (rules.ownPort(port)) return "omb";
+        continue;
+      }
       return "local-network";
     }
     if (rules.ownPort(port)) return "omb";
@@ -127,6 +133,9 @@ export async function refusalFor(
       if (namesThisMachine(host)) continue;
       return "rebinding";
     }
+    // The owner's switch opens this server's own sites, but a public name pointing at loopback (DNS rebinding) stays
+    // shut: loopback-only services are reached by localhost or an address.
+    if (rules.host === "server" && rules.localNetwork && (kind === "this-machine" || namesThisMachine(host))) continue;
     if (rules.host === "server" && rules.allowed(address, port)) continue;
     if (await rules.botPort(port)) continue;
     return "this-computer";

@@ -119,6 +119,8 @@ export class PressureLedger {
 export interface EngineBrowsers {
   /** Whether this thread's bot may browse and its browser is not running yet. */
   starts(threadId: string): boolean;
+  /** Which browser this thread would use: threads naming the same one start it once between them. */
+  which?(threadId: string): string | undefined;
   /** Whether this thread's bot's browser is running now. */
   running(threadId: string): boolean;
   /** This thread's engine was stopped for memory: its browser can close too once no turn holds it. */
@@ -350,19 +352,25 @@ export class EngineMemory {
     const measured = live.filter(([, engine]) => at - engine.startedAt >= SETTLED_MS).map(([pid]) => groups.get(pid)).filter((bytes) => bytes !== undefined);
     const process = Math.min(ENGINE_MAX_BYTES, Math.max(ENGINE_MIN_BYTES, measured.length ? measured.reduce((sum, bytes) => sum + bytes, 0) / measured.length : ENGINE_DEFAULT_BYTES));
     let held = 0;
+    const heldBrowsers = new Set<string>();
     for (const [threadId, admitted] of this.reserved) {
       if (at - admitted.at >= RESERVE_MS) { this.reserved.delete(threadId); continue; }
       // A browser grows as it starts and loads its first pages: its share is held until it has run SETTLED_MS.
       if (admitted.browser) {
         if (!this.browserStarts(threadId)) admitted.browserSince ??= at;
-        if (admitted.browserSince === undefined || at - admitted.browserSince < SETTLED_MS) held += BROWSER_BYTES;
+        const browser = this.browsers?.which?.(threadId) ?? threadId;
+        if ((admitted.browserSince === undefined || at - admitted.browserSince < SETTLED_MS) && !heldBrowsers.has(browser)) {
+          heldBrowsers.add(browser);
+          held += BROWSER_BYTES;
+        }
       }
       // A session's growth hides inside its shared process's total, so it stays held in full until it settles.
       if (admitted.start === "session") { held += SESSION_BYTES; continue; }
       const pid = live.find(([, engine]) => engine.threads.has(threadId))?.[0];
       held += Math.max(0, process - (pid === undefined ? 0 : groups.get(pid) ?? 0));
     }
-    const need = (start === "session" ? SESSION_BYTES : process) + (this.browserStarts(threadId) ? BROWSER_BYTES : 0);
+    const newBrowser = this.browserStarts(threadId) && !heldBrowsers.has(this.browsers?.which?.(threadId) ?? threadId);
+    const need = (start === "session" ? SESSION_BYTES : process) + (newBrowser ? BROWSER_BYTES : 0);
     if (this.free(memory) - this.floor(memory) - held >= need) return "admit";
     return this.idle() ?? (this.othersBusy(threadId) === 0 ? "admit" : "wait");
   }

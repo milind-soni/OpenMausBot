@@ -98,6 +98,8 @@ export interface InstanceConfig {
   icon?: ProviderIcon;
   environment?: Record<string, string>;
   enabled?: boolean;
+  /** Left out of every model list, picker and automatic choice; the engine itself (its CLI and sign-in) is untouched. */
+  hidden?: boolean;
   /** Picker group over the driver's default: an `openai-compat` instance on a provider's own key is "api". */
   access?: EngineAccess;
   config?: unknown;

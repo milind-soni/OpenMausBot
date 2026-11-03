@@ -61,6 +61,21 @@ manage, and its own consequential-action confirmations still apply. See the
 [official Whop MCP documentation](https://github.com/whopio/whop-mcp-server).
 This is an optional connected tool, not a change to OMB's subscription billing.
 
+### Agentcard
+
+In Plugins, find **Agentcard** beside Whop and click **Connect**. The card uses
+Agentcard's official hosted MCP endpoint, `https://mcp.agentcard.sh/mcp`, and
+opens Agentcard's browser sign-in with your own Agentcard account. No API key
+is needed. After sign-in and tool discovery it enables the connection, and
+**Disconnect** and **Bot access** work as they do for Whop.
+
+OpenMausBot owns no cards, approvals or orders here. Agentcard keeps your cards
+and handles purchase approvals; OpenMausBot stores no card details. A bot that
+can use Agentcard can call all of its tools, including the ones that buy and
+the ones that show card details, so choose which bots get it under **Bot
+access**. Existing custom entries at the official HTTP endpoint are recognized
+rather than replaced.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -69,7 +84,9 @@ details (RFC 9728 protected-resource metadata, then the authorization
 server's own metadata), the server shows **Needs sign-in** and a **Sign in**
 button. Sign in opens the provider's page in your browser, which returns to
 OpenMausBot when you approve. The server then shows **Signed in**, and Test
-lists its tools.
+lists its tools. A server that lists its tools before you sign in but refuses
+tool calls the same way (an HTTP 401 pointing at those sign-in details) shows
+**Sign in** too.
 
 - **Which servers work.** The authorization server must support PKCE with
   S256. If it lets apps register themselves (dynamic client registration),
