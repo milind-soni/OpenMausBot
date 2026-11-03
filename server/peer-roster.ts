@@ -109,11 +109,20 @@ export function canReach(from: RosterMember, target: RosterMember): boolean {
   return from.id !== target.id && !target.hidden && peerAllowed(from, target);
 }
 
+/** The name of the person who looks after a bot, or null when nobody does. */
+export type LookedAfterBy = (bot: RosterMember) => string | null;
+
 /** Why `from` cannot reach `target`, in words for the bot: null when it can. */
-export function reachRefusal(from: RosterMember, target: RosterMember): string | null {
+export function reachRefusal(from: RosterMember, target: RosterMember, lookedAfterBy?: LookedAfterBy): string | null {
   if (canReach(from, target)) return null;
   if (Array.isArray(from.peers) && !from.peers.includes(target.id)) {
     return `${peerName(target.name)} is not one of the bots ${peerName(from.name)} is set to talk to, so nothing was sent. ${peerAccessHelp(from)}`;
+  }
+  if (!target.hidden && !sameAudience(from.visibility, target.visibility)) {
+    const name = peerName(target.name);
+    const who = lookedAfterBy?.(target);
+    const ask = who ? `ask ${peerName(who)}, who looks after it` : "ask an admin";
+    return `${name} is shared with different people from ${peerName(from.name)}, so nothing was sent. Tell the person in one plain sentence: "${name} isn't shared here; ${ask}." Never use computer control to get around this.`;
   }
   return `${peerName(target.name)} cannot be reached from ${peerName(from.name)}. ${PEER_ACCESS_HELP}`;
 }
@@ -136,6 +145,7 @@ export function resolveTeammate<T extends RosterMember>(
   from: RosterMember,
   raw: string,
   elsewhere: (name: string) => { where: string } | { hint: string } | null = () => null,
+  lookedAfterBy?: LookedAfterBy,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
   if (bots.some(bot => bot.id === wanted)) return { id: wanted, byName: false };
@@ -156,6 +166,8 @@ export function resolveTeammate<T extends RosterMember>(
   const offList = Array.isArray(from.peers) ? bots.find(bot => bot.id !== from.id && !bot.hidden && !from.peers!.includes(bot.id) &&
     sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) : undefined;
   if (offList) return { error: reachRefusal(from, offList)! };
+  const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
+  if (apart) return { error: reachRefusal(from, apart, lookedAfterBy)! };
   const away = bots.some(bot => fold(bot.name) === name || loose(bot.name) === loose(wanted)) ? null : elsewhere(wanted);
   if (away && "where" in away) return { error: away.where };
   return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${peerAccessHelp(from)}` };
