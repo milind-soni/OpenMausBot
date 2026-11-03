@@ -515,6 +515,8 @@ it("past eight, ⋯ keeps the groups, each under its address, and search finds a
   await click(host.querySelector("[data-rail-more-button]"));
   const groups = [...host.querySelectorAll("[data-rail-more] [data-rail-group]")].map((row) => row.textContent);
   expect(groups).toEqual([ALICE, BOB]);
+  const rowsText = [...host.querySelectorAll("[data-rail-more] button")].map((row) => row.textContent);
+  expect(rowsText.join(" ")).not.toContain("@");
   expect(matchingPlaces(many, "bob@").map((row) => row.id)).toEqual(["b0", "b1", "b2", "b3", "b4"]);
 });
 
