@@ -468,8 +468,8 @@ export class LiveCallController {
     if (call.state.status !== "live" || call.goodbye) return;
     const heard = call.transcript.takeRequestParts(offsetMs);
     const said = heard.text;
-    // Only the person's own words, never what the voice said back: same end as the End button.
-    if (spokenHangUp(heard.withoutEcho)) {
+    // Only the person's own words, never what the voice said back, and all of them: "don't" may be lost in the echo.
+    if (spokenHangUp(heard.withoutEcho) && spokenHangUp(said)) {
       call.goodbye = true;
       this.append(call, "instructions", LIVE_COPY.goodbye, id);
       this.later(call, () => this.hangUp(call, "hung-up"), GOODBYE_MS);
@@ -527,7 +527,7 @@ export class LiveCallController {
   }
 
   private async decide(call: Call, said: string, delegationId: string | null, heard: string = said): Promise<void> {
-    if (call.state.status !== "live") return;
+    if (call.state.status !== "live" || call.goodbye) return;
     const open = call.approval;
     if (!open || open.submitted) return;
     const decision = spokenConsent(said, "live");
@@ -614,6 +614,7 @@ export class LiveCallController {
       }
       return;
     }
+    if (call.goodbye) return;
     if (message.kind === "options") {
       this.onCard(call, message);
       return;

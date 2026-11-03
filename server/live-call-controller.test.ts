@@ -516,6 +516,29 @@ describe("LiveCallController relay", () => {
       expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
     });
 
+    it("keeps the call when the words before \"hang up\" were heard over the voice", async () => {
+      const t = await live();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Here is what I found.", start_ms: 1_000, end_ms: 2_000 });
+      hear(t, "don't", 1_200, 1_400);
+      hear(t, "hang up", 2_100, 2_300);
+      await delegate(t, "del_1", 2_500);
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+      expect(closes(t)).toHaveLength(0);
+      expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
+    });
+
+    it("speaks no more of the bot's answers once the goodbye starts", async () => {
+      const t = await live();
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 300);
+      hear(t, "okay, thanks, you can hang up now.", 1_000);
+      await delegate(t, "del_2", 1_200);
+      t.patch({ id: "b1", text: "You have two new emails.", requestMessageId: "m1", turnTerminal: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.goodbye });
+      expect(t.socket().appends("commentary")).toHaveLength(0);
+    });
+
     it("keeps the real end reason when the call drops during the goodbye", async () => {
       const t = await live();
       hear(t, "hang up", 100);
@@ -945,6 +968,17 @@ describe("LiveCallController relay", () => {
       await delegate(t, "del_ambiguous", 5_200);
       expect(t.deps.respond).not.toHaveBeenCalled();
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.notClear });
+    });
+
+    it("grants nothing heard after the person asked to hang up", async () => {
+      const t = await live();
+      t.message(approval());
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "hang up", 5_000);
+      await delegate(t, "del_2", 5_200);
+      hear(t, "yes", 5_400);
+      await vi.advanceTimersByTimeAsync(CONSENT_SETTLE_MS + 1);
+      expect(t.deps.respond).not.toHaveBeenCalled();
     });
 
     it("accepts a yes heard in a quiet moment, without a delegation", async () => {
