@@ -450,7 +450,7 @@ describe("someone in a team with no plan of their own", () => {
 
   it("can still buy a Cloud of their own by asking for one: billing is as it was", () => {
     expect(cloudAddView(member(ready), OFFER, { now: NOW })).toEqual({ kind: "offer", offer: OFFER, signedOut: false, notice: null });
-    const paying = member(ready, { checkout: { plan: "pro", source: null, startedAt: NOW } });
+    const paying = member(ready, { checkout: { plan: "pro", startedAt: NOW } });
     expect(cloudAddView(paying, OFFER, { now: NOW, arrived: true }).kind, "a checkout they opened goes on").toBe("waiting");
   });
 });
