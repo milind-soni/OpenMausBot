@@ -173,7 +173,7 @@ describe("redactSecretsInText", () => {
     const key = `${"S" + "G."}${"abcdefghij0123456789_-"}.${"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij0123456"}`;
     expect(redactSecretsInText(`sendgrid ${key} sent`)).toBe(`sendgrid «redacted ${key.length} chars» sent`);
     expect(holdsCredential(`mail via ${key}`)).toBe(true);
-    for (const ordinary of ["SG.example.com", `${"S" + "G."}${"a".repeat(22)}.${"b".repeat(20)}`, "Use the SG. prefix for the key"]) {
+    for (const ordinary of ["SG.example.com", `${"S" + "G."}${"a".repeat(22)}.${"b".repeat(20)}`, `${"S" + "G."}${"a".repeat(22)}.${"b".repeat(44)}`, "Use the SG. prefix for the key"]) {
       expect(redactSecretsInText(ordinary)).toBe(ordinary);
       expect(holdsCredential(ordinary)).toBe(false);
     }
