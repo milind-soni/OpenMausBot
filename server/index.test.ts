@@ -2633,6 +2633,7 @@ describe("harness HTTP API", () => {
       });
       expect((await manage({ action: "new_thread", name: "x".repeat(101) })).status).toBe(400);
       expect((await manage({ action: "new_thread", name: "x".repeat(81) })).status).toBe(400);
+      expect((await manage({ action: "new_thread", name: "Line one\nLine two" })).status).toBe(400);
       for (const memberId of [foreign.id, excluded.id, "missing-bot"]) {
         expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
         expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);

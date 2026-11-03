@@ -14502,7 +14502,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (phoneSecretSubmissions.hasGroup(room.id)) {
             return json(res, 409, { error: "this room is securely saving a credential — try again when it finishes" });
           }
-          if (name !== undefined && name.length > 80) return json(res, 400, { error: "a new_thread title can be at most 80 characters" });
+          if (name !== undefined && (name.length > 80 || !fitsOnOneLine(name))) return json(res, 400, { error: "a new_thread title must fit on one line, at most 80 characters" });
           const task = store.createGroupTask(room.id, name === undefined ? undefined : redactSecretsInText(name));
           if (!task) return json(res, 500, { error: "couldn't open a thread in that room" });
           internalCapability.openedRoomThreads = (internalCapability.openedRoomThreads ?? 0) + 1;
