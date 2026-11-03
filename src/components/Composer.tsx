@@ -766,6 +766,8 @@ export function Composer({
         />
         <QueuedComposerMessages
           items={queuedMessages}
+          oneThreadPerBot={state.config?.cloudStarter === true}
+          onSeePlans={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}
           onSteer={canSteerQueued ? steerQueued : undefined}
           steerInterrupts={!canSteer}
           steerMode={group ? "next" : "all"}
