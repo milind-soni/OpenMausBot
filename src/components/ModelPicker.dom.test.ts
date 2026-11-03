@@ -311,6 +311,33 @@ describe("picking a model that has reasoning levels", () => {
   }
 });
 
+describe("clearing a search after a pick that keeps the menu open", () => {
+  it("keeps focus in the Simple menu when Escape removes the picked row, so the next Escape still closes it", async () => {
+    fixture.instances = [claude(numbered(14))];
+    render(scout("model-0"));
+    await openWith("click");
+    const search = document.querySelector<HTMLInputElement>("[data-menu-search]")!;
+    type(search, "model 13");
+    press("ArrowDown", search);
+    expect(focused()?.textContent).toContain("Model 13");
+    press("Enter");
+    await settle();
+    render(scout("model-13"));
+    await settle();
+    expect(menu()!.contains(focused())).toBe(true);
+
+    press("Escape");
+    await settle();
+    expect(document.querySelector<HTMLInputElement>("[data-menu-search]")!.value).toBe("");
+    expect(menu()).not.toBeNull();
+    expect(menu()!.contains(focused())).toBe(true);
+
+    press("Escape");
+    await settle();
+    expect(menu()).toBeNull();
+  });
+});
+
 describe("the floating menu and the pointer", () => {
   it("stays open for a click inside its portal and closes for one outside, without taking focus", async () => {
     await openWith("click");

@@ -296,7 +296,7 @@ export function ModelPicker({
   }, [open, placement]);
 
   const selection = bot.modelSelection;
-  const refocusAfterPick = useRefocusAfterPick(menuRef, open, selection);
+  const refocusAfterPick = useRefocusAfterPick(menuRef, open, selection, query);
   const instances = withTypedModels(state.instances, selection, query);
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const pickerInstances = configuredModelInstances(instances, selection.instanceId);
@@ -564,8 +564,10 @@ export function ModelPicker({
     if (event.key !== "Escape") return modelMenuKey(event, { query, typed, close: () => close(true) });
     event.preventDefault();
     event.stopPropagation();
-    if (query) setQuery("");
-    else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
+    if (query) {
+      setQuery("");
+      refocusAfterPick();
+    } else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
     else if (fullView && !advanced) backToList(true);
     else close(true);
   };

@@ -20,11 +20,11 @@ export function offersReasoning(state: Pick<AppState, "instances" | "modelVarian
 }
 
 /**
- * Applying a pick can redraw the picked row elsewhere and drop focus out of the open menu. Call the returned
- * function after a pick that keeps the menu open: focus comes back (to the thinking level when there is one)
- * so Escape and the arrow keys keep working.
+ * Applying a pick, or clearing the search after one, can redraw or remove the focused row and drop focus out of
+ * the open menu. Call the returned function after either: focus comes back (to the thinking level when there is
+ * one) so Escape and the arrow keys keep working.
  */
-export function useRefocusAfterPick(menuRef: RefObject<HTMLElement | null>, open: boolean, selection: ModelSelection): () => void {
+export function useRefocusAfterPick(menuRef: RefObject<HTMLElement | null>, open: boolean, selection: ModelSelection, query: string): () => void {
   const pending = useRef(false);
   useEffect(() => {
     if (!pending.current) return;
@@ -32,6 +32,6 @@ export function useRefocusAfterPick(menuRef: RefObject<HTMLElement | null>, open
     const menu = menuRef.current;
     if (!open || !menu || menu.contains(document.activeElement)) return;
     (menu.querySelector<HTMLElement>('[data-simple-effort] [tabindex="0"]') ?? menu).focus({ preventScroll: true });
-  }, [selection, open, menuRef]);
+  }, [selection, query, open, menuRef]);
   return () => { pending.current = true; };
 }
