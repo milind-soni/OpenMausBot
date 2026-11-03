@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
@@ -41,15 +41,14 @@ export function useRotatingPhrase(
   return { current, previous };
 }
 
-// 2s matches --animate-shimmer.
+const SHEEN_PERIOD_MS = 2000;
+
 function ShimmerPhrase({ text, className }: { text: string; className?: string }) {
-  const [delay] = useState(() => `-${Date.now() % 2000}ms`);
+  const [delay] = useState(() => `-${Date.now() % SHEEN_PERIOD_MS}ms`);
   return (
-    <span
-      className={cn("thinking-shimmer animate-shimmer [grid-area:1/1]", className)}
-      style={{ animationDelay: `${delay}, 0ms` }}
-    >
+    <span className={cn("thinking-shimmer [grid-area:1/1]", className)} style={{ "--sheen-period": `${SHEEN_PERIOD_MS}ms`, "--sheen-delay": delay } as CSSProperties}>
       {text}
+      <span aria-hidden="true" className="thinking-sheen"><span data-text={text} /></span>
     </span>
   );
 }

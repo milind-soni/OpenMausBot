@@ -39,7 +39,10 @@ export function createAuth(
         // supplied x-forwarded-for chain for rate limits or session metadata.
         ipAddressHeaders: ["cf-connecting-ip"],
       },
-      database: { generateId: "uuid" },
+      // Better Auth 1.7.3+ introspects D1 as each auth instance starts (once per
+      // request here) and makes auth requests wait on it: one more D1 round trip
+      // per request for a schema the pinned migrations already fix.
+      database: { generateId: "uuid", validateSchema: false },
       backgroundTasks: {
         handler(promise) {
           ctx.waitUntil(promise);

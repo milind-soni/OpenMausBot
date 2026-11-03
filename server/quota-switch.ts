@@ -13,7 +13,7 @@ import { spokenLineFields } from "./live-call-record.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { BotRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { TurnStops } from "./turn-outcome.ts";
-import type { LimitTakeover } from "./host/limit-takeover.ts";
+import { signedOutStop, type LimitTakeover, type TakeoverScope } from "./host/limit-takeover.ts";
 
 export interface QuotaSwitchEngine {
   instanceId: string;
@@ -40,7 +40,7 @@ export interface QuotaSwitchDeps {
   coordinator: Pick<Coordinator, "all" | "node">;
   registry: { instances(): QuotaSwitchEngine[] };
   turnStops: Pick<TurnStops, "failureCause"> & Partial<Pick<TurnStops, "read">>;
-  /** Which AIs carry on while one is limited, and the one notice for each stretch of a limit. */
+  /** Which AIs carry on while one is limited or signed out, and the one notice for each stretch of either. */
   takeover?: Pick<LimitTakeover, "backups" | "tell" | "moved">;
   /** A custom endpoint brings its own credential, so its sign-in state does not count. */
   access?: (instanceId: string) => EngineAccess | undefined;
@@ -100,9 +100,9 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   /** A second press while the engine is read is the same answer, never another. */
   const answering = new Map<string, Promise<QuotaAnswer>>();
 
-  const notice = (threadId: string, text: string, ok: boolean): void => {
-    // `notice:` makes it a status row every client shows, never a folded tool step.
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok } });
+  const notice = (threadId: string, text: string, ok: boolean, setup = false): void => {
+    // `notice:` makes it a status row every client shows, never a folded tool step; `setup`: signing in fixes it.
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok, ...(setup ? { setup: true } : {}) } });
   };
 
   const openCard = (threadId: string): Message | undefined => store.messagesFor(threadId)
@@ -147,9 +147,11 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     .filter((node) => !node.parentId && node.threadId === threadId && request.generations.has(node.id))
     .sort((a, b) => a.createdAt - b.createdAt).at(-1)?.id;
 
-  /** Moves the thread to `selection` and sends the person's message that hit the limit again there; false when that AI
-   * cannot take it now. No await from the readiness check to the resend: the gate, the switch and the resend see one state. */
-  const continueOn = async (botId: string, threadId: string, selection: ModelSelection, request: QuotaRequest, build: { stale: boolean }, resetsAt?: number): Promise<boolean> => {
+  /** Moves the thread to `selection` and sends the person's message that hit the limit (or met a signed-out AI) again
+   * there; false when that AI cannot take it now. No await from the readiness check to the resend: the gate, the switch
+   * and the resend see one state. */
+  const continueOn = async (botId: string, threadId: string, selection: ModelSelection, request: QuotaRequest, build: { stale: boolean }, resetsAt?: number,
+    scope: TakeoverScope = "engine"): Promise<boolean> => {
     const engines = deps.registry.instances();
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);
     const before = store.projectBotForTask(botId, threadId);
@@ -165,45 +167,56 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } catch {
       return false;
     }
-    deps.takeover?.moved(botId, threadId, before.modelSelection, checked.selection, resetsAt);
+    deps.takeover?.moved(botId, threadId, before.modelSelection, checked.selection, resetsAt, scope);
     const name = engine.instanceId === current.instanceId ? `${nameOf(engine)} ${checked.selection.model}` : nameOf(engine);
+    const why = scope === "signed-out" ? `while ${nameOf(current)} is signed out` : "after hitting the usage limit";
     const held = heldBy(botId, threadId, rootOf(threadId, request));
     const original = held ? undefined : resendable(store, threadId, request.messageId);
     if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true);
     else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true);
     else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true);
     else if (held === "question") {
-      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again — answer it, then send your message again.`, false);
+      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false);
     } else if (!original) {
-      notice(threadId, `switched to ${name}, but the message that hit the limit could not be found to resend — send it again.`, false);
+      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false);
     } else {
-      notice(threadId, `continuing on ${name} after hitting the usage limit`, true);
+      notice(threadId, `continuing on ${name} ${why}`, true);
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
-        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name} — ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
       }
     }
     return true;
   };
 
-  /** A turn its AI's usage limit refused: the person's own message carries on with the first AI that can take it, the
-   * person hears once for this stretch of the limit what carries on meanwhile, and the AI's later turns go there too until
-   * the limit resets (the turn start's own check). */
+  /** A turn its AI's usage limit refused, or that met its AI signed out: the person's own message carries on with the
+   * first AI that can take it, the person hears once for this stretch what carries on meanwhile (a sign-out also in this
+   * conversation, where signing in fixes it), and the AI's later turns go there too until the limit resets or it is
+   * signed in again (the turn start's own check). */
   const turnFailed = async (bot: BotRecord, event: SettledTurn, internal: boolean): Promise<Message | null> => {
     const { threadId } = event;
     try {
       // Read before any await: the record is this turn's only now.
       const request = deps.request(threadId);
       const flags = deps.turnStops.read?.(threadId, event.turnId)?.flags;
-      const scope = flags?.limit ?? (classifyError({ text: deps.turnStops.failureCause(event) ?? "" }).reason === "quota" ? "engine" : undefined);
+      const cause = deps.turnStops.failureCause(event);
+      // A tool call's failure names the tool, never the engine's own limit, whatever its words.
+      const scope: TakeoverScope | undefined = signedOutStop(event.stopReason, cause) ? "signed-out"
+        : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
       if (!scope) return null;
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;
       const from = thread.modelSelection;
       if (scope === "engine") limited.add(from.instanceId);
       // OMB_QUOTA_SWITCH=0: nothing carries on by itself; the person still hears once that the bot waits.
-      const backups = enabled() ? deps.takeover?.backups(bot.id, from, scope) ?? [] : [];
-      const tell = (backup?: ModelSelection) => deps.takeover?.tell(thread, from, { ...(flags?.limitResetsAt ? { resetsAt: flags.limitResetsAt } : {}), scope, ...(backup ? { backup } : {}) });
+      const backups = enabled() ? deps.takeover?.backups(bot.id, from, scope, approvalModeFor(thread)) ?? [] : [];
+      const resetsAt = scope === "signed-out" ? undefined : flags?.limitResetsAt;
+      // A sign-out is told once, first and without a backup's name: what the person must do is sign in again.
+      const told = scope === "signed-out" ? deps.takeover?.tell(thread, from, { scope }) : undefined;
+      if (told) notice(threadId, told, true, true);
+      const tell = (backup?: ModelSelection) => {
+        if (scope !== "signed-out") deps.takeover?.tell(thread, from, { ...(resetsAt ? { resetsAt } : {}), scope, ...(backup ? { backup } : {}) });
+      };
       // Only the person's own request: never a routine's, a webhook's, a relayed or a guest's.
       const own = !internal && request && !request.stopped && request.origin?.kind === "user"
         && (!request.turnId || !event.turnId || request.turnId === event.turnId);
@@ -216,7 +229,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       building.add(build);
       try {
         for (const selection of backups) {
-          if (await continueOn(bot.id, threadId, selection, request, build, flags?.limitResetsAt)) {
+          if (await continueOn(bot.id, threadId, selection, request, build, resetsAt, scope)) {
             tell(selection);
             return null;
           }

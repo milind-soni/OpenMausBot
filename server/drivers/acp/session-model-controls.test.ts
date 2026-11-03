@@ -81,6 +81,25 @@ describe("ACP session model controls", () => {
     await expect(controls.select(request, "s", 100)).rejects.toThrow("did not switch to two");
   });
 
+  it("accepts an unset currentValue only for an id the driver names", async () => {
+    let state: any;
+    const modelOption = (currentValue?: string) => ({ configOptions: [{ id: "model", type: "select", ...(currentValue === undefined ? {} : { currentValue }),
+      options: [{ value: "auto", name: "Auto" }, { value: "one", name: "One" }] }] });
+    const controlsFor = (model: string) => new SessionModelControls({
+      selection: { configId: "model", unsetIds: ["auto"] }, variants: false, displayName: "GitHub Copilot",
+      model: () => model, reportedModel: () => model, state: () => state, store: (value) => { state = value; }, report: () => {},
+    });
+    const unset = modelOption();
+    controlsFor("auto").receive(modelOption("one"), true);
+    await expect(controlsFor("auto").select(async (_method, _params, _timeout, receive) => { receive?.(unset); return unset; }, "s", 100)).resolves.toBe("auto");
+    expect(controlsFor("auto").confirms("auto")).toBe(true);
+    expect(controlsFor("one").confirms("one")).toBe(false);
+    controlsFor("one").receive(modelOption("one"), true);
+    await expect(controlsFor("auto").select(async (_method, _params, _timeout, receive) => { receive?.(modelOption("one")); return modelOption("one"); }, "s", 100)).rejects.toThrow("did not switch to auto (still one)");
+    controlsFor("one").receive(modelOption(), true);
+    await expect(controlsFor("one").select(async () => ({}), "s", 100)).rejects.toThrow("did not switch to one (still unknown)");
+  });
+
   it("clears the previous native session's settings when a new session has none", () => {
     const { controls, state } = fixture();
     controls.receive(modern("two"), true);

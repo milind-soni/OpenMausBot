@@ -10,8 +10,12 @@
 //   FAKE_CLAUDE_RATE_LIMIT  JSON rate_limit_info reported in a `rate_limit_event` after init
 //   FAKE_CLAUDE_LIMITED_FILE  path: while it exists, every turn plays usage-limit with the file's JSON rate_limit_info
 //   FAKE_CLAUDE_MCP_FAILED  comma list of MCP servers init reports as failed (`mcp_servers`)
+//   FAKE_CLAUDE_ANSWER_MODEL  the `model` of its assistant frames, as when the CLI answers with another model than asked
 //   FAKE_CLAUDE_RELEASE  with hang: the turn ends normally once this file exists; a scripted call's `hold` ends then too
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
+//   FAKE_CLAUDE_ELICIT  JSON request body: a "hang" turn (or a failing FAKE_CLAUDE_TRANSIENTS launch) first asks it
+//     as control_request "elicit-1"
+//   FAKE_CLAUDE_CONTROL_LOG  JSON-lines file every control_response the host writes is appended to
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
 //     calls a tool first
@@ -43,6 +47,14 @@
 //     an ok:false call with its additionalContext echoed into the reply, Stop at the end)
 //   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_TURN_STATE  counter file keeping FAKE_CLAUDE_COMPACT's turn count across respawns
+//   FAKE_CLAUDE_CONTEXT_GROWTH  "<start>:<per turn>": a session starts at <start> tokens and each turn's work adds <per turn>,
+//     which that turn's model calls report as their prompt; kept per session in FAKE_CLAUDE_CONTEXT_STATE (a folder) across
+//     processes; a compaction leaves FAKE_CLAUDE_COMPACTED_TOKENS (default 30000)
+//   FAKE_CLAUDE_AUTOCOMPACT_AT  tokens: a turn that starts at or above it compacts first, as Claude Code does at its threshold
+//     (PreCompact, FAKE_CLAUDE_COMPACT_MS of nothing, compact_boundary, then SessionStart "compact")
+//   FAKE_CLAUDE_COMPACT_MS  how long a compaction takes: that one, or a one-shot `/compact` on a fork
+//   FAKE_CLAUDE_COMPACT_DUMP  path: a one-shot `/compact` on a fork (`--resume S --fork-session`) writes its {argv, prompt,
+//     systemPrompt, mcpConfig, settings} here and answers with a new session; FAKE_CLAUDE_COMPACT_RESULT is its raw answer
 //   FAKE_CLAUDE_CONTEXT_TOKENS  latest-prompt size reported in a scripted room-plan reply
 //   FAKE_CLAUDE_AUTH  in (default) | out | unsupported | malformed | inherited-api-key: what `auth status` says
 //     | api-key: signed in on the CLI's own API key (authMethod "api_key")
@@ -249,7 +261,30 @@ const argAfter = (flag: string): string | null => {
   return i === -1 ? null : (argv[i + 1] ?? null);
 };
 
-const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+const answerModel = process.env.FAKE_CLAUDE_ANSWER_MODEL;
+const out = (obj: any) => process.stdout.write(JSON.stringify(answerModel && obj.type === "assistant" && !obj.message?.model ? { ...obj, message: { ...obj.message, model: answerModel } } : obj) + "\n");
+const contextGrowth = (() => {
+  const [start, perTurn] = (process.env.FAKE_CLAUDE_CONTEXT_GROWTH ?? "").split(":").map(Number);
+  return Number.isSafeInteger(start) && start! > 0 ? { start: start!, perTurn: Number.isSafeInteger(perTurn) ? perTurn! : 0 } : null;
+})();
+const contextFile = (session: string) => process.env.FAKE_CLAUDE_CONTEXT_STATE ? join(process.env.FAKE_CLAUDE_CONTEXT_STATE, `${session.replace(/[^\w.-]/g, "_")}.json`) : null;
+const readContext = (session: string): number => {
+  const file = contextFile(session);
+  try { if (file && existsSync(file)) return Number(JSON.parse(readFileSync(file, "utf8")).tokens) || 0; } catch {}
+  return contextGrowth?.start ?? 0;
+};
+const writeContext = (session: string, tokens: number) => {
+  const file = contextFile(session);
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ tokens }));
+};
+const compactedTokens = () => Number(process.env.FAKE_CLAUDE_COMPACTED_TOKENS) || 30_000;
+/** A compaction keeps the CLI busy: nothing reads stdin or writes a frame meanwhile. */
+const compactionPause = () => {
+  const ms = Number(process.env.FAKE_CLAUDE_COMPACT_MS);
+  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
 
 const probe = argv[0] === "--version" ? "version" : argv[0] === "--help" ? "help" : argv[0] === "auth" && argv[1] === "status" ? "auth" : null;
 if (probe) {
@@ -345,6 +380,32 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     process.stdin.on("data", (chunk) => { input += chunk; });
     process.stdin.on("end", () => resolve(input));
   });
+  if (argv.includes("--fork-session") && prompt.trimStart().startsWith("/compact")) {
+    const file = (flag: string) => {
+      const path = argAfter(flag);
+      if (!path) return null;
+      try { return readFileSync(path, "utf8"); } catch { return null; }
+    };
+    if (process.env.FAKE_CLAUDE_COMPACT_DUMP) {
+      writeDumpAtomic(process.env.FAKE_CLAUDE_COMPACT_DUMP, JSON.stringify({
+        pid: process.pid, argv, prompt, cwd: process.cwd(), mcpConfig: JSON.parse(file("--mcp-config") ?? "null"),
+        settings: JSON.parse(file("--settings") ?? "null"), systemPrompt: file("--append-system-prompt-file"),
+        hookEnv: Object.keys(process.env).filter((key) => key.startsWith("OMB_HOOK_")),
+      }, null, 2));
+    }
+    compactionPause();
+    const parent = argAfter("--resume") ?? "fake-session";
+    const forked = argv.includes("--no-session-persistence") ? parent : `fork-${process.pid}-${Date.now()}`;
+    const read = readContext(parent);
+    writeContext(forked, compactedTokens());
+    const forkModel = argAfter("--model") ?? "claude-fake";
+    process.stdout.write(process.env.FAKE_CLAUDE_COMPACT_RESULT ?? JSON.stringify({
+      type: "result", subtype: "success", is_error: false, result: "", session_id: forked,
+      usage: { input_tokens: 4, cache_read_input_tokens: read, cache_creation_input_tokens: 40, output_tokens: 2400 },
+      total_cost_usd: 0.2, modelUsage: { [forkModel]: { inputTokens: 4, cacheReadInputTokens: read, cacheCreationInputTokens: 40, outputTokens: 2400, costUSD: 0.2 } },
+    }));
+    process.exit(0);
+  }
   if (argv.includes("--fork-session")) {
     const read = (flag: string) => {
       const path = argAfter(flag);
@@ -839,6 +900,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
       }
+      // an MCP server's question still open when the launch fails
+      if (process.env.FAKE_CLAUDE_ELICIT) out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });
       process.stderr.write("claude: API error (503): service temporarily unavailable\n");
       process.exit(5);
     }
@@ -889,7 +952,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
 
   if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
     const progress = (text: string) => out({ type: "assistant", message: { content: [{ type: "text", text }] } });
-    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt, undefined, progress).then(text => {
+    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt, undefined, progress, () => steered).then(text => {
+      replaySteered();
       const contextTokens = Number(process.env.FAKE_CLAUDE_CONTEXT_TOKENS);
       const usage = Number.isSafeInteger(contextTokens) && contextTokens > 0 ? { input_tokens: contextTokens, output_tokens: 5 } : undefined;
       out({ type: "assistant", message: { content: [{ type: "text", text }], ...(usage ? { usage } : {}) } });
@@ -900,7 +964,11 @@ const playTurn = (prompt: JsonValue, late = false) => {
     return;
   }
 
+  if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (mode === "hang") {
+    if (process.env.FAKE_CLAUDE_ELICIT) {
+      out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });
+    }
     const release = process.env.FAKE_CLAUDE_RELEASE;
     const finishGate = process.env.FAKE_CLAUDE_FINISH_GATE;
     const held = setInterval(() => {
@@ -961,7 +1029,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
     });
   }
 
-  if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
   let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
@@ -979,8 +1046,19 @@ const playTurn = (prompt: JsonValue, late = false) => {
     const context = runHooks("SessionStart", { source: "compact" });
     if (context.trim()) replyParts = [`${context.trim()}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
   }
+  let sessionTokens = contextGrowth ? readContext(sessionId) : 0;
+  const autocompactAt = Number(process.env.FAKE_CLAUDE_AUTOCOMPACT_AT);
+  if (contextGrowth && autocompactAt > 0 && sessionTokens >= autocompactAt) {
+    runHooks("PreCompact", { trigger: "auto" });
+    compactionPause();
+    out({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: sessionTokens } });
+    const context = runHooks("SessionStart", { source: "compact" });
+    if (context.trim()) replyParts = [`${context.trim()}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
+    sessionTokens = compactedTokens();
+  }
+  if (contextGrowth) writeContext(sessionId, sessionTokens += contextGrowth.perTurn);
   const cacheRead = Number(process.env.FAKE_CLAUDE_CACHE_READ_TOKENS);
-  const usage = { input_tokens: 10, cache_read_input_tokens: Number.isSafeInteger(cacheRead) && cacheRead > 0 ? cacheRead : 2, output_tokens: 5 };
+  const usage = { input_tokens: 10, cache_read_input_tokens: contextGrowth ? Math.max(2, sessionTokens - 10) : Number.isSafeInteger(cacheRead) && cacheRead > 0 ? cacheRead : 2, output_tokens: 5 };
   const finish = () => {
     replaySteered();
     runHooks("Stop", { stop_hook_active: false });
@@ -1177,6 +1255,10 @@ process.stdin.on("data", (c) => {
     try {
       prompt = JSON.parse(line);
     } catch {
+      continue;
+    }
+    if ((prompt as { type?: unknown } | null)?.type === "control_response") {
+      if (process.env.FAKE_CLAUDE_CONTROL_LOG) appendFileSync(process.env.FAKE_CLAUDE_CONTROL_LOG, `${line}\n`);
       continue;
     }
     if (turnRunning || lateTurnWaiting) {

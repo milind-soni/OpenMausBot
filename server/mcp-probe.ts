@@ -22,17 +22,30 @@ export type McpProbeFailure = "keys" | "unreachable" | "timeout";
 
 export type McpProbeResult =
   | { ok: true; tools: McpProbeTool[]; total?: number }
+  /** `auth: "required"`: the server wants a sign-in. Either it refused initialize or tools/list with HTTP 401 and offers
+   * OAuth, or it listed tools for a caller with no credentials and refused a tool call with HTTP 401 from behind an
+   * RFC 9728 protected-resource document. */
   | { ok: false; error: string; auth?: "required"; reason?: McpProbeFailure; status?: number };
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
+/** A tool name no server defines, so calling it runs nothing and the answer says only whether tool calls need a sign-in.
+ * Observed 2026-10-31: mcp.agentcard.sh answers it HTTP 401 with `resource_metadata`; huggingface.co/mcp, whose sign-in is
+ * optional and which also serves an RFC 9728 document, answers JSON-RPC -32602 "not found". */
+export const SIGN_IN_CHECK_TOOL = "openmausbot.sign-in-check";
+const SIGN_IN_CHECK_MS = 5_000;
+const DISCOVERY_MS = 5_000;
 /** How MCP servers word a refused key in a JSON-RPC error when they answer it with HTTP 200. */
 const UNAUTHORIZED = /unauthori[sz]ed|forbidden|not authenticated|authentication (?:failed|required)|invalid (?:api[ _-]?)?(?:key|token|credentials)/i;
 
 export interface McpProbeOptions {
   extension?: boolean;
   observe?(info: { tools: unknown[]; uiExtension: "ok" | "refused" | "unknown" }): void;
-  /** Start a command server as this bot's AI would: in its box where turns are boxed, from its own folder. */
-  asBot?: { id: string; cwd: string };
+  /** Start a command server as a bot's turn would: in the bot box where turns are boxed, its configured environment
+   * passing the box's allow-list, from the bot's own folder when the server is one bot's (`id`). */
+  asBot?: { id?: string; cwd?: string };
+  /** Reach a URL server as a bot's turn does: at `url` with `fetch` and no headers of its own (the credential broker adds
+   * them, server/bot-box/broker-probe.ts). A sign-in is still looked for at the server's own address. */
+  via?: { url: string; fetch: typeof fetch };
 }
 
 const MAX_STDOUT_BYTES = MAX_REMOTE_MCP_BYTES;
@@ -93,6 +106,40 @@ function observeProbe(options: McpProbeOptions, tools: unknown[], uiExtension: "
   try { options.observe?.({ tools, uiExtension }); } catch {}
 }
 
+/** True when the probe carries any header value. On the `via` path the broker adds exactly these headers. Personal entries
+ * store "" placeholders, so an empty value is no credential. */
+export function sendsCredentials(server: Pick<StoredRemoteMcpServer, "headers">): boolean {
+  return Object.values(server.headers).some((value) => value !== "");
+}
+
+/** Which request the server refused with HTTP 401. */
+type RefusedAt = "connect" | "call";
+
+/** Whether a 401 asks for a sign-in rather than for keys. `connect`: any OAuth metadata counts (a server that refuses
+ * initialize is unusable without a sign-in). `call`: only metadata an RFC 9728 protected-resource document led to, since
+ * discovery's origin fallback would flag any host that merely serves openid-configuration. `url` is the server's own
+ * address, never the broker's. */
+async function asksForSignIn(url: string, refusal: McpHttpError, at: RefusedAt, signal?: AbortSignal): Promise<boolean> {
+  const bound = AbortSignal.timeout(DISCOVERY_MS);
+  const meta = await discoverMcpAuth(url, refusal.wwwAuthenticate ?? null, { signal: signal ? AbortSignal.any([signal, bound]) : bound })
+    .catch(() => null);
+  return meta !== null && (at === "connect" || meta.source === "protected-resource");
+}
+
+/** After a tools/list that carried no credentials: do tool calls need a sign-in? One call of SIGN_IN_CHECK_TOOL through
+ * the same client. Only HTTP 401 behind a protected-resource document means yes. Any other answer, a timeout or a network
+ * failure keeps the verdict Connected. A server that really lists that name is never called. */
+async function callsNeedSignIn(client: RemoteMcpClient, url: string, listed: unknown[], signal: AbortSignal): Promise<boolean> {
+  if (listed.some((tool) => (tool as { name?: unknown } | null)?.name === SIGN_IN_CHECK_TOOL)) return false;
+  try {
+    await client.request("tools/call", { name: SIGN_IN_CHECK_TOOL, arguments: {} }, AbortSignal.any([signal, AbortSignal.timeout(SIGN_IN_CHECK_MS)]));
+    return false;
+  } catch (error) {
+    return error instanceof McpHttpError && error.kind === "status" && error.status === 401
+      && await asksForSignIn(url, error, "call", signal);
+  }
+}
+
 async function probeRemoteMcpServer(
   server: StoredRemoteMcpServer,
   timeoutMs: number,
@@ -103,24 +150,25 @@ async function probeRemoteMcpServer(
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-  const client = new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
+  const client = options.via
+    ? new RemoteMcpClient({ ...server, url: options.via.url, headers: {} }, { maxBytes: MAX_REMOTE_MCP_BYTES, fetch: options.via.fetch })
+    : new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
   try {
     await client.initialize("OpenMausBot", combined, options.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {});
     const result = await client.request("tools/list", {}, combined);
     const tools = result && typeof result === "object" ? (result as { tools?: unknown }).tools : undefined;
     if (!Array.isArray(tools)) return { ok: false, error: "The server did not return a valid MCP tools list." };
     observeProbe(options, tools, client.extensions ?? "unknown");
+    if (!sendsCredentials(server) && await callsNeedSignIn(client, server.url, tools, combined)) {
+      return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
+    }
     const secrets = server.oauth?.clientSecret ? { ...server.headers, "oauth.clientSecret": server.oauth.clientSecret } : server.headers;
     return { ok: true, ...publicTools(tools, secrets) };
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
     if (timeout.signal.aborted) return { ok: false, error: publicProbeError("timeout"), reason: "timeout" };
-    if (error instanceof McpHttpError && error.status === 401) {
-      const discovery = AbortSignal.timeout(5_000);
-      const meta = await discoverMcpAuth(server.url, error.wwwAuthenticate ?? null, {
-        signal: signal ? AbortSignal.any([signal, discovery]) : discovery,
-      }).catch(() => null);
-      if (meta) return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
+    if (error instanceof McpHttpError && error.status === 401 && await asksForSignIn(server.url, error, "connect", signal)) {
+      return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
     }
     if (error instanceof McpHttpError && error.kind === "status" && (error.status === 401 || error.status === 403)) {
       return { ok: false, error: `The server didn't accept the keys (HTTP ${error.status}). Check the header values.`, reason: "keys", status: error.status };
@@ -159,10 +207,10 @@ function probeStdioMcpServer(
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(server.command, server.args, {
-        cwd: options.asBot?.cwd ?? process.cwd(),
+        ...(options.asBot ? (options.asBot.cwd ? { cwd: options.asBot.cwd } : {}) : { cwd: process.cwd() }),
         env: probeEnvironment(server),
         stdio: ["pipe", "pipe", "pipe"],
-        ...(options.asBot ? { box: { botId: options.asBot.id, allowEnv: Object.keys(server.env) } } : {}),
+        ...(options.asBot ? { box: { ...(options.asBot.id ? { botId: options.asBot.id } : {}), allowEnv: Object.keys(server.env) } } : {}),
       });
     } catch {
       resolve({ ok: false, error: publicProbeError("spawn") });

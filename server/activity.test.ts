@@ -132,11 +132,11 @@ describe("readBotActivity", () => {
 
   it("shows each run's step under it, the words the working line used, with the run's turn to open it at", () => {
     event("t1", "2026-09-07T09:00:00.000Z", { type: "item.started", itemType: "tool", itemId: "i1", title: "Bash",
-      step: { activity: "command", target: "scrape.py", detail: "cd ~/biber && python3 scrape.py --pages 40" } });
+      step: { activity: "command", target: "scrape.py", detail: "cd ~/acme && python3 scrape.py --pages 40" } });
     event("t1", "2026-09-07T09:01:00.000Z", { type: "item.started", itemType: "tool", itemId: "i2", title: "WebFetch", step: { activity: "fetch", target: "linkedin.com" } });
     expect(read().map((row) => [row.label, row.summary, row.turnId])).toEqual([
       ["Fetched a page", "linkedin.com", "turn-1"],
-      ["Ran a command", "cd ~/biber && python3 scrape.py --pages 40", "turn-1"],
+      ["Ran a command", "cd ~/acme && python3 scrape.py --pages 40", "turn-1"],
     ]);
   });
 

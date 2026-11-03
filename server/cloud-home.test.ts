@@ -628,6 +628,33 @@ it("a Team Cloud's pairing binds the Admin's member claim to the session it open
   expect(sessions.authenticate((paired as { token: string }).token)).toBeNull();
 });
 
+it("a Team Cloud pairing at a new role ends that person's sessions, phones and waiting codes at the old role at once", () => {
+  const root = directory();
+  const now = 1_800_000_000_000;
+  const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
+  const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
+  let counter = 0;
+  const mint = (email: string, role: string) => {
+    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, member: { email, role } });
+    const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
+  };
+  const redeem = (code: string) => sessions.exchange({ code, label: "", source: "198.51.100.4" }) as { ok: true; token: string; session: { id: string } };
+  const admin = redeem(mint("ada@acme.test", "admin").body.code as string);
+  const phone = redeem(sessions.openPairing({ scopes: ["admin", "client"], member: { email: "ada@acme.test", role: "admin" }, memberCheckedAt: now }).code);
+  const waiting = mint("ada@acme.test", "admin").body.code as string;
+  const ben = redeem(mint("ben@acme.test", "admin").body.code as string);
+  const again = mint("ada@acme.test", "member");
+  expect(again.status).toBe(200);
+  expect([sessions.authenticate(admin.token), sessions.authenticate(phone.token)]).toEqual([null, null]);
+  expect(sessions.exchange({ code: waiting, label: "", source: "198.51.100.4" })).toMatchObject({ ok: false });
+  expect(sessions.authenticate(ben.token)).toBeTruthy();
+  const member = redeem(again.body.code as string);
+  expect(sessions.authenticate(member.token)).toMatchObject({ teamRole: "member", scopes: ["client"] });
+  expect(mint("ada@acme.test", "member").status).toBe(200);
+  expect(sessions.authenticate(member.token)).toBeTruthy();
+});
+
 it("a My Cloud refuses a team claim: it is one person's", () => {
   const f = fixture();
   expect(f.mint(f.sign(JSON.stringify({ member: { email: "ada@acme.test", role: "member" } })))).toEqual({ status: 400, body: { error: "not_a_team" } });

@@ -34,7 +34,7 @@ import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
 import { SignInBanner } from "./SignInRequestCard";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
-import { MacLocalControl } from "./MacLocalControl";
+import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
   busyBoatView,
@@ -129,7 +129,7 @@ export function ComputerPanel({
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
 }) {
-  const { padClass, dragProps } = useCaptionChrome();
+  const { dragProps } = useCaptionChrome();
   const { panelWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd } = useComputerPanelResize();
   const { state, dispatch, flushBotPatches } = useStore();
   const liveTask = profileBot.tasks?.find((task) => task.threadId === profileBot.threadId);
@@ -665,7 +665,7 @@ export function ComputerPanel({
   useEffect(() => {
     lastLiveAt.current = 0;
     if (!cloudPreviewReady) return;
-    return listenLiveFrames({
+    return listenLiveFrames({ screens: true,
       onFrame: (frame) => {
         if (frame.kind !== "screen" || frame.botId !== bot.id || frame.threadId !== bot.threadId) return;
         lastLiveAt.current = Date.now();
@@ -1118,7 +1118,7 @@ export function ComputerPanel({
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
     ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || placeOffered(mode, state.config)).map(([mode, labelKey, descriptionKey, Icon]) => {
+  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server"))).map(([mode, labelKey, descriptionKey, Icon]) => {
     const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
     const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
     const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
@@ -1215,7 +1215,7 @@ export function ComputerPanel({
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
       />
       {/* ml-1.5 keeps the drag region clear of the resize handle: a later drag region in the DOM wins. */}
-      <div {...dragProps} className={cn("@container/paneltabs ml-1.5 py-3 pl-2.5 pr-4", padClass)}>
+      <div {...dragProps} className="@container/paneltabs ml-1.5 py-3 pl-2.5 pr-4">
         <div className="relative flex min-h-7 items-center justify-center">
           {advanced && (
             <button
@@ -1677,7 +1677,7 @@ export function ComputerPanel({
         {phase !== "team-boat" && (bot.computer !== undefined || computerStatusCurrent) && <>
           <LocalScreenPreview />
           <LinuxLocalControl />
-          <MacLocalControl />
+          <MacLocalControl /><WindowsLocalControl />
         </>}
 
         {advanced ? <>

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { WAIT_HOURS, type WaitKind } from "../shared/waits.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import {
   expandHome,
   fetchPageText,
@@ -142,7 +143,7 @@ export class WaitManager {
   private readonly probes: WaitProbes;
   private readonly options: WaitManagerOptions;
   private waits: WaitRecord[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: DueTimer | null = null;
   private running = false;
   private stopped = false;
   private ticking = false;
@@ -243,11 +244,6 @@ export class WaitManager {
     return this.waits.filter((w) => w.botId === botId && !w.ending).map(cloneWait);
   }
 
-  /** How many of the bot's waits in this chat have not ended, without copying them: what list_waits would name there. */
-  count(botId: string, threadId: string): number {
-    return this.waits.reduce((count, w) => count + (w.botId === botId && w.threadId === threadId && !w.ending ? 1 : 0), 0);
-  }
-
   /** Every wait, those ended but not yet posted too. */
   all(): WaitRecord[] {
     return this.waits.map(cloneWait);
@@ -292,18 +288,18 @@ export class WaitManager {
   start(): void {
     this.stopped = false;
     if (this.timer) return;
-    this.runTick();
-    this.timer = setInterval(() => this.runTick(), WAIT_TICK_MS);
-    this.timer.unref?.();
-  }
-
-  private runTick(): void {
-    this.tick().catch((error) => console.error("wait tick failed", error));
+    this.timer = startDueTimer({
+      run: () => this.tick(),
+      next: () => this.waits.reduce<number | null>((at, w) => Math.min(at ?? Infinity, w.ending ? this.now() : Math.min(w.nextCheckAt, w.expiresAt)), null),
+      now: this.now,
+      retryMs: WAIT_TICK_MS,
+      onError: (error) => console.error("wait tick failed", error),
+    });
   }
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 
@@ -432,6 +428,7 @@ export class WaitManager {
     try {
       mutate();
       this.save();
+      this.timer?.poke();
     } catch (error) {
       identity.forEach((w, i) => {
         for (const key of Object.keys(w)) delete (w as unknown as Record<string, unknown>)[key];

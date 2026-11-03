@@ -7,6 +7,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
+import { imeComposing } from "@/lib/send-key";
 
 type PaletteEntry =
   | { kind: "bot"; bot: Bot }
@@ -109,6 +110,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();

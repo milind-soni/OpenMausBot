@@ -10,6 +10,8 @@ import { parseClaudeUsage, parseCodexUsage, type PlanProviderRow, type PlanUsage
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
+/** Past this after its time, a hold is forgotten. */
+const REFUSAL_GRACE_FOR_TEST = 10 * 60_000 + 1;
 const iso = (at: number) => new Date(at).toISOString();
 
 function row(id: string, driver: "claude" | "codex", windows: PlanWindows): PlanProviderRow {
@@ -269,6 +271,91 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.noteLimit("claude", undefined);
     now = NOW + UNNAMED_LIMIT_MS + 1;
     expect(instance.blockedUntil("claude"), "the guess runs out on its own").toBeNull();
+  });
+
+  it("keeps a refusal's hold through a restart, so a new conversation does not go to the limited engine first", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-limit-holds-"));
+    try {
+      const file = join(dir, "limit-holds.json");
+      let now = NOW;
+      const boot = () => new LimitResetClock({ accounts: () => accounts, now: () => now, file });
+      const first = boot();
+      first.noteRuntimeEvent("claude", started("t1"));
+      first.noteRuntimeEvent(undefined, { ...refused("t1", NOW + 50 * HOUR), limit: "engine" } as RuntimeEvent);
+      first.noteLimit("codex", undefined);
+      now = NOW + 10 * 60_000;
+      const restarted = boot();
+      expect(restarted.blockedUntil("claude"), "the engine is still held after the restart").toBe(NOW + 50 * HOUR);
+      expect(restarted.resetAt("claude")).toBe(NOW + 50 * HOUR);
+      expect(restarted.blockedUntil("codex"), "a hold that named no reset keeps its re-check time").toBe(NOW + UNNAMED_LIMIT_MS);
+      expect(restarted.resetAt("codex"), "and stays a guess").toBeNull();
+      restarted.noteRuntimeEvent("claude", started("t2"));
+      restarted.noteRuntimeEvent(undefined, completed("t2", true));
+      expect(boot().blockedUntil("claude"), "a turn that worked ends it for good").toBeNull();
+      now = NOW + UNNAMED_LIMIT_MS + REFUSAL_GRACE_FOR_TEST;
+      expect(boot().blockedUntil("codex")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("holds the engine until it is checked again when its refusal names a reset that already passed", () => {
+    const { instance } = clock();
+    instance.noteRuntimeEvent("claude", started("t1"));
+    instance.noteRuntimeEvent(undefined, { ...refused("t1", NOW - 5 * 60_000), limit: "engine" } as RuntimeEvent);
+    expect(instance.blockedUntil("claude")).toBe(NOW + UNNAMED_LIMIT_MS);
+    expect(instance.resetAt("claude"), "a past time is no reset time").toBeNull();
+  });
+
+  it("ends a Codex hold once fresh usage shows room and no window resetting at the hold's time, as after a plan upgrade", () => {
+    const codexAccounts = [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }];
+    const dir = mkdtempSync(join(tmpdir(), "omb-limit-holds-"));
+    try {
+      const file = join(dir, "limit-holds.json");
+      const boot = () => new LimitResetClock({ accounts: () => codexAccounts, now: () => NOW, file });
+      const first = boot();
+      first.noteRefusal("codex", NOW + 23 * HOUR);
+      first.noteUsage(report(codex([99, NOW + 2 * HOUR], [99, NOW + 23 * HOUR + 30_000])));
+      expect(first.blockedUntil("codex"), "usage still showing the window that refused keeps the hold").toBe(NOW + 23 * HOUR);
+      const restarted = boot();
+      expect(restarted.blockedUntil("codex"), "the hold outlives a restart").toBe(NOW + 23 * HOUR);
+      restarted.noteUsage(report(codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+      expect(restarted.blockedUntil("codex")).toBeNull();
+      expect(restarted.limit("codex")).toEqual(expect.objectContaining({ blocked: false, usedPercent: 8 }));
+      expect(boot().blockedUntil("codex"), "and stays gone after the next restart").toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a Codex hold when the usage was read before the refusal, as a cached read can be", () => {
+    const { instance } = clock();
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    const room = codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]);
+    instance.noteUsage({ fetchedAt: iso(NOW - 30_000), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from before the refusal").toBe(NOW + 23 * HOUR);
+    instance.noteUsage({ fetchedAt: iso(NOW), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
+  });
+
+  it("counts a Codex hold from its latest refusal, so a read between two refusals with the same reset does not end it", () => {
+    let now = NOW;
+    const instance = new LimitResetClock({ accounts: () => [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }], now: () => now });
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    now = NOW + 60_000;
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    const room = codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]);
+    instance.noteUsage({ fetchedAt: iso(NOW + 30_000), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from before the second refusal").toBe(NOW + 23 * HOUR);
+    instance.noteUsage({ fetchedAt: iso(NOW + 60_000), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
+  });
+
+  it("keeps a Claude hold whatever its usage shows, since Claude refuses on limits those windows do not show", () => {
+    const { instance } = clock();
+    instance.noteRefusal("claude", NOW + 23 * HOUR);
+    instance.noteUsage(report(claude([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+    expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
   });
 
   it("never holds the engine for one model's own limit", () => {

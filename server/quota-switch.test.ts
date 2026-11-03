@@ -9,6 +9,7 @@ import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
+import { toolFailureMessage } from "./drivers/tool-failure.ts";
 
 const QUOTA = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
 const defaultSelection = (): ModelSelection => ({ instanceId: "claude", model: "claude-default" });
@@ -185,7 +186,7 @@ describe("quota switch", () => {
       flags = undefined;
       deps.turnStops = { failureCause: () => cause, read: () => (flags ? { flags } : undefined) };
       deps.takeover = {
-        backups: () => backups, tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); },
+        backups: () => backups, tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return null; },
         moved: (_botId, threadId, from, to, resetsAt) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}) }); },
       };
       quota = createQuotaSwitch(deps);
@@ -214,6 +215,16 @@ describe("quota switch", () => {
       expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", ok: true });
       expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
       expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
+    });
+
+    it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {
+      const turn = begin(bot.threadId, { messageId: said("export the quota report") });
+      coordinator.endTurn(turn.id, { ok: false, text: "tool failed" });
+      cause = toolFailureMessage(["mcp__billing__get-quota"], []);
+      expect(await quota.turnFailed(thread(), { ...turn.event, stopReason: "tool_error" }, false)).toBeNull();
+      expect(thread().modelSelection).toEqual(defaultSelection());
+      expect(told).toEqual([]);
+      expect(resend).not.toHaveBeenCalled();
     });
 
     it("goes by the engine's own limit flag and its reset when it gives them", async () => {
@@ -333,6 +344,59 @@ describe("quota switch", () => {
       expect(thread().modelSelection).toEqual(CODEX);
       expect(resend).not.toHaveBeenCalled();
       expect(notices()).toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", ok: true }]);
+    });
+
+    describe("an AI that is signed out", () => {
+      const SIGNED_OUT = "Not logged in · Please run /login";
+      const NOTICE = "Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.";
+      let scopes: unknown[];
+      beforeEach(() => {
+        scopes = [];
+        deps.takeover = {
+          backups: (_botId, _from, scope) => { scopes.push(scope); return backups; },
+          tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return told.length === 1 ? NOTICE : null; },
+          moved: (_botId, threadId, from, to, resetsAt, scope) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}), ...(scope ? { scope } : {}) } as never); },
+        };
+        quota = createQuotaSwitch(deps);
+      });
+      /** The person's request that met their AI signed out. */
+      const signedOut = (record: Partial<QuotaRequest> = {}, why = SIGNED_OUT) => {
+        const turn = begin(bot.threadId, record);
+        coordinator.endTurn(turn.id, { ok: false, text: why });
+        cause = why;
+        return quota.turnFailed(thread(), { ...turn.event, stopReason: "auth_required" }, false);
+      };
+
+      it("says once in this conversation how to sign in again, then carries the request on with a backup the person chose", async () => {
+        backups = [CODEX];
+        const messageId = said("plan the launch");
+        await signedOut({ messageId });
+        expect(notices()).toEqual([
+          { name: `notice: ${NOTICE}`, ok: true, setup: true },
+          { name: "notice: continuing on Codex while Claude is signed out", ok: true },
+        ]);
+        expect(scopes).toEqual(["signed-out"]);
+        expect(thread().modelSelection).toEqual(CODEX);
+        expect(resend).toHaveBeenCalledTimes(1);
+        expect(resend.mock.calls[0]![2]).toMatchObject({ id: messageId });
+        expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "signed-out" } }]);
+        expect(moves, "so it goes back once Claude is signed in again").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX, scope: "signed-out" }]);
+      });
+
+      it("with no backup chosen moves nothing, and a second refusal adds no notice", async () => {
+        backups = [];
+        await signedOut({ messageId: said("hi") });
+        await signedOut({ messageId: said("hi again") });
+        expect(notices()).toEqual([{ name: `notice: ${NOTICE}`, ok: true, setup: true }]);
+        expect(thread().modelSelection).toEqual(defaultSelection());
+        expect(resend).not.toHaveBeenCalled();
+      });
+
+      it("takes an account out of credit that stopped the same way for no sign-out", async () => {
+        await signedOut({ messageId: said("hi") }, "Your Grok account is out of credits. Add credits with Grok, then run it again.");
+        expect(scopes).not.toContain("signed-out");
+        expect(notices().filter((tool) => tool.setup)).toEqual([]);
+      });
     });
   });
 

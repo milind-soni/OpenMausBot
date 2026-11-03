@@ -5,12 +5,19 @@ import { describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 const instances = vi.hoisted(() => [] as InstanceInfo[]);
+const recovery = vi.hoisted(() => ({ enabled: true }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: { enabled: true } } }, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: recovery } }, dispatch: vi.fn() }) };
 });
 
-const { FallbackChain } = await import("./ModelSection");
+vi.mock("../ModelPicker", () => ({
+  ModelPicker: ({ label }: { label: ReactNode }) => label,
+  EffortRow: () => null,
+}));
+
+const { FallbackChain, ModelSection } = await import("./ModelSection");
+const { BotEditorContext } = await import("./BotEditorContext");
 
 const engine = (instanceId: string, displayName: string, options: string[], authenticated = true) => ({
   instanceId, displayName, driverKind: "openai-compat", enabled: true,
@@ -46,8 +53,32 @@ describe("a bot's backup models", () => {
     instances.pop();
   });
 
+  it("says the list works on its own, with Automatic recovery off as well as on", () => {
+    for (const enabled of [true, false]) {
+      recovery.enabled = enabled;
+      const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange: vi.fn() }));
+      expect(markup).toContain("Used in order, with no other setting, when this bot&#x27;s AI is at its usage limit or the provider proves a request never started.");
+      expect(markup).not.toMatch(/Automatic recovery|inactive/);
+    }
+    recovery.enabled = true;
+  });
+
   it("keeps showing a saved model the engine no longer lists", () => {
     const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-old" }]), onChange: vi.fn() }));
     expect(markup).toMatch(/aria-label="Model for Codex"[^>]*>.*<option value="gpt-old" selected="">gpt-old<\/option>/);
+  });
+});
+
+describe("the bot's model in Bot settings", () => {
+  const hint = "A new bot starts on this installation&#x27;s default model unless you pick another here. To switch automatically when this model is at its usage limit, add backup models below.";
+  const render = (draft: boolean) => renderToStaticMarkup(createElement(BotEditorContext.Provider, { value: { request: vi.fn() as never, draft } },
+    createElement(ModelSection, { bot: bot(undefined) })));
+
+  it("says where a new bot's model comes from and points to backup models", () => {
+    expect(render(false)).toContain(hint);
+  });
+
+  it("leaves the hint out while a bot is still being made", () => {
+    expect(render(true)).not.toContain(hint);
   });
 });

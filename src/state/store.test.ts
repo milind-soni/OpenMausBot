@@ -1134,6 +1134,17 @@ describe("task rename", () => {
     expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-1")?.title).toBe("Renamed");
     expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-2")?.title).toBe("Other");
   });
+
+  it("archives and unarchives a channel task in local state immediately", () => {
+    const group = {
+      id: "room", threadId: "room-task-1", name: "Launch", memberIds: [], defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, createdAt: 1, messages: [],
+      tasks: [{ threadId: "room-task-1", title: "Open", createdAt: 1 }, { threadId: "room-task-2", title: "Done", createdAt: 2 }],
+    } satisfies Group;
+    const archived = reducer({ ...initialState, groups: [group] }, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: 1234 });
+    expect(archived.groups[0]?.tasks?.map((task) => task.archivedAt)).toEqual([undefined, 1234]);
+    const unarchived = reducer(archived, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: null });
+    expect(unarchived.groups[0]?.tasks?.[1]?.archivedAt).toBeUndefined();
+  });
 });
 
 describe("config status", () => {
@@ -1333,6 +1344,14 @@ describe("optimistic sent messages", () => {
       });
       expect(visibleMessages(restored.bots[0]!).map((message) => message.text)).toEqual(["Ready", "first try", "old answer"]);
       expect(restored.bots[0]?.messages).toEqual([root, question, answer]);
+    });
+
+    it("hands back the same branch for the same transcript and leaf", () => {
+      const shown = conversation().bots[0]!;
+      const branch = visibleMessages(shown);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: answer.id })).toBe(branch);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: question.id }).map((message) => message.id)).toEqual([root.id, question.id]);
+      expect(visibleMessages({ messages: [...shown.messages], activeLeafId: answer.id })).not.toBe(branch);
     });
   });
 
@@ -2881,7 +2900,7 @@ describe("restoring the open conversation", () => {
       });
       vi.stubGlobal("EventSource", FixtureEventSource);
       vi.stubGlobal("fetch", (path: string) =>
-        path.startsWith("/api/bots?") ? json({ bots: [first, second], groups: [room] }) : json(answers[path] ?? {}),
+        path.startsWith("/api/bots?") ? json({ bots: [first, second], groups: [room] }) : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}),
       );
 
       container = document.createElement("div");
@@ -2921,7 +2940,7 @@ describe("restoring the open conversation", () => {
         "/api/groups/room-1/queue/q-room/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "images" },
         "/api/bots/bot-1/queue/q-plain/steer": { ok: true, queued: true, threadId: "bot-1-thread" },
       };
-      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path] ?? {}))));
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}))));
 
       const settled = vi.fn();
       flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-plain", onSettled: settled }));

@@ -45,6 +45,7 @@ function fixture() {
   const bot = store.createBot({ name: "Scout" });
   const cfg = { vps: { sshAlias: "production-vps" } } as AppConfig;
   const activeVpsThreads = new Set<string>();
+  const privateThreads = new Set<string>();
   // Only what a vpsAlias patch touches; any other dependency is absent, and a route that reached for one would throw.
   const deps = {
     store,
@@ -56,6 +57,9 @@ function fixture() {
     audienceChanged: () => {},
     assertTeamComputerChangeIdle: () => {},
     routines: () => null,
+    // A member's session may chat with this bot: the level that still can't move it or change what it may do.
+    levelOf: () => "chat",
+    mainThreadTasks: (botId: string) => store.tasks(botId).filter((task) => !privateThreads.has(task.threadId)),
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
   const patch = async (botId: string, body: Record<string, unknown>, as: { auth?: RequestAuth; headers?: Record<string, string> } = {}) => {
@@ -76,7 +80,7 @@ function fixture() {
     expect(sent).toHaveLength(1);
     return sent[0]!;
   };
-  return { store, bot, activeVpsThreads, patch };
+  return { store, bot, activeVpsThreads, privateThreads, patch };
 }
 
 describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
@@ -311,6 +315,14 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(store.bot(bot.id)?.phoneApps).toEqual({});
   });
 
+  it("refuses an archived conversation, which the main-thread resolver skips", async () => {
+    const { store, bot, patch } = fixture();
+    const archived = store.createTask(bot.id, "Done", false)!;
+    store.patchTask(bot.id, archived.threadId, { archivedAt: Date.now() });
+    expect((await patch(bot.id, { mainThreadChoice: archived.threadId })).status).toBe(400);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+
   it("refuses a client session and a paired device", async () => {
     const { store, bot, patch } = fixture();
 
@@ -320,5 +332,46 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.phoneApps).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id mainThreadChoice", () => {
+  it("stores the conversation the person chose, clears it with null, and refuses a routine run or another bot's thread", async () => {
+    const { store, bot, patch } = fixture();
+    const chosen = store.createTask(bot.id, "Chosen", false)!;
+    const run = store.createTask(bot.id, "Run", false)!;
+    store.patchTask(bot.id, run.threadId, { routineRunId: "run-1" });
+    const other = store.createBot({ name: "Other" });
+
+    expect((await patch(bot.id, { mainThreadChoice: chosen.threadId })).status).toBe(200);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBe(chosen.threadId);
+
+    for (const refused of [run.threadId, other.threadId, "missing", 7]) {
+      expect((await patch(bot.id, { mainThreadChoice: refused })).status).toBe(400);
+    }
+    expect(store.bot(bot.id)?.mainThreadChoice).toBe(chosen.threadId);
+
+    expect((await patch(bot.id, { mainThreadChoice: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+
+  it("refuses a conversation the main-thread resolver can't pick, the same way as an unknown id", async () => {
+    const { store, bot, patch, privateThreads } = fixture();
+    const hidden = store.createTask(bot.id, "Private", false)!;
+    privateThreads.add(hidden.threadId);
+    const refused = await patch(bot.id, { mainThreadChoice: hidden.threadId });
+    const unknown = await patch(bot.id, { mainThreadChoice: "missing" });
+    expect(refused).toEqual(unknown);
+    expect(refused.status).toBe(400);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+
+  it("refuses a client session and a paired device", async () => {
+    const { store, bot, patch } = fixture();
+    const client = await patch(bot.id, { mainThreadChoice: bot.threadId }, { auth: { kind: "session", via: "bearer", scopes: ["client"], session: { id: "s-member", email: "member@example.com", label: "Front desk" } } as unknown as RequestAuth });
+    const paired = await patch(bot.id, { mainThreadChoice: bot.threadId }, { headers: { "x-openmausbot-companion": "1" } });
+    expect(client.status).toBe(403);
+    expect(paired.status).toBe(403);
+    expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
   });
 });

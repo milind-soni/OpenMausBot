@@ -47,12 +47,16 @@ export interface EngineFolder {
   shared: readonly string[];
 }
 
+/** kimi-code 2.4.1 (resolveKimiCodeOAuthKey) names a kimi.ai sign-in after its region's OAuth host and API address. */
+const KIMI_AI_SIGN_IN = `credentials/kimi-code-env-${createHash("sha256")
+  .update(JSON.stringify({ oauthHost: "https://auth.kimi.ai", baseUrl: "https://api.kimi.ai/coding/v1" })).digest("hex").slice(0, 16)}.json`;
+
 /** File names as each engine's sign-in keeps them (the drivers' own sign-in checks read the same ones). */
 export const ENGINE_FOLDERS: readonly EngineFolder[] = [
   { env: "CLAUDE_CONFIG_DIR", home: ".claude", shared: [".credentials.json"] },
   { env: "CODEX_HOME", home: ".codex", shared: ["auth.json", "config.toml"] },
   { env: "GROK_HOME", home: ".grok", shared: ["auth.json", "config.toml"] },
-  { env: "KIMI_CODE_HOME", home: ".kimi-code", shared: ["credentials/kimi-code.json", "config.toml"] },
+  { env: "KIMI_CODE_HOME", home: ".kimi-code", shared: ["credentials/kimi-code.json", KIMI_AI_SIGN_IN, "config.toml"] },
   { env: "DSH_HOME", home: ".dsh", shared: [".credentials.yaml", ".env"] },
   { env: "FACTORY_HOME_OVERRIDE", home: "", shared: [".factory/auth.v2.file", ".factory/auth.v2.keyring", ".factory/settings.json"] },
   { env: "XDG_CONFIG_HOME", home: ".config", shared: ["muse/auth.json"] },

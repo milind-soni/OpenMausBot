@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FileStamp, PageResult, ProcessEntry } from "./wait-probes.ts";
 import { CLOUD_IDLE_AWAKE_MS, createCloudPower } from "./cloud-power.ts";
-import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { describeCondition, WAIT_WAKE_MS, WaitManager, waitList, type NewWaitCondition, type WaitManagerOptions, type WaitNotice, type WaitRecord } from "./waits.ts";
 
 const T0 = 1_800_000_000_000;
@@ -184,10 +183,9 @@ describe("WaitManager", () => {
   it("holds the line while a turn runs in the chat, then posts it once, even across a restart", async () => {
     const h = harness();
     await h.create({ kind: "file_exists", path: "/r.txt" }, { followUp: "Go." });
-    expect(h.manager.count("bot-1", "t-1")).toBe(1);
+    expect(h.manager.list("bot-1")).toHaveLength(1);
     h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
     expect(h.manager.list("bot-1")).toEqual([]);
-    expect(h.manager.count("bot-1", "t-1")).toBe(0);
     expect(h.manager.owners()).toEqual(["bot-1"]);
     const storedAtFollowUp: number[] = [];
     h.followUp.mockImplementation(() => { storedAtFollowUp.push(JSON.parse(readFileSync(h.file, "utf8")).waits.length); });
@@ -391,23 +389,11 @@ describe("WaitManager", () => {
     const { wait } = await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Go." }) as { wait: WaitRecord };
     expect(h.manager.cancel(wait.id, "bot-2")).toBeNull();
     expect(h.manager.list("bot-1")).toHaveLength(1);
-    expect([h.manager.count("bot-1", "t-1"), h.manager.count("bot-2", "t-1")]).toEqual([1, 0]);
+    expect(h.manager.list("bot-2")).toEqual([]);
     expect(h.manager.cancel(wait.id, "bot-1")?.id).toBe(wait.id);
-    expect(h.manager.count("bot-1", "t-1")).toBe(0);
     expect(h.settleCard.mock.calls.map(([, how]) => how)).toEqual(["cancelled"]);
     expect(h.manager.list("bot-1")).toEqual([]);
     expect(h.reload().owners()).toEqual([]);
-  });
-
-  it("counts only this chat's waits, so list_waits and cancel_wait are listed in that chat and not in the bot's others", async () => {
-    const h = harness();
-    await h.create({ kind: "file_exists", path: "/r" }, { threadId: "t-1" });
-    // As server/index.ts sets OMB_ACTIVE_WAITS for a turn of bot-1 in a chat.
-    const listed = (threadId: string) => availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "bot-1", OMB_ACTIVE_WAITS: h.manager.count("bot-1", threadId) ? "1" : "0" }))
-      .map((tool) => tool.name).filter((name) => ["wait_until", "list_waits", "cancel_wait"].includes(name));
-    expect([h.manager.count("bot-1", "t-1"), h.manager.count("bot-1", "t-2")]).toEqual([1, 0]);
-    expect(listed("t-2")).toEqual(["wait_until"]);
-    expect(listed("t-1")).toEqual(["wait_until", "list_waits", "cancel_wait"]);
   });
 
   it("removes a deleted bot's waits and nobody else's", async () => {

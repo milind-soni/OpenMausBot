@@ -23,6 +23,16 @@ describe("ToolActivity in Simple mode", () => {
     expect(html).toContain("mcp__omb__computer_batch");
   });
 
+  it("shows the line the harness wrote for an MCP server change, in both modes, with the tool's name in the details", () => {
+    const tool = { name: "mcp__agents__mcp_server", label: "Added MCP server linear · Turned on · Test: needs sign-in", ok: true };
+    for (const advanced of [false, true]) {
+      mode.advanced = advanced;
+      const html = render(tool);
+      expect(html, `advanced ${advanced}`).toContain("Added MCP server linear · Turned on · Test: needs sign-in · Completed · Tool details");
+      expect(html, `advanced ${advanced}`).toMatch(/data-testid="tool-name">mcp__agents__mcp_server</);
+    }
+  });
+
   it("keeps a command off the row, where it reads as a plain step", () => {
     const html = render({ name: "Bash", ok: false, summary: "pnpm test --filter api", input: "pnpm test --filter api" });
     expect(html).toContain("Run a command · Failed · Tool details");

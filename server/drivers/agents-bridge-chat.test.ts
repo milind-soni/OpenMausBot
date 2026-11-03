@@ -45,6 +45,8 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
       return;
     }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     requests.push(JSON.parse(data) as ChatRequest);
     if (requests.length === 1) calls(response, "call_guess", "agents_use_tool", { name: "schedule_task", arguments: { every: "morning" } });
@@ -95,10 +97,9 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
   expect(tools).toEqual([false, true]);
   expect(recorder.events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text" && event.text === "The tool for that is create_trigger.")).toBe(true);
 
-  // It ends the way any turn with a failed tool call ends on this runtime,
-  // not as a transport that broke under it.
+  // This fixture is on this machine, so the model counts as local: having searched and answered, it is not failed for
+  // its first guess, and nothing reads as a transport that broke under it.
   const errors = recorder.events.flatMap((event) => event.type === "runtime.error" ? [event.message] : []);
-  expect(errors.join("\n")).not.toMatch(/MCP request failed|MCP session closed|execution outcome may be uncertain/);
-  expect(completed).toMatchObject({ ok: false });
-  expect(errors).toEqual([expect.stringContaining("One or more tool operations failed or were denied")]);
+  expect(completed).toMatchObject({ ok: true });
+  expect(errors).toEqual([]);
 }, 30_000);

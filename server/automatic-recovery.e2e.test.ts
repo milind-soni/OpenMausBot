@@ -97,7 +97,7 @@ async function withRecoveryFixture(
       const { instances } = await api("GET", "/api/instances") as { instances: any[] };
       return instances.find((instance) => instance.instanceId === "codex")?.models.options.some((option: any) => option.id === "gpt-fake-default");
     }, { timeout: 20_000 }).toBe(true);
-    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Problems to look at turn
     // of its own on Claude: the backup engine, whose prompts these tests count. Stepped down, only the runs under test run.
     const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
     const starter = bots.find((bot) => bot.chiefOfStaff)!;
@@ -262,8 +262,8 @@ it("recovers a coordinated specialist and returns its result to the Chief exactl
   });
 }, 90_000);
 
-it("uses the ordered bot list only for proven pre-prompt failures and leaves defaults and siblings unchanged", async () => {
-  await withRecoveryFixture({}, async ({ api, control, calls, backupPrompts, evidence }) => {
+it.each([true, false])("uses the ordered bot list only for proven pre-prompt failures and leaves defaults and siblings unchanged (Automatic recovery on: %s)", async (enabled) => {
+  await withRecoveryFixture({ enabled }, async ({ api, control, calls, backupPrompts, evidence }) => {
     const { bot } = await control("new-bot", "--name", "Ordered startup fallback");
     const threadId = bot.activeTaskId;
     await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
@@ -287,16 +287,16 @@ it("uses the ordered bot list only for proven pre-prompt failures and leaves def
 }, 90_000);
 
 it.each([
-  { name: "disabled", enabled: false },
+  { name: "disabled and the bot has no backups of its own", enabled: false, ownBackups: false },
   { name: "prompt already accepted", method: "session/prompt" },
   { name: "partial output", method: "session/prompt", afterOutput: true },
   { name: "authentication failure", error: { code: -32603, message: "Authentication required: invalid API key" } },
-])("does not automatically replay when $name", async ({ name: _name, ...options }) => {
+])("does not automatically replay when $name", async ({ name: _name, ownBackups = true, ...options }) => {
   await withRecoveryFixture(options, async ({ api, control, calls, backupPrompts }) => {
     const { bot } = await control("new-bot", "--name", "No replay");
     const threadId = bot.activeTaskId;
     await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
-    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
+    if (ownBackups) await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "DO_NOT_REPLAY_THIS_9S");
     expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status)
       .toBe(options.afterOutput ? "settled" : "failed");

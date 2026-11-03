@@ -25,7 +25,9 @@ client; the cwd matches when quoted, resolved, or (on Windows) in another
 case, and the test's workspace.yaml uses Copilot CLI 1.0.105's own fields. Only Copilot's discovery closes stdin and waits up to two seconds for
 the agent to exit before killing it; a custom ACP agent is killed at once, and
 an agent that ignores EOF is still stopped once the wait is over. The tests also cover the model applied over ACP and never on argv,
-a model switch between turns, a `session/request_permission` shown as an
+a model switch between turns, a turn on Auto when the session leaves the model
+`currentValue` unset (Copilot CLI 1.0.105) followed by an explicit model that
+still has to be confirmed, a `session/request_permission` shown as an
 approval card and answered with the person's choice, the fallback to Auto with a notice when the plan
 no longer offers a saved model, and a missing login reported as a sign-in step.
 They also check that `COPILOT_ALLOW_ALL` and a server-wide `GITHUB_TOKEN` never

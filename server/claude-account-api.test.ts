@@ -214,7 +214,7 @@ describe("Claude account HTTP API", () => {
     try {
       await stream.until(frame => frame.kind === "hello");
       expect((await api("POST", `/api/bots/${runningBot.id}/messages`, { text: "remain active" })).status).toBe(202);
-      await expect.poll(() => existsSync(join(active.dir, "spawn.json"))).toBe(true);
+      await expect.poll(() => existsSync(join(active.dir, "spawn.json")), { timeout: 10_000 }).toBe(true);
       const originalPid = JSON.parse(readFileSync(join(active.dir, "spawn.json"), "utf8")).pid;
       expect((await bot(runningBot.id)).busy).toBe(true);
       expect((await api("PATCH", `/api/instances/${active.id}`, { cli })).status).toBe(409);

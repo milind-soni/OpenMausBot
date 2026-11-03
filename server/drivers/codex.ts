@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { codexConfigMcp, codexConfigRunsServer, mountedMcpServerName } from "./codex-mcp-names.ts";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
-import { laterStartup, openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { laterStartup, openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
@@ -56,7 +56,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts";
+import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -511,13 +511,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             if (generation === planGeneration && !planSigningOut && !disposed && (!kept || catalog.options.length)) models = catalog;
           }
         } catch (error) {
-          if (!kept) throw error;
+          if (!kept) throw error; unconfirmedModelCatalog(kept);
         }
       } else {
         try {
           const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
-          if (resolved.options.length) models = resolved;
-        } catch {}
+          if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+        } catch { unconfirmedModelCatalog(models); }
       }
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
@@ -717,7 +717,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.composioOwn) mountSelected(OWN_APPS_SERVER, `openmausbot_${OWN_APPS_SERVER}`, turn.integrations.composioOwn);
         if (turn.integrations?.agents) {
           // OpenMausBot's own coordination tools never ask: "auto" quiets only read-only tools.
-          mountSelected("agents", "agents", turn.integrations.agents, "approve");
+          mountSelected("agents", "agents", turn.integrations.agents, "approve"); if (selectedMcp.has("agents")) appServerArgs.push("-c", `mcp_servers.agents.tool_timeout_sec=${AGENTS_TOOL_TIMEOUT_SECONDS}`);
         }
         if (turn.integrations?.localComputer) {
           mountSelected("computer", "computer", turn.integrations.localComputer);
@@ -963,11 +963,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const isPermission = legacy || isMcpPermission || isAdditionalPermission ||
           method === "item/commandExecution/requestApproval" ||
           method === "item/fileChange/requestApproval";
-        // An MCP elicitation asks for real input, not permission; unknown server requests fail closed
-        // instead of being accepted by Full access.
+        // An MCP elicitation asks for real input, not permission; unknown server requests fail closed instead of being accepted by Full access.
         if (!isQuestion && !isPermission) {
           if (isMcpElicitation) {
             send({ jsonrpc: "2.0", id: msg.id, result: { action: "decline" } });
+            emit({ ...base(threadId, turnId), type: "runtime.notice", message: `${boundedLabel(params.serverName) ?? "An MCP server"} asked for input OpenMausBot can't show yet, so the request was declined.` });
           } else {
             send({
               jsonrpc: "2.0",

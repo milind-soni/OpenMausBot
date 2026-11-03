@@ -10,6 +10,7 @@ import { resetMarkers, useEngineLimits, type ResetMarker } from "@/lib/limit-res
 import { automationsFrom, automationStatus } from "@/lib/automations";
 import type { RoutineRun } from "@/lib/routines";
 import { api, useStore } from "@/state/store";
+import { useRoutineRunsFrom } from "@/state/older-routine-runs";
 import { CalendarGrid, EventDetails, EventEditor, QuickComposer, type CalendarEventItem, type EventKind, type EventSeed } from "../RoutineCalendarPage";
 import type { ResetDrop } from "../routines/LimitResetMarkers";
 
@@ -33,6 +34,7 @@ export function AutomationsCalendar({ botFilter, selectedAutomationId, onOpenAut
   const visibleBots = state.bots.filter((bot) => !bot.hidden);
   const rangeStart = days === 7 ? startOfWeek(anchor) : startOfDay(anchor);
   const rangeEnd = addDays(rangeStart, days);
+  useRoutineRunsFrom(rangeStart);
   const markers = resetMarkers(useEngineLimits(), rangeStart, rangeEnd);
 
   const loadCalls = useCallback(async () => {

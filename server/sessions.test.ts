@@ -332,6 +332,32 @@ describe("sessions", () => {
     expect(registry.isLive(email.session.id)).toBe(false);
   });
 
+  it("with recheckMs, reads membership at most that often, at once after membershipChanged(): a removal still ends access promptly", () => {
+    let allowed = true;
+    const resolve = vi.fn((_email: string) => allowed ? ["client" as const] : null);
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: resolve, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    resolve.mockClear();
+    for (let i = 0; i < 1_000; i++) expect(registry.isLive(email.session.id)).toBe(true);
+    expect(resolve.mock.calls.length).toBeLessThanOrEqual(1);
+    allowed = false;
+    registry.membershipChanged();
+    expect(registry.isLive(email.session.id)).toBe(false);
+    expect(registry.authenticate(email.token)).toBeNull();
+  });
+
+  it("with recheckMs, a sign-in list edited outside the app ends access within that time", () => {
+    let allowed = true;
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => allowed ? ["client"] : null, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    registry.recheckMembership();
+    allowed = false;
+    clock += 1_999;
+    expect(registry.isLive(email.session.id)).toBe(true);
+    clock += 1;
+    expect(registry.isLive(email.session.id)).toBe(false);
+  });
+
   it("builds one membership resolver per pass and skips snapshots with no eligible account sessions", () => {
     const resolve = vi.fn((_email: string) => ["client" as const]);
     const snapshot = vi.fn(() => resolve);
@@ -651,6 +677,22 @@ describe("a member's own phone on a Team Cloud", () => {
     expect(registry.authenticate(phone.token)!.expiresAt, "someone else's check moves nothing").toBe(end);
     clock = end;
     expect(registry.authenticate(phone.token), "no check within the hour: removed from the team, the phone signs out").toBeNull();
+  });
+
+  it("ends every session of a removed member, one stored without a role too; a role change ends only the other roles", () => {
+    const desktop = fromAdmin();
+    registry.close();
+    const stored = JSON.parse(readFileSync(file(), "utf8"));
+    for (const session of stored.sessions) delete session.teamRole;
+    writeFileSync(file(), JSON.stringify(stored));
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    expect(registry.revokeMember(ADA.email)).toBe(1);
+    expect(registry.list().map((session) => session.id)).not.toContain(desktop.id);
+    const member = fromAdmin();
+    const admin = fromAdmin({ ...ADA, role: "admin" });
+    expect(registry.revokeMember(ADA.email, "admin")).toBe(1);
+    expect(registry.list().map((session) => session.id)).toEqual(expect.arrayContaining([admin.id]));
+    expect(registry.list().map((session) => session.id)).not.toContain(member.id);
   });
 
   it("never stretches a session the Admin opened itself", () => {

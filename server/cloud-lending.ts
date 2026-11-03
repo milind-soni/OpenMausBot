@@ -41,6 +41,11 @@ export function cloudLendingRefusalText(why: CloudLendingRefusal | "memory-chang
   return `Only conversations you start with a bot, and routines you wrote, can use ${yours}. Start a new conversation with this bot to use it.`;
 }
 
+/** On a team nobody's own computer is lent: the team's bots use the team's cloud computer. */
+export function teamLendingRefusal(team: string): string {
+  return `${team}'s bots never use anyone's own computer; they use ${team}'s cloud computer.`;
+}
+
 export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
   const { request } = turn;
   if (!request?.messageId || request.stopped || !request.generations.has(turn.generation)) return "unproven";
@@ -76,9 +81,10 @@ export function ownerOnlyConversation(
     (!answeredByPerson(line.card) || ownerPerson(cardAnswerer(line.card!))));
 }
 
-/** The harness's own settlements (dismissed, unavailable, or a bot's change applied on its own) carry nobody's words. */
+/** The harness's own settlements (dismissed, unavailable, a bot's change applied on its own, or a question a bot decided)
+ * carry nobody's words. */
 export function answeredByPerson(card: Card | undefined): boolean {
-  if (!card) return false;
+  if (!card || card.answeredBy?.kind === "bot") return false;
   return (Boolean(card.answered) && card.answered !== "unavailable" && card.dismissed !== true && card.autoApplied !== true) || Boolean(card.answeredText);
 }
 

@@ -29,6 +29,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
           }
         />
         {!draft && <ThreadModelsLine bot={bot} className="mt-3" />}
+        {!draft && <div className="mt-3 text-[13px] text-ink-secondary">{t("model.section.installationDefault")}</div>}
       </div>
 
       <EffortRow
@@ -83,7 +84,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
   const nameOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId)?.displayName ?? instanceId;
   const modelsOf = (entry: NonNullable<Bot["fallback"]>[number]) => {
     const instance = state.instances.find((candidate) => candidate.instanceId === entry.instanceId);
-    const offered = instance?.models.options.filter((model) => instance.snapshot.authenticated !== false || model.custom) ?? [];
+    const offered = instance?.models.options.filter((model) => !model.orgBlocked && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
     return offered.some((model) => model.id === entry.model) ? offered : [{ id: entry.model, label: entry.model }, ...offered];
   };
 
@@ -97,9 +98,8 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
     <div className="rounded-xl bg-card p-4">
       <div className="text-[15px] font-medium text-ink">{t("model.fallback.title")}</div>
       <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {t("model.fallback.help")}
+        {t("model.fallback.uses")}
       </div>
-      {!state.config?.automaticRecovery?.enabled && <p className="mt-2 text-[12px] text-ink-secondary">{t("model.fallback.off")}</p>}
       {chain.length > 0 && (
         <ol className="mt-3 flex flex-col gap-1">
           {chain.map((entry, index) => (

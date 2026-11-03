@@ -100,6 +100,8 @@ beforeAll(async () => {
   upstream = createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "fixture-model" }] }));
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not.
+    if (req.method === "GET") { res.statusCode = 404; return res.end(); }
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const request = JSON.parse(raw || "{}") as ChatRequest;
@@ -147,6 +149,7 @@ beforeAll(async () => {
     env: {
       PATH: [fakebin, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
       HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
+      OMB_AGENTS_TOOL_BRIDGE: "0",
       APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui,
@@ -163,7 +166,7 @@ beforeAll(async () => {
     try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
   }, Boolean);
   await api("PATCH", "/api/config", { openaiCompat: { key: "fixture-key", url: `http://127.0.0.1:${upstreamPort}/v1`, model: "fixture-model" } });
-  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at turn
   // of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
   await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
@@ -214,9 +217,10 @@ describe("openai-compat Local VM tools", () => {
     const continuation = requests[2];
     expect(toolNames(continuation), JSON.stringify({ tools: toolNames(continuation), requests: requests.length })).toContain("computer_screenshot");
     expect(toolNames(requests[0])).toContain("agents_select_computer");
-    // The continuation still has the agents tools, but not a second pick: the selection route refuses one there.
-    expect(toolNames(continuation)).toContain("agents_coordinate_bots");
-    expect(toolNames(continuation)).not.toContain("agents_select_computer");
+    // The continuation is listed the agents tools its request was, select_computer too: the route refuses a second pick.
+    const agentsTools = (request: ChatRequest | undefined) => toolNames(request).filter((name) => name.startsWith("agents_"));
+    expect(agentsTools(continuation)).toEqual(agentsTools(requests[0]));
+    expect(toolNames(continuation)).toContain("agents_select_computer");
     const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
     expect(shown.filter((message: any) => message.card)).toEqual([]);
   }, 60_000);

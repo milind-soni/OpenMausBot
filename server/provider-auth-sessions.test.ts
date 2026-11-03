@@ -17,6 +17,31 @@ function fixture() {
   return { sessions: new ProviderAuthSessions(), instance, auth };
 }
 
+describe("a finished sign-in", () => {
+  it("is told for the AI it signed in to, whichever way it finished, and never for a flow still waiting or one that failed", async () => {
+    const { instance, auth } = fixture();
+    const signedIn = vi.fn();
+    const sessions = new ProviderAuthSessions({ signedIn });
+    await sessions.start(instance, "owner");
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn).not.toHaveBeenCalled();
+    instance.getAuthentication.mockResolvedValueOnce({ ...auth, phase: "failed" } as never);
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn).not.toHaveBeenCalled();
+
+    await sessions.start(instance, "owner");
+    instance.getAuthentication.mockResolvedValueOnce({ ...auth, phase: "succeeded" } as never);
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn).toHaveBeenLastCalledWith("codex");
+
+    await sessions.start(instance, "owner");
+    await sessions.complete("codex", "owner", "random-flow", "https://localhost/callback?code=x");
+    instance.startAuthentication.mockResolvedValueOnce({ ...auth, phase: "succeeded" });
+    await sessions.start({ ...instance, instanceId: "claude" }, "owner");
+    expect(signedIn.mock.calls).toEqual([["codex"], ["codex"], ["claude"]]);
+  });
+});
+
 describe("provider login ownership", () => {
   it("forgets only the replaced provider's login reservation", async () => {
     const { sessions, instance } = fixture();

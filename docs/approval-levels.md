@@ -61,7 +61,7 @@ one, every approval decision OMB makes in that conversation uses it. How far
 that reaches depends on who runs the tools:
 
 - **API engines** (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras,
-  Groq, Meta): OMB's tool gate reads the level before each tool call, so the
+  Groq, Greenference, Meta): OMB's tool gate reads the level before each tool call, so the
   change applies from the next call, up or down.
 - **Engines with their own modes** (Codex, Claude, Cursor, Antigravity, Grok
   Build, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
@@ -126,7 +126,8 @@ Teammates start at Full access like every bot, but a person may have set one
 lower, and switching each thread a Chief opens back up by hand was where a
 team's owner spent their day. So **a Chief of Staff's level flows down**. Work
 it hands out with `coordinate_bots` — into the work thread the Chief's
-conversation has with a teammate, or a fresh thread with `thread: "new"` —
+conversation has with a teammate, a fresh thread with `thread: "new"`, or a
+thread it opened earlier, named by its id —
 starts at the level of the Chief conversation it came from: Auto-accept edits,
 Approve for me, or Full access. The teammate's thread is switched to that
 level, keeps it, and opens with a line saying so ("Approve for me — delegated
@@ -270,7 +271,7 @@ multi-question card renders its structured form on current apps instead.
 | Droid | Session mode `normal` (reads only) | not offered | Ask (no reviewer) | Session mode `auto-high`, plus automatic approval of remaining ACP permission requests |
 | Kimi, Hermes, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Pi | Pi's own tools run; computer control and custom MCP tools ask | not offered | Ask (no reviewer) | Custom MCP tools run without asking; computer-control confirms are approved |
-| API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |
+| API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Greenference, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |
 
 These settings apply on each turn, including resumed conversations. Switching
 to a different provider while on Custom requires leaving Custom first;

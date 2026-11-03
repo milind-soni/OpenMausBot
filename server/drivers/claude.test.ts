@@ -1100,6 +1100,35 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  it("shows an MCP server's question as an approval card and answers it on stdin", async () => {
+    const log = join(scratch, "control.ndjson");
+    await create("hang", {
+      FAKE_CLAUDE_ELICIT: JSON.stringify({ mcp_server_name: "github", message: "Allow access to your repos?", mode: "form", requested_schema: { type: "object", properties: {} } }),
+      FAKE_CLAUDE_CONTROL_LOG: log,
+    });
+    await instance.adapter.sendTurn({ threadId: "t-elicit", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestId: "elicitation:elicit-1", requestType: "permission", tool: "mcp__github", summary: "github: Allow access to your repos?", requiresExplicitApproval: true });
+    await expect(instance.adapter.respondToRequest("t-elicit", "elicitation:elicit-1", { behavior: "allow" })).resolves.toBe("allowed-once");
+    await vi.waitFor(() => expect(existsSync(log)).toBe(true));
+    expect(JSON.parse(readFileSync(log, "utf8"))).toEqual({ type: "control_response", response: { subtype: "success", request_id: "elicit-1", response: { action: "accept", content: {} } } });
+    await recorder.until((e) => e.type === "request.resolved" && e.requestId === "elicitation:elicit-1");
+    await expect(instance.adapter.respondToRequest("t-elicit", "elicitation:elicit-1", { behavior: "allow" })).resolves.toBe("unavailable");
+    await instance.adapter.interruptTurn("t-elicit");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("withdraws an MCP server's open question when the launch that asked it fails and is retried", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "elicit-launches");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create(undefined, { FAKE_CLAUDE_ELICIT: JSON.stringify({ mcp_server_name: "github", message: "Allow access?", mode: "form", requested_schema: { type: "object", properties: {} } }) });
+    await instance.adapter.sendTurn({ threadId: "t-elicit-retry", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    expect(recorder.events.filter((e) => e.type === "request.opened").map((e) => e.requestId)).toEqual(["elicitation:elicit-1"]);
+    expect(recorder.events.find((e) => e.type === "request.resolved" && e.requestId === "elicitation:elicit-1")).toMatchObject({ behavior: "deny", source: "system" });
+  });
+
   it("sends attached images as native blocks before text without logging their bytes", async () => {
     await create();
     const dump = join(scratch, "dump-images.json");
@@ -1553,6 +1582,88 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-compact-off", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+  });
+
+  describe("the bot's own settings file", () => {
+    const guard = { matcher: "Bash", hooks: [{ type: "command", command: "/opt/guards/no-force-push.sh" }] };
+    const botFolders = (name: string, settings: unknown) => {
+      const bot = join(scratch, `${name}-bot`), thread = join(scratch, `${name}-thread`);
+      mkdirSync(join(bot, ".claude"), { recursive: true });
+      mkdirSync(thread);
+      const file = join(bot, ".claude", "settings.json");
+      writeFileSync(file, JSON.stringify(settings));
+      return { bot, thread, file };
+    };
+
+    it("reaches a turn in a thread's own folder, beside OpenMausBot's own settings", async () => {
+      const dump = join(scratch, "bot-settings.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("reach", {
+        hooks: { PreToolUse: [guard], Stop: [{ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] }] },
+        enabledPlugins: { "guard@team": true },
+        permissions: { deny: ["Read(./.env)"], defaultMode: "bypassPermissions" },
+        env: { GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "false" },
+        model: 123,
+      });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings", botId: "b-settings", text: "hi", cwd: thread, botSettingsFile: file,
+        integrations: { hooks: { url: "http://127.0.0.1:1/hooks", token: "bearer" } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(realpathSync(seen.cwd)).toBe(realpathSync(thread));
+      expect(seen.settings.hooks.PreToolUse).toEqual([guard]);
+      expect(seen.settings.hooks.Stop).toHaveLength(2);
+      expect(seen.settings.hooks.Stop[0]).toEqual({ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] });
+      expect(Object.keys(seen.settings.hooks)).toEqual(expect.arrayContaining(Object.keys(claudeHookSettings("/helper.ts"))));
+      expect(seen.settings.enabledPlugins).toEqual({ "guard@team": true });
+      expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
+      expect(seen.settings.env).toMatchObject({ GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "true" });
+      expect(seen.settings).not.toHaveProperty("model");
+      expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+    });
+
+    it("is left to Claude Code when the turn runs in the folder that holds it", async () => {
+      const dump = join(scratch, "bot-settings-own-folder.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { bot, file } = botFolders("own-folder", { hooks: { PreToolUse: [guard] }, enabledPlugins: { "guard@team": true } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-own", text: "hi", cwd: bot, botSettingsFile: file });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.settings).not.toHaveProperty("enabledPlugins");
+      expect(seen.settings).not.toHaveProperty("hooks");
+    });
+
+    it("never reaches a guest's turn", async () => {
+      const dump = join(scratch, "bot-settings-guest.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create("echo", { FAKE_CLAUDE_VERSION: "2.1.284" });
+      const { thread, file } = botFolders("guest", { hooks: { PreToolUse: [guard] }, env: { GUARD_LEVEL: "strict" } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-guest", text: "hi", cwd: thread, botSettingsFile: file, approvalMode: "ask", guestConfined: true });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv).toContain("--restricted");
+      expect(seen.settings).not.toHaveProperty("hooks");
+      expect(seen.settings.env).not.toHaveProperty("GUARD_LEVEL");
+    });
+
+    it("starts a new process on the turn after it changes, and keeps the warm one while it does not", async () => {
+      const dump = join(scratch, "bot-settings-warm.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("warm", { enabledPlugins: { "guard@team": true } });
+      const turn = async (text: string) => {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-bot-settings-warm", text, cwd: thread, botSettingsFile: file });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        return JSON.parse(readFileSync(dump, "utf8"));
+      };
+      const first = await turn("one");
+      expect((await turn("two")).pid).toBe(first.pid);
+      writeFileSync(file, JSON.stringify({ enabledPlugins: { "guard@team": true, "review@team": true } }));
+      const changed = await turn("three");
+      expect(changed.pid).not.toBe(first.pid);
+      expect(changed.settings.enabledPlugins).toEqual({ "guard@team": true, "review@team": true });
+    });
   });
 
   it("launches isolated from the machine's own Claude Code configuration", async () => {

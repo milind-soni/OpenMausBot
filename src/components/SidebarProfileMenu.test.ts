@@ -580,6 +580,11 @@ describe("Simple mode's account menu", () => {
     expect(placeMenuItems(place({ bridge: undefined, switchable: false }), { owner: null, onCloudSettings })).toEqual([]);
   });
 
+  it("names a team's Cloud by the team", () => {
+    const team = placeMenuItems(place({ switchable: false, cloudHome: true, onLine: "" }), { owner: null, name: "Acme Labs", onCloudSettings: noop });
+    expect(team.map((item) => item.label)).toEqual(["Acme Labs"]);
+  });
+
   it("shows one Get the phone app row, dotted while this computer's phone is connected", () => {
     expect(simplePhoneItems({ connected: true, onGetApp: noop }).map((item) => [item.key, Boolean(item.trailing)])).toEqual([["phone-app", true]]);
     expect(simplePhoneItems({ connected: false, onGetApp: noop })[0]!.trailing).toBeUndefined();
@@ -595,6 +600,12 @@ describe("the usage meta", () => {
     const report = { providers: [provider({ weekly: window(12, "2026-10-30T12:00:00Z") }), provider({ weekly: window(31.6, "2026-10-28T12:00:00Z") }), provider({ ok: false, weekly: window(90) })] };
     expect(planUsageSummary(report, now)).toEqual({ value: "32% used", weekly: true, resets: "Resets tomorrow" });
     expect(planUsageSummary({ providers: [provider({ fiveHour: window(40, "2026-10-27T15:00:00Z") })] }, now)).toEqual({ value: "40% used", weekly: false, resets: "Resets in 3 hours" });
+  });
+
+  it("falls back to a plan's monthly budget when it has no rolling window", () => {
+    const report = { providers: [provider({ extra: [{ label: "Monthly spend", usedPercent: 9.3 }, { label: "Other", usedPercent: 80 }] })] };
+    expect(planUsageSummary(report, now)).toEqual({ value: "9% used" });
+    expect(planUsageSummary({ providers: [provider({ extra: [{ label: "Other", usedPercent: 80 }] })] }, now)).toBeNull();
   });
 
   it("shows nothing without a percent, not even the plan's name", () => {

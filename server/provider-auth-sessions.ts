@@ -16,6 +16,12 @@ const failure = (message: string, status: number) => Object.assign(new Error(mes
 
 export class ProviderAuthSessions {
   private readonly flows = new Map<string, Flow>();
+  /** A sign-in to this AI finished: whatever waited on it being signed out may use it again. */
+  private readonly signedIn: (instanceId: string) => void;
+
+  constructor(options: { signedIn?: (instanceId: string) => void } = {}) {
+    this.signedIn = options.signedIn ?? (() => {});
+  }
 
   /** A sign-in under way, until it expires: one whose provider call never returns stops counting then too. */
   get active(): boolean {
@@ -42,7 +48,10 @@ export class ProviderAuthSessions {
       flow.flowId = result.flowId;
       const expiry = Date.parse(result.expiresAt ?? "");
       if (Number.isFinite(expiry)) flow.expiresAt = expiry;
-      if (result.phase === "succeeded") this.flows.delete(instance.instanceId);
+      if (result.phase === "succeeded") {
+        this.flows.delete(instance.instanceId);
+        this.signedIn(instance.instanceId);
+      }
       return result;
     } catch (error) {
       if ((!resuming || flow.revoked) && this.flows.get(instance.instanceId) === flow) this.flows.delete(instance.instanceId);
@@ -68,6 +77,7 @@ export class ProviderAuthSessions {
     const status = await flow.instance.getAuthentication(flowId);
     if (flow.revoked) throw failure("This sign-in session ended.", 404);
     if (status.phase !== "waiting") flow.expiresAt = 0;
+    if (status.phase === "succeeded") this.signedIn(instanceId);
     return status;
   }
 
@@ -78,6 +88,7 @@ export class ProviderAuthSessions {
     try {
       await flow.instance.completeAuthentication(flowId, callbackUrl);
       if (this.flows.get(instanceId) === flow) this.flows.delete(instanceId);
+      this.signedIn(instanceId);
     } finally { flow.busy = false; }
   }
 

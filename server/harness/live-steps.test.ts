@@ -49,13 +49,13 @@ const last = () => offered.at(-1)!;
 
 describe("LiveSteps: what the call works on", () => {
   it("stamps the start event with its step and sends the status line's frame for it", () => {
-    const event = bash("cd ~/biber && OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz python3 scrape.py --pages 40");
+    const event = bash("cd ~/acme && OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz python3 scrape.py --pages 40");
     const stamped = steps.observe(event, false);
     expect(stamped).toMatchObject({ step: { activity: "command", target: "scrape.py" } });
     expect(offered).toEqual([]);
     steps.announce(stamped);
     expect(last()).toMatchObject({ type: "turn.progress", itemId: "call-1", activity: "command", target: "scrape.py", turnId: "turn-1" });
-    expect(last().detail).toBe("cd ~/biber && OPENAI_API_KEY=… python3 scrape.py --pages 40");
+    expect(last().detail).toBe("cd ~/acme && OPENAI_API_KEY=… python3 scrape.py --pages 40");
     expect(JSON.stringify(offered)).not.toContain("sk-proj");
   });
 
@@ -65,8 +65,8 @@ describe("LiveSteps: what the call works on", () => {
     expect(last()).toMatchObject({ provider: "codex", activity: "command", target: "pnpm test" });
     steps.announce(steps.observe(started("acpAgent", "acp-1", { title: "web_fetch", input: toolDetailPreview({ url: "https://www.linkedin.com/in/ada" }) }), false));
     expect(last()).toMatchObject({ provider: "acpAgent", activity: "fetch", target: "linkedin.com" });
-    steps.announce(steps.observe(started("claudeAgent", "cl-1", { title: "WebSearch", input: toolDetailPreview({ query: "Biber Dammbau" }) }), false));
-    expect(last()).toMatchObject({ activity: "web", target: "Biber Dammbau" });
+    steps.announce(steps.observe(started("claudeAgent", "cl-1", { title: "WebSearch", input: toolDetailPreview({ query: "Acme construction leads" }) }), false));
+    expect(last()).toMatchObject({ activity: "web", target: "Acme construction leads" });
   });
 
   it("leaves a call it cannot name as it was", () => {

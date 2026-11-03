@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
-import type { Routine } from "../../shared/routines";
+import type { Routine, RoutineRun } from "../../shared/routines";
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -23,7 +23,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { t } = await import("@/lib/i18n");
-const { EventDetails, PausedList } = await import("./RoutineCalendarPage");
+const { EventDetails, EventEditor, PausedList } = await import("./RoutineCalendarPage");
 
 const bot = {
   id: "runner", threadId: "execution", name: "Runner", title: "", description: "", color: "green",
@@ -103,11 +103,34 @@ describe("calendar event details drawer", () => {
     expect(html).not.toContain("Open group");
   });
 
+  it("shows a goal run that had no group as the bot's own, even after the routine was given a room", () => {
+    const roomGoal: Routine = { ...routine, target: "room-goal", groupId: "room" };
+    const run: RoutineRun = { id: "run", routineId: roomGoal.id, routineName: roomGoal.name, target: "room-goal", botId: bot.id, runOn: "maus", scheduledFor: 1, status: "running", manual: false, createdAt: 1 };
+    const html = renderToStaticMarkup(createElement(() => EventDetails({
+      item: { kind: "routine", id: roomGoal.id, at: 1, durationMinutes: 30, routine: roomGoal, run },
+      bots: [bot], onClose: vi.fn(), onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
+    })));
+    expect(html).toContain("Runner");
+    expect(html).not.toContain("Group unavailable");
+  });
+
   it("names its close button", () => {
     const onClose = vi.fn();
     const close = render(() => drawer(onClose)).find((node) => node.type === "button" && node.props["aria-label"] === t("routines.drawer.close"));
     expect(close).toBeDefined();
     close!.props.onClick!();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("calendar event editor", () => {
+  it("cannot save a room goal whose room is gone until another room is chosen", () => {
+    const orphaned: Routine = { ...routine, target: "room-goal", groupId: "gone" };
+    const html = renderToStaticMarkup(createElement(() => EventEditor({
+      seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine: orphaned },
+      bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
+    })));
+    expect(html).toContain("Room no longer exists");
+    expect(html).toMatch(/<button[^>]*\bdisabled=""[^>]*>(?:(?!<\/button>).)*Save<\/button>/s);
   });
 });

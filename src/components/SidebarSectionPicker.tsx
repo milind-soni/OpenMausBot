@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_ITEM, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
+import { departmentNames } from "./bot-sections";
 
 /** "Move to context": the sidebar sections in use, a field for a new one, and "remove from context". */
 export function SectionPicker({
@@ -42,13 +43,7 @@ export function SectionPicker({
     };
   }, [anchor, onClose]);
 
-  const sections = [
-    ...new Set([
-      ...(state.sections ?? []),
-      ...state.bots.filter((b) => !b.hidden && b.section).map((b) => b.section!),
-      ...state.groups.filter((g) => g.section).map((g) => g.section!),
-    ]),
-  ];
+  const sections = departmentNames(state);
 
   const assign = (section: string) => {
     onAssign(section);

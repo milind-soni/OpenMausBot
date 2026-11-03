@@ -165,6 +165,19 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     expect(html).not.toContain("No model providers are available.");
   });
 
+  it("on a paired desktop, sends a signed-out provider's sign-in to the host instead of offering one that cannot run", () => {
+    fixture.instances = [signedOut()];
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const html = menu(open(bot("claude", "claude-opus-5-5")).html);
+      expect(html).toContain("data-engine-setup-on-host");
+      expect(html).toContain("Set up Claude there");
+      expect(html).not.toContain("data-claude-sign-in");
+    } finally {
+      delete window.ogb;
+    }
+  });
+
   it("keeps the bot's own Claude with its install card when the CLI is not found", () => {
     fixture.instances = [codex, notFound()];
     const html = open(bot("claude", "claude-opus-5-5")).html;

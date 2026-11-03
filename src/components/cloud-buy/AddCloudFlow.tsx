@@ -9,7 +9,7 @@ import type { AddCloudView } from "../../../electron/cloud-rail.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { addCloudScreen, addCloudStop, CLOUD_LIST_NAME_LIMIT, DEFAULT_SWATCH, swatchFill, type AddCloudScreen, type AddCloudStop } from "@/lib/cloud-extra";
-import { offerPlanLabel, usd } from "@/lib/cloud-plan";
+import { offerPlanLabel, usd, type CloudSource } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { placeInitials } from "@/lib/places";
 import { SwatchRadios } from "../SwatchRadios";
@@ -70,9 +70,10 @@ function Stop({ reason, home, busy, interest, onInterest, onClose }: {
 }
 
 /** `onFirstCloud`: there is no Cloud of the person's own yet, so this computer's own sheet buys the first (with its sign-in
- * and trial). `onWide`: the plan cards want the wide sheet. `onBack`: back to ＋'s two choices. */
-export function AddCloudFlow({ onClose, onFirstCloud, onWide = () => {}, onBack = null, now = Date.now }: {
-  onClose: () => void; onFirstCloud: () => void; onWide?: (wide: boolean) => void; onBack?: (() => void) | null; now?: () => number;
+ * and trial). `onWide`: the plan cards want the wide sheet. `onBack`: back to ＋'s two choices. `source`: where the person
+ * started, sent with the checkout. */
+export function AddCloudFlow({ onClose, onFirstCloud, onWide = () => {}, onBack = null, now = Date.now, source }: {
+  onClose: () => void; onFirstCloud: () => void; onWide?: (wide: boolean) => void; onBack?: (() => void) | null; now?: () => number; source?: CloudSource;
 }) {
   const bridge = window.ogb?.cloudAdd;
   const [view, setView] = useState<AddCloudView | null | undefined>(undefined);
@@ -117,7 +118,8 @@ export function AddCloudFlow({ onClose, onFirstCloud, onWide = () => {}, onBack 
   };
   const start = () => act(async () => {
     if (screen.kind !== "name" || !bridge) return;
-    const result = await bridge.start(screen.plan.tier, name.trim().replace(/\s+/g, " ") || suggested, color);
+    const cloudName = name.trim().replace(/\s+/g, " ") || suggested;
+    const result = await (source ? bridge.start(screen.plan.tier, cloudName, color, source) : bridge.start(screen.plan.tier, cloudName, color));
     if (result.outcome === "opened") { track("cloud_add_another", { step: "checkout_opened", plan: screen.plan.tier }); setTier(null); await read(); return; }
     // Another Cloud's checkout still open: main keeps its page, and the sheet follows that one (Reopen, Copy link).
     if (result.outcome === "blocked") { setStop(addCloudStop(result.blocked)); if (result.blocked === "checkout_open") await read(); }

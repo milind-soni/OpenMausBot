@@ -59,6 +59,25 @@ vi.mock("shiki/engine/javascript", () => ({
   createJavaScriptRegexEngine: () => ({}),
 }));
 
+describe("soft line breaks", () => {
+  it("keeps a reply's single line breaks as line breaks, outside code", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "1\n2\n3\n\n`a`\nb\n\n```\nx\ny\n```" }));
+    expect(html).toContain('<p dir="ltr">1<br/>\n2<br/>\n3</p>');
+    expect(html).toMatch(/>a<\/code><br\/>\nb<\/p>/);
+    expect(html).toContain(">x\ny</pre>");
+  });
+});
+
+describe("spoilers", () => {
+  it("hides only double-tilde spans, not text between ranges written with a single tilde", () => {
+    const ranges = renderToStaticMarkup(createElement(ChatMarkdown, { text: "Episodes 77~82 first, then 77~80." }));
+    expect(ranges).not.toContain("Reveal spoiler");
+    expect(ranges).toContain("Episodes 77~82 first, then 77~80.");
+    const spoiler = renderToStaticMarkup(createElement(ChatMarkdown, { text: "The answer is ~~42~~." }));
+    expect(spoiler).toContain("Reveal spoiler");
+  });
+});
+
 describe("mention highlighting", () => {
   const mentionPeers = [{ name: "Atlas" }, { name: "調査担当" }];
   it("carries bot colors into Markdown without coloring everyone as a bot", () => {

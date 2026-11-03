@@ -73,9 +73,3 @@ export function signInResumePrompt(site: string, outcome: "done" | "cancelled"):
     ? `OpenMausBot sign-in update: the person finished signing in to ${site}. Check you are signed in, then continue the task that paused for it. Never ask them for a password or a one-time code in chat.`
     : `OpenMausBot sign-in update: the person declined to sign in to ${site}. Continue without it if you can, or briefly explain what you could not do. Never ask them for a password or a one-time code in chat.`;
 }
-
-/** The transcript line under the card, and all a client that does not know
- * the card draws. */
-export function signInFallbackText(botName: string, site: string): string {
-  return `${botName} needs you to sign in to ${site}. Open this conversation in OpenMausBot to sign in, then press Done.`;
-}

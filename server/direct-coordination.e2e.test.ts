@@ -93,11 +93,31 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text?.includes("QA sent") || message.text?.includes("Release QA complete"))).toBe(false);
 }), 60_000);
 
+it("lets a teammate answer a one-way ask in the thread that asked, with a notice and nothing more", () => fixture(async f => {
+  const asking = f.chief.activeTaskId;
+  f.plan[f.chief.id] = { steps: [{ arguments: {
+    bot_ids: [f.lead.id], message: `Ask the person which day suits, then tell me in thread ${asking}.`, thread: "new", reply: "none",
+  } }], reply: "Asked Engineering", byPrompt: [{ promptIncludes: "Tuesday suits", plan: { reply: "Got Tuesday from Engineering" } }] };
+  f.plan[f.lead.id] = { steps: [
+    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits, please plan for it", thread: asking }, expectError: true },
+    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits", thread: asking, reply: "none" } },
+  ], reply: "Told Clive" };
+  await f.start();
+  const sends = () => f.evidence().find((turn: any) => turn.botId === f.lead.id)?.evidence.filter((entry: any) => entry.step?.arguments?.thread === asking);
+  await expect.poll(() => sends()?.length, { timeout: 15_000 }).toBe(2);
+  const [work, notice] = sends().map((entry: any) => entry.response.result);
+  expect(JSON.stringify(work)).toContain("handed you work: answer it there with reply");
+  expect(notice.isError).toBeFalsy();
+  expect(JSON.parse(notice.content[0].text).receipts[0]).toMatchObject({ threadId: asking });
+  await expect.poll(async () => (await f.messages(asking)).some((message: any) => message.text === "Got Tuesday from Engineering"), { timeout: 15_000 }).toBe(true);
+  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.filter((task: any) => task.title?.includes("Tuesday"))).toEqual([]);
+}), 60_000);
+
 it("marks a failed one-way send so restart recovery cannot duplicate its notice", () => fixture(async f => {
   // The failed send reports an incident to Clive, the lead's Chief; answering it must not send the task again.
   f.plan[f.chief.id] = { steps: [{ arguments: {
     bot_ids: [f.lead.id], message: "Try the task", thread: "new", reply: "none",
-  } }], reply: "Sent", byPrompt: [{ promptIncludes: "[Incident report from OpenMausBot", plan: { reply: "Noted the failed send" } }] };
+  } }], reply: "Sent", byPrompt: [{ promptIncludes: "[From OpenMausBot · incident report", plan: { reply: "Noted the failed send" } }] };
   f.plan[f.lead.id] = { fail: true };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
@@ -550,15 +570,14 @@ it("continues one recipient thread for every follow-up from the same conversatio
 it.each<[string, NodeJS.ProcessEnv]>([
   ["a headless server", {}],
   ["the desktop app", { OMB_TEST_DESKTOP_OWNER_TOKEN: randomBytes(32).toString("base64url") }],
-])("on %s, holds a follow-up sent while the teammate still works and runs it next in the same thread", (_where, env) => fixture(async f => {
+])("on %s, hands a follow-up sent while the teammate still works to its running turn, and one result comes back", (_where, env) => fixture(async f => {
   expect((await f.api("/.well-known/openmausbot/environment", undefined, "GET")).capabilities.selfUpdate)
     .toBe(env.OMB_TEST_DESKTOP_OWNER_TOKEN ? "desktop-managed" : "operator");
   const gate = join(f.session.info.dataDir, "first-request.gate");
-  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented" }, { reply: "Header row added" }] };
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented, with the header row" }] };
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Also add a header row to that export" } }], reply: "Sent the change" },
-    { reply: "Reviewed" },
     { reply: "Reviewed" },
   ] };
   const chiefTurns = () => f.evidence().filter((turn: any) => turn.botId === f.chief.id);
@@ -569,18 +588,16 @@ it.each<[string, NodeJS.ProcessEnv]>([
   await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Change of plan: the export also needs a header row.", threadId: f.chief.activeTaskId });
   await expect.poll(() => chiefTurns().length, { timeout: 20_000 }).toBe(2);
   expect(told(chiefTurns()[1])).toContain("send the change to the same teammate with coordinate_bots");
-  const [running, followUp] = f.nodes().filter((node: any) => node.botId === f.lead.id);
-  expect(followUp.threadId).toBe(running.threadId);
-  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "queued", threadId: running.threadId });
-  // It waits for the request already running there; never beside it.
-  await new Promise(resolve => setTimeout(resolve, 1_500));
-  expect(f.nodes().find((node: any) => node.id === followUp.id).status).toBe("queued");
-  expect(f.nodes().find((node: any) => node.id === running.id).status).toBe("running");
+  const [running, ...others] = f.nodes().filter((node: any) => node.botId === f.lead.id);
+  expect(others, "the change started no second job").toEqual([]);
+  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "injected", threadId: running.threadId, requestId: running.id });
+  expect((await f.messages(running.threadId)).filter((message: any) => message.peerAsk?.name === "Clive" && message.text === "Also add a header row to that export"))
+    .toHaveLength(1);
   writeFileSync(gate, "go");
   expect((await f.wait()).status).toBe("settled");
   await expect.poll(() => f.nodes().filter((node: any) => node.parentId).every((node: any) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
   const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
-  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId], [1, running.threadId]]);
+  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId]]);
   expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
   await stream.until(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
     && frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy);
@@ -959,6 +976,8 @@ it("gives a teammate each request once, never also as a bare assistant line", ()
 async function onLoopbackEngine(f: any, answer: (res: ServerResponse) => void): Promise<() => Promise<void>> {
   const llm = createServer(async (req, res) => {
     for await (const _ of req) {}
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not, and that is no model call.
+    if (req.url?.endsWith("/api/version")) { res.statusCode = 404; res.end(); return; }
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     answer(res);
   });
@@ -973,7 +992,7 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
   let calls = 0;
   const close = await onLoopbackEngine(f, res => {
     // Never a final answer: one more tool call, every round.
-    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: "{}" } }] };
+    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: JSON.stringify({ attempt: calls }) } }] };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: call, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
   });

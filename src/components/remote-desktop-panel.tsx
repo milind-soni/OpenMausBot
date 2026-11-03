@@ -63,7 +63,7 @@ function nextRunLabel(at: number | null) {
 
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const { padClass, dragProps } = useCaptionChrome();
+  const { dragProps } = useCaptionChrome();
   const panelRef = useComputerPanelEntry(bot.id);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +211,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
 
   return (
     <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
-      <div {...dragProps} className={cn("flex items-center justify-between border-b border-hairline px-5 py-4", padClass)}>
+      <div {...dragProps} className="flex items-center justify-between border-b border-hairline px-5 py-4">
         <div>
           <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">

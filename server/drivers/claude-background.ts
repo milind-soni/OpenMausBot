@@ -34,7 +34,7 @@ export function spawnBackgroundCall(cli: string, args: string[], env: NodeJS.Pro
   const cwd = mkdtempSync(join(tmpdir(), "omb-claude-background-"));
   const removeCwd = () => { try { rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} };
   try {
-    return { child: spawnCli(cli, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env }), removeCwd };
+    return { child: spawnCli(cli, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env, botWork: true }), removeCwd };
   } catch (error) {
     removeCwd();
     throw error;

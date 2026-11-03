@@ -122,6 +122,9 @@ describe("Upgrade", () => {
       text: "Your plan can't be changed from the app right now. Nothing was charged. Open your Plan page to see your options." } });
     const settled = bridge({ upgradePreview: vi.fn(async () => ({ outcome: "settled" as const, status: "pending" as const, tier: "pro" })) });
     expect(await previewUpgrade(settled, usage(), "app_usage")).toEqual({ note: { tone: "info", text: "Your upgrade is going through. This can take a minute." } });
+    // A change already gone through, to another plan than the one asked for, names the plan it is on now.
+    const elsewhere = bridge({ upgradePreview: vi.fn(async () => ({ outcome: "settled" as const, status: "upgraded" as const, tier: "pro" })) });
+    expect(await previewUpgrade(elsewhere, usage(), "app_usage", "max")).toEqual({ note: { tone: "good", text: "You're on Pro now. Your new allowances are ready." }, upgraded: "pro" });
     const declined = bridge({ upgrade: vi.fn(async () => ({ outcome: "refused" as const, code: "payment_failed" as const })) });
     expect(await confirmUpgrade(declined, PREVIEW, "app_usage")).toEqual({ tone: "bad",
       text: "Your payment didn't go through, so your plan hasn't changed. Update your card on your Plan page, then try again." });
