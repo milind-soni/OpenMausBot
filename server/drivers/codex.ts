@@ -963,11 +963,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const isPermission = legacy || isMcpPermission || isAdditionalPermission ||
           method === "item/commandExecution/requestApproval" ||
           method === "item/fileChange/requestApproval";
-        // An MCP elicitation asks for real input, not permission; unknown server requests fail closed
-        // instead of being accepted by Full access.
+        // An MCP elicitation asks for real input, not permission; unknown server requests fail closed instead of being accepted by Full access.
         if (!isQuestion && !isPermission) {
           if (isMcpElicitation) {
             send({ jsonrpc: "2.0", id: msg.id, result: { action: "decline" } });
+            emit({ ...base(threadId, turnId), type: "runtime.notice", message: `${boundedLabel(params.serverName) ?? "An MCP server"} asked for input OpenMausBot can't show yet, so the request was declined.` });
           } else {
             send({
               jsonrpc: "2.0",

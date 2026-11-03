@@ -110,10 +110,14 @@ export async function packedPackage(name, version, cache, scope = SCOPE) {
 }
 
 /** The trees to stage on this host: both mac arches on macOS (each app is
- *  single-arch), x64 elsewhere, matching electron-builder.yml. */
+ *  single-arch), x64 elsewhere, matching electron-builder.yml. On Linux the
+ *  Docker build names the image's CPU in OMB_DUCKDB_ARCH: it stages on the
+ *  build host's CPU for either image. */
 export function targetsFor(platform = process.platform, env = process.env) {
   if (platform === "darwin") return resolveCuaMacArches(env).map((arch) => ({ platform, arch }));
-  return [{ platform, arch: "x64" }];
+  const arch = (platform === "linux" && env.OMB_DUCKDB_ARCH) || "x64";
+  if (arch !== "x64" && arch !== "arm64") throw new Error(`OMB_DUCKDB_ARCH must be x64 or arm64; found ${arch}`);
+  return [{ platform, arch }];
 }
 
 function requireRegularFile(file) {
