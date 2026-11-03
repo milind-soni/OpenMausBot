@@ -7102,6 +7102,8 @@
   "homeScreen.planNamed": "{name} isn't running",
   "homeScreen.setupNamed": "Setting up {name}…",
   "homeLine.left": "You're no longer in {name}.",
+  "homeLine.clean": "Your bots are in your Cloud. Sign in to get them.",
+  "homeLine.cleanSaved": "Your bots are in your other account's Cloud. Click its icon at the side to get them.",
   "teamMove.menu": "Move to {team}",
   "teamMove.title": "Move {bot} to {team}?",
   "teamMove.everyone": "Everyone in {team} can use {bot}. Only {team}'s admins can change it.",
