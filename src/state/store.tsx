@@ -504,6 +504,12 @@ export interface InstanceInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
+  /** Where a Claude custom endpoint points and what it serves; its token stays on the server. */
+  claudeEndpoint?: {
+    baseUrl: string; models: string[]; tokenSaved: boolean;
+    opusModel: string; sonnetModel: string; haikuModel: string; smallFastModel: string;
+  };
+  url?: string;
   freeUpSpace?: boolean; replyWaitMinutes?: number;
 }
 

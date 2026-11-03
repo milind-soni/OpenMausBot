@@ -16,7 +16,7 @@ import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
-import { claudeModelExtras } from "./claude-model-extras.ts";
+import { CLAUDE_MODEL_ID, claudeModelExtras } from "./claude-model-extras.ts";
 import { claudeToolSearchSetting } from "./claude-tool-search.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
@@ -265,6 +265,8 @@ export interface ClaudeConfig {
   configDir?: string;
   managed?: boolean;
   managedModels?: string[];
+  /** A custom endpoint's own models: the whole catalog, first one the default. No Claude model is offered. */
+  endpointModels?: string[];
   permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
   tools?: string[];
   disallowedTools?: string[];
@@ -295,6 +297,12 @@ async function resolveClaudeTurnModel(
     return model;
   }
   return resolveInjectId(model, await probeLocalInjects(env)) ?? model;
+}
+
+/** A custom endpoint serves only its own models: a saved model it does not list runs on its main one. */
+function endpointTurnModel(model: string | null | undefined, endpointModels: string[] | undefined): string | null | undefined {
+  if (!endpointModels) return model;
+  return model && endpointModels.includes(model) ? model : endpointModels[0];
 }
 
 /** Extra ids from ~/.claude/settings.json's extraModels. Its `model` is Claude Code's last-used
@@ -638,11 +646,13 @@ function decodeConfig(raw: unknown): ClaudeConfig {
   const configDir = typeof o.configDir === "string" ? o.configDir.trim() : undefined;
   if (configDir) resolveClaudeConfigDir(configDir);
   if (o.managedModels !== undefined && (o.managed !== true || !Array.isArray(o.managedModels) || !o.managedModels.length || o.managedModels.some(model => typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(model)))) throw new Error("Invalid hosted Claude models.");
+  if (o.endpointModels !== undefined && ((o.managed === true || o.managedModels !== undefined) || !Array.isArray(o.endpointModels) || !o.endpointModels.length || o.endpointModels.some(model => typeof model !== "string" || !CLAUDE_MODEL_ID.test(model)))) throw new Error("Invalid Claude endpoint models.");
   return {
     cli: typeof o.cli === "string" ? o.cli : "claude",
     ...(configDir ? { configDir } : {}),
     ...(o.managed === true ? { managed: true } : {}),
     ...(o.managedModels ? { managedModels: o.managedModels as string[] } : {}),
+    ...(o.endpointModels ? { endpointModels: o.endpointModels as string[] } : {}),
     permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
     ...(tools !== undefined ? { tools } : {}),
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
@@ -816,10 +826,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     if (inheritsUserConfig(catalogEnv)) {
       console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
     }
-    let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) } : STATIC_CLAUDE_MODELS;
+    let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
+      : config.endpointModels ? { default: config.endpointModels[0], options: config.endpointModels.map(id => ({ id, label: id })) }
+        : STATIC_CLAUDE_MODELS;
     const orgBlocks = createOrgModelBlocks(() => engineHomes.everyHome(catalogEnv), (blocked) => { models = withOrgBlocks(models, blocked); });
     const refreshModels = async () => {
-      if (config.managed) return;
+      if (config.managed || config.endpointModels) return;
       try {
         const resolved = await mergeLocalInject(readClaudeModelCatalog(catalogEnv), catalogEnv);
         if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
@@ -827,7 +839,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       } catch { unconfirmedModelCatalog(models); }
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
-    const startupModelRefresh = config.managed ? null : (await openStartupModelCatalog({
+    const startupModelRefresh = config.managed || config.endpointModels ? null : (await openStartupModelCatalog({
       instanceId,
       use: (catalog) => { models = catalog; },
       current: () => models,
@@ -1080,7 +1092,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
       }
-      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment);
+      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(endpointTurnModel(turn.model, config.endpointModels), turnEnvironment);
       const injected = config.managed ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
@@ -1964,7 +1976,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           reject(new Error(NO_ANTHROPIC_KEY));
           return;
         }
-        const model = named ?? config.managedModels?.[0] ?? "claude-haiku-5-5";
+        const model = named ?? config.managedModels?.[0] ?? config.endpointModels?.[0] ?? "claude-haiku-5-5";
         const env = environment(model);
         const args = backgroundCallArgs({ model, outputFormat: onUsage ? "json" : "text", supports: (flag) => cliVersion !== null && claudeCliSupports(cliVersion, flag), isolated: !inheritsUserConfig(env) });
         const { child, removeCwd } = spawnBackgroundCall(config.cli, args, env);

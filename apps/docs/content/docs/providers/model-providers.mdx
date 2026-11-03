@@ -155,11 +155,25 @@ broker, including Full Access. Native Cline tool selection is not supported.
 
 ### Claude Code
 
-The app has no place yet to point Claude Code at another provider. The
-**Anthropic API key** in Connections is for Anthropic only.
+The **Anthropic API key** in Connections is for Anthropic only.
 
-You can point Claude Code itself at OpenRouter, Fireworks AI or DeepSeek,
-and your Claude bots follow it:
+To run Claude bots on DeepSeek, GLM or another host that speaks Claude
+Code's API, add a **custom endpoint** in Settings → Engines, in the Claude
+card:
+
+- **Add endpoint** takes a name, the endpoint's base URL, its token and the
+  model id the endpoint serves. Model mappings for Opus, Sonnet and Haiku
+  are optional.
+- Each endpoint is its own engine with its own directory, so a bot chooses
+  it like any other AI. It never reads or writes this computer's
+  `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
+- Its bots run the model the endpoint serves. A bot that still has a Claude
+  model selected runs the endpoint's main model instead.
+- The token is saved in OpenMausBot's own `config.json`, never sent to
+  Anthropic. Removing an endpoint removes only that entry.
+
+You can also point Claude Code itself at OpenRouter, Fireworks AI or
+DeepSeek, and your Claude bots follow it:
 
 - Put `ANTHROPIC_BASE_URL` and your key in the `env` block of
   `~/.claude/settings.json`. Fireworks' FireConnect does this for you.

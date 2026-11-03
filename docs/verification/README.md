@@ -295,6 +295,11 @@ responsive layouts, theme contrast, and status refreshes without losing drafts.
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
 
+The [Claude custom endpoints](claude-endpoint.md) checks a per-bot DeepSeek/GLM
+endpoint in Settings and its turn against the fake Claude CLI: its own
+directory, its model and routing, the token kept out of the engine list, and
+edits that keep the saved token.
+
 The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.

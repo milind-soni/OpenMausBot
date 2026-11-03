@@ -1,5 +1,5 @@
 // Claude Code's `[1m]` suffix selects a model's 1M-token context.
-const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*(?:\[1m\])?$/i;
+export const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*(?:\[1m\])?$/i;
 const OFFICIAL_CLAUDE_ID = /^claude-[a-z0-9.-]+$/;
 const official = (id: string) => OFFICIAL_CLAUDE_ID.test(id.replace(/\[1m\]$/i, ""));
 
