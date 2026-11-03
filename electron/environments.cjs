@@ -202,7 +202,8 @@ function reconcileTeams(state, teams, makeId, homeOrigin = null) {
 
 /** The place on screen that is gone: My Cloud is active again (or this computer, without one). */
 function withActiveKept(state, homeOrigin) {
-  const activeId = state.environments.some((entry) => entry.id === state.activeId) ? state.activeId : state.environments.find((entry) => entry.origin === homeOrigin)?.id ?? LOCAL_ID;
+  const here = state.activeId === LOCAL_ID || state.environments.some((entry) => entry.id === state.activeId);
+  const activeId = here ? state.activeId : state.environments.find((entry) => entry.origin === homeOrigin)?.id ?? LOCAL_ID;
   return activeId === state.activeId ? state : { ...state, activeId };
 }
 
