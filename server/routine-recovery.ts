@@ -27,6 +27,8 @@ export interface RoutineFailureFacts {
   limit?: "engine" | "model" | "credits";
   /** A backup engine takes over from one whose usage limit refused the run, or that is signed out. */
   backupReady?: boolean;
+  /** The turn's reply came back; only a step it ran failed or wasn't allowed (the runtime error's `partial`). */
+  partial?: boolean;
 }
 
 export type RoutineFailureClass =
@@ -112,8 +114,8 @@ export function retriesTeammateThread(failure: string, facts: RoutineFailureFact
   return classifyRoutineFailure(failure, facts).kind === "retry";
 }
 
-export function engineFacts({ setup, stalled, trialCredit, limitResetsAt, limit }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {
-  return { setup, stalled, trialCredit, limitResetsAt, limit };
+export function engineFacts({ setup, stalled, trialCredit, limitResetsAt, limit, partial }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {
+  return { setup, stalled, trialCredit, limitResetsAt, limit, partial };
 }
 
 /** Host-local, with its zone: on a Cloud home the host's zone need not be the reader's. */

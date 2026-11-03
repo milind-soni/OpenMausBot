@@ -53,6 +53,8 @@ export interface ConfigStatus {
   mcp?: { callTimeoutMinutes: number };
   /** Workspace defaults for new bots; absent effort = no level is sent. */
   newBots?: { effort?: EffortLevel };
+  /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
+  cloudStarter?: boolean;
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
@@ -175,6 +177,9 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
+   * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
+  serverSites?: boolean;
 }
 
 export interface BrowserProfile {

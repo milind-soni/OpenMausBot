@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { MAUS_COLORS, type MausState } from "@/lib/mascot";
 import { CALENDAR_SLOT_MINUTES } from "@/lib/routine-calendar";
-import { routineHeldNote, routineRunLabel } from "@/lib/routine-display";
+import { partlyDone, routineHeldNote, routineRunLabel } from "@/lib/routine-display";
 import type { RoutineRunStatus } from "@/lib/routines";
 import { intervalLabel, niceTime } from "@/lib/schedule-label";
 import type { Bot, Group } from "@/state/store";
@@ -125,7 +125,7 @@ export function CalendarEventCard({
         fit === "roomy" ? "px-1.5 py-1" : "px-1.5 py-0",
         paused && "border-dashed opacity-70",
         status === "cancelled" && "opacity-55",
-        (status === "failed" || status === "missed") && "border-danger/60",
+        (status === "failed" || status === "missed") && (run && partlyDone(run) ? "border-warning/60" : "border-danger/60"),
         selected && "z-20 ring-2 ring-accent ring-offset-1 ring-offset-app",
       )}
       style={{

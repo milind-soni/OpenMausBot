@@ -1,6 +1,5 @@
-// The Team map's "Who reports to whom" on a Team Cloud: people across the top, each with their Chief of Staff and the
-// bots that report to them by department. Dragging a bot onto a person, or its Reports to… button, changes its owner:
-// the same `reportsTo` the sidebar's face edits.
+// The Team map's "Who looks after what" on a Team Cloud: people across the top, each with the bots they look after by
+// department. Dragging a bot onto a person, or its button, changes who looks after it (`reportsTo`).
 import { useMemo, useState, useSyncExternalStore, type DragEvent } from "react";
 import { Crown, UserRound } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -36,7 +35,7 @@ export function MapModeToggle() {
       className={cn("rounded-md px-2.5 py-1 text-[12px] font-medium", current === value ? "bg-panel text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}>{label}</button>
   );
   return <div role="group" aria-label={t("canvas.title")} className="flex items-center gap-0.5 rounded-lg bg-control p-0.5">
-    {option("departments", t("orgChart.mode.departments"))}{option("people", t("orgChart.mode.people"))}
+    {option("departments", t("orgChart.mode.departments"))}{option("people", t("lookedAfter.mode"))}
   </div>;
 }
 
@@ -48,10 +47,10 @@ function BotRow({ bot, team, onDragStart }: { bot: Bot; team: TeamPeople; onDrag
       <BotAvatar bot={bot} size={24} motion="none" motionKey={0} animated={false} />
       <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{bot.name}</span>
       {bot.chiefOfStaff && <Crown size={12} className="shrink-0 text-accent" aria-label={t("orgChart.chief")} />}
-      {movable && <button type="button" aria-label={t("owner.change", { bot: bot.name })} title={t("owner.change", { bot: bot.name })}
+      {movable && <button type="button" aria-label={t("lookedAfter.change", { bot: bot.name })} title={t("lookedAfter.change", { bot: bot.name })}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
-          requestOwnerPick({ botIds: [bot.id], title: t("owner.pickTitle"), current: ownerOf(bot, team)?.email ?? null, x: rect.left, y: rect.bottom + 4 });
+          requestOwnerPick({ botIds: [bot.id], title: t("lookedAfter.pickTitle"), current: ownerOf(bot, team)?.email ?? null, x: rect.left, y: rect.bottom + 4 });
         }}
         className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-100"><UserRound size={13} /></button>}
     </div>
@@ -65,7 +64,7 @@ function Column({ column, team, over, onOver, onDrop, onDragStart }: {
   const person = column.person;
   const empty = !column.chief && column.departments.length === 0;
   return (
-    <section data-org-person={person?.email ?? ""} aria-label={person ? person.name : t("orgChart.noOwner")}
+    <section data-org-person={person?.email ?? ""} aria-label={person ? person.name : t("lookedAfter.nobody")}
       onDragOver={person ? (event) => { if (event.dataTransfer.types.includes(BOT_DRAG_TYPE)) { event.preventDefault(); onOver(person.email); } } : undefined}
       onDragLeave={person ? () => onOver(null) : undefined}
       onDrop={person ? (event) => onDrop(person.email, event) : undefined}
@@ -73,21 +72,21 @@ function Column({ column, team, over, onOver, onDrop, onDragStart }: {
       <header className="flex items-center gap-2.5">
         {person ? <PersonFace person={person} size={30} /> : <span aria-hidden="true" className="inline-flex size-[30px] items-center justify-center rounded-full border border-dashed border-ink-secondary/60 text-ink-secondary">?</span>}
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-semibold text-ink">{person ? (person.you ? t("owner.you", { name: person.name }) : person.name) : t("orgChart.noOwner")}</span>
-          <span className="block truncate text-[12px] text-ink-secondary">{person ? person.email : t("orgChart.noOwnerHint")}</span>
+          <span className="block truncate text-[14px] font-semibold text-ink">{person ? (person.you ? t("owner.you", { name: person.name }) : person.name) : t("lookedAfter.nobody")}</span>
+          <span className="block truncate text-[12px] text-ink-secondary">{person ? person.email : t("lookedAfter.nobodyHint")}</span>
         </span>
       </header>
       {person && (column.chief
         ? <div className="flex flex-col gap-1"><span className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{t("orgChart.chief")}</span>
             <BotRow bot={column.chief} team={team} onDragStart={onDragStart} /></div>
-        : <span className="text-[12px] text-ink-tertiary">{t("orgChart.noChief")}</span>)}
+        : null)}
       {column.departments.map((department) => (
         <div key={department.key} data-org-department={department.key} className="flex flex-col gap-1">
           <span className="truncate text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{department.key || t("teamSettings.general")}</span>
           {department.bots.map((bot) => <BotRow key={bot.id} bot={bot} team={team} onDragStart={onDragStart} />)}
         </div>
       ))}
-      {person && empty && <span className="text-[12px] text-ink-secondary">{t("orgChart.empty", { name: person.name })}</span>}
+      {person && empty && <span className="text-[12px] text-ink-secondary">{t("lookedAfter.empty", { name: person.name })}</span>}
     </section>
   );
 }
@@ -113,8 +112,8 @@ export function TeamOrgChart({ bots }: { bots: Bot[] }) {
       .catch((error: unknown) => dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) }));
   };
   return (
-    <div role="region" aria-label={t("orgChart.mode.people")} data-org-chart className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
-      <p className="text-[12px] text-ink-secondary">{t("orgChart.dropHint")}</p>
+    <div role="region" aria-label={t("lookedAfter.mode")} data-org-chart className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
+      <p className="text-[12px] text-ink-secondary">{t("lookedAfter.dropHint")}</p>
       <div className="flex items-start gap-4">
         {columns.map((column) => <Column key={column.person?.email ?? "nobody"} column={column} team={team} over={over !== null && over === column.person?.email}
           onOver={setOver} onDrop={onDrop} onDragStart={onDragStart} />)}

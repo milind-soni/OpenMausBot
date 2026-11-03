@@ -126,7 +126,7 @@ export interface RoutineRun {
   finishedAt?: number;
   output?: string;
   attention?: string;
-  error?: string;
+  error?: string; partial?: boolean;
   cost?: number | null;
   denials?: string[];
   report?: RoutineRunReport;
@@ -358,7 +358,7 @@ export class RoutineManager {
     for (const run of this.runs.filter((candidate) => candidate.status === "running" || candidate.status === "waiting")) {
       settleAsk(run, undefined, this.now());
       if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
-        this.wait(run, "Waiting for delegated work to finish");
+        this.wait(run, "Waiting for work it handed on to finish");
         continue;
       }
       if (!requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now())) {
@@ -1279,7 +1279,7 @@ export class RoutineManager {
         return cloneRun(run);
       }
       this.failureFacts.delete(run.id);
-      if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for delegated work to finish");
+      if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for work it handed on to finish");
       else {
         Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);
@@ -1310,7 +1310,7 @@ export class RoutineManager {
     if (this.closing) return;
     const held = facts.limit !== undefined || facts.limitResetsAt !== undefined ? facts.limit ?? "engine" : facts.stopReason === "auth_required" ? "signed-out" : undefined, backupReady = held !== undefined && this.options.limitBackup?.(run.botId, held) === true;
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
-    if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert);
+    if (!recovery.queued) this.failRun(Object.assign(run, { partial: (facts.partial && Boolean(run.output)) || undefined }), recovery.error, "failed", recovery.alert);
     else {
       this.saveLater();
       this.emitRun(run);
