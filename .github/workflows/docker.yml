@@ -391,9 +391,37 @@ jobs:
               print(f"{path}: {len(files)} files, each once; no build cache; {native[0]}")
           PY
 
+  arm64-smoke:
+    name: arm64 image + boot smoke
+    # Raspberry Pi 4/5 and ARM servers pull the arm64 image; GitHub's ARM
+    # runner builds it natively and proves the server, the UI, the Data
+    # engine's native tree and the bots' Chromium all work on it.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build -t openmausbot:arm64 .
+      - name: Boot the container; prove the server, UI, DuckDB and browser work on arm64
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect -f '{{.Architecture}}' openmausbot:arm64)" = arm64
+          docker run -d --init --shm-size=512m --name omb openmausbot:arm64
+          for i in $(seq 1 40); do
+            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            sleep 2
+            if [ "$i" = "40" ]; then docker logs omb; echo "server never became healthy"; exit 1; fi
+          done
+          docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
+          docker exec -w /app/duckdb omb node --input-type=module -e "const { DuckDBInstance } = await import('@duckdb/node-api'); const c = await (await DuckDBInstance.create()).connect(); const r = await c.runAndReadAll('select 42 as x'); if (Number(r.getRows()[0][0]) !== 42) process.exit(1)"
+          test "$(docker exec omb id -un)" = maus
+          timeout 90 docker exec omb agent-browser --session ci-browser open 'data:text/html,<title>OMB browser smoke</title><h1>Browser ready</h1>'
+          timeout 15 docker exec omb agent-browser --session ci-browser get title | grep -Fx 'OMB browser smoke'
+          timeout 15 docker exec omb agent-browser --session ci-browser close
+
   publish:
     name: publish to GHCR
-    needs: build-and-smoke
+    needs: [build-and-smoke, arm64-smoke]
     # Release dispatches on its published tag because GITHUB_TOKEN-created
     # tags do not start another workflow. A manual branch run is smoke-only.
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v'))
@@ -403,6 +431,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The server image is published for linux/amd64 and linux/arm64.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -430,21 +460,26 @@ jobs:
           today="date-$(date -u +%F)"
           chrome=$(curl -fsSL --max-time 30 https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json | jq -er .channels.Stable.version) || chrome=""
           [[ "$chrome" =~ ^[0-9]+(\.[0-9]+)+$ ]] || chrome=$today
+          # An arm64 image takes Debian's Chromium instead: key it on the newest bookworm build, security updates included.
+          chromium=$(curl -fsSL --max-time 30 'https://qa.debian.org/madison.php?package=chromium&s=bookworm,bookworm-security&a=arm64&text=on' | awk -F'|' '{gsub(/ /, "", $2); print $2}' | sort -V | tail -n 1) || chromium=""
+          [[ "$chromium" =~ ^[0-9][0-9A-Za-z.+~:-]*$ ]] || chromium=$today
           engines="" engines_tag=""
           for package in $CLOUD_HOME_ENGINES; do
             version=$(npm view "$package@latest" version 2>/dev/null) || version=""
             if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*$ ]]; then engines=$CLOUD_HOME_ENGINES engines_tag=$today; break; fi
             engines="$engines $package@$version"
           done
-          { echo "chrome=$chrome"; echo "engines=${engines# }"; echo "engines_tag=$engines_tag"; } | tee -a "$GITHUB_OUTPUT"
+          { echo "chrome=$chrome"; echo "chromium=$chromium"; echo "engines=${engines# }"; echo "engines_tag=$engines_tag"; } | tee -a "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
+            CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       # The Cloud Pro home machine (the Dockerfile's cloud-home target), on the
@@ -469,6 +504,7 @@ jobs:
           target: cloud-home
           build-args: |
             CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
+            CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}
             CLOUD_HOME_ENGINES=${{ steps.keys.outputs.engines }}
             ENGINES_CACHE_TAG=${{ steps.keys.outputs.engines_tag }}
           push: true
