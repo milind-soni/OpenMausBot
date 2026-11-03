@@ -311,6 +311,60 @@ describe("bots' browsers", () => {
     expect(await third).toBe(false);
   });
 
+  it("lets a second thread of one bot run beside the first on a 2 GB Cloud, counting the bot's one browser once", async () => {
+    let clock = 1_800_000_000_000;
+    const running = new Map<number, number>();
+    const memory = new EngineMemory({
+      enabled: true, tickMs: 5,
+      // 2 GB with no swap, 1.5 GB available beside the server; an engine takes 350 MB once it has run a while.
+      read: (): HostMemory => ({ totalBytes: 2 * GB, availableBytes: 1.5 * GB - [...running.values()].reduce((sum, bytes) => sum + bytes, 0), swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }),
+      groups: () => new Map(running), now: () => clock, signal: () => {}, log: () => {},
+    });
+    memory.useBrowsers({ starts: () => true, which: () => "bot-a", running: () => false, stopped: () => {} });
+    expect(await memory.admit("first", new AbortController().signal, () => {})).toBe(true);
+    memory.turnStarted("first");
+    memory.within("first", () => { const child = new FakeChild(1000); running.set(child.pid, 350 * MB); memory.track(child as unknown as ChildProcess); });
+
+    const notices: string[] = [];
+    const second = memory.admit("second", new AbortController().signal, (text) => notices.push(text));
+    await settle();
+    expect(notices, "said why while the first engine has not been measured").toEqual([memoryWaitText(1)]);
+    // Measured, with the reservation for its browser still held: no more than 30 s, not the 90 s of a browser counted twice.
+    clock += 31_000;
+    await expect.poll(async () => Promise.race([second, settle().then(() => "waiting")]), { timeout: 2_000, interval: 10 }).toBe(true);
+  });
+
+  it.each([[2, 1.5, 2], [8, 7.2, 10]])("holds sixteen threads on a %d GB Cloud to what fits: the rest wait and say so, none refused or stopped", async (totalGb, availableGb, fits) => {
+    let clock = 1_800_000_000_000;
+    const running = new Map<number, number>(), signals: string[] = [];
+    const memory = new EngineMemory({
+      enabled: true, tickMs: 5,
+      read: (): HostMemory => ({ totalBytes: totalGb * GB, availableBytes: availableGb * GB - [...running.values()].reduce((sum, bytes) => sum + bytes, 0), swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }),
+      groups: () => new Map(running), now: () => clock, signal: (pid, signal) => { signals.push(`${signal} ${pid}`); }, log: () => {},
+    });
+    const notices: string[] = [], outcomes = new Map<string, boolean>(), children = new Map<string, FakeChild>();
+    let pid = 2000;
+    const threads = Array.from({ length: 16 }, (_, i) => `thread-${i}`);
+    for (const thread of threads) void memory.admit(thread, new AbortController().signal, (text) => notices.push(text)).then((admitted) => {
+      outcomes.set(thread, admitted);
+      memory.turnStarted(thread);
+      memory.within(thread, () => { const child = new FakeChild(pid++); children.set(thread, child); running.set(child.pid, 600 * MB); memory.track(child as unknown as ChildProcess); });
+    });
+    // Each engine is measured once it has run a while, which is when the next can be let in.
+    for (let round = 0; round < 20; round++) { await settle(); clock += 31_000; }
+    expect(outcomes.size).toBe(fits);
+    expect([...outcomes.values()].every(Boolean)).toBe(true);
+    expect(notices.some((text) => text.startsWith("Waiting for memory:"))).toBe(true);
+    expect(signals, "nothing stopped to make room").toEqual([]);
+    // One ends, and the next starts by itself.
+    const first = threads.find((thread) => outcomes.has(thread))!;
+    memory.turnEnded(first);
+    running.delete(children.get(first)!.pid);
+    children.get(first)!.exit();
+    await expect.poll(() => outcomes.size, { timeout: 2_000, interval: 10 }).toBe(fits + 1);
+    expect(signals).toEqual([]);
+  });
+
   it("stops holding a browser's share once it has run a while, where what it takes shows in free memory", async () => {
     const h = host();
     const { pending } = browsers(h, ["a", "b", "c"]);
