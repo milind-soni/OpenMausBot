@@ -193,6 +193,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const parsed = claudeEndpointUpdateSchema.safeParse(await readBody(req, 16384));
       if (!parsed.success) return json(res, 400, { error: "Check the address, token and model ids." });
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Wait for bots using this endpoint to finish before changing its settings." });
+      }
       providerConfigBusy.set(true);
       providerInstancesChanging.add(instanceId);
       try {

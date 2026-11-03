@@ -119,7 +119,7 @@ describe("Claude Code section", () => {
     expect(text).toContain("add a **custom endpoint** in Settings → Engines, in the Claude card");
     expect(text).toContain("It never reads or writes this computer's `~/.claude`, and the Claude Code on this computer keeps its own sign-in.");
     expect(text).toContain("Its bots run the model the endpoint serves. A bot that still has a Claude model selected runs the endpoint's main model instead.");
-    expect(text).toContain("The token is saved in OpenMausBot's own `config.json`, never sent to Anthropic. Removing an endpoint removes only that entry.");
+    expect(text).toContain("The token is saved in OpenMausBot's own `config.json` and sent only to the base URL you enter. Removing an endpoint removes only that entry.");
   });
 });
 

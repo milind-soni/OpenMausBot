@@ -31,18 +31,20 @@ Claude card.
    `deepseek-chat`. A row appears with the address and models and its own
    **Edit** and **Remove** actions. The token is not shown anywhere.
 3. **Edit** shows the saved address and models, with the token field empty and
-   labelled to keep the saved token. Change the model and save: the row and
+   labelled to keep the saved token. Change the model to `deepseek-reasoner`
+   and save: the row and
    the bot's picker show only the new model. Leave the token empty; the saved
    token still runs the bot.
 4. Create a bot on the endpoint. Its model picker offers the endpoint's models
-   only (here `deepseek-chat`), with the first as the default.
+   only (here `deepseek-reasoner`), with the first as the default.
 5. Try **Remove** while a bot still uses the endpoint: the button is disabled
    and its tooltip says how many bots use it. Move the bot to another model,
    then remove it: only the row disappears, and Claude's own sign-in stays.
 
 ## HTTP and turn evidence
 
-Against the printed `url` (loopback owner trust in the fixture):
+Against the printed `url` (loopback owner trust in the fixture). Set
+`URL=<printed url>` in the same shell first:
 
 ```sh
 curl -s -X POST "$URL/api/instances/claude-endpoint" \

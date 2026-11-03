@@ -1092,8 +1092,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
       }
-      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(endpointTurnModel(turn.model, config.endpointModels), turnEnvironment);
-      const injected = config.managed ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
+      const turnModel = config.managed ? turn.model
+        : config.endpointModels ? endpointTurnModel(turn.model, config.endpointModels)
+          : await resolveClaudeTurnModel(turn.model, turnEnvironment);
+      const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
 

@@ -61,6 +61,16 @@ describe("custom Claude endpoint", () => {
     expect((second.instances[instanceId] as { environment: object }).environment).toEqual(entry.environment);
   });
 
+  it("inherits the installed binary from whichever Claude account sets one", () => {
+    const { instanceId, instances } = newClaudeEndpoint({
+      instances: {
+        claude: { driver: "claudeAgent", config: {} },
+        "claude-work": { driver: "claudeAgent", config: { cli: "/opt/claude/bin/claude" } },
+      },
+    } as never, BASE);
+    expect((instances[instanceId].config as { cli?: string }).cli).toBe("/opt/claude/bin/claude");
+  });
+
   it("reports only the address and models to a client, never the token", () => {
     const { instanceId, instances } = newClaudeEndpoint(cfg(), BASE);
     const info = claudeEndpointInfo(instances[instanceId]);

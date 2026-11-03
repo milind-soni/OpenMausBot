@@ -121,7 +121,8 @@ function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () 
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length;
+  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId
+    || bot.fallback?.some((candidate) => candidate.instanceId === instance.instanceId)).length;
   const endpoint = instance.claudeEndpoint;
   const remove = async () => {
     setConfirming(false);

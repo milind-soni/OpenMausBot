@@ -130,9 +130,12 @@ function endpointModels(fields: EndpointFields): string[] {
 
 /** The installed binary, not another account's environment: an endpoint has no login of its own. */
 function inheritedCli(instances: InstanceConfigMap): string | undefined {
-  const existing = Object.values(instances).find((entry) => entry.driver === "claudeAgent" && !isClaudeEndpoint(entry));
-  const cli = existing ? rawConfig(existing).cli : undefined;
-  return typeof cli === "string" && cli ? cli : undefined;
+  for (const entry of Object.values(instances)) {
+    if (entry.driver !== "claudeAgent" || isClaudeEndpoint(entry)) continue;
+    const cli = rawConfig(entry).cli;
+    if (typeof cli === "string" && cli) return cli;
+  }
+  return undefined;
 }
 
 export function newClaudeEndpoint(cfg: AppConfig, body: z.infer<typeof claudeEndpointSchema>) {

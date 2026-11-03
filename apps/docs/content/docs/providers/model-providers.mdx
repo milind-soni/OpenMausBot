@@ -11,12 +11,12 @@ differences with OpenCode 2.x.
 
 | Provider | OpenCode | Chat engine | Claude Code | Codex |
 |---|---|---|---|---|
-| OpenRouter | Yes | Yes | Only through Claude Code's own settings | Not yet |
-| Fireworks AI | Yes | Yes | Only through Claude Code's own settings | Not yet |
-| DeepSeek | Yes | Yes | Only through Claude Code's own settings | Not yet |
+| OpenRouter | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
+| Fireworks AI | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
+| DeepSeek | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | Cline | Yes | Yes | No | No |
 | Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Not yet |
-| Your own Anthropic-compatible address | Not tested | No | Only through Claude Code's own settings | No |
+| Your own Anthropic-compatible address | Not tested | No | Custom endpoint, or Claude Code's own settings | No |
 
 "Chat engine" is OpenMausBot's built-in engine for OpenAI-compatible services.
 In a bot's model picker it is called **OpenAI-compatible (OpenRouter / Groq)**
@@ -169,8 +169,8 @@ card:
   `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
 - Its bots run the model the endpoint serves. A bot that still has a Claude
   model selected runs the endpoint's main model instead.
-- The token is saved in OpenMausBot's own `config.json`, never sent to
-  Anthropic. Removing an endpoint removes only that entry.
+- The token is saved in OpenMausBot's own `config.json` and sent only to the
+  base URL you enter. Removing an endpoint removes only that entry.
 
 You can also point Claude Code itself at OpenRouter, Fireworks AI or
 DeepSeek, and your Claude bots follow it:
