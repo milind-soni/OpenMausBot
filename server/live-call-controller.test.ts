@@ -494,6 +494,31 @@ describe("LiveCallController relay", () => {
       expect(t.controller.current()).toBeNull();
     });
 
+    it("says nothing about a request that fails to send after the goodbye", async () => {
+      let fail: (error: Error) => void = () => {};
+      const t = await live({ send: vi.fn(() => new Promise<never>((_resolve, reject) => { fail = reject; })) });
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 400);
+      hear(t, "hang up", 1_000);
+      await delegate(t, "del_2", 1_200);
+      fail(new Error("offline"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary")).toHaveLength(0);
+    });
+
+    it("never says an answer is missing when the bot stops during the goodbye", async () => {
+      const t = await live();
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 400);
+      t.setActivity("working");
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "hang up", 2_000);
+      await delegate(t, "del_2", 2_200);
+      t.setActivity("idle");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary").map((e) => e.content)).not.toContain(LIVE_COPY.noAnswer);
+    });
+
     it("keeps the call for anything that is not a clear request to hang up", async () => {
       for (const text of ["don't hang up", "how do I end the call?", "hang up the poster in my room", "end the call with Sam on my calendar", "bye"]) {
         const t = await live();
@@ -968,6 +993,21 @@ describe("LiveCallController relay", () => {
       await delegate(t, "del_ambiguous", 5_200);
       expect(t.deps.respond).not.toHaveBeenCalled();
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.notClear });
+    });
+
+    it("says nothing about a failed save once the person asked to hang up", async () => {
+      let finish: (result: { ok: false; error: string }) => void = () => {};
+      const t = await live({ respond: vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => { finish = resolve; })) });
+      t.message(approval());
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "yes go ahead", 5_000);
+      await delegate(t, "del_2", 5_200);
+      expect(t.deps.respond).toHaveBeenCalled();
+      hear(t, "hang up", 6_000);
+      await delegate(t, "del_3", 6_200);
+      finish({ ok: false, error: "disk full" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary").map((e) => e.content)).not.toContain(LIVE_COPY.saveFailed("disk full"));
     });
 
     it("grants nothing heard after the person asked to hang up", async () => {

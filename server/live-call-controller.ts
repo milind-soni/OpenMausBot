@@ -486,7 +486,7 @@ export class LiveCallController {
       call.stats.answers += 1;
       const answer = heard.withoutEcho || said;
       const result = await this.respond(call, { auth: call.auth, threadId: call.state.threadId, requestId: question.requestId, behavior: "answer", message: answer, callId: call.state.callId }, id);
-      if (!result) return;
+      if (!result || call.goodbye) return;
       if (result.ok) {
         this.append(call, "thinking", LIVE_COPY.answerPassed, id);
       } else if (call.question === question) {
@@ -522,6 +522,7 @@ export class LiveCallController {
       }
       const detail = error instanceof Error ? error.message.trim().slice(0, 200) : "";
       this.recordError(call, "send-failed");
+      if (call.goodbye) return;
       this.append(call, "commentary", `The request could not be sent to ${call.botName}${detail ? `: ${detail}` : "."}`, id);
     }
   }
@@ -548,7 +549,7 @@ export class LiveCallController {
       behavior: decision,
       message: decision === "deny" ? LIVE_COPY.deniedMessage : undefined,
     }, delegationId);
-    if (!result) return;
+    if (!result || call.goodbye) return;
     if (!result.ok && call.approval === open) {
       open.submitted = false;
       this.append(call, "commentary", LIVE_COPY.saveFailed(result.error.trim().slice(0, 200)), delegationId);
@@ -585,7 +586,7 @@ export class LiveCallController {
     if (activity === "working") this.touch(call);
     if (activity === "working" && (was === "idle" || call.workStartedAt === null)) this.beginWork(call);
     if (activity === "idle") call.workStartedAt = null;
-    if (was === "idle" || activity !== "idle") return;
+    if (was === "idle" || activity !== "idle" || call.goodbye) return;
     this.forgetUnqueued(call);
     if (call.approval || call.question || call.queuedIds.size) return;
     if (!call.pendingCall.size && !call.claimNextTerminal) return;
