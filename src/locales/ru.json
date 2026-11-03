@@ -494,7 +494,7 @@
   "rail.thisComputer": "Этот компьютер",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Команда",
-  "rail.kindServer": "Сервер",
+  "rail.kindServer": "Свой сервер",
   "cloudBuy.ready.switchHint": "Переключайтесь между «Этот компьютер» и {name} вверху окна или у его левого края.",
   "rail.signIn": "Войдите, чтобы увидеть свои Cloud и команды",
   "rail.tagOpen": "{name}: показать все ваши места",

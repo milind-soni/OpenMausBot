@@ -494,7 +494,7 @@
   "rail.thisComputer": "Ten komputer",
   "rail.kindCloud": "Chmura",
   "rail.kindTeam": "Zespół",
-  "rail.kindServer": "Serwer",
+  "rail.kindServer": "Własny serwer",
   "cloudBuy.ready.switchHint": "Przełączaj między Ten komputer a {name} na górze okna lub przy jego lewej krawędzi.",
   "rail.signIn": "Zaloguj się, aby zobaczyć swoje Chmury i zespoły",
   "rail.tagOpen": "{name}: zobacz wszystkie swoje miejsca",

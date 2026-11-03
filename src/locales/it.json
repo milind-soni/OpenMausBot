@@ -489,7 +489,7 @@
   "rail.thisComputer": "Questo computer",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Team",
-  "rail.kindServer": "Server",
+  "rail.kindServer": "Server personale",
   "cloudBuy.ready.switchHint": "Passa tra Questo computer e {name} in cima alla finestra o sul suo bordo sinistro.",
   "rail.signIn": "Accedi per vedere i tuoi Cloud e team",
   "rail.tagOpen": "{name}: vedi tutti i tuoi posti",

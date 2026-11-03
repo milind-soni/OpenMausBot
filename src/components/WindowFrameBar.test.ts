@@ -81,6 +81,7 @@ describe("the window frame's top bar", () => {
   });
 
   it("says where you are as a tag in its middle, with the place's mark, in one line; beside an older app, with no list to open, it is a label and drags the window", async () => {
+    fixture.config = { cloudHome: true };
     await mount(createElement(WindowFrameBar));
     expect(middle()!.textContent).toBe("MCMy Cloud");
     expect(middle()!.className.split(" ")).toEqual(expect.arrayContaining(["text-ink", "min-w-0", "rounded-md"]));
@@ -123,7 +124,7 @@ describe("the window frame's top bar", () => {
     [{ local: false, name: "Acme Team", role: "User" }, null, "Acme Team"],
     [{ local: false, name: "Second", origin: "https://second.example" }, { cloudHome: true }, "Second · Cloud"],
     [{ local: false, name: "My Cloud", origin: "https://mine.example" }, { cloudHome: true }, "My Cloud"],
-    [{ local: false, name: "Office", origin: "https://office.example" }, {}, "Office · Server"],
+    [{ local: false, name: "Office", origin: "https://office.example" }, {}, "Office · Own server"],
     [{ local: false, name: "Office", origin: "https://office.example" }, null, "Office"],
   ] as const)("names %o as it should", async (shown, config, name) => {
     place = { ...shown };

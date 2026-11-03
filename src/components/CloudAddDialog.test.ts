@@ -676,7 +676,7 @@ describe("the sheet", () => {
 
   it("the browser's sign-in lands a teammate on their team's Cloud too", async () => {
     account = { status: "connecting" };
-    expect(await settle()).toContain("Sign in");
+    expect(await settle()).toContain("Finish in your browser");
     push(teammate()); account = teammate();
     expect(await settle()).toContain("Your team's Cloud is ready");
   });

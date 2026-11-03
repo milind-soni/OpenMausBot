@@ -544,7 +544,7 @@
   "rail.thisComputer": "这台电脑",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "团队",
-  "rail.kindServer": "服务器",
+  "rail.kindServer": "自有服务器",
   "cloudBuy.ready.switchHint": "在窗口顶部或左侧边缘，可以在「这台电脑」和 {name} 之间切换。",
   "rail.signIn": "登录后查看你的 Cloud 和团队",
   "rail.tagOpen": "{name}：查看你的所有位置",

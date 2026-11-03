@@ -485,7 +485,7 @@
   "rail.thisComputer": "Este equipo",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Equipo",
-  "rail.kindServer": "Servidor",
+  "rail.kindServer": "Servidor propio",
   "cloudBuy.ready.switchHint": "Cambia entre «Este equipo» y {name} en la parte superior de la ventana o en su borde izquierdo.",
   "rail.signIn": "Inicia sesión para ver tus Clouds y equipos",
   "rail.tagOpen": "{name}: ver todos tus lugares",

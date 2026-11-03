@@ -3073,7 +3073,7 @@
   "rail.thisComputer": "Цей комп'ютер",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Команда",
-  "rail.kindServer": "Сервер",
+  "rail.kindServer": "Власний сервер",
   "cloudBuy.ready.switchHint": "Перемикайтеся між «Цей комп’ютер» і {name} угорі вікна або біля його лівого краю.",
   "rail.signIn": "Увійдіть, щоб побачити свої Cloud і команди",
   "rail.tagOpen": "{name}: показати всі ваші місця",

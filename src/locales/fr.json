@@ -2632,7 +2632,7 @@
   "rail.thisComputer": "Cet ordinateur",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Équipe",
-  "rail.kindServer": "Serveur",
+  "rail.kindServer": "Serveur personnel",
   "cloudBuy.ready.switchHint": "Passez de « Cet ordinateur » à {name} en haut de la fenêtre ou sur son bord gauche.",
   "rail.signIn": "Connectez-vous pour voir vos Clouds et vos équipes",
   "rail.tagOpen": "{name} : voir tous vos emplacements",

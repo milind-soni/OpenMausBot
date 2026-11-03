@@ -494,7 +494,7 @@
   "rail.thisComputer": "このコンピューター",
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "チーム",
-  "rail.kindServer": "サーバー",
+  "rail.kindServer": "自分のサーバー",
   "cloudBuy.ready.switchHint": "「このコンピューター」と{name}は、ウィンドウ上部または左端から切り替えられます。",
   "rail.signIn": "サインインすると Cloud とチームが表示されます",
   "rail.tagOpen": "{name}: すべての場所を表示",

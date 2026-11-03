@@ -90,7 +90,7 @@ it("nothing until the tag asks; then every place main lists, its kind in plain w
   expect(list()).toBeNull();
   expect(rail.expand).not.toHaveBeenCalledWith(true);
   await openIt();
-  expect([...list()!.querySelectorAll("[data-window-place-row]")].map((element) => element.textContent)).toEqual(["This computer", "MCMy Cloud", "SSecond" + "Cloud", "AAcme" + "Team", "OOffice" + "Server"]);
+  expect([...list()!.querySelectorAll("[data-window-place-row]")].map((element) => element.textContent)).toEqual(["This computer", "MCMy Cloud", "SSecond" + "Cloud", "AAcme" + "Team", "OOffice" + "Own server"]);
   expect(row("local")!.getAttribute("aria-current")).toBe("page");
   expect(row("local")!.querySelector("svg.lucide-check")).toBeTruthy();
   expect(row("home")!.getAttribute("aria-current")).toBeNull();

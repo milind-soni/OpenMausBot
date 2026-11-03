@@ -116,7 +116,7 @@ const member = plan({ teams: [{ id: "team-acme", name: "Acme", role: "member", m
 it("Settings' MausBot Cloud row, signed out: says Not signed in, so the name and address above read as this computer's, and Sign in sits beside the offer", async () => {
   for (const Row of [AccountRow, PlanRow]) {
     const html = await card(signedOut, Row);
-    expect(html).toContain('data-cloud-not-signed-in=""');
+    expect(html).toContain("data-cloud-not-signed-in");
     expect(html).toContain("Not signed in");
     expect(html).toMatch(/class="ui-button"[^>]*>Have an invite or a plan\? Sign in</);
     expect(html).toMatch(/class="ui-button ui-button-primary"[^>]*>Start free trial</);
