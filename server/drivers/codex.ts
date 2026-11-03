@@ -1,6 +1,7 @@
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
+import { mcpStartupTracker } from "./codex-mcp-startup.ts";
 import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
@@ -652,6 +653,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const selectedMcp = new Map<string, StdioMcpSpec>();
         const selectedApprovals = new Map<string, McpApprovalMode>();
         const directoryMounts = new Set<string>();
+        const directMounts: string[] = [];
         const literalEnvs = new Map<string, Record<string, string>>();
         const scopedServer = (name: string, mountName: string, server: McpServerSpec): StdioMcpSpec | null => {
           if (!canUseMcpServer(turn.toolScope, name)) return null;
@@ -718,6 +720,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           Object.assign(env, bridge.env);
           for (const name of Object.keys(bridge.env)) mountedNames.add(name);
           const prefix = "mcp_servers.openmausbot_phone";
+          directMounts.push("openmausbot_phone");
           appServerArgs.push(
             "-c", `${prefix}.command=${JSON.stringify(bridge.command)}`,
             "-c", `${prefix}.args=${JSON.stringify(bridge.args)}`,
@@ -760,6 +763,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let codexTurnId: string | null = null;
       let startingNativeTurn = false;
       const earlyNotifications: any[] = [];
+      const mcpStartup = mcpStartupTracker(child);
       const state = {
         settled: false,
         lastError: "",
@@ -1105,6 +1109,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const p = msg.params ?? {};
         // MCP servers start with the thread, before it has an id; this process serves this turn alone.
         if (msg.method === "mcpServer/startupStatus/updated") {
+          mcpStartup.record(p);
           if (!teamToolsNoticed && teamToolsFailed(p)) {
             teamToolsNoticed = true;
             emit({ ...base(threadId, turnId), type: "runtime.notice", message: TEAM_TOOLS_FAILED });
@@ -1580,6 +1585,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
         };
+        const mcpReady = await mcpStartup.settled([...selectedMcp.keys(), ...directMounts], stopSignal.signal);
+        if (!mcpReady || stopRequested || state.settled) return releaseSlot();
         try {
           await startTurn();
         } catch (error) {

@@ -54,6 +54,9 @@
 //     and model/list also offers gpt-6.1-sol
 //   FAKE_CODEX_MCP_START  "1": on thread/start, start each `-c mcp_servers.*` mount as codex-cli 0.160.1 does
 //     (its initialize, or FAKE_CODEX_MCP_HANDSHAKE) and dump mcpStartup[name]
+//   FAKE_CODEX_MCP_READY_MS  each `-c mcp_servers.*` mount is reported starting after the thread/start or
+//     thread/resume reply and ready at once, as codex-cli 0.166.0 does; with this, ready only this many ms
+//     later, and the dump records mcpReadyAtTurnStart
 //   FAKE_CODEX_ROLLOUT  rollout path thread/start and thread/resume report as `thread.path`; each happy turn appends a
 //     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
@@ -281,7 +284,32 @@ const startMcpServers = async (): Promise<Record<string, McpStartup>> => {
   return Object.fromEntries(entries);
 };
 
+let mcpPending: string[] = [];
+let mcpReadyAtTurnStart: boolean | undefined;
+// codex-cli 0.166.0 answers the thread request first and reports each server's startup after it.
+const announceMcpStartup = () => {
+  const report = (name: string, status: string, error: string | null = null) =>
+    out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
+  mcpPending = Object.entries(mcpMounts())
+    .filter(([name, fields]) => "command" in fields && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    .map(([name]) => name);
+  for (const name of mcpPending) report(name, "starting");
+  const settle = () => {
+    for (const name of mcpPending.splice(0)) {
+      const started = mcpStartup?.[name];
+      if (started?.status === "failed") report(name, "failed", started.error);
+      else report(name, "ready");
+    }
+  };
+  const delayMs = Number(process.env.FAKE_CODEX_MCP_READY_MS) || 0;
+  if (delayMs > 0) setTimeout(settle, delayMs);
+  else settle();
+};
 const threadReply = (response: unknown) => {
+  replyToThread(response);
+  announceMcpStartup();
+};
+const replyToThread = (response: unknown) => {
   if (!process.env.FAKE_CODEX_RESTORED_USAGE) return out(response);
   const restored = {
     jsonrpc: "2.0", method: "thread/tokenUsage/updated",
@@ -318,7 +346,8 @@ const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,
-      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}) }, null, 2),
+      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}),
+        ...(mcpReadyAtTurnStart !== undefined ? { mcpReadyAtTurnStart } : {}) }, null, 2),
     );
   }
 };
@@ -609,6 +638,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "turn/start": {
+        if (process.env.FAKE_CODEX_MCP_READY_MS) mcpReadyAtTurnStart = mcpPending.length === 0;
         dump();
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
