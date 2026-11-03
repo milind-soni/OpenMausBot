@@ -846,3 +846,15 @@ test("another Cloud the Admin says is no longer theirs is dropped at once and My
   assert.deepEqual(setup.home.view(), { screen: "setup", step: "starting", name: "Client A" });
   assert.deepEqual(setup.ownPairs, [], "never paired while it is set up");
 });
+
+test("an account leaving: nothing under way for it goes on, and the next show takes the window off its place", async () => {
+  const w = world({ journal: null, state: { status: "signed-out" }, url: `${CLOUD}/` });
+  w.home.accountLeaving();
+  assert.equal(w.home.shown(), null);
+  await w.home.show();
+  assert.deepEqual(w.local, [true], "the window showed that account's Cloud: this computer's page now");
+  const here = world({ journal: null, state: { status: "signed-out" }, url: `${LOCAL}/` });
+  here.home.accountLeaving();
+  await here.home.show();
+  assert.deepEqual(here.local, [false], "already on this computer's page: nothing moves");
+});

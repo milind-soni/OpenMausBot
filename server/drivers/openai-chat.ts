@@ -19,9 +19,10 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, toolCallRefusal, UnsupportedChatToolsError, UnsupportedReasoningReplayError } from "./openai-chat-refusals.ts";
+import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
+import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailureMessage } from "./engine-errors.ts"; import { toolFailureMessage } from "./tool-failure.ts";
@@ -47,7 +48,7 @@ interface Usage {
   output: number;
 }
 
-interface Completion {
+export interface Completion {
   text: string;
   reasoning: string;
   usage: Usage | null;
@@ -55,9 +56,11 @@ interface Completion {
   finishReason: string | null;
   protocolReasoning: string;
   protocolReasoningDetails: Record<string, unknown>[];
+  /** Every output item of a Responses API reply, encrypted reasoning included, for the next round of this turn only. */
+  responseOutput?: ResponseItem[];
 }
 
-interface CompletionJson {
+interface CompletionJson extends ProviderBody {
   model?: string;
   choices?: Array<{
     index?: number;
@@ -65,37 +68,9 @@ interface CompletionJson {
     delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown; tool_calls?: unknown; function_call?: unknown };
     finish_reason?: string | null;
   }>;
-  error?: unknown;
-  base_resp?: { status_code?: unknown; status_msg?: unknown };
   usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; cost?: number };
   /** Groq reports streaming usage in its final x_groq envelope. */
   x_groq?: { usage?: CompletionJson["usage"] };
-}
-
-/** MiniMax reports auth, balance and parameter failures as `base_resp` with HTTP 200. */
-function providerError(json: CompletionJson): string | null {
-  if (typeof json.error === "string") return json.error;
-  const error = object(json.error);
-  if (error) return typeof error.message === "string" ? error.message : "unknown error";
-  const code = json.base_resp?.status_code;
-  if (typeof code === "number" && code !== 0) {
-    const msg = typeof json.base_resp?.status_msg === "string" ? json.base_resp.status_msg : "";
-    return `upstream error ${code}${msg ? `: ${msg}` : ""}`;
-  }
-  return null;
-}
-
-const MACHINE_CODE = /^[a-z][a-z0-9_]*$/;
-
-/** A failed response's own error message, then its machine code (trial-credit.ts parses it), else the raw body. */
-function httpErrorDetail(body: string, limit = 500): string {
-  let json: CompletionJson | undefined;
-  try { json = object(JSON.parse(body)); } catch { json = undefined; }
-  const message = json ? providerError(json) : null;
-  if (!message || message === "unknown error") return body.slice(0, limit);
-  const code = object(json?.error)?.code;
-  const suffix = typeof code === "string" && MACHINE_CODE.test(code) ? ` (${code})` : "";
-  return message.slice(0, limit) + suffix;
 }
 
 interface NativeLog {
@@ -144,6 +119,8 @@ interface RuntimeOptions<Config> {
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
+  /** The name to send for a model, when its server knows it by another. */
+  servedModel?: (model: string) => Promise<string>;
   /** Smaller models announce a step and end the turn without calling a tool; such a reply gets a nudge, at most three
    * per turn and each only after tool progress since the last. */
   nudgeAnnouncedAction?: boolean;
@@ -233,14 +210,6 @@ const LOCAL_CORRECTIVE_ROUNDS = 2;
 const TEXT_ONLY_ATTACHMENT_NOTE = "[The person attached image(s), but this model cannot see images. Say so if the request depends on them.]";
 const TEXT_ONLY_SCREENSHOT_NOTE = "[Screenshot not shown: this model cannot see images. Read the page with a snapshot or a text tool instead.]";
 
-function completionError(json: CompletionJson, label: string): ChatProtocolError | null {
-  const message = providerError(json);
-  if (!message) return null;
-  const text = `provider returned a ${label}: ${message.slice(0, 200)}`;
-  const refusal = toolCallRefusal(json.error);
-  return refusal ? new RejectedToolCallError(text, refusal) : new ChatProtocolError(text);
-}
-
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
   const listeners = new Set<RuntimeEventListener>();
@@ -255,9 +224,17 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     ending: boolean;
   }>();
   const reasoningReplayRejected = new Set<string>();
-  const assistantReply = (model: string, completion: Completion, content: string | null): OpenAIChatMessage => ({ role: "assistant", content,
-    ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
-    ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}) });
+  const routes = createModelRoutes(options.apiUrl);
+  /** Beside the messages, not on them, so encrypted reasoning never reaches a Chat Completions body, a log or a handoff. */
+  const responseOutputs = new WeakMap<OpenAIChatMessage, ResponseItem[]>();
+  const assistantReply = (model: string, completion: Completion, content: string | null, toolCalls?: ChatToolCall[]): OpenAIChatMessage => {
+    const reply: OpenAIChatMessage = { role: "assistant", content,
+      ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
+      ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
+      ...(toolCalls ? { tool_calls: toolCalls } : {}) };
+    if (completion.responseOutput) responseOutputs.set(reply, completion.responseOutput);
+    return reply;
+  };
   const delivered = new Map<string, DeliveredUserMessage[]>();
   /** Not cleared on `sessionReset`: with no cursor the harness sends it on nearly every turn. */
   const sessionGrants = new Map<string, Set<string>>();
@@ -286,7 +263,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     return timer;
   };
 
-  const complete = async (
+  const completeOn = async (
+    route: ModelRoute,
     messages: OpenAIChatMessage[],
     model: string,
     stream: boolean,
@@ -312,32 +290,43 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
-      const payload = JSON.stringify({
-        ...options.requestBody(model, messages, stream),
-        ...(tools.length ? { tools } : {}),
-      });
+      const served = options.servedModel ? await options.servedModel(model) : model;
+      const payload = JSON.stringify(route === "responses"
+        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model) })
+        : {
+          ...options.requestBody(served, messages, stream),
+          ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
+          ...(tools.length ? { tools } : {}),
+        });
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
-      const response = await send(`${options.apiUrl}/chat/completions`, {
+      const response = await send(`${options.apiUrl}/${route === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST",
         ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: payload,
         signal: activeSignal,
       });
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        if (rejectsKey(response.status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
-        const message = `${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
-        if (refusesRequestSize(response.status, body)) throw new RequestTooLargeError(message, Buffer.byteLength(payload));
-        if (rejectsToolsParameter(response.status, body)) throw new UnsupportedChatToolsError(message);
-        const refusal = refusedToolCall(response.status, body);
-        if (refusal) throw new RejectedToolCallError(message, refusal);
-        if (messages.some((entry) => entry.reasoning_content !== undefined) && rejectsReasoningReplay(response.status, body)) {
-          throw new UnsupportedReasoningReplayError(message);
+      const failure = (status: number, body: string): Error => {
+        const message = `${options.httpErrorLabel} HTTP ${status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
+        const refused = tools.length ? routeRefusal(route, status, body) : null;
+        if (refused) return new ModelRouteRefused(refused, message);
+        if (rejectsKey(status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
+        if (refusesRequestSize(status, body)) return new RequestTooLargeError(message, Buffer.byteLength(payload));
+        if (rejectsToolsParameter(status, body)) return new UnsupportedChatToolsError(message);
+        const refusal = refusedToolCall(status, body);
+        if (refusal) return new RejectedToolCallError(message, refusal);
+        if (messages.some((entry) => entry.reasoning_content !== undefined) && rejectsReasoningReplay(status, body)) {
+          return new UnsupportedReasoningReplayError(message);
         }
-        throw new Error(message);
-      }
+        return new Error(message);
+      };
+      if (!response.ok) throw failure(response.status, await response.text().catch(() => ""));
       noteKeyAccepted(options.apiUrl, options.apiKey);
+      if (route === "responses") {
+        const reply = await readResponsesStream(response.body, { reasoning: Boolean(options.reasoning), onBytes: resetIdleTimer, onDelta: (text, kind) => onDelta?.(text, kind), fail: failure });
+        activeSignal.throwIfAborted();
+        return reply;
+      }
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
@@ -471,6 +460,30 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       if (liveness) clearInterval(liveness);
+    }
+  };
+
+  const complete = async (
+    messages: OpenAIChatMessage[],
+    model: string,
+    stream: boolean,
+    signal?: AbortSignal,
+    onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
+    tools: ChatToolDefinition[] = [],
+    onUsage?: TextGenerationOptions["onUsage"],
+  ): Promise<Completion> => {
+    for (;;) {
+      let replied = false;
+      try {
+        return await completeOn(routes.routeFor(model, tools.length > 0), messages, model, stream, signal, onDelta && ((text, kind) => {
+          replied = true;
+          onDelta(text, kind);
+        }), tools, onUsage);
+      } catch (error) {
+        if (!(error instanceof ModelRouteRefused) || replied || signal?.aborted) throw error;
+        if (!routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
+        console.warn(`${options.driverKind}: ${model} answered ${error.refusal}; now on ${routes.routeFor(model, true)}`);
+      }
     }
   };
 
@@ -768,7 +781,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             seenCalls.add(call.id);
           }
           if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
-          messages.push({ ...assistantReply(model, completion, completion.text || null), tool_calls: completion.toolCalls });
+          messages.push(assistantReply(model, completion, completion.text || null, completion.toolCalls));
           // After a corrective round, the failure stays pending only until the bot runs tools again. A local model that
           // went on to use more tools has already reacted: a wrong guess, a search, then the right call is not a failed turn.
           if ((correctiveRounds || options.localModel) && !denials.length) { toolFailed = false; failedCalls.length = 0; }
@@ -880,7 +893,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           // "upstream" (an OpenAI-compatible URL) names no provider, and the Cloud trial credit reads its raw line.
           const message = options.httpErrorLabel === "upstream" ? failure : plainFailureMessage(options.httpErrorLabel, failure);
-          emit({ ...base(turn.threadId, turnId), type: "runtime.error", message, terminal: !abort.signal.aborted });
+          const replyShownFirst = stopReason === "tool_error";
+          emit({ ...base(turn.threadId, turnId), type: "runtime.error", message, terminal: !abort.signal.aborted, ...(replyShownFirst ? { partial: true } : {}) });
         }
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);

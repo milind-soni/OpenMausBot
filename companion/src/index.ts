@@ -26,6 +26,7 @@ import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
+import { machineNameFromConfig } from "./machine-name.ts";
 
 // Only Electron supplies this port; Electron children fail closed until initialized.
 const parentPort = (process as NodeJS.Process & {
@@ -77,25 +78,32 @@ const conflict = (name: string, port: number): string | null => {
   return owner ? `${name} is set to port ${port}, which is ${owner}` : null;
 };
 
-/** OMB_COMPANION_NAME wins; otherwise the harness's profile name, read once at
- * startup. Failures fall back: no part of pairing depends on the name. */
-let cachedName = process.env.OMB_COMPANION_NAME?.trim() || "";
+/** OMB_COMPANION_NAME wins; otherwise the name set in Settings or the owner's profile name, re-read every 30
+ * seconds so a rename, or a harness that answered late, reaches the phone. Failures keep the last name. */
+const fixedName = process.env.OMB_COMPANION_NAME?.trim() || "";
+let cachedName = fixedName;
 
 const machineName = (): string => cachedName || "OpenMausBot";
 
-async function refreshMachineName(): Promise<void> {
-  if (cachedName) return;
+/** True when the name changed. */
+async function refreshMachineName(): Promise<boolean> {
+  if (fixedName) return false;
   try {
     const res = await fetch(`http://127.0.0.1:${HARNESS_PORT}/api/config`, {
       signal: AbortSignal.timeout(3000),
     });
-    if (!res.ok) return;
-    const config = (await res.json()) as { profile?: { name?: string } };
-    const owner = config.profile?.name?.trim();
-    if (owner) cachedName = `${owner}'s computer`;
+    if (!res.ok) return false;
+    const next = machineNameFromConfig(await res.json());
+    if (next === cachedName) return false;
+    cachedName = next;
+    return true;
   } catch {
+    return false;
   }
 }
+
+let nameTimer: ReturnType<typeof setInterval> | null = null;
+let stopping = false;
 
 const devices = new DeviceRegistry();
 const mdns = new MdnsResponder();
@@ -104,6 +112,7 @@ const mdns = new MdnsResponder();
  * when it goes. */
 const watcher = createAddressWatcher({
   addresses: advertisableAddresses,
+  name: machineName,
   advertise: () => mdns.advertise(service()),
   withdraw: () => mdns.stop(),
   log: (line) => console.log(`bonjour: ${line}`),
@@ -209,7 +218,7 @@ async function main(): Promise<void> {
     await listenCompanionOrigin(managedOrigin, PRIVATE_ORIGIN);
   }
 
-  // Before advertising: renaming later would show the phone two computers.
+  // Before advertising, so the first record already carries the name; a later rename withdraws the old one.
   await refreshMachineName();
 
   const tailscaleTried: string[] = [];
@@ -219,6 +228,9 @@ async function main(): Promise<void> {
   // under a running sidecar. Discovery failing is never fatal.
   await watcher.check();
   watcher.start();
+  // A rename in Settings reaches the phone within one tick: the watcher re-advertises when the name moves.
+  nameTimer = setInterval(() => void refreshMachineName().then((changed) => (changed && !stopping ? watcher.check() : undefined)), 30_000);
+  nameTimer.unref?.();
 
   const addresses = lanAddresses();
   const tailscale = tailscaleAddress(addresses);
@@ -234,8 +246,10 @@ async function main(): Promise<void> {
 
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`\n${signal} — stopping`);
-  // The watcher first, or a tick could re-advertise the withdrawn record.
+  // The watcher first, or a tick (or a name refresh already in flight) could re-advertise the withdrawn record.
+  stopping = true;
   watcher.stop();
+  if (nameTimer) clearInterval(nameTimer);
   await mdns.stop().catch(() => {});
   // close() waits for open connections, and an SSE stream never ends on its own.
   proxy.closeViewers();

@@ -88,9 +88,9 @@ describe("routine list", () => {
   });
 
   it("chooses a new pending run ahead of an older run that finished later", () => {
-    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for delegated work to finish" };
+    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for work it handed on to finish" };
     expect(latestRoutineRun(routine.id, [{ ...run, finishedAt: 300 }, pending])).toBe(pending);
     expect(list({ runs: [run, pending] })).toContain("Latest: Waiting");
-    expect(list({ runs: [run, pending] })).toContain("Waiting for delegated work to finish");
+    expect(list({ runs: [run, pending] })).toContain("Waiting for work it handed on to finish");
   });
 });

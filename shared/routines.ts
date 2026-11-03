@@ -190,6 +190,8 @@ export interface RoutineRun {
   finishedAt?: number;
   output?: string;
   error?: string;
+  /** A failed run whose reply still came back: only a step it ran failed or wasn't allowed. */
+  partial?: boolean;
   /** Set when the run used its one automatic second start, and why. */
   retried?: RoutineRetryCause;
   /** Concise, redacted question or approval reason while status is waiting,

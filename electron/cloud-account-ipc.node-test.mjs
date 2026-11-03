@@ -35,6 +35,7 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" },
     ensureCloudAccount: () => Object.fromEntries(methods.map(method => [method, (...args) => { calls.push([method, ...args]); return { status: "signed-out" }; }])),
     connectCloudHome: (...args) => { calls.push(["connectHome", ...args]); return { status: "connected" }; },
+    accounts: { signOutActive: (...args) => { calls.push(["signOut", ...args]); return { status: "signed-out" }; } },
   });
   vm.runInContext(source.slice(start, end), context);
   for (const method of bridgeMethods) {
