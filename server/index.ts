@@ -8362,8 +8362,7 @@ async function beginTurn(
             label: "this computer",
             onRejected: surfaceLazyClaimRejection("this computer"),
             claim: async (call) => {
-              if (liveApprovalMode(bot, threadId, commsDepth > 0) !== "full") await askToUseYourComputer(approvalBus, bot, resourceOwner, call);
-              await bindTurnComputer(resourceOwner, "computer:host", true);
+              await claimWithYourComputerConsent(() => liveApprovalMode(bot, threadId, commsDepth > 0) !== "full", () => askToUseYourComputer(approvalBus, bot, resourceOwner, call), () => bindTurnComputer(resourceOwner, "computer:host", true));
               pinAutoSurface("local"); recordTurnPlace(bot.id, threadId, "local");
             },
           });
