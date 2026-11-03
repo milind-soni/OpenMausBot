@@ -14,7 +14,7 @@ const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8
 const workflow = parse(readFileSync(new URL("../.github/workflows/docker.yml", import.meta.url), "utf8"));
 
 interface Step { op: string; args: string }
-interface Stage { name: string; from: string; steps: Step[] }
+interface Stage { name: string; from: string; platform?: string; steps: Step[] }
 
 function stages(text: string): Stage[] {
   const all: Stage[] = [];
@@ -26,8 +26,8 @@ function stages(text: string): Stage[] {
     const [, op, args] = /^\s*(\S+)\s*([\s\S]*)$/.exec(pending)!;
     pending = "";
     if (op.toUpperCase() === "FROM") {
-      const [, from, name] = /^(\S+)(?:\s+AS\s+(\S+))?$/i.exec(args.trim())!;
-      all.push({ name: name ?? `#${all.length}`, from, steps: [] });
+      const [, platform, from, name] = /^(?:--platform=(\S+)\s+)?(\S+)(?:\s+AS\s+(\S+))?$/i.exec(args.trim())!;
+      all.push({ name: name ?? `#${all.length}`, from, platform, steps: [] });
     } else all.at(-1)?.steps.push({ op: op.toUpperCase(), args: args.trim() });
   }
   return all;
@@ -107,7 +107,7 @@ describe("container images", () => {
     expect(home.findIndex(step => step.args.startsWith("--from=edge "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.op === "RUN" && /\b(cp|mv)\b[^&]*caddy/.test(step.args))).toEqual([]);
     expect(home.filter(step => step.args.includes("--from=build")).map(step => step.args)).toEqual([
-      "/src/dist-native/duckdb/linux-x64 ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
+      "/src/dist-native/duckdb/target ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
     ].map(path => `--from=build ${path}`));
     expect(chain("server").filter(step => step.args.includes("--from=build")).every(step => step.args.startsWith("--from=build --chown=maus:maus "))).toBe(true);
   });
@@ -209,6 +209,48 @@ describe("container images", () => {
     const script = run("agent-browser-linux-x64", false);
     expect(script.status).not.toBe(0);
     expect(script.left).toEqual(script.names);
+  });
+
+  it("builds the server image for linux/arm64 too: the DuckDB tree and the browser follow the image's CPU", () => {
+    // The JavaScript build runs once on the build host; only the native tree is per CPU, staged after it.
+    const build = all.find(s => s.name === "build")!;
+    expect(build.platform).toBe("$BUILDPLATFORM");
+    const declared = build.steps.findIndex(step => step.op === "ARG" && step.args === "TARGETARCH");
+    expect(declared).toBeGreaterThan(build.steps.findIndex(step => step.op === "RUN" && step.args.startsWith("pnpm build:server")));
+    const stage = build.steps.find(step => step.op === "RUN" && step.args.includes("prepare-duckdb.mjs"))!;
+    expect(build.steps.indexOf(stage)).toBeGreaterThan(declared);
+    if (process.platform !== "win32") {
+      for (const [targetArch, arch] of [["amd64", "x64"], ["arm64", "arm64"], ["", "x64"]]) {
+        const root = mkdtempSync(join(tmpdir(), "omb-duckdb-arch-"));
+        temporaryDirectories.push(root);
+        mkdirSync(join(root, "scripts"));
+        // A stand-in for the staging script: it stages the CPU it is told to, and records which.
+        writeFileSync(join(root, "scripts/prepare-duckdb.mjs"), 'import { mkdirSync, writeFileSync } from "node:fs"; const d = `dist-native/duckdb/linux-${process.env.OMB_DUCKDB_ARCH}`; mkdirSync(d, { recursive: true }); writeFileSync(`${d}/arch`, process.env.OMB_DUCKDB_ARCH);');
+        const result = spawnSync("sh", ["-c", stage.args], { cwd: root, env: { PATH: process.env.PATH, TARGETARCH: targetArch }, encoding: "utf8" });
+        expect(result.status, `${targetArch}: ${result.stderr}`).toBe(0);
+        expect(readdirSync(join(root, "dist-native/duckdb")), targetArch).toEqual(["target"]);
+        expect(readFileSync(join(root, "dist-native/duckdb/target/arch"), "utf8"), targetArch).toBe(arch);
+      }
+    }
+    // Chrome for Testing has no Linux ARM64 build: an arm64 image takes Debian's Chromium at the same path.
+    const runtime = chain("runtime");
+    expect(runtime.slice(0, runtime.indexOf(browserRun()))).toContainEqual({ op: "ARG", args: "TARGETARCH" });
+    expect(browserRun().args).toMatch(/if \[ "\$TARGETARCH" = arm64 \]; then .*apt-get install -y --no-install-recommends chromium .*ln -s \/usr\/lib\/chromium\/chromium \/opt\/openmausbot-browser\/chrome; +else .*agent-browser install .*; +fi/);
+    // Published for both CPUs; the Cloud home (Fly, amd64) stays as it is.
+    const steps = workflow.jobs.publish.steps as { id?: string; uses?: string; with?: Record<string, string> }[];
+    const server = steps.findIndex(step => step.uses?.startsWith("docker/build-push-action@") && step.id !== "home");
+    const qemu = steps.findIndex(step => step.uses?.startsWith("docker/setup-qemu-action@"));
+    expect(qemu).toBeGreaterThan(-1);
+    expect(qemu).toBeLessThan(server);
+    expect(steps[server].with!.platforms).toBe("linux/amd64,linux/arm64");
+    expect(steps.find(step => step.id === "home")!.with).not.toHaveProperty("platforms");
+    // and an arm64 runner proves the arm64 image boots, serves and browses before anything is published
+    const arm = workflow.jobs["arm64-smoke"];
+    expect(arm["runs-on"]).toBe("ubuntu-24.04-arm");
+    expect(workflow.jobs.publish.needs).toEqual(expect.arrayContaining(["build-and-smoke", "arm64-smoke"]));
+    const armRun = (arm.steps as { run?: string }[]).map(step => step.run ?? "").join("\n");
+    expect(armRun).toContain("/api/health");
+    expect(armRun).toContain("agent-browser --session ci-browser open");
   });
 
   it("builds Cloud home from the same Dockerfile in CI, with its own layer cache", () => {
