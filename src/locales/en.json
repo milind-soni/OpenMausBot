@@ -7421,6 +7421,7 @@
   "grokMove.count.notes": "Routines saved as notes",
   "grokMove.pausedPreview": "Routines come over paused.",
   "grokMove.pausedReport": "Routines are paused. Turn each one off in Grok Bot, then on here.",
+  "grokMove.filesStay": "Files on Grok Bot's computer don't come over. Add any your Bot needs.",
   "grokMove.appsOne": "1 app needs connecting again here",
   "grokMove.appsMany": "{count} apps need connecting again here",
   "grokMove.skillsOff": "A safety check keeps these skills off: {names}",

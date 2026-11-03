@@ -9,6 +9,7 @@ vi.mock("@/lib/analytics", () => ({ track: f.track }));
 
 import { setLocale } from "@/lib/i18n";
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
+import { ComposerAttachments } from "./ComposerAttachments";
 import { GrokMoveDialog } from "./GrokMoveDialog";
 
 const MEMORY = "The door sticks in the rain";
@@ -22,6 +23,7 @@ const EXPORT = JSON.stringify({ format: GROK_EXPORT_FORMAT, version: 1, bots: [{
   ],
   apps: [{ name: "Cursor GitHub (connect_github)" }, { name: "Linear", mcp_url: "https://mcp.linear.app/mcp" }],
 }] });
+const FILES_STAY = "Files on Grok Bot's computer don't come over. Add any your Bot needs.";
 const QUIET = JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat." }] });
 
 let root: Root;
@@ -86,6 +88,7 @@ describe("Move from Grok Bot", () => {
     expect(shown()).toContain("Routines come over paused.");
     expect(shown()).toContain("2 apps need connecting again here");
     expect(shown()).toContain("A safety check keeps these skills off: Quick installer");
+    expect(shown()).not.toContain(FILES_STAY);
     plain();
     expect(f.api.mock.calls.map(([path]) => path).filter((path) => path.startsWith("/api/teams/import") || path.includes("/skills/"))).toEqual([]);
   });
@@ -99,6 +102,8 @@ describe("Move from Grok Bot", () => {
     expect(counts()).toEqual({ Skills: 2, Routines: 1, Memories: 2, "Routines saved as notes": 1 });
     expect(shown()).toContain("Routines are paused. Turn each one off in Grok Bot, then on here.");
     expect(shown()).toContain("2 apps need connecting again here");
+    const lines = [...host.querySelectorAll("[data-grok-move-body] p")].map((line) => line.textContent);
+    expect(lines.indexOf(FILES_STAY)).toBe(lines.indexOf("Routines are paused. Turn each one off in Grok Bot, then on here.") + 1);
     plain();
     expect(f.api.mock.calls.map(([path]) => path)).toContain("/api/bots/b1/skills/greet");
     expect(f.track).toHaveBeenCalledOnce();
@@ -112,6 +117,8 @@ describe("Move from Grok Bot", () => {
     expect(host.querySelector("h3")?.textContent).toBe("Quiet");
     expect(counts()).toEqual({});
     expect(shown()).not.toMatch(/paused|connecting|safety check/);
+    await importIt();
+    expect(shown()).toContain(FILES_STAY);
   });
 
   it("says one app in the singular", async () => {
@@ -178,5 +185,98 @@ describe("Move from Grok Bot", () => {
     expect(GROK_EXPORT_PROMPT).toContain(`"format": "${GROK_EXPORT_FORMAT}"`);
     expect(GROK_EXPORT_PROMPT).toContain("grok-bot-export-<your name>.json");
     expect(GROK_EXPORT_PROMPT).toMatch(/Never include passwords, API keys, tokens, webhook keys, cookies or card numbers/);
+  });
+});
+
+describe("a file dragged over the dialog, with the chat box behind it", () => {
+  const onAdd = vi.fn();
+  const OVERLAY = "Drop to attach";
+  const behindIt = vi.fn();
+  const upload = vi.fn();
+  const DRAGS = ["dragenter", "dragover", "dragleave", "drop"];
+  const noop = () => {};
+  const render = (dialog: boolean) => act(async () => root.render(createElement("div", null,
+    createElement(ComposerAttachments, { items: [], onAdd, onRemove: noop, onChangeCitation: noop, onDisplayInChatBox: noop, notice: null, onNotice: noop, uploadImage: async () => null }),
+    dialog ? createElement(GrokMoveDialog, { onClose: noop }) : null)));
+  const fileOf = (text: string, name = "grok-bot-export-x.json") => {
+    const file = new File([text], name, { type: "application/json" });
+    vi.spyOn(file, "text");
+    return file;
+  };
+  const drag = async (type: string, file?: File) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: { types: ["Files"], files: file ? [file] : [] } });
+    await act(async () => { (host.querySelector("[data-grok-move]") ?? document.body).dispatchEvent(event); });
+    await tick();
+    return event;
+  };
+  const step = () => host.querySelector("[data-grok-move]")?.getAttribute("data-grok-move");
+
+  beforeEach(() => {
+    onAdd.mockReset();
+    behindIt.mockReset();
+    upload.mockReset();
+    upload.mockImplementation(async () => new Response(JSON.stringify({ path: "/files/note.txt", name: "note.txt", bytes: 17 }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", upload);
+    for (const type of DRAGS) window.addEventListener(type, behindIt);
+  });
+  afterEach(() => {
+    for (const type of DRAGS) window.removeEventListener(type, behindIt);
+  });
+
+  it("never reaches the chat box, on any step, and only the first step reads it", async () => {
+    await render(true);
+    await tick();
+    const first = fileOf(EXPORT);
+    await drag("dragenter", first);
+    expect(shown()).not.toContain(OVERLAY);
+    expect((await drag("dragover", first)).defaultPrevented).toBe(true);
+    await drag("dragleave", first);
+    expect((await drag("drop", first)).defaultPrevented).toBe(true);
+    expect(first.text).toHaveBeenCalledOnce();
+    expect(step()).toBe("preview");
+
+    const onPreview = fileOf(QUIET);
+    expect((await drag("drop", onPreview)).defaultPrevented).toBe(true);
+    expect(onPreview.text).not.toHaveBeenCalled();
+    expect(host.querySelector("h3")?.textContent).toBe("Job Search");
+
+    await importIt();
+    const onReport = fileOf(QUIET);
+    await drag("dragenter", onReport);
+    expect(shown()).not.toContain(OVERLAY);
+    expect((await drag("drop", onReport)).defaultPrevented).toBe(true);
+    expect(onReport.text).not.toHaveBeenCalled();
+    expect(step()).toBe("report");
+
+    await act(async () => button("Move another Bot")!.click());
+    const again = fileOf(QUIET);
+    await drag("drop", again);
+    expect(again.text).toHaveBeenCalledOnce();
+    expect(host.querySelector("h3")?.textContent).toBe("Quiet");
+
+    expect(behindIt).not.toHaveBeenCalled();
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("hands drags back to the chat box once it closes", async () => {
+    await render(true);
+    await tick();
+    await drag("drop", fileOf(QUIET));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+
+    await render(false);
+    expect(step()).toBeUndefined();
+    const note = fileOf("An ordinary note.", "note.txt");
+    await drag("dragenter", note);
+    expect(shown()).toContain(OVERLAY);
+    await drag("dragleave", note);
+    expect(shown()).not.toContain(OVERLAY);
+    await drag("drop", note);
+    await vi.waitFor(() => expect(onAdd).toHaveBeenCalledOnce());
+    expect(onAdd.mock.calls[0]![0][0]).toMatchObject({ name: "note.txt" });
+    expect(note.text).not.toHaveBeenCalled();
   });
 });
