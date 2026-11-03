@@ -35,6 +35,19 @@ describe("data saved with a peers list, a peer-approval switch or an escalations
     expect(canReach(bot, reloaded.bot(other.id)!)).toBe(true);
     expect(reachablePeers(reloaded.bots, bot).map((peer) => peer.id)).toEqual([other.id]);
     expect(JSON.stringify(bot)).not.toMatch(/peers|approvePeerComms/);
+  });
+
+  it("leave the saved file on the next load, even when that load has nothing else to rewrite", () => {
+    const narrow = new Store(selection).createBot({ name: "Narrow" });
+    new Store(selection);
+    const file = join(DATA_DIR, "bots.json");
+    const saved: Array<BotRecord & { peers?: string[]; approvePeerComms?: boolean }> = JSON.parse(readFileSync(file, "utf8"));
+    const record = saved.find((bot) => bot.id === narrow.id)!;
+    record.peers = ["nobody"];
+    record.approvePeerComms = true;
+    writeFileSync(file, JSON.stringify(saved));
+
+    new Store(selection);
     const persisted: Array<Record<string, unknown>> = JSON.parse(readFileSync(file, "utf8"));
     expect(persisted.find((entry) => entry.id === narrow.id)).not.toHaveProperty("peers");
     expect(persisted.find((entry) => entry.id === narrow.id)).not.toHaveProperty("approvePeerComms");
