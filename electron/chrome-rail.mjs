@@ -41,7 +41,7 @@ const ABORTED = -3;
  * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page.
  */
 export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
-  let view = null, win = null, shown = false, expanded = false;
+  let view = null, win = null, shown = false, expanded = false, held = false;
   // Whether the page beside draws the frame; the window opens as if it does (windowChromeOptions).
   let framed = true, frameGrace = null;
   // The document beside the rail offered its button; a new one may still (`grace`); the page stopped responding.
@@ -112,7 +112,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     /** The window the rail stands beside: its size moves the rail, and each of its documents gets the room again. */
     attach(next) {
       win = next;
-      shown = false; expanded = false; offered = false; hung = false; told = "";
+      shown = false; expanded = false; held = false; offered = false; hung = false; told = "";
       framed = prefs()?.windowFrame?.() !== false;
       // The window's first document has the same time as any other to offer the button and to draw the frame.
       if (choseHidden()) startGrace(); else stopGrace();
@@ -137,7 +137,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     /** Shown while there are two places or more (railPlaces) and the person hasn't hidden it; the page beside it has the
      * whole window otherwise. */
     refresh() {
-      const on = alive() && wanted() && !hidden();
+      const on = alive() && ((wanted() && !hidden()) || held);
       if (on === shown) layout();
       else {
         shown = on;
@@ -152,6 +152,12 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
         changed();
       }
       tellState();
+    },
+    /** A sheet the rail's page shows for the page beside it (the person's accounts): the rail's page is up meanwhile, even
+     * for someone who hid the rail. */
+    holdOpen(on) {
+      held = on === true;
+      rail.refresh();
     },
     /** A sheet of the rail's is open: the view covers the window until it closes. */
     expand(on) {

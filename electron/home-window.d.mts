@@ -61,6 +61,7 @@ export function splashText(status: "opening" | "waking", name?: string | null): 
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
 export function homeOf(input: { journal?: any; frozenCloud?: string | true | null; state?: any }): Home;
+export function noWayHome(worked: Home, state?: any): boolean;
 export function routeOf(url: string, origin: string): string | null;
 
 interface WindowLike { isDestroyed(): boolean; webContents: { id: number; getURL(): string; reload(): void; mainFrame?: unknown } }
@@ -109,6 +110,7 @@ export function createHomeWindow(deps: {
   power: { asleep(): boolean; hold(): void; woke(): void };
   go(url: string, origin: string | null, place: HomePlace | null): unknown;
   showLocal(leaving: boolean): unknown;
+  clean?: import("./clean-workspace.mjs").CleanWorkspace | null;
   remembered?(): RememberedPlace;
   remember?(place: { team: string } | { cloud: string } | null): void;
   left?(name: string): void;
