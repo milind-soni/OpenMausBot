@@ -141,7 +141,7 @@ describe("the list", () => {
       { kind: "memory", name: "3", status: "error", reason: "memoriesTooBig" },
     ];
     const markup = text(renderToStaticMarkup(createElement(GrokItems, { items, warnings: ["Watch this"], report: true })));
-    for (const part of ["Imported", "Bots: 1", "Skills: 0", "Routines: 0", "Memories: 0", "Apps: 0", "Conflicts (skipped)", "Apps: Linear · you already have a server with this name", "Skipped", "Skills: Empty", "Errors", "Worth checking", "Watch this"]) {
+    for (const part of ["Imported", "Bots: 1", "Skills: 0", "Routines: 0", "Memories: 0", "Apps: 0", "Conflicts (skipped)", "Apps: Linear · you already have a connection with this name", "Skipped", "Skills: Empty", "Errors", "Worth checking", "Watch this"]) {
       expect(markup, part).toContain(part);
     }
   });
