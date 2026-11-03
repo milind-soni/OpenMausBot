@@ -386,6 +386,8 @@ export class MdnsResponder {
   private service: ServiceInfo | null = null;
   private timers: ReturnType<typeof setTimeout>[] = [];
   private sendQueue: Promise<void> = Promise.resolve();
+  /** Bumped by every stop(), so a bind still in flight knows it was cancelled. */
+  private stops = 0;
   private readonly port: number;
   private readonly multicast: boolean;
   private readonly socketFactory: () => ResponderSocket;
@@ -412,6 +414,7 @@ export class MdnsResponder {
    * by typed address still works. */
   async advertise(service: ServiceInfo): Promise<boolean> {
     await this.stop();
+    const stops = this.stops;
     if (!service.addresses.length) return false;
 
     const socket = this.socketFactory();
@@ -425,6 +428,14 @@ export class MdnsResponder {
         socket.bind(this.port, () => resolve());
       });
     } catch {
+      try {
+        socket.close();
+      } catch {
+      }
+      return false;
+    }
+    // stop() ran while the bind was pending: it found no socket to close, so close this one.
+    if (stops !== this.stops) {
       try {
         socket.close();
       } catch {
@@ -468,6 +479,7 @@ export class MdnsResponder {
   /** Sends a goodbye so the records don't sit in caches for 75 minutes
    * (RFC 6762 §10.1). */
   async stop(): Promise<void> {
+    this.stops += 1;
     for (const timer of this.timers.splice(0)) clearTimeout(timer);
     const socket = this.socket;
     const service = this.service;

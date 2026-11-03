@@ -675,3 +675,29 @@ describe("clampBytes", () => {
     expect(clampBytes("\u{1F600}", 3)).toBe("");
   });
 });
+
+describe("stop while an advertisement is still binding", () => {
+  it("never publishes once stop() has returned", async () => {
+    const socket = new FakeSocket();
+    let bound: (() => void) | undefined;
+    let closed = false;
+    socket.bind = (_port: number, callback?: () => void) => {
+      bound = callback;
+    };
+    socket.close = (callback?: () => void) => {
+      closed = true;
+      callback?.();
+    };
+    const responder = new MdnsResponder({ socketFactory: () => socket });
+    const advertised = responder.advertise(service);
+    await drained();
+    expect(bound).toBeDefined();
+    await responder.stop();
+    bound?.();
+    expect(await advertised).toBe(false);
+    await drained();
+    expect(socket.packets).toHaveLength(0);
+    expect(responder.advertising).toBe(false);
+    expect(closed).toBe(true);
+  });
+});
