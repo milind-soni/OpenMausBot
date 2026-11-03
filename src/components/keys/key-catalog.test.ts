@@ -106,6 +106,14 @@ describe("every credential has one home on the keys page", () => {
     } as unknown as ConfigStatus;
     expect(savedState(gemini, config)).toEqual({ configured: true, last4: "9abc" });
   });
+
+  it("reports the Gemini row as unconfigured when savedKeys.geminiTtsKey is absent and another provider is active", () => {
+    const gemini = keyEntry("geminiTts");
+    const config = {
+      tts: { provider: "elevenlabs", configured: true },
+    } as unknown as ConfigStatus;
+    expect(savedState(gemini, config)).toEqual({ configured: false });
+  });
 });
 
 describe("searching the keys", () => {

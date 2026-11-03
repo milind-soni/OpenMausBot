@@ -25,6 +25,7 @@ const WAV = Buffer.from("RIFF....WAVEfmt ");
 let modelsFail = false;
 let modelsDrop = false;
 let audioVoicesFail = false;
+let geminiRawPcm = false;
 let stubBase = "";
 // The streamed-response case: the first chunk goes out at once, the rest only when the test releases them.
 let speakStreamed: { first: Buffer; rest: Buffer; release: Promise<void> } | null = null;
@@ -159,6 +160,7 @@ beforeAll(async () => {
         return send(200, { data: [{ id: "alex" }, { id: "turbo-en" }] });
       }
       if (path.includes(":generateContent")) {
+        const audioData = geminiRawPcm ? Buffer.from([0x00, 0x00, 0x01, 0x00]) : WAV;
         return send(200, {
           candidates: [
             {
@@ -167,7 +169,7 @@ beforeAll(async () => {
                   {
                     inlineData: {
                       mimeType: "audio/wav",
-                      data: WAV.toString("base64"),
+                      data: audioData.toString("base64"),
                     },
                   },
                 ],
@@ -757,6 +759,22 @@ describe("Gemini", () => {
     const parsedBody = JSON.parse(call.body);
     expect(parsedBody.contents[0].parts[0].text).toBe("Hello from Gemini");
     expect(parsedBody.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe("Aoede");
+  });
+
+  it("wraps raw PCM responses in a valid WAV header", async () => {
+    geminiRawPcm = true;
+    try {
+      const { speak } = await voice();
+      const audio = await speak(
+        cfg({ provider: "gemini", geminiKey: "test-gemini-key", voice: "Aoede" }),
+        "Raw PCM test",
+      );
+      expect(audio.mime).toBe("audio/wav");
+      expect(Buffer.from(audio.bytes).subarray(0, 4).toString("ascii")).toBe("RIFF");
+      expect(Buffer.from(audio.bytes).subarray(8, 12).toString("ascii")).toBe("WAVE");
+    } finally {
+      geminiRawPcm = false;
+    }
   });
 });
 
