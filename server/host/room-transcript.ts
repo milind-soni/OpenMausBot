@@ -1,6 +1,7 @@
 import { DRAIN_COALESCE_MAX_ITEMS } from "../admission.ts";
 import { digestPromptLine } from "../digest.ts";
 import { escapeNotes, peerProvenanceNote, webhookPostNote } from "../peer-provenance.ts";
+import { lineNote } from "../provenance-label.ts";
 import { peerName } from "../peer-roster.ts";
 import { roomReactionNote } from "../reactions.ts";
 import { speakerOf, transcriptText, type PersonName } from "../replies.ts";
@@ -55,12 +56,12 @@ export function createRoomTranscript({ store, teammateReportContext }: RoomTrans
         const overridden = overrides.get(m.id);
         const rendered = overridden !== undefined ? { ...m, text: overridden } : m;
         const person = speakerOf(userName, m);
-        const speaker = m.role === "user"
-          ? m.via === "api" ? `${person} (sent through the local API, not typed)` : person
-          : m.from ? peerName(m.from.name) : "Bot";
+        const speaker = m.role === "user" ? person : m.from ? peerName(m.from.name) : "Bot";
         const body = escapeNotes(transcriptText(rendered, messagesById, userName));
         // An outside app chose these words: the bot it is shown as reads the note too, and one JSON string cannot start a line of its own.
         if (m.webhookPost && m.role === "bot") return `${webhookPostNote(m.from?.name ?? "Bot")}\n${speaker}: ${JSON.stringify(body)}`;
+        const note = lineNote(m, { shared: false, name: () => person });
+        if (note) return `${note}\n${speaker}: ${JSON.stringify(body)}${roomReactionNote(m, userName)}`;
         const line = `${speaker}: ${body}${roomReactionNote(m, userName)}`;
         if (!m.peerPost || !m.from || m.from.botId === readerBotId) return line;
         return `${peerProvenanceNote({ botName: m.from.name, delivery: "post_to_room", unattended: m.peerPost.unattended })}\n${line}`;

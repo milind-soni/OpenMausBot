@@ -248,7 +248,10 @@ describe("a Chief's answer, for the person, to a question a teammate asks them",
   it("lists the questions teammates wait on the person for, leaving out threads the Chief opened, archived ones and ones it may not read", () => {
     const w = world({ live: ["req-p"] });
     for (const threadId of ["chat", "old-chat", "chief-work"]) asks(w, threadId);
-    expect(w.routing.waitingForPerson(FUCHS, [DACHS, OTTER])).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION }]);
+    const waiting = w.routing.waitingForPerson(FUCHS, [DACHS, OTTER]);
+    expect(waiting).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION, since: expect.any(Number) }]);
+    // Since when: the card's own time, so a Chief can say how long it has waited.
+    expect(waiting[0]!.since).toBe(w.rows("chat").find((row) => row.card)!.at);
     expect(w.routing.waitingForPerson(FUCHS, [DACHS], (threadId) => threadId !== "chat")).toEqual([]);
   });
 });
@@ -261,7 +264,7 @@ describe("a message to the thread where work the sender handed on is running", (
     expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "work", requestId: node.id });
     expect(w.steered).toHaveLength(1);
     expect(w.steered[0]!.threadId).toBe("work");
-    expect(w.steered[0]!.text).toContain(`[OpenMausBot assignment ${node.id}: @Fuchs adds this while you work on it]`);
+    expect(w.steered[0]!.text).toContain(`[From @Fuchs (bot) · addition to assignment ${node.id}, while you work on it · `);
     expect(w.steered[0]!.text).toContain(JSON.stringify("Nimm auch die Steuerspalte mit"));
     expect(w.rows("work")).toEqual([expect.objectContaining({ role: "user", text: "Nimm auch die Steuerspalte mit", peerAsk: { botId: "fuchs", name: "Fuchs" }, aside: true, steered: true })]);
     expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Sent to Dachs" }), threadRef: { botId: "dachs", threadId: "work", title: "Fix" } })]);

@@ -163,6 +163,38 @@ describe("Antigravity sign-in lifecycle", () => {
     }
   });
 
+  it("signs out by forgetting only this account's stored Google sign-in", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-sign-out";
+    const profile = antigravityProfileDirectory(instanceId);
+    const token = join(profile, "antigravity-acp", "acp_token.json");
+    const other = join(antigravityProfileDirectory("antigravity-other"), "antigravity-acp", "acp_token.json");
+    for (const file of [token, other]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "{}", { mode: 0o600 });
+    }
+    const instance = await AntigravityDriver.create({
+      instanceId, displayName: "Antigravity", enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+      environment: { FAKE_ACP_AUTH_METHOD: "oauth-personal" },
+    });
+    try {
+      expect((await instance.snapshot()).authenticated).toBe(true);
+      expect(instance.signOut).toBeTypeOf("function");
+      await instance.signOut!();
+      expect(existsSync(token)).toBe(false);
+      expect(existsSync(join(profile, "antigravity-acp", "settings.json"))).toBe(true);
+      expect(existsSync(other)).toBe(true);
+      expect((await instance.snapshot()).authenticated).toBe(false);
+      await instance.signOut!();
+    } finally {
+      await instance.dispose();
+      rmSync(profile, { recursive: true, force: true });
+      rmSync(antigravityProfileDirectory("antigravity-other"), { recursive: true, force: true });
+    }
+  });
+
   it("uses the same discovered PATH for readiness and Google sign-in", async () => {
     const fake = fakeRuntime();
     const executable = join(fake.directory, process.platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par");
@@ -482,6 +514,33 @@ describe("official Antigravity runtime", () => {
       .resolves.toMatchObject({ options: [{ id: "account-model" }] });
   }, 20_000);
 
+  it("discovers thinking levels for every account model, not only the one a new session starts on", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    const profile = await prepareAntigravityProfile({
+      instanceId: "thinking-levels", runtime, baseDir: fake.directory,
+      baseEnv: {
+        PATH: process.env.PATH,
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-flash,gemini-argon,gemini-plain",
+        FAKE_ACP_VARIANTS: JSON.stringify({
+          "gemini-flash": { id: "thought_level", currentValue: "low", options: levels },
+          "gemini-argon": { id: "thought_level", currentValue: "high", options: levels },
+        }),
+      },
+    });
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    await expect(probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-flash" })).resolves.toEqual({
+      default: "gemini-flash",
+      options: [
+        { id: "gemini-flash", label: "gemini-flash", variants },
+        { id: "gemini-argon", label: "gemini-argon", variants },
+        { id: "gemini-plain", label: "gemini-plain" },
+      ],
+    });
+  }, 20_000);
+
   it("rejects a download redirected to insecure HTTP", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-insecure-"));
     scratch.push(baseDir);
@@ -794,13 +853,11 @@ describe("Antigravity driver over shared ACP", () => {
       environment: {
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: sessionModels,
-        FAKE_ACP_VARIANTS: JSON.stringify({
-          "gemini-3.8-flash": {
-            id: "thinking_level",
-            currentValue: "high",
-            options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
-          },
-        }),
+        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon"].map((id) => [id, {
+          id: "thinking_level",
+          currentValue: "high",
+          options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
+        }]))),
         FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
       },
@@ -835,6 +892,12 @@ describe("Antigravity driver over shared ACP", () => {
     });
   });
 
+  it("runs a saved Gemini 4 Argon (High) pick as the base model at High thinking when the runtime offers only the base", async () => {
+    const { calls, selection } = await legacyPickTurn("antigravity-legacy-argon", "gemini-3.8-flash,gemini-4-argon", "gemini-4-argon-high");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-4-argon", variant: "high" });
+    expect(calls.some((call: any) => call.params.value === "gemini-4-argon-high")).toBe(false);
+  });
+
   it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
     const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
     expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
@@ -849,7 +912,9 @@ describe("Antigravity driver over shared ACP", () => {
     expect(normalizeAntigravityTurn(turn, ["gemini-3.8-flash", "gemini-3.8-flash-low"])).toBe(turn);
     expect(normalizeAntigravityTurn(turn, ["gemini-3.7-flash"])).toBe(turn);
     expect(normalizeAntigravityTurn({ ...turn, variant: "high" }, ["gemini-3.8-flash"])).toMatchObject({ model: "gemini-3.8-flash-low", variant: "high" });
-    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-3.8-pro-high" }, ["gemini-3.8-flash", "gemini-3.8-pro"])).toMatchObject({ model: "gemini-3.8-pro-high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-medium" }, ["gemini-3.8-flash", "gemini-4-argon"])).toEqual({ ...turn, model: "gemini-4-argon", variant: "medium" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-4-argon", "gemini-4-argon-high"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-3.8-flash"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
   });
 
   it("keeps one process across approval and model changes, starting on OMB's model", async () => {

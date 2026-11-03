@@ -384,7 +384,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/escalations.ts", "in its thread # …"],
     ["server/escalations.ts", "in its main conversation"],
     ["server/escalations.ts", "… 's work  …  is parked at a gate:  … ."],
-    ["server/host/delegated-level.ts", "…  — delegated by  … ,  … a Chief of Staff on  …"],
+    ["server/host/delegated-level.ts", "…  — handed on by  … ,  … a Chief of Staff on  …"],
     ["server/peer-approval.ts", "@ …  wants to  …   …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],

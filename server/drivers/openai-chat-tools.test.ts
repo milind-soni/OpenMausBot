@@ -220,6 +220,25 @@ describe("bounded action announcement recovery", () => {
     expect(f.effects()).toEqual([]);
   });
 
+  it("marks a turn whose final reply came back after a failed step as partly done, and no other stop", async () => {
+    const run = async (reply: (response: Parameters<typeof answer>[0]) => void) => {
+      const f = await fixture((_body, response, round) => round === 1
+        ? sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")])
+        : reply(response));
+      await f.start({ approvalMode: "full" });
+      const completed = await f.completed();
+      return { completed, errors: f.recorder.events.filter((event) => event.type === "runtime.error") };
+    };
+    const done = await run((response) => answer(response, "Here is the summary; one file could not be read."));
+    expect(done.completed).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(done.errors).toEqual([expect.objectContaining({ partial: true, terminal: true, message: expect.stringContaining("Stopped because the tool call") })]);
+    // A reply the provider cut off is not a finished one, even after a failed step.
+    const cut = await run((response) => sse(response, [chunk({ content: "Here is the sum" }, "length")]));
+    expect(cut.completed).toMatchObject({ ok: false, stopReason: "error" });
+    expect(cut.errors).toHaveLength(1);
+    expect(cut.errors[0]).not.toHaveProperty("partial");
+  });
+
   // Whether to run an operation again is the model's call under the engine's own permissions: the nudge only asks it not to.
   it("leaves a repeated operation after a nudge to the model and the turn's permissions", async () => {
     const f = await fixture((_body, response, round) => {

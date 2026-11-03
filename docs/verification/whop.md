@@ -32,6 +32,9 @@ has no alternate endpoint or test switch. It checks:
   token reaches the synthetic provider without appearing in the renderer list.
 - Failed post-login tool discovery does not enable the server and is retryable.
 - Reload keeps the connection; disconnect disables it and revokes sign-in.
+- The Agentcard card, from the same table of hosted apps, draws a glyph with
+  no logo, connects and disconnects beside Whop, and each stays connected
+  while the other changes.
 - Narrow layout has no page overflow; no business tools execute during setup.
 
 Screenshots default to `/tmp/omb-whop-evidence`; override with
@@ -44,7 +47,7 @@ S256, refresh tokens and the `admin` scope.
 ## Regression checks
 
 ```sh
-pnpm exec vitest run src/lib/whop-integration.test.ts src/components/PluginsPanel.navigation.test.ts src/components/PluginsPanel.i18n.test.ts src/components/McpServersPanel.test.ts src/components/McpServersPanel.embedded.test.ts src/lib/mcp-sign-in.test.ts server/mcp-oauth.test.ts server/mcp-oauth-discovery.test.ts server/mcp-oauth-store.test.ts server/mcp-probe.test.ts server/mcp-selection.e2e.test.ts server/mcp-remote-proxy.test.ts server/mcp-gate-config.test.ts server/drivers/pi-mcp-extension.test.ts scripts/testing/verification-docs.test.ts
+pnpm exec vitest run src/lib/hosted-mcp-apps.test.ts src/components/PluginsPanel.navigation.test.ts src/components/PluginsPanel.i18n.test.ts src/components/McpServersPanel.test.ts src/components/McpServersPanel.embedded.test.ts src/components/McpServersPanel.hosted.test.ts src/lib/mcp-sign-in.test.ts server/mcp-oauth.test.ts server/mcp-oauth-discovery.test.ts server/mcp-oauth-store.test.ts server/mcp-probe.test.ts server/mcp-selection.e2e.test.ts server/mcp-remote-proxy.test.ts server/mcp-gate-config.test.ts server/drivers/pi-mcp-extension.test.ts scripts/testing/verification-docs.test.ts
 pnpm typecheck
 pnpm lint
 pnpm i18n:check

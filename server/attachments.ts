@@ -181,6 +181,58 @@ export function deleteAttachment(path: string): void {
   }
 }
 
+/** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
+export function attachmentStorageUsage(): { usedBytes: number; maxBytes: number } {
+  invalidateAttachmentAccounting();
+  return { usedBytes: committedBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
+}
+
+/** What a Settings clear leaves, as stored names: pictures given by their /api/attachments/ url (bot and profile
+ * pictures), and files given by their path or bare name (the banner, routines' files). */
+export function keptAttachmentNames(urls: ReadonlyArray<string | null | undefined>, paths: ReadonlyArray<string | undefined>): Set<string> {
+  const kept = new Set<string>();
+  for (const url of urls) if (url?.startsWith("/api/attachments/")) kept.add(url.slice("/api/attachments/".length));
+  for (const path of paths) {
+    const name = path?.replaceAll("\\", "/").split("/").pop();
+    if (name) kept.add(name);
+  }
+  return kept;
+}
+
+let clearOffered = true;
+/** A Team Cloud has no Settings clear, so its full-store error must not point there. */
+export function offerAttachmentClear(offered: boolean): void {
+  clearOffered = offered;
+}
+
+/** A file this new may still be on its way into a message or a turn, so a clear leaves it. */
+export const ATTACHMENT_CLEAR_MIN_AGE_MS = 10 * 60 * 1000;
+
+/** The person's Clear in Settings: every stored file older than a few minutes goes, except the ones `kept` holds
+ * (pictures, routine files). A message that showed a removed file shows it missing. */
+export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): { removed: number; freedBytes: number; failed: number } {
+  ensureAttachmentsDir();
+  let removed = 0;
+  let freedBytes = 0;
+  let failed = 0;
+  for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || PARTIAL_NAME.test(entry.name) || kept.has(entry.name)) continue;
+    const path = join(ATTACHMENTS_DIR, entry.name);
+    try {
+      const { mtimeMs, size } = statSync(path);
+      if (now - mtimeMs < ATTACHMENT_CLEAR_MIN_AGE_MS) continue;
+      unlinkSync(path);
+      removed += 1;
+      freedBytes += size;
+    } catch (error) {
+      // Gone already is fine; anything else (permissions, a busy file on Windows) the person is told about.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") failed += 1;
+    }
+  }
+  invalidateAttachmentAccounting();
+  return { removed, freedBytes, failed };
+}
+
 export function __resetAttachmentAccountingForTests(): void {
   invalidateAttachmentAccounting();
 }
@@ -223,7 +275,7 @@ class AttachmentReservation {
     if (available < required) {
       throw statusError(
         507,
-        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)`,
+        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)${clearOffered ? ". Clear old attachments in Settings → General." : ""}`,
       );
     }
     const granted = Math.min(preferred, available);

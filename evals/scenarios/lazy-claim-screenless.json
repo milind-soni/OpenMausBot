@@ -26,7 +26,8 @@
   "steps": [
     { "kind": "send", "bot": "holder", "text": "Hold the VM for this fixture." },
     { "kind": "waitForBusy", "bot": "holder", "busy": true, "timeoutMs": 20000 },
-    { "kind": "consumeDump" },
+    { "kind": "captureComputer", "bot": "holder" },
+    { "kind": "pollComputerGate", "bot": "holder", "saveAs": "holderScreenCall" },
     { "kind": "send", "bot": "auto", "text": "No screen work today." },
     { "kind": "waitForBusy", "bot": "auto", "busy": true, "timeoutMs": 20000 },
     { "kind": "captureComputer", "bot": "auto" },

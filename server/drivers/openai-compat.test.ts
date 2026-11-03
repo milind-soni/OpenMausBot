@@ -3,6 +3,7 @@ import { recordEvents } from "../testing/events.ts";
 import { buildTurnContext, replaysNatively } from "../turn-context.ts";
 import { instanceConfigs } from "../config.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
+import { flushNativeLogs } from "./native.ts";
 
 describe("OpenAICompatDriver", () => {
   const savedUrl = process.env.OPENAI_COMPAT_URL;
@@ -132,6 +133,38 @@ describe("OpenAICompatDriver", () => {
     });
     await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["gpt-5", "o3", "gpt-4.1"]));
     expect(inst.models.options.every((option) => !option.custom)).toBe(true);
+    await inst.dispose();
+  });
+
+  it("lists Gemini's chat models by their plain IDs", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ object: "list", data: [
+      { id: "models/gemini-2.5-pro", object: "model", owned_by: "google" },
+      { id: "models/gemini-embedding-001", object: "model", owned_by: "google" },
+      { id: "models/gemini-2.5-flash", object: "model", owned_by: "google" },
+      { id: "models/gemini-2.5-flash-preview-tts", object: "model", owned_by: "google" },
+      { id: "models/imagen-4.0-generate-001", object: "model", owned_by: "google" },
+      { id: "models/gemini-2.5-flash-image", object: "model", owned_by: "google" },
+      { id: "models/gemini-live-2.5-flash-preview", object: "model", owned_by: "google" },
+    ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "openai-compat-1", displayName: "Google Gemini", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" }),
+      environment: {},
+    });
+    await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]));
+    expect(fetchMock).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/openai/models", expect.anything());
+    await inst.dispose();
+  });
+
+  it("keeps other servers' model IDs as they list them", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "models/gemini-2.5-pro" }, { id: "text-embedding-3-small" }] })));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "openai-compat-2", displayName: "Proxy", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://llm.example.com/v1", key: "sk-fixture" }),
+      environment: {},
+    });
+    await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["models/gemini-2.5-pro", "text-embedding-3-small"]));
     await inst.dispose();
   });
 
@@ -1131,6 +1164,8 @@ describe("OpenAICompatDriver", () => {
 
       const item = recorder.events.find((e) => e.type === "item.completed");
       expect(item).toMatchObject({ text: "start middle end" });
+      // The native log's flush timer is shared across tests and pending only sometimes; it is not the idle timer.
+      flushNativeLogs();
       expect(vi.getTimerCount()).toBe(0);
 
       recorder.stop();

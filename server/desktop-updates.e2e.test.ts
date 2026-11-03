@@ -118,7 +118,7 @@ describe.skipIf(process.platform === "win32")("a bot's old desktop after an app 
       if (proc.exitCode !== null) throw new Error(`server exited during boot:\n${output}`);
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean, "the server starting");
-    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at turn
     // of its own that quotes the failed request, on this computer: dumpFor would take it for the turn under test. Stepped
     // down, each dump is the test's own. Only the first boot finds it a Chief.
     const seeded = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
