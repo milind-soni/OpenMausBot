@@ -298,6 +298,23 @@ describe("the Advanced composer", () => {
     expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
   });
 
+  it("offers Teach a task as its own button, which starts a /learn draft ahead of anything typed", () => {
+    fixture.advanced = true;
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "how I file expenses", attachments: [] });
+    render({ bot });
+    const teach = container.querySelector<HTMLButtonElement>('button[aria-label="Teach a task"]');
+    expect(teach).not.toBeNull();
+    click(teach);
+    expect(container.querySelector("textarea")!.value).toBe("/learn how I file expenses");
+  });
+
+  it("leaves Teach a task out when skill authoring is off", () => {
+    fixture.advanced = true;
+    fixture.config = { features: { skillAuthoring: false } };
+    render({ bot });
+    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
+  });
+
   it("sends with the bot's own button too, and keeps the accent in a room", () => {
     fixture.advanced = true;
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "hello", attachments: [] });

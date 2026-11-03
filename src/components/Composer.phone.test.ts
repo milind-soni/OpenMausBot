@@ -107,7 +107,7 @@ describe("the phone composer", () => {
     expect(fixture.call).toMatchObject({ inverse: true });
     openPlus();
     const keys = [...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"));
-    expect(keys).toEqual(expect.arrayContaining(["attach", "place", "approval", "call:turns", "call:live"]));
+    expect(keys).toEqual(expect.arrayContaining(["attach", "teach", "place", "approval", "call:turns", "call:live"]));
     expect(item("place")?.textContent).toContain("Works on");
   });
 
