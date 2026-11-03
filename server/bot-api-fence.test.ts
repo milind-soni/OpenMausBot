@@ -1,10 +1,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { BOT_API_PARTS, BOT_API_TOOLS, botApiRouteRefused } from "./bot-api-fence.ts";
 
-const ROOT = new URL(".", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
   if (entry.isDirectory()) return entry.name === "testing" ? [] : sources(join(dir, entry.name));
   return entry.name.endsWith(".ts") && !entry.name.includes(".test.") ? [join(dir, entry.name)] : [];
