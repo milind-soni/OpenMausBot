@@ -78,6 +78,7 @@ const SECTION_TARGET: Record<BotSettingsSection, PanelTarget> = {
   soul: { tab: "details", page: "settings", anchor: "instructions", editInstructions: true },
   skills: { tab: "library", page: "skills" },
   memory: { tab: "library", page: "memory" },
+  library: { tab: "library" },
   routines: { tab: "details", page: "routines" },
   access: { tab: "computer" },
   model: { tab: "details", anchor: "model" },

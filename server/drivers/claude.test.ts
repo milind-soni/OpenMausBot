@@ -1100,6 +1100,35 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  it("shows an MCP server's question as an approval card and answers it on stdin", async () => {
+    const log = join(scratch, "control.ndjson");
+    await create("hang", {
+      FAKE_CLAUDE_ELICIT: JSON.stringify({ mcp_server_name: "github", message: "Allow access to your repos?", mode: "form", requested_schema: { type: "object", properties: {} } }),
+      FAKE_CLAUDE_CONTROL_LOG: log,
+    });
+    await instance.adapter.sendTurn({ threadId: "t-elicit", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestId: "elicitation:elicit-1", requestType: "permission", tool: "mcp__github", summary: "github: Allow access to your repos?", requiresExplicitApproval: true });
+    await expect(instance.adapter.respondToRequest("t-elicit", "elicitation:elicit-1", { behavior: "allow" })).resolves.toBe("allowed-once");
+    await vi.waitFor(() => expect(existsSync(log)).toBe(true));
+    expect(JSON.parse(readFileSync(log, "utf8"))).toEqual({ type: "control_response", response: { subtype: "success", request_id: "elicit-1", response: { action: "accept", content: {} } } });
+    await recorder.until((e) => e.type === "request.resolved" && e.requestId === "elicitation:elicit-1");
+    await expect(instance.adapter.respondToRequest("t-elicit", "elicitation:elicit-1", { behavior: "allow" })).resolves.toBe("unavailable");
+    await instance.adapter.interruptTurn("t-elicit");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("withdraws an MCP server's open question when the launch that asked it fails and is retried", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "elicit-launches");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create(undefined, { FAKE_CLAUDE_ELICIT: JSON.stringify({ mcp_server_name: "github", message: "Allow access?", mode: "form", requested_schema: { type: "object", properties: {} } }) });
+    await instance.adapter.sendTurn({ threadId: "t-elicit-retry", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    expect(recorder.events.filter((e) => e.type === "request.opened").map((e) => e.requestId)).toEqual(["elicitation:elicit-1"]);
+    expect(recorder.events.find((e) => e.type === "request.resolved" && e.requestId === "elicitation:elicit-1")).toMatchObject({ behavior: "deny", source: "system" });
+  });
+
   it("sends attached images as native blocks before text without logging their bytes", async () => {
     await create();
     const dump = join(scratch, "dump-images.json");

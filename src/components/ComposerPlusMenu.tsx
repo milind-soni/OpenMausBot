@@ -123,6 +123,20 @@ function approvalItem(name: string, choice: ApprovalChoice, simple: boolean): Si
 
 /** The thread's approval level as a small pill that opens its choices: in the Simple composer while it is not the
  * default, and on the bot panel's Details. */
+export function TeachTaskButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={t("composer.teachTask")}
+      title={t("composer.teachTask")}
+      className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
+    >
+      <GraduationCap size={16} strokeWidth={1.75} absoluteStrokeWidth />
+    </button>
+  );
+}
+
 export function ApprovalChip({ choice, quiet = false }: { choice: ApprovalChoice; quiet?: boolean }) {
   const { current, note, items } = approvalMenu(choice, !useAdvancedMode());
   const CurrentIcon = current.Icon;
