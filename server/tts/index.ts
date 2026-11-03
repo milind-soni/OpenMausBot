@@ -5,8 +5,9 @@ import * as elevenlabs from "./elevenlabs.ts";
 import * as grok from "./grok.ts";
 import * as fish from "./fish.ts";
 import * as systemVoices from "./system-voices.ts";
+import * as gemini from "./gemini.ts";
 
-export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
+export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini";
 
 export class NoVoiceConfigured extends Error {
   // Not a parameter property: the harness runs under strip-only `node --experimental-strip-types`, which rejects one at load.
@@ -27,7 +28,7 @@ const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
 
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
-  return provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
+  return provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" || provider === "gemini" ? provider : "elevenlabs";
 }
 
 export function providerConfigured(cfg: AppConfig): boolean {
@@ -36,6 +37,7 @@ export function providerConfigured(cfg: AppConfig): boolean {
   if (provider === "system") return systemVoices.systemVoicesAvailable();
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim());
   if (provider === "fish") return Boolean(cfg.tts?.fishKey);
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey);
   return Boolean(elevenLabs(cfg));
 }
 
@@ -47,6 +49,7 @@ export function voiceConfigured(cfg: AppConfig): boolean {
   }
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim() && cfg.tts?.voice);
   if (provider === "fish") return Boolean(cfg.tts?.fishKey && cfg.tts?.voice);
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && cfg.tts?.voice);
   return Boolean(elevenLabs(cfg) && cfg.tts?.voice);
 }
 
@@ -58,6 +61,7 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   }
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim() && (voiceId || cfg.tts?.voice));
   if (provider === "fish") return Boolean(cfg.tts?.fishKey && (voiceId || cfg.tts?.voice));
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && (voiceId || cfg.tts?.voice));
   return Boolean(elevenLabs(cfg) && (voiceId || cfg.tts?.voice));
 }
 
@@ -92,6 +96,10 @@ export async function listVoices(
   if (provider === "chatterbox") {
     const baseUrl = cfg.tts?.baseUrl?.trim();
     return baseUrl ? chatterbox.listChatterboxVoices(baseUrl) : [];
+  }
+  if (provider === "gemini") {
+    const key = cfg.tts?.geminiKey;
+    return key ? gemini.listVoices(key) : [...gemini.GEMINI_PREBUILT_VOICES];
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
@@ -134,6 +142,12 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
     return chatterbox.synthesizeChatterbox(text, voice, baseUrl, cfg.tts?.model);
+  }
+  if (provider === "gemini") {
+    const key = cfg.tts?.geminiKey;
+    if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");
+    const voice = voiceId || cfg.tts?.voice || "Puck";
+    return gemini.synthesize(text, voice, key, cfg.tts?.model);
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
