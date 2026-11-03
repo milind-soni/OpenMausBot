@@ -46,7 +46,7 @@ export function AutomaticRecoverySettings() {
           onClick={() => change({ ...value, enabled: !value.enabled })} />
       </div>
       <p id="automatic-recovery-help" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.help")}</p>
-      <p id="automatic-recovery-scope" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.scope")}</p>
+      <p id="automatic-recovery-scope" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.scopeHanded")}</p>
       <p id="automatic-recovery-own" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.ownBackups")}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="min-w-0">

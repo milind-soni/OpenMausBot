@@ -45,8 +45,8 @@ describe("a Chief's level, every hop down", () => {
       { botId: "bea", threadId: "bea-work", approvalMode: "auto", autoApprove: false, alwaysAllow: [] },
     ]);
     expect(w.lines).toEqual([
-      "Approve for me — delegated by Clive, a Chief of Staff on Approve for me",
-      "Approve for me — delegated by Ada, from Clive, a Chief of Staff on Approve for me",
+      "Approve for me — handed on by Clive, a Chief of Staff on Approve for me",
+      "Approve for me — handed on by Ada, from Clive, a Chief of Staff on Approve for me",
     ]);
   });
 

@@ -1,21 +1,16 @@
-// On a Team Cloud: the person's whole inbox in the right panel, one tab per kind of line (what needs them, news, done),
+// On a Team Cloud: the person's whole inbox in the right panel as one list, newest first, a dot on what waits on them,
 // each line a dense row that reads in full in the panel. At phone width it is a sheet over the chat.
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import type { InboxRow, InboxTab } from "../../../shared/inbox";
-import { cn } from "@/lib/cn";
+import type { InboxRow } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";
-import type { LocaleKey } from "@/locales";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
-import { closeInbox, readInboxLine, readInboxRow, showInboxTab, useInboxPanel, useInboxView } from "@/state/inbox";
+import { closeInbox, readInboxLine, readInboxRow, useInboxPanel, useInboxView } from "@/state/inbox";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
-import { INBOX_TABS, rowsIn, tabCounts } from "./inbox-view";
+import { listedRows } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
-
-const TAB_LABEL: Record<InboxTab, LocaleKey> = { "needs-you": "needsYou.title", info: "inbox.tab.info", done: "inbox.tab.done" };
-const EMPTY: Record<InboxTab, LocaleKey> = { "needs-you": "inbox.empty.needsYou", info: "inbox.empty.info", done: "inbox.empty.done" };
 
 export function InboxPanel() {
   const view = useInboxView();
@@ -33,10 +28,9 @@ export function InboxPanel() {
     if (panel.reading) readInboxLine(null);
     else closeInbox();
   };
-  const counts = tabCounts(view);
   const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
   const open = (row: InboxRow) => { readInboxRow(row); readInboxLine(row.id); };
-  const rows = rowsIn(view, panel.tab);
+  const rows = listedRows(view);
   const body = (
     <>
       <div className="flex items-center gap-1.5 border-b border-hairline/40 px-3.5 py-2.5">
@@ -47,26 +41,11 @@ export function InboxPanel() {
         </button>
       </div>
       {reading && view ? <InboxReading view={view} row={reading} now={now} /> : (
-        <>
-          <div role="tablist" aria-label={t("inbox.panel.title")} className="flex shrink-0 gap-1 border-b border-hairline/40 px-2">
-            {INBOX_TABS.map((tab) => (
-              <button key={tab} type="button" role="tab" aria-selected={panel.tab === tab} data-inbox-tab={tab} onClick={() => showInboxTab(tab)}
-                aria-label={tab === "needs-you" ? t("needsYou.count", { count: counts[tab] }) : t(TAB_LABEL[tab])}
-                className={cn("-mb-px flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-[13px] font-medium",
-                  panel.tab === tab ? "border-accent text-ink" : "border-transparent text-ink-secondary hover:text-ink")}>
-                {t(TAB_LABEL[tab])}
-                {tab !== "done" && counts[tab] > 0 && (
-                  <span aria-hidden="true" className={cn("rounded-full px-1.5 text-[11px] font-semibold tabular-nums", tab === "needs-you" ? "bg-warning text-panel" : "bg-raised text-ink-secondary")}>{counts[tab]}</span>
-                )}
-              </button>
-            ))}
-          </div>
-          <div role="tabpanel" aria-label={t(TAB_LABEL[panel.tab])} className="min-h-0 flex-1 overflow-y-auto">
-            {rows.length === 0
-              ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t(EMPTY[panel.tab])}</p>
-              : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
-          </div>
-        </>
+        <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="min-h-0 flex-1 overflow-y-auto">
+          {rows.length === 0
+            ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.empty")}</p>
+            : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+        </div>
       )}
     </>
   );

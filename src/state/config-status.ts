@@ -119,6 +119,8 @@ export interface ConfigStatus {
   profile?: { name: string; email: string; aboutMe?: string; avatarUrl?: string };
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
+  /** What a paired phone calls this computer; "" uses the default. */
+  computerName?: string;
   /** Opt-in flags. Absent means off. */
   features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
@@ -173,6 +175,9 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
+   * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
+  serverSites?: boolean;
 }
 
 export interface BrowserProfile {

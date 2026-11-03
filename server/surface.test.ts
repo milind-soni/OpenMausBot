@@ -6,6 +6,9 @@ import {
   cloudPlaceRefusal,
   computerSkippedNote,
   computerToolsRefusal,
+  handoffUsesOwnCloud,
+  isHandedWork,
+  ownCloudStateWithin,
   parseSurface,
   pinSource,
   placeUnavailable,
@@ -22,6 +25,48 @@ describe("browserIsThePlace", () => {
     expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: false }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "local", browserOn: true }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "off", browserOn: true }))).toBe(false);
+  });
+});
+
+describe("isHandedWork", () => {
+  it("counts only work another bot handed over: not a person's own resumed root, not a consult", () => {
+    expect(isHandedWork({ parentId: "root-1", mode: "work" })).toBe(true);
+    expect(isHandedWork({ mode: "work" })).toBe(false);
+    expect(isHandedWork({ parentId: "root-1", mode: "consult" })).toBe(false);
+    expect(isHandedWork(undefined)).toBe(false);
+  });
+});
+
+describe("ownCloudStateWithin", () => {
+  it("answers with the cloud computer's state, and marks a failed or slow lookup as unavailable", async () => {
+    await expect(ownCloudStateWithin(Promise.resolve({ box: { state: "stopped" } }))).resolves.toEqual({ state: "stopped", unavailable: false });
+    await expect(ownCloudStateWithin(Promise.resolve({ box: null }))).resolves.toEqual({ state: undefined, unavailable: false });
+    await expect(ownCloudStateWithin(Promise.reject(new Error("Boat is down")))).resolves.toEqual({ state: undefined, unavailable: true });
+    const started = Date.now();
+    await expect(ownCloudStateWithin(new Promise(() => {}), 20)).resolves.toEqual({ state: undefined, unavailable: true });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});
+
+describe("handoffUsesOwnCloud", () => {
+  const auto = resolveSurface({ destination: undefined, browserOn: true });
+  it("runs handed-off work on Auto on the receiving bot's own cloud computer, awake or asleep", () => {
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: "running" })).toBe(true);
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: "archived" })).toBe(true);
+  });
+  it("never creates one, and leaves a person's own turns and consults alone", () => {
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: null })).toBe(false);
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: true, ownCloudState: undefined })).toBe(false);
+    expect(handoffUsesOwnCloud({ plan: auto, handoffWork: false, ownCloudState: "running" })).toBe(false);
+  });
+  it("keeps Works on and a pin as they are", () => {
+    for (const plan of [
+      resolveSurface({ destination: "browser", browserOn: true }),
+      resolveSurface({ destination: "local", browserOn: true }),
+      resolveSurface({ destination: "off", browserOn: true }),
+      resolveSurface({ destination: undefined, pinnedSurface: "browser", browserOn: true }),
+      resolveSurface({ destination: undefined, pinnedSurface: "vm", browserOn: true }),
+    ]) expect(handoffUsesOwnCloud({ plan, handoffWork: true, ownCloudState: "running" })).toBe(false);
   });
 });
 
@@ -102,7 +147,7 @@ describe("resolveSurface", () => {
     expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
   });
 
-  it("a Team incidents turn that lost its computer is told why and that it has none", () => {
+  it("a Problems to look at turn that lost its computer is told why and that it has none", () => {
     const note = computerSkippedNote("The team's cloud computer is missing; explicitly create or retry it from the Team map.");
     expect(note).toMatch(/^ This turn answers a Team incidents report and your computer could not be prepared for it \(The team's cloud computer is missing; explicitly create or retry it from the Team map\), so no computer is mounted/);
     expect(note).toMatch(/never claim to have checked that computer yourself\.$/);

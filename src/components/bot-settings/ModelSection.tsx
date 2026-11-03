@@ -29,6 +29,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
           }
         />
         {!draft && <ThreadModelsLine bot={bot} className="mt-3" />}
+        {!draft && <div className="mt-3 text-[13px] text-ink-secondary">{t("model.section.installationDefault")}</div>}
       </div>
 
       <EffortRow

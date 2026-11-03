@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { routineRunsOn } from "./routine-display";
+import type { RoutineRun } from "./routines";
+import { routineRunLabel, routineRunTone, routineRunsOn } from "./routine-display";
 
 describe("where a routine runs", () => {
   it("on the Cloud, every routine runs on schedule even when the person's computer is off", () => {
@@ -37,5 +38,21 @@ describe("where a routine runs", () => {
         expect(`${label} ${hint}`).not.toMatch(/boat|runner|VM\b/i);
       }
     }
+  });
+});
+
+describe("a run's status", () => {
+  const run = (patch: Partial<RoutineRun>) => ({ id: "r", routineId: "x", routineName: "Brief", botId: "b", status: "failed", manual: false, scheduledFor: 0, createdAt: 0, ...patch }) as RoutineRun;
+
+  it("reads partly done, in the waiting colour, when only a step failed after the reply came back", () => {
+    expect(routineRunLabel(run({ partial: true }))).toBe("Partly done");
+    expect(routineRunTone(run({ partial: true }))).toBe("text-warning");
+    expect(routineRunLabel(run({ partial: true, retried: "failed" }))).toBe("Retried after a failure · Partly done");
+  });
+
+  it("still reads failed, in red, for any other failure", () => {
+    expect(routineRunLabel(run({}))).toBe("Failed");
+    expect(routineRunTone(run({}))).toBe("text-danger");
+    expect(routineRunLabel(run({ status: "completed", partial: true }))).toBe("Completed");
   });
 });

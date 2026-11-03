@@ -2441,6 +2441,14 @@ describe("harness HTTP API", () => {
       expect(renamed.status).toBe(200);
       expect(renamed.body.task.title).toBe("Release plan");
 
+      const archived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: 1234 });
+      expect(archived.status).toBe(200);
+      expect(archived.body.task.archivedAt).toBe(1234);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: "soon" })).status).toBe(400);
+      const unarchived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: null });
+      expect(unarchived.status).toBe(200);
+      expect(unarchived.body.task).not.toHaveProperty("archivedAt");
+
       const switched = await api("POST", `/api/groups/${room.id}/tasks/${originalThread}`);
       expect(switched.status).toBe(200);
       expect(switched.body.group.threadId).toBe(originalThread);
@@ -8695,6 +8703,84 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", "/api/mcp/servers/hf").catch(() => undefined);
       await fake.close();
+      await oauth.close();
+    }
+  });
+
+  async function signInThroughBrowser(name: string) {
+    const started = await api("POST", `/api/mcp/servers/${name}/sign-in`);
+    expect(started.status).toBe(200);
+    await fetch(started.body.auth.authorizationUrl, { redirect: "follow" });
+    let auth = started.body.auth;
+    for (let i = 0; i < 50 && auth.phase === "waiting"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      auth = (await api("GET", `/api/mcp/servers/${name}/sign-in/${auth.flowId}`)).body.auth;
+    }
+    expect(auth.phase).toBe("succeeded");
+  }
+  /** Where mcp.agentcard.sh serves its RFC 9728 document: on its own origin, which is how sign-in finds it when initialize is not refused. */
+  const protectedResourceOf = (oauth: { issuer: string }) =>
+    ({ "/.well-known/oauth-protected-resource/mcp": (origin: string) => ({ resource: `${origin}/mcp`, authorization_servers: [oauth.issuer] }) });
+  const serverListing = async (name: string) => ((await api("GET", "/api/mcp/servers")).body.servers as Array<{ name: string }>).find((server) => server.name === name);
+
+  it("asks for a sign-in when a server lists its tools to anyone and refuses to run one", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, wellKnown: protectedResourceOf(oauth), tools: [{ name: "buy", description: "Buy something" }] });
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "shop", url: fake.url })).status).toBe(201);
+      const first = await api("POST", "/api/mcp/servers/shop/test");
+      expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+      expect(await serverListing("shop")).toMatchObject({ auth: "needs-sign-in", enabled: false });
+      expect(fake.refusedCalls).toHaveLength(1);
+      expect(fake.calls).toEqual([]);
+
+      await signInThroughBrowser("shop");
+      const tested = await api("POST", "/api/mcp/servers/shop/test");
+      expect(tested.body).toEqual({ ok: true, tools: [{ name: "buy", description: "Buy something" }] });
+      expect(fake.refusedCalls).toHaveLength(1);
+      expect(fake.seenHeaders.at(-1)?.authorization).toMatch(/^Bearer /);
+
+      expect((await api("PATCH", "/api/mcp/servers/shop", { enabled: true })).status).toBe(200);
+      expect(await serverListing("shop")).toMatchObject({ auth: "signed-in", enabled: true });
+    } finally {
+      await api("DELETE", "/api/mcp/servers/shop").catch(() => undefined);
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it("keeps a sign-in whose refresh failed on the network, and drops one whose token the server refuses", async () => {
+    const oauth = await startFakeOAuth({ refreshStatus: 503 });
+    const flaky = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, wellKnown: protectedResourceOf(oauth), tools: [{ name: "buy" }] });
+    const refusing = await startFakeHttpMcp({ guard: "every-request", acceptBearer: () => false, wwwAuthenticate: oauth.challenge });
+    const oauthFile = join(home, ".openmausbot", "mcp-oauth.json");
+    const tokensOf = (name: string) => JSON.parse(readFileSync(oauthFile, "utf8")).servers[name]?.tokens;
+    const expire = (name: string) => {
+      const saved = JSON.parse(readFileSync(oauthFile, "utf8"));
+      saved.servers[name].tokens.expiresAt = Date.now() - 1_000;
+      writeFileSync(oauthFile, JSON.stringify(saved));
+    };
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "flaky", url: flaky.url })).status).toBe(201);
+      expect((await api("POST", "/api/mcp/servers", { name: "refusing", url: refusing.url })).status).toBe(201);
+      await signInThroughBrowser("flaky");
+      await signInThroughBrowser("refusing");
+      expect(tokensOf("flaky").refresh).toEqual(expect.any(String));
+      expire("flaky");
+
+      expect((await api("POST", "/api/mcp/servers/flaky/test")).body).toMatchObject({ ok: false, auth: "required" });
+      expect(oauth.counts.refresh).toBeGreaterThan(0);
+      expect(await serverListing("flaky")).toMatchObject({ auth: "signed-in" });
+      expect(tokensOf("flaky").refresh).toEqual(expect.any(String));
+
+      expect((await api("POST", "/api/mcp/servers/refusing/test")).body).toMatchObject({ ok: false, auth: "required" });
+      expect(await serverListing("refusing")).toMatchObject({ auth: "needs-sign-in" });
+      expect(tokensOf("refusing")).toBeUndefined();
+    } finally {
+      await api("DELETE", "/api/mcp/servers/flaky").catch(() => undefined);
+      await api("DELETE", "/api/mcp/servers/refusing").catch(() => undefined);
+      await flaky.close();
+      await refusing.close();
       await oauth.close();
     }
   });

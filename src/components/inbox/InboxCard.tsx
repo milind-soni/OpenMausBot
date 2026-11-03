@@ -70,7 +70,7 @@ export function InboxCard({ view }: { view: InboxView }) {
   const counts = tabCounts(view);
   const rows = rowsIn(view, "needs-you").slice(0, CARD_ROWS);
   const openRow = (row: InboxRow) => { readInboxRow(row); openInbox({ reading: row.id }); };
-  const openAll = () => openInbox({ tab: counts["needs-you"] ? "needs-you" : "info" });
+  const openAll = () => openInbox();
   const shell = cn("my-1 w-full max-w-[560px] rounded-[24px]", ELEVATED_CARD);
   if (!rows.length) {
     return (

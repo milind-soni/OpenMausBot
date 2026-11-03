@@ -492,6 +492,7 @@ export function EngineSetup({
   unframed = false,
   description: descriptionOverride,
   quiet = false,
+  onHost = false,
 }: {
   instance: InstanceInfo;
   className?: string;
@@ -499,6 +500,8 @@ export function EngineSetup({
   unframed?: boolean;
   description?: string;
   quiet?: boolean;
+  /** A paired desktop: sign-in and setup happen on the host, whose AIs it uses. */
+  onHost?: boolean;
 }) {
   const { state } = useStore();
   const cloudHome = state.config?.cloudHome === true;
@@ -533,6 +536,16 @@ export function EngineSetup({
       : signInCommand
         ? t("engineSetup.installDescSignIn")
         : t("engineSetup.installDesc"));
+
+  // The host does not open its sign-in and setup calls to a paired desktop, so point the person there instead.
+  if (onHost) {
+    return (
+      <div data-engine-setup-on-host className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+        <div className="text-[13px] font-semibold text-ink">{title}</div>
+        <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t("remote.client.setUpOnHost", { name: instance.displayName })}</p>
+      </div>
+    );
+  }
 
   if (apiKeySetup(instance)) {
     return <ApiKeyEngineSetup instance={instance} className={className} unframed={unframed} />;
