@@ -445,6 +445,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       const browser = threadBrowser(threadId);
       return browser !== null && (browser.session === undefined || !browserRunning(browser.session, browser.spec));
     },
+    which: (threadId) => threadBrowser(threadId)?.session,
     running: (threadId) => {
       const browser = threadBrowser(threadId);
       return browser?.session !== undefined && browserRunning(browser.session, browser.spec);

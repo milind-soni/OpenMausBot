@@ -358,7 +358,7 @@ export class RoutineManager {
     for (const run of this.runs.filter((candidate) => candidate.status === "running" || candidate.status === "waiting")) {
       settleAsk(run, undefined, this.now());
       if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
-        this.wait(run, "Waiting for delegated work to finish");
+        this.wait(run, "Waiting for work it handed on to finish");
         continue;
       }
       if (!requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now())) {
@@ -1279,7 +1279,7 @@ export class RoutineManager {
         return cloneRun(run);
       }
       this.failureFacts.delete(run.id);
-      if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for delegated work to finish");
+      if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for work it handed on to finish");
       else {
         Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);

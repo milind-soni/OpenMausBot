@@ -158,7 +158,7 @@ describe("drain coalescing golden (M2)", () => {
     expect(_queuedCount(bot.threadId)).toBe(0);
   });
 
-  it("1:1 Team incidents reports merge whichever bot they are about, never with a bot's own job or a person's words", () => {
+  it("1:1 Problems to look at reports merge whichever bot they are about, never with a bot's own job or a person's words", () => {
     const bot = fakeBot("gd-incidents", "gd-thread-incidents", false);
     const store = fakeStore([bot]);
     const report = (botId: string) => ({ botId, name: botId, unattended: true, incident: { threadId: `${botId}-thread` } });
