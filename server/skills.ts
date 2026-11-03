@@ -33,7 +33,7 @@ import {
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
-import { parseSkillCommand } from "../shared/skill-command.ts";
+import { skillCommandTurnText, skillMentions } from "../shared/skill-command.ts";
 
 export {
   DESCRIPTION_MAX,
@@ -1305,17 +1305,18 @@ export function enabledSkillFile(botId: string, name: string, assignedLibrary?: 
   return entry ? join(skillTarget(workspaceDir(botId), name, entry), "SKILL.md") : librarySkillFilePath(name);
 }
 
+/** SKILL.md of each named skill that is on for the bot. */
+export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const name of names) {
+    const file = enabledSkillFile(botId, name, assignedLibrary);
+    if (file) files.set(name, file);
+  }
+  return files;
+}
+
 export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
-  if (!text.trimStart().startsWith("/")) return text;
-  const names = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name);
-  const command = parseSkillCommand(text, names);
-  if (!command) return text;
-  const file = enabledSkillFile(botId, command.name, assignedLibrary);
-  if (!file) return text;
-  const lead = `The user ran your ${command.name} skill with /${command.name}. Read ${JSON.stringify(file)} with your file tools and follow it for this turn.`;
-  return command.request
-    ? `${lead} Where the skill says {input}, use the request.\n\nRequest: ${command.request}`
-    : `${lead} There is no further request, so run it as the skill describes.`;
+  return skillCommandTurnText(text, enabledSkillFiles(botId, skillMentions(text), assignedLibrary));
 }
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
