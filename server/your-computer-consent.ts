@@ -147,3 +147,15 @@ export function dismissStaleYourComputerCards(store: Store): number {
   }
   return dismissed;
 }
+
+/**
+ * Asks before waiting for this computer, and once more after the wait if the turn dropped below Full access while
+ * it waited, so a thread switched to Ask mid-wait never gets the screen without a card. In that rare case the host
+ * stays held while the person answers; a Deny fails the claim and no screen call runs.
+ */
+export async function claimWithYourComputerConsent(askNow: () => boolean, ask: () => Promise<void>, bind: () => Promise<void>): Promise<void> {
+  const askedFirst = askNow();
+  if (askedFirst) await ask();
+  await bind();
+  if (!askedFirst && askNow()) await ask();
+}
